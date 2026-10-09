@@ -566,6 +566,7 @@ class VLLMServerManager:
         # `docker_image` in launch_overrides exactly the way the old 8192 shadowed
         # max_num_batched_tokens.
         docker_image: Optional[str] = None,
+        gate: bool = False,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -609,6 +610,9 @@ class VLLMServerManager:
             use_tensorizer (Optional[bool]): Pass model in tensorize (.tensors) format to vLLM if available.
             docker_image (Optional[str]): Docker image to launch vLLM in. None falls back to the
                 model's `docker_image` recipe entry, then to the pinned DEFAULT_VLLM_IMAGE.
+            gate (bool): The model gate owns `port` (`ModelGate`): the engine listens on loopback
+                at the internal port instead, so nothing reaches it but through the gate. The
+                container is still named after `port`.
 
         Returns:
             List[str]: Complete executable command list.
@@ -627,6 +631,13 @@ class VLLMServerManager:
         hf_model = resolve_model_hf_repo(model)
 
         token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DREAMFERENCE_HF_TOKEN")
+
+        # Behind the gate the engine is on loopback at an internal port; otherwise it is the
+        # public server itself, on every interface (Onyx and the benchmark's containers reach it
+        # from Docker's networks).
+        from dreamference.vllm_server.model_gate import ENGINE_BIND_ADDRESS, PUBLIC_BIND_ADDRESS, ModelGate
+        engine_host = ENGINE_BIND_ADDRESS if gate else PUBLIC_BIND_ADDRESS
+        engine_port = ModelGate.engine_port(port) if gate else port
 
         recipe = get_model_launch_overrides(model)
 
@@ -683,14 +694,14 @@ class VLLMServerManager:
             # The image's own entrypoint, as the recipe this entry follows runs it.
             cmd.append(docker_image)
             cmd.extend(SGLangLaunchBuilder.server_args(
-                hf_model, recipe, port, max_model_len, gpu_memory_utilization,
-                tool_call_parser, reasoning_parser, api_key,
+                hf_model, recipe, engine_port, max_model_len, gpu_memory_utilization,
+                tool_call_parser, reasoning_parser, api_key, host=engine_host,
             ))
             return cmd
 
         base_args: List[str] = [
-            "--host", "0.0.0.0",
-            "--port", str(port),
+            "--host", engine_host,
+            "--port", str(engine_port),
             "--max-model-len", str(max_model_len),
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--trust-remote-code",
@@ -1487,6 +1498,7 @@ class VLLMServerManager:
         # None so a model's recipe may pin its own image; resolved once below and then used
         # for the pull, the compile-cache reset and the launch alike.
         docker_image: Optional[str] = None,
+        gate: bool = True,
     ) -> Optional[subprocess.Popen]:
         """
         Pre-downloads model weights, saves in tensorize format, and starts local vLLM OpenAI API server.
@@ -1514,6 +1526,9 @@ class VLLMServerManager:
             background (bool): If True, run asynchronously as Popen subprocess.
             docker_image (Optional[str]): Docker image to launch vLLM in. None falls back to the
                 model's `docker_image` recipe entry, then to the pinned DEFAULT_VLLM_IMAGE.
+            gate (bool): Put the model gate on `port` and the engine behind it on loopback
+                (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18). If the gate cannot start, the
+                engine serves `port` itself, as before the gate.
 
         Returns:
             Optional[subprocess.Popen]: Popen object if background=True, else None.
@@ -1729,7 +1744,7 @@ class VLLMServerManager:
             )
 
         # Step 2: Build launch command
-        cmd = self.build_launch_command(
+        launch = dict(
             model=model,
             port=port,
             quantization=quantization,
@@ -1751,11 +1766,25 @@ class VLLMServerManager:
             use_tensorizer=use_tensorizer,
             docker_image=docker_image,
         )
+        cmd = self.build_launch_command(**launch, gate=gate)
 
         # Step 3: Cleanup potential container name conflicts prior to launch
         if cmd and cmd[0] == "docker":
             container_name = f"dreamference-vllm-{port}"
             subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # The model gate takes the public port once the old engine has let go of it; the engine
+            # then listens behind it on loopback. A gate that cannot start must not leave the model
+            # unreachable, so the engine then serves the port itself, as before the gate.
+            from dreamference.vllm_server.model_gate import ModelGate
+            if gate and ModelGate.start(port, docker_image):
+                print(f"🚦 Model gate on port {port}; the engine listens behind it on "
+                      f"127.0.0.1:{ModelGate.engine_port(port)}.")
+            else:
+                if gate:
+                    print(f"⚠️  Without the model gate: the engine serves port {port} itself, and a "
+                          "benchmark run waits for other requests instead of refusing them.")
+                    cmd = self.build_launch_command(**launch, gate=False)
+                ModelGate.remove(port)
 
         print(f"🚀 Starting GB10 vLLM Server: {' '.join(cmd)}")
         
@@ -1842,6 +1871,9 @@ class VLLMServerManager:
             self.watchdog.stop()
             self.watchdog = None
         subprocess.run(["docker", "stop", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # The gate in front of it goes too: alone it would answer every request 502.
+        from dreamference.vllm_server.model_gate import ModelGate
+        ModelGate.stop(port)
         print(f"✅ Container {container_name} stopped.")
 
     def remove_server(self, port: int = 8000) -> None:
@@ -1852,6 +1884,8 @@ class VLLMServerManager:
         container_name = f"dreamference-vllm-{port}"
         print(f"🗑️ Removing vLLM container: {container_name}")
         subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        from dreamference.vllm_server.model_gate import ModelGate
+        ModelGate.remove(port)
         print(f"✅ Container {container_name} removed.")
 
     def show_request_logs(self, port: int = 8000) -> None:

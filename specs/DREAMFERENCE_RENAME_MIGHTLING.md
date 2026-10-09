@@ -1,6 +1,6 @@
 # Renaming Puffin to Mightling
 
-**Status:** decided by the user on 2026-10-07; built on branch `rename/mightling`. The product
+**Status:** decided by the user on 2026-10-07; built on branch `rename/mightling`, merged into `main` (`a25e6d6`) and released in 1.5.1 (2026-10-08), whose upgrade from 1.4.1 ran the migration on a second GB10. The product
 "Puffin by Dreamference" becomes **Mightling by Dreamference**, because an existing AI assistant
 sells under the name Puffin (puffin.bot) and the name could not be cleared for software. The
 repository is already `github.com/dreamference/mightling`; its earlier names

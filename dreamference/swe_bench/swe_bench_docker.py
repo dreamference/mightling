@@ -117,6 +117,24 @@ class SweBenchDocker:
         return None
 
     @classmethod
+    def subnet(cls, name: str) -> Optional[str]:
+        """
+        The internal network's subnet: every instance container's address is in it, which is
+        how the model gate tells the run's requests from everyone else's.
+
+        Args:
+            name: The network's name.
+
+        Returns:
+            Optional[str]: The subnet (e.g. `172.30.0.0/16`), or None if it cannot be read.
+        """
+        described = cls.network(name) or {}
+        for config in (described.get("IPAM") or {}).get("Config") or []:
+            if config.get("Subnet"):
+                return str(config["Subnet"])
+        return None
+
+    @classmethod
     def network(cls, name: str) -> Optional[Dict[str, Any]]:
         """
         Describes a network.

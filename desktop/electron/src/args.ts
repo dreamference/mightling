@@ -1,6 +1,6 @@
-// How `ling app` asked for the window: `--work`, `--cwd <folder>` and `--thread <id>` open Work
-// (the launcher passes them); nothing opens Ask (the menu's former Chat), as before. A `mightling://` link (the scheme the
-// app registers) opens Work too: `mightling://thread/<id>` or `mightling://work?cwd=<folder>`.
+// How `ling app` asked for the window: `--work`, `--cwd <folder>` and `--thread <id>` open it on
+// Work (the launcher passes them); nothing opens it on Ask, as before. A `mightling://` link (the
+// scheme the app registers) opens Work too: `mightling://thread/<id>` or `mightling://work?cwd=<folder>`.
 
 import app from "../app.json";
 

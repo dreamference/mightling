@@ -1,6 +1,7 @@
-// No credential reaches a renderer, and the app handles none: the Ask window signs in with a
-// one-time link `ling web open --print-url` writes (web.ts), and the Onyx window's password
-// sign-in is gone. Checked in the sources that go into the preload and Work's page, and in the
+// No credential reaches a renderer, and the app handles none: Ask and Work both run in the app
+// window on its own app-server, which needs no sign-in; the Onyx window's password sign-in and
+// the separate Ask window's `ling web` link are gone. Checked in the sources that go into the
+// preload and the app window's page, and in the
 // built bundles when they exist (`npm run package` or `make` first; the release workflow runs
 // this file again after `make`).
 import fs from "node:fs";
@@ -9,8 +10,8 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = path.join(__dirname, "..");
 const UI_SRC = path.join(ROOT, "..", "ui", "src");
-const PRELOAD_BUNDLE = path.join(ROOT, ".vite", "build", "preload.js");
-const MAIN_BUNDLE = path.join(ROOT, ".vite", "build", "early-bootstrap.js");
+const PRELOAD_BUNDLE = path.join(ROOT, ".vite", "build", "preload.cjs");
+const MAIN_BUNDLE = path.join(ROOT, ".vite", "build", "early-bootstrap.cjs");
 const RENDERER_BUNDLE = path.join(ROOT, ".vite", "renderer", "main_window");
 
 // What a credential, or the code that handles one, would leave in a bundle: the file it lives in,
@@ -56,7 +57,10 @@ describe("credentials stay in the main process", () => {
     const bundles = [PRELOAD_BUNDLE, MAIN_BUNDLE, ...filesUnder(RENDERER_BUNDLE)];
     expect(bundles.length).toBeGreaterThan(2);
     expect(offenders(bundles)).toEqual([]);
-    // The check reads the right bundle: the main process does carry the Ask window's sign-in.
-    expect(fs.readFileSync(MAIN_BUNDLE, "utf8")).toContain("--print-url");
+    // The check reads the right bundle: the main process does carry the app-server's command line.
+    const main = fs.readFileSync(MAIN_BUNDLE, "utf8");
+    expect(main).toContain("features.code_mode_host=true");
+    // And nothing of the separate Ask window it no longer opens: no `ling web` sign-in link.
+    expect(main).not.toContain("--print-url");
   });
 });

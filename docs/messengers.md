@@ -40,6 +40,7 @@ Setup lists what it will change and asks for your password once (sudo). It then 
 - It downloads signal-cli and the Java runtime signal-cli needs. Each download is pinned by URL and
   SHA-256 and checked before it is unpacked. Nothing is bundled with Mightling, and no Java package is
   installed system-wide.
+- It also checks signal-cli against its maintainer's OpenPGP signature, with a key pinned in Mightling.
 - It installs the bridge and its system unit, `mightling-signal.service`.
 - It shows a QR code. On your phone, open **Signal → Settings → Linked devices → Link new device**
   and scan the code.

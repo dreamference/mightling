@@ -64,8 +64,8 @@ export function serve(root: string): void {
     return new Response(Readable.toWeb(createReadStream(file)) as ReadableStream, { status: 200, headers });
   });
 
-  // Only the app's own page may load `app://` resources: a frame on another origin (Chat's web UI
-  // never has a preload, but the rule holds for any frame) gets its request cancelled.
+  // Only the app's own page may load `app://` resources: a frame on another origin (a page from
+  // anywhere else, were one ever loaded) gets its request cancelled.
   session.defaultSession.webRequest.onBeforeRequest({ urls: [`${SCHEME}://*/*`] }, (details, callback) => {
     // The requesting frame's URL: a top-level navigation has none (`frame` is the frame being
     // navigated), which is the app's own window opening its page.

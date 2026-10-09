@@ -1,6 +1,6 @@
 # Mightling Ask, the Mightling web server, and retiring Onyx
 
-**Status:** proposed (2026-10-07); Phase A partly built, see §16 and §17 (2026-10-08). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
+**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
 **Names:** written with the post-rename names ([RENAME_MIGHTLING](./DREAMFERENCE_RENAME_MIGHTLING.md), branch `rename/mightling`): `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app`, `~/.mightling`, `mightling_*` settings, `_mightling-node._tcp`. Where `main` still says Puffin, read `puffin` for `ling`.
 **Builds on:**
 - [MIGHTLING_DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
@@ -332,7 +332,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 
 Built: the bridge policy as data, Ask threads, and `ling web` with its credentials. Not built yet: the UI's Ask view, voice, images, `ling-docs`, and the Onyx steps.
 
-**The policy is data, and both hosts are held to the same cases.** `ling-rs/web/policy.json` holds the allow-lists, the dropped fields, the named prompts and the Ask rules. `ling-rs/web/vectors/outgoing.json` holds the conformance cases: 26 of them, each with fixed stubs (a prompt composes to `PROMPT:<name>`, folders are `SCRATCH/n`, threads `ask-*` are Ask threads). They live beside the crate, not in `desktop/bridge/`, because the build copies only `ling-rs/` into the Codex export. The desktop app should read the same file and run the same cases. Five things differ from §2.3 and §3.1, all found while checking the pinned protocol (`app-server-protocol/src/protocol/v2/thread.rs`):
+**The policy is data, and both hosts are held to the same cases.** `ling-rs/web/policy.json` holds the allow-lists, the dropped fields, the named prompts and the Ask rules. `ling-rs/web/vectors/outgoing.json` holds the conformance cases: 26 of them, each with fixed stubs (a prompt composes to `PROMPT:<name>`, folders are `SCRATCH/n`, threads `ask-*` are Ask threads). They live beside the crate, not in `desktop/bridge/`, because the build copies only `ling-rs/` into the Codex export. The desktop app should read the same file and run the same cases (built in §18). Five things differ from §2.3 and §3.1, all found while checking the pinned protocol (`app-server-protocol/src/protocol/v2/thread.rs`):
 
 - **More fields are dropped from every thread opener.** Besides the five the desktop dropped, the policy removes `dynamicTools`, `environments`, `selectedCapabilityRoots`, `history` and `path`. Each loads tools, environments, plugins, a forged history or a rollout file.
 - **A prompt is chosen on `thread/start` only.** A resumed session keeps the prompt it recorded, so `prompt` on resume or fork is refused.
@@ -409,8 +409,110 @@ Built: the UI embedded in every `ling` build, the Ask view, attachments, the pho
   - a browser without a session got 401.
 
 **Not built in this part:**
-- **The desktop app's Work window still has no Ask.** Ask needs the policy in the Electron main process (§2.3: `bridge.ts` reading `policy.json` and running the vectors), or Work reaching `ling web`'s socket (§2.1).
+- **The desktop app's Work window still has no Ask.** Ask needs the policy in the Electron main process (§2.3: `bridge.ts` reading `policy.json` and running the vectors), or Work reaching `ling web`'s socket (§2.1). (Built in §18, the first way.)
 - **Two app-servers on one `~/.mightling`.** With `ling web` (socket) and the app's Work (stdio) both running, Phase 0's question 1 is still unmeasured.
 - **Images, apps and voice in the UI.** `/images/*`, `/api/apps` and `/api/transcribe` still answer 501. The gallery, Settings → Apps and the microphone are out of scope by the user's decision.
-- **Pairing in the UI.** There is no Settings → Devices, and no QR code; `ling web pair` prints the code.
+- **Pairing in the UI.** There is no Settings → Devices, and no QR code; `ling web pair` prints the code. (Built in §18.)
 - **Retiring Onyx** (§10, Phase C): the `chat` command group, the Onyx sidecars' network, `google_service.py`'s secret, and Onyx's LAN bind on an advertised node.
+
+---
+
+## 18. What was built (Phase A, third part: branch `web/onyx-retire-2`, 2026-10-09)
+
+Built: Ask in the desktop app's own window, and pairing a device by QR code. Two of the gaps listed in §17 before Onyx can go. Onyx is untouched; Phase C is not started.
+
+### 18.1 Ask in the app window: the policy in the main process
+
+**The choice.** §17 named two ways: the policy in the Electron main process (§2.3), or the app window reaching `ling web`'s socket (§2.1). §0.3, §2.3 and §16 all ask for the first, and the second is the open question of §2.1 and Phase 0 question 1 (one app-server or two), which is not decided here. So the main process enforces `policy.json` itself, and the app window keeps its own `ling app-server` over stdio, as Work had.
+
+**One file, one set of cases.** `desktop/electron/src/policy.ts` imports `ling-rs/web/policy.json` at build time (Vite inlines it, as `include_str!` does in the crate), so a packaged app cannot be pointed at another file. It is a line-for-line port of `policy.rs`: the allow-lists, the dropped thread fields, a prompt only on `thread/start`, a named prompt turned into `baseInstructions`, `default` setting nothing, a scratch prompt confining the thread, and a resumed or forked Ask thread kept in its folder. `policy.test.ts` runs every case of `ling-rs/web/vectors/outgoing.json` with the shared stubs, so the two hosts are held to the same 26 cases. The hard-coded lists in `bridge.ts` are gone; the Python test that checks the allow-list against the pinned protocol now reads `policy.json`. One consequence: the app window may now send `app/list`, which `ling web` already allowed.
+
+**Ask folders, as `ling web` makes them** (`desktop/electron/src/ask.ts`, a port of `ask.rs` and of `/api/upload`):
+- **The prompt.** Before vetting, `server.ts` runs `ling prompt show <name> --composed` in `$CODEX_HOME/ask`, with the app-server's own `ling` and a 60-second limit, as `prompts.rs` does. The environment is the app-server's without `LOG_FORMAT` and `RUST_LOG`, which belong to the server. The launcher answers `prompt` before Codex parses anything, so no log line can reach stdout anyway. Vetting stays synchronous, so the policy and its cases are the same code.
+- **The folder.** It is `ask/q-<16 hex>`, 0700 and canonical. When the server answers the `thread/start`, `ask/<thread-id>` becomes a relative link to it. On Windows it is a junction, which needs no privilege and which the Rust side's `canonicalize` also follows. `ling web` on Windows would write a plain file instead, but `ling web` does not run there.
+- **`ask_root`.** `work/start` answers with it, so the page tells Ask threads from projects exactly as in a browser.
+- **Attachments.** These go over the same IPC channel as `ask/upload`: the bytes in base64, cut into 1 MB pieces like any large message. The checks are `ling web`'s: the thread must have an Ask folder, images are capped at 20 MB and other files at 100 MB, the file name is cleaned the same way, and nothing is overwritten (`-1`, `-2`, … as on the server). `app://` has no `/api/upload`, so `bridge.upload` picks the channel by host.
+
+**The page.** The page (`desktop/ui`) shows Ask and Work in both hosts. `#work` opens Work and anything else opens Ask, as in `ling web`.
+- **Opening on Work.** The app window opens on Work when the menu's Work entry, `--work`, a folder, a thread or a `mightling://` link asked for it.
+- **Switching an open window.** A new `view` message on the for-view channel switches a window that is already open.
+- **The header's Ask button is gone.** It opened the separate Ask window; Ask is now in the sidebar.
+- **The menu.** The menu's Ask entry still opens the Ask window on `ling web` (§17), which the Python tests and `audit egress --app` pin. On Windows, where that window never existed, it now opens the app window on Ask, so Windows has Ask for the first time. (Folded into the app window on every platform in §18.6.)
+
+### 18.2 Pairing by QR code
+
+**The Devices page.** `ling web` serves `/devices` (§4.3's Settings → Devices), linked from the sidebar of the browser host as "Pair a phone or another device". It is a page of the server's own, not a view of the React UI, because pairing exists only where `ling web` runs. It has no script; its forms post back to the server.
+- **Who may use it.** Only this machine's session, from `ling web open`, may use it (`Server::owner_session`). That session's link is for loopback.
+- **A paired device.** It gets a 403 page telling it to pair or revoke on the Mightling machine. So a stolen phone cookie cannot mint more devices, and a device cannot revoke the others.
+- **Checks.** The page needs a credential like every route, and its POSTs pass the `Origin` check.
+- **The page's parts.** It lists the paired devices (name, when paired, last use) with a Revoke button for each. **Show a pairing code** answers with the page itself, not a redirect, so the code never sits in a URL on this machine.
+- **On loopback only,** it explains that no other device can reach the server and issues no code.
+
+**What the QR code carries.** It is `http://<address>:<port>/pair?code=<8 digits>`: the pairing code of §4.3, valid ten minutes, one use, ten wrong tries withdrawing it. Nothing longer-lived goes in it: never the owner token, a session or a device cookie (a test reads the page for both).
+- **Opening the link.** `GET /pair?code=` only fills in the form's field, and only with eight digits; anything else is not shown back. The person still presses Pair, so a link preview or prefetch cannot spend the code.
+- **Which address comes first.** The address shown big is the one a phone most likely reaches: 192.168/16 and 10/8, then Tailscale's 100.64/10, then other addresses, then 172.16/12, where Docker's bridges are, then names. `.local` needs mDNS on the phone and does not cross Tailscale. The other addresses are folded underneath, each with its own code, labelled "(Tailscale)" where it applies.
+- **Fixed at start.** The addresses are the ones `ling web serve --lan` read at start. An interface that comes up later is not offered until the server restarts.
+
+**Drawn locally.** The QR codes are drawn by `qrcodegen` (Nayuki, MIT, no dependencies), a new dependency of `ling-web-server` (`src/qr.rs`), with ECC level M.
+- **As SVG on the page.** The modules are drawn on white whatever the page's theme, and they are inline elements, which the existing CSP allows.
+- **As half blocks in the terminal.** `ling web pair` now prints the same code, black on white set explicitly, when stdout is a terminal. It lists the most reachable address first.
+- **No service.** No QR service and no script from elsewhere is used.
+
+### 18.3 The two app-servers: what this part learned
+
+This part did not decide §2.1. What it changes, and what was read on the way (the app's own second server is gone since §18.6; the risk below remains for a `ling web` the user runs beside the app):
+- **Two app-servers can run on one `~/.mightling` today.** With the app open, both windows are in use: the app window on its own stdio app-server, and the Ask window on `ling web`'s app-server on the socket. Ask threads from either live under the one `~/.mightling/ask/` and are recognised by the same `ask/<thread-id>` links. Because the folder rules are the same, either host can resume the other's Ask thread in its folder.
+- **The thread database is built for several connections.** Codex's state databases open read-write pools in WAL mode with a five-second busy timeout (`state/src/sqlite.rs`), which SQLite supports across processes. Read in the submodule's source, not measured.
+- **The rollout files may not be.** Codex appends a thread's history to its JSONL rollout file. A search for lock calls (`flock`, `lock_exclusive`, `try_lock_exclusive`, `fs2`, `fd_lock`) in `rollout/` and `core/src` found none. This was read, not measured, in the submodule checkout, not confirmed at the pinned tag. So the risk is the same thread loaded in both servers at once: two writers on one rollout file, each with its own in-memory turn state. The app makes that possible, since one question can be open in the app window and in the Ask window. Neither server knows about the other's turn: the busy markers are per process, and Night Shift reads them all.
+- **What Phase 0 question 1 still has to measure.** Run a turn on one thread in both servers, and check the rollout file and `thread/list` from each. Until then, the app window with its own server is what Work had already done since §17. If the answer is "one server", the app window moves to `ling web`'s socket, and this policy layer stays as the guard for the stdio fallback (§2.1).
+
+### 18.4 Verified on this machine (2026-10-09)
+
+No live service was touched: no model server, no installed `ling`, a scratch `HOME` for everything run.
+- **`desktop/electron`.** 29 vitest cases, 8 of them new:
+  - `policy.test.ts`: the policy is `ling web`'s file, all 26 conformance cases, `namedPrompt`, and a bad policy refused.
+  - `ask.test.ts`: folders, links, a planted link out of the root, uploads within the caps and names, the prompt composed by a scripted `ling` in the Ask root, and an Ask thread through `AppServer` end to end. The end-to-end case checks the composed prompt, a fresh folder, the sandbox, the link, an attachment, a resume kept in its folder, a prompt on resume refused, Work left alone, and `feedback/upload` refused.
+  - The typecheck and `npm run package` pass. The policy is in the main bundle, and the credentials test ran against the built bundles.
+- **The real app.** `npm run e2e`: the packaged main process under Playwright-Electron, windows hidden, a scripted `ling`, a scratch `HOME`. Two runs:
+  - Work opens on `app://-/index.html#work`.
+  - Clicking Ask, attaching an image and sending sent `thread/start` with the composed prompt, the sandbox and a folder under the Ask root. `ask/thread-1` linked to that folder, and the image was in it and went out as `localImage`.
+- **`desktop/ui`.** 26 vitest cases (4 new: the app host's upload over the channel, base64 of a large file, the `view` message, the host check), the typecheck and the production build.
+- **`ling-rs/web`.** `cargo test` in a copy, with and without the UI embedded: 30 unit tests and 14 server tests.
+  - **New unit tests:** the QR link, the address order, the SVG and the terminal drawing, the Devices page's escaping, its loopback case, the folded addresses, and the eight-digit check.
+  - **New server tests:** `/devices` end to end, and a loopback server issuing no code. The end-to-end test covers the owner's page, a code and its QR codes, a foreign `Origin` refused, the prefilled pairing form, and an HTML-looking code not shown back. It then pairs from the code, checks that the paired device is refused the page, a new code and a revoke, and has the owner revoke it. The three new routes are in the credential test.
+- **The QR codes decode.** A code drawn by `qr::svg` and by `qr::terminal` for `http://192.168.50.105:3100/pair?code=01234567`, rendered to pixels and read by OpenCV's `QRCodeDetector` in a scratch virtualenv, gave back exactly that link, both ways.
+- **The Python suite.**
+- **Not run:** the launcher's tests in a Codex export. `ling-rs/src/` did not change; the only change the export sees is the new `qrcodegen` dependency of `ling-web-server`, a leaf crate that Cargo adds to the workspace's lock at the next `codex build`, which does not use `--locked`. Its MIT licence is on the allow-list of the workspace's `deny.toml`, and that file bans nothing it brings.
+
+### 18.5 Still not built before Phase C
+
+- **The menu's Ask window.** It still uses `ling web` and its app-server, a second server on the same home (§18.3). Folding it into the app window is the §2.1 decision. (Built in §18.6.)
+- **Images, apps and voice in the UI.** `/images/*`, `/api/apps` and `/api/transcribe` still answer 501; out of scope by the user's decision (§17).
+- **The Onyx steps.** Retiring Onyx (§10) still needs these:
+  - the `chat` command group;
+  - the Onyx sidecars' Docker network;
+  - `google_service.py`'s secret, still taken from `OnyxRunner`;
+  - Onyx's LAN bind on an advertised node;
+  - `node_advertiser.py`'s Onyx `.env` check;
+  - the docs' Onyx section.
+- **Phase 0's measurements**, question 1 above all.
+
+### 18.6 One window, one app-server in the app (branch `desktop/one-app-server`, 2026-10-09)
+
+**The decision (the user's, 2026-10-09).** The menu's Ask no longer opens a window of its own on `ling web`: it brings the app window forward on Ask. While the app runs, the app itself starts exactly one app-server on `~/.mightling`, the app window's own over stdio (§18.1). This settles §2.1 for the desktop app the first way §17 named, the policy in the main process; `ling web` keeps its own app-server on its socket, for browsers and phones, unchanged.
+
+**What changed in the app** (`desktop/electron/`):
+- **One window.** `main.ts` keeps one `BrowserWindow`, the app window, and one `showView(view)`. The menu's Ask and Work (Ctrl+1, Ctrl+2), the tray's, `ling app` alone and a second instance with no target bring it forward on that view (restored if minimised), sending the page the `view` message of §18.1 when it is already open; `--work`, a folder, a thread or a `mightling://` link open it on Work. No path opens a second window.
+- **Removed:** `chat.ts` (the Ask window), `web.ts` (finding, starting and stopping `ling web`, the one-time sign-in link) and `web.test.ts`; the `chat` block of `app.json`; the page-to-main `work/open-chat` message, which nothing sent since the header's Ask button went (§18.1); the Windows special case, since every platform now does what Windows did. The window's title is "Mightling" (it opens on Ask; the page's `<title>` was already that).
+- **Unchanged:** the policy layer, the Ask folders and uploads (§18.1), `ling app`'s arguments (`ling-rs/src/app.rs`: comments, the help line and one error message only, which no longer name `ling web` or an Ask window), and `ling web`, including `open --print-url`, which no longer has a caller in the app.
+
+**The audit's app mode** (`dreamference/audit/egress_audit.py`). The app is started with no argument, as `ling app` starts it (it was `--work`), in the same hidden session: the window on Ask, its app-server started, quit after 40 seconds. Port 3100 is no longer on the app session's allowlist, which is now the `exec` session's: a regression to a window on `ling web`, and so to a second app-server, shows as a connect to 3100 and fails the audit (a test plays one back). `--app`'s help text and `docs/admin.md` say "its window hidden". The macOS workflow's start check runs the same audit session and needed only its comment changed.
+
+**What this does and does not settle.** The second server the app itself created is gone. A `ling web` the user runs (`ling web start`, or on an advertised node) beside the app is still a second app-server on the same home, so §18.3's risk, two writers on one rollout file when the same thread is open in both, remains for that case, and Phase 0 question 1 is still open for it.
+
+**Verified on this machine (2026-10-09)**, a scratch `HOME` for everything run, no live service touched:
+- `desktop/electron`: typecheck; 25 vitest cases (`web.test.ts`'s 5 gone with its module); the bundle check now anchors on the app-server's command line and checks that no `--print-url` is left in the main bundle. `npm run package` passes.
+- `npm run e2e` (Playwright-Electron, scripted `ling`, hidden windows): 3 passed. The new case starts the app with no argument and checks that the one window is on `app://-/index.html` (Ask), that the File menu's Work and then Ask switch it (`#work`, then `#`) with `BrowserWindow.getAllWindows()` still 1, and that the stand-in `ling` was run with `app-server` exactly once and never with `web`.
+- `desktop/ui`: 26 vitest cases and the typecheck (one comment changed).
+- The Python suite (`-k "not codex_branded_builder"`): 931 passed, 89 skipped.
+- Not run: the launcher's `cargo test` (`app.rs` changed in comments and two message strings only), and `ling-admin audit egress --app` against a real build (it needs the installed `ling` and a model server).

@@ -163,7 +163,7 @@ jobs:
           npx --prefix "$GITHUB_WORKSPACE/desktop/electron" @electron/fuses read --app "$APP" || true
           du -sh Mightling.app Mightling.app/Contents/Resources/* Mightling.app/Contents/Frameworks
 
-      # The app really starts: the audit's session (hidden windows, Chat and Work opened, Work's
+      # The app really starts: the audit's session (its one window hidden on Ask, the window's
       # app-server started with the bundled ling, quit after a few seconds), with a scratch
       # CODEX_HOME and the model server named so nothing browses the network. Chromium's mock
       # keychain: the runner's keychain may not answer the cookie-encryption key without a dialog.

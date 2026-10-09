@@ -14,8 +14,10 @@ pub mod ask_client;
 pub mod assets;
 pub mod auth;
 pub mod cli;
+pub mod devices;
 pub mod policy;
 pub mod prompts;
+pub mod qr;
 pub mod relay;
 pub mod server;
 

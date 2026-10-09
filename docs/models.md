@@ -10,6 +10,7 @@ to tune by hand.
 |---|---|---|---|---|---|
 | **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by SGLang | 27B | NVFP4 | 20 – 70 GB | yes |
 | `qwen3.8-27b-dflash2-draft` | DFlash2 drafter for Qwen3.8-27B (not served on its own) | ~1B | NVFP4 | 1 – 2 GB | no |
+| `qwen3.8-27b-minima-nvfp4-dflash2` (candidate, under evaluation) | Qwen3.8-27B with every layer in NVFP4 ("Minima"), same server settings and drafter as the default | 27B | NVFP4 | 19 – 70 GB | no |
 
 List them, with their Hugging Face repositories, on your machine:
 
@@ -21,7 +22,7 @@ ling-admin model list
 
 `qwen3.8-27b-nvfp4-dflash2` is RadixArk's NVFP4 quantisation of Qwen3.8-27B, served by **SGLang**
 rather than vLLM, because its speed comes from a drafter only SGLang runs: DFlash2, which proposes
-16 tokens at a time for the model to check in one pass. The recipe follows
+12 tokens at a time for the model to check in one pass. The recipe follows
 [hasso5703/dgx-spark-qwen38](https://github.com/hasso5703/dgx-spark-qwen38), measured on a GB10.
 
 Measured on a GB10, single-stream:
@@ -46,7 +47,7 @@ Server settings it runs with (from the registry):
 | Context length | 262,144 tokens |
 | Concurrent requests | 8 |
 | Memory fraction | 0.50 |
-| Speculative decoding | DFlash2, `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`, 16 tokens |
+| Speculative decoding | DFlash2, `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`, 12 tokens |
 | Tool calls / reasoning parsers | `qwen3_coder` / `qwen3` |
 | Thinking | `ling` asks for none; chat thinks at medium effort unless told otherwise |
 

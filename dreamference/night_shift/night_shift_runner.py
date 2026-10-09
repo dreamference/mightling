@@ -365,7 +365,7 @@ class NightShiftRunner:
 
     @classmethod
     def start_blocker(cls, vllm_host: str, mightling_bin: str, active: List[tuple],
-                      settings: NightShiftSettings, local: bool = True) -> Optional[str]:
+                      settings: NightShiftSettings, local: bool = True, priority: bool = False) -> Optional[str]:
         """
         Whether another task may start now (§5.5 and memory).
 
@@ -380,17 +380,20 @@ class NightShiftRunner:
             local: Whether that server is this machine's. An open `ling` session here uses this
                 machine's server, so it blocks this machine's lane and no other; a replica's own
                 users show up as its outside requests.
+            priority: The model gate in front of that server refuses everyone but this run
+                (a SWE-bench run's hold, specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18): open
+                sessions and other requests no longer hold a start back; memory still does.
 
         Returns:
             Optional[str]: What blocks a start, or None.
         """
-        if local and not cls.ignore_sessions and cls.host.interactive_mightling_pids(mightling_bin):
+        if local and not priority and not cls.ignore_sessions and cls.host.interactive_mightling_pids(mightling_bin):
             return "a Mightling session is open"
         metrics = cls.host.metrics(vllm_host)
         if metrics is None:
             return "the model server's /metrics does not answer"
         ours = sum(1 for _, run in active if run.in_model and cls.lane_of(run, vllm_host) == vllm_host)
-        if metrics["running"] > ours:
+        if not priority and metrics["running"] > ours:
             return "the model server is serving a request that is not the night run's"
         cap = cls.host.parse_size(settings.task_memory)
         headroom = 0

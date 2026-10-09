@@ -50,6 +50,7 @@ pub mod node;
 pub mod node_command;
 pub mod notice;
 pub mod prompt;
+pub mod proxy;
 pub mod refine;
 pub mod release_signature;
 pub mod rename;
@@ -623,10 +624,7 @@ fn mightling_gmail_from_toml(text: &str) -> Option<bool> {
 /// The connected Gmail addresses, comma-separated, or `None` when the service is not running or
 /// nothing is connected. A short timeout, because a missing service must not delay the session.
 pub async fn connected_gmail_accounts() -> Option<String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(1))
-        .build()
-        .ok()?;
+    let client = proxy::direct_client(Duration::from_secs(1)).ok()?;
     let response = client
         .get(format!("{GMAIL_SERVICE_URL}/status"))
         .send()
@@ -780,9 +778,7 @@ fn parse_served_model(body: &serde_json::Value) -> Option<ServedModel> {
 }
 
 async fn wait_for_model(host: &str) -> anyhow::Result<ServedModel> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(1))
-        .build()?;
+    let client = proxy::direct_client(Duration::from_secs(1))?;
     if let Some(model) = served_model(&client, host).await {
         return Ok(model);
     }
@@ -854,6 +850,24 @@ pub fn rebrand(prompt: &str) -> String {
 /// one. It was the whole window, so one `cat` of a large file could fill a 44K task budget
 /// (specs/DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md §4.2). Upstream uses 10,000, Claude Code 25,000.
 pub const TOOL_OUTPUT_TOKEN_LIMIT: u64 = 8_000;
+
+/// How long Codex waits for the next event of a response stream before it drops the stream and
+/// retries: upstream's 300 s default, raised (specs/DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md §1.10).
+///
+/// The server sends `response.created` as soon as a request arrives, so this one timer covers the
+/// wait in its queue plus the prefill before the first token. Codex has no other timeout there
+/// (no request timeout; local compaction is a request like any other). One stream at the
+/// pinned recipe's worst: the KV pool holds 156,907 tokens and prefill runs at about 1,000 tokens
+/// per second near 116K and somewhat slower beyond, so about 160-190 s, inside 300 s. But
+/// SWE-bench runs 3 sessions at once (Night Shift lanes and the desktop app add more), a
+/// compaction's request starts with nothing cached, and the server interleaves the prefills it
+/// admits, so the first token can come after 3 x 185 s = 555 s; a night run already hit "idle
+/// timeout waiting for SSE" with 20 requests queued (NIGHT_SHIFT §11). And the timeout feeds
+/// itself: the dropped request is aborted with its prefill discarded, and the retry joins the
+/// back of the queue. 900 s covers 555 s with margin. The cost is that a server that hangs with
+/// the connection open is noticed after 15 minutes instead of 5; one that dies closes the
+/// connection and is noticed at once.
+pub const STREAM_IDLE_TIMEOUT_MS: i64 = 900_000;
 
 /// The catalog entry Codex needs before it will talk to a model it does not know.
 ///
@@ -981,6 +995,8 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     let provider = table(providers, PROVIDER);
     provider["name"] = value(PROVIDER);
     provider["base_url"] = value(format!("{}/v1", host.trim_end_matches('/')));
+    // Only when absent, so a user can set their own (CONTEXT_BUDGET §1.10).
+    set_if_absent(provider, "stream_idle_timeout_ms", STREAM_IDLE_TIMEOUT_MS);
 
     let features = table(doc.as_table_mut(), "features");
     set_if_absent(features, "code_mode", true);
@@ -1020,7 +1036,7 @@ fn table<'a>(parent: &'a mut Table, key: &str) -> &'a mut Table {
         .unwrap_or_else(|| unreachable!("{key} was just made a table"))
 }
 
-fn set_if_absent(table: &mut Table, key: &str, setting: bool) {
+fn set_if_absent(table: &mut Table, key: &str, setting: impl Into<toml_edit::Value>) {
     if !table.contains_key(key) {
         table.insert(key, value(setting));
     }
@@ -1408,6 +1424,25 @@ mod tests {
         );
         let tui = parsed.get("tui").and_then(toml::Value::as_table);
         assert!(tui.is_some_and(|tui| !tui.contains_key("pet") && tui.contains_key("theme")));
+    }
+
+    #[test]
+    fn the_stream_idle_timeout_outlasts_a_queued_prefill_unless_the_user_set_one() {
+        let timeout = |existing: &str| {
+            let text = updated_config(existing, Path::new("/h/c.json"), "http://x:8000")
+                .unwrap_or_default();
+            let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+            parsed
+                .get("model_providers")
+                .and_then(|providers| providers.get(PROVIDER))
+                .and_then(|provider| provider.get("stream_idle_timeout_ms"))
+                .and_then(toml::Value::as_integer)
+        };
+        assert_eq!(timeout(""), Some(STREAM_IDLE_TIMEOUT_MS));
+        // Upstream's default is 300 s; the value must stay above three worst-case prefills.
+        assert!(STREAM_IDLE_TIMEOUT_MS > 3 * 185_000);
+        let own = format!("[model_providers.{PROVIDER}]\nstream_idle_timeout_ms = 120000\n");
+        assert_eq!(timeout(&own), Some(120_000));
     }
 
     #[test]

@@ -17,3 +17,5 @@ Re-run it after any Codex bump. The airlock (Phase 2) is not built.
 **Declared exceptions.** The phone messengers talk to outside services by design, outside any traced session, and only once turned on. Every report ends with one line per bridge that is on (`EgressAudit.declared_exceptions`): the system unit `mightling-signal.service` (signal-cli to Signal's servers), the user unit `mightling-chat.service` with a Telegram token (the Bot API), and the user socket `mightling-matrix-proxy.socket` (the homeserver offered to the tailnet, with push on or off). With every bridge off it adds nothing, and they never change the verdict. See [messengers.md](messengers.md).
 
 Every unattended caller of `ling` (Night Shift, the egress audit, SWE-bench, the Codex test runner) names the model server in `DREAMFERENCE_VLLM_HOST`, because a node browse is a multicast DNS query and the audit counts one as a failure.
+
+The audit does not cover a proxy variable left in the user's shell. `ling` and `ling-admin` exempt loopback and the model server from it through `NO_PROXY` instead (spec §11; [launcher.md](launcher.md#what-the-launcher-does)).

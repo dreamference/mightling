@@ -1250,7 +1250,7 @@ def test_an_sglang_recipe_launches_sglang_inside_the_same_guarded_container():
     assert flag("--speculative-algorithm") == "DFLASH"
     assert flag("--speculative-draft-model-path").endswith(
         "models--maurienne-ai--Qwen3.8-27B-DFlash2-NVFP4-RTNcal/snapshots/bd7a934213c47a9e7ef69eef36bb3325f47fd1f1")
-    assert flag("--speculative-num-draft-tokens") == "16"
+    assert flag("--speculative-num-draft-tokens") == "12"
     assert flag("--tool-call-parser") == "qwen3_coder"
     assert "--speculative-config" not in server and "--max-model-len" not in server
 

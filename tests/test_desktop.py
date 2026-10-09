@@ -21,11 +21,12 @@ def electron_sources() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted((ELECTRON / "src").glob("*.ts")))
 
 
-def test_the_ask_window_points_at_ling_web_on_this_machine():
-    # Ask (the menu's former Chat) is the Mightling UI on `ling web`, the same page a browser gets,
-    # with the policy layer Ask threads need (specs/DREAMFERENCE_MIGHTLING_ASK.md §10). Not Onyx.
+def test_the_app_names_one_window_and_no_web_page():
+    # Ask (the menu's former Chat) is a view of the app window, served from app:// with the
+    # policy layer in the main process (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6): no window on
+    # `ling web` and none on Onyx.
     config = app_config()
-    assert config["chat"]["url"] == "http://127.0.0.1:3100/"
+    assert "chat" not in config and "work" in config and "csp" in config
     assert config["productName"] == "Mightling"
     assert config["identifier"] == "dev.dreamference.mightling"
     assert config["command"] == "ling-app" and config["scheme"] == "mightling"
@@ -45,7 +46,7 @@ def test_electron_is_pinned_exactly_and_stock():
     with open(ELECTRON / "package.json") as handle:
         package = json.load(handle)
     assert package["devDependencies"]["electron"] == "42.11.11"
-    assert package["main"] == ".vite/build/early-bootstrap.js"
+    assert package["main"] == ".vite/build/early-bootstrap.cjs"
     with open(UI_DIR / "package.json") as handle:
         assert not any(name.startswith("@tauri-apps") for name in json.load(handle)["devDependencies"])
 
@@ -98,8 +99,8 @@ def test_the_checkouts_profile_has_the_same_shape():
 
 
 def test_the_app_no_longer_waits_for_onyx():
-    # Ask (the former Chat) is the Mightling UI on `ling web`, which the app starts itself; Work
-    # never needed Onyx. Nothing checks port 3000 before a window opens.
+    # Ask (the former Chat) and Work run in the app window on its own app-server; neither needs
+    # Onyx. Nothing checks port 3000 before the window opens.
     assert not hasattr(DesktopRunner, "onyx_is_up")
     source = (Path(DESKTOP_PROJECT_DIR).parent / "dreamference" / "chat" / "desktop_runner.py").read_text(encoding="utf-8")
     assert "onyx_is_up" not in source and "3000" not in source and "chat start" not in source
@@ -201,10 +202,45 @@ def test_cargo_is_found_in_the_rustup_location_as_well_as_on_path():
 
 
 def test_the_toolchain_is_node_only():
-    with patch.object(DesktopInstaller, "node_major", return_value=22), patch("shutil.which", return_value="/usr/bin/npm"):
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 13)), patch("shutil.which", return_value="/usr/bin/npm"):
         assert DesktopInstaller.missing_prerequisites() == []
-    with patch.object(DesktopInstaller, "node_major", return_value=18), patch("shutil.which", return_value=None):
+    with patch.object(DesktopInstaller, "node_version", return_value=(24, 0)), patch("shutil.which", return_value="/usr/bin/npm"):
+        assert DesktopInstaller.missing_prerequisites() == []
+    # Electron Forge 8 declares node >= 22.13.0: an earlier 22 is not enough.
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 12)), patch("shutil.which", return_value="/usr/bin/npm"):
+        assert DesktopInstaller.missing_prerequisites() == ["node"]
+    with patch.object(DesktopInstaller, "node_version", return_value=(18, 20)), patch("shutil.which", return_value=None):
         assert DesktopInstaller.missing_prerequisites() == ["node", "npm"]
+
+
+def test_the_deb_needs_dpkg_and_no_fakeroot():
+    # Forge 8's deb maker runs `dpkg-deb --root-owner-group` itself: fakeroot is not asked for.
+    present = {"npm", "dpkg", "dpkg-deb"}
+    which = lambda name: f"/usr/bin/{name}" if name in present else None
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 13)), patch("shutil.which", side_effect=which):
+        assert DesktopInstaller.missing_prerequisites(build=True) == []
+    present.discard("dpkg-deb")
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 13)), patch("shutil.which", side_effect=which):
+        assert DesktopInstaller.missing_prerequisites(build=True) == ["dpkg"]
+        assert DesktopInstaller.missing_prerequisites() == []
+
+
+def test_the_node_floor_is_forge_s_own():
+    # MIN_NODE_VERSION repeats the `engines` field of the Forge CLI the lockfile pins.
+    from dreamference.chat.desktop_installer import MIN_NODE_VERSION
+    lock = json.loads((ELECTRON / "package-lock.json").read_text(encoding="utf-8"))
+    engines = lock["packages"]["node_modules/@electron-forge/cli"]["engines"]["node"]
+    assert engines == ">= {}.{}.0".format(*MIN_NODE_VERSION)
+
+
+def test_node_version_reads_major_and_minor():
+    from types import SimpleNamespace
+    with patch("shutil.which", return_value="/usr/bin/node"), \
+         patch("subprocess.run", return_value=SimpleNamespace(stdout="v22.13.1\n")):
+        assert DesktopInstaller.node_version() == (22, 13)
+    with patch("shutil.which", return_value="/usr/bin/node"), \
+         patch("subprocess.run", return_value=SimpleNamespace(stdout="garbage\n")):
+        assert DesktopInstaller.node_version() is None
 
 
 def test_desktop_entry_matches_the_window_class_gnome_sees():
@@ -285,8 +321,10 @@ def test_identifier_comes_from_the_app_config():
 
 
 def test_window_background_is_painted_rather_than_left_black():
-    # A repaint gap shows the window's own background; painted the UI's white it is invisible.
-    assert app_config()["chat"]["backgroundColor"] == "#ffffff"
+    # A repaint gap shows the window's own background. The app window's is transparent (its title
+    # bar overlay needs that), so the page paints the white itself.
+    styles = (ELECTRON.parent / "ui" / "src" / "styles.css").read_text(encoding="utf-8")
+    assert "body { background: #fff; }" in styles
 
 
 def test_run_packages_the_app_and_opens_the_packaged_binary():

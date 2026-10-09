@@ -8,6 +8,7 @@ nothing else. The container is the sandbox: Codex's own cannot start inside one.
 the agent, collects the patch.
 """
 
+import json
 import os
 import re
 import shutil
@@ -17,12 +18,17 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
+from dreamference.config.proxy_bypass import ProxyBypass
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_task_run import ANNOUNCES_WORK, NUDGE, NightShiftTaskRun
-from dreamference.night_shift.refine_prompt import (FIX_RULES, NO_REFINED as NO_REFINED_PIECE, REFINED_HEADING,
-                                                    STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS, RefinePrompt)
+from dreamference.night_shift.refine_prompt import (FIX_RULES, FIX_RULES_V2, NO_REFINED as NO_REFINED_PIECE,
+                                                    REFINED_HEADING, STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS,
+                                                    STUDY_SECTIONS_V2, RefinePrompt)
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
+from dreamference.swe_bench.swe_bench_hooks import GATE_DIRECTORY, GATE_MOUNT, SweBenchHooks
+from dreamference.swe_bench.swe_bench_issue_gate import CONDITIONS_FILE
+from dreamference.swe_bench.swe_bench_issue_targets import SweBenchIssueTargets
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import CONTAINER_MOUNT
 
@@ -52,9 +58,36 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
 # rewritten to match a wrong change, a regression hidden in a count, the agent's own test file
 # colliding with the benchmark's), not from finding the bug. In the task prompt, not the system
 # prompt, as `CODE_INDEX_HINT` is: long system prompts cost this model (MIGHTLING_PROMPT §1.5).
+# `tests-v2` (FAILURES §9.3, rank 2) drops `tests`' "your change is wrong": in 19 of the 68
+# resolved tasks the correct fix fails an old test because the issue asks for new behaviour, so
+# the agent decides from the issue which of the two is wrong. The other two lines are unchanged.
+# `issue-v1` (FAILURES §9.3, rank 1: contract and sweep) is about the issue and the code around
+# the fix: in the 100-task round the agent fixed an example instead of what the issue asked,
+# dropped the function or result type the issue names, widened a condition, missed a sibling or
+# a second entry point with the same defect, wrote a new pattern beside the module's own, and
+# reported success on an example whose output still contradicted the issue. Rules are added in
+# this dict's order, whatever order `--task-rules` names them in, so `issue-v1` comes first: it
+# is the order of the work (understand the issue, edit, then the test discipline before stopping),
+# and the refusal and the help then list the rules in the same order.
 TASK_RULES: Final[Dict[str, str]] = {
+    "issue-v1": """- Before you edit, read the whole issue and work out exactly what behaviour it asks for: the
+  result it expects, any function, type or code path it names, and every edge case it mentions.
+  Change that behaviour and no more: do not widen a condition beyond the case it asks for.
+- Find the code nearby that does the same thing (sibling functions and classes, other backends
+  and entry points, how the module handles the analogous case) and follow its pattern instead of
+  inventing a new one. Where a sibling has the same defect, fix it there too.
+- If the issue shows an example with its expected output, run that example after your last edit
+  and check that the output matches the issue.
+""",
     "tests": """- Never change an existing test. If a test that passed before your change fails after it, your
   change is wrong: fix the source.
+- Put any test or script of your own in /tmp, not in the repository.
+- Before you stop, run the test files of every module you changed, with and without your change
+  (git stash, then git stash pop), and compare the failing tests by name.
+""",
+    "tests-v2": """- Never edit an existing test to make it pass. If a test that passed before your change fails
+  after it, decide from the issue whether the issue asks for the behaviour that test rules out:
+  if it does, leave the test as it is and say so when you stop; if not, fix the source.
 - Put any test or script of your own in /tmp, not in the repository.
 - Before you stop, run the test files of every module you changed, with and without your change
   (git stash, then git stash pop), and compare the failing tests by name.
@@ -104,6 +137,18 @@ Issue:
 
 """ + REFINED_HEADING + """
 {refined}""")
+
+# refine-v2 (`--refine-version v2`, specs/DREAMFERENCE_MIGHTLING_REFINE.md §10): the same two prompts
+# with v2's sections and rules in place of v1's, which stay the measured ones above.
+REFINE_PROMPTS: Final[Dict[str, str]] = {
+    "v1": REFINE_PROMPT,
+    "v2": REFINE_PROMPT.replace(STUDY_SECTIONS, STUDY_SECTIONS_V2),
+}
+FIX_PROMPTS: Final[Dict[str, str]] = {
+    "v1": FIX_PROMPT,
+    "v2": FIX_PROMPT.replace(RefinePrompt.subject(FIX_RULES, "issue"), RefinePrompt.subject(FIX_RULES_V2, "issue")),
+}
+REFINE_VERSIONS: Final[tuple] = tuple(REFINE_PROMPTS)
 
 # What the second step is told when the first wrote nothing.
 NO_REFINED: Final[str] = RefinePrompt.subject(NO_REFINED_PIECE, "issue")
@@ -196,6 +241,9 @@ git -c core.quotePath=false diff --cached --numstat "$base" | awk -F'\t' '$1 == 
 set -- .
 while IFS= read -r file; do set -- "$@" ":(exclude,literal)$file"; done < "$SCRATCH/binary-files"
 git -c core.fileMode=false diff --cached --no-color --no-ext-diff "$base" -- "$@" > "$SCRATCH/patch.diff"
+# The index goes back to HEAD, as the other scripts leave it: the review turn runs after a
+# collect, and with everything staged its `git diff` would show nothing.
+git read-tree HEAD
 """
 
 # What a turn that ended mid-work is resumed with (failure analysis §5.3, §6.4). Night Shift's
@@ -203,6 +251,58 @@ git -c core.fileMode=false diff --cached --no-color --no-ext-diff "$base" -- "$@
 # changed the tree and then stopped mid-reasoning ("Let me check …", "Wait, let me re-read").
 COMPLETION_NUDGE: Final[str] = ("You stopped in the middle of your work. Finish the fix, run the tests for the "
                                 "modules you changed, and end with a short summary.")
+
+# The review turn (`--review-turn`, FAILURES §9.3 rank 3, spec §19): one more turn of the same
+# session once the agent has stopped with a changed tree, before the patch is collected. The user
+# chose review and test: re-read the issue, read the diff, run the changed modules' tests, fix what
+# does not hold. In the style of `TASK_RULES`; `git status` because `git diff` leaves out new files.
+REVIEW_RULES: Final[str] = """- Re-read the issue.
+- Read your own diff: `git status`, then `git diff` (a file you added shows only in `git status`).
+- Run the test files of every module you changed.
+- If the diff does not do what the issue asks, fix it.
+- If a test that passed before your change now fails, decide from the issue whether the issue asks
+  for the behaviour that test rules out: if it does, leave the test as it is and say so; if not,
+  fix the source. Never edit an existing test to make it pass.
+Then stop with a short summary."""
+
+REVIEW_PROMPT: Final[str] = "Before you finish, review your work:\n" + REVIEW_RULES
+
+# Only when no session was recorded to resume: a fresh session is given the issue and the diff.
+REVIEW_FRESH_PROMPT: Final[str] = UNATTENDED + """
+
+An earlier session changed the repository's source files to fix the issue below; its diff follows
+the issue. Treat that work as yours and review it:
+""" + REVIEW_RULES + """
+
+Issue:
+{problem_statement}
+
+Diff:
+{diff}"""
+
+# How much of the diff a fresh review session is given.
+REVIEW_DIFF_LIMIT: Final[int] = 40000
+
+# Records the tree as the agent's own turns left it, before the review turn.
+REVIEW_SNAPSHOT_SCRIPT: Final[str] = r"""
+cd "${TESTBED:-/testbed}" || exit 3
+git add -A >/dev/null 2>&1
+git write-tree > "$SCRATCH/review-tree" || exit 5
+git read-tree HEAD
+"""
+
+# What the review turn changed: `git diff --numstat` from the tree before it to the tree after it.
+REVIEW_DIFF_SCRIPT: Final[str] = r"""
+cd "${TESTBED:-/testbed}" || exit 3
+before=$(cat "$SCRATCH/review-tree") || exit 4
+git add -A >/dev/null 2>&1
+after=$(git write-tree) || exit 5
+git read-tree HEAD
+git -c core.quotePath=false diff --numstat "$before" "$after"
+"""
+
+# The pre-review patch is kept beside the instance's scratch, so it can be graded apart.
+PATCH_BEFORE_REVIEW: Final[str] = "patch-before-review.diff"
 
 # A closing that announces nothing: "Let me know if …" ends many finished summaries.
 LET_ME_KNOW: Final[re.Pattern] = re.compile(r"\blet me know\b", re.IGNORECASE)
@@ -226,7 +326,9 @@ class SweBenchInstanceRun:
                  code_index: Optional[Dict[str, Any]] = None,
                  extra_mounts: Optional[List[str]] = None,
                  issue: Optional[Dict[str, Any]] = None, refine: bool = False,
-                 task_rules: Optional[List[str]] = None) -> None:
+                 task_rules: Optional[List[str]] = None, review_turn: bool = False,
+                 refine_version: str = "v1",
+                 hooks: Optional[List[str]] = None) -> None:
         """
         Args:
             store: The run's files.
@@ -246,6 +348,13 @@ class SweBenchInstanceRun:
                 names `replaced` (name to phrase). None gives the agent the dataset's text.
             refine: Run the refine arm's two steps: study and describe, then fix.
             task_rules: Names of `TASK_RULES` added to the prompt that fixes the issue.
+            review_turn: Resume the agent's session once more (`REVIEW_PROMPT`) after it stops
+                with a changed tree and before the patch is collected, within the task's time
+                limit.
+            refine_version: Which refine texts the two steps get (`REFINE_PROMPTS`).
+            hooks: Hook sets (`HOOK_SETS`) registered in the instance's `CODEX_HOME`: `issue-v1`
+                holds the first edit until what the issue names has been read, and the first
+                stop until the issue's example has been run (spec §20).
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -262,7 +371,10 @@ class SweBenchInstanceRun:
         self.code_index = code_index
         self.extra_mounts: List[str] = list(extra_mounts or [])
         self.refine = refine
+        self.refine_version = refine_version
         self.task_rules: List[str] = list(task_rules or [])
+        self.review_turn = review_turn
+        self.hooks: List[str] = list(hooks or [])
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -328,24 +440,25 @@ class SweBenchInstanceRun:
         return "".join(text for name, text in TASK_RULES.items() if name in wanted)
 
     @classmethod
-    def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False) -> str:
+    def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False, version: str = "v1") -> str:
         """
         Builds the refine arm's first prompt: study the issue and write the refined description.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
             code_index: Whether the agent has the code index, which adds `REFINE_CODE_INDEX_HINT`.
+            version: Which texts (`REFINE_PROMPTS`).
 
         Returns:
             str: The prompt.
         """
-        return REFINE_PROMPT.format(problem_statement=problem_statement,
-                                    refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
-                                    code_index=REFINE_CODE_INDEX_HINT if code_index else "")
+        return REFINE_PROMPTS[version].format(problem_statement=problem_statement,
+                                              refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
+                                              code_index=REFINE_CODE_INDEX_HINT if code_index else "")
 
     @classmethod
     def compose_fix_prompt(cls, problem_statement: str, refined: str, code_index: bool = False,
-                           task_rules: Optional[List[str]] = None) -> str:
+                           task_rules: Optional[List[str]] = None, version: str = "v1") -> str:
         """
         Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
 
@@ -354,14 +467,34 @@ class SweBenchInstanceRun:
             refined: What the first step wrote; empty when it wrote nothing.
             code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
             task_rules: Names of `TASK_RULES` to add, in `TASK_RULES`' order.
+            version: Which texts (`FIX_PROMPTS`).
 
         Returns:
             str: The prompt.
         """
-        return FIX_PROMPT.format(problem_statement=problem_statement,
-                                 refined=refined.strip() or NO_REFINED,
-                                 code_index=CODE_INDEX_HINT if code_index else "",
-                                 task_rules=cls.task_rules_text(task_rules))
+        return FIX_PROMPTS[version].format(problem_statement=problem_statement,
+                                           refined=refined.strip() or NO_REFINED,
+                                           code_index=CODE_INDEX_HINT if code_index else "",
+                                           task_rules=cls.task_rules_text(task_rules))
+
+    @classmethod
+    def compose_review_prompt(cls, problem_statement: str, diff: str, resumed: bool) -> str:
+        """
+        Builds the review turn's prompt.
+
+        Args:
+            problem_statement: The issue as the agent saw it.
+            diff: The patch as the agent's own turns left it.
+            resumed: Whether the turn resumes the agent's session, which has both already.
+
+        Returns:
+            str: `REVIEW_PROMPT` for a resumed session; otherwise `REVIEW_FRESH_PROMPT` with the
+            issue and the diff (cut at `REVIEW_DIFF_LIMIT` characters).
+        """
+        if resumed:
+            return REVIEW_PROMPT
+        cut = diff if len(diff) <= REVIEW_DIFF_LIMIT else diff[:REVIEW_DIFF_LIMIT] + "\n[diff cut here]\n"
+        return REVIEW_FRESH_PROMPT.format(problem_statement=problem_statement, diff=cut.rstrip("\n"))
 
     @classmethod
     def stopped_mid_work(cls, message: str) -> bool:
@@ -414,6 +547,8 @@ class SweBenchInstanceRun:
             self.notes.append(f"runner error: {error}")
         finally:
             SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
+        if self.hooks:
+            state["hooks"] = dict(state.get("hooks") or {}, **SweBenchHooks.outcome(self.scratch / GATE_DIRECTORY))
         if self.stop_event.is_set():
             status = "interrupted"
         state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
@@ -451,9 +586,12 @@ class SweBenchInstanceRun:
             if self.stop_event.is_set():
                 return "interrupted", ""
             prompt = self.compose_fix_prompt(self.problem_statement, refined, bool(self.code_index),
-                                             self.task_rules)
+                                             self.task_rules, self.refine_version)
         else:
             prompt = self.compose_prompt(self.problem_statement, bool(self.code_index), self.task_rules)
+        if self.hooks:
+            # Only now: the refine arm's study step is neither held nor counted.
+            self._prepare_gate(state)
         fix_started = time.time()
         outcome = self._exec(prompt, resume=False)
         while outcome == "ok" and self.nudges_used < self.settings.nudges:
@@ -466,10 +604,13 @@ class SweBenchInstanceRun:
         state["exec"] = outcome
         if self.refine:
             state["refine"]["fix_s"] = int(time.time() - fix_started)
+        review_timed_out = False
+        if self.review_turn and not self.stop_event.is_set():
+            review_timed_out = self._review(state, outcome) == "timeout"
 
         if self.stop_event.is_set():
             return "interrupted", ""
-        if outcome == "timeout":
+        if outcome == "timeout" or review_timed_out:
             # The container was stopped to end the agent; its filesystem is still there.
             SweBenchDocker.run(["start", self.container], timeout=120)
         collected = self._script(COLLECT_SCRIPT, timeout=600)
@@ -501,7 +642,8 @@ class SweBenchInstanceRun:
         if REFINE_TIMEOUT_S is not None:
             self.deadline = min(task_deadline, started + REFINE_TIMEOUT_S)
         try:
-            outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index)),
+            outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index),
+                                                            self.refine_version),
                                  resume=False)
         finally:
             self.deadline = task_deadline
@@ -529,6 +671,94 @@ class SweBenchInstanceRun:
         self.deadline = time.time() + self.settings.task_timeout_s
         return refined, None
 
+    def _review(self, state: Dict[str, Any], outcome: str) -> Optional[str]:
+        """
+        The review turn: once the agent's turns have ended normally with a changed tree, one more
+        turn of the same session (a fresh one with the issue and the diff when no session was
+        recorded), under the task's own deadline. Records `state["review"]`: whether it ran or
+        why not, whether it resumed, its outcome, time and tokens, and what it changed.
+
+        Args:
+            state: The instance's state.
+            outcome: How the agent's last turn ended.
+
+        Returns:
+            Optional[str]: The review turn's outcome (`ok`, `error`, `timeout`), or None when it
+            did not run.
+        """
+        if outcome != "ok":
+            state["review"] = {"skipped": f"the agent's turn ended in {'a timeout' if outcome == 'timeout' else 'an error'}"}
+            return None
+        if time.time() >= self.deadline:
+            state["review"] = {"skipped": "no time left"}
+            return None
+        if not self._changed():
+            # A review of no diff would be a second attempt, not a review, and its last message
+            # would decide between `empty` and `stalled` in place of the agent's own.
+            state["review"] = {"skipped": "no change to review"}
+            return None
+        snapshot = self._script(REVIEW_SNAPSHOT_SCRIPT, timeout=300)
+        self._script(COLLECT_SCRIPT, timeout=600)
+        before = self._read(self.scratch / "patch.diff")
+        try:
+            (self.scratch / PATCH_BEFORE_REVIEW).write_text(before)
+        except OSError:
+            pass
+        resumed = self.session is not None
+        record: Dict[str, Any] = {"resumed": resumed, "patch_bytes_before": len(before.encode()),
+                                  "log_offset": self.log_path.stat().st_size if self.log_path.exists() else 0}
+        state["review"] = record
+        started = time.time()
+        review = self._exec(self.compose_review_prompt(self.problem_statement, before, resumed), resume=resumed)
+        record.update(exec=review, seconds=int(time.time() - started))
+        log_end = self.log_path.stat().st_size if self.log_path.exists() else 0
+        tokens = self.store.log_stats(self.instance_id, record["log_offset"], log_end)
+        record["tokens"] = {key: tokens[key] for key in ("input_tokens", "cached_input_tokens", "output_tokens")}
+        if review == "timeout" and not self.stop_event.is_set():
+            # The container was stopped to end the turn; the diff and the patch need it running.
+            SweBenchDocker.run(["start", self.container], timeout=120)
+            self.notes.append("the review turn reached the task's time limit: the patch was collected as it stood")
+        if snapshot.returncode != 0:
+            record["changed"] = None
+            self.notes.append(f"recording the tree before the review turn failed ({snapshot.returncode})")
+            return review
+        added, removed, files = 0, 0, []
+        diff = self._script(REVIEW_DIFF_SCRIPT, timeout=300)
+        for line in diff.stdout.splitlines():
+            parts = line.split("\t", 2)
+            if len(parts) != 3:
+                continue
+            added += int(parts[0]) if parts[0].isdigit() else 0
+            removed += int(parts[1]) if parts[1].isdigit() else 0
+            files.append(parts[2])
+        record.update(changed=bool(files), added=added, removed=removed, files=files[:50])
+        return review
+
+    def _prepare_gate(self, state: Dict[str, Any]) -> None:
+        """
+        Writes the `issue-v1` hooks' conditions, which switches them on: the names the issue
+        holds, resolved in the container (`SweBenchIssueTargets`), and its runnable examples.
+        Records them in `state["hooks"]`. A failed resolution leaves the hooks with nothing to
+        read before the first edit; the example check still applies.
+
+        Args:
+            state: The instance's state.
+        """
+        names = SweBenchIssueTargets.names_to_resolve(self.problem_statement)
+        listed = self._script(SweBenchIssueTargets.resolve_script(names), timeout=300)
+        if listed.returncode != 0:
+            self.notes.append(f"resolving what the issue names failed ({listed.returncode})")
+        root, _, listing = listed.stdout.partition("\n")
+        conditions = SweBenchIssueTargets.conditions(self.problem_statement, listing if listed.returncode == 0 else "",
+                                                     root.strip() or "/testbed")
+        directory = self.scratch / GATE_DIRECTORY
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / CONDITIONS_FILE).write_text(json.dumps(conditions, indent=1))
+        state["hooks"] = {"sets": self.hooks, "conditions": {
+            "targets": [{"label": t["label"], "from": t["from"]} for t in conditions["targets"]],
+            "dropped": conditions["dropped"],
+            "examples": [example.get("first") for example in conditions["examples"]]}}
+
     # -- steps ---------------------------------------------------------------------------------
 
     def _start_container(self) -> Optional[str]:
@@ -552,7 +782,19 @@ class SweBenchInstanceRun:
             "GIT_CONFIG_VALUE_0": "/testbed",
             **self.extra_env,
         }
+        # The model server (the network's gateway, or a relay to a lane there) and loopback never go
+        # through a proxy: neither one the host's environment names nor one Docker's client
+        # configuration puts into every container. The host's own exemptions are kept.
+        environment.update({key: os.environ[key] for key in ("NO_PROXY", "no_proxy") if key in os.environ})
+        ProxyBypass.apply(environment, self.model_url)
         mounts: List[str] = list(self.extra_mounts)
+        if self.hooks:
+            # Registered before the launcher's first start, with their trust entries; the gate
+            # does nothing until its conditions are written (`_prepare_gate`).
+            (self.scratch / GATE_DIRECTORY).mkdir(parents=True, exist_ok=True)
+            SweBenchHooks.register(self.scratch / "codex-home", f"{SCRATCH_MOUNT}/codex-home",
+                                   f"{SCRATCH_MOUNT}/{GATE_DIRECTORY}")
+            mounts.append(f"{SweBenchHooks.gate_source()}:{GATE_MOUNT}:ro")
         if self.code_index:
             environment.update(self.code_index["env"])
             environment["PATH"] = f"{self.code_index['path']}:{CONTAINER_PATH}"

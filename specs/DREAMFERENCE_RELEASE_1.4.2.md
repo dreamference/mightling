@@ -1,6 +1,6 @@
 # Puffin 1.4.2 — release notes
 
-*Never released: 1.4.2 was prepared on 2026-10-07 and superseded the same day by 1.5.0, the first Mightling release, which carries everything below. Kept as the record of that preparation.*
+*Never released: 1.4.2 was prepared on 2026-10-07 and superseded the same day; everything below shipped in 1.5.1 (2026-10-08), the first Mightling release (1.5.0 was built but never published). Kept as the record of that preparation.*
 
 **Status:** draft, 2026-10-07, on branch `release/1.4.2`, from `git log v1.4.1..main` (main at `4de1174`). Not built, tagged or published. The text between the two rules is the GitHub release's description; the sections marked *(if merged)* are added or dropped by the checklist at the end.
 

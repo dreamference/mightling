@@ -112,14 +112,14 @@ With a dedicated number, the same exchange happens in a conversation with that c
 |---|---|---|
 | System account `mightling-signal` (no login shell, no home) | `/etc/passwd` | Keys out of the agent's reach (§0.3) |
 | Java runtime | `/opt/mightling/jdk-25.0.4.1+1-jre/` | signal-cli 0.14 needs Java 25 or later. Eclipse Temurin's JRE, fetched by setup and pinned by URL and SHA-256 for arm64 and x86_64 (§17); no apt package, whose pool URL would vanish with the next security update |
-| signal-cli | `/opt/mightling/signal-cli-<version>/` | The release tarball, checked against a SHA-256 pinned in Mightling's source (§17: the `.asc` signature check is not built) |
+| signal-cli | `/opt/mightling/signal-cli-<version>/` | The release tarball, checked against a SHA-256 pinned in Mightling's source and against the maintainer's detached OpenPGP signature (`.asc`) with a key whose fingerprint is pinned there too; both must pass before it is unpacked (§17.1) |
 | libsignal JNI for arm64 | `/opt/mightling/signal-cli-<version>/lib/libsignal_jni.so`, put inside the `libsignal-client-<v>.jar` | signal-cli bundles it only for x86_64 Linux, Windows and macOS (its wiki, "Provide native lib for libsignal") |
 | The bridge | `/usr/local/lib/mightling/ling-signal` (root, 0755) | Users' homes are 0750 on Ubuntu 24.04, so the system account cannot run a binary from the user's install |
 | The unit | `/etc/systemd/system/mightling-signal.service` | A system unit: no lingering needed, survives logout |
 | State | `/var/lib/mightling-signal/` (0700, `StateDirectory=`) | signal-cli's data, the bridge's state, the device cookie |
 
 **The arm64 libsignal library:**
-- **Phase 1:** use `exquo/signal-libs-build`'s `libsignal_jni.so-v<ver>-aarch64-unknown-linux-gnu.tar.gz` for the exact version the signal-cli release bundles. The version is read from the `libsignal-client-<ver>.jar` name in its `lib/`. The file is pinned by SHA-256 in `ling-rs/signal/pins.json`.
+- **Phase 1:** use `exquo/signal-libs-build`'s `libsignal_jni.so-v<ver>-aarch64-unknown-linux-gnu.tar.gz` for the exact version the signal-cli release bundles. The version is read from the `libsignal-client-<ver>.jar` name in its `lib/`. The file is pinned by SHA-256 in `ling-rs/signal/src/setup.rs` (`LIBSIGNAL_AARCH64_SHA256`, beside the signal-cli and JRE pins).
 - **Later:** Mightling's release workflow builds it from Signal's source (`java/build_jni.sh desktop` in signalapp/libsignal) and attaches it to each release, signed with the release key, so no third-party binary is trusted.
 
 **The unit:**
@@ -433,7 +433,7 @@ Each item is answered on this machine (gx10-1a2b), not on node-b (that machine i
 ### 12.1 Phase 0 results (2026-10-08, gx10-1a2b)
 
 - **Item 1, arm64: works.**
-  - **What was run:** signal-cli 0.14.9 with Java 25.0.4 (Temurin, in a scratch folder; Ubuntu's `openjdk-25-jre-headless` 25.0.4 is the package setup installs) and exquo's `libsignal_jni.so` 0.103.0 for aarch64, the version the release bundles as `libsignal-client-0.103.0.jar`.
+  - **What was run:** signal-cli 0.14.9 with Java 25.0.4 (Temurin, in a scratch folder; Ubuntu's `openjdk-25-jre-headless` 25.0.4 was the package setup installed then; since §17 setup fetches the pinned Temurin JRE instead) and exquo's `libsignal_jni.so` 0.103.0 for aarch64, the version the release bundles as `libsignal-client-0.103.0.jar`.
   - **How the library is found:** `-Djava.library.path=<dir>` through `JAVA_OPTS`, with no change to the jar.
   - **Result:** `signal-cli --version` answered, and `signal-cli link` reached Signal's provisioning service and printed a `sgnl://linkdevice?…` link. Nothing was linked; the process was stopped there.
 - **Item 2, memory: about 190 MB** resident for the JVM at the link step, with `-Xmx256m -XX:+UseSerialGC`. Idle and receiving are still to be measured with an account. `MemoryMax=768M` stays until then.
@@ -574,7 +574,7 @@ A second end-to-end test runs the daemon with `ling web` answering `on`. The own
 
   The stand-in accepts any shape. A mismatch would show up only as a logged error, or, for `listIdentities`, as the owner's messages being refused.
 
-**Verified without installing anything:** the Java home `setup` uses, `/usr/lib/jvm/java-25-openjdk-arm64`, is the directory Ubuntu 24.04's `openjdk-25-jre-headless` 25.0.4.1 (arm64) installs to. This was read from the package's contents with `apt-get download` and `dpkg -c`.
+**Verified without installing anything** (superseded by §17, which replaced the apt package with a pinned Temurin JRE): the Java home `setup` used then, `/usr/lib/jvm/java-25-openjdk-arm64`, is the directory Ubuntu 24.04's `openjdk-25-jre-headless` 25.0.4.1 (arm64) installs to. This was read from the package's contents with `apt-get download` and `dpkg -c`.
 
 ## 17. Merged, off by default (branch `messengers/optional`, 2026-10-08)
 
@@ -635,4 +635,62 @@ The account, the keys and the pairing are left alone. `status` already pointed a
 - `ling signal setup` and `--refresh` past `--dry-run`, which would need sudo and a phone.
 - A release build of the new asset in CI.
 
-**Not built:** the `.asc` signature check on the signal-cli tarball (§3). Its SHA-256 pin is the only check.
+### 17.1 The signature check on signal-cli (2026-10-09)
+
+Setup now checks the signal-cli tarball twice before anything is unpacked as root: against the pinned SHA-256, as before, and against the maintainer's detached OpenPGP signature. Both must pass, and either failing stops setup with nothing unpacked.
+
+**The steps** (`setup::runtime_steps`, so `setup` and `setup --refresh` both get them, and `--dry-run` prints them):
+1. `curl` the tarball, then `sha256sum -c` against `SIGNAL_CLI_SHA256`.
+2. `curl` `signal-cli-<version>.tar.gz.asc`, published beside the tarball on the release.
+3. `<bridge> verify-signal-cli --file <tarball> --signature <tarball>.asc`, as the user. `<bridge>` is the `ling-signal` binary that setup is about to install. The key and its fingerprint are compiled into it, so no keyring or key file is written anywhere.
+4. Only then `sudo tar -xzf`.
+
+The plan's text says so: "Every download is checked before it is unpacked; signal-cli twice, by its pinned SHA-256 and by its maintainer's OpenPGP signature". The step itself is listed as "Check the signature with the maintainer's pinned key (FA10826A74907F9EC6BBB7FC2BA2CD21B5B09570)".
+
+**The pinned key:**
+- `release_signature::SIGNAL_CLI_KEY_FINGERPRINT` is `FA10 826A 7490 7F9E C6BB  B7FC 2BA2 CD21 B5B0 9570`: AsamK `<asamk@gmx.de>`, RSA-2048, created 2016-06-18, sign and certify, no expiry. Its one subkey (`03D1 D926 31C7 91DC 3C72  9435 C25C DEA2 A548 BC9E`) is for encryption only.
+- The armored key is `ling-rs/signal/keys/signal-cli-AsamK.asc`, embedded with `include_str!`. It is keys.openpgp.org's export: self-signatures only, 1.8 KB.
+- The key file is data and the constant is the pin. A key file whose primary fingerprint is not the constant is refused before any signature is looked at.
+
+**Where the fingerprint came from, and how it was cross-checked (2026-10-09):**
+- **The `.asc` itself.** `signal-cli-0.14.9.tar.gz.asc` names its issuer as `FA10826A…B5B09570` (issuer-fingerprint subpacket; RSA, SHA-512, binary document, made 2026-10-07). This says which key to look for. It proves nothing on its own.
+- **keys.openpgp.org**, looked up by that fingerprint. It serves the key with the user id `AsamK <asamk@gmx.de>`. keys.openpgp.org publishes a user id only after its address has confirmed it by email, so this source rests on the maintainer's mailbox, not on GitHub.
+- **keyserver.ubuntu.com:** the same key, with the same user id and subkey.
+- **`github.com/AsamK.gpg`**, the key on the GitHub account that publishes the releases: the same key. This is not independent of a compromise of that GitHub account.
+- **The release tag.** GitHub reports the annotated tag `v0.14.9` (tag object `fabfcecb…`) as signed and verified. Its signature names the same issuer fingerprint.
+- **gpgv.** With only this key in a temporary keyring, `gpgv` reported a good signature on the downloaded tarball (`VALIDSIG FA10826A…B5B09570`, primary key `FA10826A…B5B09570`). That tarball also matched the existing SHA-256 pin.
+- signal-cli's README does not name a signing key; it was checked and says nothing about one. The two independent roots are therefore the keys.openpgp.org email confirmation and the GitHub account (its key list and its verified tag).
+
+**The rules** (`ling-rs/signal/src/release_signature.rs`). Mightling sets these on top of the OpenPGP library's own checks, and anything else fails closed:
+- The embedded key's primary fingerprint equals the pin, and its self-signatures (`verify_bindings`) hold.
+- The `.asc` is one armored block with nothing after it, and the block holds exactly one signature. The parser would otherwise read the first block and ignore the rest, and "one of two signatures is good" is not accepted.
+- The signature is of a binary document and is hashed with SHA-256, SHA-384, SHA-512, SHA3-256 or SHA3-512 (the real one uses SHA-512). A SHA-1 signature is refused even when it is otherwise good.
+- The signature names its issuer by fingerprint, and that fingerprint is the pin. The library would otherwise accept a match on the 64-bit key id.
+- It verifies against the **primary key only**. A signing subkey added to the key file cannot stand in for it.
+- The tarball is streamed through the hash: 124 MB, about a second in a release build.
+
+**Why rpgp, not gpgv or Sequoia:**
+- **rpgp** (the `pgp` crate, 0.21, default features off, so no bzip2) is pure Rust and builds the same on aarch64 and x86_64 Linux. It needs no system tool at setup time.
+- A clean release build of the crate alone took 22 s on this machine (`-j 8`, `nice`, with the SWE-bench run going). In the Codex workspace it adds 39 crates the workspace did not have: RSA, DSA, the older OpenPGP ciphers, `derive_builder` and `snafu`. It adds no second version of any crate the workspace already has (the workspace `Cargo.lock` before and after, compared).
+- **gpgv** with a temporary keyring was the fallback. It is present wherever apt is, since apt depends on it, and it would add no build time. But it needs a dearmored binary keyring written at setup time and its `--status-fd` output parsed for `VALIDSIG`. It would also be one more external program whose version decides what is accepted. The crate's cost was small enough not to need it.
+- **Sequoia** (`sequoia-openpgp`) is the heaviest of the three: a larger dependency tree, and a crypto backend to choose (Nettle by default, a C library). It was not tried.
+
+**Tests:**
+- `release_signature` has six tests:
+  - a good signature by the pinned key passes, with the pin compared without spaces or case;
+  - a bad signature fails: an altered payload, a corrupted signature, an empty file and text that is not a signature;
+  - a signature by another key fails. The same goes for that key's file under the first key's pin, and for one block holding two signatures or two blocks;
+  - a SHA-1 signature fails;
+  - the embedded key has the pinned fingerprint, and the real 0.14.9 `.asc` is binary, SHA-512 and issued by the pin;
+  - missing files fail.
+- The fixtures are in `ling-rs/signal/testdata/`: two throwaway RSA-2048 keys made with gpg for the tests (`@example.invalid`), a 28-byte payload, their signatures, and the real 488-byte `.asc`. `cli` checks that `verify-signal-cli` exits 2 without its arguments and 1 on a missing or wrong file. `setup`'s plan tests check the order: download, SHA-256 check, `.asc` download, signature check, unpack, with the check run as the user.
+
+**Verified (2026-10-09, this machine):**
+- `ling-signal`: 80 unit tests and 3 end-to-end tests. They passed in a standalone copy of the crate and with `cargo test --release -p ling-signal` in a scratch export of the pinned Codex workspace with the patches applied.
+- The built binary, run with a scratch `HOME`, on the real signal-cli 0.14.9 tarball:
+  - `verify-signal-cli` passed;
+  - on a truncated copy it failed with "the signature does not verify";
+  - with a test key's `.asc` it failed with "the signature is by 9B87…, not by the pinned key".
+- `setup --dry-run` printed the new steps in that order.
+
+**When `SIGNAL_CLI_VERSION` moves**, the `.asc` comes from the new release. Setup still checks it against the same pinned key, so a release signed with another key fails closed until the pin is changed here, on the same evidence as above.

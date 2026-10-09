@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from dreamference.config import DreamferenceConfig
+from dreamference.config import DreamferenceConfig, ProxyBypass
 from dreamference.config.dreamference_config import DEFAULT_MODEL, DEFAULT_DIFFUSION_MODEL
 from dreamference.runner import (
     ClineRunner, ClineInstaller,
@@ -315,6 +315,39 @@ class DreamferenceCLIController:
             )
 
         return rows
+
+    @classmethod
+    def _run_tool_call_canary(cls, vllm_mgr, requested_model: Optional[str]) -> Optional[bool]:
+        """
+        Checks that the served model returns a well-formed tool call through `ling`'s own API path,
+        a streamed `/v1/responses` request (ToolCallCanary). A failure is a warning naming the parser
+        or template likely at fault; it does not stop the start, since the server is up and the chat
+        UI needs no tools (specs/DREAMFERENCE_MODELS.md §2.1).
+
+        Args:
+            vllm_mgr: The server manager; its `host` and `get_models()` are used.
+            requested_model (Optional[str]): The model `server start` was asked for, preferred when the
+                served id maps to more than one registry entry.
+
+        Returns:
+            Optional[bool]: Whether the call was well formed; None when no model was reported.
+        """
+        from dreamference.hardware import model_key_for_served_id
+        from dreamference.vllm_server.tool_call_canary import ToolCallCanary, TOOL_CALL_CANARY_TIMEOUT_S
+        models = vllm_mgr.get_models()
+        if not models:
+            print("⚠️  Tool-call check skipped: the server reported no model.")
+            return None
+        print(f"🧪 Checking a tool call through /v1/responses (at most {TOOL_CALL_CANARY_TIMEOUT_S:.0f} s)...")
+        # The server is asked which model it serves, never the configuration.
+        model_key = model_key_for_served_id(models[0], requested_model)
+        passed, line = ToolCallCanary.run(vllm_mgr.host, models[0], model_key)
+        if passed:
+            print(f"✅ Tool call well formed: {line}")
+        else:
+            print(f"⚠️  Tool-call check failed: {line}.")
+            print("   The server is up, but ling's sessions will not get tool calls until this is fixed.")
+        return passed
 
     @classmethod
     def _read_kv_pool_facts(cls, container: str, max_model_len: Optional[str]) -> "dict[str, str]":
@@ -617,6 +650,46 @@ class DreamferenceCLIController:
             print(f"  {account.get('email')}: {scopes}")
         if answer.get("error"):
             print(f"⚠️  {answer['error']}")
+        return 0
+
+    @classmethod
+    def handle_gate_pause(cls, vllm_host: str, duration: Optional[str]) -> int:
+        """
+        `ling-admin night pause [--for DURATION]` and `night resume`: while paused, the model gate
+        lets every request through although a SWE-bench run holds it; the run then waits for
+        other requests before starting an instance, as it did before the gate, and records the
+        interval for its report (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18).
+
+        Args:
+            vllm_host: This machine's model server.
+            duration: How long to pause (`90m`, `2h`, minutes); None to resume.
+
+        Returns:
+            int: The exit code.
+        """
+        from dreamference.night_shift import NightShiftSettings
+        from dreamference.vllm_server.model_gate import ModelGate
+        if duration is None:
+            if ModelGate.resume():
+                print("▶️  Pause ended: the model gate refuses every request but the benchmark run's again.")
+            else:
+                print("💡 No pause was in force.")
+            print("\n".join(ModelGate.describe(vllm_host)))
+            return 0
+        try:
+            seconds = NightShiftSettings.parse_duration(duration)
+        except ValueError as error:
+            print(f"❌ --for: {error}")
+            return 2
+        if seconds <= 0:
+            print("❌ --for must be longer than nothing; `ling-admin night resume` ends a pause.")
+            return 2
+        record = ModelGate.pause(seconds)
+        until = time.strftime("%H:%M", time.localtime(record["until"]))
+        print(f"⏸️  The model gate lets every request through until {until}. A benchmark run starts no new "
+              "instance while others use the model, and its report names the pause; "
+              "`ling-admin night resume` ends it early.")
+        print("\n".join(ModelGate.describe(vllm_host)))
         return 0
 
     @classmethod
@@ -947,6 +1020,7 @@ class DreamferenceCLIController:
         # checkpoint on the old image and only the /v1/models listing told the truth.
         start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
         start_server_parser.add_argument("--port", type=int, default=8000, help="Port for the model server's /v1 API")
+        start_server_parser.add_argument("--no-gate", action="store_true", help="Serve the port from the engine itself, without the model gate that lets a SWE-bench run refuse other requests")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
         start_server_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
@@ -1042,6 +1116,9 @@ class DreamferenceCLIController:
         night_run_parser.add_argument("--minutes", type=float, default=None, help="Run for this many minutes instead")
         night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing; their requests still pause the run)")
+        night_pause_parser = night_subparsers.add_parser("pause", help="Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate)")
+        night_pause_parser.add_argument("--for", dest="duration", default="1h", help="How long: 90m, 2h, 45s, or minutes (default 1h)")
+        night_subparsers.add_parser("resume", help="End a pause: the model gate refuses everyone but the benchmark run again")
 
         # Command: ling-admin swe-bench (run ling over SWE-bench instances and grade the patches)
         from dreamference.swe_bench.swe_bench_command import SweBenchCommand
@@ -1054,7 +1131,7 @@ class DreamferenceCLIController:
             "egress", help="Trace one real ling session and list every network destination and process, with a verdict")
         audit_egress_mode = audit_egress_parser.add_mutually_exclusive_group()
         audit_egress_mode.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
-        audit_egress_mode.add_argument("--app", action="store_true", help="Trace the desktop app (ling-app) with both windows hidden, on the display DISPLAY names")
+        audit_egress_mode.add_argument("--app", action="store_true", help="Trace the desktop app (ling-app) with its window hidden, on the display DISPLAY names")
         audit_egress_mode.add_argument("--web", action="store_true", help="Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`")
         audit_egress_mode.add_argument("--docs", action="store_true", help="Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
@@ -1346,6 +1423,11 @@ class DreamferenceCLIController:
         parser = cls.build_parser()
         args = parser.parse_args(argv)
 
+        # Loopback and the model server never go through a proxy a shell left set, for every request
+        # made here and every process started from here (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §11).
+        # The configured host is added below, once the configuration is read.
+        ProxyBypass.apply(os.environ, os.environ.get("DREAMFERENCE_VLLM_HOST"))
+
         if not args.command:
             parser.print_help()
             sys.exit(0)
@@ -1408,6 +1490,7 @@ class DreamferenceCLIController:
             use_tensorizer=tensorize_opt,
             guided_decoding_backend=guided_decoding_backend
         )
+        ProxyBypass.apply(os.environ, config.vllm_host)
 
         # Instantiate selected runner (Codex by default, or Cline/Continue/OpenHands)
         if config.agent_runner == "cline":
@@ -2291,7 +2374,8 @@ class DreamferenceCLIController:
                         guided_decoding_backend=args.guided_decoding_backend or config.guided_decoding_backend,
                         use_tensorizer=getattr(args, "tensorize", None),
                         background=True,
-                        docker_image=getattr(args, "docker_image", None)
+                        docker_image=getattr(args, "docker_image", None),
+                        gate=not getattr(args, "no_gate", False),
                     )
                 
                     # Print progress while server is initializing
@@ -2344,6 +2428,8 @@ class DreamferenceCLIController:
                                     print(f"⚠️  NVFP4 Canary skipped: API returned {resp.status_code}")
                             except Exception as e:
                                 print(f"⚠️  NVFP4 Canary failed to execute: {e}")
+
+                        cls._run_tool_call_canary(vllm_mgr, args.model)
 
                         # By now the sidecar's 0.6B load has usually finished under the main
                         # model's. A brief poll reports its state either way — its /health is the
@@ -2516,12 +2602,16 @@ class DreamferenceCLIController:
                 sys.exit(0 if NightShiftScheduler.disable() else 1)
             if args.night_command == "status":
                 print(NightShiftScheduler.status())
+                from dreamference.vllm_server.model_gate import ModelGate
+                print("\n".join(ModelGate.describe(config.vllm_host)))
                 sys.exit(0)
             if args.night_command == "run":
                 sys.exit(NightShiftRunner.run(until=args.until, minutes=args.minutes,
                                               idle_minutes=args.idle_minutes,
                                               ignore_sessions=args.ignore_open_sessions))
-            print("usage: ling-admin night {enable,disable,status,run}")
+            if args.night_command in ("pause", "resume"):
+                sys.exit(cls.handle_gate_pause(config.vllm_host, args.duration if args.night_command == "pause" else None))
+            print("usage: ling-admin night {enable,disable,status,run,pause,resume}")
             sys.exit(2)
 
         elif args.command == "code":

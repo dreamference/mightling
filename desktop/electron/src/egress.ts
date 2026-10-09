@@ -23,7 +23,7 @@ export function applySwitches(): void {
 
 /**
  * Session rules, once the app is ready: no permission a page asks for is granted but writing to
- * the clipboard (the Ask window is text only; the microphone went with the Onyx window), and
+ * the clipboard (Ask is text only; the microphone went with the Onyx window), and
  * spellcheck downloads nothing
  * (Electron on Linux would fetch Hunspell dictionaries from a Google CDN: the download URL is
  * pointed at the app's own scheme, where no dictionary exists).

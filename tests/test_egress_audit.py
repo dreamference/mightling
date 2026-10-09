@@ -476,7 +476,7 @@ def test_codex_build_audits_a_new_binary_and_keeps_its_own_exit_code(argv, was_c
 
 # -- the desktop app's session --------------------------------------------------------------------
 
-def test_the_desktop_app_is_traced_hidden_with_the_web_ui_allowed(tmp_path, monkeypatch, capsys):
+def test_the_desktop_app_is_traced_hidden_as_ling_app_opens_it(tmp_path, monkeypatch, capsys):
     # A stand-in for strace: records how it was called, plays back the recorded trace, exits 0 as
     # an app that ran its audit session to the end does.
     calls = tmp_path / "calls.json"
@@ -497,61 +497,17 @@ shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o"
     out = capsys.readouterr().out
     assert code == 0 and "✅ Egress audit: pass" in out and "desktop app session" in out
     call = json.loads(calls.read_text())
-    assert call["args"][-2:] == ["/opt/Mightling", "--work"]
+    # No argument, as `ling app` starts it: the one window, on Ask.
+    assert call["args"][-1] == "/opt/Mightling"
     assert call["audit"] == "40" and call["bin"] == "/opt/ling"
     # Chromium's profile and the app's data folder land in the scratch home, never the user's.
     assert call["HOME"] != os.path.expanduser("~") and call["HOME"].endswith("home-dir")
     assert call["CODEX_HOME"] != str(tmp_path / "codex-home")
-    assert 3100 in EgressAudit.allowed_ports("http://localhost:8000", "app")
-    assert 3100 not in EgressAudit.allowed_ports("http://localhost:8000")
-    # The Onyx web UI is no longer part of the app's session.
+    # The app opens no window on `ling web` any more (ASK §18.6), nor on the Onyx web UI: a
+    # connection to either is a finding, and the app's allowlist is the `exec` session's.
+    assert 3100 not in EgressAudit.allowed_ports("http://localhost:8000", "app")
     assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000", "app")
-
-
-def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
-    if __import__("shutil").which("strace") is None:
-        pytest.skip("strace is not installed here")
-    monkeypatch.delenv("DISPLAY", raising=False)
-    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x", app=True, app_bin="/opt/Mightling") == 2
-    assert "needs a display" in capsys.readouterr().out
-    monkeypatch.setattr(EgressAudit, "app_executable", classmethod(lambda cls: None))
-    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x", app=True) == 2
-    assert "ling-admin desktop build" in capsys.readouterr().out
-
-
-# -- the desktop app's session --------------------------------------------------------------------
-
-def test_the_desktop_app_is_traced_hidden_with_the_web_ui_allowed(tmp_path, monkeypatch, capsys):
-    # A stand-in for strace: records how it was called, plays back the recorded trace, exits 0 as
-    # an app that ran its audit session to the end does.
-    calls = tmp_path / "calls.json"
-    strace = tmp_path / "bin" / "strace"
-    strace.parent.mkdir()
-    strace.write_text(f"""#!{os.sys.executable}
-import json, os, shutil, sys
-args = sys.argv[1:]
-json.dump({{"args": args, "HOME": os.environ.get("HOME"), "audit": os.environ.get("MIGHTLING_APP_AUDIT"),
-           "bin": os.environ.get("MIGHTLING_BIN"), "CODEX_HOME": os.environ.get("CODEX_HOME")}}, open({str(calls)!r}, "w"))
-shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
-""")
-    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("DISPLAY", ":99")
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
-    code = EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", app=True, app_bin="/opt/Mightling")
-    out = capsys.readouterr().out
-    assert code == 0 and "✅ Egress audit: pass" in out and "desktop app session" in out
-    call = json.loads(calls.read_text())
-    assert call["args"][-2:] == ["/opt/Mightling", "--work"]
-    assert call["audit"] == "40" and call["bin"] == "/opt/ling"
-    # Chromium's profile and the app's data folder land in the scratch home, never the user's.
-    assert call["HOME"] != os.path.expanduser("~") and call["HOME"].endswith("home-dir")
-    assert call["CODEX_HOME"] != str(tmp_path / "codex-home")
-    assert 3100 in EgressAudit.allowed_ports("http://localhost:8000", "app")
-    assert 3100 not in EgressAudit.allowed_ports("http://localhost:8000")
-    # The Onyx web UI is no longer part of the app's session.
-    assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000", "app")
+    assert EgressAudit.allowed_ports("http://localhost:8000", "app") == EgressAudit.allowed_ports("http://localhost:8000")
 
 
 def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
@@ -569,12 +525,12 @@ def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
 # -- route lookups ---------------------------------------------------------------------------------
 # Recorded from the desktop app on 2026-10-07: Chromium's IPv6 reachability check, a UDP connect
 # to Google's resolver address that fails here (no IPv6 route) and is never followed by a payload.
-# The loopback connect was the Chat window's, to the Onyx web UI on 3000 then; its port is now the
-# Ask window's, `ling web` on 3100.
+# The loopback connect was the Chat window's, to the Onyx web UI on 3000 then; the app has had no
+# such window since 2026-10-09, so here it is a connect to the model server on 8000.
 CHROMIUM_PROBE = (
     '2628928 connect(23<UDPv6:[10868489]>, {sa_family=AF_INET6, sin6_port=htons(443), sin6_flowinfo=htonl(0), '
     'inet_pton(AF_INET6, "2001:4860:4860::8888", &sin6_addr), sin6_scope_id=0}, 28) = -1 ENETUNREACH (Network is unreachable)\n'
-    '2628930 connect(24<TCP:[10873001]>, {sa_family=AF_INET, sin_port=htons(3100), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)\n'
+    '2628930 connect(24<TCP:[10873001]>, {sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)\n'
     '2628931 execve("/opt/Mightling", ["/opt/Mightling", "--type=utility"], 0xffff /* 40 vars */) = 0\n'
 )
 
@@ -582,12 +538,20 @@ CHROMIUM_PROBE = (
 def test_a_udp_connect_with_nothing_sent_is_a_route_lookup_not_a_destination():
     trace = StraceParser.parse(CHROMIUM_PROBE)
     assert trace.route_lookups == {"[2001:4860:4860::8888]:443": 1}
-    assert trace.destinations == {"127.0.0.1:3100": 1}
+    assert trace.destinations == {"127.0.0.1:8000": 1}
     allowed = EgressAudit.allowed_ports("http://localhost:8000", "app")
     verdict = EgressAudit.judge(trace, allowed, replied=True)
     assert verdict.status == PASS, verdict.problems
     lines = EgressAudit.render(trace, verdict, allowed)
     assert "Route lookups (UDP connect, nothing sent): [2001:4860:4860::8888]:443 (1x)" in lines
+
+
+def test_the_app_reaching_ling_web_again_is_a_finding():
+    # A regression to the separate Ask window (a second app-server on the same home, behind
+    # `ling web`) shows as a connect to 3100, which the app's session no longer allows.
+    trace = StraceParser.parse(CHROMIUM_PROBE.replace("htons(8000)", "htons(3100)"))
+    verdict = EgressAudit.judge(trace, EgressAudit.allowed_ports("http://localhost:8000", "app"), replied=True)
+    assert verdict.status == FAIL and "127.0.0.1:3100" in verdict.problems[0] and "not on the allowlist" in verdict.problems[0]
 
 
 @pytest.mark.parametrize("payload", [

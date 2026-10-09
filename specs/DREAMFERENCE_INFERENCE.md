@@ -1,8 +1,8 @@
 # Mightling GB10 Inference Stack
 
-> **Version:** 1.2.0
-> **Subject:** vLLM Launch Engine, Auto-Configuration, & Performance Optimization
-> **Checked against the code:** 2026-10-01 (`dreamference/vllm_server/vllm_server_manager.py`, `psi_watchdog.py`; constants compared value by value)
+> **Version:** 1.5.1
+> **Subject:** vLLM and SGLang Launch Engines, Auto-Configuration, & Performance Optimization
+> **Checked against the code:** 2026-10-09 (`dreamference/vllm_server/vllm_server_manager.py`, `sglang_launch_builder.py`, `psi_watchdog.py`; constants compared value by value). Since 2026-10-07 the registry has one main model, served by SGLang; the vLLM path is kept and tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`), so the vLLM sections below describe the launcher, not a model in use.
 
 ---
 
@@ -30,20 +30,21 @@ Resolve alias → HF repo, recipe (launch_overrides), Docker image
     ↓
 Host-safety pre-flight (check_host_safety): swap, sysctl, earlyoom / systemd-oomd, memory arena
     ↓
-Pre-download weights: main model, --draft-model, and the recipe's own drafter (DFlash)
+Pre-download weights: main model, --draft-model, and the recipe's own drafter (DFlash2), at pinned revisions
     ↓
-Reset a stale torch.compile cache if the speculative signature changed
+Reset a stale vLLM torch.compile cache if the speculative signature changed (vLLM only)
     ↓
 Diffusion sidecar: switched off since 2026-10-03, so a leftover dreamference-diffusion-8001 is removed
 (with DIFFUSION_ENABLED on: started first, unless --no-diffusion)
     ↓
-Build the docker run … vllm serve command (explicit args > recipe > module defaults)
+Build the docker run command: python3 -m sglang.launch_server … for an `engine: sglang` recipe (the main model),
+vllm serve … otherwise (explicit args > recipe > module defaults)
     ↓
 Run the container under the PSI MemoryPressureWatchdog
     ↓
 Stream logs and Docker memory; poll /v1/models until healthy
     ↓
-NVFP4 canary (nvfp4 aliases only); report diffusion sidecar state (when diffusion is on)
+NVFP4 canary (nvfp4 aliases only); tool-call check through /v1/responses (every model; MODELS §2.1); report diffusion sidecar state (when diffusion is on)
     ↓
 Exit; the containers keep running (--restart unless-stopped)
 ```
@@ -71,16 +72,16 @@ It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingfa
 
 ### 3.1. Two ways to get a drafter
 
-- **Recipe (normal case):** the model's `launch_overrides["speculative_config"]` is serialised to `--speculative-config`. The two DFlash entries use `{"method": "dflash", "model": "z-lab/Qwen3.5-122B-A10B-DFlash", "num_speculative_tokens": 12, "attention_backend": "FLASH_ATTN"}`. The drafter is a separate checkpoint, pre-downloaded and counted in the memory budget. MTP recipes (heads inside the checkpoint) use the same key with `"method": "mtp"`.
-- **Explicit `--draft-model`:** also emitted as `--speculative-config` JSON, built by `resolve_speculative_config()`; vLLM 0.2x has no `--speculative-model` or `--num-speculative-tokens` flag. `"model"` is the draft's resolved HF repo.
+- **Recipe (normal case):** the model's `launch_overrides["speculative_config"]`. On **SGLang** (the main model) it becomes `--speculative-algorithm DFLASH --speculative-draft-model-path <snapshot> --speculative-num-draft-tokens 12 --speculative-draft-model-quantization modelopt_fp4`, from `{"method": "DFLASH", "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal", "revision": "bd7a934…", "num_speculative_tokens": 12, "quantization": "modelopt_fp4"}` (`SGLangLaunchBuilder.server_args`). On **vLLM** it is serialised to `--speculative-config`; the removed 122B recipes used `{"method": "dflash", "model": "z-lab/Qwen3.5-122B-A10B-DFlash", "num_speculative_tokens": 12, "attention_backend": "FLASH_ATTN"}`, and MTP recipes (heads inside the checkpoint) use the same key with `"method": "mtp"`. Either way the drafter is a separate checkpoint, pre-downloaded and counted in the memory budget.
+- **Explicit `--draft-model` (vLLM recipes only; the SGLang path takes its drafter from the recipe alone and ignores the flag):** emitted as `--speculative-config` JSON, built by `resolve_speculative_config()`; vLLM 0.2x has no `--speculative-model` or `--num-speculative-tokens` flag. `"model"` is the draft's resolved HF repo.
 
 **Precedence:** with both present, the explicit draft is **layered onto** the recipe when the recipe also uses an external drafter (it has a `"model"`): `"model"` is replaced, and the recipe's method and drafter attention backend are kept. A self-speculation recipe (MTP, no `"model"`) is replaced outright, since its method means nothing for a separate checkpoint. There is no fail-fast validation of the combination. Until 2026-09-29 the explicit path emitted the removed `--speculative-model` flags and failed at argument parsing.
 
-**Compatibility:** a drafter must share the target's tokenizer. The DFlash drafter is built for Qwen 3.5 122B-A10B.
+**Compatibility:** a drafter must share the target's tokenizer. The DFlash2 drafter is built for Qwen3.8-27B.
 
 ### 3.2. Speculative token count
 
-- **With a recipe:** its `speculative_config` carries the count. The DFlash entries use 12.
+- **With a recipe:** its `speculative_config` carries the count. The main model uses 16 (12 was measured +7% at one stream and neutral at two on the second GB10, 2026-10-08; the change waits for the benchmark to finish).
 - **With an explicit draft:** `ling-admin server start` passes the config's resolved `num_speculative_tokens` — `--num-speculative-tokens` > `DREAMFERENCE_SPECULATIVE_TOKENS` > file > `DEFAULT_SPECULATIVE_TOKENS = 8` — so a draft without the flag gets 8, not the recipe's 12. `start_server()` / `build_launch_command()` default to 5 only when called directly from Python.
 - **Without a draft**, the depth argument is ignored and the recipe's config is passed exactly.
 
@@ -88,21 +89,23 @@ Until 2026-09-29 the raw flag was passed, and an omitted `--num-speculative-toke
 
 ### 3.3. torch.compile cache
 
-vLLM keys its compile cache on the engine config, but `SpeculativeConfig.compute_hash()` does not include `num_speculative_tokens`. `_reset_stale_compile_cache()` keeps its own `model|method|n` signature and clears the cache when it changes. It clears it *inside* the image, because the cache is root-owned. The cache lives at `VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`, which is persistent: a cold compile takes 8–12 minutes.
+This applies to vLLM only; SGLang's torch.compile output lives under `~/.cache/dreamference/sglang/inductor` and is not reset. vLLM keys its compile cache on the engine config, but `SpeculativeConfig.compute_hash()` does not include `num_speculative_tokens`. `_reset_stale_compile_cache()` keeps its own `model|method|n` signature and clears the cache when it changes. It clears it *inside* the image, because the cache is root-owned. The cache lives at `VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`, which is persistent: a cold compile takes 8–12 minutes.
 
 ---
 
-## 4. Launch Flags
+## 4. Launch Flags (vLLM)
+
+These are vLLM's flags. The SGLang launch is built separately by `SGLangLaunchBuilder.server_args()` (§5.3).
 
 | Flag | Default | Source | Effect |
 | :--- | :--- | :--- | :--- |
 | `--enable-prefix-caching` | on | Config; forced **off** when the recipe says `enable_prefix_caching: false` | KV prefix reuse |
 | `--enable-chunked-prefill` | on | Config | Chunked prefill |
-| `--max-num-batched-tokens` | `8192` | Recipe (default model: `9048`) | Prefill chunk size |
+| `--max-num-batched-tokens` | `8192` | Recipe | Prefill chunk size |
 | `--kv-cache-dtype` | `auto` | Recipe; config override | KV precision |
-| `--attention-backend` | omitted when `auto` | Recipe (default model: `flash_attn`) | Attention kernels |
+| `--attention-backend` | omitted when `auto` | Recipe | Attention kernels |
 | `--moe-backend` | unset | Recipe | MoE kernels (must be SM121-safe) |
-| `--tool-call-parser` | resolved | Explicit > recipe > name guess (`mistral` / `hermes`) | Tool-call format (`qwen3_xml` for all Qwen 3.x entries) |
+| `--tool-call-parser` | resolved | Explicit > recipe > name guess (`mistral` / `hermes`) | Tool-call format (the removed Qwen 3.5/3.6 vLLM recipes used `qwen3_xml`) |
 | `--reasoning-parser` | unset | Recipe (`qwen3`) | Reasoning channel |
 | `--structured-outputs-config.backend` | `xgrammar` | `guided_decoding_backend` | Structured outputs. On images older than vLLM v0.12 it is spelled `--guided-decoding-backend`, chosen by probing the image |
 | `--override-generation-config` | `{"temperature": 0.0, "top_p": 1.0, "top_k": 0}` | `DEFAULT_GENERATION_OVERRIDES`; a recipe may override or disable it (`generation_overrides`) | Deterministic sampling unless the client asks otherwise |
@@ -139,23 +142,11 @@ The keys mirror `build_launch_command`'s parameters: `max_model_len`, `gpu_memor
 | `chat_template_patches` | (anchor, replacement) pairs applied to a copy of the checkpoint's chat template at launch (§5.3) |
 | `container_headroom_gb` | Memory added to the engine's fraction when sizing the container's cgroup cap |
 
-### 5.2. Previous Default Recipe (`qwen3.5-122b-a10b-hybrid-dflash`, now the fallback)
+### 5.2. Removed vLLM Recipes
 
-| Setting | Value |
-| :------ | :---- |
-| `docker_image` | `dreamference-vllm-dflash:0.23.0-aeon-dense5` |
-| `max_model_len` | `32768` |
-| `gpu_memory_utilization` | `0.7` |
-| `kv_cache_dtype` | `auto` |
-| `attention_backend` | `flash_attn` |
-| `max_num_batched_tokens` | `9048` |
-| `tool_call_parser` / `reasoning_parser` | `qwen3_xml` / `qwen3` |
-| `speculative_config` | DFlash, 12 tokens (§3.1) |
-| `enable_prefix_caching` | `true` (explicit in the recipe) |
-| `env` | `VLLM_MARLIN_USE_ATOMIC_ADD=1`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` |
-| `extra_args` | `--max-num-seqs 8 --tensor-parallel-size 1 --dtype auto --default-chat-template-kwargs {"enable_thinking": false}` |
+Until 2026-10-07 four vLLM recipes were in the registry: the Qwen 3.5 122B-A10B hybrid DFlash (the default from 2026-08-23 to 2026-09-29: image `dreamference-vllm-dflash:0.23.0-aeon-dense5`, 32K context, `gpu_memory_utilization` 0.7, `flash_attn`, 9,048 batched tokens, `qwen3_xml`/`qwen3`, DFlash with 12 tokens, `VLLM_MARLIN_USE_ATOMIC_ADD=1` and `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0`, 8 sequences, thinking off in the chat template), the INT4 DFlash, the 122B NVFP4 and the 35B. They were removed with their images and `runtime/` patches; `DREAMFERENCE_MODELS.md` §1 says how a removed alias is answered. The test suite keeps equivalent recipes (`vllm_recipes` in `tests/conftest.py`) so the vLLM path stays covered.
 
-### 5.3. The SGLang Engine and the Default Model (`qwen3.8-27b-nvfp4-dflash2`, since 2026-09-29)
+### 5.3. The SGLang Engine and the Main Model (`qwen3.8-27b-nvfp4-dflash2`, since 2026-09-29)
 
 One entry is served by SGLang, because its speed is in a drafter only SGLang runs: Qwen3.8-27B's DFlash2 is a block-diffusion drafter that vLLM supports only through an unmerged pull request. The recipe follows hasso5703/dgx-spark-qwen38 (MIT), measured on a GB10.
 
@@ -164,17 +155,17 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 | `engine` | `sglang` |
 | `docker_image` | `lmsysorg/sglang@sha256:d6e7288627be…` (v0.5.19, pinned by digest) |
 | checkpoint | `RadixArk/Qwen3.8-27B-NVFP4` @ `52d1adc`, served as its snapshot directory |
-| drafter | `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` @ `bd7a934`, 16 draft tokens, `modelopt_fp4` |
+| drafter | `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` @ `bd7a934`, 12 draft tokens (the recipe's 16 until 2026-10-09: 12 measured +7% on the replay set, 48.3 against 45.1 tok/s single stream, two runs each in one session, acceptance 5.23 against 4.99 per step, speculation still exact; 8, 10 and 14 gained nothing), `modelopt_fp4` |
 | memory | `--mem-fraction-static 0.50`, cgroup cap = fraction + 24 GB headroom |
 | context | 262,144 tokens |
 | parsers | `qwen3_coder` tools, `qwen3` reasoning |
 | `extra_args` | flashinfer attention, chunked prefill 8192, mamba radix cache `extra_buffer`, bf16 SSM state, 96 mamba slots, 8 running requests, torch.compile to batch 4, 2 continuous decode steps, `--sleep-on-idle`, `--enable-metrics` |
 
-**How it is wired.** `SGLangLaunchBuilder` builds only the arguments after the image; the container comes from the same `docker run` prefix as vLLM's, so the memory cap, CPU limit, OOM score, mounts and PSI watchdog are engine-independent. Both engines get `VLLM_NO_USAGE_STATS=1` and `DO_NOT_TRACK=1`. The served model name is the repository ID, as with vLLM, so clients see no difference.
+**How it is wired.** `SGLangLaunchBuilder` builds only the arguments after the image: `python3 -m sglang.launch_server --model-path <snapshot> --trust-remote-code --served-model-name <repo> --host 0.0.0.0 --port <port> --tp-size 1 --mem-fraction-static <f> --context-length <n>`, the parsers, the drafter flags (§3.1) and the recipe's `extra_args`; the container comes from the same `docker run` prefix as vLLM's, so the memory cap, CPU limit, OOM score, mounts and PSI watchdog are engine-independent. Both engines get `VLLM_NO_USAGE_STATS=1` and `DO_NOT_TRACK=1`. The served model name is the repository ID, as with vLLM, so clients see no difference.
 
 **Four things found on the first launches, each now handled in code:**
 - **Revisions.** SGLang drops `--revision` on some offline config lookups, which then resolve through `refs/main`; a download by commit writes none, and the first launch failed in a restart loop. Pinned checkpoints are passed as their snapshot directories.
-- **The chat template.** Qwen3.8's own template answered HTTP 400 to the reasoning efforts `high`/`minimal` that Codex offers, and refused a system message after the first. `ChatTemplatePatcher` writes a patched copy under `~/.cache/dreamference/sglang/chat-templates` before launch (`high`/`max` → `xhigh`, `minimal` → `low`, a late system message becomes a `<system-reminder>`), and the start stops if an anchor no longer matches. The default effort also drops from `xhigh` to `medium`: the recipe's author measured `xhigh` at 3.19× the thinking tokens and a lower HumanEval (93.9% against 98.2%). ling sends `none` and is unaffected.
+- **The chat template.** Qwen3.8's own template answered HTTP 400 to the reasoning efforts `high`/`minimal` that Codex offers, and refused a system message after the first. `ChatTemplatePatcher` writes a patched copy under `~/.cache/dreamference/chat-templates` before launch (`high`/`max` → `xhigh`, `minimal` → `low`, a late system message becomes a `<system-reminder>`), and the start stops if an anchor no longer matches. The default effort also drops from `xhigh` to `medium`: the recipe's author measured `xhigh` at 3.19× the thinking tokens and a lower HumanEval (93.9% against 98.2%). ling sends `none` and is unaffected.
 - **The sampler.** FlashInfer's kernel for *untruncated* sampling (top_p 1 and no top_k, which is what the completions endpoint does by default, since only the chat path applies the checkpoint's generation defaults) returned token 0, `!`, for 16 of 16 sampled completions requests on this GB10. Any top_p < 1 or any top_k was clean, and so was greedy decoding, which is why chat and ling never showed it. The NVFP4 canary in `server start`, which samples with defaults on purpose, caught it. The recipe passes `--sampling-backend pytorch`: 0 of 16 corrupted, no measurable speed cost.
 - **The compile cache.** vLLM's signature-based reset is skipped for SGLang, whose torch.compile output lives under `~/.cache/dreamference/sglang/inductor`.
 
@@ -194,13 +185,13 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 
 Qwen3.8 figures are after the sampler change (the first measurement, before it, was 24.1 / 47.5 / 82.5). The 122B figures came from different prompts (`main-model inspect`), so decode is a tie within noise on prose and code. The suite's longer wall clock on the first runs was the harness, not the model: it waited up to 30 s to see a busy marker that a fast turn never showed (see `specs/README.md`).
 
-The resulting command is listed flag by flag in `DREAMFERENCE_CODEBASE.md` §5. The NVFP4 entries use the FlashInfer b12x kernels, selected through `env` and `moe_backend`, because the CUTLASS FP4 path corrupts output on SM121 (`DREAMFERENCE_MODELS.md` §2.1).
+The resulting command is listed flag by flag in `DREAMFERENCE_CODEBASE.md` §5. The CUTLASS FP4 path corrupts output on SM121 (`DREAMFERENCE_MODELS.md` §2.1); the removed vLLM NVFP4 recipes selected FlashInfer's b12x kernels through `env` and `moe_backend` for that reason.
 
 ---
 
 ## 6. Base Configuration & Module Defaults
 
-These are always emitted:
+These are always emitted on vLLM:
 
 ```
 --host 0.0.0.0 --port <port> --max-model-len <n> --gpu-memory-utilization <f>
@@ -215,7 +206,7 @@ These are always emitted:
 - `DEFAULT_KV_CACHE_DTYPE = "auto"`;
 - `DEFAULT_LOAD_FORMAT = "auto"`.
 
-Every current matrix entry sets its own context length and utilisation.
+The main model's recipe sets its own context length and utilisation.
 
 **No `fastsafetensors`.** It used to be hardcoded. Without GPUDirect Storage, which GB10 lacks, it double-resides the checkpoint during load, and that peak is what froze this host. vLLM's own loader is used unless a recipe asks otherwise.
 

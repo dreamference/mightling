@@ -2,6 +2,7 @@
 
 **Status:** implemented (re-checked against the code 2026-09-28) — `dreamference/chat/gmail_client.py`, `ling-admin gmail`, the launcher's prompt block in `ling-rs/src/lib.rs`, per-account `errors` in the service. Default-on when connected (§5's open decision), opt out with `mightling_gmail = false`.
 **Target:** the `ling` terminal agent (`ling`, the Mightling-branded Codex with the launcher in `ling-rs/` compiled in)
+**Since (noted 2026-10-09):** the service no longer needs the web UI: `ling-admin google start` runs it on its own (DOCKER §6, [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md) §5.1), and accounts are connected through its own connect page as well as in Onyx. When `/apps` declares Gmail as an MCP app (an account connected with the Gmail scope), the launcher offers the `gmail_search`/`gmail_read` tools and leaves out the shell section this spec describes; the shell section and `ling-admin gmail` remain for sessions where no app is declared.
 **Builds on:** the Gmail search service already running for the Onyx web UI (`dreamference/chat/gmail_search_service.py`, container `dreamference-gmail`), and the `ling-search` / `ling-fetch` pattern that gives the same agent web access.
 
 ---

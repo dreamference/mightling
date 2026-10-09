@@ -16,9 +16,10 @@ export type FromView =
   | { type: "work/start" }
   | { type: "work/send"; message: unknown }
   | { type: "work/stop" }
-  | { type: "work/open-chat" }
   | { type: "work/target" }
   | { type: "work/airgapped"; thread: string | null }
+  /** An attachment for an Ask thread, written into its folder (ask.ts); the bytes base64. */
+  | { type: "ask/upload"; thread: string; name: string; kind: "image" | "file"; data: string }
   | { type: "context-menu"; x: number; y: number; editable: boolean; selection: string }
   | { type: "window/minimize" }
   | { type: "window/maximize" }
@@ -30,11 +31,15 @@ export type ForView =
   | { channel: "work://stderr"; payload: string }
   | { channel: "work://protocol-error"; payload: string }
   | { channel: "work://exit"; payload: number | null }
-  | { channel: "theme"; payload: "light" | "dark" };
+  | { channel: "theme"; payload: "light" | "dark" }
+  /** Show Ask or Work: the menu, a second instance or a link asked for one. */
+  | { channel: "view"; payload: "ask" | "work" };
 
 export interface Started {
   served_model: string | null;
   started: boolean;
+  /** The folder Ask threads' scratch folders live in, canonical, as `ling web` answers it too. */
+  ask_root: string | null;
 }
 
 export interface Airgapped {

@@ -4,7 +4,8 @@
 # Codex workspace (`cargo test` in a copy of this folder), and so the daemon is a small binary the
 # system account `mightling-signal` can run from /usr/local/lib/mightling without the 300 MB `ling`.
 # Versions are the Codex workspace's and `ling-web-server`'s, so building inside it adds no second
-# copy of any crate.
+# copy of any crate. `pgp` adds 39 crates the workspace did not have (RSA, the older OpenPGP
+# ciphers), none a second copy of one it has.
 [package]
 name = "ling-signal"
 version = "0.1.0"
@@ -22,6 +23,9 @@ path = "src/main.rs"
 
 [dependencies]
 futures = { version = "0.3", default-features = false, features = ["std"] }
+# The OpenPGP check of the signal-cli release (`release_signature.rs`; spec §17 says why rpgp, not
+# gpgv or Sequoia). Default features off: no bzip2.
+pgp = { version = "0.21", default-features = false }
 rand = "0.9"
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }

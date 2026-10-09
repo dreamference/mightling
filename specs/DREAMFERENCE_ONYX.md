@@ -1,8 +1,9 @@
 # Mightling Onyx Integration & Branding (the web UI)
 
-> **Version:** 1.2.0
+> **Version:** 1.5.1
+> **Status:** in use until `ling web` matches it, then retired ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10, Phase C; decided 2026-10-07, with no history export). Since 2026-10-08 the desktop app's Chat entry opens Ask on `ling web`, not Onyx.
 > **Subject:** Onyx Lite deployment; provider registration; Mightling branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
-> **Checked against the code:** 2026-09-29 (`dreamference/chat/`)
+> **Checked against the code:** 2026-09-29 (`dreamference/chat/`); §1 and §2 again on 2026-10-09
 
 ---
 
@@ -22,14 +23,16 @@
 
 ## 1. Overview & Lifecycle
 
-**Onyx Lite** is the stock Onyx stack with Vespa, Redis, Celery, the model servers and object storage switched off. It is a browser chat UI in front of the same vLLM model the terminal agents use. Its containers are pinned to `mightling-*` names in the lite overlay:
-- `ling-web_server-1` (Next.js);
-- `mightling-api_server-1` (FastAPI);
-- `mightling-relational_db-1` (PostgreSQL);
-- `mightling-nginx-1`;
-- `ling-code-interpreter-1`.
+**Onyx Lite** is the stock Onyx stack with Vespa, Redis, Celery, the model servers and object storage switched off. It is a browser chat UI in front of the same vLLM model the terminal agents use. Its compose project is `onyx`, with the services:
+- `web_server` (Next.js);
+- `api_server` (FastAPI);
+- `relational_db` (PostgreSQL);
+- `nginx`;
+- `code-interpreter`.
 
-The UI is served at `http://localhost:3000`, and the desktop window `ling-app` shows the same server. Both of nginx's ports (80 and 3000) are published on **127.0.0.1 only** once `configure` has run (§2 step 1): Docker's default is every interface, which put the UI — and the admin account `configure` creates with a published default password, which can search the user's mail — on the local network. Until 2026-09-29 they were.
+Mightling finds each container by its compose service label (`com.docker.compose.service=…`), never by its name, and recreates one service with `docker compose -p onyx … up -d --force-recreate --no-deps <service>`.
+
+The UI is served at `http://localhost:3000` (the desktop window `ling-app` showed the same server until 2026-10-08). Both of nginx's ports (80 and 3000) are published on **127.0.0.1 only** once `configure` has run (§2 step 1): Docker's default is every interface, which put the UI — and the admin account `configure` creates with a published default password, which can search the user's mail — on the local network. Until 2026-09-29 they were.
 
 Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 
@@ -39,7 +42,8 @@ Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 | `chat/onyx_installer.py` (`OnyxInstaller`) | Finds `onyx-cli`: the venv's `bin/` first, then `PATH`, then `~/.local/bin`. If missing, installs it with pip |
 | `chat/onyx_brand_assets.py` | Logo, wordmark and favicon files, and the in-bundle logo paths |
 | `chat/onyx_ui_fonts.py`, `onyx_ui_overrides.py`, `onyx_ui_labels.py`, `onyx_ui_scripts.py` | The UI patches (§4) |
-| `chat/gmail_*`, `chat/image_search_service.py` | Sidecar services (§7, §8) |
+| `chat/chat_admin_credentials.py` (`ChatAdminCredentials`) | The admin account's per-install password (§2 step 2) |
+| `chat/gmail_*`, `chat/google_*`, `chat/image_search_service.py` | Sidecar services (§7, §8); the Google service can also run without Onyx (`ling-admin google`, [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md) §5.1) |
 
 Mightling never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
@@ -49,6 +53,7 @@ Mightling never writes Onyx's compose files. Everything goes through `onyx-cli`:
 | `configure [--email] [--password] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]` | §2 |
 | `google-auth [--client-id] [--client-secret]` | §9 |
 | `gmail` | (Re-)registers the Gmail tool and refreshes the Mightling assistant's tool list (`connect_gmail()`). It does **not** sign an account in; that happens in the UI (§8) |
+| `password` | Prints the admin account's e-mail and generated password (§2 step 2) |
 | `status` / `logs [-f]` / `stop` | `onyx-cli deploy status` / `logs` / `stop`. `stop` keeps the data |
 | `uninstall` | Removes the deployment **and its data** |
 

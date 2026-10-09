@@ -22,7 +22,7 @@ Only the launcher and `ling-app` browse; `ling-search` reads `node.json` through
 
 On the node, `ling-admin node enable` installs an Avahi service file (root once; `server start|stop` rewrite its `state` afterwards as the user) and publishes the web UI and SearXNG on every interface, which **reverses the two loopback fixes of 2026-09-29 on an advertised node only**. The advert's `web` record names `ling web` on 3100, which `node enable` starts with `--lan` (a device is served only once paired; `--no-web` and `disable` put it back on loopback); Onyx's port 3000 is still published beside it until Onyx is retired. Whether a node is advertised lives in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory.
 
-`ling-app` on a client runs its Ask window on its own `ling web`, against the node's model server; the TCP forwarder to the node's port 3000 was removed on 2026-10-08 (ASK §17).
+`ling-app` on a client runs Ask and Work in its one window on its own app-server, against the node's model server; the TCP forwarder to the node's port 3000 was removed on 2026-10-08 (ASK §17).
 
 ## Pairing and jobs, over SSH
 

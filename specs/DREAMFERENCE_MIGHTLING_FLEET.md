@@ -1,6 +1,6 @@
 # Mightling Fleet: setting up more GB10s from the one you have
 
-**Status:** proposed on 2026-10-02; §15's open questions answered by the user on 2026-10-03. Phases 1–3 and part of 4 built on 2026-10-03 and tested offline only (§16); nothing has run against a second machine. The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-1a2b`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
+**Status:** proposed on 2026-10-02; §15's open questions answered by the user on 2026-10-03. Phases 1–3 and part of 4 built on 2026-10-03 and tested offline only (§16); merged into `main` on 2026-10-08 (`249c262`, ported onto the renamed tree) and released in 1.5.1. A second GB10 has existed since 2026-10-08, but it was installed by hand over SSH, not by `node provision` (MIGHTLING_NODE §18.10), so `node provision` itself has still not run against a machine; Phase 0 (§13) is owed. The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-1a2b`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
 **Target:** new DGX Spark-class machines (DGX Spark and the partner GB10 units; this one is an ASUS Ascent GX10) on the same local network as an existing Mightling node.
 **Builds on:**
 - the client/node split, discovery and SSH pairing in [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md), in particular §9 (installing), §12.4 (no roles), §13.2 (pairing), §15.1 (control over SSH) and §18.6 (pairing as built);
@@ -497,7 +497,7 @@ Live, from Phase 0 on: everything in §13's list, then one unit end to end, then
 
 ## 16. As built (2026-10-03), offline only
 
-Built on branch `fleet/provision`, unit-tested with stand-ins for every machine; **no second GB10 exists here, so nothing below has run against one**. Phase 0 (§13) is still owed in full.
+Built on branch `fleet/provision`, unit-tested with stand-ins for every machine; **no second GB10 existed then, so nothing below has run against one** (the one that arrived on 2026-10-08 was installed by hand, MIGHTLING_NODE §18.10). Phase 0 (§13) is still owed in full. Merged on 2026-10-08 (`249c262`): `install.sh --from` was merged by hand with the signed-release checks, so a release bundle carries `SHA256SUMS` and its signature, and a bundle of this node's own build is checked against its checksums.
 
 **Code**
 

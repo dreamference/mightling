@@ -1,6 +1,6 @@
 # Mightling PDF Search Tool — Technical Specification
 
-**Status:** Draft v1: **not implemented.** Nothing in `dreamference/` implements PDF search, as of 2026-09-28. The facts below about existing infrastructure (container names, tool registration, SearXNG, Infinity) were corrected against the code on that date; the design itself is unchanged.
+**Status:** Draft v1: **not implemented.** Nothing in `dreamference/` implements PDF search on the web, as of 2026-10-09 (re-checked). PDFs already on the machine are a different matter, covered since 2026-10-08 by `ling-docs` ([MIGHTLING_LOCAL_INDEX](./DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md) Phase 1, text extraction with PDFium). The facts below about existing infrastructure (container names, tool registration, SearXNG, Infinity) were corrected against the code on that date; the design itself is unchanged.
 **Target:** Mightling (sidecar ecosystem)
 **Estimated effort:** ~4-5 days (sidecar app, SearXNG integration, PDF parsing, text embedding, semantic chunking, SSRF hardened downloader)
 

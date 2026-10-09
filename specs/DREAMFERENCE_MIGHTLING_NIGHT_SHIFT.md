@@ -29,7 +29,7 @@ You queue coding tasks during the day with `/night add …`, from inside a `ling
 **Non-goals:**
 - **Merging or pushing:** a branch and a report are the whole output.
 - **Scheduling on other machines.**
-- **Running while you work:** the night run gives way to interactive use (§6.3).
+- **Running while you work:** the night run gives way to interactive use (§5.5).
 - **Choosing tasks for you:** the queue holds only what was added explicitly.
 
 ---
@@ -250,11 +250,13 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `airgapped` | *(none)* | A stricter `/airgapped` level for night runs alone ([MIGHTLING_AIRGAPPED §7](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)); a looser one than the configured level is ignored (§11.1). |
 | `prompt` | *(none)* | The system prompt each task's `ling exec` starts with, passed as `DREAMFERENCE_MIGHTLING_PROMPT` ([MIGHTLING_PROMPT §7](./DREAMFERENCE_MIGHTLING_PROMPT.md)): `high-swe`, or any installed prompt. Absent: the configured one (`default` unless `mightling_prompt` says otherwise). A task resumed on a later night keeps the prompt its session started with. |
 | `refine` | *(absent)* | Refine mode for night tasks ([MIGHTLING_REFINE §5.3](./DREAMFERENCE_MIGHTLING_REFINE.md)): `true` studies each new task in a session of its own first, puts the worktree back, and gives the task the refined description and a fresh `task_timeout` (within the window). Absent: the configured `mightling_refine` (off by default). A task resumed on a later night is not studied again. |
+| `refine_version` | *(absent)* | Which texts refine mode uses for night tasks: `"v1"` (the measured ones) or `"v2"` ([MIGHTLING_REFINE §10](./DREAMFERENCE_MIGHTLING_REFINE.md)). Absent: the configured `mightling_refine_version` (`v1` by default). The task's result records it (`refine.version`), and the report line names a v2 study. |
 | `task_context` | `65536` | The smallest KV budget a concurrent task may be given; the run splits the pool between as many tasks as can each get this much (§11.1). |
 | `compact_at` | *(absent)* | Each task's compaction limit, passed to every `ling exec` of the task (`-c model_auto_compact_token_limit=<n>`). Absent: the task's share of the KV pool (§11.1), which is what holds the tasks of a night to the pool together. A number: that limit, and only as many tasks at once as fit at it. `0`: no limit is passed, the launcher's own (60% of the pool) applies, and nothing holds the tasks to the pool. |
 | `idle_minutes` | `10` | How long the model must have been idle before a night starts (§5.2). |
 | `index` | `true` | Refresh each repository's code index before its tasks start (§11.1). |
 | `index_timeout` | `20m` | The most one repository's refresh may take; never more than half of what is left of the window. |
+| `nodes` | `paired` | Other nodes' model servers a run may also use, as extra lanes ([MIGHTLING_NODE §12.3](./DREAMFERENCE_MIGHTLING_NODE.md)): every paired node serving the same model by default, `none`, or a list of node names. |
 
 ---
 
@@ -391,3 +393,12 @@ Two additions from [MIGHTLING_NODE §18.8](./DREAMFERENCE_MIGHTLING_NODE.md), bo
 ### 11.6 The sandbox from the timer (2026-10-03)
 
 Every task is a sandboxed `ling exec` and its tests run under `ling sandbox`, and on Ubuntu 24.04 (`kernel.apparmor_restrict_unprivileged_userns=1`) `bwrap` is refused a user namespace from a systemd unit unless an AppArmor profile allows it, so until 2026-10-03 a run started by the timer would have had every sandboxed command fail on this machine; runs by hand had passed only because their shells inherited the PyCharm snap's AppArmor label. `SandboxPrerequisite` (`vllm_server/sandbox_prerequisite.py`, SETUP §3.3) now checks `bwrap` from a throwaway user unit on every `ling-admin` run: `night run` and `night enable` are refused while it fails and nobody is at a terminal (the timer), or while the user has chosen "turn off" (which also removes the timer, remembered in `~/.config/dreamference/sandbox.json`). `ling-admin host setup` installs the profile (`/etc/apparmor.d/puffin-bwrap`); it was loaded on this machine on 2026-10-03, after which `bwrap` and `ling sandbox -- true` succeed from a unit. A night run started by the timer with the profile in place has not yet been watched.
+
+### 11.7 Busy app servers and `ling web` (2026-10-07)
+
+An app server is not an interactive session by its command line, so an idle desktop window or web UI left open never holds a night back. While a turn runs, its client keeps a marker named after the server's pid in `$CODEX_HOME/night/busy/`: the desktop app for its Work window's `ling app-server` (`desktop/electron/src/bridge.ts`), and `ling web serve` itself for every tab's Ask and Work turns (`ling-rs/web/src/server.rs`, the threads that are running, as JSON). `NightShiftHost.busy_app_server_pids()` counts a marker whose pid is alive and is the installed `ling` (which `ling web serve` is) or a bundled `ling` running `app-server`; any other marker was left by a client killed hard, or names a reused pid, and is deleted. A running turn in either counts as an open session (§5.5), so the run waits for it.
+
+
+### 11.8 `night pause` and `resume` (2026-10-09)
+
+The two commands belong to SWE-bench, not to the night queue: while a SWE-bench run holds the model gate it refuses every request that is not the run's, and `ling-admin night pause [--for DURATION]` (default one hour) lets them through until it ends or `night resume` (MIGHTLING_SWE_BENCH §18). They live under `night` because they are about the overnight use of the model. A Night Shift run holds no gate and is unchanged: it gives way to interactive use as §5.5 says. `night status` also says what the gate is doing.

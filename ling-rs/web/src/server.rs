@@ -41,6 +41,7 @@ use crate::assets;
 use crate::ask;
 use crate::auth;
 use crate::auth::Addresses;
+use crate::devices;
 use crate::policy::BusyTracker;
 use crate::policy::Policy;
 
@@ -136,6 +137,13 @@ impl Server {
                 .is_some_and(|token| auth::same_secret(token.trim(), &self.owner_token))
     }
 
+    /// Whether a request carries this machine's own session (from `ling web open`, whose link is
+    /// for loopback), not a paired device's cookie: what pairing and revoking devices need.
+    pub fn owner_session(&self, headers: &HeaderMap) -> bool {
+        auth::cookie(header_str(headers, header::COOKIE), auth::SESSION_COOKIE)
+            .is_some_and(|token| self.sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token)))
+    }
+
     fn new_session(&self) -> String {
         let token = auth::random_hex(32);
         self.sessions.lock().unwrap_or_else(|p| p.into_inner()).insert(auth::sha256_hex(&token));
@@ -205,6 +213,9 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/login", get(login))
         .route("/pair", get(pair_page).post(pair))
         .route("/pair.css", get(pair_css))
+        .route("/devices", get(devices_page))
+        .route("/devices/pair", post(devices_pair))
+        .route("/devices/revoke", post(devices_revoke))
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(server.clone(), guard))
         .with_state(server)
@@ -345,8 +356,70 @@ fn redirect_with_cookie(cookie: String) -> Response {
     response
 }
 
-async fn pair_page() -> Response {
-    html(StatusCode::OK, &assets::pair_html(None))
+/// The pairing form, prefilled when the link carries a code (the Devices page's QR code does). A
+/// GET never pairs anything: the person still presses Pair, so a link preview cannot spend a code.
+async fn pair_page(Query(query): Query<HashMap<String, String>>) -> Response {
+    let code = query.get("code").map(String::as_str).filter(|code| devices::is_pairing_code(code));
+    html(StatusCode::OK, &assets::pair_html_with(None, code))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The Devices page: this machine's session sees the paired devices and can pair or revoke one;
+/// a paired device is told to do that on the Mightling machine.
+async fn devices_page(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    if !server.owner_session(&headers) {
+        return html(StatusCode::FORBIDDEN, &devices::device_page());
+    }
+    let state = &server.config.state_dir;
+    html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), &server.config.lan_names, None, None, now_secs()))
+}
+
+/// A new pairing code, shown with its QR codes. Answered with the page itself (not a redirect),
+/// so the code is never in a URL on this machine.
+async fn devices_pair(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    if !server.owner_session(&headers) {
+        return html(StatusCode::FORBIDDEN, &devices::device_page());
+    }
+    let state = &server.config.state_dir;
+    let lan_names = &server.config.lan_names;
+    if lan_names.is_empty() {
+        return html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), lan_names, None, None, now_secs()));
+    }
+    match auth::issue_pairing_code(state) {
+        Ok(code) => {
+            let pairing = devices::Pairing { code: &code, port: server.config.port, lan_names };
+            html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), lan_names, Some(&pairing), None, now_secs()))
+        }
+        Err(err) => {
+            let notice = format!("Could not write a pairing code: {err}");
+            html(StatusCode::INTERNAL_SERVER_ERROR, &devices::owner_page(&auth::load_devices(state), lan_names, None, Some(&notice), now_secs()))
+        }
+    }
+}
+
+/// Revokes one device by its id; its next request is refused.
+async fn devices_revoke(State(server): State<Arc<Server>>, headers: HeaderMap, Form(form): Form<HashMap<String, String>>) -> Response {
+    if !server.owner_session(&headers) {
+        return html(StatusCode::FORBIDDEN, &devices::device_page());
+    }
+    let state = &server.config.state_dir;
+    let id = form.get("device").map(String::as_str).unwrap_or_default();
+    let known = auth::load_devices(state).iter().any(|device| device.id == id);
+    let notice = if !known {
+        Some("No paired device has that id.".to_string())
+    } else {
+        match auth::revoke_device(state, id) {
+            Ok(_) => None,
+            Err(err) => Some(format!("Could not revoke it: {err}")),
+        }
+    };
+    if notice.is_none() {
+        return (StatusCode::SEE_OTHER, [(header::LOCATION, "/devices")]).into_response();
+    }
+    html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), &server.config.lan_names, None, notice.as_deref(), now_secs()))
 }
 
 /// The pairing form: a code from `ling web pair` and a name for this device.

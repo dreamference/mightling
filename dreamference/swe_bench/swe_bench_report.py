@@ -22,12 +22,13 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
-    "parallelism", "harness", "repository_commit",
+    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "parallelism", "harness", "repository_commit", "review_turn", "hooks",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
-                               "task_rules": []}
+                               "refine_version": "v1",
+                               "task_rules": [], "review_turn": False, "hooks": []}
 
 
 class SweBenchReport:
@@ -85,6 +86,8 @@ class SweBenchReport:
             "puffin_code_users": sum(1 for entry in stats.values() if entry["puffin_code_calls"]),
             "refine": cls.refine_summary(store, manifest, states, finished & set(instances)),
             "nudges_fired": cls.nudge_counts(states, finished & set(instances)),
+            "review": cls.review_summary(store, manifest, states, finished & set(instances)),
+            "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
         }
 
@@ -138,6 +141,7 @@ class SweBenchReport:
             for key in first:
                 first[key] += stats[key]
         return {
+            "version": manifest.get("refine_version") or "v1",
             "instances": len(records),
             "refine_s": [record.get("refine_s", 0) for record in records.values()],
             "fix_s": [record["fix_s"] for record in records.values() if "fix_s" in record],
@@ -146,6 +150,149 @@ class SweBenchReport:
             "timeouts": sum(1 for record in records.values() if record.get("refine_exec") == "timeout"),
             "refine_tokens": first,
         }
+
+    @classmethod
+    def review_summary(cls, store: SweBenchRunStore, manifest: Dict[str, Any], states: Dict[str, Any],
+                       finished: Any) -> Optional[Dict[str, Any]]:
+        """
+        What the review turn did (spec §19): where it ran and why not elsewhere, how often it
+        changed the patch and by how many lines, its time limits reached, its time and tokens.
+
+        Args:
+            store: The run.
+            manifest: Its manifest.
+            states: Its instances' states.
+            finished: The instances that have a prediction.
+
+        Returns:
+            Optional[Dict[str, Any]]: None for a run without the review turn.
+        """
+        if not manifest.get("review_turn"):
+            return None
+        records = {i: (states.get(i) or {}).get("review") for i in finished}
+        ran = {i: record for i, record in records.items() if record and "skipped" not in record}
+        skipped: Dict[str, int] = {}
+        for record in records.values():
+            if record and "skipped" in record:
+                skipped[record["skipped"]] = skipped.get(record["skipped"], 0) + 1
+        tokens = {key: 0 for key in ("input_tokens", "cached_input_tokens", "output_tokens")}
+        for instance_id, record in ran.items():
+            counted = record.get("tokens")
+            if counted is None:
+                counted = store.log_stats(instance_id, int(record.get("log_offset") or 0))
+            for key in tokens:
+                tokens[key] += int(counted.get(key) or 0)
+        changed = sorted(i for i, record in ran.items() if record.get("changed"))
+        return {
+            "instances": len(records), "ran": len(ran), "skipped": skipped,
+            "fresh": sum(1 for record in ran.values() if not record.get("resumed")),
+            "changed": changed,
+            "added": sum(int(record.get("added") or 0) for record in ran.values()),
+            "removed": sum(int(record.get("removed") or 0) for record in ran.values()),
+            "timeouts": sorted(i for i, record in ran.items() if record.get("exec") == "timeout"),
+            "seconds": [int(record.get("seconds") or 0) for record in ran.values()],
+            "tokens": tokens,
+        }
+
+    @classmethod
+    def review_line(cls, review: Optional[Dict[str, Any]]) -> str:
+        """
+        Says whether the review turn was on and, when it was, what it did.
+
+        Args:
+            review: The summary's `review` entry; None when the run had no review turn.
+
+        Returns:
+            str: One line of the report.
+        """
+        if review is None:
+            return "Review turn         off: the patch was collected when the agent stopped"
+        if not review["ran"]:
+            return (f"Review turn         on: it ran in none of {review['instances']} finished instance(s)"
+                    + "".join(f"; {reason}: {count}" for reason, count in sorted(review["skipped"].items())))
+        tokens = review["tokens"]
+        skipped = ", ".join(f"{reason} {count}" for reason, count in sorted(review["skipped"].items()))
+        return (f"Review turn         on: ran in {review['ran']} of {review['instances']}"
+                + (f" (not run: {skipped})" if skipped else "")
+                + (f", {review['fresh']} as a fresh session" if review["fresh"] else "")
+                + f"; changed the patch in {len(review['changed'])} (+{review['added']} -{review['removed']} lines)"
+                + f", reached the time limit in {len(review['timeouts'])}"
+                + f"; median {cls.duration(statistics.median(review['seconds']))}, "
+                  f"{cls.duration(sum(review['seconds']))} in all; {tokens['input_tokens']:,} tokens in, "
+                  f"{tokens['output_tokens']:,} out")
+
+    @classmethod
+    def hooks_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Optional[Dict[str, Any]]:
+        """
+        What the hooks did (spec §20): where they ran at all, what the edit hold and the stop
+        hold held, and whether the agent then did what it was told.
+
+        Args:
+            manifest: The run's manifest.
+            states: Its instances' states.
+            finished: The instances that have a prediction.
+
+        Returns:
+            Optional[Dict[str, Any]]: None for a run without hooks.
+        """
+        if not manifest.get("hooks"):
+            return None
+        records = {i: (states.get(i) or {}).get("hooks") or {} for i in sorted(finished)}
+
+        def held(key: str) -> Dict[str, Any]:
+            holds = {i: r[key] for i, r in records.items() if r.get(key)}
+            return {"fired": sorted(holds), "complied": sum(1 for h in holds.values() if h.get("complied") is True),
+                    "not": sum(1 for h in holds.values() if h.get("complied") is False),
+                    "undecided": sum(1 for h in holds.values() if h.get("complied") is None)}
+
+        first = [r["first_edit"] for r in records.values() if r.get("first_edit") and r["first_edit"].get("of")]
+        measured = [r.get("example_run_after_last_edit") for r in records.values()
+                    if r.get("example_run_after_last_edit") is not None]
+        return {
+            "sets": manifest["hooks"], "instances": len(records),
+            "never_ran": sorted(i for i, r in records.items() if not r.get("ran")),
+            "with_targets": sum(1 for r in records.values() if r.get("targets")),
+            "first_edit_read": sum(f["read"] for f in first), "first_edit_of": sum(f["of"] for f in first),
+            "first_edit_all": sum(1 for f in first if f["read"] == f["of"]), "first_edits": len(first),
+            "edit_hold": held("edit_hold"), "stop_hold": held("stop_hold"),
+            "with_examples": sum(1 for r in records.values() if r.get("examples")),
+            "example_after_edit": sum(1 for value in measured if value), "example_measured": len(measured),
+            "errors": sorted(i for i, r in records.items() if r.get("errors")),
+        }
+
+    @classmethod
+    def hooks_lines(cls, hooks: Optional[Dict[str, Any]]) -> List[str]:
+        """
+        Says whether hooks were on and, when they were, what they held and whether the agent
+        complied.
+
+        Args:
+            hooks: The summary's `hooks` entry; None when the run had none.
+
+        Returns:
+            List[str]: Lines of the report.
+        """
+        if hooks is None:
+            return ["Hooks               off: no rule was enforced in the session"]
+        ran = hooks["instances"] - len(hooks["never_ran"])
+        lines = [f"Hooks               {', '.join(hooks['sets'])}: ran in {ran} of {hooks['instances']} finished instance(s)"]
+        if hooks["never_ran"]:
+            lines.append(f"  never ran in {len(hooks['never_ran'])} ({', '.join(hooks['never_ran'][:10])}"
+                         + (", ..." if len(hooks["never_ran"]) > 10 else "")
+                         + "): those ran as without hooks (an untrusted hook is skipped in silence)")
+        edit, stop = hooks["edit_hold"], hooks["stop_hold"]
+        lines.append(f"  edit hold         held the first edit in {len(edit['fired'])}: then read what it named "
+                     f"{edit['complied']}, did not {edit['not']}, edited no more {edit['undecided']}; "
+                     f"{hooks['with_targets']} issue(s) named something to read, "
+                     f"{hooks['first_edit_all']} of {hooks['first_edits']} first edits came after reading all of it "
+                     f"({hooks['first_edit_read']} of {hooks['first_edit_of']} items)")
+        lines.append(f"  stop hold         held the first stop in {len(stop['fired'])}: then ran the example "
+                     f"{stop['complied']}, did not {stop['not']}, stopped no more {stop['undecided']}; "
+                     f"{hooks['with_examples']} issue(s) showed an example, run after the last edit at the "
+                     f"last stop in {hooks['example_after_edit']} of {hooks['example_measured']}")
+        if hooks["errors"]:
+            lines.append(f"  gate errors in {len(hooks['errors'])}: {', '.join(hooks['errors'][:10])} (see state.hooks.errors)")
+        return lines
 
     @classmethod
     def render(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> Optional[str]:
@@ -182,6 +329,8 @@ class SweBenchReport:
         ]
         if manifest.get("task_rules"):
             lines.append(f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)")
+        lines.append(cls.review_line(summary["review"]))
+        lines += cls.hooks_lines(summary["hooks"])
         not_run = validated - summary["finished"]
         not_graded = summary["finished"] - summary["graded"]
         if not_run or not_graded:
@@ -195,6 +344,7 @@ class SweBenchReport:
         lines.append(f"Tokens              {tokens['input_tokens']:,} in ({tokens['cached_input_tokens']:,} cached), "
                      f"{tokens['output_tokens']:,} out; {summary['commands']:,} commands")
         lines.append(cls.code_index_line(summary))
+        lines += cls.gate_lines(store, summary["states"], manifest.get("instances", []))
         if manifest.get("issue_text") == "names stripped":
             stripped = manifest.get("stripped_issues") or {}
             changed = sum(1 for entry in stripped.values() if entry.get("replaced"))
@@ -262,12 +412,13 @@ class SweBenchReport:
         Returns:
             str: One line of the report.
         """
+        state = f"on ({refine.get('version', 'v1')})"
         if not refine["instances"]:
-            return "Refine first        on: no instance has finished its first step yet"
+            return f"Refine first        {state}: no instance has finished its first step yet"
         tokens = refine["refine_tokens"]
         fix = (f", median {cls.duration(statistics.median(refine['fix_s']))} fixing"
                if refine["fix_s"] else "")
-        return (f"Refine first        on: median {cls.duration(statistics.median(refine['refine_s']))} studying"
+        return (f"Refine first        {state}: median {cls.duration(statistics.median(refine['refine_s']))} studying"
                 f"{fix}; the first step took {cls.duration(sum(refine['refine_s']))} and "
                 f"{tokens['input_tokens']:,} tokens in, {tokens['output_tokens']:,} out; it wrote nothing in "
                 f"{refine['empty']}, timed out in {refine['timeouts']} and changed the tree in {refine['edited']} "
@@ -328,6 +479,16 @@ class SweBenchReport:
             first, second = (m.get(field, MISSING_FIELDS.get(field)) for m in (a, b))
             if first != second:
                 lines.append(f"  differs: {field}: {first} | {second}")
+        # Timings are only comparable where the model was the run's alone (§18).
+        gates = [cls.gate_lines(run, summary["states"], summary["manifest"].get("instances", []))
+                 for run, summary in ((store, ours), (other, theirs))]
+        if gates[0][:1] != gates[1][:1]:
+            lines.append(f"  differs: model gate: {(gates[0][:1] or ['no record'])[0].split('  ', 1)[-1].strip()} | "
+                         f"{(gates[1][:1] or ['no record'])[0].split('  ', 1)[-1].strip()}")
+        for run_name, gate in zip((name, other.name), gates if other.name != store.name else gates[:1]):
+            if len(gate) > 1:
+                lines.append(f"  note: {run_name} paused its model gate; see its report for the instances "
+                             "whose times are not comparable")
         lines.append(f"Resolved only by {name} ({len(only_ours)}): {', '.join(only_ours) or 'none'}")
         lines.append(f"Resolved only by {other.name} ({len(only_theirs)}): {', '.join(only_theirs) or 'none'}")
         if both:
@@ -377,8 +538,10 @@ class SweBenchReport:
             return {
                 "code index": summary["code_index"],
                 "issue text": summary["manifest"].get("issue_text", "verbatim"),
-                "refine first": "on" if summary["refine"] is not None else "off",
+                "refine first": f"on ({summary['refine']['version']})" if summary["refine"] is not None else "off",
                 "task rules": ",".join(summary["manifest"].get("task_rules") or []) or "none",
+                "review turn": "on" if summary["review"] is not None else "off",
+                "hooks": ",".join(summary["manifest"].get("hooks") or []) or "none",
                 "grading": "test files dropped" if summary.get("variant") == DROP_TEST_HUNKS else "plain",
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
                 "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",
@@ -418,6 +581,15 @@ class SweBenchReport:
                 else:
                     lines.append(f"In {run} the agent called ling-code in {users} of {len(both)} instances; "
                                  "the others ran as if there were no index.")
+        for summary, run in ((ours, name), (theirs, other)):
+            hooks = summary.get("hooks")
+            if hooks is not None:
+                ran = [i for i in both if i not in hooks["never_ran"]]
+                if not ran:
+                    lines.append(f"In {run} the hooks never ran: this comparison says nothing about them.")
+                elif len(ran) < len(both):
+                    lines.append(f"In {run} the hooks ran in {len(ran)} of {len(both)} instances; "
+                                 "the others ran as if there were none.")
         lines += ["", f"  {'instance':<34} {'resolved in':<16} {name:<28} {other}"] + table
         return lines
 
@@ -457,6 +629,58 @@ class SweBenchReport:
         variance = (only_first + only_second - (only_first - only_second) ** 2 / pairs) / pairs ** 2
         half = 1.96 * math.sqrt(max(variance, 0.0))
         return difference - half, difference + half
+
+    @classmethod
+    def gate_lines(cls, store: SweBenchRunStore, states: Dict[str, Any], instances: List[str]) -> List[str]:
+        """
+        What the model gate did during a run (§18): whether it refused other requests, and the
+        pauses that let them through, with the instances that ran during one, whose times are
+        not comparable with the rest. Nothing for a run made before the gate existed.
+
+        Args:
+            store: The run.
+            states: Its instances' states.
+            instances: The instances it covers.
+
+        Returns:
+            List[str]: Report lines.
+        """
+        from datetime import datetime
+
+        from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
+        record = SweBenchGateHold.read(store)
+        sessions, pauses = record["sessions"], record["pauses"]
+        if not sessions:
+            return []
+        kinds = {session.get("gate") for session in sessions}
+        if kinds == {"in force"}:
+            lines = ["Model gate          in force: requests from anything but the run were refused"]
+        elif "in force" in kinds:
+            lines = ["Model gate          in force for part of the run only; in the rest other requests were "
+                     "served beside it and held its starts back"]
+        else:
+            lines = ["Model gate          none in front of the model server: other requests were served beside "
+                     "the run and held its starts back, as before the gate"]
+        if not pauses:
+            return lines
+        stamp = lambda t: datetime.fromtimestamp(t).strftime("%m-%d %H:%M")
+        total = sum(max(0.0, pause["end"] - pause["start"]) for pause in pauses)
+        spans = ", ".join(f"{stamp(pause['start'])}-{datetime.fromtimestamp(pause['end']):%H:%M}" for pause in pauses)
+        shared = []
+        for instance_id in instances:
+            state = states.get(instance_id) or {}
+            try:
+                started = datetime.strptime(state["started"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+                ended = started + float(state["wall_s"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if any(started < pause["end"] and ended > pause["start"] for pause in pauses):
+                shared.append(instance_id)
+        lines.append(f"Gate paused         {len(pauses)} time(s), {cls.duration(total)} in all ({spans}); "
+                     f"{len(shared)} instance(s) ran during a pause and may have shared the model with other "
+                     "requests, so their times are not comparable"
+                     + (f": {', '.join(shared)}" if shared else ""))
+        return lines
 
     @classmethod
     def duration(cls, seconds: float) -> str:

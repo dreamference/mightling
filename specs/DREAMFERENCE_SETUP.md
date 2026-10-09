@@ -1,8 +1,8 @@
 # Mightling System Requirements & Setup
 
-> **Version:** 1.2.0
+> **Version:** 1.5.1
 > **Subject:** Installation, Hardware Detection, Quickstart, Helper Scripts
-> **Checked against the code:** 2026-10-01 (`setup.py`, `scripts/`, `dreamference/`)
+> **Checked against the code:** 2026-10-09 (`setup.py`, `install.sh`, `scripts/`, `dreamference/`, the `v1.5.1` release assets)
 
 ---
 
@@ -22,7 +22,7 @@
 ### 1.1. Hardware
 
 - **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU), in any of the eight machines built on it (§3.5): NVIDIA's DGX Spark and the Acer, ASUS, Dell, Gigabyte, HP, Lenovo and MSI boxes.
-- NVMe storage: the default model (~20 GB of weights, the SGLang image) fits a 1 TB drive, the smallest any GB10 machine ships with; the fallback's DFlash vLLM images are ~41 GB each, and SWE-bench keeps 100 GB free.
+- NVMe storage: the model (~20 GB of weights, the SGLang image) fits a 1 TB drive, the smallest any GB10 machine ships with. SWE-bench keeps 100 GB free (`RESERVE_GB`).
 
 ### 1.2. Operating System and Drivers
 
@@ -40,7 +40,8 @@
   - `perl` and a C compiler, because OpenSSL is built from source;
   - no `libssl-dev` or `libcap-dev` is needed.
 - **For the web UI:** `onyx-cli`, installed via pip by `OnyxInstaller` when missing.
-- **For the desktop window:** GTK/WebKit 4.1 development headers, Rust and the Tauri CLI. `ling-admin desktop install` fetches all three; the headers need `sudo apt-get`.
+- **For the desktop app (a checkout's build):** Node.js 22.13 or newer (Forge 8's minimum) and npm (Electron comes from npm as a prebuilt binary; Vite builds the UI); `dpkg` only to make the `.deb` (no `fakeroot` since Forge 8, whose maker runs `dpkg-deb --root-owner-group` itself). No Rust and no system headers. A dev run on Ubuntu 24.04 needs an AppArmor profile for Chromium's sandbox, which `ling-admin desktop install` writes with sudo (`/etc/apparmor.d/mightling-desktop-dev`); the `.deb` writes its own in `postinst`.
+- **For the document index:** `ling-admin docs setup` fetches what `ling-docs` loads (PDFium, ONNX Runtime, the embedding model; about 320 MB, each pinned).
 - **For the code index:** `ling-admin code setup` installs the pinned tools `ling-code` runs; Go, a JDK 17+ and a .NET SDK 8+ are optional and only enable their languages' exact indexers.
 - **For Night Shift:** a systemd user session (`ling-admin night enable` installs a user timer; lingering must be on for it to fire while logged out).
 - **Optional agents:**
@@ -51,7 +52,7 @@
 
 - Docker through `docker` group membership, without `sudo`.
 - Write access to `~/.cache/`, `~/.config/`, `~/.local/`.
-- `sudo` only for the desktop's system packages (prompted, and visible before it runs).
+- `sudo` only where something outside the home folder changes, each command printed before it runs: `ling-admin host setup` (§3.3), `node enable` (the Avahi service file), `node prepare`, `desktop install` (the dev AppArmor profile), `ling signal setup` (its system account and unit), and `install.sh` on a node (§3.2.1, once at the start).
 
 ---
 
@@ -81,7 +82,7 @@ ling-admin status        # "System Target" row
 
 ```bash
 git clone --recurse-submodules https://github.com/dreamference/mightling.git
-cd dgxcoder                      # the codex/ submodule is shallow; add --depth 1 on update if preferred
+cd mightling                     # the codex/ submodule is shallow; add --depth 1 on update if preferred
 
 python3 -m venv .venv
 .venv/bin/pip install -e .       # installs the `ling-admin` console script into .venv/bin
@@ -89,35 +90,38 @@ python3 -m venv .venv
 .venv/bin/ling-admin init                  # default model qwen3.8-27b-nvfp4-dflash2: downloads weights,
                                              # writes dreamference.toml, indexes the workspace
 .venv/bin/ling-admin codex build           # builds ling from codex/ + codex-patches/ + ling-rs/,
-                                             # also ling-search, ling-fetch and ling-code; links them into
+                                             # also ling-search, ling-fetch, ling-code and ling-docs; links them into
                                              # ~/.local/bin (first build: long; later: incremental)
-.venv/bin/ling-admin server start          # model server (SGLang for the default); exits when healthy
+.venv/bin/ling-admin server start          # model server (SGLang); exits when healthy
 ling                                       # the terminal agent
 ```
 
 **Extras:**
-- **Web UI:** `ling-admin chat start`, then `ling-admin chat configure`.
-- **Desktop window:** `ling-admin desktop install`, then `ling-admin desktop run`, or `ling app`.
+- **Web UI:** `ling web start` (Mightling's own, port 3100; `ling web open` signs a browser in). The earlier Onyx chat: `ling-admin chat start`, then `ling-admin chat configure`.
+- **Desktop app:** `ling-admin desktop install`, then `ling-admin desktop build` and `desktop run`, or `ling app`.
+- **Google (Gmail, Drive, Calendar in `/apps`):** `ling-admin google start`, then connect an account.
+- **Document index:** `ling-admin docs setup`; `~/Documents` and `~/Downloads` are the default collections, others are added with `ling docs add`.
 - **Web search for `ling`:** `ling-admin searxng start` (the web UI's `configure` also sets it up).
 - **Code index:** `ling-admin code setup`.
 - **Night Shift:** `ling-admin night enable`; tasks are queued from `ling` with `/night add`.
 
-**Model images.** The default model pins `lmsysorg/sglang` by digest; being registry-qualified, it is pulled by `server start` when missing. The fallback `qwen3.5-122b-a10b-hybrid-dflash` pins `dreamference-vllm-dflash:0.23.0-aeon-dense5`, a locally built image. That one is not pulled and not built automatically: build it from `Dockerfile.dflash` → `Dockerfile.dense` before the first `server start --model qwen3.5-122b-a10b-hybrid-dflash` (`DREAMFERENCE_DOCKER.md` §5.2–5.3).
+**Model image.** The model pins `lmsysorg/sglang` by digest; being registry-qualified, it is pulled by `server start` when missing. Nothing has to be built by hand since the 122B fallback and its locally built vLLM images were removed on 2026-10-07 (`DREAMFERENCE_DOCKER.md` §5.2).
 
 ### 3.2. Install from a release: `install.sh`
 
-No checkout and nothing compiled. `install.sh` (repository root; attached to every release from the one after v1.3.0) installs from a published release:
+No checkout and nothing compiled. `install.sh` (repository root; attached to every release from v1.4.0) installs from a published release; on Windows, `install.ps1` installs the client (an unsigned preview, MIGHTLING_WINDOWS_ARM):
 
 ```bash
-export GH_TOKEN=...          # while the repository is private; a logged-in `gh` also works
-gh release download -R dreamference/mightling -p install.sh && bash install.sh [--role client|node] [--version X.Y.Z]
+curl -fsSLO https://github.com/dreamference/mightling/releases/latest/download/install.sh
+bash install.sh [--role client|node] [--version X.Y.Z] [--no-advertise] [--from <dir>] [--no-host-setup] [--no-model]
 ```
 
 - **The machine decides the role.** A GB10 (arm64 Linux whose `nvidia-smi --query-gpu=name` says `GB10`) gets the **node**; everything else gets the **client**. `--role` overrides it. The device tree has no model string on this hardware and the DMI product name is the vendor's (`GX10` on the machine this was written on), so neither is used.
-- **Client:** `ling`, `codex-code-mode-host`, and, when the release carries them, `ling-search`, `ling-fetch` and `ling-code`. They are the same assets `ling update` downloads, by the same names, every archive checked against `ling-<target>.sha256sums` before any is placed. They go to `~/.local/share/dreamference/mightling/bin`, linked into `~/.local/bin`; a real file of the same name there is left alone.
+- **Client:** `ling`, `codex-code-mode-host`, and, when the release carries them, `ling-search`, `ling-fetch`, `ling-code` and, on Linux from 1.6.0, `ling-docs` and `ling-signal` (the Signal daemon, never linked onto PATH). They are the same assets `ling update` downloads, by the same names, every archive checked against `ling-<target>.sha256sums` before any is placed, and `SHA256SUMS` checked against its Ed25519 signature with `ssh-keygen -Y verify` (RELEASE_SIGNING). They go to `~/.local/share/dreamference/mightling/bin`, linked into `~/.local/bin`; a real file of the same name there is left alone.
 - **Node:** the client, then the release's wheel into a virtualenv of its own (`~/.local/share/dreamference/venv`), `ling-admin` linked into `~/.local/bin`, then everything else a node needs, unattended (§3.2.1).
-- **Token.** `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`, sent to the API and to the asset downloads. Without one, on a private repository, the script stops and says so. `MIGHTLING_RELEASE_REPO` names a fork.
-- **Targets.** Releases carry linux-arm64 only. On another machine the script stops with the targets the release does have.
+- **Token.** None is needed: the repository has been public since 2026-10-06. `GH_TOKEN` or `GITHUB_TOKEN` is used when set (a higher rate limit), and a logged-in `gh`'s token only for a fork named by `MIGHTLING_RELEASE_REPO`, which may be private.
+- **Targets.** Since 1.5.1 releases carry arm64 and x86-64 Linux and macOS (Apple silicon and Intel) for the client; a Mac cannot be a node, and the script says so. On another machine the script stops with the targets the release does have.
+- **`--from <dir>`** installs from a folder holding the same asset names and checksum files (a release bundle, or this node's own build; `node provision` uses it, MIGHTLING_FLEET §7.2).
 
 #### 3.2.1. A node is installed unattended (2026-10-08)
 
@@ -125,7 +129,7 @@ The user's requirement: run the script on a fresh GB10 and leave. Installing 1.4
 
 - **Root, asked for once, at the start.** Right after the role is decided and before anything is downloaded: nothing is asked when `sudo -n true` succeeds (root, a NOPASSWD rule); otherwise sudo's own prompt, once (`sudo -v`, on standard input or `/dev/tty` when the script was piped into bash), and a background loop refreshes sudo's timestamp every 50 s until the script exits (the model download outlasts sudo's 15 minutes). Every root command afterwards runs with `sudo -n`, so none can stop to ask. With no terminal and a sudo that wants a password, the script stops there, having downloaded nothing, and says to download it and run `bash install.sh` in a terminal (or over `ssh -t`). The timestamp is kept per terminal on Ubuntu, so the commands that use it run on the script's terminal: `HostSafetySetup` detaches only commands it runs as root.
 - **System updates, the one question.** With that sudo, at the start: `apt-get update`, then the upgrades `apt-get -s full-upgrade` would install (its simulation leaves out Ubuntu's phased updates, which `apt list --upgradable` counts; on the fresh GX10 that was 21 upgrades and 8 phased), NVIDIA's (`dgx-*`, `nvidia-*`, CUDA, the NVIDIA kernels; matched on the package and its origin) named; and firmware from `fwupdmgr get-updates --json` (there: the UEFI and the GX10's USB-C PD controller). At a terminal it asks once, default no, whether to install them. Yes installs them **after** everything else, so a driver update cannot break the model server's first start: `DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade` and `fwupdmgr update -y --no-reboot-check`. The script never reboots; the summary says to, and that the model server comes back by itself (`--restart unless-stopped`). With no terminal they are not installed: the summary lists them as "available, not installed", with the commands.
-- **Every step, in order, none asked about:** `python3-venv` when `python3 -m venv` fails (DGX OS lacks it); the wheel; `ling-admin host setup --yes` (§3.3); the user in the `docker` group (`usermod -aG docker`; this login does not have it yet, so the model steps run through `sg docker -c`, as `node provision` does); lingering (`loginctl enable-linger`), without which jobs sent from another node and Night Shift tasks stop at logout; the node id; `ling-admin node enable --yes` (advertising, which starts by itself: the user's decision); the default model (`ling-admin model download`) and the model server (`ling-admin server start`), both logged to `~/.local/state/dreamference/install-<time>.log`, whose path is printed first. Every `ling-admin` runs with standard input from `/dev/null`, so none can ask anything (the sandbox check of §3.3 asks at a terminal).
+- **Every step, in order, none asked about:** `python3-venv` when `python3 -m venv` fails (DGX OS lacks it); the wheel; `ling-admin host setup --yes` (§3.3); the user in the `docker` group (`usermod -aG docker`; this login does not have it yet, so the model steps run through `sg docker -c`, as `node provision` does); lingering (`loginctl enable-linger`), without which jobs sent from another node and Night Shift tasks stop at logout; the node id; `ling-admin node enable --yes` (advertising, which starts by itself: the user's decision); what the document index loads (`ling-admin docs setup`, from 1.6.0); the default model (`ling-admin model download`) and the model server (`ling-admin server start`), both logged to `~/.local/state/dreamference/install-<time>.log`, whose path is printed first. Every `ling-admin` runs with standard input from `/dev/null`, so none can ask anything (the sandbox check of §3.3 asks at a terminal).
 - **The summary** lists each step as done (✅) or failed (❌, with the command to run), the updates as available (📦) or installed, and the reboot when one is needed; nothing is ever "skipped". The exit status is 1 when a step failed. From the wheel on, a hang-up or a closed reader no longer stops the script halfway (`trap '' HUP PIPE`; `say` drops a line it cannot write).
 - **Opt-outs**, each named as such in the summary: `--no-advertise`; and, for `ling-admin node provision`, which does those parts itself (MIGHTLING_FLEET §7.2), `--no-host-setup` (no root at all, so no password and no update check) and `--no-model`.
 
@@ -138,7 +142,7 @@ Tested against the stand-in release server with stand-ins for `sudo` (passwordle
 - **Client, against the real v1.3.0 release:** 23 s, about 155 MB downloaded, checksums passed. `ling --version`, a `ling-search` query and one `ling exec` turn against the model server all worked from that home.
 - **Node, with no `--role`:** the script chose `node` here. Against a stand-in release holding v1.3.0's real binaries and a wheel built from this tree: 124 s; binaries, virtualenv and `ling-admin` in place, and the host step reported nothing to do and ran no sudo (that was before the sandbox check of §3.3 existed). From that home, `ling-admin codex build` reported the release's binaries and built nothing (and, with `ling` removed, said how to install it); `desktop build` and `desktop install` pointed at the release's `.deb`; `ling-admin run` went straight to `ling` with no Rust toolchain installed.
 
-**Not verified:** a second machine or a second user account; `ling` from a release install in a plain terminal (every run above was from the IDE's terminal, where the sandbox worked even before this machine had the AppArmor profile of §3.3, loaded on 2026-10-03); a fresh GB10 where `host setup` has real work (its commands run only in tests, with sudo mocked); `install.sh` downloaded from a release (the next release is the first to carry it); a non-GB10 client (no release has x86 or macOS binaries); and `server start` after a release install, which was not run because a model server is already resident here.
+**Not verified then:** a second machine or a second user account; `ling` from a release install in a plain terminal (every run above was from the IDE's terminal, where the sandbox worked even before this machine had the AppArmor profile of §3.3, loaded on 2026-10-03); a fresh GB10 where `host setup` has real work (its commands run only in tests, with sudo mocked); `install.sh` downloaded from a release; a non-GB10 client; and `server start` after a release install, which was not run because a model server is already resident here. **Since:** `install.sh` has shipped with every release from v1.4.0; a second GB10 was installed from the 1.4.1 release over SSH on 2026-10-08, where `host setup` had real work (§3.3, MIGHTLING_NODE §18.10), and upgraded to 1.5.1; x86-64 and macOS clients ship from 1.5.1 but have not been installed on such a machine here.
 
 ### 3.3. Host settings: `ling-admin host check|setup`
 
@@ -189,7 +193,7 @@ Mightling targets the chip, not a vendor's box. Eight machines carry it (researc
 |---|---|---|---|
 | NVIDIA DGX Spark (Founders Edition) | 4 TB, self-encrypting | DGX OS | no |
 | Acer Veriton GN100 (GN100-UD11) | up to 4 TB | DGX OS ("DGX Base OS") | no |
-| ASUS Ascent GX10 | 1 TB, 2 TB (Gen4) or 4 TB (Gen5) | DGX OS, the only one ASUS supports | **yes**: this machine, 1 TB (916 GB root), DGX OS 7.5.0 (7.2.3 as shipped), Ubuntu 24.04.4, kernel 6.17.0-1029-nvidia, driver 580.173.02 |
+| ASUS Ascent GX10 | 1 TB, 2 TB (Gen4) or 4 TB (Gen5) | DGX OS, the only one ASUS supports | **yes**: this machine, 1 TB (916 GB root), DGX OS 7.5.0 (7.2.3 as shipped), Ubuntu 24.04.4, kernel 6.17.0-1029-nvidia, driver 580.173.02; and a second one since 2026-10-08 (§3.2.1) |
 | Dell Pro Max with GB10 (FCM1253) | 2 TB (QLC, Gen4) and up | DGX OS 7, lightly reskinned | no |
 | Gigabyte AI TOP ATOM (ATAGB10-9000) | 4 TB | DGX OS | no |
 | HP ZGX Nano G1n AI Station | 2 or 4 TB, self-encrypting | DGX OS 7, or Ubuntu 24.04 | no |
@@ -200,7 +204,7 @@ Sources: [itechguides, all eight compared](https://www.itechguides.com/all-nvidi
 
 **What every machine shares, and so what Mightling relies on:**
 - `nvidia-smi` names the GPU `NVIDIA GB10` and reports `memory.total` as `[N/A]` (unified memory), which `detect_gb10_hardware()` already tolerates; the PCI id is `10de:2e12`.
-- DGX OS 7 is Ubuntu 24.04, so the apt package names (`sysstat`, `earlyoom`, `bubblewrap`, `avahi-daemon`, `libwebkit2gtk-4.1-dev`), the AppArmor user-namespace restriction and the systemd user session are the same on all of them.
+- DGX OS 7 is Ubuntu 24.04, so the apt package names (`sysstat`, `earlyoom`, `bubblewrap`, `avahi-daemon`), the AppArmor user-namespace restriction and the systemd user session are the same on all of them.
 - The driver is 580 or later on every shipped image, which the CUDA 13 images (the SGLang default and the NGC vLLM base) need. Nothing checks the version; none older exists for this chip.
 - The default model, its pinned SGLang image (pulled, not built) and 64 GB of swap fit the smallest drive any of them ships, 1 TB.
 
@@ -211,7 +215,7 @@ Sources: [itechguides, all eight compared](https://www.itechguides.com/all-nvidi
 - **Plain Ubuntu instead of DGX OS** (HP and Lenovo document it; anyone can reinstall). DGX OS brings Docker, the NVIDIA Container Toolkit, Avahi and (through GNOME) bubblewrap, and this ASUS's first user is in the `docker` group; a server install has none of that. `host check` names each (§3.3), `host setup` installs bubblewrap and joins the `docker` group itself, and `node enable` installs `avahi-daemon` through sudo or publishes nothing and says how to reach the node by address. Docker and the toolkit come from vendor repositories and are left to the owner, with the links.
 - **The RTX Spark laptops** (GB10's Windows sibling, N1X, shipping from 2026-10) run Windows 11 on Arm and no Linux has been announced for them, so they cannot be a node: the model server needs Linux, Docker with the NVIDIA runtime, and the host-safety layer is Linux's. They are out of scope until NVIDIA ships Linux for them ([computingforgeeks](https://computingforgeeks.com/nvidia-rtx-spark-linux/)).
 
-**Not verified on hardware, so made to tolerate rather than assumed:** every machine but this ASUS; plain Ubuntu on any of them (the Docker, toolkit, `docker` group, bubblewrap and Avahi steps are covered by tests only); a swap layout other than a single `/swap.img`; zram; another vendor's DMI strings; the DGX Spark's 4 TB self-encrypting drive (nothing in Mightling touches disk encryption). The first owner of another machine should run `ling-admin host check` and `ling-admin status` and report both.
+**Not verified on hardware, so made to tolerate rather than assumed:** every machine but the two ASUS GX10s; plain Ubuntu on any of them (the Docker, toolkit, `docker` group, bubblewrap and Avahi steps are covered by tests only); a swap layout other than a single `/swap.img`; zram; another vendor's DMI strings; the DGX Spark's 4 TB self-encrypting drive (nothing in Mightling touches disk encryption). The first owner of another machine should run `ling-admin host check` and `ling-admin status` and report both.
 
 ---
 
@@ -251,8 +255,8 @@ ling-admin model list             # the model matrix
 ling --version                    # "ling 0.158.0"
 ling exec "say hello"             # a one-shot answer from the local model (needs the server)
 ling-admin index --force          # (re)builds .dreamference/ in the current directory
-.venv/bin/python -m pytest tests/ -q   # 521 tests on 2026-10-01; 63 of them need a running model server and are
-                                       # skipped without one (the full run then takes ~13 minutes instead of ~25 s)
+.venv/bin/python -m pytest tests/ -q   # 1,046 tests collected on 2026-10-09; those that need a running model server
+                                       # are skipped without one
 ```
 
 ---

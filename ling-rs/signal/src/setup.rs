@@ -32,6 +32,11 @@ pub fn signal_cli_url() -> String {
     format!("https://github.com/AsamK/signal-cli/releases/download/v{SIGNAL_CLI_VERSION}/signal-cli-{SIGNAL_CLI_VERSION}.tar.gz")
 }
 
+/// The maintainer's detached OpenPGP signature of that tarball, published beside it.
+pub fn signal_cli_signature_url() -> String {
+    format!("{}.asc", signal_cli_url())
+}
+
 pub fn libsignal_url() -> String {
     format!(
         "https://github.com/exquo/signal-libs-build/releases/download/libsignal_v{LIBSIGNAL_VERSION}/libsignal_jni.so-v{LIBSIGNAL_VERSION}-aarch64-unknown-linux-gnu.tar.gz"
@@ -113,8 +118,10 @@ pub fn shell_quote(part: &str) -> String {
 
 /// Downloading, checking and unpacking the pinned runtime: the JRE (unless `java_present`), signal-cli
 /// (unless `signal_cli_present`) and on arm64 libsignal's JNI library. Every archive is checked
-/// against its pin as the user before anything is unpacked as root.
-fn runtime_steps(work: &Path, arch: &str, java_present: bool, signal_cli_present: bool) -> Vec<Step> {
+/// against its pin as the user before anything is unpacked as root; signal-cli is also checked
+/// against its maintainer's OpenPGP signature by `bridge` (`verify-signal-cli`, with the key and its
+/// fingerprint compiled in), and both checks must pass.
+fn runtime_steps(bridge: &Path, work: &Path, arch: &str, java_present: bool, signal_cli_present: bool) -> Vec<Step> {
     let mut steps = Vec::new();
     if !java_present || !signal_cli_present {
         steps.push(Step::root("Make /opt/mightling for the pinned runtime", &["install", "-d", "-m", "0755", OPT_DIR]));
@@ -130,8 +137,14 @@ fn runtime_steps(work: &Path, arch: &str, java_present: bool, signal_cli_present
     }
     let tarball = work.join(format!("signal-cli-{SIGNAL_CLI_VERSION}.tar.gz"));
     let tarball = tarball.to_string_lossy().into_owned();
+    let signature = format!("{tarball}.asc");
     steps.push(Step::user("Download signal-cli", &["curl", "-fsSL", "-o", &tarball, &signal_cli_url()]));
     steps.push(Step::user("Check it against the pinned SHA-256", &["sh", "-c", &format!("echo '{SIGNAL_CLI_SHA256}  {tarball}' | sha256sum -c -")]));
+    steps.push(Step::user("Download its OpenPGP signature", &["curl", "-fsSL", "-o", &signature, &signal_cli_signature_url()]));
+    steps.push(Step::user(
+        &format!("Check the signature with the maintainer's pinned key ({})", crate::release_signature::SIGNAL_CLI_KEY_FINGERPRINT),
+        &[&bridge.to_string_lossy(), "verify-signal-cli", "--file", &tarball, "--signature", &signature],
+    ));
     steps.push(Step::root("Unpack it under /opt/mightling", &["tar", "-xzf", &tarball, "-C", OPT_DIR, "--no-same-owner"]));
     if arch == "aarch64" {
         let lib = work.join("libsignal_jni.tar.gz").to_string_lossy().into_owned();
@@ -157,7 +170,7 @@ pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool
     if need_qrencode {
         steps.push(Step::root("Install qrencode, to show the linking QR code in this terminal", &["apt-get", "install", "-y", "qrencode"]));
     }
-    steps.extend(runtime_steps(work, arch, java_present, false));
+    steps.extend(runtime_steps(bridge, work, arch, java_present, false));
     steps.push(Step::root("Install the bridge where the system account can run it", &["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH]));
     steps.push(Step::root("Create its private state folder", &["install", "-d", "-m", "0700", "-o", unit::ACCOUNT, "-g", unit::ACCOUNT, unit::STATE_DIR]));
     let mut write_unit = Step::root("Write the system unit", &["tee", &format!("/etc/systemd/system/{}", unit::UNIT_NAME)]);
@@ -173,7 +186,7 @@ pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool
 /// bridge's settings at it (`retool`, as the bridge's account), rewrites the unit and restarts it.
 /// The account, its keys and the pairing are left alone.
 pub fn refresh_plan(bridge: &Path, work: &Path, arch: &str, java_present: bool, signal_cli_present: bool) -> Vec<Step> {
-    let mut steps = runtime_steps(work, arch, java_present, signal_cli_present);
+    let mut steps = runtime_steps(bridge, work, arch, java_present, signal_cli_present);
     steps.push(Step::root("Install the current bridge where the system account can run it", &["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH]));
     let mut retool = vec![
         unit::BRIDGE_PATH.to_string(),
@@ -323,11 +336,19 @@ mod tests {
         assert!(shown.iter().any(|s| s == "sudo install -d -m 0700 -o mightling-signal -g mightling-signal /var/lib/mightling-signal"));
         let unit = plan.iter().find(|s| s.stdin.is_some()).unwrap();
         assert!(unit.root && unit.stdin.as_ref().unwrap().contains("ProtectHome=yes"));
-        // Every download is checked before anything is unpacked as root.
-        let download = shown.iter().position(|s| s.starts_with("curl") && s.contains("signal-cli-0.14.9")).unwrap();
+        // Every download is checked before anything is unpacked as root: signal-cli both by its
+        // SHA-256 and by its maintainer's signature, checked as the user by the bridge being installed.
+        let download = shown.iter().position(|s| s.starts_with("curl") && s.ends_with("/signal-cli-0.14.9.tar.gz")).unwrap();
+        let download_asc = shown
+            .iter()
+            .position(|s| s.starts_with("curl -fsSL -o /tmp/w/signal-cli-0.14.9.tar.gz.asc ") && s.ends_with("/v0.14.9/signal-cli-0.14.9.tar.gz.asc"))
+            .unwrap();
         let check = shown.iter().position(|s| s.contains(SIGNAL_CLI_SHA256)).unwrap();
+        let verify = "/home/u/.local/share/dreamference/mightling/bin/ling-signal verify-signal-cli --file /tmp/w/signal-cli-0.14.9.tar.gz --signature /tmp/w/signal-cli-0.14.9.tar.gz.asc";
+        let signature = shown.iter().position(|s| s == verify).unwrap();
+        assert!(!plan[signature].root && plan[signature].what.contains(crate::release_signature::SIGNAL_CLI_KEY_FINGERPRINT));
         let unpack = shown.iter().position(|s| s.starts_with("sudo tar") && s.contains("signal-cli-0.14.9")).unwrap();
-        assert!(download < check && check < unpack);
+        assert!(download < check && download_asc < signature && check < unpack && signature < unpack);
         let jre_check = shown.iter().position(|s| s.contains(JRE_AARCH64_SHA256)).unwrap();
         let jre_unpack = shown.iter().position(|s| s.starts_with("sudo tar") && s.contains("jre.tar.gz")).unwrap();
         assert!(jre_check < jre_unpack);
@@ -361,6 +382,9 @@ mod tests {
         let plan = refresh_plan(Path::new("/b"), Path::new("/w"), "aarch64", false, false);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(shown.iter().any(|s| s.contains(JRE_AARCH64_SHA256)) && shown.iter().any(|s| s.contains(SIGNAL_CLI_SHA256)));
+        let signature = shown.iter().position(|s| s.starts_with("/b verify-signal-cli ")).unwrap();
+        let unpack = shown.iter().position(|s| s.starts_with("sudo tar") && s.contains("signal-cli-0.14.9")).unwrap();
+        assert!(signature < unpack);
     }
 
     #[test]

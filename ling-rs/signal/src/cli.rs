@@ -13,6 +13,9 @@
 //! - `trust`: accept the owner's new safety number after comparing it (§5.3)
 //! - `remove [--dry-run]`: undo setup; the Ask threads stay
 //! - `unit`: print the unit file
+//! - `verify-signal-cli --file TARBALL --signature ASC`: setup's check of the downloaded signal-cli
+//!   against its maintainer's OpenPGP signature (`release_signature.rs`); run by setup as the user,
+//!   through the bridge binary it is about to install
 //!
 //! As the bridge's own account, only through the `ling-signal` binary in /usr/local/lib/mightling
 //! (setup runs these through `sudo -u mightling-signal`; `ling signal` refuses them):
@@ -94,6 +97,7 @@ pub fn run(args: &[String], invocation: &Invocation) -> i32 {
                 1
             }
         },
+        Some("verify-signal-cli") => run_verify_signal_cli(&args[1..]),
         Some("trust") => run_trust(),
         Some("remove") => run_remove(&args[1..]),
         Some("setup") if has(&args[1..], "--refresh") => run_refresh(&args[1..], invocation),
@@ -277,6 +281,24 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
     0
 }
 
+/// `verify-signal-cli`: exit 0 only when the tarball carries a good signature by the pinned key.
+fn run_verify_signal_cli(args: &[String]) -> i32 {
+    let (Some(file), Some(signature)) = (flag(args, "--file"), flag(args, "--signature")) else {
+        eprintln!("verify-signal-cli needs --file and --signature");
+        return 2;
+    };
+    match crate::release_signature::verify_signal_cli(Path::new(&file), Path::new(&signature)) {
+        Ok(()) => {
+            println!("✅ Good signature by the signal-cli maintainer's pinned key {}.", crate::release_signature::SIGNAL_CLI_KEY_FINGERPRINT);
+            0
+        }
+        Err(err) => {
+            eprintln!("❌ signal-cli's signature check failed, so nothing is unpacked: {err}");
+            1
+        }
+    }
+}
+
 fn run_pair(args: &[String]) -> i32 {
     let (Some(state_dir), Some(code)) = (flag(args, "--state"), flag(args, "--code")) else {
         eprintln!("pair needs --state and --code");
@@ -422,7 +444,9 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
         None => println!("Mightling over Signal: setup linked to your own Signal account\n"),
     }
     println!("This installs signal-cli and a small bridge that runs as its own system account,");
-    println!("`{}`, so the agent can never read the Signal keys. It changes these things:\n", unit::ACCOUNT);
+    println!("`{}`, so the agent can never read the Signal keys. Every download is checked before it is", unit::ACCOUNT);
+    println!("unpacked; signal-cli twice, by its pinned SHA-256 and by its maintainer's OpenPGP signature.");
+    println!("It changes these things:\n");
     for step in &plan {
         if !step.what.is_empty() {
             println!("  • {}", step.what);
@@ -837,5 +861,22 @@ mod tests {
         assert_eq!(run(&args(&["remove", "--dry-run"]), &present), 0);
         assert_eq!(run(&args(&["unknown"]), &present), 2);
         assert_eq!(run(&args(&["help"]), &present), 0);
+    }
+
+    #[test]
+    fn the_signature_check_fails_closed() {
+        let invocation = Invocation { bridge: None, bridge_commands: true };
+        assert_eq!(run(&args(&["verify-signal-cli", "--file", "/nonexistent/a.tar.gz"]), &invocation), 2);
+        assert_eq!(run(&args(&["verify-signal-cli", "--file", "/nonexistent/a.tar.gz", "--signature", "/nonexistent/a.tar.gz.asc"]), &invocation), 1);
+        // The real signature over anything but the real tarball.
+        let dir = std::env::temp_dir().join(format!("ling-signal-verify-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let tarball = dir.join("signal-cli.tar.gz");
+        std::fs::write(&tarball, b"not signal-cli").unwrap();
+        let asc = dir.join("signal-cli.tar.gz.asc");
+        std::fs::write(&asc, include_str!("../testdata/signal-cli-0.14.9.tar.gz.asc")).unwrap();
+        let code = run(&args(&["verify-signal-cli", "--file", &tarball.to_string_lossy(), "--signature", &asc.to_string_lossy()]), &invocation);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(code, 1);
     }
 }

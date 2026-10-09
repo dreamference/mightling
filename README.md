@@ -124,7 +124,7 @@ to reach. [Privacy & security →](docs/privacy.md)
 | Reading your code (prefill) | **~1,700 tokens/s** |
 | Context window | **262K tokens** |
 
-A small drafter proposes 16 tokens at a time and the model checks them in one pass, which is why
+A small drafter proposes 12 tokens at a time and the model checks them in one pass, which is why
 code comes out fastest. Run four agents at once and they all keep going: no quota, no "please wait",
 nothing to pay per token, ever.
 
@@ -164,7 +164,8 @@ Mightling is developed and tested daily on the ASUS Ascent GX10; the others are 
 
 **Do I need a GB10?** Yes, to run the model. Your other computers use it as clients: Linux
 (Intel/AMD or Arm) and macOS (Apple silicon or Intel), set up by the same install command. A
-Windows client, for the RTX Spark laptops among others, is being built.
+Windows client (Windows 11 on Arm, such as the RTX Spark laptops, and x86-64) has shipped since 1.5.1
+as an unsigned preview, installed with the release's `install.ps1`, and needs Smart App Control off.
 
 **Does `/airgapped on` work on a Mac?** Yes, enforced by macOS's own sandbox, with one difference:
 there the level is set when `ling` starts (`ling airgapped default on`, then restart), not

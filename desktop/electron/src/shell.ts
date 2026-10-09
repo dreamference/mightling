@@ -6,8 +6,9 @@ import path from "node:path";
 import { BrowserWindow, Menu, Notification, Tray, app, nativeImage, powerSaveBlocker } from "electron";
 
 export interface ShellActions {
-  /** The Ask window (the menu's former Chat). */
-  openChat(): void;
+  /** The app window on Ask (the menu's former Chat, a window of its own until 2026-10-09). */
+  openAsk(): void;
+  /** The app window on Work. */
   openWork(): void;
 }
 
@@ -18,7 +19,7 @@ export function installMenu(actions: ShellActions): void {
     {
       label: "File",
       submenu: [
-        { label: "Ask", accelerator: "CmdOrCtrl+1", click: () => actions.openChat() },
+        { label: "Ask", accelerator: "CmdOrCtrl+1", click: () => actions.openAsk() },
         { label: "Work", accelerator: "CmdOrCtrl+2", click: () => actions.openWork() },
         { type: "separator" },
         { role: "quit" },
@@ -52,7 +53,7 @@ export function installTray(iconsDir: string, actions: ShellActions): void {
   tray.setToolTip("Mightling");
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "Ask", click: () => actions.openChat() },
+      { label: "Ask", click: () => actions.openAsk() },
       { label: "Work", click: () => actions.openWork() },
       { type: "separator" },
       { role: "quit" },

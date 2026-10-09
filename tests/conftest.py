@@ -55,6 +55,11 @@ from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite  #
 # Every `ling-admin` run checks bubblewrap through a transient unit of the user's systemd and may
 # ask a question; the fixture below replaces the check, and its own tests restore this.
 REAL_SANDBOX_GATE = SandboxPrerequisite.gate
+from dreamference.vllm_server.model_gate import ModelGate  # noqa: E402
+
+# Asks the model server's gate what it does: an HTTP request to the configured server, which in the
+# suite would be this machine's live one. The fixture below answers "no gate"; its tests restore it.
+REAL_GATE_PROBE = ModelGate.probe
 # The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
 UI_PATCHERS = (OnyxBrandAssets, OnyxUIFonts, OnyxUILabels, OnyxUIOverrides, OnyxUIScripts)
 # The name MemoryPressureWatchdog gives its thread, and how long a stopped one may take to exit.
@@ -130,6 +135,11 @@ def _no_passwordless_sudo(monkeypatch):
 @pytest.fixture(autouse=True)
 def _skip_sandbox_gate(monkeypatch):
     monkeypatch.setattr(SandboxPrerequisite, "gate", classmethod(lambda cls, command, subcommand: True))
+
+
+@pytest.fixture(autouse=True)
+def _no_model_gate_probe(monkeypatch):
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: None))
 
 
 @pytest.fixture(autouse=True)
@@ -230,6 +240,12 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # The rename migration's switch (legacy_name_migration.py): a developer's shell setting must not
     # decide whether a test migrates. A test that means to migrate sets it.
     monkeypatch.delenv("MIGHTLING_LEGACY_MIGRATION", raising=False)
+    # `ling-admin` extends NO_PROXY in its own environment (ProxyBypass), so a test that runs the
+    # CLI would leave the value behind for the rest of the suite. Set first, so that it is restored
+    # (deleted) even when the developer's shell had none; a test that needs one sets it.
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
 
     # HOME alone does not reach paths a module resolved at import, like VLLM_CACHE_HOME: a test
     # that ran start_server stamped the real ~/.cache/dreamference/vllm/.compile_signature with a

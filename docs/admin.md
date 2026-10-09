@@ -133,6 +133,7 @@ Launch local vLLM server optimized for GB10 unified memory.
 |---|---|
 | `--model` | Model name to serve (default: the configured main model; examples: qwen3.8-27b-nvfp4-dflash2, llama-3.3-70b) |
 | `--port` | Port for the model server's /v1 API. |
+| `--no-gate` | Serve the port from the engine itself, without the model gate that lets a SWE-bench run refuse other requests. |
 | `--quantization` | Quantization method (int8, fp8, awq) |
 | `--draft-model` | Speculative decoding draft model (e.g. qwen2.5-coder-1.5b) |
 | `--num-speculative-tokens` | Number of speculative tokens to propose. |
@@ -271,6 +272,18 @@ Work through the queue now, until the window ends.
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing; their requests still pause the run) |
 
+#### `ling-admin night pause`
+
+Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate).
+
+| Option | Description |
+|---|---|
+| `--for` | How long: 90m, 2h, 45s, or minutes (default 1h) |
+
+#### `ling-admin night resume`
+
+End a pause: the model gate refuses everyone but the benchmark run again.
+
 ### `ling-admin swe-bench`
 
 Run ling over SWE-bench instances on this machine and grade the patches.
@@ -306,7 +319,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--instances` | Comma-separated instance ids. |
 | `--subset` | A file of instance ids, one per line. |
 | `--limit` | Only the first N selected instances, sorted by id. |
-| `--name` | The run's name; an existing run of that name is resumed. |
+| `--name` | The run's name (letters, digits, ., _ and -); an existing run of that name is resumed. |
 | `--eval` | Grade the predictions when the agent phase ends. |
 | `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
 | `--code-index` | universal: index each instance's repository on the host and give the agent ling-code (default off); exact: the same with the SCIP stores alone and no graph. One of: `off`, `universal`, `exact`. |
@@ -314,10 +327,14 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
 | `--strip-names` | Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it. |
 | `--refine` | Two steps per instance: a session that studies the issue and writes a refined description without changing the repository, then a fresh session that fixes it. |
-| `--task-rules` | Rules added to the task prompt, comma-separated, of: tests (default none). tests: never change an existing test, keep your own scripts in /tmp, and compare failing tests by name with and without the change. |
+| `--refine-version` | With --refine: which texts the two steps get. v1 (the default) is the measured one; v2 stops protecting what the issue contradicts and lists those tests with their new values, says what the issue changes, names one option where the issue leaves a choice open, wants checks the bug fails, and checks every claim against the repository (refine spec §10) One of: `v1`, `v2`. |
+| `--task-rules` | Rules added to the task prompt, comma-separated, of: issue-v1, tests, tests-v2 (default none). tests: never change an existing test, keep your own scripts in /tmp, and compare failing tests by name with and without the change. tests-v2: the same, except that a test the change fails is weighed against the issue, which decides whether the test or the change is wrong. issue-v1: work out exactly what the issue asks for before editing, follow the pattern of the sibling code that does the same thing, and run the issue's example after the last edit. Rules stack (e.g. tests-v2,issue-v1); the prompt has them in the order listed here, whatever order they are given in. |
+| `--hooks` | Rules enforced in the agent's session by Codex hooks, comma-separated, of: issue-v1 (default none). issue-v1: the first edit is held once until the files and functions the issue names have been read, and the first stop is held once if the issue shows an example that no command since the last edit has run. Independent of --task-rules, which only asks. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing) |
+| `--label` | What the model gate's refusal calls this run, e.g. "night 1" (default: SWE-bench run <name>) |
+| `--review-turn` | After the agent stops with a changed tree, resume its session once more to re-read the issue, read its diff, run the tests of the modules it changed and fix what does not hold, within the task's time limit; the patch is collected after that turn (default off) |
 
 #### `ling-admin swe-bench eval`
 
@@ -363,7 +380,7 @@ Trace one real ling session and list every network destination and process, with
 | Option | Description |
 |---|---|
 | `--tui` | Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte) |
-| `--app` | Trace the desktop app (ling-app) with both windows hidden, on the display DISPLAY names. |
+| `--app` | Trace the desktop app (ling-app) with its window hidden, on the display DISPLAY names. |
 | `--web` | Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`. |
 | `--docs` | Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |

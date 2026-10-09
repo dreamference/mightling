@@ -64,12 +64,12 @@ SESSION_NAMES: Final[Dict[str, str]] = {
 }
 
 # The desktop app's session (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §6): `ling-app` is
-# started with `MIGHTLING_APP_AUDIT=<seconds>`, opens Ask on `ling web` (which it starts, so the
-# server is traced too) and Work with its app-server, both hidden, and quits by itself after that
-# many seconds. `ling web`'s loopback port joins the allowlist for this kind of session alone; the
-# Onyx web UI's 3000 is no longer reached (specs/DREAMFERENCE_MIGHTLING_ASK.md §10).
+# started as `ling app` starts it, with `MIGHTLING_APP_AUDIT=<seconds>`: its one window opens
+# hidden on Ask, the app-server it owns is started (and traced with it), and it quits by itself
+# after that many seconds. Its allowlist is the `exec` session's: since 2026-10-09 the app opens
+# no window on `ling web` (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6), so a connection to that
+# server's port 3100, like one to the Onyx web UI's 3000, is a finding.
 APP_SESSION_S: Final[int] = 40
-WEB_UI_PORT: Final[int] = 3100
 
 # Mightling over Signal (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §10): the one component that talks to
 # an outside service by itself, and only once the user set it up. It runs as its own system unit,
@@ -99,17 +99,15 @@ class EgressAudit:
 
         Args:
             vllm_host (str): The model server's base URL.
-            session (str): `exec`, `tui` or `app`; the app's session may also reach `ling web`.
+            session (str): `exec`, `tui`, `app` or `web`; every kind has the same allowlist (the
+                app's reached `ling web` until its Ask window was folded into the app window).
 
         Returns:
             Dict[int, str]: Port to the service behind it.
         """
         parsed = urlparse(vllm_host if "://" in vllm_host else f"http://{vllm_host}")
         model_port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        allowed = {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG"}
-        if session == APP:
-            allowed[WEB_UI_PORT] = "ling web (the Ask window)"
-        return allowed
+        return {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG"}
 
     @classmethod
     def judge(cls, trace: EgressTrace, allowed: Dict[int, str], replied: bool) -> EgressVerdict:
@@ -170,11 +168,11 @@ class EgressAudit:
         indexers run detached in their own network-less sandbox and outlive the session, so they
         are not part of what this trace can show (`audit egress --docs` traces the file index).
 
-        An `app` session is the desktop app itself (`app_bin`) in its audit mode: both windows
-        hidden, Chat loading the web UI, Work starting `ling app-server` (the `ling` under test,
-        named in `MIGHTLING_BIN`), then quitting by itself. It "replied" when it ran to that end
-        and exited 0. Its HOME is a scratch folder, so Chromium's profile and the app's own data
-        folder are throwaway too.
+        An `app` session is the desktop app itself (`app_bin`), started with no argument as
+        `ling app` starts it, in its audit mode: its one window hidden on Ask, its own
+        `ling app-server` started (the `ling` under test, named in `MIGHTLING_BIN`), then quitting
+        by itself. It "replied" when it ran to that end and exited 0. Its HOME is a scratch
+        folder, so Chromium's profile and the app's own data folder are throwaway too.
 
         Args:
             mightling_bin (str): The `ling` executable.
@@ -222,7 +220,7 @@ class EgressAudit:
             scratch_home = os.path.join(work_dir, "home-dir")
             os.makedirs(scratch_home)
             env.update({"HOME": scratch_home, "MIGHTLING_APP_AUDIT": str(APP_SESSION_S), "MIGHTLING_BIN": mightling_bin})
-            command = strace[:-1] + [str(app_bin), "--work"]
+            command = strace[:-1] + [str(app_bin)]
         else:
             command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]
         exited = None

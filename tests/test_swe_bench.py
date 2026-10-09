@@ -9,8 +9,10 @@ pulls an image, installs a package or reaches the network.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import time
 import types
 from pathlib import Path
@@ -19,10 +21,11 @@ import pytest
 
 from dreamference.night_shift import NightShiftQueue
 from dreamference.night_shift.night_shift_task_run import NUDGE
+from dreamference.night_shift.refine_prompt import FIX_RULES, FIX_RULES_V2, STUDY_SECTIONS, STUDY_SECTIONS_V2, RefinePrompt
 from dreamference.swe_bench import (
     SweBenchCodeIndex, SweBenchCommand, SweBenchDocker, SweBenchEvaluator, SweBenchHarness, SweBenchImages,
-    SweBenchInstanceRun, SweBenchNameStripper, SweBenchReport, SweBenchRunStore, SweBenchRunner,
-    SweBenchRuntime, SweBenchSettings,
+    SweBenchHooks, SweBenchInstanceRun, SweBenchIssueGate, SweBenchIssueTargets, SweBenchNameStripper,
+    SweBenchReport, SweBenchRunStore, SweBenchRunner, SweBenchRuntime, SweBenchSettings,
 )
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS
@@ -30,7 +33,9 @@ from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATC
 from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, COMPLETION_NUDGE,
                                                           NO_REFINED, PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT,
                                                           SCRUB_SCRIPT, TASK_RULES)
+from dreamference.swe_bench.swe_bench_instance_run import REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
+from dreamference.swe_bench.swe_bench_runner import RUN_NAME
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -84,6 +89,10 @@ class FakeDocker:
         self.modes = {}
         self.default_mode = "change"
         self.processes = []
+        # The review turn, per instance: `leave` (the default), `edit`, `hang`.
+        self.review_modes = {}
+        # True: `ling exec` reports no thread, so there is no session to resume.
+        self.no_thread = False
 
     # -- SweBenchDocker.run ------------------------------------------------------------------
     def run(self, args, timeout=None, input_text=None):
@@ -163,10 +172,35 @@ class FakeDocker:
         prompt = args[-1]
         resume = "resume" in args
         session = args[args.index("resume") + 1] if resume else f"session-{len(self.calls)}"
-        stdout.write((json.dumps({"type": "thread.started", "thread_id": session}) + "\n").encode())
+        if not self.no_thread:
+            stdout.write((json.dumps({"type": "thread.started", "thread_id": session}) + "\n").encode())
         stdout.flush()
         say = lambda text: (box["scratch"] / "last.txt").write_text(text)
+        if REVIEW_RULES in prompt:
+            # The review turn: leaves the fix alone, edits it, or runs past the time limit.
+            review = self.review_modes.get(instance, "leave")
+            # What the prompt relies on: the index at HEAD, so `git diff` shows the agent's change.
+            assert git(box["repo"], "diff", "--cached", "--quiet").returncode == 0
+            assert "widget.py" in git(box["repo"], "diff").stdout
+            stdout.write((json.dumps({"type": "turn.completed", "usage": {
+                "input_tokens": 70, "cached_input_tokens": 60, "output_tokens": 7}}) + "\n").encode())
+            stdout.flush()
+            if review == "hang":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX HALF-REVIEWED\n")
+                process = FakeProcess(0, hang=True)
+                self.processes.append(process)
+                return process
+            if review == "edit":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX REVIEWED\n")
+                (box["repo"] / "api.py").write_text("from widget import widget\n\n\ndef api():\n    return widget()\n")
+                say("Reviewed: the caller in api.py needed the fix too; the widget tests pass.")
+            else:
+                say("Reviewed: the diff does what the issue asks and the widget tests pass.")
+            return FakeProcess(0)
+        if mode.startswith("gated"):
+            return self.gated_agent(box, mode, say)
         if "This is the first of two steps" in prompt:
+            box["conditions_during_study"] = (box["scratch"] / "issue-gate" / "conditions.json").exists()
             # The refine arm's first step: writes the description, unless told to write nothing;
             # `refine_edits` also changes the tree it was told to leave alone.
             if mode != "refine_silent":
@@ -232,6 +266,54 @@ class FakeDocker:
         return FakeProcess(0)
 
 
+    # -- an agent under the `issue-v1` hooks -----------------------------------------------------
+    @classmethod
+    def hook(cls, box, event, payload):
+        """What Codex does for a hook event: runs the gate with the event on stdin."""
+        payload = dict(payload, cwd=str(box["repo"]), hook_event_name=event, session_id="s", turn_id="t")
+        result = subprocess.run([sys.executable, str(SweBenchHooks.gate_source()), event,
+                                 str(box["scratch"] / "issue-gate")], input=json.dumps(payload),
+                                capture_output=True, text=True)
+        box.setdefault("hook_results", []).append((event, result.returncode, result.stderr))
+        return result.returncode, result.stderr
+
+    @classmethod
+    def tool(cls, box, name, command, act):
+        """One tool call between its PreToolUse and PostToolUse hooks; the denial's reason, or None."""
+        code, reason = cls.hook(box, "pre-tool-use", {"tool_name": name, "tool_input": {"command": command}})
+        if code == 2:
+            return reason
+        output = act()
+        cls.hook(box, "post-tool-use", {"tool_name": name, "tool_input": {"command": command},
+                                        "tool_response": output})
+        return None
+
+    @classmethod
+    def gated_agent(cls, box, mode, say):
+        """
+        `gated`: tries to edit at once, is held, reads, edits, tries to stop, is held, runs the
+        example, stops. `gated_ignores`: edits again without reading and stops again without
+        running anything.
+        """
+        repo = box["repo"]
+        patch = "*** Begin Patch\n*** Update File: widget.py\n@@\n-    return 1\n+    return 2  # FIX\n*** End Patch"
+        fix = lambda: (repo / "widget.py").write_text("def widget():\n    return 2  # FIX\n") and "Success."
+        held = cls.tool(box, "apply_patch", patch, fix)
+        box["edit_held"] = held
+        if mode == "gated":
+            cls.tool(box, "Bash", "cat widget.py", lambda: (repo / "widget.py").read_text())
+        assert cls.tool(box, "apply_patch", patch, fix) is None, "a second edit is never held"
+        code, reason = cls.hook(box, "stop", {"stop_hook_active": False, "last_assistant_message": "Done."})
+        box["stop_held"] = reason if code == 2 else None
+        if mode == "gated":
+            command = "python -c 'from widget import widget; print(widget())'"
+            cls.tool(box, "Bash", command, lambda: "2\n")
+        assert cls.hook(box, "stop", {"stop_hook_active": True, "last_assistant_message": "Done."})[0] == 0, \
+            "a second stop is never held"
+        say("Fixed widget(). Files changed: widget.py")
+        return FakeProcess(0)
+
+
 class FakeHarness:
     """Plays `swebench eval`: writes the per-instance reports the real one writes."""
 
@@ -283,7 +365,7 @@ class QuietMachine:
         return cls.refuse
 
     @classmethod
-    def start_blocker(cls, vllm_host, mightling_bin, active, settings):
+    def start_blocker(cls, vllm_host, mightling_bin, active, settings, priority=False):
         return cls.blocker
 
 
@@ -471,10 +553,44 @@ def test_the_report_counts_the_refine_steps_apart(bench):
     assert summary["refine"]["refine_tokens"] == {"input_tokens": 600, "cached_input_tokens": 0, "output_tokens": 60}
     assert summary["tokens"]["input_tokens"] == 2 * (300 + 1000)
     text = SweBenchReport.render(SweBenchRunStore("r1"))
-    assert "Refine first        on:" in text and "changed the tree in 0 of 2" in text
+    assert "Refine first        on (v1):" in text and "changed the tree in 0 of 2" in text
     assert "Refine first" not in SweBenchReport.render(SweBenchRunStore("r2"))
     compared = SweBenchReport.against(SweBenchRunStore("r1"), SweBenchRunStore("r2"))
     assert "differs: refine: True | False" in compared
+    assert "refine_version" not in compared, "a run without --refine records the default version"
+
+def test_refine_v2_is_chosen_recorded_and_compared(bench):
+    # specs/DREAMFERENCE_MIGHTLING_REFINE.md §10: `--refine-version v2` gives both steps v2's texts,
+    # and the manifest, the report and `--against` say which version an arm ran.
+    issue = "The widget is broken in acme__widget-1."
+    described = "1. Intent: widget() returns 2 (acme__widget-1).\n"
+    assert run(bench, instances=["acme__widget-1"], refine=True, evaluate=True) == 0
+    bench["docker"].calls.clear()
+    assert run(bench, instances=["acme__widget-1"], name="r2", refine=True, refine_version="v2", evaluate=True) == 0
+    assert mightling_prompts(bench["docker"]) == [
+        (SweBenchInstanceRun.compose_refine_prompt(issue, version="v2"), False),
+        (SweBenchInstanceRun.compose_fix_prompt(issue, described, version="v2"), False)]
+    assert SweBenchRunStore("r2").manifest()["refine_version"] == "v2"
+    assert SweBenchRunStore("r1").manifest()["refine_version"] == "v1"
+    assert "Refine first        on (v2):" in SweBenchReport.render(SweBenchRunStore("r2"))
+    compared = SweBenchReport.against(SweBenchRunStore("r2"), SweBenchRunStore("r1"))
+    assert "differs: refine_version: v2 | v1" in compared and "differs: refine:" not in compared
+    assert re.search(r"refine first\s+on \(v2\)\s+on \(v1\)", compared)
+    # A manifest written before the field existed ran v1.
+    store = SweBenchRunStore("r1")
+    manifest = store.manifest()
+    del manifest["refine_version"]
+    store.manifest_path.write_text(json.dumps(manifest))
+    assert "differs: refine_version: v2 | v1" in SweBenchReport.against(SweBenchRunStore("r2"), store)
+
+def test_refine_v2_differs_from_v1_only_in_the_sections_and_the_rules():
+    issue = "ISSUE"
+    one, two = (SweBenchInstanceRun.compose_refine_prompt(issue, True, version) for version in ("v1", "v2"))
+    assert one.replace(STUDY_SECTIONS, "S") == two.replace(STUDY_SECTIONS_V2, "S") and one != two
+    one, two = (SweBenchInstanceRun.compose_fix_prompt(issue, "D", True, ["tests-v2"], version) for version in ("v1", "v2"))
+    assert one.replace(RefinePrompt.subject(FIX_RULES, "issue"), "R") == \
+        two.replace(RefinePrompt.subject(FIX_RULES_V2, "issue"), "R") and one != two
+    assert "the issue is authoritative" in two and "do not keep the old one" in two
 
 
 def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
@@ -486,6 +602,9 @@ def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
     assert any(mount.endswith(":/opt/ling:ro") for mount in created)
     env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://172.30.0.1:8000"
+    # Neither a proxy in the host's environment nor one Docker puts into containers sees the model.
+    for key in ("NO_PROXY", "no_proxy"):
+        assert {"localhost", "127.0.0.1", "::1", "172.30.0.1"} <= set(env[key].split(","))
     assert env["PATH"].startswith("/opt/miniconda3/envs/testbed/bin:")
     assert env["MIGHTLING_NIGHT_RUN"] == "1"
     assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("safe.directory", "/testbed")
@@ -1160,6 +1279,11 @@ def test_the_command_line_parses_every_subcommand():
                   ["status"], ["clean", "--images"]):
         assert parser.parse_args(["swe-bench", *words]).swe_bench_command == words[0]
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench"])) == 2
+    args = parser.parse_args(["swe-bench", "run", "--refine", "--refine-version", "v2"])
+    assert (args.refine, args.refine_version) == (True, "v2")
+    assert parser.parse_args(["swe-bench", "run", "--refine"]).refine_version is None
+    # The version chooses the texts of --refine and means nothing without it.
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--refine-version", "v2"])) == 2
 
 
 def test_status_and_clean_touch_only_the_benchmarks_own_things(bench, capsys):
@@ -1644,9 +1768,127 @@ def test_the_test_discipline_rules_are_an_arm_and_the_plain_prompt_is_unchanged(
     assert "Task rules          tests" in SweBenchReport.render(SweBenchRunStore("rules"))
 
 
+def test_tests_v2_lets_the_issue_decide_and_leaves_the_first_rule_as_it_was(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    # `tests` is the original arm, kept byte for byte so runs made with it stay comparable.
+    assert TASK_RULES["tests"] == (
+        "- Never change an existing test. If a test that passed before your change fails after it, your\n"
+        "  change is wrong: fix the source.\n"
+        "- Put any test or script of your own in /tmp, not in the repository.\n"
+        "- Before you stop, run the test files of every module you changed, with and without your change\n"
+        "  (git stash, then git stash pop), and compare the failing tests by name.\n")
+    v2 = TASK_RULES["tests-v2"]
+    for words in ("Never edit an existing test to make it pass", "decide from the issue",
+                  "leave the test as it is and say so", "fix the source", "in /tmp", "git stash",
+                  "compare the failing tests by name"):
+        assert words in v2
+    # The sentence the failure analysis (§9.2) found false for 19 resolved tasks is the one v2 leaves out.
+    assert "change is wrong" not in v2
+    for word in ("benchmark", "hidden", "reference", "swe"):
+        assert word not in v2.lower()
+    with_v2 = SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2"])
+    assert with_v2.replace(v2, "") == plain and with_v2.endswith(issue)
+    assert v2 in SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["tests-v2"])
+
+    assert run(bench, name="v2", instances=["acme__widget-1"], task_rules=["tests-v2"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["tests-v2"])]
+    assert SweBenchRunStore("v2").manifest()["task_rules"] == ["tests-v2"]
+    assert "Task rules          tests-v2" in SweBenchReport.render(SweBenchRunStore("v2"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--task-rules", "tests-v2", "--name", "x"])) == 0
+    assert seen["task_rules"] == ["tests-v2"]
+
+
+def test_issue_v1_reads_the_issue_and_follows_the_sibling_code(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    rule = TASK_RULES["issue-v1"]
+    for words in ("Before you edit, read the whole issue", "exactly what behaviour it asks for",
+                  "every edge case it mentions", "do not widen a condition", "follow its pattern",
+                  "Where a sibling has the same defect, fix it there too", "after your last edit"):
+        assert words in rule
+    for word in ("benchmark", "hidden", "reference", "swe", "upstream"):
+        assert word not in rule.lower()
+    with_rule = SweBenchInstanceRun.compose_prompt(issue, task_rules=["issue-v1"])
+    assert with_rule.replace(rule, "") == plain and with_rule.endswith(issue)
+    assert rule in SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["issue-v1"])
+
+    assert run(bench, name="iv1", instances=["acme__widget-1"], task_rules=["issue-v1"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["issue-v1"])]
+    assert SweBenchRunStore("iv1").manifest()["task_rules"] == ["issue-v1"]
+    assert "Task rules          issue-v1" in SweBenchReport.render(SweBenchRunStore("iv1"))
+
+
+def test_issue_v1_stacks_with_tests_v2_once_each_and_in_the_order_of_the_work(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    rule, v2 = TASK_RULES["issue-v1"], TASK_RULES["tests-v2"]
+    # The issue comes before the test discipline, whatever order the rules are named in.
+    both = SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2", "issue-v1"])
+    assert both == SweBenchInstanceRun.compose_prompt(issue, task_rules=["issue-v1", "tests-v2"])
+    assert both == SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2", "issue-v1", "tests-v2"])
+    assert both.replace(rule + v2, "") == plain
+    assert both.count(rule) == 1 and both.count(v2) == 1 and both.index(rule) < both.index(v2)
+    # No line is said twice.
+    lines = (rule + v2).splitlines()
+    assert len(lines) == len(set(lines))
+    fix = SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["tests-v2", "issue-v1"])
+    assert fix.count(rule + v2) == 1
+
+    assert run(bench, name="n3-tests-v2-issue-v1", instances=["acme__widget-1"],
+               task_rules=["tests-v2", "issue-v1"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["issue-v1", "tests-v2"])]
+    assert SweBenchRunStore("n3-tests-v2-issue-v1").manifest()["task_rules"] == ["issue-v1", "tests-v2"]
+    assert "Task rules          issue-v1, tests-v2" in SweBenchReport.render(SweBenchRunStore("n3-tests-v2-issue-v1"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(
+        ["swe-bench", "run", "--task-rules", "tests-v2,issue-v1", "--name", "x"])) == 0
+    assert seen["task_rules"] == ["tests-v2", "issue-v1"]
+
+
+def test_an_arm_named_after_its_rules_is_a_distinct_name_the_grader_accepts():
+    import itertools
+    arms = {}
+    for size in range(1, len(TASK_RULES) + 1):
+        for rules in itertools.permutations(TASK_RULES, size):
+            # The night scripts' shape, <prefix>-<rules joined by ->, and the grader's run ids.
+            name = "n3-" + "-".join(rules)
+            for run_id in (f"{name}-1", f"{name}-drop-test-hunks-1"):
+                assert RUN_NAME.fullmatch(run_id), run_id
+            # Whatever order the rules are named in, no name stands for two different sets of rules.
+            assert arms.setdefault(name, frozenset(rules)) == frozenset(rules), name
+    assert arms["n3-tests-v2-issue-v1"] == {"tests-v2", "issue-v1"}
+
+
+def test_a_new_run_whose_name_the_grader_would_refuse_is_refused_and_an_old_one_resumes(bench, capsys):
+    for name in ("n3-tests-v2+issue-v1", "tests-v2,issue-v1", "a b", "-x"):
+        assert run(bench, name=name, instances=["acme__widget-1"], task_rules=["tests-v2", "issue-v1"]) == 1
+        assert "a run's name is letters, digits" in capsys.readouterr().out
+        assert not SweBenchRunStore(name).manifest_path.exists()
+    assert mightling_prompts(bench["docker"]) == []
+    # A run already on disk under such a name (from before the check) is still resumed.
+    assert run(bench, name="old", instances=["acme__widget-1"]) == 0
+    old, odd = SweBenchRunStore("old"), SweBenchRunStore("old+name")
+    old.directory.rename(odd.directory)
+    assert run(bench, name="old+name", instances=["acme__widget-2"]) == 0
+    assert "a run's name is letters, digits" not in capsys.readouterr().out
+
+
 def test_an_unknown_task_rule_is_refused_and_the_option_reaches_the_runner(bench, monkeypatch, capsys):
     assert run(bench, instances=["acme__widget-1"], task_rules=["everything"]) == 1
-    assert "--task-rules takes: tests" in capsys.readouterr().out
+    assert "--task-rules takes: issue-v1, tests, tests-v2" in capsys.readouterr().out
     assert not SweBenchRunStore("r1").manifest_path.exists()
     import argparse
     seen = {}
@@ -1801,3 +2043,717 @@ def test_without_cycling_the_index_pass_keeps_the_images(bench):
     assert run(bench, code_index="universal") == 0
     assert not any(call[0] == "rmi" for call in bench["docker"].calls)
     assert len(bench["docker"].present) == 3
+
+
+# -- the model gate (spec §18) ---------------------------------------------------------------------
+
+@pytest.fixture
+def gated(bench, monkeypatch):
+    """The benchmark network has a subnet, and a gate answers from this (test) home's files."""
+    from dreamference.swe_bench import swe_bench_gate_hold
+    from dreamference.vllm_server.model_gate import ModelGate
+    docker = bench["docker"]
+
+    def run_with_subnet(args, timeout=None, input_text=None):
+        if args[:2] == ["network", "inspect"]:
+            docker.calls.append(list(args))
+            return subprocess.CompletedProcess(args, 0, json.dumps([{"Internal": True, "IPAM": {"Config": [
+                {"Gateway": "172.30.0.1", "Subnet": "172.30.0.0/16"}]}}]), "")
+        return docker.run(args, timeout, input_text)
+    monkeypatch.setattr(SweBenchDocker, "run", classmethod(lambda cls, *a, **k: run_with_subnet(*a, **k)))
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: ModelGate.state()))
+    monkeypatch.setattr(swe_bench_gate_hold, "HEARTBEAT_S", 0.02)
+    written = []
+    real_write = ModelGate.write_run.__func__
+    monkeypatch.setattr(ModelGate, "write_run", classmethod(lambda cls, record: written.append(dict(record))
+                                                            or real_write(cls, record)))
+    return dict(bench, written=written, gate=ModelGate)
+
+
+class OthersBusy(QuietMachine):
+    """A session is open and another request is running: only the gate's priority lets a start through."""
+    admitted = []
+
+    @classmethod
+    def admit(cls, vllm_host, mightling_bin, idle_minutes, end):
+        cls.admitted.append((idle_minutes, cls.ignore_sessions))
+        return None
+
+    @classmethod
+    def start_blocker(cls, vllm_host, mightling_bin, active, settings, local=True, priority=False):
+        return None if priority else "the model server is serving a request that is not the night run's"
+
+
+def test_a_run_closes_the_gate_to_everyone_but_its_network_and_opens_it_after(gated, monkeypatch):
+    monkeypatch.setattr(SweBenchRunner, "admission", OthersBusy)
+    monkeypatch.setattr(OthersBusy, "admitted", [])
+    assert run(gated, instances=["acme__widget-1", "acme__widget-2"], label="night 1, default arm") == 0
+    records = gated["written"]
+    assert records and all(r["networks"] == ["172.30.0.0/16"] and r["run"] == "r1" for r in records)
+    assert records[-1]["label"] == "night 1, default arm" and records[-1]["total"] == 2
+    # Nobody else can reach the model: admission waits only for requests in flight, and neither an
+    # open session nor another request held a start back.
+    assert OthersBusy.admitted == [(0, True)]
+    assert set(SweBenchRunStore("r1").finished()) == {"acme__widget-1", "acme__widget-2"}
+    # Open again once the run is over, and the run's record says the gate was in force.
+    assert gated["gate"].run_record() is None and gated["gate"].state()["state"] == "open"
+    sessions = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["sessions"]
+    assert [s["gate"] for s in sessions] == ["in force"] and sessions[0]["ended"]
+    report = SweBenchReport.render(SweBenchRunStore("r1"))
+    assert "Model gate          in force: requests from anything but the run were refused" in report
+    assert "Gate paused" not in report
+
+
+def test_the_refusal_counts_progress_and_estimates_the_time_left(gated):
+    from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
+    assert run(gated, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("r1")
+    for instance_id, wall in (("acme__widget-1", 600), ("acme__widget-2", 1200)):
+        state = store.state(instance_id)
+        state["wall_s"] = wall
+        store.write_state(instance_id, state)
+    hold = SweBenchGateHold(store, "http://localhost:8000", "172.30.0.0/16")
+    hold.instances, hold.total, hold.parallel = ["acme__widget-1", "acme__widget-2", "x-1", "x-2", "x-3", "x-4"], 6, 2
+    assert hold.progress() == {"done": 2, "total": 6, "eta_s": 1800}  # 4 left x median 900 s / 2 at once
+
+
+def test_while_paused_the_run_waits_for_others_and_its_report_names_the_pause(gated, monkeypatch):
+    monkeypatch.setattr(SweBenchRunner, "admission", OthersBusy)
+    gated["gate"].pause(0.6)
+    started = time.time()
+    assert run(gated, instances=["acme__widget-1"]) == 0
+    assert time.time() - started >= 0.5, "no instance started while the pause let others through"
+    pauses = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["pauses"]
+    assert len(pauses) == 1 and 0.3 < pauses[0]["end"] - pauses[0]["start"] <= 0.7
+    assert "Gate paused         1 time(s)" in SweBenchReport.render(SweBenchRunStore("r1"))
+
+
+def test_without_the_networks_subnet_the_gate_stays_open_and_the_run_waits_as_before(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: ModelGate.state()))
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert ModelGate.run_record() is None
+    sessions = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["sessions"]
+    assert sessions[0]["gate"].startswith("open: ")
+
+
+def test_with_no_gate_in_front_of_the_server_the_report_says_others_were_served(bench):
+    # The suite's probe answers "no gate", as a model server started before the gate existed does.
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert "Model gate          none in front of the model server" in SweBenchReport.render(SweBenchRunStore("r1"))
+
+
+def test_the_report_names_the_instances_that_ran_during_a_pause(bench):
+    from datetime import datetime
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("r1")
+    for offset, instance_id in enumerate(["acme__widget-1", "acme__widget-2"]):
+        state = store.state(instance_id)
+        state.update(started=datetime.fromtimestamp(10_000 + offset * 1000).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z"),
+                     wall_s=100)
+        store.write_state(instance_id, state)
+    (store.directory / "gate.json").write_text(json.dumps({
+        "sessions": [{"start": 9_000, "end": 20_000, "gate": "in force", "ended": True}],
+        "pauses": [{"start": 10_050, "end": 10_500}]}))
+    lines = SweBenchReport.gate_lines(store, store.states(), ["acme__widget-1", "acme__widget-2"])
+    assert lines[1].startswith("Gate paused         1 time(s), 7 min 30 s in all")
+    assert lines[1].endswith(": acme__widget-1")
+
+
+def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "parallel": 1, "budget": None}
+    monkeypatch.setattr(SweBenchRunner, "lanes", classmethod(
+        lambda cls, vllm_host, served, settings, parallel: (
+            [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel, "budget": None},
+             dict(replica)], [])))
+
+    def relays(cls, gateway, lanes):
+        for lane in lanes:
+            lane["model_url"] = f"http://{gateway}:40001"
+        return []
+    monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(relays))
+    monkeypatch.setattr(ModelGate, "probe", classmethod(
+        lambda cls, host, timeout=2.0: {"gate": "mightling", "state": "closed"} if "192.168" in host else None))
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    created = [call for call in bench["docker"].calls if call[0] == "run"]
+    hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
+             for call in created}
+    assert "http://172.30.0.1:40001" not in hosts and len(created) == 2
+
+
+# -- the review turn (spec §19) --------------------------------------------------------------------
+
+def test_the_review_prompts_are_terse_and_a_fresh_one_carries_the_issue_and_the_diff():
+    issue, diff = "The widget is broken.", "diff --git a/widget.py b/widget.py\n+    return 2\n"
+    assert SweBenchInstanceRun.compose_review_prompt(issue, diff, resumed=True) == REVIEW_PROMPT
+    for words in ("Re-read the issue", "`git status`, then `git diff`",
+                  "Run the test files of every module you changed",
+                  "does not do what the issue asks", "a test that passed before your change now", "decide from the issue", "Never edit an existing test", "Then stop"):
+        assert words in REVIEW_PROMPT
+    for word in ("benchmark", "hidden", "reference", "swe", "grad"):
+        assert word not in REVIEW_PROMPT.lower()
+    fresh = SweBenchInstanceRun.compose_review_prompt(issue, diff, resumed=False)
+    assert REVIEW_RULES in fresh and fresh.index(issue) < fresh.index(diff.rstrip("\n"))
+    assert fresh.endswith(diff.rstrip("\n")) and "Nobody will answer questions" in fresh
+    cut = SweBenchInstanceRun.compose_review_prompt(issue, "x" * 50000, resumed=False)
+    assert cut.endswith("[diff cut here]") and len(cut) < 42000
+
+
+def test_without_the_review_turn_the_patch_is_collected_when_the_agent_stops(bench):
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    store = SweBenchRunStore("r1")
+    assert [resumed for _, resumed in mightling_prompts(bench["docker"])] == [False]
+    assert store.manifest()["review_turn"] is False and "review" not in store.state("acme__widget-1")
+    assert "Review turn         off: the patch was collected when the agent stopped" in SweBenchReport.render(store)
+
+
+def test_the_review_turn_resumes_the_same_session_in_the_same_container_before_collecting(bench):
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    calls = [call for call in bench["docker"].calls if call[0] == "exec" and len(call) > 2 and call[2].endswith("/ling")]
+    assert [(call[-1], "resume" in call) for call in calls] == [
+        (SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1."), False), (REVIEW_PROMPT, True)]
+    # The same session, in the same container: the model gate passes it by the container's address.
+    first_session = json.loads(store.log_path("acme__widget-1").read_text().splitlines()[0])["thread_id"]
+    assert calls[1][calls[1].index("resume") + 1] == first_session and calls[1][1] == calls[0][1]
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done" and state["nudges"] == 0
+    review = state["review"]
+    assert review["resumed"] is True and review["exec"] == "ok" and review["changed"] is False
+    assert (review["added"], review["removed"], review["files"]) == (0, 0, [])
+    assert review["tokens"] == {"input_tokens": 70, "cached_input_tokens": 60, "output_tokens": 7}
+    before = (store.directory / "scratch" / "acme__widget-1" / "patch-before-review.diff").read_text()
+    assert before == prediction("r1", "acme__widget-1") and review["patch_bytes_before"] == len(before.encode())
+    assert store.manifest()["review_turn"] is True
+    SweBenchEvaluator.grade(store, bench["settings"])
+    text = SweBenchReport.render(store)
+    assert "Review turn         on: ran in 1 of 1; changed the patch in 0 (+0 -0 lines), reached the time limit in 0" in text
+    assert "70 tokens in, 7 out" in text
+
+
+def test_a_review_that_changes_the_diff_is_what_is_collected_and_its_lines_are_counted(bench):
+    bench["docker"].review_modes = {"acme__widget-1": "edit"}
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    patch = prediction("r1", "acme__widget-1")
+    assert "REVIEWED" in patch and "api.py" in patch
+    assert "REVIEWED" not in (store.directory / "scratch" / "acme__widget-1" / "patch-before-review.diff").read_text()
+    review = store.state("acme__widget-1")["review"]
+    assert review["changed"] is True and sorted(review["files"]) == ["api.py", "widget.py"]
+    assert (review["added"], review["removed"]) == (1 + 5, 1)
+    assert store.state("acme__widget-2")["review"]["changed"] is False
+    assert "changed the patch in 1 (+6 -1 lines)" in SweBenchReport.render(store)
+
+
+def test_a_review_that_reaches_the_time_limit_submits_the_tree_as_it_stands(bench):
+    bench["docker"].review_modes = {"acme__widget-1": "hang"}
+    bench["settings"] = SweBenchSettings({"task_timeout": "1s"})
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    state = store.state("acme__widget-1")
+    # The agent finished; only the review was cut off, so the status is the patch's, not a timeout.
+    assert state["status"] == "done" and state["exec"] == "ok"
+    assert state["review"]["exec"] == "timeout" and state["review"]["changed"] is True
+    assert any("review turn reached the task's time limit" in note for note in state["notes"])
+    assert "HALF-REVIEWED" in prediction("r1", "acme__widget-1")
+    assert any(call[0] == "stop" for call in bench["docker"].calls)
+    assert any(call[0] == "start" for call in bench["docker"].calls)
+    assert "reached the time limit in 1" in SweBenchReport.render(store)
+
+
+def test_a_task_with_no_time_left_is_not_reviewed(bench):
+    bench["settings"] = SweBenchSettings({"task_timeout": "0s"})
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    assert store.state("acme__widget-1")["review"] == {"skipped": "no time left"}
+    assert store.state("acme__widget-1")["status"] == "done"
+    assert [resumed for _, resumed in mightling_prompts(bench["docker"])] == [False]
+
+
+def test_no_review_without_a_change_or_after_an_error_and_the_report_says_why(bench):
+    bench["docker"].modes = {"acme__widget-1": "empty", "acme__widget-2": "error"}
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2", "beta__gadget-7"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    assert store.state("acme__widget-1")["status"] == "empty"
+    assert store.state("acme__widget-1")["review"] == {"skipped": "no change to review"}
+    assert store.state("acme__widget-2")["review"] == {"skipped": "the agent's turn ended in an error"}
+    assert sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT) == 1
+    text = SweBenchReport.render(store)
+    assert ("Review turn         on: ran in 1 of 3 (not run: no change to review 1, "
+            "the agent's turn ended in an error 1); changed the patch in 0") in text
+
+
+def test_without_a_session_to_resume_the_review_is_a_fresh_session_given_the_issue_and_the_diff(bench):
+    bench["docker"].no_thread = True
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    turns = mightling_prompts(bench["docker"])
+    assert len(turns) == 2 and turns[1][1] is False
+    assert "The widget is broken in acme__widget-1." in turns[1][0] and "+    return 2  # FIX" in turns[1][0]
+    assert store.state("acme__widget-1")["review"]["resumed"] is False
+    assert "1 as a fresh session" in SweBenchReport.render(store)
+
+
+def test_the_review_turn_is_an_arm_kept_on_resume_and_told_apart_by_against(bench, monkeypatch):
+    run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"])
+    run(bench, name="reviewed", instances=["acme__widget-1", "acme__widget-2"], review_turn=True)
+    # A resumed run keeps the arm it started with, whatever the flag says now: widget-2 is made
+    # unfinished and runs again without the flag.
+    store = SweBenchRunStore("reviewed")
+    kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
+    store.predictions_path.write_text("".join(line + "\n" for line in kept))
+    reviews = sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT)
+    run(bench, name="reviewed")
+    assert store.manifest()["review_turn"] is True
+    assert sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT) == reviews + 1
+    for name in ("plain", "reviewed"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("reviewed"), SweBenchRunStore("plain"))
+    assert "differs: review_turn: True | False" in text
+    review_row = next(line for line in text.splitlines() if line.startswith("review turn"))
+    assert review_row.split()[-2:] == ["on", "off"]
+    # A manifest written before the option existed ran without it.
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["review_turn"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "review_turn" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    assert "Review turn         off" in SweBenchReport.render(SweBenchRunStore("plain"))
+
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--review-turn", "--name", "x"])) == 0
+    assert seen["review_turn"] is True
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["review_turn"] is False
+
+
+# -- the issue-v1 hooks (spec §20) ------------------------------------------------------------------
+
+GATED_ISSUE = """`widget()` in widget.py returns 1; it should return 2.
+
+```python
+from widget import widget
+print(widget())
+```
+"""
+
+
+def gated_dataset(text=GATED_ISSUE):
+    """The dataset with an issue that names a file and a function and shows an example."""
+    snapshot = SweBenchHarness.snapshot_path("verified")
+    rows = [dict(row(i), problem_statement=text) for i in IDS]
+    snapshot.write_text("".join(json.dumps(entry) + "\n" for entry in rows))
+
+
+def test_the_trust_hash_is_the_one_codex_computes_and_each_hook_carries_its_own():
+    # The ledger hook a live session accepted (ling-rs/src/compaction.rs pins the same value).
+    assert SweBenchHooks.hook_hash(
+        "session_start", "/home/user/.cache/dreamference/compaction-phase0/ledger-bin/target/release/puffin-ledger",
+        10, "compact") == "sha256:1b64b41e805a60f826cec5251cf954562100119e9235cdddd20580387d4ff2d7"
+    import tomllib
+    text = SweBenchHooks.config_text("/mightling-scratch/codex-home/config.toml", "/mightling-scratch/issue-gate")
+    hooks = tomllib.loads(text)["hooks"]
+    for table, label, event in (("PreToolUse", "pre_tool_use", "pre-tool-use"),
+                                ("PostToolUse", "post_tool_use", "post-tool-use"), ("Stop", "stop", "stop")):
+        [group] = hooks[table]
+        assert "matcher" not in group, "every tool, MCP tools included"
+        [handler] = group["hooks"]
+        assert handler["type"] == "command" and handler["timeout"] == 30
+        assert f"/opt/ling-issue-gate/issue_gate.py {event} /mightling-scratch/issue-gate" in handler["command"]
+        assert handler["command"].startswith("for p in /opt/miniconda3/bin/python3 ")
+        key = f"/mightling-scratch/codex-home/config.toml:{label}:0:0"
+        assert hooks["state"][key]["trusted_hash"] == SweBenchHooks.hook_hash(label, handler["command"], 30)
+
+
+def test_the_gate_runs_on_the_oldest_python_the_images_carry():
+    import ast
+    ast.parse(SweBenchHooks.gate_source().read_text(), feature_version=(3, 6))
+    assert "dreamference" not in "".join(line for line in SweBenchHooks.gate_source().read_text().splitlines()
+                                         if line.startswith(("import", "from")))
+
+
+ISSUE = """Calling `separability_matrix()` on nested models gives a wrong result; see
+astropy/modeling/separable.py and astropy.modeling.core, also `CompoundModel` and `Model.evaluate`
+and `render()` and `nothing_here()`.
+
+```python
+from astropy.modeling import models as m
+from astropy.modeling.separable import separability_matrix
+cm = m.Linear1D(10) & m.Linear1D(5)
+separability_matrix(m.Pix2Sky_TAN() & cm)
+```
+
+```
+array([[ True, False],
+       [False,  True]])
+```
+
+```
+Traceback (most recent call last):
+  File "/usr/lib/python3.9/site-packages/astropy/utils/misc.py", line 3, in a
+  File "/usr/lib/python3.9/site-packages/astropy/modeling/mappings.py", line 9, in b
+ValueError: boom
+```
+"""
+
+LISTING = "\n".join([
+    "astropy/modeling/separable.py", "astropy/modeling/core.py", "astropy/modeling/mappings.py",
+    "astropy/utils/misc.py", "astropy/modeling/tests/test_separable.py", "docs/conf.py", "@@definitions@@",
+    "astropy/modeling/separable.py:66:def separability_matrix(transform):",
+    "astropy/modeling/tests/test_separable.py:5:def separability_matrix(x):",
+    "astropy/modeling/core.py:3000:class CompoundModel(Model):",
+    "astropy/modeling/core.py:10:class Model:",
+    "astropy/a.py:1:    def evaluate(self):", "astropy/b.py:1:    def evaluate(self):",
+    "astropy/modeling/core.py:20:    def evaluate(self, x):", "astropy/c.py:1:def evaluate():",
+    "astropy/d.py:1:def render():", "astropy/e.py:1:def render():", "astropy/f.py:1:def render():",
+    "astropy/g.py:1:def render():",
+]) + "\n"
+
+
+def test_what_the_issue_names_is_extracted_resolved_and_ranked():
+    found = SweBenchIssueTargets.candidates(ISSUE)
+    assert found["paths"][0] == ("astropy/modeling/separable.py", "prose")
+    # Traceback frames deepest first: the one nearest the error.
+    assert [path for path, source in found["paths"] if source == "traceback"] == [
+        "/usr/lib/python3.9/site-packages/astropy/modeling/mappings.py", "/usr/lib/python3.9/site-packages/astropy/utils/misc.py"]
+    assert "astropy.modeling.core" in found["dotted"] and "Model.evaluate" in found["dotted"]
+    assert {"separability_matrix", "CompoundModel", "render", "nothing_here"} <= set(found["names"])
+    assert "Linear1D" not in found["names"], "calls in a code block are not names the issue asks to read"
+    conditions = SweBenchIssueTargets.conditions(ISSUE, LISTING)
+    labels = [target["label"] for target in conditions["targets"]]
+    assert labels == ["astropy/modeling/separable.py", "astropy/modeling/core.py",
+                      "astropy/modeling/mappings.py", "astropy/utils/misc.py"]
+    why = {entry["text"]: entry["why"] for entry in conditions["dropped"]}
+    # Defined in a file already to be read; or nowhere; or in too many files to ask for.
+    assert why["separability_matrix"] == why["CompoundModel"] == why["Model.evaluate"] == "its file is already to be read"
+    assert why["nothing_here"] == "not defined in the repository"
+    assert why["render"] == "defined in 4 files"
+
+
+def test_a_function_is_a_target_of_its_own_and_test_files_do_not_define_it():
+    text = "`separability_matrix` is wrong for nested models."
+    conditions = SweBenchIssueTargets.conditions(text, LISTING)
+    [target] = conditions["targets"]
+    assert target["kind"] == "definition" and target["files"] == ["astropy/modeling/separable.py"]
+    assert target["label"] == "`separability_matrix` (astropy/modeling/separable.py)"
+    assert conditions["examples"] == []
+
+
+def test_at_most_six_targets_and_the_rest_are_recorded_as_dropped():
+    files = [f"pkg/m{n}.py" for n in range(9)]
+    text = " ".join(files)
+    conditions = SweBenchIssueTargets.conditions(text, "\n".join(files) + "\n@@definitions@@\n")
+    assert len(conditions["targets"]) == 6
+    assert [entry["text"] for entry in conditions["dropped"]] == files[6:]
+
+
+def test_a_bare_base_name_must_be_unique_and_a_long_path_is_matched_by_its_tail():
+    files = ["a/setup.py", "b/setup.py", "django/db/models/query.py"]
+    assert SweBenchIssueTargets.resolve_path("setup.py", files) == (None, "names 2 files")
+    assert SweBenchIssueTargets.resolve_path("/x/site-packages/django/db/models/query.py", files)[0] == \
+        "django/db/models/query.py"
+    assert SweBenchIssueTargets.resolve_path("https://github.com/o/r/blob/main/django/db/models/query.py",
+                                             files)[0] == "django/db/models/query.py"
+    assert SweBenchIssueTargets.resolve_dotted("django.db.models.query.QuerySet", files) == \
+        ("django/db/models/query.py", ["QuerySet"])
+
+
+def test_what_counts_as_a_runnable_example():
+    [example] = SweBenchIssueTargets.examples(ISSUE)
+    assert example["kind"] == "python" and example["first"] == "cm = m.Linear1D(10) & m.Linear1D(5)"
+    assert example["key_lines"] == ["cm = m.Linear1D(10) & m.Linear1D(5)", "separability_matrix(m.Pix2Sky_TAN() & cm)"]
+    # A session at the prompt, fenced or not; the output lines are not code.
+    session = "It fails:\n\n>>> from sympy import Symbol\n>>> latex(Symbol('x')**2)\n'x^{2}'\n"
+    assert SweBenchIssueTargets.examples(session)[0]["key_lines"] == ["latex(Symbol('x')**2)"]
+    # Not examples: output, a traceback, Python 2, imports alone, prose.
+    for text in ("```\nTrue\n```", "```\nTraceback (most recent call last):\n  x\n```",
+                 "```python\nprint 'hi'\n```", "```python\nimport os\n```", "Nothing to run here."):
+        assert SweBenchIssueTargets.examples(text) == [], text
+    shell = "```bash\n$ pip install -e .\n$ pytest -q test_foo.py\n```"
+    assert SweBenchIssueTargets.examples(shell) == [{"kind": "shell", "commands": [["pytest", "test_foo.py"]],
+                                                     "first": "pytest -q test_foo.py"}]
+    assert SweBenchIssueTargets.examples("```console\n$ git clone x\n$ cd x\n```") == []
+
+
+def test_the_light_index_runs_against_the_repository(tmp_path):
+    git(tmp_path, "init", "-q")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "core.py").write_text("class Thing:\n    def frob(self):\n        pass\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_core.py").write_text("def frob():\n    pass\n")
+    git(tmp_path, "add", "-A")
+    script = SweBenchIssueTargets.resolve_script(["frob", "Thing", "bad name; rm -rf /"])
+    assert "rm -rf" not in script
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                            env=dict(os.environ, TESTBED=str(tmp_path)))
+    root, _, listing = result.stdout.partition("\n")
+    assert root == str(tmp_path)
+    files, definitions = SweBenchIssueTargets.parse_listing(listing)
+    assert files == ["pkg/core.py", "tests/test_core.py"]
+    assert definitions == {"Thing": ["pkg/core.py"], "frob": ["pkg/core.py"]}
+
+
+def gate_world(tmp_path, targets=None, examples=None):
+    repo = tmp_path / "testbed"
+    repo.mkdir()
+    (repo / "widget.py").write_text("def widget():\n    return 1\n")
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "core.py").write_text("x = 1\n")
+    conditions = {"root": str(repo), "targets": targets if targets is not None else [
+        {"id": "file:widget.py", "kind": "file", "path": "widget.py", "label": "widget.py"},
+        {"id": "def:frob", "kind": "definition", "name": "frob", "files": ["pkg/core.py"],
+         "label": "`frob` (pkg/core.py)"}],
+        "examples": examples if examples is not None else
+        SweBenchIssueTargets.examples("```python\nfrom widget import widget\nprint(widget())\n```")}
+    return repo, conditions
+
+
+def test_what_counts_as_an_edit(tmp_path):
+    repo, _ = gate_world(tmp_path)
+    edit = lambda name, command: SweBenchIssueGate.edit_of(name, command, str(repo), str(repo))
+    patch = "*** Begin Patch\n*** Update File: widget.py\n@@\n-a\n+b\n*** End Patch"
+    assert edit("apply_patch", patch) == {"kind": "apply_patch", "paths": ["widget.py"]}
+    assert edit("Bash", "apply_patch <<'EOF'\n" + patch + "\nEOF")["kind"] == "apply_patch"
+    assert edit("apply_patch", "*** Begin Patch\n*** Add File: reproduce.py\n+print(1)\n*** End Patch") is None
+    assert edit("Bash", "sed -i 's/1/2/' widget.py") == {"kind": "sed -i", "paths": ["widget.py"]}
+    assert edit("Bash", "cd pkg && perl -pi -e 's/1/2/' core.py") is None, "cwd is not followed through cd"
+    assert edit("Bash", f"perl -pi -e 's/1/2/' {repo}/pkg/core.py") == {"kind": "perl -i", "paths": ["pkg/core.py"]}
+    assert edit("Bash", "echo 'x = 2' >> pkg/core.py")["kind"] == "redirect"
+    assert edit("Bash", "printf 'y' | tee widget.py")["kind"] == "tee"
+    assert edit("Bash", "git apply /tmp/fix.diff")["kind"] == "git apply"
+    for harmless in ("cat > /tmp/repro.py <<'EOF'\nprint(1 > 0)\nEOF\npython /tmp/repro.py",
+                     "python -m pytest -q 2>&1 > /tmp/out.txt", "git stash && python -m pytest; git stash pop",
+                     "grep -n widget widget.py", "echo hi > new_file.py", "ls > /dev/null"):
+        assert edit("Bash", harmless) is None, harmless
+
+
+def test_what_counts_as_reading_a_target():
+    targets = [{"id": "file:a/b.py", "kind": "file", "path": "a/b.py"},
+               {"id": "def:frob", "kind": "definition", "name": "frob", "files": ["pkg/core.py"]}]
+    reads = SweBenchIssueGate.reads
+    assert reads(targets, "sed -n 1,80p a/b.py", "") == ["file:a/b.py"]
+    assert reads(targets, "cd a && cat b.py", "") == ["file:a/b.py"]
+    assert reads(targets, "grep -rn frob .", "./pkg/core.py:12:    def frob(self):") == ["def:frob"]
+    assert reads(targets, "grep -rn thing .", "./a/b.py:3: thing = 1") == ["file:a/b.py"]
+    assert reads(targets, "grep -rn 'def frob' .", "") == [], "naming it in a search is not reading it"
+    assert reads(targets, "code_show", "class frob:\n    pass") == ["def:frob"]
+
+
+def test_what_counts_as_running_the_example(tmp_path):
+    repo, conditions = gate_world(tmp_path)
+    examples = conditions["examples"]
+    runs = lambda command: SweBenchIssueGate.runs_example(command, str(repo), examples)
+    assert runs("python -c 'from widget import widget; print(widget())'")
+    assert runs("cd /testbed && python3 - <<'EOF'\nfrom widget import widget\nprint( widget() )\nEOF")
+    (tmp_path / "repro.py").write_text("from widget import widget\nresult = widget()\nprint(result)\n")
+    assert runs(f"python {tmp_path}/repro.py"), "it calls what the example calls"
+    (tmp_path / "other.py").write_text("print('something else')\n")
+    assert not runs(f"python {tmp_path}/other.py")
+    assert runs("python /tmp/gone-already.py"), "a script that cannot be read may be the example"
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_widget.py").write_text("def test_widget():\n    assert True\n")
+    assert not runs("python -m pytest tests/test_widget.py -q") and not runs("grep -n widget widget.py")
+    shell = SweBenchIssueTargets.examples("```bash\n$ pytest test_foo.py\n```")
+    assert SweBenchIssueGate.runs_example("cd /tmp && python -m pytest -q test_foo.py", str(repo), shell)
+    assert not SweBenchIssueGate.runs_example("pytest -q other.py", str(repo), shell)
+
+
+def test_the_edit_hold_fires_once_names_what_is_unread_and_records_compliance(tmp_path):
+    repo, conditions = gate_world(tmp_path)
+    state = {}
+    call = lambda name, command: SweBenchIssueGate.pre_tool_use(state, conditions, {
+        "tool_name": name, "tool_input": {"command": command}, "cwd": str(repo)})
+    patch = "*** Begin Patch\n*** Update File: widget.py\n@@\n-a\n+b\n*** End Patch"
+    assert call("Bash", "cat widget.py") is None
+    reason = call("apply_patch", patch)
+    assert reason == ("Not yet: read what the issue names before your first edit. Still unread: `frob` (pkg/core.py). "
+                      "Open each one (cat, sed -n, or grep -n for its definition), then make the edit again")
+    assert state["first_edit"]["read"] == ["file:widget.py"] and state["first_edit"]["unread"] == ["def:frob"]
+    SweBenchIssueGate.post_tool_use(state, conditions, {"tool_name": "Bash", "tool_input": {"command": "grep -rn frob ."},
+                                                        "tool_response": "pkg/core.py:4:def frob():"})
+    assert call("apply_patch", patch) is None
+    assert state["edit_hold"]["complied"] is True and state["edits"] == 1
+    # Never a second hold, whatever was read.
+    other = {}
+    assert SweBenchIssueGate.pre_tool_use(other, conditions, {"tool_name": "apply_patch", "tool_input": {"command": patch},
+                                                              "cwd": str(repo)})
+    assert SweBenchIssueGate.pre_tool_use(other, conditions, {"tool_name": "apply_patch", "tool_input": {"command": patch},
+                                                              "cwd": str(repo)}) is None
+    assert other["edit_hold"]["complied"] is False and other["edit_hold"]["read_after"] == []
+
+
+def test_nothing_named_means_no_edit_hold(tmp_path):
+    repo, conditions = gate_world(tmp_path, targets=[])
+    state = {}
+    assert SweBenchIssueGate.pre_tool_use(state, conditions, {"tool_name": "Bash", "cwd": str(repo),
+                                                              "tool_input": {"command": "sed -i 's/1/2/' widget.py"}}) is None
+    assert "edit_hold" not in state and state["first_edit"]["unread"] == []
+
+
+def test_the_stop_hold_fires_once_after_an_edit_until_the_example_runs(tmp_path):
+    repo, conditions = gate_world(tmp_path, targets=[])
+    state = {}
+    tool = lambda command: SweBenchIssueGate.pre_tool_use(state, conditions, {
+        "tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo)})
+    stop = lambda: SweBenchIssueGate.stop(state, conditions, {"stop_hook_active": False})
+    assert stop() is None, "no edit: nothing to check"
+    tool("python -c 'from widget import widget; print(widget())'")  # before any edit: does not count
+    tool("sed -i 's/1/2/' widget.py")
+    assert stop() == ("Before you stop: the issue shows an example, and no command since your last edit has run it "
+                      "(it starts `print(widget())`). Run the issue's example now and check that its output is what "
+                      "the issue expects; if it is not, fix the code. Then stop.")
+    tool("python -c 'from widget import widget; print(widget())'")
+    assert stop() is None and state["stop_hold"]["complied"] is True
+    assert state["stops"][-1]["example_run_after_last_edit"] is True
+    tool("sed -i 's/2/3/' widget.py")
+    assert stop() is None, "never a second hold"
+    assert state["stops"][-1]["example_run_after_last_edit"] is False
+
+
+def test_no_example_means_no_stop_hold(tmp_path):
+    repo, conditions = gate_world(tmp_path, examples=[])
+    state = {"edits": 1, "last_edit": 3, "seq": 3}
+    assert SweBenchIssueGate.stop(state, conditions, {}) is None
+    assert state["stops"] == [{"seq": 3, "blocked": False, "example_run_after_last_edit": None}]
+
+
+def test_the_gate_process_blocks_with_exit_2_waits_for_its_conditions_and_never_blocks_on_its_own_fault(tmp_path):
+    repo, conditions = gate_world(tmp_path)
+    directory = tmp_path / "gate"
+    directory.mkdir()
+    gate = lambda event, payload: subprocess.run([sys.executable, str(SweBenchHooks.gate_source()), event, str(directory)],
+                                                 input=json.dumps(payload), capture_output=True, text=True)
+    edit = {"tool_name": "Bash", "tool_input": {"command": "sed -i 's/1/2/' widget.py"}, "cwd": str(repo)}
+    first = gate("pre-tool-use", edit)
+    assert first.returncode == 0, "no conditions yet (the refine arm's study step): never held"
+    (directory / "conditions.json").write_text(json.dumps(conditions))
+    held = gate("pre-tool-use", edit)
+    assert held.returncode == 2 and held.stderr.startswith("Not yet: read what the issue names")
+    (directory / "conditions.json").write_text(json.dumps(dict(conditions, targets=[{"id": "x", "kind": "broken"}])))
+    assert gate("pre-tool-use", dict(edit, tool_input={"command": "cat widget.py"})).returncode == 0
+    state = json.loads((directory / "state.json").read_text())
+    assert state["invocations"] == {"before_conditions": 1, "pre-tool-use": 2}
+    assert state["errors"] and "KeyError" in state["errors"][0]
+    assert gate("stop", "not json").returncode == 0
+
+
+def test_hooks_are_off_unless_asked_and_the_report_says_so(bench):
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    store = SweBenchRunStore("r1")
+    assert store.manifest()["hooks"] == [] and "hooks" not in store.state("acme__widget-1")
+    assert not (store.directory / "scratch" / "acme__widget-1" / "codex-home" / "config.toml").exists()
+    assert "Hooks               off: no rule was enforced in the session" in SweBenchReport.render(store)
+
+
+def test_the_issue_v1_hooks_hold_the_first_edit_and_the_first_stop_and_record_compliance(bench):
+    gated_dataset()
+    bench["docker"].modes = {"acme__widget-1": "gated"}
+    assert run(bench, instances=["acme__widget-1"], task_rules=["issue-v1"], hooks=["issue-v1"]) == 0
+    store = SweBenchRunStore("r1")
+    box = bench["docker"].removed[SweBenchInstanceRun.container_name("r1", "acme__widget-1")]
+    # Registered in the instance's CODEX_HOME before the first session, the gate mounted read-only.
+    config = (box["scratch"] / "codex-home" / "config.toml").read_text()
+    assert config == SweBenchHooks.config_text("/mightling-scratch/codex-home/config.toml", "/mightling-scratch/issue-gate")
+    assert f"{SweBenchHooks.gate_source()}:/opt/ling-issue-gate/issue_gate.py:ro" in box["args"]
+    assert box["edit_held"].startswith("Not yet: read what the issue names before your first edit. Still unread: widget.py")
+    assert "(it starts `print(widget())`)" in box["stop_held"]
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done"
+    hooks = state["hooks"]
+    assert hooks["sets"] == ["issue-v1"] and hooks["ran"] is True
+    assert hooks["conditions"]["targets"] == [{"label": "widget.py", "from": "prose"}]
+    assert hooks["conditions"]["examples"] == ["print(widget())"]
+    assert hooks["edit_hold"] == {"unread": ["widget.py"], "kind": "apply_patch", "complied": True,
+                                  "read_after": ["widget.py"]}
+    assert hooks["stop_hold"] == {"complied": True} and hooks["example_run_after_last_edit"] is True
+    assert hooks["first_edit"] == {"read": 0, "of": 1, "kind": "apply_patch"} and hooks["edits"] == 1
+    assert hooks["errors"] == []
+    manifest = store.manifest()
+    assert manifest["hooks"] == ["issue-v1"] and manifest["hooks_gate_sha256"] == SweBenchHooks.gate_digest()
+    SweBenchEvaluator.grade(store, bench["settings"])
+    text = SweBenchReport.render(store)
+    assert "Hooks               issue-v1: ran in 1 of 1 finished instance(s)" in text
+    assert ("  edit hold         held the first edit in 1: then read what it named 1, did not 0, edited no more 0; "
+            "1 issue(s) named something to read, 0 of 1 first edits came after reading all of it (0 of 1 items)") in text
+    assert ("  stop hold         held the first stop in 1: then ran the example 1, did not 0, stopped no more 0; "
+            "1 issue(s) showed an example, run after the last edit at the last stop in 1 of 1") in text
+
+
+def test_an_agent_that_ignores_the_holds_is_held_once_each_and_recorded_as_not_complying(bench):
+    gated_dataset()
+    bench["docker"].modes = {"acme__widget-1": "gated_ignores"}
+    assert run(bench, instances=["acme__widget-1"], hooks=["issue-v1"]) == 0
+    hooks = SweBenchRunStore("r1").state("acme__widget-1")["hooks"]
+    assert hooks["edit_hold"]["complied"] is False and hooks["stop_hold"] == {"complied": False}
+    assert hooks["example_run_after_last_edit"] is False
+    assert SweBenchRunStore("r1").state("acme__widget-1")["status"] == "done"
+
+
+def test_hooks_that_never_ran_are_named_and_the_comparison_says_it_proves_nothing(bench):
+    gated_dataset()
+    run(bench, name="plain", instances=["acme__widget-1"], task_rules=["issue-v1"])
+    run(bench, name="hooked", instances=["acme__widget-1"], task_rules=["issue-v1"], hooks=["issue-v1"])
+    for name in ("plain", "hooked"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.render(SweBenchRunStore("hooked"))
+    assert "Hooks               issue-v1: ran in 0 of 1 finished instance(s)" in text
+    assert "never ran in 1 (acme__widget-1)" in text
+    against = SweBenchReport.against(SweBenchRunStore("hooked"), SweBenchRunStore("plain"))
+    assert "  differs: hooks: ['issue-v1'] | []" in against
+    assert "In hooked the hooks never ran: this comparison says nothing about them." in against
+    assert any(line.startswith("hooks") and line.split()[1:] == ["issue-v1", "none"] for line in against.splitlines())
+
+
+def test_a_manifest_from_before_hooks_counts_as_none(bench):
+    run(bench, name="a", instances=["acme__widget-1"])
+    run(bench, name="b", instances=["acme__widget-1"], hooks=["issue-v1"])
+    path = SweBenchRunStore("a").manifest_path
+    manifest = json.loads(path.read_text())
+    del manifest["hooks"]
+    path.write_text(json.dumps(manifest))
+    for name in "ab":
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    assert "differs: hooks: [] | ['issue-v1']" in SweBenchReport.against(SweBenchRunStore("a"), SweBenchRunStore("b"))
+    assert "Hooks               off" in SweBenchReport.render(SweBenchRunStore("a"))
+
+
+def test_in_the_refine_arm_the_study_step_runs_before_the_conditions_exist(bench):
+    gated_dataset()
+    assert run(bench, instances=["acme__widget-1"], refine=True, hooks=["issue-v1"]) == 0
+    box = bench["docker"].removed[SweBenchInstanceRun.container_name("r1", "acme__widget-1")]
+    assert box["conditions_during_study"] is False
+    assert (box["scratch"] / "issue-gate" / "conditions.json").exists()
+
+
+def test_a_resumed_run_keeps_its_hooks_and_an_unknown_set_is_refused(bench, capsys):
+    assert run(bench, instances=["acme__widget-1"], hooks=["everything"]) == 1
+    assert "--hooks takes: issue-v1 (not everything)" in capsys.readouterr().out
+    assert not SweBenchRunStore("r1").manifest_path.exists()
+    gated_dataset()
+    run(bench, instances=["acme__widget-1"], hooks=["issue-v1"])
+    store = SweBenchRunStore("r1")
+    manifest = store.manifest()
+    manifest["instances"].append("acme__widget-2")
+    manifest["images"]["acme__widget-2"] = {"image": f"{REPOSITORY}:acme-widget-2", "digest": "d"}
+    store.manifest_path.write_text(json.dumps(manifest))
+    assert run(bench) == 0  # no --hooks on the resume
+    assert store.state("acme__widget-2")["hooks"]["sets"] == ["issue-v1"]
+    assert (store.directory / "scratch" / "acme__widget-2" / "codex-home" / "config.toml").exists()
+
+
+def test_the_hooks_option_reaches_the_runner(monkeypatch):
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(
+        ["swe-bench", "run", "--task-rules", "issue-v1", "--hooks", "issue-v1", "--name", "x"])) == 0
+    assert seen["hooks"] == ["issue-v1"] and seen["task_rules"] == ["issue-v1"]
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["hooks"] is None

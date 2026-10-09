@@ -3,20 +3,50 @@
 // `out/Mightling-linux-<arch>/`; `make` wraps that in a `.deb` (and a zip). The fuses are flipped on
 // the packaged binary. `ling` and `codex-code-mode-host` ride along as extra resources, copied into
 // `resources/` by `ling-admin desktop build` before `make` runs.
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
-// @electron/fuses 2 (Forge 7's own fuses plugin pins the 1.x line, which has no WasmTrapHandlers
-// fuse), flipped on the packaged binary in the postPackage hook below.
+// @electron/fuses 2 (Forge 7's own fuses plugin pinned the 1.x line, which has no WasmTrapHandlers
+// fuse; Forge 8's takes 2.x, but the hook also removes chrome-sandbox and re-signs on a Mac), flipped
+// on the packaged binary in the postPackage hook below.
 const { FuseV1Options, FuseVersion, flipFuses } = require("@electron/fuses");
 
 const app = require("./app.json");
+const { MakerDebOwnRelations } = require("./linux/deb-maker");
 const pkg = require("./package.json");
 
 const resources = path.join(__dirname, "resources");
 const extraResource = ["ling", "codex-code-mode-host", "rg"]
   .map((name) => path.join(resources, name))
   .filter((file) => fs.existsSync(file));
+
+// What `Mightling --version` prints for the bundled `ling` (src/version.ts, LING_VERSION_FILE):
+// `ling --version`'s first line, read once here, at build time, so the app never runs `ling` to
+// answer it. Run with a scratch HOME and CODEX_HOME, so it creates or migrates no real home folder.
+// A bundled `ling` whose version cannot be read stops the build.
+function stampLingVersion(packagerConfig) {
+  const ling = path.join(resources, "ling");
+  const stamp = path.join(resources, "ling.version");
+  fs.rmSync(stamp, { force: true });
+  if (!fs.existsSync(ling)) return;
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "mightling-ling-version-"));
+  try {
+    const output = execFileSync(ling, ["--version"], {
+      env: { ...process.env, HOME: scratch, CODEX_HOME: scratch },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+    });
+    const line = output.split("\n")[0].trim();
+    if (!line) throw new Error(`${ling} --version printed nothing`);
+    fs.writeFileSync(stamp, `${line}\n`);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+  packagerConfig.extraResource = [...(packagerConfig.extraResource || []).filter((file) => file !== stamp), stamp];
+}
 
 // The Mac preview (§10): the packager wants an `.icns`, which `generateAssets` below makes from
 // icons/icon.png with the system's own `sips` and `iconutil`, into the git-ignored `resources/`
@@ -51,52 +81,55 @@ module.exports = {
   },
   rebuildConfig: {},
   makers: [
-    {
-      name: "@electron-forge/maker-deb",
-      config: {
-        options: {
-          name: app.packageName,
-          productName: app.productName,
-          genericName: "AI assistant",
-          description: "Private AI on your GB10: a coding agent and a chat assistant, nothing leaves your machine.",
-          productDescription:
-            "Mightling's desktop app. Chat is the local web UI in a window of its own; Work drives the coding agent, ling, which is bundled inside the app.",
-          bin: app.executable,
-          icon: path.join(__dirname, "icons", "icon.png"),
-          categories: ["Utility", "Development"],
-          mimeType: [`x-scheme-handler/${app.scheme}`],
-          section: "devel",
-          priority: "optional",
-          homepage: "https://github.com/dreamference/mightling",
-          maintainer: "Dreamference <dgxcoder@dreamference.ai>",
-          scripts: {
-            postinst: path.join(__dirname, "linux", "postinst"),
-            prerm: path.join(__dirname, "linux", "prerm"),
-          },
-          // Chromium's own dependencies (electron-installer-debian's defaults) plus the sound server
-          // the microphone and notification sounds use. None of the Codex app's extras (its TPM and
-          // USB libraries).
-          depends: [
-            "libgtk-3-0 | libgtk-3-0t64",
-            "libnotify4",
-            "libnss3",
-            "libxss1",
-            "libxtst6",
-            "xdg-utils",
-            "libatspi2.0-0 | libatspi2.0-0t64",
-            "libdrm2",
-            "libgbm1",
-            "libxcb-dri3-0",
-            "libasound2t64 | libasound2",
-            "libxkbcommon0",
-            "mesa-vulkan-drivers | vulkan-icd",
-          ],
-          // The Tauri-era package names, so an upgrade replaces them.
-          conflicts: ["puffin", "mightling-app"],
-          replaces: ["puffin", "mightling-app"],
+    // Forge's maker-deb, declaring only the relationships listed here (linux/deb-maker.js).
+    new MakerDebOwnRelations({
+      options: {
+        name: app.packageName,
+        productName: app.productName,
+        genericName: "AI assistant",
+        description: "Private AI on your GB10: a coding agent and a chat assistant, nothing leaves your machine.",
+        productDescription:
+          "Mightling's desktop app: Ask (questions with no project) and Work (the coding agent on your projects) in one window, on ling, which is bundled inside the app.",
+        bin: app.executable,
+        icon: path.join(__dirname, "icons", "icon.png"),
+        categories: ["Utility", "Development"],
+        mimeType: [`x-scheme-handler/${app.scheme}`],
+        section: "devel",
+        priority: "optional",
+        homepage: "https://github.com/dreamference/mightling",
+        maintainer: "Dreamference <dgxcoder@dreamference.ai>",
+        scripts: {
+          postinst: path.join(__dirname, "linux", "postinst"),
+          prerm: path.join(__dirname, "linux", "prerm"),
         },
+        // The whole Depends line: nothing is added to it (linux/deb-maker.js), and there is no
+        // Recommends or Suggests. Chromium's own libraries (electron-installer-debian's list for
+        // this Electron, each with its 64-bit-time name where Ubuntu 24.04 renamed it), then the
+        // sound library, xkbcommon and Vulkan. Left out of the installer's list: libsecret-1-0,
+        // which Chromium only dlopens to keep the cookie key in the desktop keyring and does
+        // without (the app stores no credential), and the trash helpers (it trashes nothing).
+        // None of the Codex app's extras (its TPM and USB libraries).
+        depends: [
+          "libgtk-3-0 | libgtk-3-0t64",
+          "libnotify4",
+          "libnss3",
+          "libxss1",
+          "libxtst6",
+          "xdg-utils",
+          "libatspi2.0-0 | libatspi2.0-0t64",
+          "libdrm2",
+          "libgbm1",
+          "libxcb-dri3-0",
+          "libasound2t64 | libasound2",
+          "libxkbcommon0",
+          "mesa-vulkan-drivers | vulkan-icd",
+        ],
+        // The Tauri-era package names, so an upgrade replaces them (written into the control
+        // file by linux/deb-maker.js: electron-installer-debian's template has neither field).
+        conflicts: ["puffin", "mightling-app"],
+        replaces: ["puffin", "mightling-app"],
       },
-    },
+    }),
     { name: "@electron-forge/maker-zip", platforms: ["linux", "darwin", "win32"] },
   ],
   plugins: [
@@ -130,9 +163,11 @@ module.exports = {
       execFileSync("iconutil", ["-c", "icns", iconset, "-o", path.join(resources, "icon.icns")]);
       fs.rmSync(iconset, { recursive: true, force: true });
     },
-    // The version the release stamps (`MIGHTLING_VERSION`), else the package's.
+    // The version the release stamps (`MIGHTLING_VERSION`), else the package's; and the bundled
+    // `ling`'s, for `--version` (stampLingVersion above).
     prePackage: async (forgeConfig) => {
       forgeConfig.packagerConfig.appVersion = process.env.MIGHTLING_VERSION || pkg.version;
+      stampLingVersion(forgeConfig.packagerConfig);
     },
     // The Codex app's fuse settings (§3, decision 6): the binary cannot be run as Node, takes no
     // NODE_OPTIONS or --inspect, loads only its own (integrity-checked) asar, and encrypts cookies.
