@@ -1,6 +1,6 @@
 # Dependency audit, October 2026
 
-**Status:** audit of `main` at `47d5328` (2026-10-09), fixes on branch `security/dep-audit`.
+**Status:** audit of `main` at `47d5328` (2026-10-09), fixes merged into `main` (2026-10-09).
 Every lockfile and dependency declaration in the repository was checked against the public
 advisory databases. What could be fixed without a breaking change was fixed here; the rest is
 listed with the reason it was left. The `ling-engine` submodule is out of scope.
