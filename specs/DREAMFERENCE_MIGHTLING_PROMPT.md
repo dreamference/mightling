@@ -521,3 +521,8 @@ Say what was wrong, which files you changed, and how you verified it (the comman
 | sympy-13798 | 0 / 1 | 0 | `printing/latex.py` | the same |
 | sympy-13877 | 0 / 1 | 0 | `matrices/matrices.py`, `utilities/randtest.py` | `core/exprtools.py` (timed out) |
 | sympy-17318 | 0 / 1 | 0 | `simplify/radsimp.py`, `simplify/sqrtdenest.py` | `radsimp.py`, a test file, `probe.txt` |
+
+## 14. A third built-in prompt, `ask` (2026-10-07)
+
+`ling prompt list` now shows three built-in prompts: `default`, `high-swe` and **`ask`** (`ling-rs/prompts/ask.md`, all three blocks: web, email, code), written for questions and research in a scratch folder with cited sources. It is what the web UI's Ask threads use: the UI asks for it by name and `ling web`'s bridge policy sets it from `ling prompt show ask --composed` ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §3.2). It is chosen like any other (`ling prompt use ask`, `DREAMFERENCE_MIGHTLING_PROMPT=ask`). Refine mode's two texts are in `ling-rs/prompts/refine.md` but are not a named prompt: `refine.rs` composes them around the task ([MIGHTLING_REFINE](./DREAMFERENCE_MIGHTLING_REFINE.md)).
+
