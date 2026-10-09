@@ -247,6 +247,8 @@ Unchanged in kind: the catalog and `config.toml` in `$CODEX_HOME`, with the prov
 
 ## 7. `ling-app` on a client
 
+> **Superseded on 2026-10-07 and 2026-10-08.** This section describes the Tauri `ling-app`, which the Electron app replaced ([MIGHTLING_DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md)); `desktop/src-tauri/`, its forwarder and its copy of the node locator no longer exist. The Electron app reaches no web UI on the node: its Ask window is `ling web` on the same machine (port 3100) and its Work window `ling app-server`, both started from the bundled `ling`, whose launcher resolves the node's model server (§6.1). The node's advertisement names `ling web`'s port 3100 since 2026-10-08. Kept as the record of the Tauri design.
+
 Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/src-tauri/tauri.conf.json` and `ONYX_WEB_URL` in `ling-rs/src/app.rs`.
 
 **Chosen design: a loopback forwarder inside the app.** On a machine that is not a node, `ling-app` resolves the node (§6.1, with its own browse), binds `127.0.0.1:3000` and forwards every request, streamed response and WebSocket upgrade to `<address>:<web_port>`. The window keeps loading `http://localhost:3000/app`.
