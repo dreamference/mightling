@@ -16,7 +16,12 @@
 # that has this change; `start` creates it as a detached worktree when it is missing. Never point
 # it at the local `main` branch, which is old history.
 set -u
-REPO=/home/user/mightling
+# The main checkout (the one holding .venv and .claude/worktrees), found from this script's own
+# location: through git's common directory when the script runs from a worktree of it, else the
+# folder above scripts/.
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+COMMON=$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+REPO=${REPO:-$( [ -n "$COMMON" ] && cd "$COMMON/.." && pwd || echo "$HERE")}
 WT=${WT:-$REPO/.claude/worktrees/swe-night1}
 PY=${PY:-$REPO/.venv/bin/python}
 LIST=${LIST:-$HOME/.cache/dreamference/swe-bench/fresh-50.txt}

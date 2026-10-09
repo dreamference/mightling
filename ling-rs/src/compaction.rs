@@ -481,16 +481,18 @@ mod tests {
         assert_eq!(with_limit(args(&["ling", "-c", "x=1"]), Some(1), "").len(), 5);
     }
 
-    /// The hook and hash below are the ones a live session accepted on 2026-10-02: defined in a
-    /// `config.toml` exactly like this, the hook ran after a compaction with no
-    /// `--dangerously-bypass-hook-trust`. If Codex changes how it hashes a hook, this is where to
-    /// find out; re-run that check before changing the expected value. The path is the one recorded
-    /// that day, before the product was renamed, so it keeps the old binary name.
+    /// The hook below is the one a live session accepted on 2026-10-02: defined in a `config.toml`
+    /// exactly like this, the hook ran after a compaction with no `--dangerously-bypass-hook-trust`.
+    /// The path keeps that day's binary name (before the product was renamed) but not its home
+    /// folder, which is neutral here; the expected value was then taken from Codex's own
+    /// `hook_hash` (codex-rs/hooks, rust-v0.158.0) for this path, which also reproduced the hash the
+    /// live session recorded for the original one. If Codex changes how it hashes a hook, this is
+    /// where to find out; re-check against Codex before changing the expected value.
     #[test]
     fn the_trust_hash_is_the_one_codex_computes() {
         assert_eq!(
             hook_hash("/home/user/.cache/dreamference/compaction-phase0/ledger-bin/target/release/puffin-ledger"),
-            "sha256:5cee02e5271aa2540559a85813a274411fdf53a822a6b933805d44325e4fbb76"
+            "sha256:1b64b41e805a60f826cec5251cf954562100119e9235cdddd20580387d4ff2d7"
         );
     }
 

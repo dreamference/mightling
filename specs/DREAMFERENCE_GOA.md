@@ -1,6 +1,6 @@
 # Mightling — Google Auth via GOA Client
 
-**Status:** partly implemented (Gmail only) · **Owner:** Owner · **Scope:** Gmail + Drive connectors, single-user and multi-account
+**Status:** partly implemented (Gmail only) · **Owner:** dgxcoder · **Scope:** Gmail + Drive connectors, single-user and multi-account
 
 ## 0. As built (checked against `dreamference/chat/gmail_search_service.py`, 2026-09-29)
 
