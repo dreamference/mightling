@@ -23,16 +23,16 @@ def test_there_is_no_python_mightling_entry_point():
     assert "ling=" not in open("setup.py").read()
 
 
-def test_chat_is_the_web_chat_group_not_the_agent(capsys):
+def test_chat_is_the_retired_web_chat_not_the_agent(capsys):
     # `ling` is the terminal agent; the `chat` that started it was retired with the Python
-    # launcher. Since the rename `chat` names the web chat's group (it was `puffin-admin puffin`), so
-    # on its own it prints that group's help and starts nothing.
+    # launcher. Since the rename `chat` named the web chat's group (it was `puffin-admin puffin`),
+    # and since that web chat's retirement it only says so and starts nothing.
     import pytest
 
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["chat"])
-    assert exit_info.value.code == 1
-    assert "usage: ling-admin chat" in capsys.readouterr().out
+    assert exit_info.value.code == 2
+    assert "retired" in capsys.readouterr().out
 
 
 def test_unknown_arguments_are_rejected(capsys):
@@ -49,12 +49,24 @@ def test_a_command_group_without_a_subcommand_prints_its_help(capsys):
     import pytest
 
     # `diffusion-model` is absent while diffusion is switched off (tests/test_diffusion_switched_off.py).
-    for group in ("server", "clear", "model", "main-model", "desktop", "chat", "onyx"):
+    for group in ("server", "clear", "model", "main-model", "desktop", "images", "voice"):
         with pytest.raises(SystemExit) as exit_info:
             DreamferenceCLIController.run_cli([group])
         assert exit_info.value.code == 1, group
-        name = "chat" if group == "onyx" else group  # the alias prints the command's own name
-        assert f"usage: ling-admin {name}" in capsys.readouterr().out, group
+        assert f"usage: ling-admin {group}" in capsys.readouterr().out, group
+
+
+def test_the_retired_web_chat_commands_say_where_their_job_went(capsys):
+    # The Onyx web chat is retired (specs/DREAMFERENCE_MIGHTLING_ASK.md §10): every former
+    # subcommand, flags included, answers with its replacements instead of argparse's error.
+    import pytest
+
+    for argv in (["chat"], ["onyx"], ["chat", "start", "--no-wait"], ["chat", "configure", "--no-web"], ["onyx", "password"]):
+        with pytest.raises(SystemExit) as exit_info:
+            DreamferenceCLIController.run_cli(argv)
+        assert exit_info.value.code == 2, argv
+        out = capsys.readouterr().out
+        assert "retired" in out and "ling web" in out and "ling-admin chat remove" in out, argv
 
 
 def test_model_list_runs(capsys):

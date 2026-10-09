@@ -63,7 +63,7 @@
   --line-strong: #d4d4d4;
   --hover: rgba(0, 0, 0, 0.045);
   --selected: rgba(0, 0, 0, 0.075);
-  --accent: #0abab5; /* TIFFANY_BLUE, dreamference/chat/onyx_brand_assets.py */
+  --accent: #0abab5; /* Tiffany Blue, the mark's colour (desktop/electron/icons) */
   --accent-soft: #e8f7f6;
   --on-accent: #ffffff;
   --focus-ring: rgba(10, 186, 181, 0.28);

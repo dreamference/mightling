@@ -40,7 +40,7 @@ pub struct Live;
 impl Backend for Live {
     fn get(&self, path: &str) -> Result<(u16, String), String> {
         let secret = secret().ok_or_else(|| {
-            "Google has not been set up on this machine: connect an account with /apps or in the web UI's Settings.".to_string()
+            "Google has not been set up on this machine: connect an account with /apps.".to_string()
         })?;
         http::get(SERVICE_ADDR, path, Some(&secret), CALL_TIMEOUT)
     }

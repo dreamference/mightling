@@ -7,9 +7,9 @@ answers `/status`, the connect pages and the read-only Gmail, Drive and Calendar
 `127.0.0.1:8767`. Until Mightling's apps it was created only by `ling-admin chat configure`, so a
 node without the web UI had none and `/apps` could not connect anything. It is now created here
 too, on the sidecar network (never Docker's default bridge, DOCKER §6), and started by default on a
-node by `server start` when it is absent. `configure` still creates its own on Onyx's network,
-which publishes the same loopback port, so either one serves `/apps`. The shared secret both use is
-this module's (`GoogleService.secret`), not the web UI's.
+node by `server start` when it is absent. One the retired Onyx web chat's `configure` created on
+its network publishes the same loopback port and is adopted as it is. The shared secret is this
+module's (`GoogleService.secret`).
 
 Nothing here prints: a failure is kept in `GoogleService.problem` for the CLI to say.
 """
@@ -164,7 +164,7 @@ class GoogleService:
     def start(cls) -> bool:
         """Makes the service run.
 
-        One that exists (the web UI's included) is restaged and started, not replaced; otherwise
+        One that exists (the retired web chat's included) is restaged and started, not replaced; otherwise
         one is created on the sidecar network. Restaged files take effect at its next restart.
 
         Returns:

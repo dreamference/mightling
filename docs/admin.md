@@ -1,6 +1,6 @@
 # `ling-admin` reference
 
-`ling-admin` runs everything around the agent: the model server, the web chat, the desktop app,
+`ling-admin` runs everything around the agent: the model server, the sidecars (search, images, voice, Google), the desktop app,
 models, and the mail commands the agent calls (`gmail`). The agent itself is `ling`, and its web
 commands are programs of their own, `ling-search` and `ling-fetch`; see [Terminal agent](ling.md).
 
@@ -91,7 +91,6 @@ Set the main model.
 | Option | Description |
 |---|---|
 | `model_name` | Name of the model to set as main. |
-| `--no-onyx` | Skip re-registering the model with a running Onyx deployment. |
 
 #### `ling-admin main-model inspect`
 
@@ -584,68 +583,15 @@ Run vLLM serve benchmark using Sonnet dataset.
 
 ### `ling-admin chat`
 
-Manage the Mightling web chat UI (Onyx Lite) backed by local vLLM.
+The retired Onyx web chat: remove what an older install left (`ling web` replaces it).
 
 Alias: `onyx`.
 
-#### `ling-admin chat start`
-
-Deploy (or restart) Onyx Lite and wait until it is healthy.
-
 | Option | Description |
 |---|---|
-| `--no-wait` | Return as soon as containers start. |
-
-#### `ling-admin chat configure`
-
-Point Onyx at the local vLLM model as its default provider.
-
-| Option | Description |
-|---|---|
-| `--email` | Your own admin e-mail (registered if no account exists); default: a generated account. |
-| `--password` | Your own admin password, with --email; stored in ~/.config/dreamference/chat-admin.json. |
-| `--no-web` | Skip registering SearXNG as Onyx's web search provider. |
-| `--no-brand` | Skip rebranding the deployment as Mightling. |
-| `--no-voice` | Skip the local Whisper server and the microphone button. |
-| `--no-gmail` | Skip the Gmail service and its search tool. |
-| `--no-image-search` | Skip the image search sidecar and its tool. |
-
-#### `ling-admin chat google-auth`
-
-Add Google sign-in to the login page, keeping username/password.
-
-| Option | Description |
-|---|---|
-| `--client-id` | Google OAuth client ID. |
-| `--client-secret` | Google OAuth client secret. |
-
-#### `ling-admin chat gmail`
-
-Connect Gmail and give the assistant a mailbox search tool.
-
-#### `ling-admin chat status`
-
-Show Onyx version, containers and health.
-
-#### `ling-admin chat password`
-
-Show the web chat's admin e-mail and generated password.
-
-#### `ling-admin chat logs`
-
-Show Onyx container logs.
-
-| Option | Description |
-|---|---|
-| `--follow`, `-f` | Stream new log lines. |
-
-#### `ling-admin chat stop`
-
-Stop the Onyx containers, keeping their data.
-
-#### `ling-admin chat uninstall`
-
-Permanently delete the Onyx deployment and all its data.
+| `chat_command` | remove: stop and remove its containers, then (asked again) its data; status: show what is left. |
+| `--yes` | Remove the containers without asking. |
+| `--delete-data` | Also delete its volumes (saved chats, accounts), images and leftover sidecars without asking. |
 
 ### `ling-admin desktop`
 
@@ -721,7 +667,7 @@ Manage the local Google service (Gmail, Drive, Calendar).
 
 #### `ling-admin google start`
 
-Start the Google service on 127.0.0.1:8767 (adopts the web UI's if it exists).
+Start the Google service on 127.0.0.1:8767 (adopts an existing container).
 
 #### `ling-admin google stop`
 

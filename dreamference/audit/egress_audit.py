@@ -68,7 +68,7 @@ SESSION_NAMES: Final[Dict[str, str]] = {
 # hidden on Ask, the app-server it owns is started (and traced with it), and it quits by itself
 # after that many seconds. Its allowlist is the `exec` session's: since 2026-10-09 the app opens
 # no window on `ling web` (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6), so a connection to that
-# server's port 3100, like one to the Onyx web UI's 3000, is a finding.
+# server's port 3100, like one to the retired Onyx web UI's 3000, is a finding.
 APP_SESSION_S: Final[int] = 40
 
 # Mightling over Signal (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §10): the one component that talks to
