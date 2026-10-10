@@ -23,12 +23,12 @@ CAVEATS: Final[str] = (
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
-    "parallelism", "harness", "repository_commit", "review_turn", "hooks",
+    "parallelism", "harness", "repository_commit", "review_turn", "hooks", "restart_after_compactions",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
                                "refine_version": "v1",
-                               "task_rules": [], "review_turn": False, "hooks": []}
+                               "task_rules": [], "review_turn": False, "hooks": [], "restart_after_compactions": 0}
 
 
 class SweBenchReport:
@@ -87,6 +87,7 @@ class SweBenchReport:
             "refine": cls.refine_summary(store, manifest, states, finished & set(instances)),
             "nudges_fired": cls.nudge_counts(states, finished & set(instances)),
             "review": cls.review_summary(store, manifest, states, finished & set(instances)),
+            "restart": cls.restart_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
         }
@@ -193,6 +194,39 @@ class SweBenchReport:
             "seconds": [int(record.get("seconds") or 0) for record in ran.values()],
             "tokens": tokens,
         }
+
+    @classmethod
+    def restart_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Optional[Dict[str, Any]]:
+        """
+        The restart arm's measures (spec §21): which finished instances restarted, after how many
+        compactions and how far into the task, so two reports give the survey's measure (resolved
+        among restarted tasks against the same tasks in the record arm).
+
+        Returns:
+            Optional[Dict[str, Any]]: None for a run without the arm.
+        """
+        after = int(manifest.get("restart_after_compactions") or 0)
+        if not after:
+            return None
+        records = {i: (states.get(i) or {}).get("restart") for i in finished}
+        restarted = {i: record for i, record in records.items() if record}
+        return {"after": after, "instances": len(records), "restarted": sorted(restarted),
+                "compactions": [int(r.get("compactions") or 0) for r in restarted.values()],
+                "after_s": [int(r.get("after_s") or 0) for r in restarted.values()],
+                "diff_bytes": [int(r.get("diff_bytes") or 0) for r in restarted.values()]}
+
+    @classmethod
+    def restart_line(cls, restart: Optional[Dict[str, Any]]) -> str:
+        """One line: whether the restart arm was on and which instances restarted."""
+        if restart is None:
+            return "Restart             off: a session compacts as often as it needs"
+        if not restart["restarted"]:
+            return (f"Restart             after {restart['after']} compaction(s): none of {restart['instances']} "
+                    "finished instance(s) reached it")
+        return (f"Restart             after {restart['after']} compaction(s): {len(restart['restarted'])} of "
+                f"{restart['instances']} restarted, median {cls.duration(statistics.median(restart['after_s']))} "
+                f"into the task, {sum(1 for b in restart['diff_bytes'] if b)} with a diff to hand over: "
+                + ", ".join(restart["restarted"]))
 
     @classmethod
     def review_line(cls, review: Optional[Dict[str, Any]]) -> str:
@@ -330,6 +364,7 @@ class SweBenchReport:
         if manifest.get("task_rules"):
             lines.append(f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)")
         lines.append(cls.review_line(summary["review"]))
+        lines.append(cls.restart_line(summary["restart"]))
         lines += cls.hooks_lines(summary["hooks"])
         not_run = validated - summary["finished"]
         not_graded = summary["finished"] - summary["graded"]

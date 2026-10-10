@@ -209,6 +209,8 @@ This is the "own output contradicted it" pattern (9 of 32) at the moment it happ
 - **First, a replay count:** how many runs in night 1 cross each trigger, failed against resolved.
 - **Then an arm:** `--restart-after-compactions 3`. Measures: restarts, and resolved among restarted tasks against the same tasks in the record arm.
 
+**Built (2026-10-10, branch `bench/restart-after-compactions`, [MIGHTLING_SWE_BENCH §21](../DREAMFERENCE_MIGHTLING_SWE_BENCH.md)):** the arm as `--restart-after-compactions N`, counting the fix session's compactions from its rollouts, with the diff handed over as a file (not applied) and one fresh session; the ledger as notes is v2. "Instead of a third compaction" is `N = 2`. The replay count comes first, from night 1's run directory (`scripts/context_budget_replay.py compactions`).
+
 ### 3.8 Mark misaligned tasks in the lists (new; harness, the U class)
 
 **Evidence.** PAIChecker (2607.28587) read all 500 Verified instances. 13.6% have a PR that does not match the issue (five patterns, eleven scenarios), and 41.2% of the instances no leaderboard agent resolves are misaligned. 2605.12270's failure taxonomy (abstract read) adds that harnesses sometimes misjudge correct patches.

@@ -95,6 +95,10 @@ class SweBenchCommand:
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
         run.add_argument("--label", default=None,
                          help="What the model gate's refusal calls this run, e.g. \"night 1\" (default: SWE-bench run <name>)")
+        run.add_argument("--restart-after-compactions", type=int, default=0, metavar="N",
+                         help="Once the fix session's N-th compaction is recorded, stop it and start one fresh session "
+                              "with the task and the stopped session's diff as a file it may apply or discard; "
+                              "the tree is reset first, the time limit is not (default 0: never)")
         run.add_argument("--review-turn", action="store_true",
                          help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
                               "read its diff, run the tests of the modules it changed and fix what does not hold, "
@@ -150,7 +154,7 @@ class SweBenchCommand:
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
                 task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn,
                 refine_version=args.refine_version or "v1",
-                hooks=cls._ids(args.hooks))
+                hooks=cls._ids(args.hooks), restart_after_compactions=args.restart_after_compactions)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":
