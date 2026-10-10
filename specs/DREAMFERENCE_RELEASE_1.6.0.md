@@ -189,6 +189,12 @@ gate container in front of the engine on the public port. While a SWE-bench run 
 request that is not the run's is answered 503, naming the run and its time left, instead of slowing
 it down; `ling-admin night pause [--for 2h]` lets you through meanwhile. With no run, nothing changes.
 
+**Code Mode is on, and on this server it changes nothing yet.** `ling` offers the model Code Mode's `exec` tool
+(a program that calls several tools in one turn) beside the ordinary tools. The model server renders only
+ordinary function tools into the prompt, so the model never sees `exec` and works through the ordinary tools,
+as it did in 1.5.1 (measured on 2026-10-10: eleven turns, no call to `exec`). Nothing breaks, nothing to
+configure; Code Mode becomes real when a server passes custom tools through, which ling-engine now does.
+
 **Paired nodes are found again after the rename, and always where they are now.** A node paired under Puffin
 "did not answer over the pairing" after the switch to Mightling: its host key was stored under the old alias.
 The one-time migration now moves it. And no connection to a paired node uses its remembered address any
