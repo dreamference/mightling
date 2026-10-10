@@ -82,6 +82,9 @@ def machine(monkeypatch):
                         classmethod(lambda cls, method, url, body=None, token=None: fake.request(method, url, body, token)))
     monkeypatch.setattr("dreamference.node.node_identity.NodeIdentity.read", classmethod(lambda cls: "node-1"))
     monkeypatch.setattr(mh.time, "sleep", lambda seconds: None)
+    # The sidecar network is ensured with docker calls of its own (not `_run`): on a machine that has
+    # the network it is a read, on CI it is `docker network create`, which conftest refuses (2026-10-10).
+    monkeypatch.setattr("dreamference.chat.sidecar_network.SidecarNetwork.ensure", classmethod(lambda cls: True))
     return fake
 
 
