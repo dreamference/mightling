@@ -18,6 +18,14 @@ another stream's lines.
 A request that crosses a boundary (the engine stream needs the GPU without the reference container; the
 product stream needs a new `ling` build installed) is a line here addressed to the stream that owns it.
 
+## Decisions pending
+
+Tick one box on the forge, or run `crew answer <id> <option>`; the next board write records the choice as a `decision:` note.
+
+- d1 · 2026-10-10 17:06 · crew: Where does the mightling crew's board live from here on? (spec §11.1)
+  - [ ] stay in mightling docs/dev/sessions.md (recommended)
+  - [ ] move to the mighty-crew repository
+
 ## Status
 
 - 2026-10-10 15:00 operations: night 1 running since 09:49 (default arm 34/50); night 2 (44 tasks) chains when it writes `done`; 1.6.0 prepared on `release/1.6.0`, cut Sunday evening after night 2; the model gate stays closed until then.
