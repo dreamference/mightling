@@ -857,3 +857,13 @@ def test_the_preview_page_reaches_for_the_internet_every_way_and_records_its_own
             assert b"egress audit's preview page" in answer.read()
         urllib.request.urlopen(page.url + "seen", timeout=5).read()
         assert page.loaded()
+
+def test_remote_access_is_named_with_its_box(monkeypatch, tmp_path):
+    from dreamference.remote import RemoteSettings
+    _chat_files(monkeypatch, tmp_path, {})
+    calls = _fake_units(monkeypatch, {"mightling-remote-tunnel.service"})
+    RemoteSettings.write({"dns_name": "relay.example.org", "overlay_name": "mightling-x.netbird.selfhosted"})
+    lines = EgressAudit.declared_exceptions()
+    assert len(lines) == 1 and lines[0].startswith("Remote access enabled") and "relay.example.org" in lines[0]
+    assert "`ling-admin remote remove`" in lines[0]
+    assert ["systemctl", "--user", "is-enabled", "--quiet", "mightling-remote-tunnel.service"] in calls
