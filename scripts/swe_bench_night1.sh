@@ -14,6 +14,10 @@
 #   scripts/swe_bench_night1.sh start   checks, then runs `run` as the user unit ling-swe-night1
 #   scripts/swe_bench_night1.sh run     the night itself (what the unit runs)
 #
+# The nights run on this machine alone (`nodes = "none"`, the owner's decision of 2026-10-10): a paired
+# node's model server would join one arm as a lane with its own draft-token setting and image, and the
+# second machine belongs to the engine's work over the weekend.
+#
 # Before `start`: the 100-task benchmark (unit puffin-swe-im100-refine) has finished, and the list
 # exists (scripts/swe_bench_fresh.py validate, then draw). WT must be a checkout of origin/main
 # that has this change; `start` creates it as a detached worktree when it is missing. Never point
@@ -92,7 +96,7 @@ start() {
         mv "$D" "$aside" && echo "ℹ️  Previous night moved to $aside"
     fi
     mkdir -p "$D"
-    { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\n' "$RESERVE_GB"; } \
+    { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\nnodes = "none"\n' "$RESERVE_GB"; } \
         > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: default against test discipline (tests-v2) on fresh tasks" \
