@@ -49,13 +49,29 @@ start() {
     if systemctl --user is-active --quiet "$UNIT"; then
         echo "❌ $UNIT is already running."; exit 1
     fi
+    # The worktree is what the unit runs (this script included), so it is moved to origin/main
+    # every start: a stale worktree would run last night's script with none of today's fixes.
+    git -C "$REPO" fetch origin || exit 1
     if [ ! -d "$WT" ]; then
-        git -C "$REPO" fetch origin || exit 1
         git -C "$REPO" worktree add --detach "$WT" origin/main || exit 1
+    elif [ -z "$(git -C "$WT" status --porcelain)" ]; then
+        git -C "$WT" checkout --quiet --detach origin/main || exit 1
+    else
+        echo "❌ $WT has local changes; commit or discard them so the night runs origin/main."; exit 1
     fi
     if ! grep -q -- '"tests-v2"' "$WT/dreamference/swe_bench/swe_bench_instance_run.py"; then
         echo "❌ $WT does not have the tests-v2 task rule: update it to origin/main."; exit 1
     fi
+    # The universal code index needs codebase-memory-mcp beside ling-code in Mightling's install
+    # directory (ling-code never looks on PATH). Without it every index fails and the run refuses
+    # to start, which is how the night of 2026-10-09 was lost after the old install folder, which
+    # held the indexers, was deleted.
+    install=$("$PY" -c "from dreamference.runner.codex_branded_builder import INSTALL_DIR; print(INSTALL_DIR)") || exit 1
+    for tool in ling-code codebase-memory-mcp; do
+        if [ ! -x "$install/bin/$tool" ]; then
+            echo "❌ $install/bin/$tool is missing: run \`ling-admin codex build\` and \`ling-admin code setup\` first."; exit 1
+        fi
+    done
     if [ ! -s "$LIST" ]; then
         echo "❌ No task list at $LIST: run scripts/swe_bench_fresh.py validate, then draw."; exit 1
     fi
@@ -69,6 +85,11 @@ start() {
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
     fi
+    # A finished or failed night keeps its folder; this one starts clean.
+    if [ -e "$D/done" ] || [ -e "$D/failed" ]; then
+        aside="$D.$(date +%Y%m%d-%H%M%S)"
+        mv "$D" "$aside" && echo "ℹ️  Previous night moved to $aside"
+    fi
     mkdir -p "$D"
     { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\n' "$RESERVE_GB"; } \
         > "$D/dreamference.toml"
@@ -79,10 +100,22 @@ start() {
     echo "✅ Started $UNIT; log: $D/run.log"
 }
 
+# A step that failed ends the night: `failed` is written (never `done`), the cause is logged, and
+# the unit exits with the step's status, so `systemctl --user is-failed` and a watcher see it. The
+# night of 2026-10-09 ran on after both rounds exited 1, regraded nothing with a green tick and
+# wrote `done`.
+fail() {
+    local step=$1 rc=$2
+    log "❌ $step failed ($rc); night 1 stopped. See above and the run's logs under $(dirname "$D")/runs/."
+    echo "$step $rc $(date -Is)" > "$D/failed"
+    exit "$rc"
+}
+
 run() {
     export PYTHONPATH="$WT"
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
+    rm -f "$D/failed"
     log "night 1 from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), refine $REFINE"
     for arm in default tests-v2; do
         extra=""
@@ -92,13 +125,22 @@ run() {
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$arm" --code-index universal --mask off \
             --prompt default $extra --eval --remove-images --label "night 1, $arm arm"
-        log "$PREFIX-$arm finished ($?)"
+        rc=$?
+        log "$PREFIX-$arm finished ($rc)"
         df -h / | tail -1
+        [ "$rc" -eq 0 ] || fail "round $PREFIX-$arm" "$rc"
+        # A round that ran nothing is a failure whatever its status: the report says what was left.
+        if admin swe-bench report "$PREFIX-$arm" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet'; then
+            admin swe-bench report "$PREFIX-$arm" | grep '^INCOMPLETE'
+            fail "round $PREFIX-$arm (instances not run)" 1
+        fi
     done
     for arm in default tests-v2; do
         log "regrade $PREFIX-$arm with the test files dropped"
         admin swe-bench eval "$PREFIX-$arm" --drop-test-hunks --remove-images
-        log "regrade of $PREFIX-$arm finished ($?)"
+        rc=$?
+        log "regrade of $PREFIX-$arm finished ($rc)"
+        [ "$rc" -eq 0 ] || fail "regrade $PREFIX-$arm" "$rc"
     done
     for arm in default tests-v2; do
         admin swe-bench report "$PREFIX-$arm" > "$D/report-$arm.txt"
