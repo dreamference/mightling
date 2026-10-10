@@ -161,7 +161,7 @@ def _no_model_gate_probe(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _refuse_real_docker(monkeypatch):
+def _refuse_real_docker(monkeypatch, request):
     # A test that reached OnyxRunner._start_gmail_service ran `docker rm -f dreamference-gmail` and
     # `docker run` for real, replacing the live Gmail sidecar with one mounting a pytest temp
     # folder and a test secret: Gmail search in the web chat answered "unauthorised" until the
@@ -184,11 +184,79 @@ def _refuse_real_docker(monkeypatch):
             # machine or become root.
             if os.path.basename(str(program)) in ("ssh", "scp", "rsync", "sudo", "sg"):
                 raise AssertionError(f"a test tried to run a real {os.path.basename(str(program))}: {argv!r}; mock it")
+            # The suite is offline by construction (AGENTS.md): the installed `ling` and the other
+            # binaries of the install would wait for, and reach, this machine's model server. A
+            # test that needs an agent writes a stand-in under its tmp_path (test_night_shift.py).
+            installed = _installed_binary(program)
+            if installed and not request.node.get_closest_marker(INSTALLED_BINARY_MARK):
+                raise AssertionError(f"a test tried to run the installed {installed}: {argv!r}; use a stand-in, "
+                                     f"or mark the test `{INSTALLED_BINARY_MARK}` if it tests the built binary")
             return original(*args, **kwargs)
         return run
 
     for name in ("run", "call", "check_call", "check_output", "Popen"):
         monkeypatch.setattr(subprocess, name, guarded(getattr(subprocess, name)))
+
+
+# The one opt-out of the offline rule: a test of the built `ling` itself (test_mightling_slash_commands.py)
+# may run the installed binary and, when the model server answers, reach it. Registered in pyproject.toml.
+INSTALLED_BINARY_MARK: str = "installed_binary"
+
+# Where a release install and `ling-admin codex build` put the binaries, and the links to them.
+INSTALLED_BINARY_DIRS: tuple = tuple(os.path.join(REAL_HOME, d) for d in
+                                     (".local/bin", ".local/share/dreamference", ".cache/dreamference/puffin-codex"))
+
+
+def _installed_binary(program) -> str:
+    """The resolved path when `program` is a binary of the install (or a link to one), else ''."""
+    import shutil
+    text = str(program)
+    if not text:
+        return ""
+    located = text if os.sep in text else (shutil.which(text) or "")
+    if not located:
+        return ""
+    # `~` means the real home here, whatever HOME a test has set.
+    if located == "~" or located.startswith("~" + os.sep):
+        located = REAL_HOME + located[1:]
+    for candidate in (os.path.abspath(located), os.path.realpath(located)):
+        if any(candidate == d or candidate.startswith(d + os.sep) for d in INSTALLED_BINARY_DIRS):
+            return candidate
+    return ""
+
+
+# The model server's public port and the engine's behind the gate (vllm_server/model_gate.py).
+MODEL_SERVER_PORTS: tuple = (8000, 18000)
+
+
+@pytest.fixture(autouse=True)
+def _no_model_server(monkeypatch, request):
+    # Nothing in the suite may reach the model server: a test that did would hang behind the gate
+    # while a benchmark holds it, or spend the model's time. Connections to its ports fail the
+    # test by name; a test that needs a server starts its own on a free port (http.server, a
+    # socket it bound). asyncio's sock_connect and http.client both go through socket.connect.
+    import socket
+    if request.node.get_closest_marker(INSTALLED_BINARY_MARK):
+        return
+
+    def refused(address):
+        port = address[1] if isinstance(address, tuple) and len(address) >= 2 else None
+        if port in MODEL_SERVER_PORTS:
+            raise AssertionError(f"a test tried to connect to the model server at {address!r}; "
+                                 "stub the request or serve a stand-in on a free port")
+
+    original_connect, original_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def connect(self, address):
+        refused(address)
+        return original_connect(self, address)
+
+    def connect_ex(self, address):
+        refused(address)
+        return original_connect_ex(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
 
 
 # Docker subcommands that only read. Launch-command tests ask `docker info` and `docker image

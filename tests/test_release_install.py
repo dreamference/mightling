@@ -65,7 +65,9 @@ class FakeRelease:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        # A short poll, so that `shutdown()` at teardown returns at once (the default half second
+        # was most of these tests' time).
+        threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02), daemon=True).start()
 
     def document(self, port):
         base = f"http://127.0.0.1:{port}/repos/test/ling"

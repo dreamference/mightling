@@ -378,7 +378,7 @@ def test_the_interface_is_opened_prompted_and_quit_on_a_pseudo_terminal(tmp_path
 
 def test_an_interface_that_never_answers_is_stopped_and_is_not_a_pass(tmp_path, monkeypatch, capsys):
     calls = interface_stand_in(tmp_path, monkeypatch, answers=False)
-    monkeypatch.setattr("dreamference.audit.egress_audit.SESSION_TIMEOUT_S", 3)
+    monkeypatch.setattr("dreamference.audit.egress_audit.SESSION_TIMEOUT_S", 1)
     assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", tui=True) == 2
     out = capsys.readouterr().out
     assert "Egress audit: trace failed" in out and "The interface opened and took the prompt" in out

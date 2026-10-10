@@ -1390,7 +1390,9 @@ def test_every_connection_resolves_the_node_on_the_network_first(monkeypatch):
     answers = [[], [], [{"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"}]]
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: answers.pop(0) if answers else []))
     monkeypatch.setattr(NodePairing, "resolve_wait_s", 5.0)
+    monkeypatch.setattr("dreamference.node.node_pairing.time.sleep", lambda seconds: None)
     assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.50.200"
+    assert not answers, "the node was found on the third browse"
     NodePairing.forget_resolved()
     # An address given by hand (`sync-model --address`, a direct link) is used as it is.
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [

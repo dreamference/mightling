@@ -68,3 +68,8 @@ files = ["dreamference"]
 # Phase 4 raises this package by package to `strict = true` (spec §3.8, §6).
 ignore_missing_imports = true
 warn_unused_configs = true
+
+[tool.pytest.ini_options]
+markers = [
+    "installed_binary: the test runs the built `ling` (and may reach the model server); everything else is offline by construction (tests/conftest.py)",
+]

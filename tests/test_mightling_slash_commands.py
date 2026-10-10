@@ -90,6 +90,9 @@ def _served_model() -> Optional[str]:
 
 SERVED_MODEL = _served_model()
 
+# Every test here runs the built `ling` (and the live ones its model server): the one module that
+# opts out of the suite's offline rule (tests/conftest.py, `installed_binary`).
+pytestmark = pytest.mark.installed_binary
 needs_source = pytest.mark.skipif(not SLASH_SOURCE.is_file(), reason="codex submodule not checked out")
 needs_mightling = pytest.mark.skipif(not os.access(MIGHTLING, os.X_OK), reason=f"{MIGHTLING} is not built; run `ling-admin codex build`")
 needs_server = pytest.mark.skipif(SERVED_MODEL is None, reason=f"no model server answering at {VLLM_HOST}/v1/models, or the model gate is closed for a benchmark")

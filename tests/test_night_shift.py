@@ -466,7 +466,7 @@ def test_an_exec_error_with_no_change_is_failed(setup, monkeypatch):
 
 
 def test_a_task_cut_off_keeps_its_worktree_and_resumes_its_session_next_time(setup, monkeypatch):
-    status, record, run = run_task(setup, monkeypatch, "hang", deadline_s=3)
+    status, record, run = run_task(setup, monkeypatch, "hang", deadline_s=1)
     assert status == "interrupted"
     assert run.worktree.is_dir()
     session = record["session"]
