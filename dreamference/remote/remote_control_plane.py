@@ -267,7 +267,29 @@ class RemoteControlPlane:
         if status != 200 or not body.get("plain_token"):
             print(f"❌ The control plane refused a management token ({status}): {str(body)[:300]}")
             return None
+        cls.prune_tokens(dns_name, body["plain_token"], user_id, (body.get("personal_access_token") or {}).get("id"))
         return body["plain_token"]
+
+    @classmethod
+    def prune_tokens(cls, dns_name: str, token: str, user_id: str, keep: Optional[str]) -> None:
+        """
+        Deletes the node's older tokens (and the one-day setup token), so a renewal leaves one.
+
+        Args:
+            dns_name: The box's public DNS name.
+            token: The new token, which does the deleting.
+            user_id: The owner's id.
+            keep: The new token's id; nothing is deleted without it.
+        """
+        if not keep:
+            return
+        status, tokens = cls._request(dns_name, "GET", f"/api/users/{user_id}/tokens", token=token)
+        if status != 200 or not isinstance(tokens, list):
+            return
+        for entry in tokens:
+            name = str(entry.get("name", ""))
+            if entry.get("id") != keep and (name.startswith("mightling-node-") or name == "setup-token"):
+                cls._request(dns_name, "DELETE", f"/api/users/{user_id}/tokens/{entry['id']}", token=token)
 
     @classmethod
     def setup_key(cls, dns_name: str, token: str, name: str) -> Optional[str]:

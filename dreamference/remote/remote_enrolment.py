@@ -135,7 +135,7 @@ class RemoteEnrolment:
 
     @classmethod
     def serve(cls, code: str, make_bundle: Callable[[str], Optional[Dict[str, Any]]],
-              port: int = ENROL_PORT, minutes: int = CODE_MINUTES) -> str:
+              port: int = ENROL_PORT, minutes: int = CODE_MINUTES, host: str = "") -> str:
         """
         Listens for one enrolment.
 
@@ -144,6 +144,7 @@ class RemoteEnrolment:
             make_bundle: Makes the bundle for a client name.
             port: The port.
             minutes: How long the code is valid.
+            host: The address to bind; every IPv4 interface by default (the LAN check is per request).
 
         Returns:
             str: `enrolled:<client>`, `expired` or `withdrawn` (ten wrong proofs).
@@ -188,7 +189,7 @@ class RemoteEnrolment:
                 self._send(200, answer)
                 state["outcome"] = f"enrolled:{str(request.get('client') or 'client')[:63]}"
 
-        server = HTTPServer(("", port), Handler)
+        server = HTTPServer((host, port), Handler)
         server.timeout = 1
         deadline = time.monotonic() + minutes * 60
         try:

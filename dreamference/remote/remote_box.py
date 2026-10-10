@@ -157,6 +157,8 @@ class RemoteBox:
             "global",
             "    log /dev/log local0",
             "    maxconn 2000",
+            "    user haproxy",
+            "    group haproxy",
             "defaults",
             "    mode tcp",
             "    log global",

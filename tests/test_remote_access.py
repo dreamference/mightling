@@ -176,6 +176,7 @@ def test_a_setup_key_is_one_off_one_use_ten_minutes(monkeypatch):
 def test_haproxy_passes_only_the_boxs_own_name_to_the_tunnel():
     config = RemoteBox.haproxy_config(BOX)
     assert "mode tcp" in config and "bind :443" in config
+    assert "    user haproxy" in config and "    group haproxy" in config, "haproxy drops root after binding"
     assert "use_backend node if { req.ssl_sni -i relay.example.org }" in config
     assert "server tunnel 127.0.0.1:8443" in config
     assert "default_backend refuse" in config and "tcp-request content reject" in config
@@ -397,7 +398,7 @@ def test_the_listener_serves_one_client_then_stops():
     port = _free_port()
     outcome = {}
     thread = threading.Thread(target=lambda: outcome.update(result=RemoteEnrolment.serve(
-        "12345678", lambda client: {"setup_key": "K"}, port=port, minutes=1)))
+        "12345678", lambda client: {"setup_key": "K"}, port=port, minutes=1, host="127.0.0.1")))
     thread.start()
     time.sleep(0.3)
     status, body = _post(port, {"nonce": "1" * 32, "proof": "0" * 64})
@@ -413,7 +414,7 @@ def test_ten_wrong_proofs_withdraw_the_code():
     port = _free_port()
     outcome = {}
     thread = threading.Thread(target=lambda: outcome.update(result=RemoteEnrolment.serve(
-        "12345678", lambda client: pytest.fail("minted"), port=port, minutes=1)))
+        "12345678", lambda client: pytest.fail("minted"), port=port, minutes=1, host="127.0.0.1")))
     thread.start()
     time.sleep(0.3)
     for _ in range(10):
@@ -449,6 +450,8 @@ def seams(monkeypatch):
     monkeypatch.setattr(RemoteTunnel, "public_key", classmethod(lambda cls: "ssh-ed25519 AAAA t"))
     monkeypatch.setattr(RemoteTunnel, "install", classmethod(lambda cls, d: log.append(("tunnel", d)) or True))
     monkeypatch.setattr(RemoteNodePeer, "enrol", classmethod(lambda cls, ca, url, key, node, yes: log.append(("join", url, key)) or True))
+    monkeypatch.setattr(RemoteAccess, "node_label",
+                        classmethod(lambda cls, d, t, name, seconds=30: f"{name}.netbird.selfhosted"))
     return log
 
 
@@ -464,6 +467,39 @@ def test_setup_does_everything_in_order_and_records_names_only(seams):
     assert len(RemoteSettings.read_private("relay-secret")) == 64
     assert RemoteTunnel.known_hosts().read_text().startswith(BOX + " ssh-ed25519 ")
     assert not re.search(r"\d+\.\d+\.\d+\.\d+", RemoteSettings.path("remote.json").read_text()), "no address is written"
+
+
+def test_setup_fails_loudly_when_management_renamed_the_node(seams, monkeypatch, capsys):
+    monkeypatch.setattr(RemoteAccess, "node_label",
+                        classmethod(lambda cls, d, t, name, seconds=30: f"{name}-1.netbird.selfhosted"))
+    assert RemoteAccess.setup(BOX, yes=True) == 1
+    assert "not mightling-" in capsys.readouterr().out
+    assert not RemoteSettings.read().get("node_peer"), "a rerun checks again"
+    assert ("advertise", RemoteSettings.overlay_name(NODE_ID)) not in seams
+
+
+def test_node_label_reads_managements_name_for_the_node(monkeypatch):
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: PEERS))
+    assert RemoteAccess.node_label(BOX, "tok", f"mightling-{NODE_ID}") == f"mightling-{NODE_ID}.netbird.selfhosted"
+    assert RemoteAccess.node_label(BOX, "tok", "nobody", seconds=0) is None
+
+
+def test_a_renewal_leaves_one_node_token(monkeypatch):
+    requests = []
+
+    def fake(cls, dns_name, method, path, body=None, token=None):
+        requests.append((method, path))
+        if method == "POST":
+            return 200, {"plain_token": "nbp_new", "personal_access_token": {"id": "t3"}}
+        if method == "GET":
+            return 200, [{"id": "t1", "name": "setup-token"}, {"id": "t2", "name": "mightling-node-20251010"},
+                         {"id": "t3", "name": "mightling-node-20261010"}, {"id": "t9", "name": "someone else's"}]
+        return 200, {}
+
+    monkeypatch.setattr(RemoteControlPlane, "_request", classmethod(fake))
+    assert RemoteControlPlane.renew_token(BOX, "old", "u1") == "nbp_new"
+    deleted = [path for method, path in requests if method == "DELETE"]
+    assert deleted == ["/api/users/u1/tokens/t1", "/api/users/u1/tokens/t2"]
 
 
 def test_setup_again_keeps_the_secret_and_does_not_rejoin(seams, monkeypatch):

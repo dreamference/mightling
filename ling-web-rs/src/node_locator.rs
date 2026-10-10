@@ -7,8 +7,8 @@
 //!
 //! A client enrolled for remote access (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §5) also
 //! remembers the node's overlay name, `remote`: a name, never an address. A program that finds the
-//! node's LAN address silent uses that name instead, which NetBird's client resolves while the
-//! overlay is up.
+//! node's LAN address silent uses that name instead, if NetBird's client reports its management
+//! connected: with the overlay down the name is never handed to the system's resolver.
 //!
 //! Standard library only: this file is compiled into the launcher and the web commands.
 
@@ -17,6 +17,8 @@ use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
 
 /// The DNS-SD service type a node is advertised under.
@@ -288,18 +290,46 @@ pub fn remembered_at(path: &Path) -> Option<Node> {
 /// What a program that is not the launcher should use for a service that defaults to loopback:
 /// `None` on a node, or on a client that remembers no node (loopback, as before the split), and
 /// the remembered node otherwise: at its LAN address, or at its overlay name when the LAN
-/// address does not accept a connection and the node has one.
+/// address does not accept a connection, the node has one and the overlay is up.
 pub fn remote_node() -> Option<Node> {
-    remote_node_from(is_node(), remembered()).map(|node| reachable(node, lan_answers))
+    remote_node_from(is_node(), remembered()).map(|node| reachable(node, lan_answers, overlay_up))
 }
 
-/// [`remote_node`]'s choice of address, with the LAN probe given.
-pub fn reachable(node: Node, lan_answers: fn(&Node) -> bool) -> Node {
-    if !node.overlay_name_is_its_own() || lan_answers(&node) {
+/// [`remote_node`]'s choice of address, with the LAN probe and NetBird's state given.
+pub fn reachable(node: Node, lan_answers: fn(&Node) -> bool, overlay_up: fn() -> bool) -> Node {
+    if !node.overlay_name_is_its_own() || lan_answers(&node) || !overlay_up() {
         node
     } else {
         node.via_overlay()
     }
+}
+
+/// Whether NetBird's client reports its management connected (`netbird status --json`; the
+/// daemon's socket is open to local users). False when NetBird is absent or says otherwise.
+pub fn overlay_up() -> bool {
+    Command::new("netbird")
+        .args(["status", "--json"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| management_connected(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Reads `"management": {..., "connected": true, ...}` out of `netbird status --json` without a
+/// JSON library: the management object holds no nested object, and the peers' own `connected`
+/// (a count) is outside it.
+pub fn management_connected(status: &str) -> bool {
+    let Some(start) = status.find("\"management\"") else { return false };
+    let rest = &status[start..];
+    let (Some(open), Some(close)) = (rest.find('{'), rest.find('}')) else { return false };
+    if close < open {
+        return false;
+    }
+    let object = &rest[open..close];
+    let Some(key) = object.find("\"connected\"") else { return false };
+    object[key + "\"connected\"".len()..].trim_start().trim_start_matches(':').trim_start().starts_with("true")
 }
 
 /// Whether the node's LAN address accepts a connection on the model port, within a moment.
@@ -362,10 +392,24 @@ mod tests {
     }
 
     #[test]
-    fn a_silent_lan_address_falls_back_to_the_overlay_name() {
-        assert_eq!(reachable(enrolled(), |_| true).address, "192.168.0.105");
-        assert_eq!(reachable(enrolled(), |_| false).model_url(), "http://mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted:8000");
-        assert_eq!(reachable(node(), |_| false).address, "192.168.0.105", "no overlay name, no fallback");
+    fn a_silent_lan_address_falls_back_to_the_overlay_name_only_while_the_overlay_is_up() {
+        assert_eq!(reachable(enrolled(), |_| true, || true).address, "192.168.0.105");
+        assert_eq!(
+            reachable(enrolled(), |_| false, || true).model_url(),
+            "http://mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted:8000"
+        );
+        assert_eq!(reachable(enrolled(), |_| false, || false).address, "192.168.0.105", "overlay down: the name is never resolved");
+        assert_eq!(reachable(node(), |_| false, || true).address, "192.168.0.105", "no overlay name, no fallback");
+    }
+
+    #[test]
+    fn management_connected_is_read_from_its_own_object() {
+        let up = r#"{"peers": {"total": 2, "connected": 0}, "management": {"url": "https://b:443", "connected": true, "error": ""}}"#;
+        assert!(management_connected(up));
+        let down = r#"{"peers": {"connected": 2}, "management": {"url": "https://b:443", "connected": false}}"#;
+        assert!(!management_connected(down));
+        assert!(!management_connected(r#"{"daemonStatus": "NeedsLogin"}"#));
+        assert!(!management_connected(""));
     }
 
     #[test]
