@@ -20,6 +20,9 @@ from dreamference.node.node_serve import NodeServe
 from dreamference.node.node_service_file import NodeServiceFile, SERVICE_TYPE
 
 
+PAIRED_NODE = "11111111-2222-4333-8444-555555555555"
+
+
 def _fake_systemctl(calls, enabled=True):
     def systemctl(args):
         calls.append(list(args))
@@ -49,6 +52,16 @@ def _legacy_node(tmp_home: Path):
     config = tmp_home / ".config/dreamference/config.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text('puffin_airgapped = "on"\n[night]\nwindow = "01:00-07:00"\n')
+    # A node paired under Puffin: its host key is pinned under the old alias, in a hashed file,
+    # as ssh-keygen leaves it.
+    nodes = tmp_home / ".config/dreamference/nodes"
+    nodes.mkdir(parents=True, exist_ok=True)
+    (nodes / f"{PAIRED_NODE}.json").write_text(
+        f'{{"node": "{PAIRED_NODE}", "name": "gx10-test", "address": "gx10-test.local", "user": "u"}}\n')
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(tmp_home / "nodekey")], check=True)
+    public = (tmp_home / "nodekey.pub").read_text().split()[:2]
+    (nodes / "known_hosts").write_text(f"puffin-node-{PAIRED_NODE} {' '.join(public)}\n")
+    subprocess.run(["ssh-keygen", "-q", "-H", "-f", str(nodes / "known_hosts")], check=True, capture_output=True)
     desktop = tmp_home / ".local/share/dev.dreamference.puffin"
     desktop.mkdir(parents=True, exist_ok=True)
     (desktop / "cookies").write_text("session")
@@ -86,7 +99,15 @@ def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(o
 
     done = LegacyNameMigration.run()
 
-    assert len(done) == 7, done
+    assert len(done) == 8, done
+    known_hosts = tmp_home / ".config/dreamference/nodes/known_hosts"
+
+    def pinned(alias):
+        found = subprocess.run(["ssh-keygen", "-F", alias, "-f", str(known_hosts)], capture_output=True, text=True)
+        return [line for line in found.stdout.splitlines() if not line.startswith("#")]
+    assert len(pinned(f"mightling-node-{PAIRED_NODE}")) == 1, "the paired node's key is found under the new alias"
+    assert pinned(f"puffin-node-{PAIRED_NODE}") == [], "and no longer under the old one"
+    assert not (known_hosts.parent / "known_hosts.old").exists()
     from dreamference.runner.codex_branded_builder import INSTALL_DIR
     new_bin = Path(INSTALL_DIR) / "bin"
     assert (new_bin / "ling").is_file() and (new_bin / "ling-code").is_file()

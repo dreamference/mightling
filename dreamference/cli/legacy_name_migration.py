@@ -22,6 +22,7 @@ release too).
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Final, List, Optional
@@ -106,7 +107,7 @@ class LegacyNameMigration:
         done: List[str] = []
         for step in (cls.move_install_dir, cls.remove_old_links, cls.rewrite_user_config,
                      cls.replace_night_units, cls.replace_service_file, cls.rewrite_authorized_keys,
-                     cls.move_desktop_data):
+                     cls.rekey_paired_nodes, cls.move_desktop_data):
             try:
                 line = step()
             except OSError as error:
@@ -302,6 +303,63 @@ class LegacyNameMigration:
             return None
         path.write_text("".join(out))
         return f"pointed {changed} paired sender(s) at ling-admin in {path}"
+
+    @classmethod
+    def rekey_paired_nodes(cls) -> Optional[str]:
+        """
+        Moves each paired node's pinned host key from the old alias (`puffin-node-<id>`) to the
+        new one (`mightling-node-<id>`), so a connection to a node paired under Puffin finds its
+        key. The alias is a `HostKeyAlias`, never a name on the wire, and the pairing's known-hosts
+        file may be hashed, so the lines are found and removed with `ssh-keygen -F` and `-R`
+        rather than by text. Found missing on 2026-10-10: the renamed sender asked for the new
+        alias, the file held the old one, and every paired node "did not answer".
+
+        Returns:
+            Optional[str]: A line when a key was moved.
+        """
+        from dreamference.node.node_pairing import NodePairing
+
+        path = NodePairing.known_hosts()
+        if not path.is_file():
+            return None
+        moved = 0
+        for record in NodePairing.paired():
+            node_id = record["node"]
+            old_alias = f"{LEGACY_KEY_COMMENT}-{node_id}"
+            new_alias = NodePairing.host_alias(node_id)
+            if cls._pinned_keys(path, new_alias):
+                continue
+            keys = cls._pinned_keys(path, old_alias)
+            if not keys:
+                continue
+            with open(path, "a") as handle:
+                handle.writelines(f"{new_alias} {key}\n" for key in keys)
+            subprocess.run(["ssh-keygen", "-q", "-R", old_alias, "-f", str(path)],
+                           capture_output=True, text=True, check=False)
+            Path(f"{path}.old").unlink(missing_ok=True)
+            moved += 1
+        if not moved:
+            return None
+        return f"moved {moved} paired node(s)' host key to the new alias in {path}"
+
+    @classmethod
+    def _pinned_keys(cls, path: Path, alias: str) -> List[str]:
+        """
+        Args:
+            path: A known-hosts file, hashed or plain.
+            alias: A `HostKeyAlias`.
+
+        Returns:
+            List[str]: The `<type> <key>` pairs stored under that alias.
+        """
+        found = subprocess.run(["ssh-keygen", "-F", alias, "-f", str(path)], capture_output=True, text=True,
+                               check=False)
+        keys = []
+        for line in found.stdout.splitlines():
+            fields = line.split()
+            if len(fields) >= 3 and not line.startswith("#"):
+                keys.append(" ".join(fields[1:3]))
+        return keys
 
     @classmethod
     def move_desktop_data(cls) -> Optional[str]:
