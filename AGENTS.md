@@ -71,7 +71,7 @@ There is no linter or formatter configured.
 
 ## Where things live
 
-Twelve packages under `dreamference/` (eleven subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
+Thirteen packages under `dreamference/` (twelve subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
 
 | Package | Role |
 | --- | --- |
@@ -86,6 +86,7 @@ Twelve packages under `dreamference/` (eleven subsystems and `cli/`), each with 
 | `node/` | The node half of the client/server split: the advertised service file, the node id, what is published to the LAN, pairing, jobs and model sync over SSH |
 | `swe_bench/` | `ling-admin swe-bench`: `ling` inside each SWE-bench instance's container, A/B runs and reports |
 | `audit/` | `ling-admin audit egress`: the strace-based network audit of a real `ling` session |
+| `remote/` | `ling-admin remote`: a NetBird overlay run on the node, one untrusted relay box |
 | `cli/` | `ling-admin`'s parser and dispatch (`dreamference_cli_controller.py`) |
 
 Outside the package:
@@ -106,7 +107,7 @@ Outside the package:
 | `install.sh`, `install.ps1` | Release installers |
 | `scripts/`, `paper/`, `website/`, `images/` | Helper scripts, the paper, the one-page site, logos |
 
-`ling-admin` (`dreamference.cli:main`) subcommands: `init`, `run`, `status`, `index`, `mcp`, `web`, `endpoints`, `searxng {start}`, `codex {build,start,stop,test}`, `code {setup}`, `docs {setup}`, `gmail {search,read,status}`, `night {enable,disable,status,run,pause,resume}`, `host {check,setup}`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}` (plus `authorize`, `serve-job` and `job-exec`, which no person types), `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}` (`--tui`, `--app`, `--docs`), `logs {server,mcp}`, `benchmark_server`, `server {start,stop,remove,logs}`, `chat {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias: `onyx`; it was `puffin-admin puffin`), `matrix {start,stop,status,add-user,push,remove}` (the private homeserver behind `ling chat`; unrelated to `chat`, the web UI), `desktop {install,run,build,status}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off), `clear {model-cache,tensorize-cache}`. Every command rejects unknown arguments.
+`ling-admin` (`dreamference.cli:main`) subcommands: `init`, `run`, `status`, `index`, `mcp`, `web`, `endpoints`, `searxng {start}`, `codex {build,start,stop,test}`, `code {setup}`, `docs {setup}`, `gmail {search,read,status}`, `night {enable,disable,status,run,pause,resume}`, `host {check,setup}`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}` (plus `authorize`, `serve-job` and `job-exec`, which no person types), `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}` (`--tui`, `--app`, `--docs`), `logs {server,mcp}`, `benchmark_server`, `server {start,stop,remove,logs}`, `chat {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias: `onyx`; it was `puffin-admin puffin`), `matrix {start,stop,status,add-user,push,remove}` (the private homeserver behind `ling chat`; unrelated to `chat`, the web UI), `remote {setup,status,remove,code,peers,revoke}`, `desktop {install,run,build,status}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off), `clear {model-cache,tensorize-cache}`. Every command rejects unknown arguments.
 
 `ling`, the terminal agent, is **not** Python: it is the Rust binary `CodexBrandedBuilder` builds, linked at `~/.local/bin/ling`, so every Codex flag and subcommand works natively (`ling -a on-request "…"`, `ling exec …`, `ling resume --last`). The old `chat` subcommand that started the agent was removed once the agent stopped being a Python wrapper; `ling-admin run "…"` remains for one-shot tasks with any configured agent. `ling-search` and `ling-fetch` are Rust binaries from `ling-web-rs/`, installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is only the MCP server's copy of the same behaviour.
 

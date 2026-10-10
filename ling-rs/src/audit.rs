@@ -304,6 +304,7 @@ fn known_host() -> Option<String> {
     match crate::node::resolve(&inputs, &NoBrowse) {
         crate::node::Resolution::Host(host) => Some(host),
         crate::node::Resolution::LastAddress { node, .. } => Some(node.model_url()),
+        crate::node::Resolution::Overlay { node } => Some(node.model_url()),
         _ => None,
     }
 }
