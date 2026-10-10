@@ -88,6 +88,7 @@ class NodeAdvertiser:
             web_port=WEB_PORT if cls.ling_web_available() and not no_web else None,
             search_port=cls.search_port(),
             main=cls.serves_main_model(),
+            remote=cls.remote_name(),
         )
         # The advertisement first, the binds only once it is in place: a node whose web UI is on
         # the LAN but which nobody can find is the worst of both states.
@@ -384,6 +385,17 @@ class NodeAdvertiser:
                                   stdin=None if mode == "sudo" else subprocess.DEVNULL).returncode == 0
         except OSError:
             return False
+
+    @classmethod
+    def remote_name(cls) -> Optional[str]:
+        """
+        Returns:
+            Optional[str]: The node's overlay name when remote access is set up, else None
+            (REMOTE_ACCESS §7).
+        """
+        from dreamference.remote.remote_settings import RemoteSettings
+        record = RemoteSettings.read()
+        return record.get("overlay_name") if record else None
 
     @classmethod
     def model_port(cls) -> int:
