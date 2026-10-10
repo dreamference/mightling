@@ -191,3 +191,4 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/context-engine.md](docs/dev/context-engine.md): the Python context engine
 - [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
 - [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
+- [docs/dev/sessions.md](docs/dev/sessions.md): the three parallel work streams, what each owns, and their status board
