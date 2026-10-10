@@ -95,6 +95,10 @@ class SweBenchCommand:
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
         run.add_argument("--label", default=None,
                          help="What the model gate's refusal calls this run, e.g. \"night 1\" (default: SWE-bench run <name>)")
+        run.add_argument("--apply-patch", choices=("off", "function", "freeform"), default=None, metavar="FORM",
+                         help="How the agent is offered Codex's apply_patch tool: function (a function tool, which "
+                              "SGLang serves), freeform (a custom tool, which only ling-engine serves) or off; "
+                              "the launcher's own choice when absent (spec §22)")
         run.add_argument("--review-turn", action="store_true",
                          help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
                               "read its diff, run the tests of the modules it changed and fix what does not hold, "
@@ -150,7 +154,7 @@ class SweBenchCommand:
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
                 task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn,
                 refine_version=args.refine_version or "v1",
-                hooks=cls._ids(args.hooks))
+                hooks=cls._ids(args.hooks), apply_patch=args.apply_patch)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":

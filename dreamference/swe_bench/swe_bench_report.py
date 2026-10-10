@@ -23,12 +23,12 @@ CAVEATS: Final[str] = (
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
-    "parallelism", "harness", "repository_commit", "review_turn", "hooks",
+    "parallelism", "harness", "repository_commit", "review_turn", "hooks", "apply_patch",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
                                "refine_version": "v1",
-                               "task_rules": [], "review_turn": False, "hooks": []}
+                               "task_rules": [], "review_turn": False, "hooks": [], "apply_patch": "auto"}
 
 
 class SweBenchReport:
@@ -87,6 +87,7 @@ class SweBenchReport:
             "refine": cls.refine_summary(store, manifest, states, finished & set(instances)),
             "nudges_fired": cls.nudge_counts(states, finished & set(instances)),
             "review": cls.review_summary(store, manifest, states, finished & set(instances)),
+            "apply_patch": cls.apply_patch_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
         }
@@ -193,6 +194,33 @@ class SweBenchReport:
             "seconds": [int(record.get("seconds") or 0) for record in ran.values()],
             "tokens": tokens,
         }
+
+    @classmethod
+    def apply_patch_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Dict[str, Any]:
+        """
+        The apply_patch arm's measures (spec §22): the form the run asked for and, over the
+        finished instances with a record, how many called the tool at all and how many calls.
+
+        Returns:
+            Dict[str, Any]: `form`, `instances`, `recorded`, `users` (ids that called it), `calls`.
+        """
+        form = str(manifest.get("apply_patch") or "auto")
+        records = {i: (states.get(i) or {}).get("apply_patch") for i in finished}
+        recorded = {i: r for i, r in records.items() if isinstance(r, dict)}
+        users = sorted(i for i, r in recorded.items() if int(r.get("calls") or 0))
+        return {"form": form, "instances": len(records), "recorded": len(recorded), "users": users,
+                "calls": sum(int(r.get("calls") or 0) for r in recorded.values())}
+
+    @classmethod
+    def apply_patch_line(cls, summary: Dict[str, Any]) -> str:
+        """One line: the apply_patch form and how much the agent used the tool."""
+        head = f"Apply patch         {summary['form']}"
+        if summary["form"] == "auto":
+            head += " (the launcher's choice: freeform on ling-engine, none on SGLang)"
+        if not summary["recorded"]:
+            return head + ": no finished instance recorded its calls" if summary["instances"] else head
+        return (f"{head}: called in {len(summary['users'])} of {summary['recorded']} finished instance(s), "
+                f"{summary['calls']} call(s)" + (": " + ", ".join(summary["users"]) if summary["users"] else ""))
 
     @classmethod
     def review_line(cls, review: Optional[Dict[str, Any]]) -> str:
@@ -330,6 +358,7 @@ class SweBenchReport:
         if manifest.get("task_rules"):
             lines.append(f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)")
         lines.append(cls.review_line(summary["review"]))
+        lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines += cls.hooks_lines(summary["hooks"])
         not_run = validated - summary["finished"]
         not_graded = summary["finished"] - summary["graded"]

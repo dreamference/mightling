@@ -328,7 +328,7 @@ class SweBenchInstanceRun:
                  issue: Optional[Dict[str, Any]] = None, refine: bool = False,
                  task_rules: Optional[List[str]] = None, review_turn: bool = False,
                  refine_version: str = "v1",
-                 hooks: Optional[List[str]] = None) -> None:
+                 hooks: Optional[List[str]] = None, apply_patch: str = "auto") -> None:
         """
         Args:
             store: The run's files.
@@ -375,6 +375,9 @@ class SweBenchInstanceRun:
         self.task_rules: List[str] = list(task_rules or [])
         self.review_turn = review_turn
         self.hooks: List[str] = list(hooks or [])
+        # The apply_patch arm (spec §22): the form the run asked for, recorded with how often
+        # the agent called the tool, counted from its rollouts when the task ends.
+        self.apply_patch = apply_patch or "auto"
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -551,6 +554,7 @@ class SweBenchInstanceRun:
             state["hooks"] = dict(state.get("hooks") or {}, **SweBenchHooks.outcome(self.scratch / GATE_DIRECTORY))
         if self.stop_event.is_set():
             status = "interrupted"
+        state["apply_patch"] = {"form": self.apply_patch, "calls": self.apply_patch_calls()}
         state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
                      wall_s=int(time.time() - self.started), patch_bytes=len(patch.encode()),
                      last_message=self._last_message()[:LAST_MESSAGE_LIMIT], notes=self.notes)
@@ -670,6 +674,34 @@ class SweBenchInstanceRun:
         self.session = None
         self.deadline = time.time() + self.settings.task_timeout_s
         return refined, None
+
+    def apply_patch_calls(self) -> int:
+        """
+        Counts the agent's `apply_patch` tool calls in this instance's rollouts: `function_call`
+        records named `apply_patch` (the function form) and `custom_tool_call` ones (freeform).
+        An edit made through the shell is not counted; it is the behaviour the arm measures against.
+
+        Returns:
+            int: The count; a line still being written is skipped.
+        """
+        count = 0
+        for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
+            try:
+                with open(path, "rb") as handle:
+                    for line in handle:
+                        if b'"apply_patch"' not in line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except ValueError:
+                            continue
+                        payload = record.get("payload") if isinstance(record, dict) else None
+                        if (isinstance(payload, dict) and payload.get("name") == "apply_patch"
+                                and payload.get("type") in ("function_call", "custom_tool_call")):
+                            count += 1
+            except OSError:
+                continue
+        return count
 
     def _review(self, state: Dict[str, Any], outcome: str) -> Optional[str]:
         """

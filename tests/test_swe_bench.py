@@ -35,7 +35,7 @@ from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLL
                                                           SCRUB_SCRIPT, TASK_RULES)
 from dreamference.swe_bench.swe_bench_instance_run import REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
-from dreamference.swe_bench.swe_bench_runner import BUILT_IN_PROMPTS, RUN_NAME
+from dreamference.swe_bench.swe_bench_runner import APPLY_PATCH_ENV, BUILT_IN_PROMPTS, RUN_NAME
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -212,6 +212,24 @@ class FakeDocker:
                 "input_tokens": 300, "cached_input_tokens": 0, "output_tokens": 30}}) + "\n").encode())
             stdout.flush()
             say("Wrote the description.")
+            return FakeProcess(0)
+        form = box["env"].get(APPLY_PATCH_ENV)
+        if form in ("function", "freeform") and mode == "change":
+            rollout = box["scratch"] / "codex-home" / "sessions" / "2026" / "10" / "02" / "rollout-2026-10-02T00-00-00-fake.jsonl"
+            rollout.parent.mkdir(parents=True, exist_ok=True)
+            patch_text = "*** Begin Patch\n*** Update File: widget.py\n@@\n-    return 1\n+    return 2  # FIX\n*** End Patch"
+            call = {"type": "function_call", "name": "apply_patch", "arguments": json.dumps({"input": patch_text}), "call_id": "c1"} \
+                if form == "function" else {"type": "custom_tool_call", "name": "apply_patch", "input": patch_text, "call_id": "c1"}
+            with open(rollout, "a") as handle:
+                handle.write(json.dumps({"type": "response_item", "payload": call}) + "\n")
+                handle.write(json.dumps({"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1", "output": "Done"}}) + "\n")
+                # A shell command that merely mentions the tool is not a call.
+                handle.write(json.dumps({"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"grep apply_patch .\"}", "call_id": "c2"}}) + "\n")
+            (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX\n")
+            stdout.write((json.dumps({"type": "turn.completed", "usage": {
+                "input_tokens": 500, "cached_input_tokens": 400, "output_tokens": 40}}) + "\n").encode())
+            stdout.flush()
+            say("Fixed widget() with apply_patch.")
             return FakeProcess(0)
         if mode == "hang":
             (box["repo"] / "partial.py").write_text("# half done\n")
@@ -2771,3 +2789,73 @@ def test_the_hooks_option_reaches_the_runner(monkeypatch):
     assert seen["hooks"] == ["issue-v1"] and seen["task_rules"] == ["issue-v1"]
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["hooks"] is None
+
+
+# -- the apply_patch arm (`--apply-patch`, spec §22) ---------------------------------------------
+
+def test_the_apply_patch_arm_sets_the_launchers_override_and_counts_the_calls(bench, monkeypatch):
+    monkeypatch.delenv(APPLY_PATCH_ENV, raising=False)
+    assert run(bench, name="fn", instances=["acme__widget-1"], apply_patch="function") == 0
+    env, _ = container_env(bench)
+    assert env[APPLY_PATCH_ENV] == "function"
+    store = SweBenchRunStore("fn")
+    assert store.manifest()["apply_patch"] == "function"
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done" and state["apply_patch"] == {"form": "function", "calls": 1}
+    assert "FIX" in prediction("fn", "acme__widget-1")
+    assert "Apply patch         function: called in 1 of 1 finished instance(s), 1 call(s): acme__widget-1" in SweBenchReport.render(store)
+    # Without the flag the variable is not set, the launcher decides, and the count is still kept.
+    bench["docker"].calls.clear()
+    assert run(bench, name="auto", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert APPLY_PATCH_ENV not in env
+    auto = SweBenchRunStore("auto")
+    assert auto.manifest()["apply_patch"] == "auto"
+    assert auto.state("acme__widget-1")["apply_patch"] == {"form": "auto", "calls": 0}
+    assert "Apply patch         auto (the launcher's choice: freeform on ling-engine, none on SGLang): called in 0 of 1" \
+        in SweBenchReport.render(auto)
+
+
+def test_the_freeform_form_is_counted_from_custom_tool_calls_and_off_is_passed_through(bench, monkeypatch):
+    monkeypatch.delenv(APPLY_PATCH_ENV, raising=False)
+    assert run(bench, name="free", instances=["acme__widget-1"], apply_patch="freeform") == 0
+    assert SweBenchRunStore("free").state("acme__widget-1")["apply_patch"] == {"form": "freeform", "calls": 1}
+    bench["docker"].calls.clear()
+    assert run(bench, name="off", instances=["acme__widget-1"], apply_patch="off") == 0
+    env, _ = container_env(bench)
+    assert env[APPLY_PATCH_ENV] == "off"
+    assert SweBenchRunStore("off").state("acme__widget-1")["apply_patch"] == {"form": "off", "calls": 0}
+
+
+def test_the_apply_patch_arm_is_kept_on_resume_told_apart_by_against_and_parsed(bench, monkeypatch):
+    monkeypatch.delenv(APPLY_PATCH_ENV, raising=False)
+    run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"])
+    assert run(bench, name="fn", instances=["acme__widget-1", "acme__widget-2"], apply_patch="function") == 0
+    store = SweBenchRunStore("fn")
+    kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
+    store.predictions_path.write_text("".join(line + "\n" for line in kept))
+    bench["docker"].calls.clear()
+    assert run(bench, name="fn") == 0
+    env, _ = container_env(bench)
+    assert env[APPLY_PATCH_ENV] == "function" and store.manifest()["apply_patch"] == "function"
+    assert store.state("acme__widget-2")["apply_patch"]["calls"] == 1
+    for name in ("plain", "fn"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("fn"), SweBenchRunStore("plain"))
+    assert "differs: apply_patch: function | auto" in text
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["apply_patch"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "apply_patch" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--apply-patch", "function", "--name", "x"])) == 0
+    assert seen["apply_patch"] == "function"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["apply_patch"] is None
+    with pytest.raises(SystemExit):
+        parser.parse_args(["swe-bench", "run", "--apply-patch", "maybe", "--name", "z"])
