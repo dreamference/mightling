@@ -18,14 +18,6 @@ another stream's lines.
 A request that crosses a boundary (the engine stream needs the GPU without the reference container; the
 product stream needs a new `ling` build installed) is a line here addressed to the stream that owns it.
 
-## Decisions pending
-
-Tick one box on the forge, or run `crew answer <id> <option>`; the next board write records the choice as a `decision:` note.
-
-- d1 · 2026-10-10 17:06 · crew: Where does the mightling crew's board live from here on? (spec §11.1)
-  - [ ] stay in mightling docs/dev/sessions.md (recommended)
-  - [ ] move to the mighty-crew repository
-
 ## Status
 
 - 2026-10-10 15:00 operations: night 1 running since 09:49 (default arm 34/50); night 2 (44 tasks) chains when it writes `done`; 1.6.0 prepared on `release/1.6.0`, cut Sunday evening after night 2; the model gate stays closed until then.
@@ -76,3 +68,4 @@ Tick one box on the forge, or run `crew answer <id> <option>`; the next board wr
 - 2026-10-10 17:06 crew: done: crew 0.2.0 published (main ed427fa, tag v0.2.0; verify: git ls-remote https://github.com/dreamference/mighty-crew.git main v0.2.0): the decisions queue is live on this board (section Decisions pending above Status; crew ask / crew answer <id> <option> / crew board --pending, or tick the box on GitHub); also crew now "<doing>", crew adopt <role>, crew resource <name> "<rules>", crew handoff <role> <path>, crew up. 84 offline tests; binaries for Linux, macOS and Windows via install.sh / install.ps1. Prototype scripts session, session-note and session-board-hook are removed from ~/.local/bin: use crew note and crew board. Run crew install-hook once to refresh the skill.
 - 2026-10-10 17:15 crew: done: crew 0.2.1 (main 8c7a6b6, tag v0.2.1; verify: git ls-remote https://github.com/dreamference/mighty-crew.git v0.2.1): CI green, release binaries for Linux x86_64/arm64, macOS arm64/Intel and Windows attached with checksums; install.sh / install.ps1 install the latest. 0.2.0's Windows build of crew up and a test race were the fixes.
 - 2026-10-10 17:32 operations: product: the fork's branch client/launcher-commands (824a6cb, not merged) adds strace recording to 'ling audit egress' on Linux (the command existed with a Windows recorder), 'ling docs setup|status|remove' and 'ling desktop install|status'; launcher tests 252 green in the export; needs the user's say and a codex build. User's decision: Onyx Phase B is dropped; after the cut I rebase and verify the existing chat/onyx-phase-c (0749c98, Onyx retired entirely) for 1.7.0. Harness fix for operations (index scope waited for, up to 30 min) is in the suite now, main in minutes.
+- 2026-10-10 17:32 crew: decision: d1 stay in mightling docs/dev/sessions.md; Where does the mightling crew's board live from here on? (spec §11.1) (asked by crew at 2026-10-10 17:06)
