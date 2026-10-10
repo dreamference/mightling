@@ -46,6 +46,9 @@ REFINE=${REFINE:-0}
 # The two arms, record first (night 1: default against tests-v2; night 3: night 1's winner against it plus
 # issue-v1, the record arm winning a tie).
 ARMS=${ARMS:-"default tests-v2"}
+# The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
+# landing on main during the day does not change the harness between two arms or two nights).
+REF=${REF:-origin/main}
 
 log() { echo "$(date -Is) $*"; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
@@ -61,11 +64,11 @@ start() {
     # every start: a stale worktree would run last night's script with none of today's fixes.
     git -C "$REPO" fetch origin || exit 1
     if [ ! -d "$WT" ]; then
-        git -C "$REPO" worktree add --detach "$WT" origin/main || exit 1
+        git -C "$REPO" worktree add --detach "$WT" "$REF" || exit 1
     elif [ -z "$(git -C "$WT" status --porcelain)" ]; then
-        git -C "$WT" checkout --quiet --detach origin/main || exit 1
+        git -C "$WT" checkout --quiet --detach "$REF" || exit 1
     else
-        echo "❌ $WT has local changes; commit or discard them so the night runs origin/main."; exit 1
+        echo "❌ $WT has local changes; commit or discard them so the night runs $REF."; exit 1
     fi
     if ! grep -q -- '"tests-v2"' "$WT/dreamference/swe_bench/swe_bench_instance_run.py"; then
         echo "❌ $WT does not have the tests-v2 task rule: update it to origin/main."; exit 1
