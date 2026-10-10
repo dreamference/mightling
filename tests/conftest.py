@@ -128,11 +128,15 @@ def _no_browse_wait(monkeypatch):
     # Every connection to a paired node resolves it on the network first and, when no browse shows
     # it, keeps browsing for up to a minute (NodePairing.resolve). A test's browse is a stub, and
     # a test never waits for the network: the budget is zero, and what one test resolved is not
-    # another test's answer.
-    from dreamference.node import NodePairing
+    # another test's answer. The browse itself is stubbed too: an unstubbed one is a real
+    # `avahi-browse`, a multicast query on the user's network (ten of them were counted in the
+    # suite on 2026-10-10); a test that wants nodes seen sets its own stub, which lands later and wins.
+    from dreamference.node import NodeBrowser, NodePairing
 
     NodePairing.forget_resolved()
     monkeypatch.setattr(NodePairing, "resolve_wait_s", 0.0)
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    monkeypatch.setattr(NodeBrowser, "browse_service", classmethod(lambda cls, service_type, timeout=6: []))
     yield
     NodePairing.forget_resolved()
 

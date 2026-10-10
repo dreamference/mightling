@@ -171,13 +171,18 @@ class NodePairing:
             return known["address"]
         deadline = time.monotonic() + cls.resolve_wait_s
         address: Optional[str] = None
+        attempts = 0
         while True:
+            attempts += 1
             for node in NodeBrowser.browse():
                 if node.get("node") == node_id:
                     address = node["address"]
                     break
             if address is not None or time.monotonic() >= deadline:
                 break
+            if attempts == 1:
+                print(f"⏳ {record.get('name') or node_id} is not answering on the network yet; "
+                      f"looking for it for up to {cls.resolve_wait_s:.0f} s...", flush=True)
             time.sleep(min(2.0, max(0.0, deadline - time.monotonic())))
         if address is not None and address != record.get("address"):
             record["address"] = address
