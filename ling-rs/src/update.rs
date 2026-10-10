@@ -150,7 +150,7 @@ pub fn parse_sums(text: &str) -> HashMap<String, String> {
         .collect()
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
+pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -160,10 +160,10 @@ fn hex_sha256(bytes: &[u8]) -> String {
 /// The only host a token is ever sent to. The release JSON names each asset's download URL, and
 /// a token must not follow such a URL anywhere else: a release that was tampered with, or an old
 /// repository name taken over by someone else, would otherwise collect the user's GitHub token.
-const GITHUB_API: &str = "https://api.github.com/";
+pub(crate) const GITHUB_API: &str = "https://api.github.com/";
 
 /// Whether a request to `url` may carry the token.
-fn sends_token(url: &str) -> bool {
+pub(crate) fn sends_token(url: &str) -> bool {
     url.starts_with(GITHUB_API)
 }
 
@@ -171,7 +171,7 @@ fn sends_token(url: &str) -> bool {
 /// logged-in `gh` is asked for only when `MIGHTLING_RELEASE_REPO` names another repository (a
 /// private fork). The public repository needs none, and a `gh` login usually carries far more
 /// access than reading a release.
-fn github_token(repo: &str) -> Option<String> {
+pub(crate) fn github_token(repo: &str) -> Option<String> {
     for name in ["GH_TOKEN", "GITHUB_TOKEN"] {
         if let Ok(token) = std::env::var(name)
             && !token.trim().is_empty()
