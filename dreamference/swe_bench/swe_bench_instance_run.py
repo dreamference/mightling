@@ -304,6 +304,16 @@ git -c core.quotePath=false diff --numstat "$before" "$after"
 # The pre-review patch is kept beside the instance's scratch, so it can be graded apart.
 PATCH_BEFORE_REVIEW: Final[str] = "patch-before-review.diff"
 
+# Restart instead of another compaction (`--restart-after-compactions N`, agent survey §3.7, spec
+# §21): once the fix session's N-th compaction is recorded in its rollout, the session is stopped
+# and one fresh session is started in the same container, given the task prompt again and the
+# stopped session's diff as a file it may inspect, apply or discard (FailFast-RestartSmart's
+# overlay, not applied for it). The tree is reset first. One restart per task; the deadline stays.
+RESTART_DIFF: Final[str] = "restart-diff.patch"
+RESTART_PREAMBLE: Final[str] = """An earlier session worked on this task and was stopped before it finished. Its changes are not
+in the tree: they are the patch in {diff}. Read it first. Apply it with `git apply` only if it is
+right; otherwise take from it what helps, or ignore it."""
+
 # A closing that announces nothing: "Let me know if …" ends many finished summaries.
 LET_ME_KNOW: Final[re.Pattern] = re.compile(r"\blet me know\b", re.IGNORECASE)
 
@@ -328,7 +338,7 @@ class SweBenchInstanceRun:
                  issue: Optional[Dict[str, Any]] = None, refine: bool = False,
                  task_rules: Optional[List[str]] = None, review_turn: bool = False,
                  refine_version: str = "v1",
-                 hooks: Optional[List[str]] = None) -> None:
+                 hooks: Optional[List[str]] = None, restart_after_compactions: int = 0) -> None:
         """
         Args:
             store: The run's files.
@@ -375,6 +385,12 @@ class SweBenchInstanceRun:
         self.task_rules: List[str] = list(task_rules or [])
         self.review_turn = review_turn
         self.hooks: List[str] = list(hooks or [])
+        # `--restart-after-compactions N` (spec §21): 0 is off. Armed only around the fix
+        # session's turns; the baseline keeps the refine arm's study step out of the count.
+        self.restart_after_compactions = int(restart_after_compactions or 0)
+        self.restart_armed = False
+        self.restarted = False
+        self.compaction_baseline = 0
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -593,14 +609,19 @@ class SweBenchInstanceRun:
             # Only now: the refine arm's study step is neither held nor counted.
             self._prepare_gate(state)
         fix_started = time.time()
-        outcome = self._exec(prompt, resume=False)
+        if self.restart_after_compactions:
+            # Compactions recorded before the fix session (the refine arm's study step) do not count.
+            self.compaction_baseline = self.compactions_recorded()
+            self.restart_armed = True
+        outcome = self._fix_turn(state, prompt, prompt, resume=False)
         while outcome == "ok" and self.nudges_used < self.settings.nudges:
             kind = self._nudge_kind()
             if kind is None:
                 break
             self.nudges_used += 1
             self.nudge_kinds.append(kind)
-            outcome = self._exec(NUDGE if kind == "stall" else COMPLETION_NUDGE, resume=True)
+            outcome = self._fix_turn(state, NUDGE if kind == "stall" else COMPLETION_NUDGE, prompt, resume=True)
+        self.restart_armed = False
         state["exec"] = outcome
         if self.refine:
             state["refine"]["fix_s"] = int(time.time() - fix_started)
@@ -670,6 +691,81 @@ class SweBenchInstanceRun:
         self.session = None
         self.deadline = time.time() + self.settings.task_timeout_s
         return refined, None
+
+    def _fix_turn(self, state: Dict[str, Any], turn_prompt: str, task_prompt: str, resume: bool) -> str:
+        """One turn of the fix session; a turn cut off for a restart becomes the fresh session's."""
+        outcome = self._exec(turn_prompt, resume=resume)
+        return self._restart(state, task_prompt) if outcome == "restart" else outcome
+
+    def compactions_recorded(self) -> int:
+        """
+        Counts the compactions in this instance's sessions: the `compacted` records of every
+        rollout under its scratch `codex-home` (what `scripts/context_budget_replay.py` counts).
+
+        Returns:
+            int: The count; a line still being written is skipped.
+        """
+        count = 0
+        for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
+            try:
+                with open(path, "rb") as handle:
+                    for line in handle:
+                        if b'"compacted"' not in line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except ValueError:
+                            continue
+                        if isinstance(record, dict) and record.get("type") == "compacted":
+                            count += 1
+            except OSError:
+                continue
+        return count
+
+    def _restart_due(self) -> bool:
+        return (self.restart_armed and not self.restarted and self.restart_after_compactions > 0
+                and self.compactions_recorded() - self.compaction_baseline >= self.restart_after_compactions)
+
+    def _restart(self, state: Dict[str, Any], task_prompt: str) -> str:
+        """
+        The restart (spec §21): the session was stopped at its N-th compaction. Its diff is written
+        to `restart-diff.patch` in the scratch folder, the tree is reset, and one fresh session gets
+        the task prompt again under `RESTART_PREAMBLE`. Records `state["restart"]`.
+
+        Args:
+            state: The instance's state.
+            task_prompt: The fix session's task prompt, given again.
+
+        Returns:
+            str: The fresh session's outcome (`ok`, `error`, `timeout`), or `error` when the tree
+            could not be reset; `restart` when the run was interrupted during it.
+        """
+        self.restarted = True
+        record: Dict[str, Any] = {"compactions": self.compactions_recorded() - self.compaction_baseline,
+                                  "after_s": int(time.time() - self.started), "nudges_before": self.nudges_used,
+                                  "session_before": self.session}
+        state["restart"] = record
+        if self.stop_event.is_set():
+            return "restart"
+        # The container was stopped to end the session; the diff and the reset need it running.
+        SweBenchDocker.run(["start", self.container], timeout=120)
+        collected = self._script(COLLECT_SCRIPT, timeout=600)
+        diff = self._read(self.scratch / "patch.diff") if collected.returncode == 0 else ""
+        try:
+            (self.scratch / RESTART_DIFF).write_text(diff)
+        except OSError:
+            pass
+        record["diff_bytes"] = len(diff.encode())
+        reset = self._script(RESET_SCRIPT, timeout=600)
+        if reset.returncode != 0:
+            self.notes.append(f"resetting /testbed for the restart failed ({reset.returncode}): "
+                              f"{(reset.stderr or reset.stdout).strip()[-300:]}")
+            return "error"
+        self.session = None
+        record["log_offset"] = self.log_path.stat().st_size if self.log_path.exists() else 0
+        self.notes.append(f"restarted after {record['compactions']} compaction(s), {record['after_s']} s into the task")
+        fresh = RESTART_PREAMBLE.format(diff=f"{SCRATCH_MOUNT}/{RESTART_DIFF}") + "\n\n" + task_prompt
+        return self._exec(fresh, resume=False)
 
     def _review(self, state: Dict[str, Any], outcome: str) -> Optional[str]:
         """
@@ -836,21 +932,24 @@ class SweBenchInstanceRun:
                     try:
                         code = process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
-                        if time.time() >= self.deadline or self.stop_event.is_set():
+                        if self._restart_due():
+                            code = "restart"
+                        elif time.time() >= self.deadline or self.stop_event.is_set():
+                            code = "timeout"
+                        if code is not None:
                             SweBenchDocker.run(["stop", "-t", str(STOP_GRACE_S), self.container],
                                                timeout=STOP_GRACE_S + 60)
                             try:
                                 process.wait(timeout=STOP_GRACE_S)
                             except subprocess.TimeoutExpired:
                                 process.kill()
-                            code = "timeout"
         finally:
             self.in_model = False
         session = NightShiftTaskRun.thread_id_in(self.log_path, offset)
         if session:
             self.session = session
-        if code == "timeout":
-            return "timeout"
+        if code in ("timeout", "restart"):
+            return code
         return "ok" if code == 0 else "error"
 
     def _nudge_kind(self) -> Optional[str]:

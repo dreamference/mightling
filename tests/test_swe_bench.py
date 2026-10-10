@@ -33,7 +33,7 @@ from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATC
 from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, COMPLETION_NUDGE,
                                                           NO_REFINED, PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT,
                                                           SCRUB_SCRIPT, TASK_RULES)
-from dreamference.swe_bench.swe_bench_instance_run import REVIEW_PROMPT, REVIEW_RULES
+from dreamference.swe_bench.swe_bench_instance_run import RESTART_DIFF, RESTART_PREAMBLE, REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 from dreamference.swe_bench.swe_bench_runner import BUILT_IN_PROMPTS, RUN_NAME
 
@@ -91,6 +91,10 @@ class FakeDocker:
         self.processes = []
         # The review turn, per instance: `leave` (the default), `edit`, `hang`.
         self.review_modes = {}
+        # The restart arm's stand-ins: compactions the fix session records before it hangs, the
+        # study step's, the fresh session's (which then hangs too), and what the fresh session saw.
+        self.compactions, self.study_compactions, self.compactions_again = 3, 0, 0
+        self.restart_seen = {}
         # True: `ling exec` reports no thread, so there is no session to resume.
         self.no_thread = False
 
@@ -163,6 +167,16 @@ class FakeDocker:
             return done()
         return done()  # start, update, info
 
+    def compact(self, box, count):
+        """Records `count` compactions in the instance's rollout, as Codex writes them."""
+        if not count:
+            return
+        rollout = box["scratch"] / "codex-home" / "sessions" / "2026" / "10" / "02" / "rollout-2026-10-02T00-00-00-fake.jsonl"
+        rollout.parent.mkdir(parents=True, exist_ok=True)
+        with open(rollout, "a") as handle:
+            for _ in range(count):
+                handle.write(json.dumps({"type": "compacted", "payload": {"message": "summary"}}) + "\n")
+
     # -- SweBenchDocker.popen ----------------------------------------------------------------
     def popen(self, args, stdout):
         self.calls.append(list(args))
@@ -205,6 +219,7 @@ class FakeDocker:
             # `refine_edits` also changes the tree it was told to leave alone.
             if mode != "refine_silent":
                 (box["scratch"] / "refined.md").write_text(f"1. Intent: widget() returns 2 ({instance}).\n")
+            self.compact(box, self.study_compactions)
             if mode == "refine_edits":
                 (box["repo"] / "widget.py").write_text("def widget():\n    return 99  # EXPLORING\n")
                 (box["repo"] / "stray.py").write_text("print('scratch')\n")
@@ -213,6 +228,27 @@ class FakeDocker:
             stdout.flush()
             say("Wrote the description.")
             return FakeProcess(0)
+        if prompt.startswith(RESTART_PREAMBLE[:40]):
+            # The fresh session after a restart: the hand-over file holds the stopped session's
+            # diff, the tree is back at the base, and the task prompt follows the preamble.
+            self.restart_seen[instance] = {"diff": (box["scratch"] / RESTART_DIFF).read_text(),
+                                           "tree": (box["repo"] / "widget.py").read_text(), "prompt": prompt}
+            if self.compactions_again:
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # PARTIAL AGAIN\n")
+                self.compact(box, self.compactions_again)
+                process = FakeProcess(0, hang=True)
+                self.processes.append(process)
+                return process
+            (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX AFTER RESTART\n")
+            say("Fixed widget() after reading the earlier patch.")
+            return FakeProcess(0)
+        if mode == "compacting":
+            # Edits, compacts `compactions` times (3 unless the test says) and never finishes.
+            (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # PARTIAL\n")
+            self.compact(box, self.compactions)
+            process = FakeProcess(0, hang=True)
+            self.processes.append(process)
+            return process
         if mode == "hang":
             (box["repo"] / "partial.py").write_text("# half done\n")
             process = FakeProcess(0, hang=True)
@@ -2826,3 +2862,98 @@ def test_an_index_scope_still_active_at_the_limit_and_any_other_heavy_job_are_le
     monkeypatch.setattr(SweBenchRunner, "INDEX_WAIT_S", 0)
     assert run(bench, name="refused", instances=["acme__widget-1"]) == 1
     assert "Not run: an index run is active" in capsys.readouterr().out
+
+
+# -- restart instead of another compaction (`--restart-after-compactions`, spec §21) ----------------
+
+def test_a_session_stopped_at_its_nth_compaction_restarts_once_with_its_diff_in_a_file(bench):
+    bench["docker"].default_mode = "compacting"
+    assert run(bench, instances=["acme__widget-1"], restart_after_compactions=3) == 0
+    store = SweBenchRunStore("r1")
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done" and state["exec"] == "ok" and state["nudges"] == 0
+    restart = state["restart"]
+    assert restart["compactions"] == 3 and restart["nudges_before"] == 0 and restart["diff_bytes"] > 0
+    assert restart["session_before"] and "log_offset" in restart
+    assert any("restarted after 3 compaction(s)" in note for note in state["notes"])
+    # The fresh session found the stopped session's diff in the file, the tree at the base, and
+    # the task prompt after the preamble; what it did is the patch, not the stopped session's work.
+    seen = bench["docker"].restart_seen["acme__widget-1"]
+    assert "PARTIAL" in seen["diff"] and "widget.py" in seen["diff"]
+    assert seen["tree"] == "def widget():\n    return 1\n"
+    assert seen["prompt"].startswith(RESTART_PREAMBLE.format(diff=f"/mightling-scratch/{RESTART_DIFF}"))
+    assert "widget" in seen["prompt"].split("\n\n", 1)[1]
+    patch = prediction("r1", "acme__widget-1")
+    assert "FIX AFTER RESTART" in patch and "PARTIAL" not in patch
+    calls = [call[0] for call in bench["docker"].calls]
+    assert calls.index("stop") < calls.index("start")
+    assert "Restart             after 3 compaction(s): 1 of 1 restarted" in SweBenchReport.render(store)
+    assert "acme__widget-1" in SweBenchReport.render(store).split("Restart   ", 1)[1].splitlines()[0]
+
+
+def test_below_the_threshold_and_without_the_arm_a_compacting_session_runs_to_its_limit(bench):
+    bench["docker"].default_mode = "compacting"
+    bench["settings"] = SweBenchSettings({"task_timeout": "0.3s"})
+    assert run(bench, name="four", instances=["acme__widget-1"], restart_after_compactions=4) == 0
+    state = SweBenchRunStore("four").state("acme__widget-1")
+    assert state["status"] == "timeout" and "restart" not in state
+    assert "PARTIAL" in prediction("four", "acme__widget-1")
+    assert "after 4 compaction(s): none of 1 finished instance(s) reached it" in SweBenchReport.render(SweBenchRunStore("four"))
+    assert run(bench, name="off", instances=["acme__widget-1"]) == 0
+    assert SweBenchRunStore("off").state("acme__widget-1")["status"] == "timeout"
+    assert "Restart             off" in SweBenchReport.render(SweBenchRunStore("off"))
+
+
+def test_a_task_restarts_at_most_once(bench):
+    bench["docker"].default_mode = "compacting"
+    bench["settings"] = SweBenchSettings({"task_timeout": "0.5s"})
+    # The fresh session compacts again and hangs: the task ends at its time limit, not in a
+    # second restart, and the patch is that session's tree.
+    bench["docker"].compactions_again = 3
+    store = SweBenchRunStore("again")
+    assert run(bench, name="again", instances=["acme__widget-1"], restart_after_compactions=2) == 0
+    state = store.state("acme__widget-1")
+    assert state["status"] == "timeout" and state["restart"]["compactions"] == 3
+    assert sum(1 for note in state["notes"] if "restarted after" in note) == 1
+    assert "PARTIAL AGAIN" in prediction("again", "acme__widget-1")
+
+
+def test_the_refine_study_steps_compactions_do_not_count_towards_a_restart(bench):
+    bench["docker"].default_mode = "compacting"
+    bench["settings"] = SweBenchSettings({"task_timeout": "0.3s"})
+    bench["docker"].study_compactions = 3
+    assert run(bench, instances=["acme__widget-1"], refine=True, restart_after_compactions=4) == 0
+    state = SweBenchRunStore("r1").state("acme__widget-1")
+    # Six compactions in the instance's rollout, three of them the study step's: below four.
+    assert state["refine"]["refine_exec"] == "ok" and state["status"] == "timeout" and "restart" not in state
+
+
+def test_the_restart_arm_is_kept_on_resume_told_apart_by_against_and_parsed(bench, monkeypatch):
+    bench["docker"].default_mode = "compacting"
+    bench["settings"] = SweBenchSettings({"task_timeout": "0.3s"})
+    run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"])
+    assert run(bench, name="restarted", instances=["acme__widget-1", "acme__widget-2"], restart_after_compactions=3) == 0
+    store = SweBenchRunStore("restarted")
+    kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
+    store.predictions_path.write_text("".join(line + "\n" for line in kept))
+    assert run(bench, name="restarted") == 0
+    assert store.manifest()["restart_after_compactions"] == 3
+    assert store.state("acme__widget-2")["restart"]["compactions"] == 3
+    for name in ("plain", "restarted"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("restarted"), SweBenchRunStore("plain"))
+    assert "differs: restart_after_compactions: 3 | 0" in text
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["restart_after_compactions"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "restart_after_compactions" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--restart-after-compactions", "2", "--name", "x"])) == 0
+    assert seen["restart_after_compactions"] == 2
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["restart_after_compactions"] == 0
