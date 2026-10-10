@@ -189,6 +189,13 @@ gate container in front of the engine on the public port. While a SWE-bench run 
 request that is not the run's is answered 503, naming the run and its time left, instead of slowing
 it down; `ling-admin night pause [--for 2h]` lets you through meanwhile. With no run, nothing changes.
 
+**Paired nodes are found again after the rename, and always where they are now.** A node paired under Puffin
+"did not answer over the pairing" after the switch to Mightling: its host key was stored under the old alias.
+The one-time migration now moves it. And no connection to a paired node uses its remembered address any
+more: every one browses the network for the node's id, keeps looking for up to a minute when the network
+does not answer, and then refuses rather than trying an address that may belong to another machine by now
+(a DHCP move had cost a benchmark night its second lane).
+
 **Fixed:**
 - **The code index's memory budget saw no running index.** Since the rename the code index looked
   for its running scopes under a folder that does not exist, so a new index run was admitted without
