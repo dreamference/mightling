@@ -124,6 +124,20 @@ def _isolate_node_advert(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_browse_wait(monkeypatch):
+    # Every connection to a paired node resolves it on the network first and, when no browse shows
+    # it, keeps browsing for up to a minute (NodePairing.resolve). A test's browse is a stub, and
+    # a test never waits for the network: the budget is zero, and what one test resolved is not
+    # another test's answer.
+    from dreamference.node import NodePairing
+
+    NodePairing.forget_resolved()
+    monkeypatch.setattr(NodePairing, "resolve_wait_s", 0.0)
+    yield
+    NodePairing.forget_resolved()
+
+
+@pytest.fixture(autouse=True)
 def _no_passwordless_sudo(monkeypatch):
     # Whether sudo needs a password on this machine must not decide a test, and asking it is a
     # real sudo; a test of the no-password path says so itself.

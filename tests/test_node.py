@@ -552,7 +552,8 @@ def paired_record(node_id="2222-bbbb", address="192.168.50.106"):
 
 def test_every_connection_uses_the_pairing_key_and_the_pinned_host_key(monkeypatch):
     from dreamference.node import NodePairing
-    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000"}]))
     record = paired_record()
     command = NodePairing.ssh_command(record, "status")
     assert command[0] == "ssh" and command[-2:] == ["owner@192.168.50.106", "status"]
@@ -1061,11 +1062,14 @@ def test_finished_jobs_are_pruned_a_day_after_the_fetch_or_after_fourteen_days(j
 
 def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named(monkeypatch):
     from dreamference.node import NodeLanes, NodePairing
-    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     paired_record()                                                               # spark-2, .106
     for number in (3, 4, 5):
         NodePairing._save({"node": f"{number}{number}{number}{number}-x", "name": f"spark-{number}",
                            "address": f"192.168.50.10{number + 4}", "user": "owner", "ssh_port": 22})
+    # Every node is reached where the browse shows it, never at its recorded address.
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": record["name"], "node": record["node"], "address": record["address"], "port": "8000"}
+        for record in NodePairing.paired()]))
     answers = {"192.168.50.106": {"model_port": 8000}, "192.168.50.107": {"model_port": 8000},
                "192.168.50.108": {"runner": "a Night Shift run"}}
     asked = []
@@ -1104,7 +1108,8 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
 
 def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(tmp_path, monkeypatch):
     from dreamference.node import NodeJobSender, NodePairing
-    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000"}]))
     repo = tmp_path / "My Repo!"
     repo.mkdir()
     subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
@@ -1115,7 +1120,8 @@ def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(t
     assert NodeJobSender.compose(str(repo), "a" * 40, ["x"], "16G", "2h", "pytest -q")["test"] == "pytest -q"
     record = paired_record()
     assert NodeJobSender.git_url(record, "calc-0123456789") == "ssh://owner@192.168.50.106:22/jobs/calc-0123456789.git"
-    assert NodeJobSender.git_url(dict(record, address="fd00::6", ssh_port=2222), "r") == "ssh://owner@[fd00::6]:2222/jobs/r.git"
+    fixed = dict(record, address="fd00::6", ssh_port=2222, address_fixed=True)   # a direct link, given by hand
+    assert NodeJobSender.git_url(fixed, "r") == "ssh://owner@[fd00::6]:2222/jobs/r.git"
     ssh = NodeJobSender.git_environment(record)["GIT_SSH_COMMAND"]
     assert ssh.startswith("ssh -i ") and "HostKeyAlias=mightling-node-2222-bbbb" in ssh and "StrictHostKeyChecking=yes" in ssh
     assert " -p " not in ssh                                                    # the URL carries the port
@@ -1361,6 +1367,7 @@ def test_every_connection_resolves_the_node_on_the_network_first(monkeypatch):
     assert NodePairing.paired()[0]["address"] == "192.168.50.200"                # remembered for next time
     # Other nodes answer and this one does not: it is off, and its old address may be another
     # machine's by now. Nothing is tried.
+    NodePairing.forget_resolved()
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
         {"name": "spark-3", "node": "3333-cccc", "address": "192.168.50.106", "port": "8000"}]))
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("ssh must not run"))
@@ -1368,9 +1375,23 @@ def test_every_connection_resolves_the_node_on_the_network_first(monkeypatch):
     assert answer.returncode == 255 and "not on the network" in answer.stderr and "192.168.50.200" in answer.stderr
     with pytest.raises(LookupError):
         NodePairing.ssh_command(record, "info")
-    # A browse that returns nothing at all (multicast blocked): the remembered address is the fallback.
-    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    # A browse that returns nothing at all (multicast blocked, the access point rebooting) is
+    # repeated until the budget runs out; then the node is refused. The remembered address is
+    # never the fallback (the user's rule, 2026-10-10: resolve, retry for a minute, then refuse).
+    NodePairing.forget_resolved()
+    browses = []
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: browses.append(1) or []))
+    monkeypatch.setattr(NodePairing, "resolve_wait_s", 0.05)
+    with pytest.raises(LookupError):
+        NodePairing.ssh_command(record, "info")
+    assert len(browses) >= 2, "the browse was repeated before the node was given up"
+    # ... and a node that appears during the wait is found.
+    NodePairing.forget_resolved()
+    answers = [[], [], [{"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"}]]
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: answers.pop(0) if answers else []))
+    monkeypatch.setattr(NodePairing, "resolve_wait_s", 5.0)
     assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.50.200"
+    NodePairing.forget_resolved()
     # An address given by hand (`sync-model --address`, a direct link) is used as it is.
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
         {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.201", "port": "8000"}]))

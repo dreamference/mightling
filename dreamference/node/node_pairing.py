@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
@@ -134,16 +135,26 @@ class NodePairing:
         ]
         return options
 
+    # How long a browse that does not show the node is repeated before the node is reported off
+    # the network, and how long an answer is reused by the same process (a lane probe and the ssh
+    # it then runs would otherwise browse twice for one node).
+    resolve_wait_s: float = 60.0
+    resolve_reuse_s: float = 30.0
+    _resolved: Dict[str, Any] = {}
+
     @classmethod
     def resolve(cls, record: Dict[str, Any]) -> Optional[str]:
         """
         The address a paired node answers at now. The pairing is with the node's id, and DHCP
         moves addresses (spec §6.1, tier 4): a browse looks for the id, and the address in that
-        answer is used and remembered. The remembered address is tried only when the browse
-        returns nothing at all (multicast blocked); when other nodes answer and this one does
-        not, it is off or elsewhere, and its old address, which may belong to another machine by
-        now, is never tried. On 2026-10-10 a lane was lost for a night because the remembered
-        address was used directly after the node's lease had moved.
+        answer is used; the record remembers it for display only. **A remembered address is never
+        connected to.** A browse that does not show the node (nothing answering, or other nodes
+        answering and this one not) is repeated for up to `resolve_wait_s`; then the node is
+        reported off the network, and its old address, which may belong to another machine by
+        now, is left alone. The user's rule (2026-10-10): never use an address, always resolve;
+        when the network does not answer, retry for a minute, then refuse. That day a lane had
+        been lost for a night because the remembered address was used directly after the node's
+        lease had moved.
 
         Args:
             record: The paired node's record. One with `address_fixed` set (an address given by
@@ -154,17 +165,31 @@ class NodePairing:
         """
         if record.get("address_fixed"):
             return record["address"]
-        seen = NodeBrowser.browse()
-        if not seen:
-            return record["address"]
-        for node in seen:
-            if node.get("node") == record["node"]:
-                if node["address"] != record["address"]:
-                    record["address"] = node["address"]
-                    if cls.record_path(record["node"]).is_file():
-                        cls._save(record)
-                return node["address"]
-        return None
+        node_id = record["node"]
+        known = cls._resolved.get(node_id)
+        if known is not None and time.monotonic() < known["until"]:
+            return known["address"]
+        deadline = time.monotonic() + cls.resolve_wait_s
+        address: Optional[str] = None
+        while True:
+            for node in NodeBrowser.browse():
+                if node.get("node") == node_id:
+                    address = node["address"]
+                    break
+            if address is not None or time.monotonic() >= deadline:
+                break
+            time.sleep(min(2.0, max(0.0, deadline - time.monotonic())))
+        if address is not None and address != record.get("address"):
+            record["address"] = address
+            if cls.record_path(node_id).is_file():
+                cls._save(record)
+        cls._resolved[node_id] = {"address": address, "until": time.monotonic() + cls.resolve_reuse_s}
+        return address
+
+    @classmethod
+    def forget_resolved(cls) -> None:
+        """Drops the addresses this process has resolved, so the next connection browses again."""
+        cls._resolved.clear()
 
     @classmethod
     def ssh_command(cls, record: Dict[str, Any], request: str) -> List[str]:
