@@ -375,6 +375,10 @@ class FakeHost:
         return ("test-model", 262144)
 
     @classmethod
+    def heavy_jobs(cls):
+        return []  # nothing heavy runs on the test machine; the index-wait tests replace this
+
+    @classmethod
     def metrics(cls, host, timeout=3.0):
         return {"running": 0.0, "served": 1.0, "kv_pool": 150000.0}
 
@@ -2771,3 +2775,54 @@ def test_the_hooks_option_reaches_the_runner(monkeypatch):
     assert seen["hooks"] == ["issue-v1"] and seen["task_rules"] == ["issue-v1"]
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["hooks"] is None
+
+
+# -- an index run beside a session is waited for, not refused (spec §5.2) ---------------------------
+
+def set_heavy(monkeypatch, probe):
+    """The host's heavy-jobs probe, on the test's host stand-in (which has none of its own)."""
+    monkeypatch.setattr(FakeHost, "heavy_jobs", staticmethod(probe), raising=False)
+
+
+def test_a_transient_index_scope_is_waited_for_then_the_run_goes_on(bench, monkeypatch, capsys):
+    polls = {"n": 0}
+    slept = []
+
+    def heavy_jobs():
+        polls["n"] += 1
+        return ["an index run is active (mightling-index-docs-downloads-1a2b.scope)"] if polls["n"] <= 2 else []
+
+    set_heavy(monkeypatch, heavy_jobs)
+    # The run's own polling sleeps through the same seam; only the index wait sleeps the poll interval.
+    monkeypatch.setattr(SweBenchRunner, "sleep", staticmethod(lambda seconds: (slept.append(seconds), time.sleep(0.01))))
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert polls["n"] == 3 and [s for s in slept if s == SweBenchRunner.INDEX_POLL_S] == [15, 15]
+    out = capsys.readouterr().out
+    assert out.count("Waiting for an index run is active (mightling-index-docs-downloads-1a2b.scope) to end") == 1
+    assert out.count("The index run ended after") == 1
+    assert SweBenchRunStore("r1").state("acme__widget-1")["status"] == "done"
+
+
+def test_an_index_scope_still_active_at_the_limit_and_any_other_heavy_job_are_left_to_admission(bench, monkeypatch, capsys):
+    set_heavy(monkeypatch, lambda: ["an index run is active (mightling-index-x.scope)"])
+    clock = {"now": 0.0}
+    monkeypatch.setattr("dreamference.swe_bench.swe_bench_runner.time.monotonic", lambda: clock["now"])
+    monkeypatch.setattr(SweBenchRunner, "sleep", staticmethod(lambda seconds: clock.__setitem__("now", clock["now"] + seconds)))
+    assert SweBenchRunner.wait_for_index_runs(limit_s=60, poll_s=15) is False
+    out = capsys.readouterr().out
+    assert "Waiting for" in out and "Still active after 1 min" in out
+    # A build beside the index run is not transient: no waiting at all, admission decides.
+    set_heavy(monkeypatch, lambda: ["a ling build holds the build lock",
+                                    "an index run is active (mightling-index-y.scope)"])
+    assert SweBenchRunner.wait_for_index_runs(limit_s=60, poll_s=15) is False
+    assert "Waiting for" not in capsys.readouterr().out
+    # Nothing heavy: no wait, nothing printed.
+    set_heavy(monkeypatch, lambda: [])
+    assert SweBenchRunner.wait_for_index_runs() is True
+    assert capsys.readouterr().out == ""
+    # The real admission still refuses what is left for it.
+    monkeypatch.setattr(QuietMachine, "refuse", "an index run is active (mightling-index-y.scope)")
+    set_heavy(monkeypatch, lambda: ["an index run is active (mightling-index-y.scope)"])
+    monkeypatch.setattr(SweBenchRunner, "INDEX_WAIT_S", 0)
+    assert run(bench, name="refused", instances=["acme__widget-1"]) == 1
+    assert "Not run: an index run is active" in capsys.readouterr().out

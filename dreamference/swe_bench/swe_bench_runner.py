@@ -63,6 +63,11 @@ class SweBenchRunner:
     sleep = staticmethod(time.sleep)
     host = NightShiftHost
     admission = NightShiftRunner
+    # A `ling-code` or `ling-docs` index run beside a session is a transient scope: a run waits
+    # for it rather than refusing (night 1's second arm refused at 16:40 on 2026-10-10 for a
+    # ling-docs index a session had started, and lost five minutes to a restart by hand).
+    INDEX_WAIT_S = 30 * 60
+    INDEX_POLL_S = 15
     gate_hold = SweBenchGateHold
     gate = ModelGate
 
@@ -146,6 +151,41 @@ class SweBenchRunner:
                 digest.update(handle.read())
         tag = CODEX_RELEASE_TAG.removeprefix("rust-v")
         return f"mightling-{tag}-{digest.hexdigest()[:8]}/{served_model}"
+
+    @classmethod
+    def wait_for_index_runs(cls, limit_s: Optional[int] = None, poll_s: Optional[int] = None) -> bool:
+        """
+        Waits for an active index run (a `mightling-index-*` scope: `ling-code` or `ling-docs`
+        indexing started by a session) to end, for up to `limit_s`, polling every `poll_s`. Any
+        other heavy job, or an index scope still active at the limit, is left to admission, which
+        refuses as before. Prints one line when it starts waiting and one when it goes on.
+
+        Args:
+            limit_s: How long to wait at most; `INDEX_WAIT_S` by default.
+            poll_s: Seconds between polls; `INDEX_POLL_S` by default.
+
+        Returns:
+            bool: True when no index run is active afterwards.
+        """
+        limit = cls.INDEX_WAIT_S if limit_s is None else limit_s
+        poll = cls.INDEX_POLL_S if poll_s is None else poll_s
+        started = time.monotonic()
+        waited = False
+        while True:
+            jobs = cls.host.heavy_jobs()
+            index_runs = [job for job in jobs if job.startswith("an index run is active")]
+            if not index_runs or len(index_runs) != len(jobs):
+                if waited:
+                    print(f"✅ The index run ended after {int(time.monotonic() - started)} s; going on.", flush=True)
+                return not index_runs
+            if time.monotonic() - started >= limit:
+                print(f"⚠️  Still active after {int(limit // 60)} min: {index_runs[0]}.", flush=True)
+                return False
+            if not waited:
+                print(f"⏳ Waiting for {index_runs[0]} to end (up to {int(limit // 60)} min, "
+                      f"checked every {poll} s)...", flush=True)
+                waited = True
+            cls.sleep(poll)
 
     @classmethod
     def build_manifest(cls, name: str, dataset: str, selected: List[str], excluded: Dict[str, str],
@@ -401,6 +441,7 @@ class SweBenchRunner:
                     print("💡 No model gate answers in front of the model server (it comes with the next "
                           "`ling-admin server start`): this run waits for other requests, as before.", flush=True)
                 cls.admission.ignore_sessions = ignore_sessions or hold.priority()
+                cls.wait_for_index_runs()
                 reason = cls.admission.admit(vllm_host, mightling_bin, idle, end or datetime.now().astimezone() + timedelta(days=365))
                 reason = reason or SweBenchEvaluator.disk_problem(settings)
                 if reason:
