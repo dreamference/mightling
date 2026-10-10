@@ -35,9 +35,10 @@ stamps it into the binaries.
   nothing set up, `systemctl list-unit-files 'mightling-*'` shows no new unit, and
   `ling-admin audit egress` names no declared exception.
 - **The messengers against real services** — none has run yet (MIGHTLING_SIGNAL §17,
-  MIGHTLING_CHAT §14–§15): {{TBD: Signal linked to a real account (setup, QR, a question in Note to
-  Self, /stop, remove); Telegram with a real bot; Matrix with tuwunel, Tailscale and Element X. If any
-  of them is still untested when 1.6.0 is cut, its "preview" label stays.}}
+  MIGHTLING_CHAT §14–§15): Signal linked to a real account (setup, QR, a question in Note to Self,
+  /stop, remove) is planned for the day of the cut, once the model is free; Telegram with a real bot
+  and Matrix with tuwunel, Tailscale and Element X are not. Each still untested when 1.6.0 is cut
+  keeps its "preview" label, and the notes above say so.
 - **The Mac preview:** dispatched with `build_clients` and `build_mac_preview` on, the release carries
   `Mightling-1.6.0-arm64-preview.dmg` and `Mightling-1.6.0-x64-preview.dmg`, both listed in
   `SHA256SUMS`, and its description starts with the "Mac desktop app (preview, unsigned)" paragraph
@@ -134,41 +135,24 @@ starts nothing and opens no port. All three need `ling web` running on the node 
   as a declared exception.
 - **Why preview:** the Matrix and Telegram bridge is tested against stand-ins of Telegram's Bot API
   and a Matrix homeserver, end to end through a real `ling web`; the Signal bridge is tested against
-  a scripted signal-cli and a stand-in `ling web`; {{TBD: but not yet against a real Signal account, a
-  real Telegram bot or a real homeserver with Element X — update to what the pre-release check
-  covered}}. Full guide: the Phone messengers page of the documentation.
+  a scripted signal-cli and a stand-in `ling web`; none has yet been exercised against a real Signal
+  account, a real Telegram bot or a real homeserver with Element X, which is why each keeps its
+  preview label. Full guide: the Phone messengers page of the documentation.
 
-<!-- REFINE, VARIANT A: keep this block if the 100-task refine run wins; delete VARIANT B. -->
-**Refine mode is now the default.** Every new task first goes to a session that studies it and
-writes a refined description without changing anything, then to a fresh session that does the
-work: in `ling`, `ling exec` and Night Shift alike. On a fixed 100-task sample of SWE-bench
-Verified, run on one DGX Spark, it resolved {{TBD: refine k}}/100 against 68/100 without it
-(estimated {{TBD: refine full-set estimate}}% on all 500 tasks, against about 69%). **It is slower:** on
-SWE-bench a task took a median of 16 minutes with it against 4 minutes without
-{{TBD: replace with the 100-task medians}}, because the study step reads and runs the code first.
-
-- **To switch it off** for one run: `ling --no-refine …`; for good: `mightling_refine = false` in
-  `dreamference.toml`, or `DREAMFERENCE_MIGHTLING_REFINE=0`; for Night Shift: `refine = false` under
-  `[night]`.
-- If you keep hooks in `hooks.json` rather than `config.toml`, the interactive session cannot be
-  refined and says so once; `ling exec` is refined either way.
-<!-- END VARIANT A -->
-
-<!-- REFINE, VARIANT B: keep this block if refine does not win; delete VARIANT A. -->
 **Refine mode stays opt-in.** `ling --refine` (also `ling exec --refine`, `[night] refine = true`, or
 `mightling_refine = true` in `dreamference.toml`) first studies the task in a session that changes
 nothing, then does it in a fresh one. On a fixed 100-task sample of SWE-bench Verified, run on one
-DGX Spark, it resolved {{TBD: refine k}}/100 against 68/100 without it, at about
-{{TBD: time ratio}} times the time, so it remains off by default. It can still help on tasks
-whose description is thin or misleading.
-<!-- END VARIANT B -->
+DGX Spark, it resolved 69/100 against 68/100 without it (the two arms each won tasks the other
+lost: 10 against 9, McNemar p = 1.0), at about 2.2 times the time per task (a median of 13.9
+minutes against 6.5), so it remains off by default. It can still help on tasks whose description is
+thin or misleading.
 
 **Measured: 68 of 100 SWE-bench Verified tasks.** With the default configuration, 1.5.1's agent and
 Qwen3.8-27B resolved 68 of a fixed 100-task sample of SWE-bench Verified on one DGX Spark, offline,
 one attempt per task. That corresponds to an estimated 69% on all 500 tasks (95% band 63.9–73.4%),
 estimated from the per-task results of every public submission (`scripts/swe_bench_compare.py`).
-It is our own measurement, not a leaderboard entry. {{TBD: one sentence on the refine run once it is
-graded, consistent with the variant kept above}}
+It is our own measurement, not a leaderboard entry. The same sample with refine mode on resolved 69,
+one more, at 2.2 times the time (above).
 
 **The installer** installs the two new programs on Linux: `ling-docs`, linked onto your PATH, and
 `ling-signal`, placed beside `ling` with no link and not started. On a GB10 node it also runs
@@ -229,8 +213,5 @@ it down; `ling-admin night pause [--for 2h]` lets you through meanwhile. With no
    web chat still runs at `http://localhost:3000` and is managed with `ling-admin chat …`.
 6. **Nothing else turns on by itself.** The Signal, Matrix and Telegram bridges stay off until you run
    their setup; your settings, sessions and paired machines are unchanged.
-7. {{TBD: refine, if VARIANT A is kept: "Tasks now take longer, because refine mode is on; `ling
-   --no-refine` or `mightling_refine = false` restores 1.5.1's behaviour." If VARIANT B is kept,
-   delete this item.}}
 
 ---
