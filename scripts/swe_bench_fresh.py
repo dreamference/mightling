@@ -19,13 +19,20 @@ tasks of ``sample-100.txt``, so they are measured on tasks outside it. This scri
     Draws ``--count`` tasks (default 50) from the validated tasks outside ``sample-100.txt`` with a
     recorded seed, stratified to ``sample-100.txt``'s difficulty mix (easy, medium, hard by the share
     of strong published submissions that solve each task, from the comparison script's data), and
-    writes them with a header that says how they were drawn. Commit the list before any arm runs.
+    writes them with a header that says how they were drawn. ``--exclude <list>`` (repeatable) also
+    leaves out every task of an earlier fresh list, so that a list stays fresh once the failures of an
+    earlier one have been read (FAILURES §9.4). The PR-issue mismatch list (``MISMATCH_LIST``, 68
+    tasks whose PR does not match its issue; from night 2 on they are out of every list, the user's
+    decision of 2026-10-10) is excluded by default; ``--keep-mismatch`` leaves it in. Commit the list
+    before any arm runs.
 
 Run it with the repository's code on ``PYTHONPATH`` and the project's virtualenv::
 
     PYTHONPATH=<checkout> .venv/bin/python scripts/swe_bench_fresh.py candidates
     PYTHONPATH=<checkout> .venv/bin/python scripts/swe_bench_fresh.py validate --count 60
     PYTHONPATH=<checkout> .venv/bin/python scripts/swe_bench_fresh.py draw --count 50 --seed 20261009
+    PYTHONPATH=<checkout> .venv/bin/python scripts/swe_bench_fresh.py draw --count 50 --seed <new> \
+        --exclude docs/dev/swe-bench/fresh-50.txt --out ~/.cache/dreamference/swe-bench/fresh-50b.txt
 
 It refuses to validate while another benchmark run holds the runner lock or a named systemd unit is
 active, since both would pull and grade on the same Docker.
@@ -52,6 +59,9 @@ DATASET: Final[str] = "verified"
 SAMPLE_100: Final[Path] = swe_bench_settings.CACHE_DIR / "sample-100.txt"
 DEFAULT_LIST: Final[Path] = swe_bench_settings.CACHE_DIR / "fresh-50.txt"
 CANDIDATES: Final[Path] = swe_bench_settings.CACHE_DIR / "fresh-candidates.txt"
+# The committed record of the PR-issue mismatch list (PAIChecker's human-labelled data), read from
+# the checkout so that a draw is reproducible from the repository alone.
+MISMATCH_LIST: Final[Path] = Path(__file__).resolve().parent.parent / "docs" / "dev" / "swe-bench" / "verified-mismatch-exclude.txt"
 LIVE_UNIT: Final[str] = "puffin-swe-im100-refine"
 # An instance image unpacked (2.1 to 2.4 GB measured), with a margin.
 IMAGE_BYTES: Final[int] = int(2.5 * 1024 ** 3)
@@ -189,19 +199,49 @@ FAILURES_PURPOSE: Final[str] = ("the failure analysis's A/B rounds\n"
                                 "# (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §6.5)")
 
 
-def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAILURES_PURPOSE) -> int:
+def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAILURES_PURPOSE,
+         exclude: Optional[List[Path]] = None, keep_mismatch: bool = False) -> int:
+    """Draws ``count`` validated tasks outside ``sample-100.txt`` and every ``exclude`` list into ``out``.
+
+    Args:
+        count: How many tasks to draw.
+        seed: The random seed, recorded in the header.
+        out: The list file to write.
+        experiments: The leaderboard checkout the stratification reads; without it the draw is plain.
+        purpose: What the list is for, written into the header.
+        exclude: Earlier fresh lists whose tasks are left out as well, each named in the header. A
+            list that is missing or empty is an error, since a draw against nothing would silently
+            repeat the earlier list.
+        keep_mismatch: Leave the tasks of ``MISMATCH_LIST`` in the pool. By default they are out,
+            and the list is named in the header like an excluded one.
+
+    Returns:
+        int: 0 when the list was written, 1 otherwise.
+    """
     used = set(read_ids(SAMPLE_100))
     if not used:
         print(f"❌ {SAMPLE_100} is missing: the fresh tasks are defined against it.")
         return 1
+    excluded_from: List[str] = []
+    lists = list(exclude or [])
+    if not keep_mismatch:
+        lists.insert(0, MISMATCH_LIST)
+    for path in lists:
+        ids = read_ids(path)
+        if not ids:
+            print(f"❌ --exclude {path}: no task ids found; an earlier fresh list must be named by its real path.")
+            return 1
+        excluded_from.append(f"{path.name} ({len(ids)})")
+        used |= set(ids)
+    outside = "sample-100.txt" + (" and " + ", ".join(excluded_from) if excluded_from else "")
     pool = sorted(i for i in SweBenchImages.validated() if i not in used)
     if len(pool) < count:
-        print(f"❌ Only {len(pool)} validated tasks lie outside sample-100.txt; {count} are wanted. Validate more first.")
+        print(f"❌ Only {len(pool)} validated tasks lie outside {outside}; {count} are wanted. Validate more first.")
         return 1
     rng = random.Random(seed)
     rates = strong_rates(experiments)
     lines = [f"# {count} fresh SWE-bench Verified tasks for {purpose}, drawn {time.strftime('%Y-%m-%d')}",
-             f"# from the {len(pool)} tasks validated on this machine outside sample-100.txt, seed {seed}."]
+             f"# from the {len(pool)} tasks validated on this machine outside {outside}, seed {seed}."]
     if rates is None:
         chosen = sorted(rng.sample(pool, count))
         lines.append("# Not stratified: the comparison data (--experiments) was not found.")
@@ -255,6 +295,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                          help="what the list is for, written into its header (default: the failure analysis)")
     drawing.add_argument("--experiments", type=Path,
                          default=swe_bench_settings.CACHE_DIR / "experiments")
+    drawing.add_argument("--exclude", type=Path, action="append", default=[], metavar="LIST",
+                         help="an earlier fresh list whose tasks are left out too (repeatable)")
+    drawing.add_argument("--keep-mismatch", action="store_true",
+                         help=f"keep the tasks of the PR-issue mismatch list ({MISMATCH_LIST.name}), out by default")
     args = parser.parse_args(argv)
     if args.command == "candidates":
         found = candidates()
@@ -263,7 +307,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     if args.command == "validate":
         return validate(args.count, args.batch, args.wait_for_unit, args.disk_reserve)
-    return draw(args.count, args.seed, args.out, args.experiments, args.purpose)
+    return draw(args.count, args.seed, args.out, args.experiments, args.purpose, args.exclude, args.keep_mismatch)
 
 
 if __name__ == "__main__":

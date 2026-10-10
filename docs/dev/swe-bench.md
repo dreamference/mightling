@@ -44,7 +44,7 @@ Since 2026-10-09 a run has priority over the model server (spec §18). `server s
 
 ## Task lists
 
-The lists the rounds run on are committed under `docs/dev/swe-bench/` (the user's decision, 2026-10-09), so a report can be read against the exact list it was run on: `sample-100.txt` (the fixed 100-task sample of the first rounds and the refine pair) and `fresh-50.txt` (the 50 fresh tasks of night 1, drawn by `scripts/swe_bench_fresh.py draw --seed 20261009` from the 75 tasks validated outside the sample; its header says how). The runner reads its copy from `~/.cache/dreamference/swe-bench/`, where `swe_bench_fresh.py` writes it; the committed file is the record, byte for byte the same.
+The lists the rounds run on are committed under `docs/dev/swe-bench/` (the user's decision, 2026-10-09), so a report can be read against the exact list it was run on: `sample-100.txt` (the fixed 100-task sample of the first rounds and the refine pair) and `fresh-50.txt` (the 50 fresh tasks of night 1, drawn by `scripts/swe_bench_fresh.py draw --seed 20261009` from the 75 tasks validated outside the sample; its header says how). The runner reads its copy from `~/.cache/dreamference/swe-bench/`, where `swe_bench_fresh.py` writes it; the committed file is the record, byte for byte the same. A later list is drawn with `--exclude docs/dev/swe-bench/fresh-50.txt` (repeatable) once a night's failures on the earlier one have been read, so that no rule is measured on the transcripts it was designed from; the header names every excluded list.
 
 ## Tests
 
