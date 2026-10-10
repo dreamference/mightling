@@ -5,6 +5,7 @@ Developer notes behind the system-prompt line in `AGENTS.md`. Spec: `specs/DREAM
 A new session's system prompt is chosen by name (`ling-rs/src/prompt.rs`):
 
 - `default` is Codex's template plus the web, email and code blocks, byte for byte what the launcher sent before (a test composes both);
+- `offline` (since 2026-10-10) is the same template with the code block only, for a machine or a container with no network, where the web and email blocks would name commands that cannot work; SWE-bench's `run --prompt offline` arm (failures spec §9.3, rank 5);
 - `high-swe` (`ling-rs/prompts/high-swe.md`) is a 4.4 KB method for repository tasks with the code block only;
 - a file `$CODEX_HOME/system-prompts/<name>.md` is a custom one.
 

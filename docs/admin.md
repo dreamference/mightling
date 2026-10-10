@@ -323,7 +323,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--eval` | Grade the predictions when the agent phase ends. |
 | `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
 | `--code-index` | universal: index each instance's repository on the host and give the agent ling-code (default off); exact: the same with the SCIP stores alone and no graph. One of: `off`, `universal`, `exact`. |
-| `--prompt` | The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one) |
+| `--prompt` | The system prompt the agent starts with: default, offline (default without the web and email blocks), high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one) |
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
 | `--strip-names` | Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it. |
 | `--refine` | Two steps per instance: a session that studies the issue and writes a refined description without changing the repository, then a fresh session that fixes it. |

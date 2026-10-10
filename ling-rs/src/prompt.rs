@@ -1,13 +1,16 @@
 //! Named system prompts (specs/DREAMFERENCE_MIGHTLING_PROMPT.md, Phase 1): which prompt a new
 //! `ling` session starts with, and `ling prompt list|show|use`.
 //!
-//! A prompt is a core text plus the launcher blocks appended to it (`web`, `email`, `code`). Three
+//! A prompt is a core text plus the launcher blocks appended to it (`web`, `email`, `code`). Four
 //! are built in: `default`, Codex's own template renamed, byte for byte what `ling` sent before
-//! this module existed; `high-swe`, a short method for resolving a defined task in a repository
-//! (`prompts/high-swe.md`); and `ask`, for research and questions in a scratch folder
-//! (`prompts/ask.md`, specs/DREAMFERENCE_MIGHTLING_ASK.md §3.2), which the UI asks for by name and
-//! the bridge policy sets from `ling prompt show ask --composed`. A file `$CODEX_HOME/system-prompts/<name>.md` is a custom
-//! prompt of that name; never one from the repository or the model, which cannot write there.
+//! this module existed; `offline`, the same template with the code block only, for a machine or a
+//! container with no network (the web and email blocks would describe commands that cannot work;
+//! SWE-bench's `--prompt offline` arm, FAILURES §9.3 rank 5); `high-swe`, a short method for
+//! resolving a defined task in a repository (`prompts/high-swe.md`); and `ask`, for research and
+//! questions in a scratch folder (`prompts/ask.md`, specs/DREAMFERENCE_MIGHTLING_ASK.md §3.2),
+//! which the UI asks for by name and the bridge policy sets from `ling prompt show ask --composed`.
+//! A file `$CODEX_HOME/system-prompts/<name>.md` is a custom prompt of that name; never one from
+//! the repository or the model, which cannot write there.
 //!
 //! The choice for a new session is, first match wins: `DREAMFERENCE_MIGHTLING_PROMPT`, then
 //! `mightling_prompt` in the Dreamference TOML file, then `default`. An unknown name is skipped with
@@ -103,6 +106,17 @@ impl Prompt {
         }
     }
 
+    /// `default` for a session that has no network: no web or email block, so the model is not
+    /// told to run commands that fail there.
+    pub fn offline() -> Prompt {
+        Prompt {
+            name: "offline".to_string(),
+            core: Core::Codex,
+            blocks: Blocks { web: false, email: false, code: true },
+            origin: Origin::BuiltIn("the general prompt without web or email: for a machine or a container with no network"),
+        }
+    }
+
     pub fn high_swe() -> Prompt {
         Prompt {
             name: "high-swe".to_string(),
@@ -151,7 +165,10 @@ pub struct Installed {
 
 impl Installed {
     pub fn built_in() -> Installed {
-        Installed { prompts: vec![Prompt::default_prompt(), Prompt::high_swe(), Prompt::ask()], notes: Vec::new() }
+        Installed {
+            prompts: vec![Prompt::default_prompt(), Prompt::offline(), Prompt::high_swe(), Prompt::ask()],
+            notes: Vec::new(),
+        }
     }
 
     /// The built-ins plus `<codex_home>/system-prompts/*.md`.
@@ -573,6 +590,24 @@ mod tests {
     }
 
     #[test]
+    fn offline_is_the_default_without_the_web_and_email_blocks() {
+        assert_eq!(Installed::built_in().get("offline"), Some(&Prompt::offline()));
+        let code = "\n\n# Code navigation\n\n`ling-code def`\n";
+        let email = crate::gmail_access_instructions("a@x.com");
+        let text = compose(&Prompt::offline(), &parts(&email, code));
+        let default = compose(&Prompt::default_prompt(), &parts(&email, code));
+        // The same core as `default`, then the code block and nothing in between.
+        assert!(text.starts_with(&crate::rebrand(&crate::codex_template())[..200]));
+        assert!(text.ends_with(code));
+        for absent in ["# Web access", "ling-search", "ling-fetch", "# Email access"] {
+            assert!(!text.contains(absent), "{absent}");
+        }
+        assert!(default.contains("# Web access") && default.len() > text.len());
+        // Without an index the text is the template alone.
+        assert!(!compose(&Prompt::offline(), &parts("", "")).contains("# Code navigation"));
+    }
+
+    #[test]
     fn high_swe_is_short_names_only_real_tools_and_carries_only_the_code_block() {
         assert!(HIGH_SWE.len() < 5_000, "{} chars", HIGH_SWE.len());
         assert!(HIGH_SWE.starts_with("You are Mightling, a coding agent."));
@@ -642,7 +677,7 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), "not a prompt").unwrap();
         let installed = Installed::load(&home);
         let names: Vec<&str> = installed.prompts.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["default", "high-swe", "ask", "mine", "plain"]);
+        assert_eq!(names, ["default", "offline", "high-swe", "ask", "mine", "plain"]);
         let mine = installed.get("mine").unwrap();
         assert_eq!(mine.blocks, Blocks { web: true, email: false, code: true });
         assert_eq!(mine.core, Core::Text("Be brief.\n".to_string()));
@@ -694,7 +729,8 @@ mod tests {
         let lines = list_lines(&resolved, &installed);
         assert_eq!(lines[0], format!("Prompt for new sessions: high-swe ({ENV_VAR})"));
         assert!(lines[1].starts_with("  default   the general prompt") && !lines[1].contains('←'));
-        assert!(lines[2].starts_with("  high-swe  repository tasks") && lines[2].ends_with("← new sessions"));
+        assert!(lines[2].starts_with("  offline   the general prompt without web or email") && !lines[2].contains('←'));
+        assert!(lines[3].starts_with("  high-swe  repository tasks") && lines[3].ends_with("← new sessions"));
         let updated = with_choice("# mine\nvllm_host = \"http://h:8000\"\n\n[night]\nprompt = \"x\"\n", "high-swe").unwrap();
         assert!(updated.starts_with("# mine\nvllm_host = \"http://h:8000\"\n"));
         let parsed: toml::Table = toml::from_str(&updated).unwrap();

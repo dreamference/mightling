@@ -428,6 +428,8 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 
 **Elsewhere:** `DreamferenceConfig.mightling_prompt` (`DEFAULT_MIGHTLING_PROMPT`, a test keeps it equal to the launcher's), `[night] prompt` (passed as `DREAMFERENCE_MIGHTLING_PROMPT` to every command of the task), `ling-admin swe-bench run --prompt <name>` (§6.2), and `prompt` among the subcommands Night Shift does not count as an open session.
 
+**Added 2026-10-10:** a third built-in beside `ask` (§ASK), `offline`: `Core::Codex` with the `code` block only, `default` for a session with no network, where the web and email blocks would name commands that cannot work. It is the SWE-bench arm `run --prompt offline` of the failures analysis (FAILURES §9.3, rank 5), which no longer needs a file mounted into the instance's home. One launcher test composes it against `default`.
+
 **Where it departs from the design above:**
 - **`model_catalog.json` always holds `default`,** not the chosen prompt: `config.toml` names it, and `ling skill` and `/night` read the served model's id and window from it.
 - **The skills glossary follows every prompt.** It is not one of the three blocks: the skills list is a developer message both prompts see (§7), so the glossary that explains it goes wherever the list goes. It is off by default.

@@ -62,7 +62,7 @@ class SweBenchCommand:
                          help="universal: index each instance's repository on the host and give the agent ling-code (default off); "
                               "exact: the same with the SCIP stores alone and no graph")
         run.add_argument("--prompt", default=None,
-                         help="The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one)")
+                         help="The system prompt the agent starts with: default, offline (default without the web and email blocks), high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one)")
         run.add_argument("--mask", default="off", choices=["off", "on"],
                          help="on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off)")
         run.add_argument("--strip-names", action="store_true",
