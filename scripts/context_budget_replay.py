@@ -11,6 +11,11 @@ rollouts a SWE-bench run leaves under its scratch directory and needs nothing ru
     context_budget_replay.py mask --policy HIGH,LOW,STEP RUN_DIR...
                                                   the same for one policy (fractions of
                                                   the limit, step in tokens), repeatable
+    context_budget_replay.py compactions RUN_DIR...
+                                                  compactions per task against the grading,
+                                                  and how many tasks each restart trigger
+                                                  would have stopped (agent survey §3.7,
+                                                  SWE_BENCH spec §21)
 
 RUN_DIR is a run directory such as ~/.local/share/dreamference/swe-bench/runs/idx14b-on.
 """
@@ -20,6 +25,7 @@ import glob
 import json
 import re
 import sys
+from pathlib import Path
 from typing import Dict, Final, Iterator, List, Optional, Tuple
 
 # Prefill rate of Qwen3.8-27B on SGLang measured by the cache probe of §1.7 (idle server).
@@ -301,9 +307,56 @@ def mask(run_dir: str, policies: Tuple[Tuple[float, float, int], ...] = POLICIES
                   f"total {compacting + newest:4.1f}-{compacting + first_masked:4.1f} min")
 
 
+def instance_compactions(run_dir: str) -> Dict[str, int]:
+    """Compactions recorded in each instance's rollouts, by instance id (0 for none)."""
+    counts: Dict[str, int] = {}
+    for state_path in sorted(glob.glob(f"{run_dir}/instances/*.json")):
+        with open(state_path) as handle:
+            instance_id = json.load(handle).get("instance_id") or Path(state_path).stem
+        counts[instance_id] = 0
+        for path in glob.glob(f"{run_dir}/scratch/{instance_id}/codex-home/sessions/**/rollout*.jsonl", recursive=True):
+            for record in records(path):
+                if record.get("type") == "compacted":
+                    counts[instance_id] += 1
+    return counts
+
+
+def grading_of(run_dir: str) -> Dict[str, Optional[bool]]:
+    """Each graded instance's verdict from the run's latest grading, or an empty map."""
+    results: Dict[str, Optional[bool]] = {}
+    for path in sorted(glob.glob(f"{run_dir}/eval/*/grading.json"), key=lambda p: int(Path(p).parent.name)):
+        with open(path) as handle:
+            results = {i: bool(r.get("resolved")) for i, r in (json.load(handle).get("results") or {}).items()}
+    return results
+
+
+def compactions(run_dir: str, triggers: Tuple[int, ...] = (1, 2, 3, 4)) -> None:
+    """Prints compactions per task against the grading, and what each restart trigger would stop."""
+    counts = instance_compactions(run_dir)
+    verdicts = grading_of(run_dir)
+    graded = sum(1 for i in counts if i in verdicts)
+    print(f"== {run_dir}: {len(counts)} instance(s) with a state, {graded} graded")
+    by_count: Dict[int, List[Optional[bool]]] = collections.defaultdict(list)
+    for instance_id, count in counts.items():
+        by_count[count].append(verdicts.get(instance_id))
+    for count in sorted(by_count):
+        outcomes = by_count[count]
+        print(f"   {count} compaction(s): {outcomes.count(True):3d} resolved {outcomes.count(False):3d} failed "
+              f"{outcomes.count(None):3d} ungraded")
+    for trigger in triggers:
+        crossed = [i for i, count in counts.items() if count >= trigger]
+        resolved = sum(1 for i in crossed if verdicts.get(i) is True)
+        failed = sum(1 for i in crossed if verdicts.get(i) is False)
+        print(f"   restart after {trigger}: {len(crossed)} task(s) would have restarted "
+              f"({resolved} resolved, {failed} failed, {len(crossed) - resolved - failed} ungraded)")
+    most = sorted(counts.items(), key=lambda item: -item[1])[:5]
+    if most and most[0][1]:
+        print("   most compacted: " + ", ".join(f"{i} ({n})" for i, n in most if n))
+
+
 def main() -> int:
-    """Runs one of the three reports over the run directories given."""
-    commands = {"kinds": kinds, "rereads": rereads, "mask": mask}
+    """Runs one of the reports over the run directories given."""
+    commands = {"kinds": kinds, "rereads": rereads, "mask": mask, "compactions": compactions}
     arguments = sys.argv[1:]
     if len(arguments) < 2 or arguments[0] not in commands:
         print(__doc__)
