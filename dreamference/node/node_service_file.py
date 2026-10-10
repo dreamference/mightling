@@ -33,7 +33,7 @@ class NodeServiceFile:
     @classmethod
     def render(cls, port: int, node_id: str, version: str, state: str = "stopped",
                web_port: Optional[int] = None, search_port: Optional[int] = None,
-               main: bool = False) -> str:
+               main: bool = False, remote: Optional[str] = None) -> str:
         """
         Renders the service file.
 
@@ -45,6 +45,8 @@ class NodeServiceFile:
             web_port: The web UI's port; None when it is not shared.
             search_port: SearXNG's port; None when it is not shared.
             main: Whether the model assigned to the node is one a coding client can use.
+            remote: The node's overlay name once remote access is set up (REMOTE_ACCESS §7); a
+                name, never an address. None leaves the record out.
 
         Returns:
             str: The file's exact text. The instance name is the host name (`%h`).
@@ -59,6 +61,8 @@ class NodeServiceFile:
         records.append(f"state={state}")
         if main:
             records.append("main=1")
+        if remote:
+            records.append(f"remote={remote}")
         lines = [
             "<?xml version=\"1.0\" standalone='no'?>",
             "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">",
@@ -132,7 +136,7 @@ class NodeServiceFile:
     @classmethod
     def update(cls, state: Optional[str] = None, port: Optional[int] = None,
                main: Optional[bool] = None, version: Optional[str] = None,
-               web_port: Any = KEEP, search_port: Any = KEEP) -> Optional[bool]:
+               web_port: Any = KEEP, search_port: Any = KEEP, remote: Any = KEEP) -> Optional[bool]:
         """
         Changes records of the installed file and leaves the others as they are.
 
@@ -143,6 +147,7 @@ class NodeServiceFile:
             version: Mightling's version, if it changes.
             web_port: The web UI's port, or None to stop advertising it; `KEEP` leaves it.
             search_port: SearXNG's port, or None to stop advertising it; `KEEP` leaves it.
+            remote: The node's overlay name, or None to stop advertising it; `KEEP` leaves it.
 
         Returns:
             Optional[bool]: None when the node is not advertised (nothing to do), True when the
@@ -159,6 +164,7 @@ class NodeServiceFile:
             web_port=(int(current["web"]) if current.get("web", "").isdigit() else None) if web_port is KEEP else web_port,
             search_port=(int(current["search"]) if current.get("search", "").isdigit() else None) if search_port is KEEP else search_port,
             main=("main" in current) if main is None else main,
+            remote=(current.get("remote") or None) if remote is KEEP else remote,
         )
         try:
             if cls.service_path.read_text() == text:
