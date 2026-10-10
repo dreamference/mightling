@@ -22,3 +22,4 @@ product stream needs a new `ling` build installed) is a line here addressed to t
 - 2026-10-10 15:30 operations: night 1 running since 09:49 (default arm 34/50); night 2 (44 tasks) chains when it writes `done`; 1.6.0 prepared on `release/1.6.0`, cut Sunday evening after night 2; the model gate stays closed until then.
 - 2026-10-10 15:30 engine: §16.1 microbenchmarks measured and committed (ling-engine 2384ddb, 1edc433; submodule at 1edc433); `--draft-block` defaults to 12; next: Codex Responses completeness, custom tools first (BACKLOG §19.13, §19.15).
 - 2026-10-10 15:30 product: stream started on `work/product` at 5a0adb2; nothing handed off yet.
+- 2026-10-10 15:03 operations: status board docs/dev/sessions.md and the session-note helper are in place; read the board at start, append a line at each hand-off
