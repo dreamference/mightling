@@ -25,6 +25,7 @@ codex-models-manager = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 ed25519-dalek = { workspace = true }
 flate2 = { workspace = true }
+tar = { workspace = true }
 # Pure-Rust mDNS browsing, one code path on Linux, macOS and Windows; no async runtime, no logging.
 mdns-sd = { version = "0.21.4", default-features = false }
 ling-airgapped = { path = "airgapped" }

@@ -699,5 +699,6 @@ if [ "$ROLE" = "node" ]; then
     fi
 else
     say "🎉 Done. \`ling\` needs a Mightling node to talk to: start one on a GB10, then run \`ling\`."
+    say "   Also on this machine, no Python needed: \`ling docs setup\` (the file index's runtime), \`ling desktop install\` (the app), \`ling audit egress\` (what leaves)."
 fi
 exit "$FAILED"

@@ -41,7 +41,7 @@
   - no `libssl-dev` or `libcap-dev` is needed.
 - **For the web UI:** `onyx-cli`, installed via pip by `OnyxInstaller` when missing.
 - **For the desktop app (a checkout's build):** Node.js 22.13 or newer (Forge 8's minimum) and npm (Electron comes from npm as a prebuilt binary; Vite builds the UI); `dpkg` only to make the `.deb` (no `fakeroot` since Forge 8, whose maker runs `dpkg-deb --root-owner-group` itself). No Rust and no system headers. A dev run on Ubuntu 24.04 needs an AppArmor profile for Chromium's sandbox, which `ling-admin desktop install` writes with sudo (`/etc/apparmor.d/mightling-desktop-dev`); the `.deb` writes its own in `postinst`.
-- **For the document index:** `ling-admin docs setup` fetches what `ling-docs` loads (PDFium, ONNX Runtime, the embedding model; about 320 MB, each pinned).
+- **For the document index:** `ling-admin docs setup` fetches what `ling-docs` loads (PDFium, ONNX Runtime, the embedding model; about 320 MB, each pinned); on a client, `ling docs setup` does the same from the launcher.
 - **For the code index:** `ling-admin code setup` installs the pinned tools `ling-code` runs; Go, a JDK 17+ and a .NET SDK 8+ are optional and only enable their languages' exact indexers.
 - **For Night Shift:** a systemd user session (`ling-admin night enable` installs a user timer; lingering must be on for it to fire while logged out).
 - **Optional agents:**
@@ -98,9 +98,9 @@ ling                                       # the terminal agent
 
 **Extras:**
 - **Web UI:** `ling web start` (Mightling's own, port 3100; `ling web open` signs a browser in). The earlier Onyx chat: `ling-admin chat start`, then `ling-admin chat configure`.
-- **Desktop app:** `ling-admin desktop install`, then `ling-admin desktop build` and `desktop run`, or `ling app`.
+- **Desktop app:** `ling-admin desktop install`, then `ling-admin desktop build` and `desktop run`, or `ling app`. On a client: `ling desktop install` fetches the release's package.
 - **Google (Gmail, Drive, Calendar in `/apps`):** `ling-admin google start`, then connect an account.
-- **Document index:** `ling-admin docs setup`; `~/Documents` and `~/Downloads` are the default collections, others are added with `ling docs add`.
+- **Document index:** `ling-admin docs setup` (on a client `ling docs setup`); `~/Documents` and `~/Downloads` are the default collections, others are added with `ling docs add`.
 - **Web search for `ling`:** `ling-admin searxng start` (the web UI's `configure` also sets it up).
 - **Code index:** `ling-admin code setup`.
 - **Night Shift:** `ling-admin night enable`; tasks are queued from `ling` with `/night add`.
