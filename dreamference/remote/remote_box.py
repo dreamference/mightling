@@ -266,8 +266,14 @@ class RemoteBox:
             f"id -u {BOX_TUNNEL_USER} >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/{BOX_TUNNEL_USER} --shell /usr/sbin/nologin {BOX_TUNNEL_USER}",
             f"install -d -m 0700 -o {BOX_TUNNEL_USER} /var/lib/{BOX_TUNNEL_USER}/.ssh",
             f"install -m 0600 -o {BOX_TUNNEL_USER} \"$stage\"/authorized_keys /var/lib/{BOX_TUNNEL_USER}/.ssh/authorized_keys",
+            # The drop-in's Match block must change nothing for anyone else: the effective settings
+            # for root are compared before and after, and a difference undoes it.
+            "global_before=$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | sort)",
             f"install -m 0644 \"$stage\"/sshd-tunnel.conf {SSHD_DROP_IN}",
             "sshd -t",
+            "global_after=$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | sort)",
+            f"if [ \"$global_before\" != \"$global_after\" ]; then rm -f {SSHD_DROP_IN}; "
+            "echo 'the sshd drop-in changed settings beyond the tunnel account; undone' >&2; exit 1; fi",
             "systemctl reload ssh 2>/dev/null || systemctl reload sshd",
             "systemctl daemon-reload",
             f"systemctl enable --now {RELAY_UNIT}",

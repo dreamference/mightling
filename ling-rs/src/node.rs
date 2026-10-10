@@ -6,6 +6,9 @@
 //! 1. `DREAMFERENCE_VLLM_HOST`, then `vllm_host` in a configuration file: "I know where it is";
 //! 2. `MIGHTLING_NODE=<name>`: one node, for one command;
 //! 3. this machine is a node (it has `~/.config/dreamference/node-id`): loopback, and no browse;
+//! 3a. the remembered node's overlay name (`mightling-<id>.<domain>`, REMOTE_ACCESS §5), when
+//!    NetBird's client says it is connected to management and the name resolves: no browse, and
+//!    it works off the LAN. The name carries the id, so it can only be that node;
 //! 4. the node remembered in `$CODEX_HOME/node.json`, found again on the network **by its id**, so
 //!    an address change costs nothing; its last address is tried only when a browse returns
 //!    nothing at all;
@@ -38,7 +41,8 @@ const SETTLE: Duration = Duration::from_millis(400);
 /// One command's choice of node, by name, address or id.
 pub const PIN_ENV: &str = "MIGHTLING_NODE";
 
-const USAGE: &str = "Usage: ling node [list] | ling node use <name|address> | ling node forget";
+const USAGE: &str = "Usage: ling node [list] | ling node use <name|address> | ling node forget\n       \
+                     ling node remote join --code <8 digits>   (remote access, on the node's LAN)";
 
 /// What a node advertises: where it is, and the records that are not kept in `node.json`.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -72,6 +76,9 @@ pub struct Inputs {
     pub pinned: Option<String>,
     pub is_node: bool,
     pub remembered: Option<Node>,
+    /// Whether the remembered node's overlay name answers: NetBird's client is connected and the
+    /// name resolves. Checked only when the node has one.
+    pub overlay: bool,
 }
 
 /// Where the tiers ended.
@@ -83,6 +90,8 @@ pub enum Resolution {
     Found { advert: Advert, remember: bool, note: Option<String> },
     /// The remembered node, by its last address, because no browse reached it.
     LastAddress { node: Node, note: Option<String> },
+    /// The remembered node at its overlay name (remote access). Nothing was browsed.
+    Overlay { node: Node },
     /// Several nodes and no way to choose without asking; `gone` names a remembered node that
     /// did not answer while others did.
     Choose { adverts: Vec<Advert>, gone: Option<String> },
@@ -109,6 +118,9 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
     }
     if inputs.is_node {
         return Resolution::Host(crate::DEFAULT_VLLM_HOST.to_string());
+    }
+    if let Some(remembered) = inputs.remembered.as_ref().filter(|node| inputs.overlay && node.overlay_name_is_its_own()) {
+        return Resolution::Overlay { node: remembered.via_overlay() };
     }
     if let Some(remembered) = &inputs.remembered {
         // Set by address and never seen in a browse: there is no id to look for.
@@ -257,12 +269,35 @@ pub fn state_verdict(node: &Node, state: &str, answers: bool) -> Result<Option<S
 
 /// Reads the tiers' inputs from the environment and the files.
 pub fn inputs() -> Inputs {
-    Inputs {
-        configured: crate::configured_vllm_host(),
-        pinned: std::env::var(PIN_ENV).ok(),
-        is_node: locator::is_node(),
-        remembered: locator::remembered(),
-    }
+    let configured = crate::configured_vllm_host();
+    let is_node = locator::is_node();
+    let remembered = locator::remembered();
+    // Asked only when it can decide something: no configured host, not a node, an overlay name.
+    let overlay = configured.is_none()
+        && !is_node
+        && remembered.as_ref().is_some_and(|node| node.overlay_name_is_its_own() && overlay_answers(&node.remote));
+    Inputs { configured, pinned: std::env::var(PIN_ENV).ok(), is_node, remembered, overlay }
+}
+
+/// Whether NetBird's client is connected to its management and `name` resolves. NetBird is asked
+/// first so that, with the overlay down, the name is never sent to the system's DNS servers.
+fn overlay_answers(name: &str) -> bool {
+    let output = std::process::Command::new("netbird")
+        .args(["status", "--json"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let connected = output
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
+        .is_some_and(|status| netbird_connected(&status));
+    connected && std::net::ToSocketAddrs::to_socket_addrs(&(name, locator::DEFAULT_MODEL_PORT)).is_ok_and(|mut found| found.next().is_some())
+}
+
+/// Reads `netbird status --json`: whether management is connected.
+pub fn netbird_connected(status: &serde_json::Value) -> bool {
+    status.pointer("/management/connected").and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
 /// Resolves the model server's base URL for a command that needs the model, printing what the
@@ -286,6 +321,10 @@ pub async fn resolve_host(interactive: bool) -> anyhow::Result<String> {
         }
         Resolution::Found { advert, remember, note } => (advert.node, advert.state, remember, note),
         Resolution::LastAddress { node, note } => (node, String::new(), false, note),
+        Resolution::Overlay { node } => {
+            let note = format!("Node {} over the overlay ({}).", label(&node), node.address);
+            (node, String::new(), false, Some(note))
+        }
     };
     if let Some(note) = note {
         eprintln!("{note}");
@@ -360,6 +399,12 @@ fn remember_node(node: &Node) {
     }
 }
 
+/// Remembers a node after `ling node remote join`, with its overlay name.
+pub fn remember_enrolled(node: &Node) -> Result<(), String> {
+    let path = locator::node_file().ok_or("could not resolve CODEX_HOME")?;
+    write_node_file(&path, node).map_err(|error| format!("could not write {}: {error}", path.display()))
+}
+
 fn write_node_file(path: &Path, node: &Node) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -403,6 +448,8 @@ pub enum Request {
     List,
     Use(String),
     Forget,
+    /// `ling node remote …` (remote_join.rs).
+    Remote(Vec<String>),
     Usage,
 }
 
@@ -412,6 +459,7 @@ impl Request {
             [] | ["list"] => Request::List,
             ["use", name] => Request::Use(name.to_string()),
             ["forget"] => Request::Forget,
+            ["remote", ..] => Request::Remote(args[1..].to_vec()),
             _ => Request::Usage,
         }
     }
@@ -424,6 +472,7 @@ pub async fn run_cli(args: &[String]) -> i32 {
         return 1;
     };
     match Request::from_args(args) {
+        Request::Remote(rest) => crate::remote_join::run_cli(&rest).await,
         Request::Usage => {
             println!("{USAGE}");
             2
@@ -547,12 +596,17 @@ pub fn list_lines(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::S
             if node.version.is_empty() { "?" } else { &node.version },
             if advert.main { "" } else { "  (not a coding model)" },
         ));
+        if !node.remote.is_empty() {
+            lines.push(format!("      off the LAN: {} (remote access)", node.remote));
+        }
     }
     if let Some(used) = in_use {
         let seen = adverts.iter().any(|advert| {
             (!used.node.is_empty() && advert.node.node == used.node) || advert.node.address == used.address
         });
-        if !seen {
+        if !seen && inputs.overlay && used.overlay_name_is_its_own() {
+            lines.push(format!("* {}  {}/v1  over the overlay (remote access)", label(used), used.via_overlay().model_url()));
+        } else if !seen {
             lines.push(format!(
                 "* {}  {}/v1  remembered, did not answer this browse",
                 label(used),
@@ -631,18 +685,24 @@ pub fn advert_from(fullname: &str, port: u16, addresses: &[IpAddr], records: &[(
         .map(|name| name.trim_end_matches('.'))
         .unwrap_or(fullname);
     let usable = usable_addresses(addresses);
+    let mut node = Node {
+        node: record("node").unwrap_or_default().to_string(),
+        name: name.to_string(),
+        address: usable.first()?.to_string(),
+        model_port: port,
+        web_port: port_record("web"),
+        search_port: port_record("search"),
+        version: record("version").unwrap_or_default().to_string(),
+        last_seen: String::new(),
+        remote: record("remote").unwrap_or_default().to_ascii_lowercase(),
+    };
+    // An overlay name that is not the node's own (`mightling-<its id>.`) is not kept.
+    if !node.overlay_name_is_its_own() {
+        node.remote.clear();
+    }
     Some(Advert {
         addresses: usable.iter().map(IpAddr::to_string).collect(),
-        node: Node {
-            node: record("node").unwrap_or_default().to_string(),
-            name: name.to_string(),
-            address: usable.first()?.to_string(),
-            model_port: port,
-            web_port: port_record("web"),
-            search_port: port_record("search"),
-            version: record("version").unwrap_or_default().to_string(),
-            last_seen: String::new(),
-        },
+        node,
         // An advert without the record predates nothing: it is treated as the first contract.
         proto: record("proto").and_then(|value| value.parse().ok()).unwrap_or(1),
         state: record("state").unwrap_or_default().to_string(),
@@ -743,6 +803,7 @@ mod tests {
                 search_port: Some(8888),
                 version: "1.3.0".to_string(),
                 last_seen: String::new(),
+                remote: String::new(),
             },
             proto: 1,
             state: "ready".to_string(),
@@ -761,7 +822,7 @@ mod tests {
     #[test]
     fn a_configured_host_wins_and_nothing_is_browsed() {
         let browser = Fixed::new(vec![spark1()]);
-        let inputs = Inputs { configured: Some("http://10.0.0.1:8000".into()), is_node: true, remembered: Some(spark2().node), pinned: Some("spark-1".into()) };
+        let inputs = Inputs { configured: Some("http://10.0.0.1:8000".into()), is_node: true, remembered: Some(spark2().node), pinned: Some("spark-1".into()), overlay: false };
         assert_eq!(resolve(&inputs, &browser), Resolution::Host("http://10.0.0.1:8000".into()));
         assert!(browser.asked.borrow().is_empty());
     }
@@ -1062,4 +1123,82 @@ mod tests {
         assert_eq!(version_notice_line("1.4.0", &node, Some("2026-10-02"), "2026-10-02"), None);
         assert_eq!(version_notice_line("1.4.0", &Node { version: String::new(), ..node }, None, "2026-10-02"), None);
     }
+
+    // -- remote access (REMOTE_ACCESS §5) ------------------------------------------------------------
+
+    fn enrolled() -> Node {
+        Node { remote: "mightling-11111111-aaaa.netbird.selfhosted".to_string(), ..spark1().node }
+    }
+
+    #[test]
+    fn the_overlay_name_comes_before_any_browse() {
+        let browser = Fixed { adverts: vec![spark1()], asked: RefCell::new(Vec::new()) };
+        let inputs = Inputs { remembered: Some(enrolled()), overlay: true, ..Inputs::default() };
+        match resolve(&inputs, &browser) {
+            Resolution::Overlay { node } => assert_eq!(node.model_url(), "http://mightling-11111111-aaaa.netbird.selfhosted:8000"),
+            other => panic!("{other:?}"),
+        }
+        assert!(browser.asked.borrow().is_empty(), "no browse");
+    }
+
+    #[test]
+    fn with_the_overlay_down_the_lan_tiers_run_as_before() {
+        let browser = Fixed { adverts: vec![spark1()], asked: RefCell::new(Vec::new()) };
+        let inputs = Inputs { remembered: Some(enrolled()), overlay: false, ..Inputs::default() };
+        assert!(matches!(resolve(&inputs, &browser), Resolution::Found { .. }));
+    }
+
+    #[test]
+    fn configuration_and_a_node_still_win_over_the_overlay() {
+        let browser = Fixed { adverts: Vec::new(), asked: RefCell::new(Vec::new()) };
+        let configured = Inputs { configured: Some("http://10.0.0.1:8000".into()), remembered: Some(enrolled()), overlay: true, ..Inputs::default() };
+        assert_eq!(resolve(&configured, &browser), Resolution::Host("http://10.0.0.1:8000".into()));
+        let node = Inputs { is_node: true, remembered: Some(enrolled()), overlay: true, ..Inputs::default() };
+        assert!(matches!(resolve(&node, &browser), Resolution::Host(_)));
+    }
+
+    #[test]
+    fn an_overlay_name_that_is_not_the_nodes_own_is_never_used() {
+        let browser = Fixed { adverts: Vec::new(), asked: RefCell::new(Vec::new()) };
+        let stranger = Node { remote: "laptop.netbird.selfhosted".to_string(), ..spark1().node };
+        let inputs = Inputs { remembered: Some(stranger), overlay: true, ..Inputs::default() };
+        assert!(matches!(resolve(&inputs, &browser), Resolution::LastAddress { .. }));
+    }
+
+    #[test]
+    fn the_advert_carries_the_overlay_name_only_when_it_is_the_nodes_own() {
+        let addresses = ["192.168.0.105".parse().unwrap()];
+        let record = |remote: &str| {
+            vec![("node".to_string(), "11111111-aaaa".to_string()), ("remote".to_string(), remote.to_string())]
+        };
+        let own = advert_from("spark-1._mightling-node._tcp.local.", 8000, &addresses, &record("Mightling-11111111-AAAA.netbird.selfhosted")).unwrap();
+        assert_eq!(own.node.remote, "mightling-11111111-aaaa.netbird.selfhosted");
+        let other = advert_from("spark-1._mightling-node._tcp.local.", 8000, &addresses, &record("mightling-2222.netbird.selfhosted")).unwrap();
+        assert_eq!(other.node.remote, "");
+    }
+
+    #[test]
+    fn netbirds_status_is_read_for_a_connected_management() {
+        assert!(netbird_connected(&serde_json::json!({"management": {"url": "https://b:443", "connected": true}})));
+        assert!(!netbird_connected(&serde_json::json!({"management": {"connected": false}})));
+        assert!(!netbird_connected(&serde_json::json!({"daemonStatus": "NeedsLogin"})));
+    }
+
+    #[test]
+    fn remote_subcommands_go_to_remote_join() {
+        let args: Vec<String> = ["remote", "join", "--code", "12345678"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(Request::from_args(&args), Request::Remote(args[1..].to_vec()));
+    }
+
+    #[test]
+    fn the_list_says_how_the_node_is_reached_off_the_lan() {
+        let inputs = Inputs { remembered: Some(enrolled()), overlay: true, ..Inputs::default() };
+        let lines = list_lines(&inputs, &[], &[]);
+        assert!(lines.iter().any(|line| line.contains("over the overlay (remote access)")), "{lines:?}");
+        let mut advert = spark1();
+        advert.node.remote = enrolled().remote;
+        let lines = list_lines(&Inputs::default(), &[advert], &[None]);
+        assert!(lines.iter().any(|line| line.contains("off the LAN: mightling-11111111-aaaa.netbird.selfhosted")), "{lines:?}");
+    }
+
 }

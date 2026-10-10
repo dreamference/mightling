@@ -53,6 +53,7 @@ pub mod prompt;
 pub mod proxy;
 pub mod refine;
 pub mod release_signature;
+pub mod remote_join;
 pub mod rename;
 #[cfg(target_os = "linux")]
 pub mod signal;
