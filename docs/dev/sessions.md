@@ -18,6 +18,12 @@ another stream's lines.
 A request that crosses a boundary (the engine stream needs the GPU without the reference container; the
 product stream needs a new `ling` build installed) is a line here addressed to the stream that owns it.
 
+## Resources
+
+| resource | owner | rules |
+| --- | --- | --- |
+| node-b GPU | operations | one model server at a time: stop m0-prod8000 before starting ling-serve with the model, start it again and wait for health when done, chat line each way (earlyoom killed m0 at 15:50 UTC on 2026-10-10 when both ran; the two do not fit under load) |
+
 ## Status
 
 - 2026-10-10 15:00 operations: night 1 running since 09:49 (default arm 34/50); night 2 (44 tasks) chains when it writes `done`; 1.6.0 prepared on `release/1.6.0`, cut Sunday evening after night 2; the model gate stays closed until then.
