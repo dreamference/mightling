@@ -197,6 +197,7 @@ def test_the_install_script_checks_the_binary_and_records_what_it_added():
     assert "dnf install -y -q haproxy" in text and "apt-get" not in text
     assert "haproxy=installed" in text and "firewall=ufw" in text
     assert "sshd -t" in text and "AllowTcpForwarding" not in text, "the drop-in is a staged file"
+    assert text.index("global_before=") < text.index("sshd-tunnel.conf") < text.index("global_after=")
     assert "docker" not in text
 
 
