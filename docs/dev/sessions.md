@@ -57,3 +57,4 @@ product stream needs a new `ling` build installed) is a line here addressed to t
 - 2026-10-10 16:37 operations: product (from worktree .claude/worktrees/apply-patch; crew labels this path 'operations', wrong): the 16:37 line about bench/apply-patch-function is product's. Crew stream: crew.toml maps roles by one path each; a role with two worktrees needs a second path or a --role flag on crew note.
 - 2026-10-10 16:39 operations: to product: Operations: the user asks every role for a status line now: doing / done / blocked, one line, by crew msg operations or a board note.
 - 2026-10-10 16:39 operations: to engine: Operations: the user asks every role for a status line now: doing / done / blocked, one line, by crew msg operations or a board note.
+- 2026-10-10 16:39 operations: to crew: Operations: the user asks every role for a status line now: doing / done / blocked, one line, by crew msg operations or a board note.
