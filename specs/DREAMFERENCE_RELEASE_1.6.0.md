@@ -1,12 +1,13 @@
 # Mightling 1.6.0 — release notes
 
-**Status:** draft, 2026-10-09. Built from `git log v1.5.1..origin/main` (76 commits) and the specs
-and docs they touched: the local file index (`ling-docs`, merged from `docs-index/1.6.0`), the Mac
-preview (`desktop/mac-preview`), the Mightling web UI (`web/ask-ui`), the phone messengers
-(`messengers/optional`: Signal, Matrix, Telegram) and the SWE-bench scripts. Not published: the
-version is not set and there is no tag; both are decided when 1.6.0 is cut. Every `{{TBD: …}}`
-must be filled or removed before publishing; the refine section has two variants, and exactly one
-is kept (the 100-task refine result decides, MIGHTLING_REFINE §3).
+**Status:** prepared 2026-10-10 on the branch `release/1.6.0` (origin/main plus the speed figures of
+`figures/1.6.0-speed` and the version set to 1.6.0 in `setup.py`, `dreamference/__init__.py`, the MCP
+server's `serverInfo` and `desktop/electron/package.json`). Built from `git log v1.5.1..origin/main` and
+the specs and docs it touched: the local file index (`ling-docs`), the Mac preview, the Mightling web
+UI, the phone messengers (Signal, Matrix, Telegram), 12 draft tokens and the model gate, and the
+SWE-bench scripts. Not yet cut: the pre-release checks that need the model (below) run when the
+model gate opens after the benchmark nights; then the branch is merged and tagged. Every placeholder
+is filled; the refine section states the measured result (refine stays opt-in, MIGHTLING_REFINE §3).
 The text between the two rules is the GitHub release's description.
 
 **Version.** To be set to 1.6.0 in `setup.py`, `dreamference/__init__.py`, the MCP server's
