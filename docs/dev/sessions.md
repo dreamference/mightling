@@ -1,5 +1,7 @@
 # Work streams and their status
 
+> **Retired 2026-10-10 22:40.** The parallel streams ended by the user's decision: one session does all the work (operations, product, engine, crew), so nothing is appended here any more and the `session` launcher, `session-note` and the crew hook are removed. The lines below are kept as the record of 2026-10-10.
+
 Since 2026-10-10 the work runs as parallel streams (three, then four), each in its own working tree, so that no two
 writers share a checkout. This file is their shared status board: **each stream appends one dated line
 when it hands work off or finishes a piece, and reads the file when it starts.** It is the only place
