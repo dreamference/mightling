@@ -35,7 +35,7 @@ from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLL
                                                           SCRUB_SCRIPT, TASK_RULES)
 from dreamference.swe_bench.swe_bench_instance_run import REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
-from dreamference.swe_bench.swe_bench_runner import RUN_NAME
+from dreamference.swe_bench.swe_bench_runner import BUILT_IN_PROMPTS, RUN_NAME
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -1358,6 +1358,20 @@ def test_a_built_in_prompt_needs_no_file_and_two_prompts_are_told_apart(bench, m
     del old["prompt"], old["prompt_sha256"]
     manifest_path.write_text(json.dumps(old))
     assert "differs: prompt: default | high-swe" in SweBenchReport.against(SweBenchRunStore("a"), SweBenchRunStore("b"))
+
+
+def test_the_built_in_prompts_are_the_launchers_and_offline_runs_without_a_file(bench, monkeypatch):
+    # The launcher's built-ins (ling-rs/src/prompt.rs, `name: "<x>".to_string()` in the constructors)
+    # and the harness's list must agree, or an arm's prompt is looked for as a file and refused.
+    source = (Path(__file__).resolve().parent.parent / "ling-rs" / "src" / "prompt.rs").read_text()
+    built_in = re.findall(r'name: (?:"([a-z0-9-]+)"|DEFAULT_PROMPT)\.to_string\(\)', source)
+    assert sorted(name or "default" for name in built_in) == sorted(BUILT_IN_PROMPTS)
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_PROMPT", raising=False)
+    assert run(bench, instances=["acme__widget-1"], prompt="offline") == 0
+    env, mounts = container_env(bench)
+    assert env["DREAMFERENCE_MIGHTLING_PROMPT"] == "offline"
+    assert not any("system-prompts" in mount for mount in mounts)
+    assert SweBenchRunStore("r1").manifest()["prompt"] == "offline" and SweBenchRunStore("r1").manifest()["prompt_sha256"] is None
 
 
 def test_a_custom_prompt_is_mounted_read_only_and_its_text_is_recorded(bench, monkeypatch, tmp_path):

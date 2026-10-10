@@ -32,28 +32,40 @@ def test_running_the_installed_agent_fails_the_test(monkeypatch):
         subprocess.Popen([os.path.join(REAL_HOME, ".local/share/dreamference/mightling/bin/ling"), "exec", "hi"])
 
 
-@pytest.mark.installed_binary
-def test_a_test_of_the_built_binary_opts_out_by_its_marker(tmp_path):
-    # The spawn goes through (and fails on the missing file, not on the guard) ...
-    with pytest.raises(FileNotFoundError):
-        subprocess.run([os.path.join(REAL_HOME, ".local/share/dreamference/mightling/bin/no-such-binary")])
-    # ... and so does a connection to the model server's port, refused or not by the machine.
-    try:
-        socket.create_connection(("127.0.0.1", MODEL_SERVER_PORTS[1]), timeout=0.2).close()
-    except OSError:
-        pass
-
-
-def test_connecting_to_the_model_server_fails_the_test():
-    for port in MODEL_SERVER_PORTS:
-        with pytest.raises(AssertionError, match="model server"):
-            socket.create_connection(("127.0.0.1", port), timeout=1)
-    with pytest.raises(AssertionError, match="model server"):
-        import urllib.request
-        urllib.request.urlopen("http://localhost:8000/v1/models", timeout=1)
-    # A server the test starts on a free port is reachable as before.
+@pytest.fixture
+def listener():
+    """A socket this test process listens on, standing in for the model server at its port."""
     with socket.socket() as server:
         server.bind(("127.0.0.1", 0))
         server.listen(1)
-        with socket.create_connection(server.getsockname(), timeout=2):
+        yield server.getsockname()
+
+
+@pytest.mark.installed_binary
+def test_a_test_of_the_built_binary_opts_out_by_its_marker(listener):
+    # The spawn goes through (and fails on the missing file, not on the guard) ...
+    with pytest.raises(FileNotFoundError):
+        subprocess.run([os.path.join(REAL_HOME, ".local/share/dreamference/mightling/bin/no-such-binary")])
+    # ... and a connection to the model server's port is not refused by the guard either. The port
+    # is this test's own listener: the guard itself is what keeps the suite off the live server,
+    # so even its tests never reach it.
+    with socket.create_connection(listener, timeout=2):
+        pass
+
+
+def test_connecting_to_the_model_server_fails_the_test(listener, monkeypatch):
+    # The rule covers the live ports by name ...
+    assert MODEL_SERVER_PORTS == (8000, 18000)
+    # ... and is shown on a listener of this test's own, named as the model server's port.
+    monkeypatch.setattr("conftest.MODEL_SERVER_PORTS", (listener[1],))
+    with pytest.raises(AssertionError, match="model server"):
+        socket.create_connection(listener, timeout=1)
+    with pytest.raises(AssertionError, match="model server"):
+        import urllib.request
+        urllib.request.urlopen(f"http://127.0.0.1:{listener[1]}/v1/models", timeout=1)
+    # Any other free port is reachable as before.
+    with socket.socket() as other:
+        other.bind(("127.0.0.1", 0))
+        other.listen(1)
+        with socket.create_connection(other.getsockname(), timeout=2):
             pass

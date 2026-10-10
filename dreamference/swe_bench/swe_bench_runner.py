@@ -44,7 +44,7 @@ LOCK_HOLDER: Final[str] = "a SWE-bench run"
 
 # The prompts compiled into `ling` (ling-rs/src/prompt.rs); any other name is a file in
 # `$CODEX_HOME/system-prompts/`. A run's manifest without a prompt ran the default.
-BUILT_IN_PROMPTS: Final[tuple] = ("default", "high-swe")
+BUILT_IN_PROMPTS: Final[tuple] = ("default", "offline", "high-swe", "ask")
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
 
