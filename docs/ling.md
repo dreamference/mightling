@@ -7,7 +7,7 @@ and explains what it did. Its prompts go to the model your GB10 serves, never to
 cd ~/my-project
 ling                              # interactive session
 ling "why do the tests fail?"     # start with a prompt
-ling exec "add a --verbose flag"  # run once, non-interactively
+ling exec "add a --verbose flag"  # run once, non-interactively (from a script: < /dev/null)
 ling resume --last                # pick up the last session
 ```
 
@@ -38,7 +38,7 @@ The everyday commands and flags:
 
 | Command or flag | What it does |
 |---|---|
-| `ling exec`, `ling review` | Run non-interactively, or review changes |
+| `ling exec`, `ling review` | Run non-interactively, or review changes. `ling exec` reads more input from standard input when it is not a terminal, so a script, a cron job or another program that starts it must close stdin (`< /dev/null`) or the run waits for input that never comes |
 | `ling resume`, `ling fork` | Continue or branch a saved session |
 | `ling apply` | Apply the agent's last diff with `git apply` |
 | `-c key=value`, `-p profile` | Override configuration, pick a profile |

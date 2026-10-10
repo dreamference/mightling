@@ -93,6 +93,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_RELEASE_1.4.2.md](./DREAMFERENCE_RELEASE_1.4.2.md) | *Never released:* prepared 2026-10-07, shipped inside 1.5.1 |
 | [DREAMFERENCE_RELEASE_1.5.1.md](./DREAMFERENCE_RELEASE_1.5.1.md) | *Published 2026-10-08:* the first Mightling release and the first signed one; the rename, signing and the unattended installer |
 | [DREAMFERENCE_RELEASE_1.6.0.md](./DREAMFERENCE_RELEASE_1.6.0.md) | *Draft:* `ling-docs`, the Mac preview, the new web UI, the messengers off by default, refine if it wins |
+| [DREAMFERENCE_RELEASE_1.6.1.md](./DREAMFERENCE_RELEASE_1.6.1.md) | *Draft (2026-10-10), cut after night 5:* the `offline` prompt, `apply_patch` on ling-engine, the nights' script and lists, the suite offline by construction; the two arms' results to fill |
 
 ---
 
