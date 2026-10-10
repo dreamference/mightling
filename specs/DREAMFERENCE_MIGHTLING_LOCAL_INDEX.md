@@ -703,7 +703,7 @@ names the script cannot know. Every name below is final; there are no aliases fo
    only, so the launcher still builds for Windows, where there is no `ling-docs`.
 2. `dreamference/runner/codex_branded_builder.py`: `DOCS_*` constants, `build_docs_index()`
    (Linux only: elsewhere it builds nothing and succeeds), the `~/.local/bin/ling-docs` link.
-3. `dreamference/runner/docs_index_setup.py` and `ling-admin docs setup`.
+3. `dreamference/runner/docs_index_setup.py` and `ling-admin docs setup`; since 2026-10-10 also `ling docs setup|status|remove` in the launcher (`ling-rs/src/docs_setup.rs`), the same pins and places, for a client that has no `ling-admin`.
 4. `dreamference/audit/docs_egress_audit.py` and `ling-admin audit egress --docs` (one of the
    mutually exclusive modes, beside `--tui`, `--app` and `--web`).
 5. In the crate: `config::home()` (`$CODEX_HOME`, else `~/.mightling`), the secret folders

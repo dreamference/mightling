@@ -108,7 +108,7 @@ Open <http://localhost:3000> and sign in. See [Web chat](web-chat.md).
 For a window of its own:
 
 ```bash
-ling-admin desktop install     # build tools for the desktop app (asks for sudo once)
+ling-admin desktop install     # build tools for the desktop app (asks for sudo once); on a client: ling desktop install
 ling-admin desktop run
 ```
 

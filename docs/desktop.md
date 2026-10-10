@@ -16,6 +16,7 @@ From a checkout:
 
 ```bash
 ling-admin desktop install    # the app's packages (Node.js 22.13+ needed) and, once, a sandbox profile (sudo)
+# On a client with no ling-admin: `ling desktop install` fetches the release's .deb or .dmg and installs it.
 ling-admin desktop run        # build if needed, register the launcher entry, open the window
 ling-admin desktop build      # the installable .deb, in desktop/electron/out/make
 ```

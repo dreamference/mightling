@@ -40,7 +40,9 @@ pub mod cave;
 pub mod chat;
 pub mod code_index;
 pub mod compaction;
+pub mod desktop;
 pub mod docs_index;
+pub mod docs_setup;
 pub mod help;
 pub mod home;
 pub mod ledger;
@@ -310,11 +312,22 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(audit::run_cli(&user_args[index + 1..]));
     }
-    // `docs` is the local file index, `ling-docs` (docs_index.rs).
+    // `docs` is the local file index, `ling-docs` (docs_index.rs); `docs setup|status|remove`
+    // fetch what it loads at run time (docs_setup.rs), so a client needs no `ling-admin` for it.
     if let Some(index) = subcommand
         && user_args[index] == "docs"
     {
+        if docs_setup::handles(user_args.get(index + 1).map(String::as_str)) {
+            std::process::exit(docs_setup::run_cli(&user_args[index + 1..]).await);
+        }
         std::process::exit(docs_index::run_cli(&user_args[index + 1..]));
+    }
+    // `desktop` installs the desktop app from the release on a client (desktop.rs); `ling app`
+    // opens it.
+    if let Some(index) = subcommand
+        && user_args[index] == "desktop"
+    {
+        std::process::exit(desktop::run_cli(&user_args[index + 1..]).await);
     }
     // `prompt` lists, shows and chooses the system prompt new sessions get (prompt.rs).
     if let Some(index) = subcommand

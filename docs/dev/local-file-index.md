@@ -10,7 +10,7 @@ The local file index is `ling-docs`, a Rust binary of its own (`ling-docs-rs/`, 
 
 ## No network, bounded memory
 
-- It opens no socket: PDFium and ONNX Runtime are loaded with dlopen and, with the model (~320 MB in all), installed pinned by `ling-admin docs setup` (run by `codex build` and by `install.sh` on a node); `ling-admin audit egress --docs` proves it.
+- It opens no socket: PDFium and ONNX Runtime are loaded with dlopen and, with the model (~320 MB in all), installed pinned by `ling-admin docs setup` (run by `codex build` and by `install.sh` on a node) or, on a client with no wheel, by `ling docs setup` (`ling-rs/src/docs_setup.rs`, the same pins, since 2026-10-10); `ling-admin audit egress --docs` proves it.
 - Indexing runs only outside the sandbox, in `mightling-index-docs-*` scopes of `mightling-index.slice` admitted against the code index's own ledger (copied `host.rs`), inside bwrap with no network.
 - Extraction is capped at 1 GiB with `OOMPolicy=continue`, so an over-cap PDF reads as killed, not as a stop from outside.
 - Linux only.

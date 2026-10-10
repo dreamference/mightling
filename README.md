@@ -82,7 +82,7 @@ branches over coffee.
 | Cost per token | Metered | Zero |
 | Rate limits | Yes | No |
 | Works with the network unplugged | No | Yes |
-| You can verify what leaves | No | `ling-admin audit egress` |
+| You can verify what leaves | No | `ling-admin audit egress` (`ling audit egress` on a client) |
 
 ---
 

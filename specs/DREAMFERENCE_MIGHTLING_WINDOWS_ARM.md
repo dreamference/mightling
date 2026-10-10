@@ -390,7 +390,7 @@ The runner is Python (`dreamference/night_shift/`) under a systemd timer, with e
 
 ## 14. The egress audit on Windows
 
-`ling-admin audit egress` is strace and Python. The Windows version is `ling audit egress`, in Rust, because there is no Python on the client.
+`ling-admin audit egress` is strace and Python. The Windows version is `ling audit egress`, in Rust, because there is no Python on the client. *Since 2026-10-10 the same command also records with strace on Linux clients (EGRESS §12); the verdict below is shared.*
 
 - **Tracing:** an ETW real-time session (the `ferrisetw` crate) with Microsoft-Windows-Kernel-Network (TCP/UDP connect, send and accept, with process ids), Microsoft-Windows-DNS-Client (every name lookup, which strace could not see from `sendmmsg`) and Microsoft-Windows-Kernel-Process (process starts, to follow the session's tree, including commands spawned through the sandbox accounts).
 - **Verdict:** the same as Linux. Every destination is an allow-listed loopback port or the node; no DNS query; no networked git; exit 0, 1 or 2.
