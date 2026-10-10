@@ -29,7 +29,8 @@ WT=${WT:-$REPO/.claude/worktrees/swe-night1}
 PY=${PY:-$REPO/.venv/bin/python}
 LIST=${LIST:-$HOME/.cache/dreamference/swe-bench/fresh-50.txt}
 D=${D:-$HOME/.local/share/dreamference/swe-bench/night1}
-PREFIX=${PREFIX:-n1}
+NIGHT=${NIGHT:-1}
+PREFIX=${PREFIX:-n$NIGHT}
 UNIT=${UNIT:-ling-swe-night1}
 LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 # The disk a repository's images need at once (about 2.3 GB each unpacked), and the disk the run
@@ -94,8 +95,8 @@ start() {
     { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\n' "$RESERVE_GB"; } \
         > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
-        --description="SWE-bench night 1: default against test discipline (tests-v2) on 50 fresh tasks" \
-        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=REFINE="$REFINE" \
+        --description="SWE-bench night $NIGHT: default against test discipline (tests-v2) on fresh tasks" \
+        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=REFINE="$REFINE" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
 }
@@ -116,7 +117,7 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night 1 from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), refine $REFINE"
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), refine $REFINE"
     for arm in default tests-v2; do
         extra=""
         [ "$arm" = tests-v2 ] && extra="--task-rules tests-v2"
@@ -124,7 +125,7 @@ run() {
         log "round $PREFIX-$arm"
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$arm" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night 1, $arm arm"
+            --prompt default $extra --eval --remove-images --label "night $NIGHT, $arm arm"
         rc=$?
         log "$PREFIX-$arm finished ($rc)"
         df -h / | tail -1
