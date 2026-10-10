@@ -82,7 +82,10 @@ class NodeJobSender:
             str: The URL git pushes to and fetches from; the node's `serve-job` maps it to its
             job repository.
         """
-        address = record["address"]
+        address = NodePairing.resolve(record)
+        if address is None:
+            raise LookupError(f"{record['name']} is not on the network: no node answering a browse carries its id, "
+                              f"so its remembered address was not tried.")
         host = f"[{address}]" if ":" in address else address
         return f"ssh://{record['user']}@{host}:{record.get('ssh_port') or 22}/jobs/{slug}.git"
 
@@ -179,7 +182,11 @@ class NodeJobSender:
         if cls._git(repo, "status", "--porcelain").stdout.strip():
             print("⚠️  Uncommitted changes are not sent: the job runs at HEAD.")
         request = cls.compose(repo, commit, command, memory, time_limit, test, gpu, setup, out, binds)
-        url = cls.git_url(record, request["repo"])
+        try:
+            url = cls.git_url(record, request["repo"])
+        except LookupError as error:
+            print(f"❌ {error}")
+            return 1
         print(f"📤 Sending {commit[:10]} to {record['name']} as job {request['id']} "
               f"(memory {request['memory']}, time {request['time']})...")
         pushed = subprocess.run(["git", "-C", repo, "push", "--quiet", url, f"{commit}:refs/jobs/{request['id']}"],
@@ -325,7 +332,13 @@ class NodeJobSender:
                 print(f"❌ No job {job_id} was sent from this machine to a node that is still paired.")
             return False
         branch = f"job/{job_id}"
-        fetched = subprocess.run(["git", "-C", sent["repo"], "fetch", "--quiet", cls.git_url(record, sent["slug"]),
+        try:
+            url = cls.git_url(record, sent["slug"])
+        except LookupError as error:
+            if not quiet_when_absent:
+                print(f"❌ {error}")
+            return False
+        fetched = subprocess.run(["git", "-C", sent["repo"], "fetch", "--quiet", url,
                                   f"refs/heads/{branch}:refs/heads/{branch}"],
                                  env=cls.git_environment(record), capture_output=True, text=True, check=False)
         if fetched.returncode != 0:
@@ -346,7 +359,7 @@ class NodeJobSender:
         try:
             process = subprocess.Popen(NodePairing.ssh_command(record, f"job-out {job_id}"), stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE)
-        except OSError:
+        except (OSError, LookupError):
             return False
         count = 0
         try:

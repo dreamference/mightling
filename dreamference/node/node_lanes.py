@@ -124,6 +124,12 @@ class NodeLanes:
             if mine and record.get("node") == mine:
                 continue
             name = record.get("name") or record["node"]
+            # Where the node is now, never where it was: its lease may have moved (NodePairing.resolve).
+            address = NodePairing.resolve(record)
+            if address is None:
+                notes.append(f"{name}: is not on the network (no node answering a browse carries its id), "
+                             f"so its model server was not used.")
+                continue
             info = cls.info(record)
             if info is None:
                 notes.append(f"{name}: did not answer over the pairing, so its model server was not used.")
@@ -132,7 +138,7 @@ class NodeLanes:
                 notes.append(f"{name}: {info['runner']} is in progress there, so its model server was not used.")
                 continue
             port = info.get("model_port") or DEFAULT_MODEL_PORT
-            url = f"http://{cls.url_host(record['address'])}:{port}"
+            url = f"http://{cls.url_host(address)}:{port}"
             theirs = host.served_model(url)
             if theirs is None:
                 notes.append(f"{name}: its model server at {url} is not answering, so it was not used.")

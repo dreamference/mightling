@@ -1346,3 +1346,64 @@ def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypa
     assert "MIGHTLING_NODE" in capsys.readouterr().out
     assert not NodeServiceFile.service_path.exists()
 
+
+
+# -- a paired node is reached where it is now, never at a remembered address -----------------------
+
+def test_every_connection_resolves_the_node_on_the_network_first(monkeypatch):
+    # 2026-10-10: node-b's lease had moved from .30 to .246 and every lane probe went to the
+    # old address for a night. The record remembers an address; no connection trusts it.
+    from dreamference.node import NodePairing
+    record = paired_record()                                                      # remembered at .106
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"}]))
+    assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.50.200"
+    assert NodePairing.paired()[0]["address"] == "192.168.50.200"                # remembered for next time
+    # Other nodes answer and this one does not: it is off, and its old address may be another
+    # machine's by now. Nothing is tried.
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-3", "node": "3333-cccc", "address": "192.168.50.106", "port": "8000"}]))
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("ssh must not run"))
+    answer = NodePairing.run(record, "info")
+    assert answer.returncode == 255 and "not on the network" in answer.stderr and "192.168.50.200" in answer.stderr
+    with pytest.raises(LookupError):
+        NodePairing.ssh_command(record, "info")
+    # A browse that returns nothing at all (multicast blocked): the remembered address is the fallback.
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.50.200"
+    # An address given by hand (`sync-model --address`, a direct link) is used as it is.
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.201", "port": "8000"}]))
+    fixed = dict(record, address="10.10.0.2", address_fixed=True)
+    assert NodePairing.ssh_command(fixed, "info")[-2] == "owner@10.10.0.2"
+    assert NodePairing.paired()[0]["address"] == "192.168.50.200"                # a fixed address is not remembered
+
+
+def test_a_lane_and_a_job_follow_the_node_to_its_new_address(monkeypatch):
+    from dreamference.node import NodeJobSender, NodeLanes, NodePairing
+    paired_record()                                                               # remembered at .106
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"},
+        {"name": "spark-7", "node": "7777-gggg", "address": "192.168.50.207", "port": "8000"}]))
+    NodePairing._save({"node": "5555-eeee", "name": "spark-5", "address": "192.168.50.109", "user": "owner",
+                       "ssh_port": 22})                                           # paired, not on the network
+    monkeypatch.setattr(NodePairing, "run", classmethod(
+        lambda cls, record, request, capture=True, input_text=None:
+        subprocess.CompletedProcess([], 0, json.dumps({"model_port": 8000}) + "\n", "")))
+
+    class Host:
+        @classmethod
+        def served_model(cls, host, timeout=3.0):
+            return ("m", 1) if host == "http://192.168.50.200:8000" else None
+
+        @classmethod
+        def metrics(cls, host, timeout=3.0):
+            return {"kv_pool": 200000.0}
+
+    lanes, notes = NodeLanes.lanes("http://127.0.0.1:8000", ("m", 1), "paired", Host, lambda pool: (2, None))
+    assert [lane["host"] for lane in lanes[1:]] == ["http://192.168.50.200:8000"]
+    assert any("spark-5: is not on the network" in note for note in notes)
+    record = NodePairing.find("spark-2", browse=False)
+    assert NodeJobSender.git_url(record, "repo-abc").startswith("ssh://owner@192.168.50.200:22/")
+    with pytest.raises(LookupError):
+        NodeJobSender.git_url(NodePairing.find("spark-5", browse=False), "repo-abc")

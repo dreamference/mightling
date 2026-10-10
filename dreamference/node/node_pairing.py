@@ -135,6 +135,38 @@ class NodePairing:
         return options
 
     @classmethod
+    def resolve(cls, record: Dict[str, Any]) -> Optional[str]:
+        """
+        The address a paired node answers at now. The pairing is with the node's id, and DHCP
+        moves addresses (spec §6.1, tier 4): a browse looks for the id, and the address in that
+        answer is used and remembered. The remembered address is tried only when the browse
+        returns nothing at all (multicast blocked); when other nodes answer and this one does
+        not, it is off or elsewhere, and its old address, which may belong to another machine by
+        now, is never tried. On 2026-10-10 a lane was lost for a night because the remembered
+        address was used directly after the node's lease had moved.
+
+        Args:
+            record: The paired node's record. One with `address_fixed` set (an address given by
+                hand, such as a QSFP link's) is used as it is.
+
+        Returns:
+            Optional[str]: The address to connect to, or None when the node is not on the network.
+        """
+        if record.get("address_fixed"):
+            return record["address"]
+        seen = NodeBrowser.browse()
+        if not seen:
+            return record["address"]
+        for node in seen:
+            if node.get("node") == record["node"]:
+                if node["address"] != record["address"]:
+                    record["address"] = node["address"]
+                    if cls.record_path(record["node"]).is_file():
+                        cls._save(record)
+                return node["address"]
+        return None
+
+    @classmethod
     def ssh_command(cls, record: Dict[str, Any], request: str) -> List[str]:
         """
         Args:
@@ -142,9 +174,16 @@ class NodePairing:
             request: What to ask `serve-job` for (it arrives as `SSH_ORIGINAL_COMMAND`).
 
         Returns:
-            List[str]: The argv.
+            List[str]: The argv, to the address the node answers at now (`resolve`).
+
+        Raises:
+            LookupError: The node is not on the network; its remembered address was not tried.
         """
-        return ["ssh", *cls.ssh_options(record), f"{record['user']}@{record['address']}", request]
+        address = cls.resolve(record)
+        if address is None:
+            raise LookupError(f"{record.get('name') or record['node']} is not on the network: no node answering a "
+                              f"browse carries its id, so its remembered address ({record['address']}) was not tried.")
+        return ["ssh", *cls.ssh_options(record), f"{record['user']}@{address}", request]
 
     @classmethod
     def record_path(cls, node_id: str) -> Path:
@@ -191,10 +230,7 @@ class NodePairing:
             if wanted in (record.get("name", "").lower(), record["address"].lower(), record["node"].lower()) \
                     or (len(wanted) >= 4 and record["node"].lower().startswith(wanted)):
                 if browse:
-                    for seen in NodeBrowser.browse():
-                        if seen.get("node") == record["node"] and seen["address"] != record["address"]:
-                            record["address"] = seen["address"]
-                            cls._save(record)
+                    cls.resolve(record)  # refreshes and saves the address when the node has moved
                 return record
         return None
 
@@ -419,7 +455,7 @@ class NodePairing:
         try:
             return subprocess.run(cls.ssh_command(record, request), capture_output=capture, text=True,
                                   input=input_text, check=False)
-        except OSError as error:
+        except (OSError, LookupError) as error:
             return subprocess.CompletedProcess([], 255, "", str(error))
 
     @classmethod

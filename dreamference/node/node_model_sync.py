@@ -113,7 +113,9 @@ class NodeModelSync:
             print(f"❌ {name} is not a paired node. Pair once with: ling-admin node add {name}")
             return 1
         if address:
-            record = dict(record, address=address)
+            # An address given by hand is used as it is; otherwise every connection resolves the
+            # node on the network first (NodePairing.resolve).
+            record = dict(record, address=address, address_fixed=True)
         hub = cls.hub()
         folders = [hub / cls.folder_name(repo) for repo in cls.repos(model_key)]
         missing = [folder.name for folder in folders if not (folder / "snapshots").is_dir()]
@@ -122,13 +124,17 @@ class NodeModelSync:
                   f"here first, or on {record['name']}.")
             return 1
         size = cls.size(folders)
+        try:
+            command = NodePairing.ssh_command(record, f"model-receive {model_key} {size}")
+        except LookupError as error:
+            print(f"❌ {error}")
+            return 1
         print(f"📤 Copying {model_key} ({size / GIB:.1f} GiB, {len(folders)} folder(s)) to {record['name']} "
-              f"at {record['address']}...", flush=True)
+              f"at {command[-2].partition('@')[2]}...", flush=True)
         started = time.time()
         tar = subprocess.Popen(["tar", "-C", str(hub), "-cf", "-", "--exclude=*.incomplete",
                                 *[folder.name for folder in folders]], stdout=subprocess.PIPE)
-        ssh = subprocess.Popen(NodePairing.ssh_command(record, f"model-receive {model_key} {size}"),
-                               stdin=tar.stdout)
+        ssh = subprocess.Popen(command, stdin=tar.stdout)
         tar.stdout.close()
         code = ssh.wait()
         tar.wait()
