@@ -9,7 +9,7 @@ The launcher (`ling-rs/src/lib.rs`) is what the Python runner used to do, and `C
 - resolves the vLLM URL (`DREAMFERENCE_VLLM_HOST`, then `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml` or `~/.config/dreamference/config.toml`; on a client, the node tiers in [node.md](node.md));
 - waits for the server with the old dotted progress;
 - reads the served model's id **and `max_model_len` from `/v1/models`**, so it needs no copy of the model registry;
-- writes `$CODEX_HOME/model_catalog.json` (Codex's own prompt plus `WEB_ACCESS_INSTRUCTIONS`; see [prompt.md](prompt.md) for named prompts);
+- writes `$CODEX_HOME/model_catalog.json` (Codex's own prompt plus `WEB_ACCESS_INSTRUCTIONS`; see [prompt.md](prompt.md) for named prompts). The entry offers `apply_patch` in its freeform (custom-tool) form only when `/v1/models` reports `owned_by: ling-engine`: SGLang and vLLM drop a `custom` tool silently (measured 2026-10-10), ling-engine runs it (verified the same day). `ServedModel::runs_custom_tools` is the one gate, and `DREAMFERENCE_MIGHTLING_APPLY_PATCH=off|function|freeform` overrides it for a benchmark arm; a test pins both (Codex spec §"Writes model_catalog.json");
 - edits `config.toml` with `toml_edit` (so top-level keys can never be reparented into a table; `check_for_update_on_startup = false` because the update prompt would offer to replace Mightling with upstream Codex);
 - prepends `--oss --local-provider openai-custom --model <id>` unless the user gave their own.
 

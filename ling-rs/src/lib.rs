@@ -191,6 +191,37 @@ user asked for exactly that.
 pub struct ServedModel {
     pub id: String,
     pub max_model_len: u64,
+    /// `owned_by` from `/v1/models`: `sglang`, `vllm`, `ling-engine`, … Decides what the catalog
+    /// may promise Codex about the server (`apply_patch_tool_type`).
+    pub owned_by: String,
+}
+
+/// The `owned_by` ling-engine reports: the one server here that runs Codex's custom (freeform)
+/// tools; SGLang and vLLM drop a `custom` tool silently (measured 2026-10-10).
+pub const LING_ENGINE_OWNER: &str = "ling-engine";
+
+impl ServedModel {
+    /// Whether the server runs Codex's custom tools, so the catalog may offer `apply_patch` in
+    /// its freeform grammar form (a `custom` tool beside the function tools).
+    pub fn runs_custom_tools(&self) -> bool {
+        self.owned_by == LING_ENGINE_OWNER
+    }
+}
+
+/// Overrides how `apply_patch` is offered, for a benchmark arm: `off`, `function` or `freeform`.
+/// Unset, empty or anything else leaves the automatic choice ([`apply_patch_tool_type`]).
+pub const APPLY_PATCH_ENV: &str = "DREAMFERENCE_MIGHTLING_APPLY_PATCH";
+
+/// Codex's `apply_patch_tool_type` for the catalog: the override from [`APPLY_PATCH_ENV`] when it
+/// names a form, else `freeform` on a server that runs custom tools and nothing elsewhere (the
+/// model then edits through the shell, as it did before the field existed).
+pub fn apply_patch_tool_type(model: &ServedModel, setting: Option<&str>) -> Option<&'static str> {
+    match setting.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("off") => None,
+        Some("function") => Some("function"),
+        Some("freeform") => Some("freeform"),
+        _ => model.runs_custom_tools().then_some("freeform"),
+    }
 }
 
 /// Parses the process's command line into Codex's CLI type `T`, after [`prepare_args`] has pointed
@@ -705,7 +736,12 @@ async fn served_model_with(client: &reqwest::Client, host: &str, configured: Opt
     let max_model_len = configured
         .or(reported)
         .unwrap_or(FALLBACK_CONTEXT_WINDOW);
-    Some(ServedModel { id, max_model_len })
+    Some(ServedModel { id, max_model_len, owned_by: owner_of(card) })
+}
+
+/// `owned_by` from a `/v1/models` entry, or an empty string.
+fn owner_of(card: &serde_json::Value) -> String {
+    card.get("owned_by").and_then(serde_json::Value::as_str).unwrap_or("").to_string()
 }
 
 fn served_card(body: &serde_json::Value) -> Option<&serde_json::Value> {
@@ -774,6 +810,7 @@ fn parse_served_model(body: &serde_json::Value) -> Option<ServedModel> {
         max_model_len: context_window_from_card(card)
             .or_else(|| training_window(card))
             .unwrap_or(FALLBACK_CONTEXT_WINDOW),
+        owned_by: owner_of(card),
     })
 }
 
@@ -878,8 +915,7 @@ pub const STREAM_IDLE_TIMEOUT_MS: i64 = 900_000;
 /// whole system prompt (`prompt::compose`).
 pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Value {
     let context = model.max_model_len;
-    json!({
-        "models": [{
+    let mut entry = json!({
             "id": model.id,
             "slug": model.id,
             "display_name": model.id,
@@ -901,8 +937,16 @@ pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Val
             "experimental_supported_tools": [],
             "tool_mode": "code_mode",
             "base_instructions": instructions,
-        }]
-    })
+    });
+    // `apply_patch` reaches the model only through this field (Codex adds the handler when it is
+    // set). Its freeform form is a `custom` tool, which only ling-engine runs: verified on
+    // 2026-10-10 (one `custom_tool_call apply_patch`, applied). On SGLang or vLLM the tool would
+    // be dropped by the server, so the field stays absent there and the model edits by shell,
+    // unless a benchmark arm asks for a form (`APPLY_PATCH_ENV`, SWE-bench night 5: `function`).
+    if let Some(form) = apply_patch_tool_type(model, std::env::var(APPLY_PATCH_ENV).ok().as_deref()) {
+        entry["apply_patch_tool_type"] = json!(form);
+    }
+    json!({"models": [entry]})
 }
 
 /// Writes the catalogs and brings `config.toml` up to what a local session needs.
@@ -1115,7 +1159,7 @@ mod tests {
 
     #[test]
     fn the_catalog_entry_is_listed_without_a_chatgpt_sign_in() {
-        let model = ServedModel { id: "m".into(), max_model_len: 1000 };
+        let model = ServedModel { id: "m".into(), max_model_len: 1000, owned_by: String::new() };
         let entry = &model_catalog(&model, "prompt")["models"][0];
         assert_eq!(entry["supported_in_api"], json!(true));
         assert_eq!(entry["visibility"], json!("list"));
@@ -1298,11 +1342,33 @@ mod tests {
     }
 
     #[test]
+    fn apply_patch_is_offered_freeform_on_ling_engine_only() {
+        let engine = ServedModel { id: "m".into(), max_model_len: 65536, owned_by: LING_ENGINE_OWNER.into() };
+        let entry = model_catalog(&engine, "x")["models"][0].clone();
+        assert_eq!(entry["apply_patch_tool_type"], json!("freeform"));
+        for owner in ["sglang", "vllm", ""] {
+            let other = ServedModel { id: "m".into(), max_model_len: 65536, owned_by: owner.into() };
+            assert!(model_catalog(&other, "x")["models"][0].get("apply_patch_tool_type").is_none(), "{owner}");
+        }
+        let body = json!({"data": [{"id": "m", "max_model_len": 65536, "owned_by": "ling-engine"}]});
+        assert!(parse_served_model(&body).unwrap().runs_custom_tools());
+        assert!(!parse_served_model(&json!({"data": [{"id": "m"}]})).unwrap().runs_custom_tools());
+        // The override, for an arm: a form by name, `off` for none, anything else is automatic.
+        let sglang = ServedModel { id: "m".into(), max_model_len: 65536, owned_by: "sglang".into() };
+        assert_eq!(apply_patch_tool_type(&sglang, Some("function")), Some("function"));
+        assert_eq!(apply_patch_tool_type(&sglang, Some("FreeForm ")), Some("freeform"));
+        assert_eq!(apply_patch_tool_type(&engine, Some("off")), None);
+        assert_eq!(apply_patch_tool_type(&engine, Some("")), Some("freeform"));
+        assert_eq!(apply_patch_tool_type(&sglang, Some("maybe")), None);
+        assert_eq!(apply_patch_tool_type(&sglang, None), None);
+    }
+
+    #[test]
     fn the_served_model_and_its_context_come_from_v1_models() {
-        let body = json!({"data": [{"id": "Intel/Qwen", "max_model_len": 32768}]});
+        let body = json!({"data": [{"id": "Intel/Qwen", "max_model_len": 32768, "owned_by": "vllm"}]});
         assert_eq!(
             parse_served_model(&body),
-            Some(ServedModel { id: "Intel/Qwen".into(), max_model_len: 32768 })
+            Some(ServedModel { id: "Intel/Qwen".into(), max_model_len: 32768, owned_by: "vllm".into() })
         );
         assert_eq!(parse_served_model(&json!({"data": []})), None);
     }
@@ -1322,7 +1388,7 @@ mod tests {
         assert_eq!(context_window_from_card(&json!({"id": "qwen", "object": "model", "owned_by": "library"})), None);
         assert_eq!(
             parse_served_model(&json!({"data": [{"id": "qwen", "object": "model", "owned_by": "library"}]})),
-            Some(ServedModel { id: "qwen".into(), max_model_len: FALLBACK_CONTEXT_WINDOW })
+            Some(ServedModel { id: "qwen".into(), max_model_len: FALLBACK_CONTEXT_WINDOW, owned_by: "library".into() })
         );
     }
 
@@ -1379,7 +1445,7 @@ mod tests {
         });
         let client = reqwest::Client::new();
         let served = served_model_with(&client, &base, None).await.unwrap();
-        assert_eq!(served, ServedModel { id: "q.gguf".into(), max_model_len: 16_384 });
+        assert_eq!(served, ServedModel { id: "q.gguf".into(), max_model_len: 16_384, owned_by: String::new() });
         let served = served_model_with(&client, &base, Some(65_536)).await.unwrap();
         assert_eq!(served.max_model_len, 65_536);
     }
@@ -1553,7 +1619,7 @@ mod tests {
     #[test]
     fn one_tool_output_is_capped_below_the_window() {
         let limit = |len| {
-            let catalog = model_catalog(&ServedModel { id: "m".into(), max_model_len: len }, "x");
+            let catalog = model_catalog(&ServedModel { id: "m".into(), max_model_len: len, owned_by: String::new() }, "x");
             catalog["models"][0]["truncation_policy"]["limit"].as_u64()
         };
         assert_eq!(limit(262_144), Some(TOOL_OUTPUT_TOKEN_LIMIT));
@@ -1562,7 +1628,7 @@ mod tests {
 
     #[test]
     fn the_catalog_prompt_keeps_web_access_and_appends_gmail() {
-        let model = ServedModel { id: "m".into(), max_model_len: 1024 };
+        let model = ServedModel { id: "m".into(), max_model_len: 1024, owned_by: String::new() };
         let default = prompt::Prompt::default_prompt();
         let parts = prompt::Parts { email: gmail_access_instructions("a@x.com"), ..Default::default() };
         let with_gmail = model_catalog(&model, &prompt::compose(&default, &parts));
@@ -1577,7 +1643,7 @@ mod tests {
     fn another_prompt_gets_a_catalog_of_its_own_and_default_stays_in_the_shared_one() {
         let home = std::env::temp_dir().join(format!("mightling-catalogs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        let model = ServedModel { id: "m".into(), max_model_len: 1024 };
+        let model = ServedModel { id: "m".into(), max_model_len: 1024, owned_by: String::new() };
         let parts = prompt::Parts::default();
         let read = |path: &Path| -> String {
             let catalog: serde_json::Value =

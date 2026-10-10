@@ -959,7 +959,7 @@ mod tests {
 
     #[test]
     fn the_list_says_which_node_is_in_use_and_gives_the_url_to_paste() {
-        let model = crate::ServedModel { id: "RadixArk/Qwen3.8-27B-NVFP4".into(), max_model_len: 262_144 };
+        let model = crate::ServedModel { id: "RadixArk/Qwen3.8-27B-NVFP4".into(), max_model_len: 262_144, owned_by: "sglang".into() };
         let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
         let lines = list_lines(&inputs, &[spark1(), Advert { state: "stopped".into(), main: false, ..spark2() }], &[Some(model), None]);
         assert_eq!(lines[0], "* spark-1  http://192.168.50.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens)  Mightling 1.3.0");

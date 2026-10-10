@@ -187,6 +187,8 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 
 Qwen3.8 figures are after the sampler change (the first measurement, before it, was 24.1 / 47.5 / 82.5). The 122B figures came from different prompts (`main-model inspect`), so decode is a tie within noise on prose and code. The suite's longer wall clock on the first runs was the harness, not the model: it waited up to 30 s to see a busy marker that a fast turn never showed (see `specs/README.md`).
 
+**Custom tools (2026-10-10).** SGLang's OpenAI-compatible Responses endpoint drops a tool of `type: custom` (Codex's freeform tools: Code Mode's `exec`, `apply_patch` in its freeform form) without an error: in 11 traced turns the model never saw it and worked through the function tools. ling-engine runs custom tools (its spec §7). The launcher therefore offers freeform `apply_patch` only when `/v1/models` says `owned_by: ling-engine` (`DREAMFERENCE_MIGHTLING_CODEX.md`, the catalog entry); the function form of `apply_patch` on SGLang is not offered by default and would be a night arm.
+
 The resulting command is listed flag by flag in `DREAMFERENCE_CODEBASE.md` §5. The CUTLASS FP4 path corrupts output on SM121 (`DREAMFERENCE_MODELS.md` §2.1); the removed vLLM NVFP4 recipes selected FlashInfer's b12x kernels through `env` and `moe_backend` for that reason.
 
 ---
