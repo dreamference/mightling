@@ -68,19 +68,31 @@ BUSY_MARKER = "esc to interrupt"
 PING = "Reply with exactly one word: pong"
 
 
+def _gate_closed() -> bool:
+    """Whether the model gate in front of the server is refusing requests (a benchmark owns the
+    model: SWE_BENCH spec §18). The gate still answers `/v1/models`, so without this check the live
+    tests start and then wait, five minutes per command, for turns the gate refuses (2026-10-10)."""
+    try:
+        response = requests.get(f"{VLLM_HOST}/mightling-gate", timeout=3)
+        return response.ok and response.json().get("state") == "closed"
+    except (requests.RequestException, ValueError, AttributeError):
+        return False
+
+
 def _served_model() -> Optional[str]:
     try:
         response = requests.get(f"{VLLM_HOST}/v1/models", timeout=3)
-        return response.json()["data"][0]["id"] if response.ok else None
+        served = response.json()["data"][0]["id"] if response.ok else None
     except (requests.RequestException, ValueError, KeyError, IndexError):
         return None
+    return None if served and _gate_closed() else served
 
 
 SERVED_MODEL = _served_model()
 
 needs_source = pytest.mark.skipif(not SLASH_SOURCE.is_file(), reason="codex submodule not checked out")
 needs_mightling = pytest.mark.skipif(not os.access(MIGHTLING, os.X_OK), reason=f"{MIGHTLING} is not built; run `ling-admin codex build`")
-needs_server = pytest.mark.skipif(SERVED_MODEL is None, reason=f"no model server answering at {VLLM_HOST}/v1/models")
+needs_server = pytest.mark.skipif(SERVED_MODEL is None, reason=f"no model server answering at {VLLM_HOST}/v1/models, or the model gate is closed for a benchmark")
 needs_terminal = pytest.mark.skipif(pexpect is None, reason="pexpect and pyte are not installed")
 
 
