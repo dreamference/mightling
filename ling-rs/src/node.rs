@@ -282,22 +282,8 @@ pub fn inputs() -> Inputs {
 /// Whether NetBird's client is connected to its management and `name` resolves. NetBird is asked
 /// first so that, with the overlay down, the name is never sent to the system's DNS servers.
 fn overlay_answers(name: &str) -> bool {
-    let output = std::process::Command::new("netbird")
-        .args(["status", "--json"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output();
-    let connected = output
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-        .is_some_and(|status| netbird_connected(&status));
-    connected && std::net::ToSocketAddrs::to_socket_addrs(&(name, locator::DEFAULT_MODEL_PORT)).is_ok_and(|mut found| found.next().is_some())
-}
-
-/// Reads `netbird status --json`: whether management is connected.
-pub fn netbird_connected(status: &serde_json::Value) -> bool {
-    status.pointer("/management/connected").and_then(serde_json::Value::as_bool).unwrap_or(false)
+    locator::overlay_up()
+        && std::net::ToSocketAddrs::to_socket_addrs(&(name, locator::DEFAULT_MODEL_PORT)).is_ok_and(|mut found| found.next().is_some())
 }
 
 /// Resolves the model server's base URL for a command that needs the model, printing what the
@@ -1175,13 +1161,6 @@ mod tests {
         assert_eq!(own.node.remote, "mightling-11111111-aaaa.netbird.selfhosted");
         let other = advert_from("spark-1._mightling-node._tcp.local.", 8000, &addresses, &record("mightling-2222.netbird.selfhosted")).unwrap();
         assert_eq!(other.node.remote, "");
-    }
-
-    #[test]
-    fn netbirds_status_is_read_for_a_connected_management() {
-        assert!(netbird_connected(&serde_json::json!({"management": {"url": "https://b:443", "connected": true}})));
-        assert!(!netbird_connected(&serde_json::json!({"management": {"connected": false}})));
-        assert!(!netbird_connected(&serde_json::json!({"daemonStatus": "NeedsLogin"})));
     }
 
     #[test]

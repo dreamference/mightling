@@ -200,6 +200,13 @@ class RemoteAccess:
                 print("⚠️  The box and the tunnel are up, but this node did not join the overlay. "
                       f"Run ling-admin remote setup {dns_name} again.")
                 return 1
+        label = cls.node_label(dns_name, token, RemoteSettings.node_peer_name(node_id))
+        if label != overlay_name:
+            RemoteSettings.write(record)
+            print(f"❌ Management names this node {label or 'nothing'}, not {overlay_name}; clients find the node only "
+                  "by the latter. `ling-admin remote peers` shows the peers; remove a stale one with `remote revoke`, "
+                  f"then run ling-admin remote setup {dns_name} again.")
+            return 1
         record["node_peer"] = True
         RemoteSettings.write(record)
         cls._advertise(overlay_name)
@@ -207,6 +214,32 @@ class RemoteAccess:
         print("   To enrol a laptop: on the node's LAN, run `ling-admin remote code` here,")
         print("   then `ling node remote join --code <the 8 digits>` on the laptop.")
         return 0
+
+    @classmethod
+    def node_label(cls, dns_name: str, token: str, peer_name: str, seconds: int = 30) -> Optional[str]:
+        """
+        Asks management which overlay name it gave the node: it may change a name (a suffix for a
+        duplicate), and clients find the node only by `mightling-<id>.<domain>`.
+
+        Args:
+            dns_name: The box's public DNS name.
+            token: The management token.
+            peer_name: The node's peer name.
+            seconds: How long to wait for the peer to appear.
+
+        Returns:
+            Optional[str]: The node peer's overlay name, or None when it is not there.
+        """
+        deadline = time.monotonic() + seconds
+        while True:
+            peers = RemoteControlPlane.peers(dns_name, token) or []
+            labels = [str(peer.get("dns_label", "")).lower() for peer in peers
+                      if str(peer.get("name", "")).lower() == peer_name]
+            if labels:
+                return labels[0]
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(2)
 
     # -- status, peers, revoke --------------------------------------------------------------------
 
