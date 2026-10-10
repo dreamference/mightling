@@ -43,6 +43,9 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
 REFINE=${REFINE:-0}
+# The two arms, record first (night 1: default against tests-v2; night 3: night 1's winner against it plus
+# issue-v1, the record arm winning a tie).
+ARMS=${ARMS:-"default tests-v2"}
 
 log() { echo "$(date -Is) $*"; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
@@ -100,7 +103,7 @@ start() {
         > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: default against test discipline (tests-v2) on fresh tasks" \
-        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=REFINE="$REFINE" \
+        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
 }
@@ -121,39 +124,45 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), refine $REFINE"
-    for arm in default tests-v2; do
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], refine $REFINE"
+    # ARMS names the two arms: the record arm first, then the candidate. An arm is `default` or a
+    # task-rules list (`tests-v2`, `tests-v2,issue-v1`); its run is named by joining the rules with `-`.
+    set -- $ARMS
+    record=$1; candidate=$2
+    rname=$(echo "$record" | tr , -); cname=$(echo "$candidate" | tr , -)
+    for arm in $record $candidate; do
+        name=$(echo "$arm" | tr , -)
         extra=""
-        [ "$arm" = tests-v2 ] && extra="--task-rules tests-v2"
+        [ "$arm" != default ] && extra="--task-rules $arm"
         [ "$REFINE" = 1 ] && extra="$extra --refine"
-        log "round $PREFIX-$arm"
+        log "round $PREFIX-$name"
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
-        admin swe-bench run --subset "$LIST" --name "$PREFIX-$arm" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night $NIGHT, $arm arm"
+        admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
+            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
         rc=$?
-        log "$PREFIX-$arm finished ($rc)"
+        log "$PREFIX-$name finished ($rc)"
         df -h / | tail -1
-        [ "$rc" -eq 0 ] || fail "round $PREFIX-$arm" "$rc"
+        [ "$rc" -eq 0 ] || fail "round $PREFIX-$name" "$rc"
         # A round that ran nothing is a failure whatever its status: the report says what was left.
-        if admin swe-bench report "$PREFIX-$arm" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet'; then
-            admin swe-bench report "$PREFIX-$arm" | grep '^INCOMPLETE'
-            fail "round $PREFIX-$arm (instances not run)" 1
+        if admin swe-bench report "$PREFIX-$name" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet'; then
+            admin swe-bench report "$PREFIX-$name" | grep '^INCOMPLETE'
+            fail "round $PREFIX-$name (instances not run)" 1
         fi
     done
-    for arm in default tests-v2; do
-        log "regrade $PREFIX-$arm with the test files dropped"
-        admin swe-bench eval "$PREFIX-$arm" --drop-test-hunks --remove-images
+    for name in $rname $cname; do
+        log "regrade $PREFIX-$name with the test files dropped"
+        admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images
         rc=$?
-        log "regrade of $PREFIX-$arm finished ($rc)"
-        [ "$rc" -eq 0 ] || fail "regrade $PREFIX-$arm" "$rc"
+        log "regrade of $PREFIX-$name finished ($rc)"
+        [ "$rc" -eq 0 ] || fail "regrade $PREFIX-$name" "$rc"
     done
-    for arm in default tests-v2; do
-        admin swe-bench report "$PREFIX-$arm" > "$D/report-$arm.txt"
-        admin swe-bench report "$PREFIX-$arm" --drop-test-hunks --against "$PREFIX-$arm" > "$D/drop-test-hunks-$arm.txt"
+    for name in $rname $cname; do
+        admin swe-bench report "$PREFIX-$name" > "$D/report-$name.txt"
+        admin swe-bench report "$PREFIX-$name" --drop-test-hunks --against "$PREFIX-$name" > "$D/drop-test-hunks-$name.txt"
     done
-    admin swe-bench report "$PREFIX-tests-v2" --against "$PREFIX-default" > "$D/tests-v2-against-default.txt"
-    admin swe-bench report "$PREFIX-tests-v2" --drop-test-hunks --against "$PREFIX-default" \
-        > "$D/tests-v2-dropped-against-default.txt"
+    admin swe-bench report "$PREFIX-$cname" --against "$PREFIX-$rname" > "$D/$cname-against-$rname.txt"
+    admin swe-bench report "$PREFIX-$cname" --drop-test-hunks --against "$PREFIX-$rname" \
+        > "$D/$cname-dropped-against-$rname.txt"
     touch "$D/done"
     log "all done; reports in $D"
 }
