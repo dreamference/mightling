@@ -257,10 +257,14 @@ pub fn associated_number(line: &str) -> Option<String> {
     (!number.is_empty()).then(|| number.to_string())
 }
 
-/// The account's id in `listAccounts -o json` (`[{"number": …, "aci": …}]`).
-pub fn account_aci(json: &str, number: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
-    value.as_array()?.iter().find(|a| a.get("number").and_then(|n| n.as_str()) == Some(number)).and_then(|a| a.get("aci")?.as_str().map(str::to_string))
+/// The account's id in `listAccounts -o json` (`[{"number": …, "aci": …}]`). The output given is
+/// stdout and stderr together, and signal-cli logs to stderr (after a fresh link always
+/// `INFO  AccountHelper - The Signal protocol expects that incoming messages are regularly
+/// received.`), so the JSON is the line that parses, not the whole text.
+pub fn account_aci(output: &str, number: &str) -> Option<String> {
+    output.lines().filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok()).find_map(|value| {
+        value.as_array()?.iter().find(|a| a.get("number").and_then(|n| n.as_str()) == Some(number)).and_then(|a| a.get("aci")?.as_str().map(str::to_string))
+    })
 }
 
 /// This device's id in `listDevices`' text (`- Device 3 (this device):`); its JSON form leaves
@@ -428,6 +432,9 @@ mod tests {
         assert_eq!(associated_number("sgnl://linkdevice?uuid=x"), None);
         assert_eq!(account_aci(r#"[{"number":"+15550000","aci":"aci-1"},{"number":"+1999","aci":"x"}]"#, "+15550000").as_deref(), Some("aci-1"));
         assert_eq!(account_aci("not json", "+1"), None);
+        // What signal-cli 0.14.9 gave right after a real link (2026-10-11): the JSON, then its log line.
+        let after_link = "[{\"number\":\"+15550000\",\"aci\":\"aci-1\"}]\nINFO  AccountHelper - The Signal protocol expects that incoming messages are regularly received.\n";
+        assert_eq!(account_aci(after_link, "+15550000").as_deref(), Some("aci-1"));
         let devices = "- Device 1:\n  Name: Pixel\n- Device 4 (this device):\n  Name: Mightling (gx10)\n";
         assert_eq!(this_device(devices), Some(4));
         assert_eq!(this_device("- Device 1:\n"), None);
