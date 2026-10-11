@@ -218,7 +218,8 @@ def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAI
     Returns:
         int: 0 when the list was written, 1 otherwise.
     """
-    used = set(read_ids(SAMPLE_100))
+    sample = set(read_ids(SAMPLE_100))
+    used = set(sample)
     if not used:
         print(f"❌ {SAMPLE_100} is missing: the fresh tasks are defined against it.")
         return 1
@@ -246,8 +247,10 @@ def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAI
         chosen = sorted(rng.sample(pool, count))
         lines.append("# Not stratified: the comparison data (--experiments) was not found.")
     else:
+        # The target is the sample's own mix: `used` also holds the excluded lists, whose tasks would
+        # skew it (fresh-50b was first drawn against 201 tasks that way, 2026-10-11).
         mix: Dict[str, int] = {"easy": 0, "medium": 0, "hard": 0}
-        for instance_id in used:
+        for instance_id in sample:
             mix[tier(rates.get(instance_id, 0.0))] += 1
         wanted = allocate(count, mix)
         by_tier: Dict[str, List[str]] = {"easy": [], "medium": [], "hard": []}
@@ -265,7 +268,7 @@ def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAI
         chosen = sorted(chosen)
         got = {name: sum(1 for i in chosen if tier(rates.get(i, 0.0)) == name) for name in mix}
         lines.append(f"# Stratified to sample-100.txt's mix (easy/medium/hard {mix['easy']}/{mix['medium']}/"
-                     f"{mix['hard']} of 100; easy = solved by >= 75% of strong submissions, hard < 40%):")
+                     f"{mix['hard']} of {len(sample)}; easy = solved by >= 75% of strong submissions, hard < 40%):")
         lines.append(f"# wanted {wanted['easy']}/{wanted['medium']}/{wanted['hard']}, drawn "
                      f"{got['easy']}/{got['medium']}/{got['hard']}"
                      + (f" ({short} filled from other tiers, which were short)" if short else "") + ".")
