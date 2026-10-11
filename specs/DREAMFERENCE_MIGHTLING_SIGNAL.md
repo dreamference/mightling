@@ -1,6 +1,6 @@
 # Mightling over Signal: `ling signal`
 
-**Status:** implemented, off by default (2026-10-08). The bridge is built and tested (§16) end to end against a scripted signal-cli and a stand-in `ling web`, and merged into `main` with the other messengers (§17): `ling signal …` is a launcher subcommand, the `ling-signal` daemon binary ships in the release, and signal-cli and its Java runtime are fetched pinned by setup. Nothing has run against a real Signal account yet. The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
+**Status:** implemented, off by default (2026-10-08). §18 (2026-10-11) proposes several accounts on one node, not built. The bridge is built and tested (§16) end to end against a scripted signal-cli and a stand-in `ling web`, and merged into `main` with the other messengers (§17): `ling signal …` is a launcher subcommand, the `ling-signal` daemon binary ships in the release, and signal-cli and its Java runtime are fetched pinned by setup. Nothing has run against a real Signal account yet. The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 **Builds on:**
 - [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md). The bridge is one more client of `ling web`, signed in like a paired phone (§4.3 there). It uses **Ask threads** (§3 there), the bridge policy (`ling-rs/web/policy.json`) and `/api/upload`.
@@ -694,3 +694,89 @@ The plan's text says so: "Every download is checked before it is unpacked; signa
 - `setup --dry-run` printed the new steps in that order.
 
 **When `SIGNAL_CLI_VERSION` moves**, the `.asc` comes from the new release. Setup still checks it against the same pinned key, so a release signed with another key fails closed until the pin is changed here, on the same evidence as above.
+
+---
+
+## 18. Several Signal accounts on one node (proposal, 2026-10-11)
+
+**Status:** proposal, not built. The user asked on 2026-10-11, during the first real-account setup, whether several Signal accounts can be connected, and asked for this spec. Today one node holds one bridge: the names in `ling-rs/signal/src/unit.rs` are fixed (`mightling-signal`, `/var/lib/mightling-signal`, `mightling-signal.service`), a second `ling signal setup` finds the account already there and writes into the first bridge's state, and the `ling web` device name is the constant `signal-bridge` (`agent.rs`), which `ling web revoke` matches by name.
+
+### 18.1 Decisions, stated first
+
+1. **One bridge per Signal account: an *instance*.** Each instance is what §2 to §11 describe for the single bridge, with its own name, system account, state folder, unit, signal-cli child, `ling web` pairing and owner. Nothing in the gate, the commands, the formatter or the agent side changes: a bridge still has exactly one owner (§0.4).
+2. **Both account modes, mixed freely.** An instance is linked (§4.2) or has a dedicated number (§4.1); one node can hold, say, the owner's own account linked and a dedicated number beside it.
+3. **Each instance answers with the agent of the Linux user who set it up.** Setup pairs the instance with the invoking user's `ling web`, so its Ask threads land in that user's `~/.mightling/ask/`, under that user's air-gap level, sandbox and approvals. Two cases follow, and both are supported:
+   - **One person, several accounts** (a personal and a work number): the same Linux user sets up two instances. Both feed the same Ask history; each instance's `/threads` lists only the threads started from it (its `conversation.json`).
+   - **Several people on one node:** each person has their own Linux user and runs `ling web` on a port of their own (`ling web serve --port N` exists; `ling web start` would need a `--port` too, see §18.5), then `ling signal setup` as themselves. An instance never answers with another person's agent: an agent reads whatever its user can read (security review, 2026-10), so pairing one person's Signal account with another person's agent would hand them that person's files.
+4. **One system account per instance, not one shared.** Instance `<name>` runs as `mightling-signal-<name>`, with its keys in `/var/lib/mightling-signal-<name>` (0700). A bridge or signal-cli compromised through a crafted message then reaches its own keys only, not the other accounts'. The shared parts are root-owned and read-only to every instance: the JRE, signal-cli and the bridge binary under `/opt/mightling` and `/usr/local/lib/mightling`.
+5. **The existing bridge stays where it is.** The first instance keeps today's names (`mightling-signal`, `/var/lib/mightling-signal`, `mightling-signal.service`) and is called `default`; nothing is moved, so no key is ever copied. Further instances use the template unit `mightling-signal@<name>.service`. A node with one instance looks exactly as it does today.
+6. **One account, one instance.** Linking an account that another instance already holds is refused: two bridges on one account would both answer every note (the 🐦 marker stops them answering each other, §4.2, not both answering the owner).
+7. **At most four instances per node.** Each is a JVM capped at 768 MB (§3), and on unified memory the model's headroom is the host's (`docs/dev/host-safety.md`). Setup refuses a fifth, and refuses any instance while `MemAvailable` is under 2 GB above the existing instances' caps.
+
+**Alternatives not chosen:**
+- **One signal-cli serving several accounts.** signal-cli's `jsonRpc` without `-a` serves every account in its config folder from one JVM, which would save one JVM per account (about 190 MB resident at the link step, §12.1; idle and receiving not yet measured). It puts every account's keys under one uid and one process, against decision 4. Reconsider only if memory, measured, forbids four JVMs.
+- **One dedicated number with several owners** (a household bot). It needs a gate with several owners, each with their own threads and approvals, and the question of whose agent answers whom. With decision 3 the clean form is several instances anyway. Not planned.
+
+### 18.2 Names
+
+| | Instance `default` (today's) | Instance `<name>` |
+|---|---|---|
+| System account | `mightling-signal` | `mightling-signal-<name>` |
+| State | `/var/lib/mightling-signal/` | `/var/lib/mightling-signal-<name>/` |
+| Status | `/run/mightling-signal/status.json` | `/run/mightling-signal-<name>/status.json` |
+| Unit | `mightling-signal.service` | `mightling-signal@<name>.service` (`User=mightling-signal-%i`, `StateDirectory=mightling-signal-%i`, `RuntimeDirectory=mightling-signal-%i`, otherwise §3's unit) |
+| `ling web` device | `signal-bridge` | `signal-<name>` |
+| signal-cli device name (linked) | `Mightling (<host>)` | `Mightling (<host>, <name>)` |
+
+**The name:** 1 to 12 characters, lowercase letters, digits and `-`, starting with a letter; `default` is reserved for the first instance. That keeps `mightling-signal-<name>` within `useradd`'s 32 characters and safe as a systemd instance name with no escaping.
+
+**The device name matters:** `ling web revoke` removes every device whose id *or name* matches (`ling-rs/web/src/auth.rs`, `revoke_device`), so two bridges both named `signal-bridge` would be revoked together by one instance's `remove`.
+
+### 18.3 Commands
+
+Every `ling signal` command takes `--name <name>`:
+
+| Command | With several instances |
+|---|---|
+| `ling signal setup [--name N] [--number …]` | Without `--name` on a node that already has `default`: refuses and says to pass `--name`. Installs the shared runtime only if missing; creates the instance's account, state and unit; links or registers; pairs with the invoking user's `ling web` (its port read from that user's running server, `ling web status`); writes `bridge.json` with the instance name and the Linux user it serves |
+| `ling signal status` | Without `--name`: one line per instance (name, mode, the Linux user it serves, running or not, last owner message). With it: today's detail. Reads only the 0644 `status.json` files, which hold no account id and no text (§7) |
+| `ling signal start\|stop\|trust\|remove` | `--name` required when there is more than one instance; refused otherwise, listing the names |
+| `ling signal setup --refresh` | Refreshes the shared runtime once, then every instance's unit and `retool`, and restarts each that was running |
+| `ling signal remove --name N` | Removes the instance's unit, state, account and its `ling web` device; deletes the shared runtime and bridge binary only when it was the last instance |
+
+**Who may act on an instance:** `setup`, `trust` and `remove` of an instance pair or unpair a `ling web` device, so they run as the Linux user the instance serves; another user is refused with that user's name. `start` and `stop` only need sudo, so the node's administrator can stop any instance (as with today's single one).
+
+### 18.4 Setup's extra checks
+
+In order, before anything is changed:
+1. the name is valid and unused (no account, state folder or unit of that name);
+2. fewer than four instances exist, and the memory rule of decision 7 holds;
+3. the invoking user's `ling web` is running and answers (today's check, §6), on that user's port.
+
+After linking or registering, before pairing:
+4. the new account's ACI (`listAccounts`, the same parse as §4.2) is held by no other instance. Each instance's `bridge.json` is read through its own account (`ling-signal account --state …`, as setup does today). If it is, setup stops, deletes the new instance's state and account, and tells the owner to unlink the new device on the phone.
+
+A failed setup leaves no half instance behind: the instance's unit, state and account are removed, and the shared runtime is kept if another instance uses it.
+
+### 18.5 What else changes
+
+- **The egress audit:** `ling-admin audit egress` (and the Rust `ling audit egress`) name every enabled `mightling-signal.service` and `mightling-signal@*.service`, one declared exception per instance. `audit egress --signal` traces every enabled instance's processes, or one with `--signal <name>`; the Signal host list is unchanged (§10). Today both audits hold the single unit name (`dreamference/audit/egress_audit.py`, `SIGNAL_UNIT`).
+- **The air gap:** each instance asks its own `ling web` (§11), so it follows its own Linux user's level. Nothing else changes.
+- **Host safety:** the four-instance cap and the memory rule of decision 7; each unit keeps `MemoryMax=768M`.
+- **The Signal account's device limit** (§4.2 item 6) is per account and unaffected: one instance takes one linked device of its own account.
+- **Code:** `unit.rs`'s constants become functions of the instance name (`account(name)`, `state_dir(name)`, `unit_name(name)`, `runtime_dir(name)`, `unit_text(name)`), with `default` mapping to today's values; `agent::DEVICE_NAME` becomes `device_name(name)`; `setup::install_plan` splits into the shared runtime (once) and the instance (each); `remove_plan` deletes the shared runtime only for the last instance; `cli.rs` parses `--name`, lists instances by their state folders under `/var/lib`, and applies §18.3's refusals. `serve` already takes `--state` and needs no change. `ling web start` gains `--port`, since a second Linux user's server cannot also take 3100 (today only `serve` and `ask` take it); the bridge already takes the port it pairs on (`setup --port`).
+
+### 18.6 Tests
+
+- **Names:** `default` maps to exactly today's names, so an existing node's unit, state and account are untouched (a test pins each string); a named instance maps to §18.2's table; invalid and reserved names are refused.
+- **Plans:** a second instance's setup plan has no runtime download when the runtime exists and creates only its own account, state and unit; `remove` of one of two instances never deletes `/opt/mightling` or the bridge binary, and the last one does; `remove` revokes `signal-<name>` only, never `signal-bridge`.
+- **Refusals:** setup without `--name` beside `default`; a fifth instance; a duplicate ACI (from the fixture output of §4.2, including the stderr line signal-cli writes after a link); `remove` or `trust` by a Linux user other than the one served.
+- **Units:** the template unit's text, with `%i` in `User=`, `StateDirectory=` and `RuntimeDirectory=`, and §3's hardening lines unchanged.
+- **The audit:** two enabled instances give two declared exceptions; a disabled one gives none.
+- **Live, before it is called done:** two linked accounts (or one linked and one dedicated) on gx10-9428, each answering only in its own Note to Self; the memory of two JVMs read beside a resident model server; `remove` of one leaving the other running.
+
+### 18.7 For the user to confirm
+
+1. Both cases of decision 3 (one person with several accounts, and several people as separate Linux users), or only the first.
+2. The cap of four instances.
+3. Separate system accounts per instance (decision 4) at the cost of one JVM each, rather than one shared signal-cli.
