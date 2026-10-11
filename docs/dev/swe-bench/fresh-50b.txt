@@ -1,8 +1,8 @@
 # 50 fresh SWE-bench Verified tasks for the failure analysis's A/B rounds
 # (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §6.5), drawn 2026-10-11
 # from the 52 tasks validated on this machine outside sample-100.txt and verified-mismatch-exclude.txt (68), fresh-50.txt (50), seed 20261011.
-# Stratified to sample-100.txt's mix (easy/medium/hard 111/32/58 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
-# wanted 28/8/14, drawn 34/6/10 (6 filled from other tiers, which were short).
+# Stratified to sample-100.txt's mix (easy/medium/hard 59/16/25 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
+# wanted 30/8/12, drawn 34/6/10 (4 filled from other tiers, which were short).
 astropy__astropy-13579
 astropy__astropy-13977
 astropy__astropy-14096
@@ -29,9 +29,9 @@ django__django-13794
 django__django-14017
 django__django-14140
 django__django-14493
-django__django-14559
 django__django-14608
 django__django-14672
+django__django-15128
 django__django-15375
 django__django-15503
 django__django-15814

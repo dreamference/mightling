@@ -81,6 +81,20 @@ def test_an_empty_or_missing_exclude_list_is_an_error_not_a_silent_repeat(fresh,
     assert code == 1 and not out.exists()
 
 
+def test_the_stratification_target_is_the_sample_alone_not_the_excluded_lists(fresh, tmp_path, monkeypatch):
+    # The two sample tasks are easy; the mismatch list and an earlier fresh list are all hard. The
+    # target mix must stay the sample's (all easy), whatever the excluded lists hold.
+    rates = {"acme__s-1": 1.0, "acme__s-2": 1.0} | {f"acme__t-{n}": 0.0 for n in range(1, 9)} | {"acme__m-1": 0.0}
+    rates |= {"acme__t-5": 1.0, "acme__t-6": 1.0}
+    monkeypatch.setattr(fresh, "strong_rates", lambda experiments: rates)
+    (tmp_path / "earlier.txt").write_text("acme__t-1\nacme__t-2\n")
+    code, out = _draw(fresh, tmp_path, 2, exclude=[tmp_path / "earlier.txt"])
+    assert code == 0
+    assert set(fresh.read_ids(out)) == {"acme__t-5", "acme__t-6"}
+    header = out.read_text()
+    assert "easy/medium/hard 2/0/0 of 2" in header and "wanted 2/0/0, drawn 2/0/0." in header
+
+
 def test_the_command_line_accepts_exclude_repeatedly(fresh, tmp_path):
     (tmp_path / "a.txt").write_text("acme__t-1\nacme__t-2\n")
     (tmp_path / "b.txt").write_text("acme__t-3\n")
