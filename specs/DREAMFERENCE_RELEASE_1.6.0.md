@@ -152,7 +152,9 @@ Qwen3.8-27B resolved 68 of a fixed 100-task sample of SWE-bench Verified on one 
 one attempt per task. That corresponds to an estimated 69% on all 500 tasks (95% band 63.9–73.4%),
 estimated from the per-task results of every public submission (`scripts/swe_bench_compare.py`).
 It is our own measurement, not a leaderboard entry. The same sample with refine mode on resolved 69,
-one more, at 2.2 times the time (above).
+one more, at 2.2 times the time (above). On 50 fresh SWE-bench Verified tasks, a test-discipline
+prompt rule resolved 33 against the default's 34 (no measurable difference), so the default task
+prompt stays unchanged.
 
 **The installer** installs the two new programs on Linux: `ling-docs`, linked onto your PATH, and
 `ling-signal`, placed beside `ling` with no link and not started. On a GB10 node it also runs
