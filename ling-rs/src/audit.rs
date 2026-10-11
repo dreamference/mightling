@@ -451,7 +451,9 @@ mod linux {
 /// Reading an `strace` of a session into [`Event`]s (the Python `StraceParser`'s rules,
 /// MIGHTLING_EGRESS §3.1), platform-independent and tested on the recorded traces:
 ///
-///     strace -f -qq -yy -e trace=connect,sendto,sendmsg,sendmmsg,execve,write,writev -s 256 -o <file> ling …
+/// ```text
+/// strace -f -qq -yy -e trace=connect,sendto,sendmsg,sendmmsg,execve,write,writev -s 256 -o <file> ling …
+/// ```
 ///
 /// `sendmmsg` is how glibc sends a lookup's A and AAAA queries: without it a DNS query leaves no
 /// name, only a connect to the resolver. `-yy` labels every descriptor with its socket kind and
