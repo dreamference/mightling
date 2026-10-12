@@ -122,6 +122,13 @@ Your other computers can use the GB10's model. On the GB10, let them find it:
 ling-admin node enable          # publishes this machine to your local network (asks for sudo once)
 ```
 
+!!! warning "A GB10 on Wi-Fi: turn power saving off"
+    Clients find the node by multicast DNS, and Wi-Fi power saving, which NetworkManager turns on
+    by default, loses most of it: with it on, up to ~80% of the queries to a GB10 went unanswered
+    and laptops could not find it. `node enable` and `ling-admin host check` warn when it is on,
+    with the commands that fix it; `ling-admin host setup` turns it off for good, with no reconnect.
+    On Ethernet there is nothing to do.
+
 Then on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple silicon or Intel):
 
 ```bash

@@ -6,7 +6,8 @@ It is the one command a person types once on a new GB10, and the one `node provi
 with `sudo`. It acts for the user who invoked sudo (`SUDO_USER`), reads each setting before it
 changes it, prints every command before running it, and changes only what is missing:
 
-- the host settings a model load is refused without (`HostSafetySetup.steps()`, unchanged);
+- the host settings a model load is refused without (`HostSafetySetup.steps()`, less Wi-Fi power
+  saving, which is NetworkManager's);
 - the user in the `docker` group, which NVIDIA's first-boot wizard does not do;
 - lingering, which jobs and Night Shift need;
 - the Avahi service file, created empty and owned by the user, so `node enable` (run as the user)
@@ -135,13 +136,16 @@ class NodePrepare:
     @classmethod
     def _host_steps(cls) -> List[Dict[str, Any]]:
         from dreamference.vllm_server.host_safety_setup import HostSafetySetup
+        from dreamference.vllm_server.wifi_power_save import STEP_NAME as WIFI_STEP
 
         # The sandbox check of `HostSafetySetup` runs bubblewrap from the invoking user's systemd,
-        # which root does not have; this class checks the profile itself (`_sandbox_step`).
+        # which root does not have; this class checks the profile itself (`_sandbox_step`). Wi-Fi
+        # power saving is a NetworkManager setting, which node prepare never touches: `node
+        # enable` warns about it and `ling-admin host setup` turns it off.
         return [
             step
             for step in HostSafetySetup.steps()
-            if step["name"] != "let bubblewrap create its sandbox"
+            if step["name"] not in ("let bubblewrap create its sandbox", WIFI_STEP)
         ]
 
     @classmethod

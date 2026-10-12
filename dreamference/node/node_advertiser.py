@@ -96,6 +96,7 @@ class NodeAdvertiser:
             print("⚠️  Nothing was published. Run `ling-admin node enable` from a terminal, where sudo "
                   "can ask for the password once.")
             return False
+        cls.warn_wifi_power_save()
         print(SHARING_NOTICE)
         if not no_web:
             print(WEB_NOTICE)
@@ -103,6 +104,17 @@ class NodeAdvertiser:
         print(f"✅ This node is advertised as {socket.gethostname()} (_mightling-node._tcp, port {port}, "
               f"id {node_id[:8]}…). Clients find it with no address typed.")
         return True
+
+    @classmethod
+    def warn_wifi_power_save(cls) -> None:
+        """
+        Prints a warning, not an error, when a connected Wi-Fi interface has power saving on: it
+        loses the multicast mDNS this advertisement travels by, so clients may not find the node.
+        """
+        from dreamference.vllm_server.wifi_power_save import WifiPowerSave
+        warning = WifiPowerSave.warning()
+        if warning:
+            print(warning)
 
     @classmethod
     def disable(cls) -> bool:

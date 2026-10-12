@@ -4,7 +4,8 @@ Applies the host settings `VLLMServerManager.check_host_safety()` demands
 
 It also checks, and fixes, one thing `check_host_safety()` does not look at, because it is the
 agent's prerequisite and not the model's: whether bubblewrap can create a sandbox from an ordinary
-login. `SandboxPrerequisite` asks about the same fix on every `ling-admin` run.
+login. `SandboxPrerequisite` asks about the same fix on every `ling-admin` run. And one that is the
+node's: Wi-Fi power saving, which loses the multicast mDNS clients find a node by (`WifiPowerSave`).
 
 `check_host_safety()` refuses to load a model on a machine without sysstat, an armed OOM handler,
 64 GB of swap and two raised sysctls, and until 2026-10-02 it only printed the `sudo` lines: a
@@ -84,7 +85,7 @@ class HostSafetySetup:
         """
         found: List[Dict[str, Any]] = []
         for step in (cls._sysstat_step(), cls._oom_step(), cls._swap_step(), *cls._sysctl_steps(),
-                     cls._container_step(), cls._sandbox_step()):
+                     cls._container_step(), cls._sandbox_step(), cls._wifi_step()):
             if step is not None:
                 found.append(step)
         return found
@@ -406,6 +407,16 @@ class HostSafetySetup:
         # programs; see sandbox_prerequisite.py for why not the sysctl.
         step["commands"] = commands
         return step
+
+    @classmethod
+    def _wifi_step(cls) -> Optional[Dict[str, Any]]:
+        """
+        Wi-Fi power saving, which NetworkManager turns on by default and which loses most of the
+        multicast a client's mDNS browse for this node depends on (measured 2026-10-11/12 on the
+        MT7925 both GB10 machines here use). Ethernet only, or no NetworkManager: nothing.
+        """
+        from dreamference.vllm_server.wifi_power_save import WifiPowerSave
+        return WifiPowerSave.step()
 
     # -- readings --------------------------------------------------------------------------------
 

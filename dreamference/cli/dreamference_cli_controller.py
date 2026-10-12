@@ -1098,7 +1098,7 @@ class DreamferenceCLIController:
         )
 
         # Command: ling-admin host (the settings a model load is refused without)
-        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and ling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap)")
+        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and ling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap, Wi-Fi power saving)")
         host_subparsers = host_parser.add_subparsers(dest="host_command")
         host_subparsers.add_parser("check", help="Show what `server start` would refuse over, changing nothing")
         host_setup_parser = host_subparsers.add_parser("setup", help="Apply the settings; each command is printed first and sudo asks for your password")
