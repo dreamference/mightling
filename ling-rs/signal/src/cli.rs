@@ -719,20 +719,6 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
         }
     };
     let user = if dry_run { String::new() } else { current_user() };
-    if !dry_run {
-        let others = other_accounts(&instance, host);
-        if let Some((other, served)) = setup::serves_someone_else(&user, &others) {
-            eprintln!("❌ The bridge `{other}` here answers with {served}'s agent. Bridges for several people on one node");
-            eprintln!("   are not turned on yet (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §18.7); every bridge here serves one user.");
-            return 1;
-        }
-        if let Some(number) = &number
-            && let Some(holder) = setup::held_by(number, None, &others)
-        {
-            eprintln!("❌ {number} is already the bridge `{holder}`'s; one Signal account has one bridge.");
-            return 1;
-        }
-    }
     let work = std::env::temp_dir().join(format!("ling-signal-setup-{}", std::process::id()));
     let account_exists = host.account_exists(&instance.account());
     let java_present = setup::java_home().join("bin/java").exists();
@@ -781,6 +767,21 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
     }
     if prompt("\nGo ahead? [y/N]").to_ascii_lowercase() != "y" {
         println!("Nothing was changed.");
+        return 1;
+    }
+    // The other bridges' settings are read through their own accounts (sudo), so only after the
+    // owner has seen the plan and said yes; still before anything is changed.
+    let others = other_accounts(&instance, host);
+    if let Some((other, served)) = setup::serves_someone_else(&user, &others) {
+        eprintln!("❌ The bridge `{other}` here answers with {served}'s agent. Bridges for several people on one node");
+        eprintln!("   are not turned on yet (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §18.7); every bridge here serves one user.");
+        eprintln!("Nothing was changed.");
+        return 1;
+    }
+    if let Some(number) = &number
+        && let Some(holder) = setup::held_by(number, None, &others)
+    {
+        eprintln!("❌ {number} is already the bridge `{holder}`'s; one Signal account has one bridge. Nothing was changed.");
         return 1;
     }
     let _ = std::fs::create_dir_all(&work);
