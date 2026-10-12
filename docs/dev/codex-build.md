@@ -23,7 +23,7 @@ The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from
 
 ### The patches are one-line hooks and nothing else
 
-23 patches, ~42.7 KB in all; `test_the_patches_stay_small` caps them at 43 KB. The cap's history:
+23 patches, ~43.0 KB in all (42,958 bytes); `test_the_patches_stay_small` caps them at 43 KB. The cap's history:
 
 - raised from 20 KB on 2026-09-30 for the last on-screen Codex names;
 - to 25 KB on 2026-10-01 for `0017-cave-mode`;
@@ -37,6 +37,7 @@ The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from
 - to 39.5 KB on 2026-10-07 for `0024-airgapped-windows` (2,042 bytes: Codex's two elevated Windows sandbox entry points clear a sealed session's network, so the command runs as the offline account the firewall blocks; the user approved up to 39.5 KB; spec `specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md` §7.3);
 - to 41 KB the same day for `0025-node-slash-command` (`/node` suspends the TUI and runs `ling-admin node …` in the terminal, outside the sandbox, through the external editor's `Tui::with_restored`; logic in `ling-rs/src/node_command.rs`; allowed at `/airgapped on` with a one-line notice, since it talks to the LAN only);
 - to 43 KB on 2026-10-08 when the two were merged together (each approval was given with the other absent: 42.7 KB in all);
+- not raised on 2026-10-12, when `0020` grew by 217 bytes (to 42,958 in all) so Code Mode's `exec` works on SGLang: the request hook also takes the request's input and one line turns each output item back as it arrives (`ling-rs/tools/src/custom.rs`; [launcher.md](launcher.md));
 - and to be raised again, explicitly, for each hook that needs it.
 
 `0001` renames what is visible: session header, status card, `exec` banner, clap `name`/`bin_name`/usage (so `--version` says `ling`) and subcommand usage lines. `0002` adds `ling-launcher = { path = "../ling" }` to the CLI's manifest (a path dependency inside the workspace root joins the workspace by itself) and replaces `MultitoolCli::parse()` with `ling_launcher::help::parse(ling_launcher::args().await?)`, which also rewrites "Codex" in every about/help string of the clap tree at parse time (`ling-rs/src/help.rs`) so no doc comment needs a patch; paths such as `~/.codex` and `$CODEX_HOME` are left alone. `0001` still carries `exec`'s hard-coded `override_usage`, since clap has no getter for it.
