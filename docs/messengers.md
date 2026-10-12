@@ -19,6 +19,10 @@ that leave the machine. At `/airgapped on`, Signal sends nothing, not even a rea
 Telegram pauses. When the air gap is off again, Signal tells you what you missed. Matrix keeps
 working, because its homeserver is on the node and has no route out.
 
+**Matrix and Telegram are previews.** They are tested against stand-ins of a homeserver and of
+Telegram's Bot API, not yet against the real services. Signal has been used with a real account and
+is not a preview.
+
 ## Signal, in Note to Self
 
 The bridge is linked to **your own Signal account** as one more device, the way Signal Desktop is.

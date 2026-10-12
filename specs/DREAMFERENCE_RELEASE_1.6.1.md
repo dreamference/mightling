@@ -28,6 +28,7 @@ night 5 is named):
 | 5630dff | Matrix homeserver tests stub the sidecar network |
 | a22b776 | `docs/dev/sessions.md`, the work streams' board |
 | 324a6b6 | ling-engine submodule at 1edc433 |
+| (docs) | Signal's first real-account test (2026-10-12) recorded; Signal drops the preview label, Matrix and Telegram keep it |
 
 **Checklist before publishing:**
 - **`ling prompt list`** on the release build lists `offline` between `default` and `high-swe`,
@@ -71,6 +72,12 @@ earlier one (`draw --exclude`), and the 68 tasks whose pull request does not mat
 connect to the model server now fails with the path or address in its message; the one module
 that tests the built binary opts in by name. The suite takes about two minutes, which the project
 guide now says instead of the eight seconds it used to claim.
+
+**Signal is no longer a preview.** The Signal bridge (`ling signal setup`) has now been used against
+a real Signal account: linked to the owner's own account by QR code, a question asked in Note to Self
+and answered there, and `/stop`, with 1.6.0 as published. Nothing in the bridge changed for this.
+Matrix and Telegram (`ling chat`) keep their preview label: neither has yet been tested against a
+real homeserver or Telegram bot.
 
 ---
 
