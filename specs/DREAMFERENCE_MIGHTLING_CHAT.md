@@ -228,7 +228,7 @@ ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
   - the paired users;
   - the threads with a running turn.
 - **`ling chat start`** refuses when no adapter is configured, and says which command configures one.
-- **The homeserver commands are `ling-admin`'s,** because containers are (DOCKER §6). The bridge reads `matrix.json`, which they write. They are `ling-admin matrix …`, not `ling-admin chat matrix …`: `ling-admin chat` is already the web UI's command (Onyx's alias).
+- **The homeserver commands are `ling-admin`'s,** because containers are (DOCKER §6). The bridge reads `matrix.json`, which they write. They are `ling-admin matrix …`, not `ling-admin chat matrix …`: `ling-admin chat` is already the web UI's command (Onyx's alias; since Onyx's retirement in 1.7.0, the command that removes what it left).
 
 ## 8. Egress
 
@@ -335,7 +335,7 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
 
 **Where it departs from the design above:**
 
-- **The command is `ling-admin matrix`,** not `ling-admin chat matrix`: `ling-admin chat` already names the web UI (Onyx's alias).
+- **The command is `ling-admin matrix`,** not `ling-admin chat matrix`: `ling-admin chat` already names the web UI (Onyx's alias; its leftovers since 1.7.0).
 - **The loopback proxy is decided:** two user units with `systemd-socket-proxyd` (§5.2), not a forwarder inside the bridge, so the homeserver stays reachable from the phone whether or not the bridge runs.
 - **The image is pinned by digest:** tuwunel `v1.9.3@sha256:678b7f53…`, a multi-architecture index with arm64 and amd64.
 - **A message that cannot steer a running turn** is queued and starts the next turn, with a one-line notice ("Noted: this goes in as soon as the current answer is done").
@@ -372,7 +372,7 @@ The user decided that the messenger bridges ship with Mightling, are off by defa
 
 **The command surface stays as built.**
 - `ling chat …` is a launcher subcommand, like `ling web`. The bridge is a library linked into `ling`, so there is no separate binary to ship.
-- The homeserver is `ling-admin matrix …`, because containers are `ling-admin`'s, and `ling-admin chat` is the web UI.
+- The homeserver is `ling-admin matrix …`, because containers are `ling-admin`'s, and `ling-admin chat` is the web UI's (the retired Onyx's leftovers since 1.7.0).
 - There is no `ling chat matrix` alias: one command for one thing.
 
 **Compiled at last.**

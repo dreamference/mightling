@@ -430,7 +430,7 @@ The advisor is resolved separately from the coder's model server, first match wi
 |---|---|---|
 | Diffusion sidecar | **not started** (`exclusive`) | up to 8 GiB cap plus GPU memory; it serves the coder's fast tools, which run on the coder's node |
 | Speech-to-text, image search, Gmail service | **stopped** before the load | they serve the web UI and the agent on the coder's node |
-| Web UI stack (Onyx Lite) | **stopped**; `node enable` defaults to `--no-web` on such a node | about 0.6 GiB of host memory plus Postgres, and nobody chats on the advisor node (question 5 offers it as a second model in node 1's web UI instead) |
+| Web UI stack (Onyx Lite, retired in 1.7.0; `ling web` since) | **stopped**; `node enable` defaults to `--no-web` on such a node | about 0.6 GiB of host memory plus Postgres, and nobody chats on the advisor node (question 5 offers it as a second model in node 1's web UI instead) |
 | SearXNG | **stopped** | the advisor does no web search |
 | `ling-code` index runs, Night Shift, benchmark containers, script jobs (MIGHTLING_NODE §13) | **refused** while the advisor model is assigned | each assumes a coder's memory budget; a script job sent to an advisor node is refused with that reason |
 | Desktop session | allowed, not budgeted beyond the 5.5–8 GiB above | the machine is a Spark, and someone may log in |
@@ -593,7 +593,7 @@ Live, on two Sparks: the user's path of §7.1 end to end; a consult from a TUI s
 2. **The TUI's default.** `auto` makes an interactive editing turn that ran tests or claims completion wait one to four minutes for review. `ask` leaves the review to `ling advise`. Which is the default in the TUI, given that unattended runs use `auto` either way?
 3. **If arm E wins** (Flash-Next as the coder beats the 27B with an advisor): swap the coder, and look for an advisor larger than one Spark holds?
 4. **A stacked advisor** on two linked Sparks, three in all: wanted at about two index points for a third machine (§3.8), or only when a DeepSeek V4.1-class model fits two?
-5. **The advisor in the web UI.** Node 1's `ling-admin chat configure` could register the advisor's model as a second provider, so the chat UI can use the stronger model directly. Wanted?
+5. **The advisor in the web UI.** (Written for Onyx, retired in 1.7.0; in `ling web` the question becomes a model choice for Ask threads.) Node 1's `ling-admin chat configure` could register the advisor's model as a second provider, so the chat UI can use the stronger model directly. Wanted?
 6. **Morning review of night branches.** The advisor node is idle at night. Should Night Shift also send each finished branch's full diff for a second, slower review before the report is written, apart from the in-task review?
 7. **Telling the coder it will be reviewed** (§4.6): measure it as a separate arm, or leave it out?
 

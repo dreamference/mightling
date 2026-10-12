@@ -219,13 +219,13 @@ The diffusion sidecar, when diffusion is switched on, runs in the **main model's
 
 ```bash
 docker run --rm -it --name dreamference-openhands \
-  -e LLM_MODEL=openai/{hf_repo} -e LLM_BASE_URL={OnyxRunner.resolve_container_vllm_url(vllm_host)} -e LLM_API_KEY=gb10-local-token \
+  -e LLM_MODEL=openai/{hf_repo} -e LLM_BASE_URL={DockerBridge.container_vllm_url(vllm_host)} -e LLM_API_KEY=gb10-local-token \
   -e WORKSPACE_BASE={cwd} \
   -v /var/run/docker.sock:/var/run/docker.sock -v {cwd}:/opt/workspace_base \
   -p 127.0.0.1:3001:3000 ghcr.io/all-hands-ai/openhands:main
 ```
 
-`LLM_BASE_URL` has loopback rewritten to the Docker bridge gateway, as for Onyx: vLLM runs with `--network host`, and `localhost` inside the container is the container. Until 2026-09-29 the launch passed the host's `localhost` URL and published `3000:3000` on every interface.
+`LLM_BASE_URL` has loopback rewritten to the Docker bridge gateway (`DockerBridge`, `chat/docker_bridge.py`; Onyx's provider had the same rewrite): vLLM runs with `--network host`, and `localhost` inside the container is the container. Until 2026-09-29 the launch passed the host's `localhost` URL and published `3000:3000` on every interface.
 
 ---
 

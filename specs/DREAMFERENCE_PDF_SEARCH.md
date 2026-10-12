@@ -1,7 +1,7 @@
 # Mightling PDF Reading and Search — Technical Specification
 
 **Status:** proposed, **nothing built** (revised 2026-10-03, reworked 2026-10-12 around `ling-docs`' PDF reader, and again on 2026-10-12 around the owner's decision of §2: `ling` gets a tool that searches inside a PDF it has not indexed; draft v1 of 2026-09-28 is in git history). PDFs already in a collection are covered since 2026-10-08 by `ling-docs` ([MIGHTLING_LOCAL_INDEX](./DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md) Phase 1, PDFium with a reading-order pass); this document is about PDFs the agent meets during a task: a link on the web, a file in Drive, a file in the workspace or an Ask thread's attachment. §1 is read from the code on 2026-10-12; every other section is design, and claims not checked on this machine are marked *(unverified)*.
-**Target:** `ling` (the terminal agent, and the Ask threads that run it). The Onyx web chat gets no PDF tool (§2, §5.3).
+**Target:** `ling` (the terminal agent, and the Ask threads that run it). The Onyx web chat gets no PDF tool (§2, §5.3); it is retired in 1.7.0 ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §19).
 **Builds on:** `ling-docs` (`ling-docs-rs/`: its extractor, sandbox and memory admission, chunker, embedder, keyword tables and fusion: LOCAL_INDEX §7, §15.2, §16.3), its MCP server (`ling-docs mcp`, registered by `ling-rs/src/docs_index.rs`), `ling-fetch` (`ling-web-rs/`), the Drive app ([MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md) §6, §9; [GOA](./DREAMFERENCE_GOA.md)), the tool-output budget of [MIGHTLING_CONTEXT_BUDGET](./DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md), and `/airgapped` ([MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)).
 
 ---
@@ -14,7 +14,7 @@ Draft v1 proposed one thing: an Onyx sidecar (`dreamference-pdf-search`, port 87
 2. **Mightling already has the search, too.** The same crate chunks (512 tokens, 15 % overlap), embeds (`snowflake-arctic-embed-m-v2.0` int8 on the CPU, 8–13 chunks/s on four cores, LOCAL_INDEX §15.3), keeps FTS5 tables (`porter unicode61` plus a trigram table for Chinese and Japanese) and fuses keyword and dense rankings by weighted RRF. A database of one document is a collection like any other to that code.
 3. **`ling` can find PDFs on the web but not read them.** `ling-search` returns PDF links like any other. `ling-fetch` (`ling-web-rs/src/fetch.rs`, read 2026-10-12) decodes any non-HTML body by charset, up to `MAX_DOWNLOAD_BYTES` (5 MiB) and `DEFAULT_MAX_CHARS` (8,000) characters, so the model receives up to 8,000 characters of compressed-stream noise; `ling-search --read` fetches through the same code and has the same defect.
 4. **The Drive app is built** (APPS §14.4, a preview in 1.4.0): `drive_search` and `drive_read` are served by `ling apps serve drive` (Rust, in the launcher) over the Google service (`dreamference-gmail`, Python, `chat/google_workspace_reader.py`). `drive_read` refuses binary files with their type, PDFs included (APPS §9: "PDF_SEARCH is where text extraction belongs").
-5. **The web UI is moving to Ask threads on `ling`** ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md)): a question in the new UI is answered by the same agent, with the same tools, and an attachment is written into the thread's own folder, which is the session's working directory (ASK §3.3). Onyx stays until the new UI matches it (decided 2026-10-07).
+5. **The web UI is moving to Ask threads on `ling`** ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md)): a question in the new UI is answered by the same agent, with the same tools, and an attachment is written into the thread's own folder, which is the session's working directory (ASK §3.3). Onyx stays until the new UI matches it (decided 2026-10-07); Phase C retires it in 1.7.0 (ASK §10, §19).
 
 ---
 
@@ -168,7 +168,7 @@ In the launcher's configuration files and the environment (`DREAMFERENCE_MIGHTLI
 
 ### 5.3 C: the Onyx web chat
 
-**Not planned; confirmed by the owner on 2026-10-12** when PDF search moved into `ling`. The Ask threads that replace Onyx's chat run `ling`, so they get D, A and B with nothing added. Draft v1's sidecar (SearXNG `filetype:pdf`, a hardened downloader, chunks embedded on the CPU, a 2 GiB container) is kept in git history; it is worth reopening only if Onyx outlives the Ask UI, and then it would call the same reader and the same search rather than carry its own.
+**Not planned; confirmed by the owner on 2026-10-12** when PDF search moved into `ling`. The Ask threads that replace Onyx's chat run `ling`, so they get D, A and B with nothing added. Draft v1's sidecar (SearXNG `filetype:pdf`, a hardened downloader, chunks embedded on the CPU, a 2 GiB container) is kept in git history; it was worth reopening only if Onyx outlived the Ask UI, which it does not: Onyx is retired in 1.7.0 (ASK §19), so C is closed.
 
 ---
 

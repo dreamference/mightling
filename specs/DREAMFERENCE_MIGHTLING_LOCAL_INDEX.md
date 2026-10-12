@@ -13,7 +13,7 @@ the release says in §17.
 
 ---
 
-## 1. Why, and what Onyx does today
+## 1. Why, and what Onyx did (retired in 1.7.0, MIGHTLING_ASK §19)
 
 - **The Onyx installed by Mightling indexes nothing.** `onyx-cli deploy install --lite` (`docs/dev/onyx.md`,
   `chat/onyx_runner.py`) deploys the API server, the web server and PostgreSQL only: no Vespa, no
