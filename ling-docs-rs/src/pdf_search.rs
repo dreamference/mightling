@@ -431,6 +431,8 @@ impl PdfSearch {
         let _ = std::fs::remove_dir_all(&work);
         store::create_private_dir(&work)?;
         let copy = work.join("source.pdf");
+        // A URL is remembered once its index exists, so a failed one is downloaded again.
+        let mut remember: Option<String> = None;
         let result = (|| -> Result<String> {
             let (name, label) = match &source {
                 Source::Drive(_) => bail!("Drive PDFs cannot be searched yet: drive_read refuses PDFs (PDF_SEARCH §3.3.2)."),
@@ -444,9 +446,8 @@ impl PdfSearch {
                         let fetched = work.join("download.pdf");
                         let final_url = download(url, &fetched, max_bytes).map_err(anyhow::Error::msg)?;
                         let sha = copy_checked(&fetched, &copy, max_bytes).map_err(anyhow::Error::msg)?;
-                        let name = entry_name(&sha);
-                        self.urls.insert(url.clone(), (name.clone(), final_url.clone()));
-                        (name, final_url)
+                        remember = Some(url.clone());
+                        (entry_name(&sha), final_url)
                     }
                 }
                 Source::Local(given) => {
@@ -472,6 +473,9 @@ impl PdfSearch {
                     FileIndexed::Stopped(Outcome::Failed(why)) => bail!("failed: {why}"),
                     FileIndexed::Stopped(other) => bail!("{}", other.status()),
                 }
+            }
+            if let Some(url) = remember.take() {
+                self.urls.insert(url, (name.clone(), label.clone()));
             }
             touch(&name);
             let keep: Vec<String> = self.running.iter().map(|(n, _)| n.clone()).chain([name.clone()]).collect();
