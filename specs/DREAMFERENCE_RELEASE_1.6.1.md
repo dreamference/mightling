@@ -28,8 +28,8 @@ night 5 is named):
 | 5630dff | Matrix homeserver tests stub the sidecar network |
 | a22b776 | `docs/dev/sessions.md`, the work streams' board |
 | 324a6b6 | ling-engine submodule at 1edc433 |
-| (bridge) | Signal: a question refused by the model gate during a benchmark run gets a clear reply (spec SIGNAL §17.3) |
-| (docs) | Signal's first real-account test (2026-10-12) recorded; Signal drops the preview label, Matrix and Telegram keep it |
+| 9d96092 | Signal: a question refused by the model gate during a benchmark run gets a clear reply (spec SIGNAL §17.3) |
+| 9e6f82e | Signal's first real-account test (2026-10-12) recorded; Signal drops the preview label, Matrix and Telegram keep it |
 | 9fb0b1e, (Wi-Fi) | Wi-Fi power saving: `host check` reports it, `host setup` and `node prepare` turn it off (prepare's one NetworkManager change), `node enable` warns, and a Linux client whose browse misses adds a hint when its own Wi-Fi saves power |
 
 **Checklist before publishing:**
