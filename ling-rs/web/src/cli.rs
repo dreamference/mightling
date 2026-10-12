@@ -1,7 +1,9 @@
 //! `ling web …` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1).
 //!
 //! - `serve [--lan] [--port N]`: the server in the foreground; what the user unit runs.
-//! - `start [--lan]`, `stop`: the user unit `mightling-web.service`.
+//! - `start [--lan] [--port N]`, `stop`: the user unit `mightling-web.service`. `--port` is for a
+//!   second Linux user on the node, whose server cannot also take 3100 (a Signal bridge of their
+//!   own answers through it, specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §18).
 //! - `status`: whether it answers, where, and how many devices are paired.
 //! - `open [--no-browser | --print-url]`: signs this machine's browser in with a one-time link;
 //!   `--print-url` prints the link alone, for the desktop app's Ask window.
@@ -37,7 +39,7 @@ use crate::server::Server;
 
 pub const UNIT_NAME: &str = "mightling-web.service";
 
-const USAGE: &str = "Usage: ling web start [--lan] | stop | status | open [--no-browser | --print-url] | pair | devices | revoke <device> | serve [--lan] [--port N] | ask [--port N] <question>";
+const USAGE: &str = "Usage: ling web start [--lan] [--port N] | stop | status | open [--no-browser | --print-url] | pair | devices | revoke <device> | serve [--lan] [--port N] | ask [--port N] <question>";
 
 /// What the launcher tells `ling web`.
 #[derive(Clone, Debug)]
@@ -134,16 +136,22 @@ pub fn probe(state: &Path, port: u16) -> Option<Value> {
     serde_json::from_str(response.split("\r\n\r\n").nth(1)?).ok()
 }
 
-/// The user unit's text.
+/// The user unit's text, on the default port.
 pub fn unit_text(ling: &Path, lan: bool) -> String {
+    unit_text_on(ling, lan, DEFAULT_PORT)
+}
+
+/// The user unit's text; `--port` only when it is not the default, so the default unit is as it was.
+pub fn unit_text_on(ling: &Path, lan: bool, port: u16) -> String {
     let lan = if lan { " --lan" } else { "" };
+    let port = if port == DEFAULT_PORT { String::new() } else { format!(" --port {port}") };
     format!(
         "# Written by `ling web start`; `ling web stop` stops it.\n\
          [Unit]\n\
          Description=Mightling web server (ling web)\n\
          \n\
          [Service]\n\
-         ExecStart={} web serve{lan}\n\
+         ExecStart={} web serve{lan}{port}\n\
          Restart=on-failure\n\
          RestartSec=2\n\
          \n\
@@ -300,6 +308,14 @@ async fn serve_command(args: &[String], environment: &Environment) -> i32 {
 
 fn start(args: &[String], environment: &Environment) -> i32 {
     let lan = args.iter().any(|arg| arg == "--lan");
+    let port = match flag_value(args, "--port").map(str::parse::<u16>) {
+        None => DEFAULT_PORT,
+        Some(Ok(port)) => port,
+        Some(Err(_)) => {
+            eprintln!("--port takes a port number");
+            return 2;
+        }
+    };
     if lan && !advertised_web(&environment.home) {
         eprintln!("--lan serves the web UI to the network, which only an advertised node does: run `ling-admin node enable` first.");
         return 1;
@@ -308,7 +324,7 @@ fn start(args: &[String], environment: &Environment) -> i32 {
     let written = unit
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&unit, unit_text(&environment.ling, lan)));
+        .and_then(|()| std::fs::write(&unit, unit_text_on(&environment.ling, lan, port)));
     if let Err(err) = written {
         eprintln!("Could not write {}: {err}", unit.display());
         return 1;
@@ -318,7 +334,7 @@ fn start(args: &[String], environment: &Environment) -> i32 {
         return 1;
     }
     println!(
-        "Mightling web server started on http://127.0.0.1:{DEFAULT_PORT}/{}. Sign this machine in with `ling web open`.",
+        "Mightling web server started on http://127.0.0.1:{port}/{}. Sign this machine in with `ling web open`.",
         if lan { ", and on the LAN" } else { "" }
     );
     0
@@ -530,6 +546,10 @@ mod tests {
         let text = unit_text(Path::new("/home/u/.local/bin/ling"), true);
         assert!(text.contains("ExecStart=/home/u/.local/bin/ling web serve --lan\n"));
         assert!(!unit_text(Path::new("/x/ling"), false).contains("--lan"));
+        // The default port is not written, so the unit is as it always was; another one is.
+        assert_eq!(unit_text_on(Path::new("/x/ling"), false, DEFAULT_PORT), unit_text(Path::new("/x/ling"), false));
+        assert!(!unit_text(Path::new("/x/ling"), false).contains("--port"));
+        assert!(unit_text_on(Path::new("/x/ling"), true, 3101).contains("ExecStart=/x/ling web serve --lan --port 3101\n"));
     }
 
     #[tokio::test]

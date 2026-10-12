@@ -85,6 +85,11 @@ APP_SESSION_S: Final[int] = 40
 # an outside service by itself, and only once the user set it up. It runs as its own system unit,
 # outside any traced session, so the report names it instead of passing silently.
 SIGNAL_UNIT: Final[str] = "mightling-signal.service"
+# A node can hold further Signal bridges, one per Signal account (SIGNAL §18): each runs from the
+# template unit as `mightling-signal@<name>.service`. They are found by their enablement links, so
+# only names are read; each is then asked `is-enabled` like the first.
+SIGNAL_INSTANCE_PREFIX: Final[str] = "mightling-signal@"
+SIGNAL_INSTANCE_SUFFIX: Final[str] = ".service"
 # The messenger bridge (specs/DREAMFERENCE_MIGHTLING_CHAT.md): `ling chat start`'s user unit, and the
 # loopback proxy socket `ling-admin matrix start` enables in front of the homeserver. Named the
 # same way when on; off, nothing of either runs.
@@ -503,6 +508,35 @@ class EgressAudit:
             return {}
         return value if isinstance(value, dict) else {}
 
+    # Where systemd keeps the enablement links of system units; a class attribute so tests can
+    # point it at a scratch folder.
+    SYSTEMD_SYSTEM_DIR: str = "/etc/systemd/system"
+
+    @classmethod
+    def _signal_instances(cls) -> List[str]:
+        """
+        The further Signal bridges with an enablement link (`<target>.wants/mightling-signal@<name>.service`).
+
+        Returns:
+            List[str]: Their names, sorted, each once.
+        """
+        names = set()
+        try:
+            targets = [entry for entry in os.listdir(cls.SYSTEMD_SYSTEM_DIR) if entry.endswith(".wants")]
+        except OSError:
+            return []
+        for target in targets:
+            try:
+                links = os.listdir(os.path.join(cls.SYSTEMD_SYSTEM_DIR, target))
+            except OSError:
+                continue
+            for link in links:
+                if link.startswith(SIGNAL_INSTANCE_PREFIX) and link.endswith(SIGNAL_INSTANCE_SUFFIX):
+                    name = link[len(SIGNAL_INSTANCE_PREFIX):-len(SIGNAL_INSTANCE_SUFFIX)]
+                    if name:
+                        names.add(name)
+        return sorted(names)
+
     @classmethod
     def declared_exceptions(cls) -> List[str]:
         """
@@ -510,8 +544,9 @@ class EgressAudit:
         session shows: the messenger bridges, each off until its own command turns it on
         (SIGNAL §10, CHAT §10). Off, none of them is named and none adds a destination to the trace.
 
-        - Signal: the system unit `mightling-signal.service` (`ling signal setup`); signal-cli
-          connects to Signal's servers.
+        - Signal: the system unit `mightling-signal.service` (`ling signal setup`), and one line
+          for each further bridge, `mightling-signal@<name>.service` (`ling signal setup --name`,
+          SIGNAL §18); signal-cli connects to Signal's servers.
         - The chat bridge: the user unit `mightling-chat.service` (`ling chat start`) with a
           Telegram bot set up (`ling chat telegram setup`) connects to Telegram's Bot API.
         - The Matrix homeserver (`ling-admin matrix start`): its loopback proxy socket is enabled
@@ -527,6 +562,11 @@ class EgressAudit:
         if cls._unit_enabled(SIGNAL_UNIT, user=False):
             lines.append(f"Signal bridge enabled ({SIGNAL_UNIT}): signal-cli connects to Signal's servers, outside this trace. "
                          "`ling signal remove` turns it off.")
+        for name in cls._signal_instances():
+            unit = f"{SIGNAL_INSTANCE_PREFIX}{name}{SIGNAL_INSTANCE_SUFFIX}"
+            if cls._unit_enabled(unit, user=False):
+                lines.append(f"Signal bridge `{name}` enabled ({unit}): signal-cli connects to Signal's servers, outside this trace. "
+                             f"`ling signal remove --name {name}` turns it off.")
         if cls._unit_enabled(CHAT_UNIT, user=True) and cls._chat_file("telegram.json").get("token"):
             lines.append(f"Telegram bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to Telegram's Bot API, outside this trace. "
                          "`ling chat telegram off` or `ling chat stop` turns it off.")

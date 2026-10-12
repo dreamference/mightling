@@ -26,8 +26,15 @@ use crate::bridge::ApprovalKind;
 
 /// `ling web`'s device cookie name (ling-rs/web/src/auth.rs).
 pub const DEVICE_COOKIE: &str = "mightling_device";
-/// The name the bridge's device gets in `ling web devices`.
+/// The name the first bridge's device gets in `ling web devices`.
 pub const DEVICE_NAME: &str = "signal-bridge";
+
+/// The device name of the bridge instance `instance` (§18.2): `signal-bridge` for `default`, as it
+/// always was, `signal-<name>` for the others. Each must differ, because `ling web revoke` removes
+/// every device whose id or name matches.
+pub fn device_name(instance: &str) -> String {
+    if instance == crate::unit::DEFAULT_INSTANCE { DEVICE_NAME.to_string() } else { format!("signal-{instance}") }
+}
 
 /// What a request the bridge sent was for, so its response can be read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,8 +200,9 @@ fn header_value(head: &str, name: &str) -> Vec<String> {
 }
 
 /// Trades a pairing code from `ling web pair` for a device cookie (`mightling_device=…`).
-pub async fn pair(port: u16, code: &str) -> Result<String, String> {
-    let body = format!("code={}&name={}", form_escape(code.trim()), form_escape(DEVICE_NAME));
+/// `device` is the name it is listed and revoked by ([`device_name`]).
+pub async fn pair(port: u16, code: &str, device: &str) -> Result<String, String> {
+    let body = format!("code={}&name={}", form_escape(code.trim()), form_escape(device));
     let request = format!(
         "POST /pair HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
