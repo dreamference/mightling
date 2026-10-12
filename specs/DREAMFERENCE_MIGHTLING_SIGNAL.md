@@ -713,6 +713,14 @@ The owner reports that all of it worked. `ling signal status` afterwards: runnin
 
 **The label.** The owner decided on 2026-10-12 that Signal drops its preview label in 1.6.1 on the strength of this run; Matrix and Telegram keep theirs. No product text printed the label (it was in the 1.6.0 release notes only), so no code changed.
 
+### 17.3 While a benchmark run holds the model (2026-10-12)
+
+**The owner's decision:** while a SWE-bench run holds the model gate (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md, the model gate), a question from Signal is refused, not let through. The bridge does not pause the gate and does not suggest it.
+
+**What reaches the bridge:** the gate answers the turn's request 503 with `code: benchmark_running` and a message naming the run, its progress and the time left (`model_gate_service.py`, `message`). Codex retries it, then fails the turn with "unexpected status 503 Service Unavailable: The model is running a benchmark (night 4, 37/100 done, about 9 h left). Try later or run `ling-admin night pause`., url: …". Before this change the bridge relayed that line as "The answer failed: …", URL and pause hint included.
+
+**What the owner now gets** in Note to Self (`bridge.rs`, `benchmark_holds_model`): "The model on <node> is busy with a benchmark run (night 4, 37/100 done, about 9 h left), so this question was not answered. Ask again when the run has finished." The parentheses are the gate's own words; the pause hint and the URL are dropped. The question is not queued, and the next one is taken as usual. Read-only probes (`/v1/models`) pass the gate, so `ling web` and the bridge stay connected meanwhile. Tested with the error text as Codex words it (`a_benchmark_holding_the_model_says_when_to_ask_again`); not exercised against the live gate.
+
 ---
 
 ## 18. Several Signal accounts on one node (proposal, 2026-10-11)
