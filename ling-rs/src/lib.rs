@@ -440,8 +440,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // The code index: its session process starts here, outside the sandbox, and its prompt block
     // joins the others (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §4.2).
     let code_block = code_index::start_and_prompt_block(code_index::tools_enabled(), &code_index::session_dir(&user_args));
-    // The local file index: its session process, and its block when a collection exists
-    // (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §8.2).
+    // The local file index: its session process, and its blocks when a collection exists or PDFs
+    // can be searched (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §8.2, PDF_SEARCH §3.8).
     let docs_block = docs_index::start_and_prompt_block(docs_index::enabled(config_file()));
     // Skills other agents installed are linked in, and the glossary of their tool names joins the
     // prompt when one is offered (specs/DREAMFERENCE_MIGHTLING_SKILLS.md §3, §5).
@@ -477,7 +477,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     } else {
         args
     };
-    // `docs_search` and `docs_read`, when a collection exists (docs_index.rs).
+    // `docs_search`, `docs_read` and `pdf_search`, as the docs block allows (docs_index.rs).
     let args = docs_index::with_tools(args, &docs_block);
     // One MCP server per declared app (apps.rs).
     let args = apps::with_servers(args, &declared_apps);

@@ -507,12 +507,17 @@ fn the_cache_is_evicted_by_age_and_size_and_spares_what_is_in_use() {
     let in_use = entry("000000000003", 3, 6);
     let fresh = entry("000000000004", 2, 1);
     std::fs::create_dir_all(dir.join("run-pdf-000000000009-999999999")).unwrap();
-    // One day unused goes; then the oldest until under 5 MiB, sparing the one in use.
-    let removed = ling_docs::pdf_search::evict(5, 1, &[in_use.clone()]);
+    // Another session is embedding this one: its lock is held, so it stays, however old.
+    let busy = entry("000000000005", 1, 48);
+    let held = std::fs::File::create(dir.join(format!("{busy}.lock"))).unwrap();
+    ling_docs::host::flock(&held, false).unwrap();
+    // One day unused goes; then the oldest until at most 6 MiB, sparing the ones in use.
+    let removed = ling_docs::pdf_search::evict(6, 1, &[in_use.clone()]);
     let left: Vec<String> = ling_docs::pdf_search::entries().into_iter().map(|(n, ..)| n).collect();
     assert_eq!(removed, 2, "{left:?}");
     assert!(!left.contains(&old) && !left.contains(&big_old), "{left:?}");
-    assert!(left.contains(&in_use) && left.contains(&fresh), "{left:?}");
+    assert!(left.contains(&in_use) && left.contains(&fresh) && left.contains(&busy), "{left:?}");
+    drop(held);
     assert!(!dir.join("run-pdf-000000000009-999999999").exists(), "a dead run's folder is removed");
 }
 
