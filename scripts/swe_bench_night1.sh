@@ -44,8 +44,8 @@ IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
 REFINE=${REFINE:-0}
 # The two arms, record first (night 1: default against tests-v2; night 3: night 1's winner against it plus
-# issue-v1, the record arm winning a tie; night 4: the record arm against `restart-2`). The spelling
-# is `arm_flags`' below.
+# issue-v1, the record arm winning a tie; night 4: the record arm against `restart-2`; night 5: the
+# record arm against `apply-patch-function`). The spelling is `arm_flags`' below.
 ARMS=${ARMS:-"default tests-v2"}
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
@@ -53,7 +53,8 @@ REF=${REF:-origin/main}
 
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
-# arm, `--restart-after-compactions N`, SWE_BENCH spec §21), or several of these joined with `+`
+# arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM function,
+# freeform or off: `--apply-patch FORM`, spec §22), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -63,6 +64,8 @@ arm_flags() {
             default) ;;
             restart-[1-9]|restart-[1-9][0-9]) flags="$flags --restart-after-compactions ${part#restart-}" ;;
             restart*) echo "❌ Arm $1: write the restart arm as restart-N (N from 1)." >&2; return 2 ;;
+            apply-patch-function|apply-patch-freeform|apply-patch-off) flags="$flags --apply-patch ${part#apply-patch-}" ;;
+            apply-patch*|apply_patch*) echo "❌ Arm $1: write the apply_patch arm as apply-patch-function, -freeform or -off." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
@@ -97,6 +100,18 @@ start() {
     case "$ARMS" in *restart-*)
         if ! grep -q -- '"--restart-after-compactions"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
             echo "❌ $WT does not have --restart-after-compactions: pin REF to a commit that has it."; exit 1
+        fi ;;
+    esac
+    case "$ARMS" in *apply-patch-*)
+        if ! grep -q -- '"--apply-patch"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
+            echo "❌ $WT does not have --apply-patch: pin REF to a commit that has it."; exit 1
+        fi
+        # The arm only sets the launcher's override (DREAMFERENCE_MIGHTLING_APPLY_PATCH); a `ling`
+        # built before the launcher read it (1.6.0 and older) ignores it, and the night would
+        # measure the record arm twice.
+        ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
+        if ! grep -q -a DREAMFERENCE_MIGHTLING_APPLY_PATCH "$ling"; then
+            echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_APPLY_PATCH: rebuild it (\`ling-admin codex build\`) from a commit that has the launcher's override."; exit 1
         fi ;;
     esac
     # The universal code index needs codebase-memory-mcp beside ling-code in Mightling's install
