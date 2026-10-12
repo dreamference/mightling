@@ -24,13 +24,13 @@ COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit", "review_turn", "hooks", "restart_after_compactions",
-    "apply_patch",
+    "apply_patch", "exec_tool",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
                                "refine_version": "v1",
                                "task_rules": [], "review_turn": False, "hooks": [], "restart_after_compactions": 0,
-                               "apply_patch": "auto"}
+                               "apply_patch": "auto", "exec_tool": "auto"}
 
 
 class SweBenchReport:
@@ -91,6 +91,7 @@ class SweBenchReport:
             "review": cls.review_summary(store, manifest, states, finished & set(instances)),
             "restart": cls.restart_summary(manifest, states, finished & set(instances)),
             "apply_patch": cls.apply_patch_summary(manifest, states, finished & set(instances)),
+            "exec_tool": cls.exec_tool_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
         }
@@ -240,8 +241,30 @@ class SweBenchReport:
         Returns:
             Dict[str, Any]: `form`, `instances`, `recorded`, `users` (ids that called it), `calls`.
         """
-        form = str(manifest.get("apply_patch") or "auto")
-        records = {i: (states.get(i) or {}).get("apply_patch") for i in finished}
+        return cls.tool_summary("apply_patch", manifest, states, finished)
+
+    @classmethod
+    def exec_tool_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Dict[str, Any]:
+        """
+        The Code Mode arm's measures (spec §23), as `apply_patch_summary` gives them for
+        `apply_patch`: the form `exec` was offered in and how much the agent called it.
+
+        Returns:
+            Dict[str, Any]: `form`, `instances`, `recorded`, `users` (ids that called it), `calls`.
+        """
+        return cls.tool_summary("exec_tool", manifest, states, finished)
+
+    @classmethod
+    def tool_summary(cls, key: str, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Dict[str, Any]:
+        """
+        A tool arm's measures: the form the manifest's `key` names and, over the finished
+        instances whose state has a `key` record, how many called the tool and how many calls.
+
+        Returns:
+            Dict[str, Any]: `form`, `instances`, `recorded`, `users` (ids that called it), `calls`.
+        """
+        form = str(manifest.get(key) or "auto")
+        records = {i: (states.get(i) or {}).get(key) for i in finished}
         recorded = {i: r for i, r in records.items() if isinstance(r, dict)}
         users = sorted(i for i, r in recorded.items() if int(r.get("calls") or 0))
         return {"form": form, "instances": len(records), "recorded": len(recorded), "users": users,
@@ -250,9 +273,29 @@ class SweBenchReport:
     @classmethod
     def apply_patch_line(cls, summary: Dict[str, Any]) -> str:
         """One line: the apply_patch form and how much the agent used the tool."""
-        head = f"Apply patch         {summary['form']}"
+        return cls.tool_line("Apply patch", "freeform on ling-engine, none on SGLang", summary)
+
+    @classmethod
+    def exec_tool_line(cls, summary: Dict[str, Any]) -> str:
+        """One line: the form Code Mode's `exec` was offered in and how much the agent called it."""
+        return cls.tool_line("Exec tool", "function on SGLang and vLLM, freeform on ling-engine", summary)
+
+    @classmethod
+    def tool_line(cls, label: str, auto: str, summary: Dict[str, Any]) -> str:
+        """
+        One line of a tool arm: its form, what `auto` means, and how much the agent used the tool.
+
+        Args:
+            label: The line's label (`Apply patch`).
+            auto: What the launcher chooses when the run left the form alone.
+            summary: `tool_summary`'s result.
+
+        Returns:
+            str: The line.
+        """
+        head = f"{label:<20}{summary['form']}"
         if summary["form"] == "auto":
-            head += " (the launcher's choice: freeform on ling-engine, none on SGLang)"
+            head += f" (the launcher's choice: {auto})"
         if not summary["recorded"]:
             return head + ": no finished instance recorded its calls" if summary["instances"] else head
         return (f"{head}: called in {len(summary['users'])} of {summary['recorded']} finished instance(s), "
@@ -396,6 +439,7 @@ class SweBenchReport:
         lines.append(cls.review_line(summary["review"]))
         lines.append(cls.restart_line(summary["restart"]))
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
+        lines.append(cls.exec_tool_line(summary["exec_tool"]))
         lines += cls.hooks_lines(summary["hooks"])
         not_run = validated - summary["finished"]
         not_graded = summary["finished"] - summary["graded"]
