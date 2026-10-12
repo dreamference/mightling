@@ -536,7 +536,7 @@ Set up new GB10s from this one: install Mightling, the root half, the model, pai
 | `--from` | What to install: this (default) or release[=X.Y.Z]. |
 | `--per-host-password` | With several hosts, ask each machine's password separately (default: one password for all) |
 | `--mesh` | Also pair every node with every other (not built yet) |
-| `--web` | Also install and configure the web UI there (`ling-admin chat start` and `configure`; `node enable` without `--no-web`) |
+| `--web` | Also share the web UI (`ling web`) on the LAN there: `node enable` without `--no-web`. |
 | `--no-start` | Leave the model server stopped. |
 | `--restart` | Restart a running model server. |
 | `--os-update` | NVIDIA's OS and firmware update first, with a reboot. |
