@@ -35,7 +35,7 @@ from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLL
                                                           SCRUB_SCRIPT, TASK_RULES)
 from dreamference.swe_bench.swe_bench_instance_run import RESTART_DIFF, RESTART_PREAMBLE, REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
-from dreamference.swe_bench.swe_bench_runner import APPLY_PATCH_ENV, BUILT_IN_PROMPTS, RUN_NAME
+from dreamference.swe_bench.swe_bench_runner import APPLY_PATCH_ENV, BUILT_IN_PROMPTS, EXEC_TOOL_ENV, RUN_NAME
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -266,6 +266,24 @@ class FakeDocker:
                 "input_tokens": 500, "cached_input_tokens": 400, "output_tokens": 40}}) + "\n").encode())
             stdout.flush()
             say("Fixed widget() with apply_patch.")
+            return FakeProcess(0)
+        if box["env"].get(EXEC_TOOL_ENV) == "function" and mode == "change":
+            # Code Mode's exec, offered as a function: the launcher turns the model's function
+            # call back into the custom tool call Codex records (ling-rs/tools), so the rollout
+            # holds a `custom_tool_call` named `exec` whichever form the server saw.
+            rollout = box["scratch"] / "codex-home" / "sessions" / "2026" / "10" / "12" / "rollout-2026-10-12T00-00-00-fake.jsonl"
+            rollout.parent.mkdir(parents=True, exist_ok=True)
+            code = "const a = await tools.exec_command({cmd: 'sed -i s/1/2/ widget.py'});\ntext(a.output);"
+            with open(rollout, "a") as handle:
+                handle.write(json.dumps({"type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec", "input": code, "call_id": "e1"}}) + "\n")
+                handle.write(json.dumps({"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "e1", "output": [{"type": "input_text", "text": "ok"}]}}) + "\n")
+                # A shell command that merely names the tool is not a call.
+                handle.write(json.dumps({"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"grep '\\\"exec\\\"' .\"}", "call_id": "e2"}}) + "\n")
+            (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX\n")
+            stdout.write((json.dumps({"type": "turn.completed", "usage": {
+                "input_tokens": 500, "cached_input_tokens": 400, "output_tokens": 40}}) + "\n").encode())
+            stdout.flush()
+            say("Fixed widget() in one exec cell.")
             return FakeProcess(0)
         if mode == "hang":
             (box["repo"] / "partial.py").write_text("# half done\n")
@@ -3045,3 +3063,76 @@ def test_the_apply_patch_arm_is_kept_on_resume_told_apart_by_against_and_parsed(
     assert seen["apply_patch"] is None
     with pytest.raises(SystemExit):
         parser.parse_args(["swe-bench", "run", "--apply-patch", "maybe", "--name", "z"])
+
+
+# -- the Code Mode arm (`--exec-tool`, spec §23) -------------------------------------------------
+
+def test_the_exec_tool_arm_sets_the_launchers_switch_and_counts_the_calls(bench, monkeypatch):
+    monkeypatch.delenv(EXEC_TOOL_ENV, raising=False)
+    assert run(bench, name="fn", instances=["acme__widget-1"], exec_tool="function") == 0
+    env, _ = container_env(bench)
+    assert env[EXEC_TOOL_ENV] == "function" and APPLY_PATCH_ENV not in env
+    store = SweBenchRunStore("fn")
+    assert store.manifest()["exec_tool"] == "function"
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done" and state["exec_tool"] == {"form": "function", "calls": 1}
+    assert state["apply_patch"] == {"form": "auto", "calls": 0}
+    assert "FIX" in prediction("fn", "acme__widget-1")
+    assert "Exec tool           function: called in 1 of 1 finished instance(s), 1 call(s): acme__widget-1" in SweBenchReport.render(store)
+    # Without the flag the variable is not set, the launcher decides, and the count is still kept.
+    bench["docker"].calls.clear()
+    assert run(bench, name="auto", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert EXEC_TOOL_ENV not in env
+    auto = SweBenchRunStore("auto")
+    assert auto.manifest()["exec_tool"] == "auto"
+    assert auto.state("acme__widget-1")["exec_tool"] == {"form": "auto", "calls": 0}
+    assert ("Exec tool           auto (the launcher's choice: function on SGLang and vLLM, freeform on ling-engine): "
+            "called in 0 of 1") in SweBenchReport.render(auto)
+
+
+def test_the_freeform_exec_arm_is_passed_through_and_a_shell_command_naming_exec_is_no_call(bench, monkeypatch):
+    monkeypatch.delenv(EXEC_TOOL_ENV, raising=False)
+    assert run(bench, name="free", instances=["acme__widget-1"], exec_tool="freeform") == 0
+    env, _ = container_env(bench)
+    assert env[EXEC_TOOL_ENV] == "freeform"
+    store = SweBenchRunStore("free")
+    assert store.state("acme__widget-1")["exec_tool"] == {"form": "freeform", "calls": 0}
+    assert "Exec tool           freeform: called in 0 of 1 finished instance(s), 0 call(s)" in SweBenchReport.render(store)
+
+
+def test_the_exec_tool_arm_is_kept_on_resume_told_apart_by_against_and_parsed(bench, monkeypatch):
+    monkeypatch.delenv(EXEC_TOOL_ENV, raising=False)
+    run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"])
+    assert run(bench, name="free", instances=["acme__widget-1", "acme__widget-2"], exec_tool="freeform") == 0
+    assert run(bench, name="fn", instances=["acme__widget-1", "acme__widget-2"], exec_tool="function") == 0
+    store = SweBenchRunStore("fn")
+    kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
+    store.predictions_path.write_text("".join(line + "\n" for line in kept))
+    bench["docker"].calls.clear()
+    assert run(bench, name="fn") == 0
+    env, _ = container_env(bench)
+    assert env[EXEC_TOOL_ENV] == "function" and store.manifest()["exec_tool"] == "function"
+    assert store.state("acme__widget-2")["exec_tool"]["calls"] == 1
+    for name in ("plain", "free", "fn"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    # Night 6: the candidate (the launcher's choice) against the record arm (freeform).
+    assert "differs: exec_tool: auto | freeform" in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("free"))
+    assert "differs: exec_tool: function | auto" in SweBenchReport.against(store, SweBenchRunStore("plain"))
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["exec_tool"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "exec_tool" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--exec-tool", "freeform", "--name", "x"])) == 0
+    assert seen["exec_tool"] == "freeform"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["exec_tool"] is None
+    for form in ("off", "auto", "custom"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["swe-bench", "run", "--exec-tool", form, "--name", "z"])

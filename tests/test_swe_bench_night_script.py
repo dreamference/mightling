@@ -89,3 +89,54 @@ def test_a_misspelt_apply_patch_arm_ends_the_night_before_any_round(tmp_path, ar
     status, recorded, folder = night(tmp_path, f"default {arm}")
     assert status == 2 and runs(recorded) == []
     assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+def test_night_6s_record_arm_is_the_freeform_exec_tool_and_the_candidate_the_launchers_choice(tmp_path):
+    status, recorded, folder = night(tmp_path, "exec-tool-freeform default")
+    assert status == 0 and (folder / "done").exists()
+    record, candidate = runs(recorded)
+    assert "--name n4-exec-tool-freeform " in record and record.count("--exec-tool freeform") == 1
+    assert "--name n4-default " in candidate and "--exec-tool" not in candidate
+    assert "--task-rules" not in record and "--task-rules" not in candidate
+    assert "swe-bench report n4-default --against n4-exec-tool-freeform" in recorded
+    assert (folder / "default-against-exec-tool-freeform.txt").exists()
+    # The forced form, and stacking with the other arms like any part.
+    stacked = tmp_path / "stacked"
+    stacked.mkdir()
+    _, recorded, _ = night(stacked, "default restart-2+exec-tool-function")
+    assert "--restart-after-compactions 2 --exec-tool function" in runs(recorded)[1]
+
+
+@pytest.mark.parametrize("arm", ["exec-tool", "exec-tool-auto", "exec-tool-off", "exec_tool-function", "exec-tool-func"])
+def test_a_misspelt_exec_tool_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"{arm} default")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+@pytest.mark.parametrize("reads_it", [False, True])
+def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch(tmp_path, reads_it):
+    # `start` with stand-ins: no unit is active (systemctl), git succeeds and changes nothing,
+    # and the venv's Python names a fake `ling` and an install folder without the indexers.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ling = tmp_path / "ling"
+    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL ..." if reads_it else b"\x7fELF ... 1.6.0 ...")
+    for name, body in (("systemctl", "exit 1"), ("git", "exit 0")):
+        tool = bin_dir / name
+        tool.write_text(f"#!/bin/bash\n{body}\n")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{tmp_path / "install"}";; esac\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
+           "D": str(tmp_path / "night6"), "NIGHT": "6", "UNIT": "ling-swe-night6-test", "LIVE_UNIT": "ling-swe-night5-test",
+           "ARMS": "exec-tool-freeform default", "LIST": str(tmp_path / "list.txt")}
+    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 1
+    refused = f"{ling} does not read DREAMFERENCE_MIGHTLING_EXEC_TOOL" in result.stdout
+    assert refused is not reads_it
+    if reads_it:
+        # Past the check, `start` stops at the next one: the indexers missing from the fake install.
+        assert "ling-code is missing" in result.stdout
+    assert not (tmp_path / "night6").exists()

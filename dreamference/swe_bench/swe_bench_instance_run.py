@@ -339,7 +339,7 @@ class SweBenchInstanceRun:
                  task_rules: Optional[List[str]] = None, review_turn: bool = False,
                  refine_version: str = "v1",
                  hooks: Optional[List[str]] = None, restart_after_compactions: int = 0,
-                 apply_patch: str = "auto") -> None:
+                 apply_patch: str = "auto", exec_tool: str = "auto") -> None:
         """
         Args:
             store: The run's files.
@@ -366,6 +366,9 @@ class SweBenchInstanceRun:
             hooks: Hook sets (`HOOK_SETS`) registered in the instance's `CODEX_HOME`: `issue-v1`
                 holds the first edit until what the issue names has been read, and the first
                 stop until the issue's example has been run (spec §20).
+            apply_patch: The form `--apply-patch` asked for (`auto` when it did not; spec §22).
+            exec_tool: The form `--exec-tool` asked for Code Mode's `exec` (`auto` when it did
+                not; spec §23).
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -395,6 +398,9 @@ class SweBenchInstanceRun:
         # The apply_patch arm (spec §22): the form the run asked for, recorded with how often
         # the agent called the tool, counted from its rollouts when the task ends.
         self.apply_patch = apply_patch or "auto"
+        # The Code Mode arm (spec §23): the same for `exec`. The launcher turns a translated call
+        # back into Codex's custom tool call before Codex records it, so both forms count alike.
+        self.exec_tool = exec_tool or "auto"
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -572,6 +578,7 @@ class SweBenchInstanceRun:
         if self.stop_event.is_set():
             status = "interrupted"
         state["apply_patch"] = {"form": self.apply_patch, "calls": self.apply_patch_calls()}
+        state["exec_tool"] = {"form": self.exec_tool, "calls": self.exec_calls()}
         state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
                      wall_s=int(time.time() - self.started), patch_bytes=len(patch.encode()),
                      last_message=self._last_message()[:LAST_MESSAGE_LIMIT], notes=self.notes)
@@ -736,19 +743,45 @@ class SweBenchInstanceRun:
         Returns:
             int: The count; a line still being written is skipped.
         """
+        return self.tool_calls("apply_patch")
+
+    def exec_calls(self) -> int:
+        """
+        Counts the agent's calls to Code Mode's `exec` in this instance's rollouts. A call the
+        model made to the translated function is recorded as the `custom_tool_call` Codex expects
+        (`ling-rs/tools`), so the count is the same in either form; a shell command that merely
+        mentions `exec` is not a call.
+
+        Returns:
+            int: The count; a line still being written is skipped.
+        """
+        return self.tool_calls("exec")
+
+    def tool_calls(self, name: str) -> int:
+        """
+        Counts the `function_call` and `custom_tool_call` records named `name` in this
+        instance's rollouts.
+
+        Args:
+            name: The tool's name.
+
+        Returns:
+            int: The count; a line still being written is skipped.
+        """
+        needle = json.dumps(name).encode()
         count = 0
         for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
             try:
                 with open(path, "rb") as handle:
                     for line in handle:
-                        if b'"apply_patch"' not in line:
+                        if needle not in line:
                             continue
                         try:
                             record = json.loads(line)
                         except ValueError:
                             continue
                         payload = record.get("payload") if isinstance(record, dict) else None
-                        if (isinstance(payload, dict) and payload.get("name") == "apply_patch"
+                        if (isinstance(payload, dict) and payload.get("name") == name
                                 and payload.get("type") in ("function_call", "custom_tool_call")):
                             count += 1
             except OSError:
