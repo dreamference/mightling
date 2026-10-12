@@ -6,9 +6,17 @@
 //! network, so only the launcher ever browses and everything else works inside a sandbox.
 //!
 //! Standard library only: this file is compiled into the launcher and the web commands.
+//!
+//! It also reads whether this machine's Wi-Fi saves power ([`wifi_power_save_hint`]), which loses
+//! the multicast a browse depends on. Only the launcher calls that, after a browse found nothing;
+//! the rest of this file runs nothing.
 
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
+use std::time::Duration;
+use std::time::Instant;
 
 /// The DNS-SD service type a node is advertised under.
 pub const SERVICE_TYPE: &str = "_mightling-node._tcp.local.";
@@ -260,6 +268,194 @@ pub fn remote_node_from(is_node: bool, remembered: Option<Node>) -> Option<Node>
     if is_node { None } else { remembered }
 }
 
+// -- Wi-Fi power saving -----------------------------------------------------------------------------
+//
+// A Wi-Fi radio that saves power sleeps between beacons, and its access point holds multicast for
+// it until the next DTIM beacon; on 2026-10-11/12 that lost up to ~80% of the mDNS queries between
+// the machines here, so a client could not find its node. NetworkManager turns power saving on for
+// every Wi-Fi connection by default. The node checks itself (`ling-admin host check`, `host setup`,
+// `node enable`, `node prepare`: `dreamference/vllm_server/wifi_power_save.py`); a client that
+// found no node by a browse reads the same two things here, the same way, and prints one hint with
+// the commands. It never runs them: they need root.
+
+/// How long one nmcli or iw reading may take. It runs only after a browse failed.
+const WIFI_READ_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// NetworkManager's `802-11-wireless.powersave` values that mean off: the keyword `nmcli -g`
+/// prints, or the number older versions print.
+const POWERSAVE_OFF: [&str; 2] = ["disable", "2"];
+
+/// One connected Wi-Fi interface, as nmcli and iw describe it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WifiInterface {
+    pub device: String,
+    pub connection: String,
+    /// The connection's `802-11-wireless.powersave`, as nmcli prints it (`default`, `enable`, …).
+    pub setting: String,
+    /// Whether `iw` says the radio saves power now; `None` when iw is missing or does not say.
+    pub radio: Option<bool>,
+}
+
+impl WifiInterface {
+    /// Whether the connection's setting keeps power saving off.
+    pub fn setting_off(&self) -> bool {
+        let first = self.setting.split(' ').next().unwrap_or_default().to_lowercase();
+        POWERSAVE_OFF.contains(&first.as_str())
+    }
+
+    /// Whether power saving is on, or comes back at the next reconnect.
+    pub fn saves_power(&self) -> bool {
+        !self.setting_off() || self.radio == Some(true)
+    }
+
+    /// The commands that turn it off, to run as root: the connection's setting, kept across
+    /// reconnects, and the radio, now and with no reconnect.
+    pub fn fix_commands(&self) -> Vec<Vec<String>> {
+        let mut commands = Vec::new();
+        if !self.setting_off() {
+            commands.push(
+                ["nmcli", "connection", "modify", self.connection.as_str(), "802-11-wireless.powersave", "2"]
+                    .map(String::from)
+                    .to_vec(),
+            );
+        }
+        if self.radio == Some(true) {
+            commands.push(["iw", "dev", self.device.as_str(), "set", "power_save", "off"].map(String::from).to_vec());
+        }
+        commands
+    }
+}
+
+/// The connected Wi-Fi devices in `nmcli -t -f DEVICE,TYPE,STATE device status`.
+pub fn connected_wifi_devices(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            // Device names, types and states hold no colon, so the terse fields split cleanly.
+            let fields: Vec<&str> = line.split(':').collect();
+            (fields.len() >= 3 && fields[1] == "wifi" && fields[2].starts_with("connected") && !fields[0].is_empty())
+                .then(|| fields[0].to_string())
+        })
+        .collect()
+}
+
+/// What `iw dev <device> get power_save` says: `Some(true)` for `Power save: on`.
+pub fn radio_power_save(output: &str) -> Option<bool> {
+    let text = output.trim().to_lowercase();
+    if text.ends_with(": on") {
+        Some(true)
+    } else if text.ends_with(": off") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Reads every connected Wi-Fi interface through `read`, which runs one command and returns its
+/// output, or `None` when the program is missing or fails.
+pub fn wifi_interfaces_with(read: &dyn Fn(&[&str]) -> Option<String>) -> Vec<WifiInterface> {
+    let Some(listing) = read(&["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"]) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for device in connected_wifi_devices(&listing) {
+        let Some(connection) = read(&["nmcli", "-g", "GENERAL.CONNECTION", "device", "show", device.as_str()]) else {
+            continue;
+        };
+        let connection = connection.trim().to_string();
+        if connection.is_empty() {
+            continue;
+        }
+        let setting = read(&["nmcli", "-g", "802-11-wireless.powersave", "connection", "show", connection.as_str()])
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+        let radio = read(&["iw", "dev", device.as_str(), "get", "power_save"]).and_then(|text| radio_power_save(&text));
+        found.push(WifiInterface { device, connection, setting, radio });
+    }
+    found
+}
+
+/// The one hint line for interfaces that save power, with the commands that turn it off; `None`
+/// when none does.
+pub fn wifi_hint_from(interfaces: &[WifiInterface]) -> Option<String> {
+    let saving: Vec<&WifiInterface> = interfaces.iter().filter(|interface| interface.saves_power()).collect();
+    if saving.is_empty() {
+        return None;
+    }
+    let named: Vec<String> =
+        saving.iter().map(|interface| format!("{} ({})", interface.device, interface.connection)).collect();
+    let commands: Vec<String> = saving
+        .iter()
+        .flat_map(|interface| interface.fix_commands())
+        .map(|command| {
+            let words: Vec<String> = command.iter().map(|word| shell_quote(word)).collect();
+            format!("sudo {}", words.join(" "))
+        })
+        .collect();
+    Some(format!(
+        "Hint: Wi-Fi power saving is on for {}, and it loses most of the multicast a node is found by. Turn it off: {}",
+        named.join(", "),
+        commands.join(" && ")
+    ))
+}
+
+/// The hint for this machine, read with nmcli and iw: Linux with NetworkManager and a connected
+/// Wi-Fi interface that saves power, or `None` (another system, no NetworkManager, Ethernet only,
+/// power saving already off). It never fails and changes nothing.
+pub fn wifi_power_save_hint() -> Option<String> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    wifi_hint_from(&wifi_interfaces_with(&read_command))
+}
+
+/// A word as a shell reads it back: as it is when that is safe, in single quotes otherwise.
+fn shell_quote(word: &str) -> String {
+    let safe = !word.is_empty()
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | ',' | '+' | '=' | '@'));
+    if safe { word.to_string() } else { format!("'{}'", word.replace('\'', "'\\''")) }
+}
+
+/// Runs one reading in the C locale, with a deadline. `None` when the program is missing, fails or
+/// takes too long.
+fn read_command(argv: &[&str]) -> Option<String> {
+    let (name, args) = argv.split_first()?;
+    let program = find_program(name)?;
+    let mut child = Command::new(program)
+        .args(args)
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + WIFI_READ_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let mut output = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut output).ok()?;
+    status.success().then_some(output)
+}
+
+/// A program on `PATH`, or in `/usr/sbin` and `/sbin`, which not every user's `PATH` has (iw).
+fn find_program(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .chain([PathBuf::from("/usr/sbin"), PathBuf::from("/sbin")])
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +528,109 @@ mod tests {
         assert_eq!(remote_node_from(true, Some(node())), None);
         assert_eq!(remote_node_from(false, None), None);
         assert_eq!(remote_node_from(false, Some(node())), Some(node()));
+    }
+
+    const WIFI_ONLY: &str = "wlP9s9:wifi:connected\np2p-dev-wlP9s9:wifi-p2p:disconnected\nenP7s7:ethernet:unavailable\nlo:loopback:connected (externally)\n";
+    const ETHERNET_ONLY: &str = "enP7s7:ethernet:connected\nwlP9s9:wifi:disconnected\nlo:loopback:connected (externally)\n";
+
+    /// A machine's nmcli and iw, answered from strings: (listing, connection, setting, radio).
+    /// `None` for a program that is missing or fails.
+    fn machine(
+        listing: Option<&'static str>,
+        connection: &'static str,
+        setting: &'static str,
+        radio: Option<&'static str>,
+    ) -> impl Fn(&[&str]) -> Option<String> {
+        move |argv: &[&str]| -> Option<String> {
+            match argv {
+                ["nmcli", "-t", ..] => listing.map(String::from),
+                ["nmcli", "-g", "GENERAL.CONNECTION", "device", "show", "wlP9s9"] => Some(format!("{connection}\n")),
+                ["nmcli", "-g", "802-11-wireless.powersave", "connection", "show", name] if *name == connection => {
+                    Some(format!("{setting}\n"))
+                }
+                ["iw", "dev", "wlP9s9", "get", "power_save"] => radio.map(|state| format!("Power save: {state}\n")),
+                _ => panic!("unexpected reading {argv:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn only_connected_wifi_devices_are_read() {
+        assert_eq!(connected_wifi_devices(WIFI_ONLY), vec!["wlP9s9".to_string()]);
+        assert!(connected_wifi_devices(ETHERNET_ONLY).is_empty());
+        assert!(connected_wifi_devices("").is_empty());
+        assert_eq!(connected_wifi_devices("wlan0:wifi:connected (externally)\n"), vec!["wlan0".to_string()]);
+    }
+
+    #[test]
+    fn the_radio_says_on_off_or_nothing() {
+        assert_eq!(radio_power_save("Power save: on\n"), Some(true));
+        assert_eq!(radio_power_save("Power save: off"), Some(false));
+        assert_eq!(radio_power_save("command failed: Operation not supported (-95)"), None);
+        assert_eq!(radio_power_save(""), None);
+    }
+
+    #[test]
+    fn wifi_saving_power_gets_one_hint_with_both_commands() {
+        for setting in ["default", "enable", "3", "unknown"] {
+            let found = wifi_interfaces_with(&machine(Some(WIFI_ONLY), "TP-Link_DA74", setting, Some("on")));
+            assert_eq!(found.len(), 1, "{setting}");
+            let hint = wifi_hint_from(&found).expect("a hint");
+            assert!(!hint.contains('\n'), "one line: {hint}");
+            assert!(hint.starts_with("Hint: Wi-Fi power saving is on for wlP9s9 (TP-Link_DA74)"), "{hint}");
+            assert!(hint.ends_with(
+                "Turn it off: sudo nmcli connection modify TP-Link_DA74 802-11-wireless.powersave 2 \
+                 && sudo iw dev wlP9s9 set power_save off"
+            ), "{hint}");
+        }
+    }
+
+    #[test]
+    fn power_saving_off_for_good_and_now_gets_no_hint() {
+        for setting in ["disable", "2", "2 (disable)"] {
+            let found = wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", setting, Some("off")));
+            assert_eq!(wifi_hint_from(&found), None, "{setting}");
+        }
+        // iw missing or silent: the setting decides.
+        let found = wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", "disable", None));
+        assert_eq!(found[0].radio, None);
+        assert_eq!(wifi_hint_from(&found), None);
+    }
+
+    #[test]
+    fn each_half_of_the_fix_is_named_only_when_it_is_needed() {
+        // Set, not yet reconnected: the radio still sleeps.
+        let set = wifi_hint_from(&wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", "disable", Some("on")))).unwrap();
+        assert!(set.ends_with("Turn it off: sudo iw dev wlP9s9 set power_save off"), "{set}");
+        // Awake now, but it comes back at the next reconnect; iw cannot say.
+        let unset = wifi_hint_from(&wifi_interfaces_with(&machine(Some(WIFI_ONLY), "home", "default", None))).unwrap();
+        assert!(unset.ends_with("Turn it off: sudo nmcli connection modify home 802-11-wireless.powersave 2"), "{unset}");
+    }
+
+    #[test]
+    fn a_connection_name_is_quoted_for_the_shell() {
+        let hint = wifi_hint_from(&wifi_interfaces_with(&machine(Some(WIFI_ONLY), "Bob's Wi-Fi", "default", Some("off")))).unwrap();
+        assert!(hint.contains("on for wlP9s9 (Bob's Wi-Fi)"), "{hint}");
+        assert!(hint.ends_with("sudo nmcli connection modify 'Bob'\\''s Wi-Fi' 802-11-wireless.powersave 2"), "{hint}");
+        assert_eq!(shell_quote("TP-Link_DA74"), "TP-Link_DA74");
+        assert_eq!(shell_quote(""), "''");
+        assert_eq!(shell_quote("a b"), "'a b'");
+        assert_eq!(shell_quote("$(x)"), "'$(x)'");
+    }
+
+    #[test]
+    fn no_networkmanager_or_no_wifi_says_nothing() {
+        assert!(wifi_interfaces_with(&machine(None, "home", "default", Some("on"))).is_empty());
+        assert!(wifi_interfaces_with(&machine(Some(ETHERNET_ONLY), "home", "default", Some("on"))).is_empty());
+        // A Wi-Fi device with no connection named is skipped, not guessed at.
+        assert!(wifi_interfaces_with(&machine(Some(WIFI_ONLY), "", "default", Some("on"))).is_empty());
+        assert_eq!(wifi_hint_from(&[]), None);
+    }
+
+    #[test]
+    fn a_missing_program_is_none_and_never_an_error() {
+        assert_eq!(read_command(&["ling-no-such-program-for-a-test"]), None);
+        assert_eq!(read_command(&[]), None);
     }
 
     #[test]

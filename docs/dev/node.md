@@ -16,6 +16,8 @@ Mightling is a client and a node, and `ling` finds the node.
 
   It never adopts a node other than the remembered one without asking. `ling node list|use|forget` is the same logic from a shell.
 
+  When a browse misses (tier 5 finds nothing, the remembered node of tier 4 does not answer, or `MIGHTLING_NODE` names a node that is not there; `browse_missed`), a Linux client reads its own Wi-Fi the way `WifiPowerSave` does (below) and, if a connected Wi-Fi connection saves power, adds one line naming it with the commands that turn it off (`ling_node_locator::wifi_power_save_hint`). It is a hint: the error or the fallback to the last address is unchanged, `ling` runs no `sudo`, and on another system, without NetworkManager or on Ethernet it says nothing. `ling node list` with no answer and `ling node use` with a name nothing answered to print it too.
+
 Only the launcher and `ling-app` browse; `ling-search` reads `node.json` through `ling-rs/node-locator/`, a std-only crate with **byte-identical copies** in `ling-web-rs/src/node_locator.rs` (a test compares them, as for the air-gap resolver; the desktop app's `desktop/electron/src/node_locator.ts` is a port with the crate's tests).
 
 ## Advertising a node
@@ -43,4 +45,5 @@ A job (`node run <node> -- <command>`) is a systemd user unit with a mandatory m
 
 - Every unattended caller of `ling` (Night Shift, the egress audit, SWE-bench, the Codex test runner) names the model server in `DREAMFERENCE_VLLM_HOST`, because a browse is a multicast DNS query and the audit counts one as a failure.
 - Tests never write `/etc/avahi` or run sudo (conftest points `NodeServiceFile.service_path` at scratch), and never read or change this machine's Wi-Fi: conftest stubs `WifiPowerSave._read` and fails any `nmcli`/`iw` command that changes something.
+- The client's Wi-Fi reading lives in the locator crate, so it is in both byte-identical copies (`ling-web-rs` compiles it and never calls it); it mirrors `WifiPowerSave` (`LC_ALL=C`, iw also looked for in `/usr/sbin` and `/sbin`, off means `disable` or `2`, the radio's `on` counts), and its tests take nmcli's and iw's output as strings. Change one side's reading, change the other.
 - A job sent over SSH does not inherit a permissive AppArmor profile; see [host-safety.md](host-safety.md#bubblewrap-needs-an-apparmor-profile-and-this-machine-now-has-one).
