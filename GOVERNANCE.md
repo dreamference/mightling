@@ -22,7 +22,7 @@ Security problems are not proposed in public: see [SECURITY.md](SECURITY.md).
 A release is cut by hand from `main`, with the **Release** workflow
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)). It builds every binary on GitHub's
 runners and publishes them as a release tagged `v<version>`. The last step runs in the GitHub `release`
-environment, which only `main` can use and which waits for a maintainer's approval; its key, held only
+environment, which only `main` and `release/*` can use; its key, held only
 there, signs `SHA256SUMS` (Ed25519), and each file carries a build-provenance attestation. `ling update`
 and `install.sh` check the signature against the keys in `ling-rs/release-signing.pub` before
 installing anything. Windows builds are an unsigned preview for now.
