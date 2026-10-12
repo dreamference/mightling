@@ -1,12 +1,13 @@
 # Mightling 1.6.0 — release notes
 
-**Status:** draft, 2026-10-09. Built from `git log v1.5.1..origin/main` (76 commits) and the specs
-and docs they touched: the local file index (`ling-docs`, merged from `docs-index/1.6.0`), the Mac
-preview (`desktop/mac-preview`), the Mightling web UI (`web/ask-ui`), the phone messengers
-(`messengers/optional`: Signal, Matrix, Telegram) and the SWE-bench scripts. Not published: the
-version is not set and there is no tag; both are decided when 1.6.0 is cut. Every `{{TBD: …}}`
-must be filled or removed before publishing; the refine section has two variants, and exactly one
-is kept (the 100-task refine result decides, MIGHTLING_REFINE §3).
+**Status:** prepared 2026-10-10 on the branch `release/1.6.0` (origin/main plus the speed figures of
+`figures/1.6.0-speed` and the version set to 1.6.0 in `setup.py`, `dreamference/__init__.py`, the MCP
+server's `serverInfo` and `desktop/electron/package.json`). Built from `git log v1.5.1..origin/main` and
+the specs and docs it touched: the local file index (`ling-docs`), the Mac preview, the Mightling web
+UI, the phone messengers (Signal, Matrix, Telegram), 12 draft tokens and the model gate, and the
+SWE-bench scripts. Not yet cut: the pre-release checks that need the model (below) run when the
+model gate opens after the benchmark nights; then the branch is merged and tagged. Every placeholder
+is filled; the refine section states the measured result (refine stays opt-in, MIGHTLING_REFINE §3).
 The text between the two rules is the GitHub release's description.
 
 **Version.** To be set to 1.6.0 in `setup.py`, `dreamference/__init__.py`, the MCP server's
@@ -189,6 +190,19 @@ because speculative decoding preserves the model's distribution.
 gate container in front of the engine on the public port. While a SWE-bench run holds the gate, a
 request that is not the run's is answered 503, naming the run and its time left, instead of slowing
 it down; `ling-admin night pause [--for 2h]` lets you through meanwhile. With no run, nothing changes.
+
+**Code Mode is on, and on this server it changes nothing yet.** `ling` offers the model Code Mode's `exec` tool
+(a program that calls several tools in one turn) beside the ordinary tools. The model server renders only
+ordinary function tools into the prompt, so the model never sees `exec` and works through the ordinary tools,
+as it did in 1.5.1 (measured on 2026-10-10: eleven turns, no call to `exec`). Nothing breaks, nothing to
+configure; Code Mode becomes real when a server passes custom tools through, which ling-engine now does.
+
+**Paired nodes are found again after the rename, and always where they are now.** A node paired under Puffin
+"did not answer over the pairing" after the switch to Mightling: its host key was stored under the old alias.
+The one-time migration now moves it. And no connection to a paired node uses its remembered address any
+more: every one browses the network for the node's id, keeps looking for up to a minute when the network
+does not answer, and then refuses rather than trying an address that may belong to another machine by now
+(a DHCP move had cost a benchmark night its second lane).
 
 **Fixed:**
 - **The code index's memory budget saw no running index.** Since the rename the code index looked
