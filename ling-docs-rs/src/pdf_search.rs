@@ -323,7 +323,8 @@ pub fn entries() -> Vec<(String, u64, SystemTime)> {
 }
 
 /// Removes entries unused for `days`, then the least recently used until the cache is under
-/// `max_mb`, never one named in `keep`; and run folders a dead process left. Returns how many
+/// `max_mb`, never one named in `keep` or one a session is building; and run folders a dead
+/// process left. Returns how many
 /// entries went.
 pub fn evict(max_mb: u64, days: u64, keep: &[String]) -> usize {
     let dir = config::pdf_cache_dir();
@@ -340,7 +341,8 @@ pub fn evict(max_mb: u64, days: u64, keep: &[String]) -> usize {
     let mut total: u64 = list.iter().map(|(_, size, _)| size).sum();
     let mut removed = 0;
     for (name, size, used) in list {
-        if keep.contains(&name) {
+        // Named by the caller, or being built or embedded by a session now (its lock is held).
+        if keep.contains(&name) || in_use(&name) {
             continue;
         }
         let stale = now.duration_since(used).map(|age| age > Duration::from_secs(days * 86400)).unwrap_or(false);
@@ -351,6 +353,15 @@ pub fn evict(max_mb: u64, days: u64, keep: &[String]) -> usize {
         }
     }
     removed
+}
+
+/// Whether a process holds the entry's lock (it is indexing or embedding it).
+fn in_use(name: &str) -> bool {
+    let path = config::pdf_cache_dir().join(format!("{name}.lock"));
+    match std::fs::File::open(&path) {
+        Ok(file) => crate::host::flock(&file, false).is_err(),
+        Err(_) => false,
+    }
 }
 
 fn remove_entry(name: &str) {
