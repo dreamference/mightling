@@ -41,6 +41,7 @@ pub mod chat;
 pub mod code_index;
 pub mod compaction;
 pub mod docs_index;
+pub mod exec_tool;
 pub mod help;
 pub mod home;
 pub mod ledger;
@@ -406,6 +407,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // the network (node.rs; specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1).
     let host = node::resolve_host(interactive).await?;
     let model = wait_for_model(&host).await?;
+    // Code Mode's `exec` as a function where the server drops custom tools (exec_tool.rs).
+    exec_tool::configure(&model);
     let codex_home = codex_utils_home_dir::find_codex_home()
         .context("could not resolve CODEX_HOME")?
         .as_path()

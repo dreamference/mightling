@@ -81,7 +81,9 @@ def test_the_patches_stay_small():
     # sealed, and the two elevated Windows sandbox entry points calling it, so the command runs as
     # the offline account) made 39,330 on its own.
     # Raised to 43,000 on 2026-10-08 when 0024 and 0025 were merged together: each approval was
-    # given with the other absent, and the two together make 42,741.
+    # given with the other absent, and the two together make 42,741. Not raised on 2026-10-12 when
+    # 0020 grew by 217 bytes (the request hook also takes the request's input, and one line turns each
+    # output item back) so Code Mode's `exec` is offered as a function on SGLang; 42,958 after.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 43_000
 
 
