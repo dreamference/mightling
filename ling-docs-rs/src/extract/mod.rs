@@ -42,6 +42,12 @@ pub struct Extracted {
     /// PDF pages with no text layer: unsearchable until OCR (Phase 2, §7.1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs_ocr: Vec<u32>,
+    /// PDF pages read, when a page cap stopped the reading before the end (PDF_SEARCH §3.5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages_read: Option<u32>,
+    /// The PDF's own title (document information), when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// Decodes a text file: UTF-8 (a BOM dropped), else Latin-1 rather than nothing.
@@ -54,12 +60,13 @@ pub fn decode(bytes: &[u8]) -> String {
     }
 }
 
-/// Extracts one file.
-pub fn extract_file(path: &Path, kind: Kind, pdfium: Option<&pdf::Pdf>) -> Result<Extracted> {
+/// Extracts one file; of a PDF, at most `max_pages` pages from the first.
+pub fn extract_file(path: &Path, kind: Kind, pdfium: Option<&pdf::Pdf>, max_pages: Option<u32>) -> Result<Extracted> {
     if kind == Kind::Pdf {
         let Some(pdfium) = pdfium else { anyhow::bail!("PDFium is not available") };
-        let text = pdfium.extract(path)?;
-        let mut out = Extracted { pages: Some(text.pages.len() as u32), ..Extracted::default() };
+        let text = pdfium.extract(path, max_pages)?;
+        let read = text.pages.len() as u32;
+        let mut out = Extracted { pages: Some(text.page_count), pages_read: (read < text.page_count).then_some(read), title: text.title, ..Extracted::default() };
         for (i, page) in text.pages.into_iter().enumerate() {
             let number = i as u32 + 1;
             if page.trim().is_empty() {
@@ -87,6 +94,9 @@ pub struct Job {
     pub id: i64,
     pub path: PathBuf,
     pub kind: Kind,
+    /// A PDF's page cap (`pdf_search`); collections read every page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_pages: Option<u32>,
 }
 
 /// A line of the worker's output: `start` before a file, then its result.
@@ -118,7 +128,7 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path) -> Result<()> {
         emit(&Event::Start { id: job.id })?;
         let result = match (&pdfium, job.kind) {
             (Err(why), Kind::Pdf) => Err(anyhow::anyhow!("{why}")),
-            (pdfium, kind) => extract_file(&job.path, kind, pdfium.as_ref().ok()),
+            (pdfium, kind) => extract_file(&job.path, kind, pdfium.as_ref().ok(), job.max_pages),
         };
         match result {
             Ok(result) => emit(&Event::Done { id: job.id, result })?,
@@ -137,7 +147,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.md");
         std::fs::write(&path, b"\xEF\xBB\xBF# Hello\nworld\n").unwrap();
-        let out = extract_file(&path, Kind::Markdown, None).unwrap();
+        let out = extract_file(&path, Kind::Markdown, None, None).unwrap();
         assert_eq!(out.units.len(), 1);
         assert_eq!(out.units[0].heading, "Hello");
         assert!(out.units[0].text.starts_with("# Hello"));
@@ -156,8 +166,8 @@ mod tests {
         std::fs::write(&good, "hello\n").unwrap();
         let jobs = dir.path().join("jobs.jsonl");
         let lines = [
-            serde_json::to_string(&Job { id: 1, path: dir.path().join("missing.txt"), kind: Kind::Text }).unwrap(),
-            serde_json::to_string(&Job { id: 2, path: good, kind: Kind::Text }).unwrap(),
+            serde_json::to_string(&Job { id: 1, path: dir.path().join("missing.txt"), kind: Kind::Text, max_pages: None }).unwrap(),
+            serde_json::to_string(&Job { id: 2, path: good, kind: Kind::Text, max_pages: None }).unwrap(),
         ];
         std::fs::write(&jobs, lines.join("\n")).unwrap();
         let out = dir.path().join("out.jsonl");

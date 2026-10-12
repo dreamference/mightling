@@ -1,4 +1,5 @@
 //! `ling-fetch "https://…" [--max-chars N] [--json]`: print a web page as readable text.
+//! `ling-fetch --download <file> [--max-bytes N] "https://…"`: save a PDF for `ling-docs`.
 
 use std::process::ExitCode;
 
@@ -19,6 +20,14 @@ struct Args {
     /// Emit JSON (url, final_url, status, content_type, title, text, truncated) instead of text
     #[arg(long)]
     json: bool,
+
+    /// Save the body to this new file instead, only if it is a PDF (pdf_search's download)
+    #[arg(long, value_name = "FILE")]
+    download: Option<std::path::PathBuf>,
+
+    /// With --download: the largest body kept, in bytes
+    #[arg(long, default_value_t = fetch::DOWNLOAD_DEFAULT_BYTES, requires = "download")]
+    max_bytes: u64,
 }
 
 fn main() -> ExitCode {
@@ -26,6 +35,18 @@ fn main() -> ExitCode {
     if let Some(message) = ling_web::refusal_now() {
         println!("❌ {message}");
         return ExitCode::FAILURE;
+    }
+    if let Some(dest) = &args.download {
+        return match fetch::download_pdf(&args.url, dest, args.max_bytes) {
+            Ok(saved) => {
+                println!("{}", serde_json::to_string(&saved).unwrap_or_default());
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                println!("❌ {error}");
+                ExitCode::FAILURE
+            }
+        };
     }
     match fetch::fetch(&args.url, args.max_chars) {
         Ok(page) => {

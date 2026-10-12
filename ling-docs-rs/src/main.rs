@@ -73,6 +73,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print a file's text by page, storing nothing (PDFs through the extractor's sandbox).
+    Extract {
+        file: PathBuf,
+        #[arg(long, conflicts_with = "pages")]
+        page: Option<u32>,
+        /// A range such as 12-15.
+        #[arg(long)]
+        pages: Option<String>,
+        /// Characters to print when no page is named.
+        #[arg(long, default_value_t = 8000)]
+        max_chars: usize,
+        #[arg(long)]
+        json: bool,
+    },
     /// Rebuild a collection's index from its files.
     Reindex { name: String },
     /// Index now, in the foreground (outside the agent's sandbox).
@@ -289,6 +303,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
             if let Some(missing) = missing {
                 writeln!(out, "Indexing waits: {missing}.")?;
             }
+            let cache = ling_docs::pdf_search::entries();
+            if !cache.is_empty() {
+                writeln!(out, "pdf_search cache: {} PDFs, {}", cache.len(), human_bytes(cache.iter().map(|(_, size, _)| size).sum()))?;
+            }
             writeln!(out, "Network: none. The index is local only, unaffected by /airgapped.")?;
         }
         Command::Search { query, collection, k, path, kind, after, json } => {
@@ -359,12 +377,18 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let settings = Settings::load();
             if settings.enabled {
                 let collections = search::collections().unwrap_or_default();
-                let block = prompt::block(&collections, tools);
-                if !block.is_empty() {
-                    writeln!(out, "{block}")?;
+                let mut blocks = vec![prompt::block(&collections, tools)];
+                // pdf_search is a tool only (PDF_SEARCH §3.8).
+                if tools && mcp::pdf_available() {
+                    blocks.push(prompt::pdf_block());
+                }
+                let blocks: Vec<String> = blocks.into_iter().filter(|b| !b.is_empty()).collect();
+                if !blocks.is_empty() {
+                    writeln!(out, "{}", blocks.join("\n\n"))?;
                 }
             }
         }
+        Command::Extract { file, page, pages, max_chars, json } => return extract_command(&file, page, pages.as_deref(), max_chars, json),
         Command::ExtractWorker { jobs, out: events, lib_dir } => ling_docs::extract::worker(&jobs, &events, &lib_dir)?,
         Command::IndexWorker { collection, db, events, threads, lib_dir, model_dir, test_embedder } => {
             let mut log = std::io::stderr();
@@ -387,6 +411,98 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 use ling_docs::embed::Embed;
                 writeln!(out, "{}", serde_json::to_string(&embedder.embed(&text)?)?)?;
             }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `ling-docs extract` (PDF_SEARCH §4): the extractor in a capped scope and bwrap where the user's
+/// systemd is reachable, else (inside the agent's sandbox) a plain child under `RLIMIT_AS`.
+fn extract_command(file: &std::path::Path, page: Option<u32>, pages: Option<&str>, max_chars: usize, json: bool) -> Result<ExitCode> {
+    let mut out = std::io::stdout();
+    let range = match (page, pages) {
+        (Some(p), _) => Some((p, p)),
+        (None, Some(text)) => {
+            let (a, b) = text.split_once('-').unwrap_or((text, text));
+            let (a, b) = (a.trim().parse::<u32>().ok(), b.trim().parse::<u32>().ok());
+            match (a, b) {
+                (Some(a), Some(b)) if a >= 1 && b >= a => Some((a, b)),
+                _ => bail!("`{text}` is not a page range (12-15)"),
+            }
+        }
+        (None, None) => None,
+    };
+    if ling_docs::discover::Kind::of(&file.to_string_lossy()) == Some(ling_docs::discover::Kind::Pdf) && !config::lib_dir().join("libpdfium.so").is_file() {
+        writeln!(out, "failed: reading PDFs needs PDFium, which is not installed (run `ling-admin docs setup` on a node)")?;
+        return Ok(ExitCode::from(1));
+    }
+    let systemd = SystemdHost;
+    let fallback = ling_docs::host::RlimitHost::in_temp();
+    use ling_docs::host::Host;
+    let scoped = systemd.can_create_scopes();
+    let mut env = index::Env::real(if scoped { &systemd } else { &fallback })?;
+    env.sandbox = scoped;
+    let settings = Settings::load();
+    env.settings.extract_timeout_s = settings.pdf_timeout_s;
+    let extracted = match index::extract_one(&env, file, range.map(|(_, b)| b))? {
+        Ok(extracted) => extracted,
+        Err(why) => {
+            writeln!(out, "{why}")?;
+            return Ok(ExitCode::from(1));
+        }
+    };
+    let count = extracted.pages.unwrap_or(0);
+    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // Units by page (a PDF) or the file's sections (text), the requested ones only.
+    let mut shown: Vec<(Option<u32>, String)> = Vec::new();
+    let mut used = 0;
+    let mut next = None;
+    for unit in &extracted.units {
+        if let (Some((a, b)), Some(p)) = (range, unit.page) {
+            if p < a || p > b {
+                continue;
+            }
+        }
+        if range.is_none() && used > 0 && used + unit.text.chars().count() > max_chars {
+            next = unit.page;
+            break;
+        }
+        used += unit.text.chars().count();
+        shown.push((unit.page, unit.text.clone()));
+    }
+    let scans: Vec<u32> = extracted.needs_ocr.iter().copied().filter(|p| range.is_none_or(|(a, b)| *p >= a && *p <= b)).collect();
+    let returned = match (shown.first().and_then(|s| s.0), shown.last().and_then(|s| s.0)) {
+        (Some(a), Some(b)) if a == b => format!("p.{a}"),
+        (Some(a), Some(b)) => format!("pp.{a}-{b}"),
+        _ => String::new(),
+    };
+    if json {
+        let pages: Vec<serde_json::Value> = shown.iter().map(|(p, t)| serde_json::json!({ "page": p, "text": t })).collect();
+        writeln!(out, "{}", serde_json::to_string_pretty(&serde_json::json!({
+            "file": name, "title": extracted.title, "page_count": extracted.pages, "returned": returned,
+            "pages": pages, "needs_ocr": scans, "next_page": next,
+        }))?)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    let title = extracted.title.as_ref().map(|t| format!(" — \"{t}\"")).unwrap_or_default();
+    if extracted.pages.is_some() {
+        writeln!(out, "{name}{title}, {count} pages{}", if returned.is_empty() { String::new() } else { format!("; {returned} returned") })?;
+        if extracted.units.is_empty() {
+            writeln!(out, "No page has a text layer (a scan, or only images): OCR is not offered here.")?;
+        }
+        for (page, text) in &shown {
+            writeln!(out, "--- page {} of {count} ---", page.unwrap_or(0))?;
+            writeln!(out, "{}", text.trim_end())?;
+        }
+        for p in scans {
+            writeln!(out, "p.{p}: no text layer (scanned?); OCR is not offered here")?;
+        }
+        if let Some(n) = next {
+            writeln!(out, "-- more: ling-docs extract {} --pages {n}-{}", file.display(), (n + 4).min(count))?;
+        }
+    } else {
+        for (_, text) in &shown {
+            writeln!(out, "{}", text.trim_end())?;
         }
     }
     Ok(ExitCode::SUCCESS)

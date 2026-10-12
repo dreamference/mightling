@@ -353,6 +353,39 @@ fn fetch_reports_http_errors() {
 }
 
 #[test]
+fn download_saves_a_pdf_and_refuses_anything_else() {
+    let server = Server::start(|line| {
+        if line.contains("/paper") {
+            response("200 OK", "application/octet-stream", b"%PDF-1.4\nbody", "")
+        } else {
+            response("200 OK", "text/html", b"<html>login</html>", "")
+        }
+    });
+    let dir = std::env::temp_dir().join(format!("ling-fetch-download-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let dest = dir.join("a.pdf");
+    let output = fetch(&["--download", dest.to_str().unwrap(), &format!("{}/paper", server.base)], &[]);
+    assert!(output.status.success(), "{}", stdout(&output));
+    let saved: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(saved["bytes"], 13);
+    assert_eq!(saved["final_url"], format!("{}/paper", server.base));
+    assert_eq!(std::fs::read(&dest).unwrap(), b"%PDF-1.4\nbody");
+    let refused = fetch(&["--download", dir.join("b.pdf").to_str().unwrap(), &format!("{}/login", server.base)], &[]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(stdout(&refused).starts_with("❌ not a PDF"), "{}", stdout(&refused));
+    assert!(!dir.join("b.pdf").exists());
+    let capped = fetch(&["--download", dir.join("c.pdf").to_str().unwrap(), "--max-bytes", "5", &format!("{}/paper", server.base)], &[]);
+    assert!(stdout(&capped).contains("larger than"), "{}", stdout(&capped));
+    // At `on` nothing is sent, as for a fetch.
+    let before = server.requests().len();
+    let off = fetch(&["--download", dir.join("d.pdf").to_str().unwrap(), &format!("{}/paper", server.base)], &[("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")]);
+    assert_eq!(off.status.code(), Some(1));
+    assert_eq!(server.requests().len(), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn fetch_refuses_anything_but_http() {
     let output = fetch(&["file:///etc/passwd"], &[]);
     assert_eq!(output.status.code(), Some(1));

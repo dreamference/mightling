@@ -22,6 +22,7 @@ pub mod extract;
 pub mod host;
 pub mod index;
 pub mod mcp;
+pub mod pdf_search;
 pub mod prompt;
 pub mod read;
 pub mod requests;
