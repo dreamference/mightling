@@ -17,6 +17,7 @@ conftest now fails any real `docker` command that changes something (reads like 
 ## The same rule elsewhere
 
 - Tests never write `/etc/avahi` or run sudo (conftest points `NodeServiceFile.service_path` at scratch; [node.md](node.md)).
+- Tests never read or change this machine's Wi-Fi (since 2026-10-12): conftest stubs `WifiPowerSave._read`, so whether this machine is on Wi-Fi with power saving on decides no test of `host check`, `host setup`, `node enable` or `node prepare`, and fails any `nmcli` or `iw` command carrying a word that changes something (`modify`, `set`, `up`, `down`, `connect`, …; `_changes_network`). A test of the Wi-Fi check sets its own `_read` (`tests/test_wifi_power_save.py`); the launcher's Rust tests of the same reading take the commands' output as strings and run nothing ([node.md](node.md#advertising-a-node)).
 - Night Shift's tests use a scripted stand-in for `ling` and never create a real scope or unit ([night-shift.md](night-shift.md)).
 - SWE-bench's tests never start a container or touch the real cache ([swe-bench.md](swe-bench.md)).
 - `ling-docs` tests never run with the real `HOME` ([local-file-index.md](local-file-index.md)).

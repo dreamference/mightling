@@ -13,8 +13,9 @@
 #            for arm64 and x86-64 Linux and for macOS (Apple silicon and Intel).
 #   node     the client, plus `ling-admin` (the Python package, from the release's wheel, in a
 #            virtualenv of its own) and everything else a node needs, with no question asked:
-#            python3-venv where the system lacks it; the host settings a model load needs
-#            (`ling-admin host setup --yes`); you in the `docker` group; lingering, so jobs and
+#            python3-venv where the system lacks it; the host settings a model load needs, and
+#            Wi-Fi power saving off, which loses the mDNS clients find a node by (`ling-admin
+#            host setup --yes`); you in the `docker` group; lingering, so jobs and
 #            Night Shift tasks outlive a logout; the node offered to the local network
 #            (`ling-admin node enable --yes`), so `ling` on your other computers finds it with no
 #            address typed; what the local file index loads (`ling-admin docs setup`, about
@@ -60,8 +61,8 @@
 # DREAMFERENCE_MIGHTLING_FLEET.md §7.2). The checks are the same. A `VERSION` file in it names the
 # version, and a `wheelhouse/` folder in it, if present, holds the Python dependencies so pip needs
 # no index either. --no-host-setup and --no-model are for provisioning, which does those parts
-# itself: the root half with `sudo ling-admin node prepare` (host settings, docker group,
-# lingering), and the model copied from the machine provisioning it. With --no-host-setup this
+# itself: the root half with `sudo ling-admin node prepare` (host settings, Wi-Fi power saving,
+# docker group, lingering), and the model copied from the machine provisioning it. With --no-host-setup this
 # script needs no root, and checks for no system updates.
 #
 # MIGHTLING_LINGER_DIR, MIGHTLING_PCI_DEVICES and the PATH are where the tests point it at
@@ -532,7 +533,7 @@ if [ "$ROLE" = "node" ]; then
         # and runs with `sudo -n` on the password given above.
         say ""
         if admin host setup --yes; then
-            step done "host settings applied (swap, sysctls, earlyoom, sysstat, bubblewrap)"
+            step done "host settings applied (swap, sysctls, earlyoom, sysstat, bubblewrap, Wi-Fi power saving off)"
         else
             step failed "host settings: \`ling-admin host check\` lists what is left, \`ling-admin host setup\` applies it"
         fi
