@@ -79,6 +79,13 @@ and answered there, and `/stop`, with 1.6.0 as published. Nothing in the bridge 
 Matrix and Telegram (`ling chat`) keep their preview label: neither has yet been tested against a
 real homeserver or Telegram bot.
 
+### Fixed
+
+- **`ling-admin node provision --web`** ran `ling-admin ling start` and `ling configure`, a
+  subcommand `ling-admin` never had (a leftover of the rename), so `--web` failed at that step
+  since 1.5.1; it now runs `ling-admin chat start` and `chat configure` there, and the dry run
+  names the web UI instead of `node enable --no-web`.
+
 ---
 
 ## Upgrading from 1.6.0

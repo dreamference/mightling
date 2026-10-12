@@ -525,7 +525,17 @@ def test_web_is_off_unless_asked(fleet):
     provision(["spark-1"], web=True)
     commands = FakeSession.machines["spark-1"].commands
     assert any(c.endswith("node enable") for c in commands)
-    assert any("ling start" in c for c in commands) and any("ling configure" in c for c in commands)
+    assert any(c.endswith("ling-admin chat start") for c in commands)
+    assert any(c.endswith("ling-admin chat configure") for c in commands)
+    # `ling-admin` has no `ling` subcommand: the rename's leftover failed every --web since 1.5.1.
+    assert not any("ling-admin ling " in c for c in commands)
+
+
+def test_a_dry_run_with_web_names_the_web_ui(fleet, capsys):
+    FakeSession.machines = {"spark-1": StandIn()}
+    assert provision(["spark-1"], dry_run=True, web=True) == 0
+    out = capsys.readouterr().out
+    assert "chat start" in out and "--no-web" not in out
 
 
 def test_an_unknown_model_is_refused_before_connecting(fleet):
