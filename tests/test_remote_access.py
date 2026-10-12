@@ -13,6 +13,7 @@ import json
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import tarfile
 import threading
@@ -432,8 +433,11 @@ def seams(monkeypatch):
     monkeypatch.setattr(RemoteAccess, "_node_id", classmethod(lambda cls: NODE_ID))
     monkeypatch.setattr(RemoteAccess, "_confirm", classmethod(lambda cls, q: True))
     monkeypatch.setattr(RemoteAccess, "_advertise", classmethod(lambda cls, name: log.append(("advertise", name))))
-    monkeypatch.setattr(RemoteBox, "probe", classmethod(lambda cls, d: {"arch": "amd64", "root": "yes", "packages": "apt", "host_key": HOST_KEY}))
-    monkeypatch.setattr(RemoteBox, "deploy", classmethod(lambda cls, *a: log.append(("deploy", a[0], a[1])) or True))
+    monkeypatch.setattr(RemoteBox, "probe", classmethod(
+        lambda cls, d, ssh_to=None: log.append(("probe", d, ssh_to)) and None
+        or {"arch": "amd64", "root": "yes", "packages": "apt", "host_key": HOST_KEY}))
+    monkeypatch.setattr(RemoteBox, "deploy", classmethod(
+        lambda cls, *a, ssh_to=None: log.append(("deploy", a[0], a[1], ssh_to)) or True))
     monkeypatch.setattr(RemoteCertificateAuthority, "ensure", classmethod(lambda cls, d: log.append(("ca", d)) or True))
 
     def issue(cls, label, names):
@@ -458,7 +462,7 @@ def seams(monkeypatch):
 def test_setup_does_everything_in_order_and_records_names_only(seams):
     assert RemoteAccess.setup("Relay.Example.org.", yes=True) == 0
     steps = [entry[0] for entry in seams]
-    assert steps == ["ca", "issue", "issue", "start", "deploy", "tunnel", "key", "join", "advertise"]
+    assert steps == ["probe", "ca", "issue", "issue", "start", "deploy", "tunnel", "key", "join", "advertise"]
     assert ("join", "https://relay.example.org:443", "KEY") in seams
     record = RemoteSettings.read()
     assert record["dns_name"] == BOX and record["overlay_name"] == f"mightling-{NODE_ID}.netbird.selfhosted"
@@ -533,7 +537,7 @@ def test_setup_refuses_on_a_machine_that_is_not_a_node(seams, monkeypatch):
     ({"arch": "amd64", "root": "yes", "packages": "apt", "host_key": ""}, "ed25519 host key"),
 ])
 def test_setup_stops_before_changing_anything_when_the_box_will_not_do(seams, monkeypatch, capsys, facts, reason):
-    monkeypatch.setattr(RemoteBox, "probe", classmethod(lambda cls, d: facts))
+    monkeypatch.setattr(RemoteBox, "probe", classmethod(lambda cls, d, ssh_to=None: facts))
     assert RemoteAccess.setup(BOX, yes=True) == 1
     assert reason in capsys.readouterr().out and seams == []
 
@@ -550,6 +554,137 @@ def test_a_box_under_another_name_needs_a_new_ca(seams, monkeypatch, capsys):
 def test_declining_changes_nothing(seams, monkeypatch):
     monkeypatch.setattr(RemoteAccess, "_confirm", classmethod(lambda cls, q: False))
     assert RemoteAccess.setup(BOX) == 1 and seams == []
+
+
+def test_box_only_deploys_the_box_and_runs_nothing_on_the_node(seams, capsys):
+    assert RemoteAccess.setup(BOX, yes=True, ssh_to="my-box", box_only=True) == 0
+    steps = [entry[0] for entry in seams]
+    assert steps == ["probe", "ca", "issue", "issue", "deploy"], "no container, no tunnel, no key minted, no join, no advert"
+    assert ("probe", BOX, "my-box") in seams and ("deploy", BOX, "amd64", "my-box") in seams
+    record = RemoteSettings.read()
+    assert record["box_only"] is True and record["ssh"] == "my-box" and "node_peer" not in record
+    assert RemoteTunnel.known_hosts().read_text().startswith(BOX + " ssh-ed25519 "), "the tunnel pins the box by its DNS name"
+    assert RemoteSettings.read_private("admin-token") is None
+    assert f"ling-admin remote setup {BOX} --ssh my-box" in capsys.readouterr().out
+
+
+def test_setup_after_box_only_finishes_with_the_remembered_alias(seams):
+    assert RemoteAccess.setup(BOX, yes=True, ssh_to="my-box", box_only=True) == 0
+    seams.clear()
+    assert RemoteAccess.setup(BOX, yes=True) == 0
+    assert ("probe", BOX, "my-box") in seams and ("tunnel", BOX) in seams and ("start",) in seams
+    record = RemoteSettings.read()
+    assert record["node_peer"] is True and record["ssh"] == "my-box" and "box_only" not in record
+
+
+def test_box_only_on_a_finished_setup_keeps_its_record(seams):
+    assert RemoteAccess.setup(BOX, yes=True) == 0
+    seams.clear()
+    assert RemoteAccess.setup(BOX, yes=True, box_only=True) == 0
+    assert [entry[0] for entry in seams] == ["probe", "ca", "issue", "issue", "deploy"]
+    record = RemoteSettings.read()
+    assert record["node_peer"] is True and "box_only" not in record
+
+
+@pytest.mark.parametrize("destination", ["192.0.2.7", "root@192.0.2.7", "[2001:db8::1]", "two words", "-oProxyCommand=x"])
+def test_the_ssh_destination_is_never_an_address(seams, destination, capsys):
+    assert RemoteAccess.setup(BOX, yes=True, ssh_to=destination) == 2
+    assert seams == [] and RemoteSettings.read() is None
+
+
+def test_an_alias_reaches_ssh_but_the_box_keeps_its_dns_name(monkeypatch):
+    calls = []
+    monkeypatch.setattr(RemoteBox, "_run", classmethod(
+        lambda cls, argv, input_bytes=None, timeout=600: calls.append(argv) or _done(argv, "active\nactive\n")))
+    assert RemoteBox.unit_states(BOX, ssh_to="my-box") == {"haproxy": "active", "relay": "active"}
+    assert RemoteBox.remove(BOX, ssh_to="my-box") is False
+    assert [argv[-2] for argv in calls] == ["my-box", "my-box"]
+    assert RemoteBox.unit_states(BOX) is not None and calls[-1][-2] == BOX
+
+
+@pytest.mark.parametrize("own, other, healthy_words", [
+    ("verified", "closed", "reaches this node's control plane"),
+    ("closed", "closed", "the tunnel is not up"),
+    ("foreign", "closed", "something other than this node"),
+    ("unreachable", "unreachable", "does not take a connection"),
+    ("verified", "answered", "ANOTHER NAME GOT A TLS ANSWER"),
+])
+def test_the_public_port_line_says_what_443_did(own, other, healthy_words):
+    assert healthy_words in RemoteBox.public_port_line({"own": own, "other": other})
+
+
+def test_the_public_port_is_checked_with_the_boxs_name_and_another(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(RemoteBox, "_handshake", classmethod(
+        lambda cls, d, port, name, ca, timeout=10: seen.append((d, port, name, ca)) or ("verified" if ca else "closed")))
+    ca = tmp_path / "ca.crt"
+    assert RemoteBox.check_public_port(BOX, ca) == {"own": "verified", "other": "closed"}
+    assert seen == [(BOX, 443, BOX, ca), (BOX, 443, "not-this-box.invalid", None)]
+
+
+def _one_connection_server(certificate=None, key=None):
+    """A scratch loopback listener for one connection: TLS with the given certificate, or a bare close."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def serve():
+        with listener:
+            connection, _ = listener.accept()
+            with connection:
+                if certificate is None:
+                    return
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(str(certificate), str(key))
+                try:
+                    with context.wrap_socket(connection, server_side=True):
+                        pass
+                except (ssl.SSLError, OSError):
+                    pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    return listener.getsockname()[1]
+
+
+@needs_openssl
+def test_a_handshake_tells_the_node_from_a_stranger_and_from_nothing(tmp_path):
+    RemoteCertificateAuthority.ensure(BOX)
+    ca = RemoteCertificateAuthority.ca_certificate()
+    node_certificate, node_key = RemoteCertificateAuthority.issue("control-plane", [BOX])
+    assert RemoteBox._handshake("127.0.0.1", _one_connection_server(node_certificate, node_key), BOX, ca) == "verified"
+    stranger_certificate, stranger_key = tmp_path / "s.crt", tmp_path / "s.key"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+                    "-subj", f"/CN={BOX}", "-addext", f"subjectAltName=DNS:{BOX}", "-days", "1",
+                    "-keyout", str(stranger_key), "-out", str(stranger_certificate)], check=True, capture_output=True)
+    assert RemoteBox._handshake("127.0.0.1", _one_connection_server(stranger_certificate, stranger_key), BOX, ca) == "foreign"
+    assert RemoteBox._handshake("127.0.0.1", _one_connection_server(stranger_certificate, stranger_key),
+                                "not-this-box.invalid", None) == "answered"
+    assert RemoteBox._handshake("127.0.0.1", _one_connection_server(), BOX, ca) == "closed"
+    assert RemoteBox._handshake("127.0.0.1", _free_port(), BOX, ca, timeout=2) == "unreachable"
+
+
+def test_status_of_a_box_only_setup_names_the_missing_half(monkeypatch, capsys):
+    RemoteSettings.write({"dns_name": BOX, "overlay_name": f"mightling-{NODE_ID}.netbird.selfhosted",
+                          "box_only": True, "ssh": "my-box"})
+    monkeypatch.setattr(RemoteBox, "unit_states", classmethod(lambda cls, d, ssh_to=None: {"haproxy": "active", "relay": "active"}))
+    monkeypatch.setattr(RemoteBox, "check_public_port", classmethod(lambda cls, d, ca: {"own": "closed", "other": "closed"}))
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: pytest.fail("the tunnel was asked about")))
+    assert RemoteAccess.status() == 1
+    out = capsys.readouterr().out
+    assert "haproxy active, relay active" in out and "not set up yet (--box-only)" in out and "--ssh my-box" in out
+
+
+def test_status_is_green_only_when_443_reaches_the_node(monkeypatch, capsys):
+    _set_up()
+    monkeypatch.setattr(RemoteBox, "unit_states", classmethod(lambda cls, d, ssh_to=None: {"haproxy": "active", "relay": "active"}))
+    monkeypatch.setattr(RemoteTunnel, "state", classmethod(lambda cls: "active"))
+    monkeypatch.setattr(RemoteControlPlane, "running", classmethod(lambda cls: True))
+    monkeypatch.setattr(RemoteControlPlane, "peers", classmethod(lambda cls, d, t: PEERS))
+    port = {"own": "verified", "other": "closed"}
+    monkeypatch.setattr(RemoteBox, "check_public_port", classmethod(lambda cls, d, ca: dict(port)))
+    assert RemoteAccess.status() == 0
+    port["own"] = "closed"
+    assert RemoteAccess.status() == 1
 
 
 def _set_up():
@@ -578,7 +713,7 @@ def test_remove_keeps_the_ca_and_purge_deletes_everything(monkeypatch):
     _set_up()
     calls = []
     monkeypatch.setattr(RemoteAccess, "_advertise", classmethod(lambda cls, name: calls.append(("advertise", name))))
-    monkeypatch.setattr(RemoteBox, "remove", classmethod(lambda cls, d: calls.append(("box", d)) or True))
+    monkeypatch.setattr(RemoteBox, "remove", classmethod(lambda cls, d, ssh_to=None: calls.append(("box", d)) or True))
     monkeypatch.setattr(RemoteTunnel, "remove", classmethod(lambda cls: calls.append(("tunnel",))))
     monkeypatch.setattr(RemoteControlPlane, "stop", classmethod(lambda cls: calls.append(("stop",)) or True))
     monkeypatch.setattr(RemoteNodePeer, "leave", classmethod(lambda cls, yes: calls.append(("leave",)) or True))
@@ -624,5 +759,8 @@ def test_the_cli_has_the_remote_group():
     parser = DreamferenceCLIController.build_parser()
     args = parser.parse_args(["remote", "setup", BOX, "--yes"])
     assert args.remote_command == "setup" and args.dns_name == BOX and args.yes
+    assert args.ssh_to is None and not args.box_only
+    staged = parser.parse_args(["remote", "setup", BOX, "--ssh", "my-box", "--box-only"])
+    assert staged.ssh_to == "my-box" and staged.box_only
     assert parser.parse_args(["remote", "remove", "--purge"]).purge
     assert "remote" in parser.command_groups

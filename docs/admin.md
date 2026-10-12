@@ -780,6 +780,8 @@ Set up (or update) the control plane here, the box over SSH, the tunnel, and thi
 |---|---|
 | `dns_name` | The box's public DNS name; `ssh <name>` must log in. |
 | `--yes` | Do not ask; never wait for a sudo password. |
+| `--ssh` | Your SSH Host alias for the box, when `ssh <dns_name>` itself does not log in (remembered; never an address) |
+| `--box-only` | Deploy the box and stop: nothing runs on this node (no container, tunnel or sudo) |
 
 #### `ling-admin remote status`
 
