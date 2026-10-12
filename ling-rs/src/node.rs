@@ -11,6 +11,12 @@
 //!    nothing at all;
 //! 5. a browse of `_mightling-node._tcp`: one node is used and remembered, several are a question.
 //!
+//! When a browse misses (nothing answered, the remembered node did not, or the pinned one is not
+//! there), a Linux client whose own Wi-Fi saves power gets one more line saying so, with the
+//! commands that turn it off: power saving loses most of the multicast a browse is (measured on
+//! 2026-10-11/12). It is a hint, never a failure, and `ling` runs none of it
+//! (`ling_node_locator::wifi_power_save_hint`).
+//!
 //! A node other than the remembered one is never adopted silently: prompts and source code go to
 //! whichever node is chosen. `ling node list|use|forget` is the same logic from a shell.
 //!
@@ -174,6 +180,35 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
     checked(chosen.clone(), true, Some(note))
 }
 
+/// Whether the tiers ended because a browse did not find the node: nothing answered and nothing
+/// is remembered, the remembered node did not answer (its last address is tried), or the node
+/// named in [`PIN_ENV`] is not among those that did. Those are the ends a lossy network explains,
+/// so they are the ones [`wifi_hint`] is read for; a configured host, a node, or a node set by
+/// address never browsed.
+pub fn browse_missed(resolution: &Resolution) -> bool {
+    match resolution {
+        Resolution::NoneFound => true,
+        Resolution::LastAddress { note, .. } => note.is_some(),
+        Resolution::Refused(message) => message.starts_with(&format!("{PIN_ENV}=")),
+        _ => false,
+    }
+}
+
+/// The Wi-Fi power-saving hint for a browse that missed (Linux, NetworkManager, a Wi-Fi
+/// connection that saves power), or `None`. It reads nmcli and iw; it never fails and never runs
+/// anything as root.
+fn wifi_hint(missed: bool) -> Option<String> {
+    if missed { locator::wifi_power_save_hint() } else { None }
+}
+
+/// A message with the hint, if any, as its last line.
+pub fn with_hint(message: String, hint: Option<String>) -> String {
+    match hint {
+        Some(hint) => format!("{message}\n{hint}"),
+        None => message,
+    }
+}
+
 /// Refuses a node that speaks a newer contract than this client knows.
 fn checked(advert: Advert, remember: bool, note: Option<String>) -> Resolution {
     if advert.proto > locator::PROTO {
@@ -269,16 +304,18 @@ pub fn inputs() -> Inputs {
 /// user should know and remembering the node. `interactive` says whether a question may be asked.
 pub async fn resolve_host(interactive: bool) -> anyhow::Result<String> {
     let inputs = inputs();
-    let (node, state, remember, note) = match resolve(&inputs, &MdnsBrowser) {
+    let resolution = resolve(&inputs, &MdnsBrowser);
+    let missed = browse_missed(&resolution);
+    let (node, state, remember, note) = match resolution {
         Resolution::Host(host) => return Ok(host),
-        Resolution::Refused(message) => bail!("{message}"),
+        Resolution::Refused(message) => bail!("{}", with_hint(message, wifi_hint(missed))),
         Resolution::NoneFound => {
             // A machine with a model server on loopback that has not written its node id yet
             // (installed before the split): keep working, as before.
             if answers(crate::DEFAULT_VLLM_HOST).await {
                 return Ok(crate::DEFAULT_VLLM_HOST.to_string());
             }
-            bail!("{}", none_found_message());
+            bail!("{}", with_hint(none_found_message(), wifi_hint(missed)));
         }
         Resolution::Choose { adverts, gone } => {
             let chosen = choose(&adverts, gone.as_deref(), interactive)?;
@@ -289,6 +326,11 @@ pub async fn resolve_host(interactive: bool) -> anyhow::Result<String> {
     };
     if let Some(note) = note {
         eprintln!("{note}");
+    }
+    // The remembered node's last address is tried next, and may well answer; the hint says why
+    // the browse missed it, without stopping anything.
+    if let Some(hint) = wifi_hint(missed) {
+        eprintln!("{hint}");
     }
     if remember {
         remember_node(&node);
@@ -443,6 +485,9 @@ pub async fn run_cli(args: &[String]) -> i32 {
             for line in list_lines(&inputs(), &adverts, &models) {
                 println!("{line}");
             }
+            if let Some(hint) = wifi_hint(adverts.is_empty()) {
+                println!("{hint}");
+            }
             0
         }
         Request::Use(name) => {
@@ -450,7 +495,7 @@ pub async fn run_cli(args: &[String]) -> i32 {
             let node = match pick(&adverts, &name) {
                 Ok(node) => node,
                 Err(message) => {
-                    eprintln!("{message}");
+                    eprintln!("{}", with_hint(message, wifi_hint(adverts.is_empty())));
                     return 1;
                 }
             };
@@ -867,6 +912,51 @@ mod tests {
         let Resolution::Found { advert, remember, note } = resolve(&Inputs::default(), &browser) else { panic!("not found") };
         assert_eq!((advert, remember), (spark1(), true));
         assert_eq!(note.as_deref(), Some("Using Mightling node spark-1 at 192.168.50.105 (remembered; `ling node list` shows every node)."));
+    }
+
+    #[test]
+    fn only_the_ends_a_lost_browse_explains_read_the_wifi() {
+        let empty = Fixed::new(Vec::new());
+        // Nothing answered and nothing is remembered.
+        assert!(browse_missed(&resolve(&Inputs::default(), &empty)));
+        // The remembered node did not answer: its last address is tried, and the hint is read.
+        let remembered = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        assert!(browse_missed(&resolve(&remembered, &empty)));
+        // The node named for one command is not among those that answered.
+        let pinned = Inputs { pinned: Some("spark-9".into()), ..Inputs::default() };
+        assert!(browse_missed(&resolve(&pinned, &Fixed::new(vec![spark1()]))));
+        assert!(browse_missed(&resolve(&pinned, &empty)));
+
+        // No browse, or a browse that found the node: nothing is read.
+        let configured = Inputs { configured: Some("http://10.0.0.1:8000".into()), ..Inputs::default() };
+        assert!(!browse_missed(&resolve(&configured, &empty)));
+        let node = Inputs { is_node: true, ..Inputs::default() };
+        assert!(!browse_missed(&resolve(&node, &empty)));
+        let by_hand = Inputs { remembered: Some(Node { address: "10.0.0.2".into(), ..Node::default() }), ..Inputs::default() };
+        assert!(!browse_missed(&resolve(&by_hand, &empty)));
+        assert!(!browse_missed(&resolve(&Inputs::default(), &Fixed::new(vec![spark1()]))));
+        assert!(!browse_missed(&resolve(&Inputs::default(), &Fixed::new(vec![spark1(), spark2()]))));
+        // A node found but refused for its protocol is not a lost browse.
+        let newer = Advert { proto: locator::PROTO + 1, ..spark1() };
+        assert!(!browse_missed(&resolve(&Inputs::default(), &Fixed::new(vec![newer]))));
+    }
+
+    #[test]
+    fn the_hint_is_the_last_line_and_nothing_without_one() {
+        let hint = locator::wifi_hint_from(&[locator::WifiInterface {
+            device: "wlP9s9".into(),
+            connection: "TP-Link_DA74".into(),
+            setting: "default".into(),
+            radio: Some(true),
+        }]);
+        let message = with_hint(none_found_message(), hint);
+        assert!(message.starts_with("No Mightling node found on this network."));
+        assert!(message.lines().last().is_some_and(|line| line.starts_with("Hint: Wi-Fi power saving is on for wlP9s9")
+            && line.contains("sudo nmcli connection modify TP-Link_DA74 802-11-wireless.powersave 2")
+            && line.ends_with("sudo iw dev wlP9s9 set power_save off")));
+        assert_eq!(with_hint(none_found_message(), None), none_found_message());
+        assert!(!browse_missed(&Resolution::Refused("Node x speaks a newer protocol".into())));
+        assert!(browse_missed(&Resolution::Refused(format!("{PIN_ENV}=x: no such node on this network."))));
     }
 
     #[test]

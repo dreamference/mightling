@@ -126,7 +126,9 @@ ling-admin node enable          # publishes this machine to your local network (
     Clients find the node by multicast DNS, and Wi-Fi power saving, which NetworkManager turns on
     by default, loses most of it: with it on, up to ~80% of the queries to a GB10 went unanswered
     and laptops could not find it. `node enable` and `ling-admin host check` warn when it is on,
-    with the commands that fix it; `ling-admin host setup` turns it off for good, with no reconnect.
+    with the commands that fix it; `ling-admin host setup` (or `sudo ling-admin node prepare`) turns
+    it off for good, with no reconnect. A Linux laptop on Wi-Fi loses the answers the same way: when
+    its `ling` finds no node and its own power saving is on, it says so, with the commands.
     On Ethernet there is nothing to do.
 
 Then on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple silicon or Intel):
