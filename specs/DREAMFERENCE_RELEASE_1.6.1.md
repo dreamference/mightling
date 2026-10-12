@@ -30,6 +30,7 @@ night 5 is named):
 | 324a6b6 | ling-engine submodule at 1edc433 |
 | (bridge) | Signal: a question refused by the model gate during a benchmark run gets a clear reply (spec SIGNAL §17.3) |
 | (docs) | Signal's first real-account test (2026-10-12) recorded; Signal drops the preview label, Matrix and Telegram keep it |
+| 9fb0b1e, (Wi-Fi) | Wi-Fi power saving: `host check` reports it, `host setup` and `node prepare` turn it off (prepare's one NetworkManager change), `node enable` warns, and a Linux client whose browse misses adds a hint when its own Wi-Fi saves power |
 
 **Checklist before publishing:**
 - **`ling prompt list`** on the release build lists `offline` between `default` and `high-swe`,
@@ -84,6 +85,16 @@ real homeserver or Telegram bot.
 question from Signal is not answered, and Mightling now replies in Note to Self with the run, its
 progress and roughly how long is left, so you know when to ask again. Before, the reply was the
 raw server error.
+
+**Nodes on Wi-Fi are found again.** Wi-Fi power saving, which Ubuntu's NetworkManager turns on by
+default, loses most of the multicast DNS your other computers find a GB10 by: on two GB10s on
+Wi-Fi up to ~80% of the queries went unanswered, and laptops could not find their node.
+`ling-admin host setup` and `sudo ling-admin node prepare` now turn it off for the Wi-Fi
+connection in use (`nmcli connection modify <connection> 802-11-wireless.powersave 2`, and `iw dev
+<interface> set power_save off` for now, with no reconnect, so an SSH session survives);
+`ling-admin host check` and `node enable` say when it is on, with the commands. On a Linux laptop,
+when `ling` finds no node and the laptop's own Wi-Fi saves power, it adds one line saying so, with
+the commands to run; it changes nothing itself. On Ethernet nothing changes and nothing is said.
 
 ### Fixed
 
