@@ -98,7 +98,9 @@ PROBE_KEYS: Final[dict] = {"enter": "\r", "tab": "\t"}
 # The decision rule's numbers (report "Decision rule").
 MAX_MEDIAN_TURN_END_S: Final[float] = 60.0
 MAX_TURN_END_S: Final[float] = 120.0
-MAX_WALL_INCREASE: Final[float] = 0.10
+MAX_WALL_INCREASE: Final[float] = 0.25
+MAX_HIDDEN_DROP: Final[float] = 1.0
+MISSED_MARGIN_PERCENT: Final[int] = 5
 
 COMPACTION_PROMPT_MARK: Final[str] = "CONTEXT CHECKPOINT COMPACTION"
 TITLE_REQUEST_MARK: Final[str] = "task title"
@@ -477,6 +479,22 @@ def probe_outcome(records: list[dict[str, Any]], turns: list[dict[str, Any]], co
     }
 
 
+def inputs_missing(records: list[dict[str, Any]], typed: dict[int, str]) -> list[int]:
+    """The typed turns whose whole text is not in any user message of the rollout (a paste cut short).
+
+    Args:
+        records: The rollout's records.
+        typed: Turn index to the text typed.
+
+    Returns:
+        list[int]: The indices missing, in order.
+    """
+    seen = [" ".join(message_text(_payload(record)).split()) for record in records
+            if record.get("type") == "response_item" and _payload(record).get("type") == "message"
+            and _payload(record).get("role") == "user"]
+    return [index for index, text in sorted(typed.items()) if not any(" ".join(text.split()) in message for message in seen)]
+
+
 def audit_verdicts(rollout: Path) -> list[dict[str, Any]]:
     """The nightly compaction audit's judgement of each summary in a rollout (§10.3, §12.2).
 
@@ -539,6 +557,9 @@ def analyze_session(rollout: Path, threshold: int | None, probe: dict[str, Any] 
         "peak_context": max(peaks) if peaks else None,
         "usable_window": model_window(records),
         "missed_turn_ends": missed_turn_ends(turns, compactions, threshold) if threshold else [],
+        # Clearly above it: my reading of the context and Codex's estimate can differ near the line.
+        "missed_turn_ends_clear": missed_turn_ends(turns, compactions, threshold * (100 + MISSED_MARGIN_PERCENT) // 100)
+        if threshold else [],
         "probe": probe_outcome(records, turns, compactions, probe) if probe else None,
     }
 
@@ -874,7 +895,7 @@ class SessionPlan:
 def session_env(plan: SessionPlan, host: str, home: Path | None, code_tools: bool, docs: bool) -> dict[str, str]:
     """The environment of one session: throwaway homes, the target server, masking off, the arm's switch."""
     env = dict(os.environ)
-    for key in [key for key in env if key.startswith(("DREAMFERENCE_MIGHTLING_", "CODEX_"))]:
+    for key in [key for key in env if key.startswith(("DREAMFERENCE_MIGHTLING_", "CODEX_")) or key == "MIGHTLING_NODE"]:
         env.pop(key)
     env.update({
         "CODEX_HOME": str(plan.root / "home"),
@@ -1073,6 +1094,9 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
     rollout = find_rollout(plan.root / "home")
     if rollout is not None:
         result.update(analyze_session(rollout, threshold, probe or None))
+        typed = sorted({event["index"] for event in events if event["event"] in ("turn", "probe")})
+        result["inputs_missing"] = inputs_missing(read_records(rollout), {index: texts[index] for index in typed})
+        result["inputs_intact"] = not result["inputs_missing"]
     result["grade"] = plan.task.grade(repo, python)
     return result
 
@@ -1081,7 +1105,9 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
 # A stand-in model server, for the dry run
 
 DRY_RUN_TURNS: Final[list] = [
-    "DRYRUN-1 Say done.",
+    # As long as the real turns (600-950 characters), so the composer's handling of a long paste is tested.
+    "DRYRUN-1 Say done. " + " ".join(f"Filler sentence {n} checks that a long paste reaches the model whole."
+                                     for n in range(1, 15)),
     "DRYRUN-2 Run one command, then say done.",
     "DRYRUN-3 Say goodbye.",
 ]
@@ -1256,7 +1282,7 @@ def dry_run(out: Path, ling: Path, compaction_delay: float = 8.0, probe_key: str
         server = FakeModelServer(compaction_delay=compaction_delay)
         host = server.start()
         try:
-            plan = SessionPlan(task, arm, 1, out / f"dry-run-{arm}", probe_key if arm == "on" else None)
+            plan = SessionPlan(task, arm, 1, out / f"dry-run-{arm}-1", probe_key if arm == "on" else None)
             sessions.append(run_session(plan, ling=ling, host=host, limit=DEFAULT_LIMIT, window=DEFAULT_WINDOW,
                                         python=sys.executable, cache=out / "sources", home=home, code_tools=False,
                                         docs=False, turn_timeout=120, session_timeout=600, think_s=1.0, settle=3.0,
@@ -1265,6 +1291,7 @@ def dry_run(out: Path, ling: Path, compaction_delay: float = 8.0, probe_key: str
             server.stop()
         requests[arm] = server.requests
         tools = server.tools or tools
+        (plan.root / "session.json").write_text(json.dumps(sessions[-1], indent=1, default=str))
     off, on = sessions
     checks = {
         "both sessions reached the composer and finished": all(s["status"] == "complete" for s in sessions),
@@ -1277,6 +1304,7 @@ def dry_run(out: Path, ling: Path, compaction_delay: float = 8.0, probe_key: str
         and on["probe"]["compaction_kind"] == "turn-end",
         "on: the probe's message was not lost": bool(on.get("probe")) and on["probe"]["delivered"],
         "every compaction has an audit verdict": all("audit" in c for s in sessions for c in s.get("compactions", [])),
+        "every typed turn reached the model whole (a long paste included)": all(s.get("inputs_intact") for s in sessions),
     }
     return {"sessions": sessions, "requests": requests, "tools": tools, "checks": checks}
 
@@ -1333,6 +1361,8 @@ def aggregate(sessions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "hidden_passed_mean": _mean((s.get("grade") or {}).get("hidden", {}).get("counts", {}).get("passed", 0)
                                         for s in members),
             "missed_turn_ends": sum(len(s.get("missed_turn_ends", [])) for s in members),
+            "missed_turn_ends_clear": sum(len(s.get("missed_turn_ends_clear", [])) for s in members),
+            "inputs_intact": all(s.get("inputs_intact", True) for s in members),
             "audit_lossless": sum(1 for c in compactions if (c.get("audit") or {}).get("verdict") in ("kept all", "nothing to keep")),
             "audited": len(compactions),
             "stray_summaries": sum(1 for c in compactions if c.get("stray_tool_call")),
@@ -1343,12 +1373,16 @@ def aggregate(sessions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> tuple[str, list[str]]:
     """Applies the decision rule.
 
-    Switch turn-end compaction on by default only if every condition holds: (1) no typed message was
-    lost; (2) turn-end compactions took at most `MAX_MEDIAN_TURN_END_S` at the median and
-    `MAX_TURN_END_S` at worst; (3) for every task whose "off" arm had a mid-turn compaction, the
-    "on" arm had fewer per session; (4) no task's "on" arm was more than `MAX_WALL_INCREASE` slower
-    per session, nor passed fewer hidden tests; (5) the "on" arm missed no turn end. If no "off"
-    session reached the limit, the result is inconclusive, whatever else holds.
+    Hard conditions, all needed to switch turn-end compaction on by default: (1) at least one probe,
+    and no typed message lost; (2) turn-end compactions took at most `MAX_MEDIAN_TURN_END_S` at the
+    median and `MAX_TURN_END_S` at worst; (3) for every task whose "off" arm compacted mid-turn, fewer
+    mid-turn compactions per session in the "on" arm; (4) no turn of the "on" arm ended clearly
+    (`MISSED_MARGIN_PERCENT` above) over the threshold without compacting. Reported, not deciding,
+    because two sessions per arm cannot resolve them (Phase 0 saw the same task vary twofold): a task
+    more than `MAX_WALL_INCREASE` slower per session in the "on" arm, or passing more than
+    `MAX_HIDDEN_DROP` fewer hidden tests. Inconclusive: no "off" session compacted mid-turn (the tasks
+    were too small, not the setting useless), or a typed turn did not reach the model intact (the
+    driver failed, not the setting).
 
     Args:
         sessions: Session records.
@@ -1361,7 +1395,9 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
     passed = True
     probes = [s["probe"] for s in sessions if s.get("probe")]
     lost = [p for p in probes if p["verdict"] == "lost"]
+    interrupted = [p for p in probes if p["verdict"] == "interrupted"]
     lines.append(f"{'✅' if not lost and probes else '❌'} typed messages kept: {len(probes) - len(lost)} of {len(probes)} probes"
+                 + (f" ({len(interrupted)} cut the compaction short)" if interrupted else "")
                  + ("" if probes else " (no probe fired: not shown)"))
     passed &= bool(probes) and not lost
     walls = [c["wall_s"] for s in sessions if s["arm"] == "on" for c in s.get("compactions", [])
@@ -1371,9 +1407,8 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
     lines.append(f"{'✅' if fast else '❌'} turn-end compaction wall time: median {median} s, max "
                  f"{max(walls) if walls else None} s (limits {MAX_MEDIAN_TURN_END_S:.0f} s / {MAX_TURN_END_S:.0f} s)")
     passed &= fast
-    tasks = sorted({s["task"] for s in sessions})
     reached = False
-    for task in tasks:
+    for task in sorted({s["task"] for s in sessions}):
         off, on = table.get(f"{task}/off"), table.get(f"{task}/on")
         if not off or not on:
             lines.append(f"❔ {task}: one arm has no session")
@@ -1386,19 +1421,23 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
                          f"off, {on['mid_turn_per_session']} on")
             passed &= saves
         else:
-            lines.append(f"❔ {task}: the off arm never reached the limit (peak {off['peak_context_max']}), so it shows "
+            lines.append(f"❔ {task}: the off arm never compacted mid-turn (peak {off['peak_context_max']}), so it shows "
                          "no saving to measure")
+        missed = on["missed_turn_ends_clear"]
+        lines.append(f"{'❌' if missed else '✅'} {task}: on-arm turns ending clearly above the threshold with no compaction: "
+                     f"{missed}" + (f" ({on['missed_turn_ends']} within {MISSED_MARGIN_PERCENT}% of it)"
+                                    if on["missed_turn_ends"] > missed else ""))
+        passed &= not missed
         slower = bool(off["session_wall_mean_s"] and on["session_wall_mean_s"]
                       and on["session_wall_mean_s"] > off["session_wall_mean_s"] * (1 + MAX_WALL_INCREASE))
-        worse = (on["hidden_passed_mean"] or 0) < (off["hidden_passed_mean"] or 0)
-        lines.append(f"{'❌' if slower or worse else '✅'} {task}: session wall {off['session_wall_mean_s']} s off, "
-                     f"{on['session_wall_mean_s']} s on; hidden tests passed {off['hidden_passed_mean']} off, "
-                     f"{on['hidden_passed_mean']} on")
-        passed &= not (slower or worse)
-        missed = on["missed_turn_ends"]
-        lines.append(f"{'❌' if missed else '✅'} {task}: turn ends above the threshold with no compaction in the on arm: {missed}")
-        passed &= not missed
-    if not reached:
+        worse = (on["hidden_passed_mean"] or 0) < (off["hidden_passed_mean"] or 0) - MAX_HIDDEN_DROP
+        lines.append(f"{'⚠️' if slower or worse else '➖'} {task} (reported, not deciding): session wall "
+                     f"{off['session_wall_mean_s']} s off, {on['session_wall_mean_s']} s on; hidden tests passed "
+                     f"{off['hidden_passed_mean']} off, {on['hidden_passed_mean']} on")
+    intact = all(row["inputs_intact"] for row in table.values())
+    if not intact:
+        lines.append("❔ a typed turn did not reach the model intact: the driver failed, see `inputs_missing`")
+    if not reached or not intact:
         return "inconclusive", lines
     return ("switch on" if passed else "keep off"), lines
 
@@ -1427,7 +1466,8 @@ its mDNS name, never an address. Speed differs from this machine's server; compa
    reversed. The probe presses Enter in repetition 1 and Tab (queue) in repetition 2.
 3. Expected duration: about 25 min per session (Phase 0's unlimited runs of the same Night Shift work took
    14–18 min as one `exec`; six TUI turns plus compactions add to that), so 8 sessions ≈ 3.5 h; one
-   repetition (`--reps 1`) ≈ 1.7 h. Hard ceiling: 90 min per session (`--session-timeout`).
+   repetition (`--reps 1`) ≈ 1.7 h. Ceilings: 45 min per turn (`--turn-timeout`), 105 min per session
+   (`--session-timeout`). Do not rebuild `ling` during the run: each session records the binary it ran.
 4. Watch: `tail -f` the log; `results.json` and this report are rewritten after every session.
 """
 
@@ -1506,13 +1546,16 @@ def render_report(meta: dict[str, Any], sessions: list[dict[str, Any]]) -> str:
             out.append(f"| {s['label']} | {c['number']} | {c['kind']} | {c['wall_s']} | {c['context_before']} → {c['context_after']} "
                        f"| {c['summary_chars']} | {(c.get('audit') or {}).get('verdict', '—')} |")
     out += ["", "## Decision rule", "",
-            f"Switch `mightling_turn_end_compaction` on by default only if all hold: no typed message lost; turn-end "
-            f"compactions at most {MAX_MEDIAN_TURN_END_S:.0f} s at the median and {MAX_TURN_END_S:.0f} s at worst (about the "
-            "time it takes to read an answer); for each task whose off arm compacted mid-turn, fewer mid-turn compactions "
-            f"per session in the on arm; no task more than {MAX_WALL_INCREASE:.0%} slower per session in the on arm nor "
-            "passing fewer hidden tests; and no turn in the on arm ended above the threshold without compacting. If no off "
-            "session reached the limit the run is inconclusive: the task was too small, not the setting useless. An "
-            "interrupted compaction is not a failure if the typed message was kept; it is reported.",
+            f"Switch `mightling_turn_end_compaction` on by default only if all hold: at least one probe and no typed "
+            f"message lost; turn-end compactions at most {MAX_MEDIAN_TURN_END_S:.0f} s at the median and "
+            f"{MAX_TURN_END_S:.0f} s at worst (about the time it takes to read an answer); for each task whose off arm "
+            "compacted mid-turn, fewer mid-turn compactions per session in the on arm; and no turn of the on arm ended "
+            f"clearly ({MISSED_MARGIN_PERCENT}% or more) above the threshold without compacting. Reported but not deciding, "
+            "since two sessions per arm cannot resolve them (Phase 0 saw one task vary twofold): an on arm more than "
+            f"{MAX_WALL_INCREASE:.0%} slower per session, or passing more than {MAX_HIDDEN_DROP:.0f} fewer hidden tests. "
+            "Inconclusive when no off session compacted mid-turn (the tasks were too small, not the setting useless) or a "
+            "typed turn did not reach the model intact. An interrupted compaction is not a failure if the typed message "
+            "was kept; it is reported.",
             "", RUNBOOK]
     return "\n".join(out) + "\n"
 
@@ -1550,10 +1593,24 @@ def server_facts(host: str) -> dict[str, Any]:
             "window": int(card.get("max_model_len") or 0) or None, "pool": pool}
 
 
+LOOPBACK_NAMES: Final[tuple] = ("localhost", "127.", "0.0.0.0", "[::1]", "::1")
+
+
 def require_host(host: str | None) -> str:
-    """The target server; the bench never falls back to a default (it would hit this machine's server)."""
+    """The target server, named. The bench never falls back to a default, and refuses this machine's
+    own server (a loopback name): on 2026-10-13 it is held by the benchmark nights.
+
+    Args:
+        host: `--host`, or the inherited `DREAMFERENCE_VLLM_HOST`.
+
+    Returns:
+        str: The URL without a trailing slash.
+    """
     if not host:
         raise SystemExit("❌ name the model server: --host http://<node>.local:8000 (or DREAMFERENCE_VLLM_HOST)")
+    name = host.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0] if "]" not in host else host.split("://", 1)[-1].split("]")[0] + "]"
+    if name.lower().startswith(LOOPBACK_NAMES):
+        raise SystemExit(f"❌ {host} is this machine's own server; name the node to measure on (--host http://<node>.local:8000)")
     return host.rstrip("/")
 
 
@@ -1701,12 +1758,15 @@ def command_dry_run(options: argparse.Namespace) -> int:
     """Both arms against the stand-in server; prints the checks."""
     out = Path(options.out).expanduser() if options.out else DEFAULT_OUT_PARENT / f"dry-run-{datetime.now():%Y%m%d-%H%M%S}"
     out.mkdir(parents=True, exist_ok=True)
-    result = dry_run(out, ling_binary(options.ling), probe_key=options.probe_key)
+    ling = ling_binary(options.ling)
+    meta = {"started": datetime.now(timezone.utc).isoformat(timespec="seconds"), "host": "stand-in", "model": "fake-model",
+            "window": DEFAULT_WINDOW, "limit": DEFAULT_LIMIT, "percent": turn_end_percent(DEFAULT_WINDOW, DEFAULT_LIMIT),
+            "threshold": turn_end_threshold_tokens(DEFAULT_WINDOW, 26), "binary": binary_info(ling),
+            "order": [f"dry-run-{arm}-1" for arm in ARMS]}
+    (out / "meta.json").write_text(json.dumps(meta, indent=1))
+    result = dry_run(out, ling, probe_key=options.probe_key)
     (out / "dry-run.json").write_text(json.dumps(result, indent=1, default=str))
-    (out / "report.md").write_text(render_report({"host": "stand-in", "model": "fake-model", "window": DEFAULT_WINDOW,
-                                                  "limit": DEFAULT_LIMIT, "percent": turn_end_percent(DEFAULT_WINDOW, DEFAULT_LIMIT),
-                                                  "threshold": turn_end_threshold_tokens(DEFAULT_WINDOW, 26),
-                                                  "binary": binary_info(ling_binary(options.ling))}, result["sessions"]))
+    write_outputs(out, meta, load_sessions(out))
     for name, passed in result["checks"].items():
         print(f"{'✅' if passed else '❌'} {name}")
     print(f"💡 {out}")
@@ -1745,8 +1805,8 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--python", default=sys.executable, help="the interpreter the tasks' tests use (default: this one)")
     run.add_argument("--no-code-tools", action="store_true", help="switch ling-code's tools off (default: the product's)")
     run.add_argument("--no-docs", action="store_true", help="switch ling-docs's tools off (default: the product's)")
-    run.add_argument("--turn-timeout", type=float, default=1800)
-    run.add_argument("--session-timeout", type=float, default=5400)
+    run.add_argument("--turn-timeout", type=float, default=2700, help="seconds before a turn is interrupted")
+    run.add_argument("--session-timeout", type=float, default=6300, help="seconds after which no further turn is typed")
     report = commands.add_parser("report", help="re-analyze the rollouts and rewrite the report")
     report.add_argument("--out", required=True)
     dry = commands.add_parser("dry-run", help="both arms against a stand-in server on loopback")

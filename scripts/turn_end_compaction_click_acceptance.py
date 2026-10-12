@@ -52,15 +52,16 @@ def test_hidden_deprecated_option_warns_and_marks_help():
 
 
 def test_hidden_help_width_from_environment(monkeypatch):
+    # 60 and 70, not narrower: click's formatter never wraps below 50 on its default path.
     @click.command(help="word " * 60)
     def cli():
         pass
 
-    monkeypatch.setenv("CLICK_HELP_WIDTH", "40")
+    monkeypatch.setenv("CLICK_HELP_WIDTH", "60")
     narrow = CliRunner().invoke(cli, ["--help"]).output
-    assert max(len(line) for line in narrow.splitlines()) <= 40
+    assert max(len(line) for line in narrow.splitlines()) <= 60
     monkeypatch.setenv("CLICK_HELP_WIDTH", "120")
     wide = CliRunner().invoke(cli, ["--help"]).output
-    assert max(len(line) for line in wide.splitlines()) > 40
-    explicit = CliRunner().invoke(cli, ["--help"], terminal_width=60).output
-    assert max(len(line) for line in explicit.splitlines()) <= 60
+    assert max(len(line) for line in wide.splitlines()) > 60
+    explicit = CliRunner().invoke(cli, ["--help"], terminal_width=70).output
+    assert max(len(line) for line in explicit.splitlines()) <= 70
