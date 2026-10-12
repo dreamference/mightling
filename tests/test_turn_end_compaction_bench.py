@@ -312,15 +312,38 @@ def test_the_rule_keeps_it_off_when_a_typed_message_is_lost_or_compaction_is_slo
     assert bench.decide(sessions, bench.aggregate(sessions))[0] == "keep off"
     sessions = [_result("a", "off", mid=2), _result("a", "on", turn_end=(90.0, 95.0), probe=WAITED)]
     assert bench.decide(sessions, bench.aggregate(sessions))[0] == "keep off"
-    sessions = [_result("a", "off", mid=2), _result("a", "on", turn_end=(35.0,), probe=WAITED, wall=2000.0)]
+    sessions = [_result("a", "off", mid=2), _result("a", "on", mid=2, turn_end=(35.0,), probe=WAITED)]
     assert bench.decide(sessions, bench.aggregate(sessions))[0] == "keep off"
+    sessions = [_result("a", "off", mid=2), _result("a", "on", turn_end=(35.0,), probe=WAITED, missed=("t9",))]
+    sessions[1]["missed_turn_ends_clear"] = ["t9"]
+    assert bench.decide(sessions, bench.aggregate(sessions))[0] == "keep off"
+
+
+def test_wall_time_and_hidden_tests_are_reported_but_two_sessions_cannot_decide_on_them():
+    sessions = [_result("a", "off", mid=2), _result("a", "on", turn_end=(35.0,), probe=WAITED, wall=2400.0, hidden=3)]
+    decision, lines = bench.decide(sessions, bench.aggregate(sessions))
+    assert decision == "switch on"
+    assert any(line.startswith("⚠️ a (reported, not deciding)") for line in lines)
+
+
+def test_a_turn_end_just_above_the_threshold_is_a_note_not_a_failure():
+    sessions = [_result("a", "off", mid=2), _result("a", "on", turn_end=(35.0,), probe=WAITED, missed=("t9",))]
+    decision, lines = bench.decide(sessions, bench.aggregate(sessions))
+    assert decision == "switch on"
+    assert any("1 within 5% of it" in line for line in lines)
+
+
+def test_a_turn_that_did_not_reach_the_model_whole_makes_the_run_inconclusive():
+    sessions = [_result("a", "off", mid=2), _result("a", "on", turn_end=(35.0,), probe=WAITED)]
+    sessions[1]["inputs_intact"] = False
+    assert bench.decide(sessions, bench.aggregate(sessions))[0] == "inconclusive"
 
 
 def test_the_rule_is_inconclusive_when_no_off_session_reached_the_limit():
     sessions = [_result("a", "off", mid=0), _result("a", "on", turn_end=(35.0,), probe=WAITED)]
     decision, lines = bench.decide(sessions, bench.aggregate(sessions))
     assert decision == "inconclusive"
-    assert any("never reached the limit" in line for line in lines)
+    assert any("never compacted mid-turn" in line for line in lines)
 
 
 def test_the_report_carries_the_decision_the_tables_and_the_runbook():
@@ -357,11 +380,56 @@ def test_a_session_runs_in_throwaway_homes_with_masking_off_and_the_arm_on_the_c
     assert bench.session_args("off", 94_144, 26, "workspace-write")[-1] == "model_post_turn_compact_threshold_percent=0"
 
 
-def test_the_bench_refuses_to_run_without_a_named_server(tmp_path):
+def test_the_bench_refuses_to_run_without_a_named_server_or_against_this_machines_own(tmp_path):
     with pytest.raises(SystemExit):
         bench.require_host(None)
     with pytest.raises(SystemExit):
         bench.main(["run", "--host", "", "--out", str(tmp_path / "out")])
+    for own in ("http://localhost:8000", "http://127.0.0.1:8000/", "http://0.0.0.0:8000", "http://[::1]:8000"):
+        with pytest.raises(SystemExit):
+            bench.require_host(own)
+    assert bench.require_host("http://node-b.local:8000/") == "http://node-b.local:8000"
+
+
+def test_a_turn_whose_paste_was_cut_short_is_missing(tmp_path):
+    def build(r):
+        r.turn_start("t1")
+        r.user("Read every module in full, then explain the runner.")
+        r.user("Second turn, cut")
+        r.turn_end("t1")
+
+    path, _ = _session(tmp_path, build)
+    typed = {0: "Read every module  in full,\nthen explain the runner.", 1: "Second turn, cut short by the composer."}
+    assert bench.inputs_missing(bench.read_records(path), typed) == [1]
+
+
+def test_report_rebuilds_the_results_from_the_rollouts_left_on_disk(tmp_path):
+    out = tmp_path / "run"
+    label = "click-on-1"
+
+    def build(r):
+        r.turn_start("t1")
+        r.user("Explain.")
+        r.assistant("Explained.")
+        r.tokens(66_000, 66_400)
+        r.compaction("t1", 30_000, record_summary=False)
+        r.turn_end("t1")
+
+    session_dir = out / label / "home" / "sessions" / "2026" / "10" / "13"
+    session_dir.mkdir(parents=True)
+    rollout = Rollout()
+    build(rollout)
+    rollout.write(session_dir / "rollout-2026-10-13T09-00-00-x.jsonl")
+    (out / "meta.json").write_text(json.dumps({"order": [label], "limit": 94_144}))
+    (out / label / "session.json").write_text(json.dumps(
+        {"label": label, "task": "click", "arm": "on", "rep": 1, "status": "driver error: died", "turn_end_threshold": 64_750,
+         "probe_note": None}))
+    assert bench.main(["report", "--out", str(out)]) == 0
+    results = json.loads((out / "results.json").read_text())
+    (session,) = results["sessions"]
+    assert session["counts"] == {"pre-turn": 0, "mid-turn": 0, "turn-end": 1}
+    assert session["compactions"][0]["wall_s"] == 30.0
+    assert "click-on-1" in (out / "report.md").read_text()
 
 
 def test_the_stand_in_answers_titles_compactions_and_steers_turn_two_into_a_shell_call():
