@@ -1,6 +1,6 @@
 # Mightling Ask, the Mightling web server, and retiring Onyx
 
-**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0, ships in **1.7.0**, the user's decision of 2026-10-09), see §19. The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
+**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0, ships in **1.7.0**, the user's decision of 2026-10-09), see §19; **rebased onto `main` after the 1.6.0 release on 2026-10-12 and not merged, for the owner's review** (§19.7). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
 **Names:** written with the post-rename names ([RENAME_MIGHTLING](./DREAMFERENCE_RENAME_MIGHTLING.md), branch `rename/mightling`): `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app`, `~/.mightling`, `mightling_*` settings, `_mightling-node._tcp`. Where `main` still says Puffin, read `puffin` for `ling`.
 **Builds on:**
 - [MIGHTLING_DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
@@ -612,3 +612,27 @@ No container, live service, model server or real home was touched.
 - **The 1.7.0 release notes** get the line under §10's table.
 - **Verified:** the Python suite, 907 passed, 91 skipped, with the same one failure from the environment. One run also failed `test_night_shift.py::…bundled_ling…`, a timing race on a loaded machine; it passed on three reruns and on the full rerun. No Rust or front-end code changed in this part.
 
+### 19.7 Rebased onto `main` for 1.7.0 (2026-10-12)
+
+**The decision.** On 2026-10-10 the owner dropped Phase B as a separate step. On 2026-10-12, asked again, the owner chose Phase C: this branch, rebased and verified, ships in 1.7.0 after the owner's review. Phase B (`chat export`, `chat retire`, Onyx opt-in) is not built and will not be.
+
+**The rebase.** The seven commits of 2026-10-09 were replayed onto `main` at `29dd60b` (after the 1.6.0 release and the automatic-release change), 136 commits later. Four conflicts, all small:
+- `tests/conftest.py`: `main` had given `_refuse_real_docker` a `request` argument (the installed-binary guard reads its marker). The resolution keeps that argument and takes this branch's comment.
+- `AGENTS.md`, `docs/dev/desktop.md` and `specs/README.md`: prose, one hunk each. `main`'s additions were kept: the `ling` spawn and port guards and `FAKE_MIGHTLING` in the tests rule, the Forge 8 note on the fuses, and DESKTOP_ELECTRON's §11 and §12 in the index.
+
+No code in the rebased tree names a deleted module (`onyx_runner`, `onyx_installer`, `chat_admin_credentials`, `onyx_ui_*`, `onyx_brand_assets`).
+
+**Found and fixed on the way.** `ling-admin node provision --web` (FLEET) ran `ling-admin ling start` and `ling configure`, which is how the rename mechanically rewrote `puffin-admin puffin start`. `ling-admin` never had that subcommand (the group is `chat`), so `--web` failed at that step from the moment the fleet code reached the renamed tree. The step is gone: with Onyx retired, the web UI is `ling web`, and `node enable` without `--no-web` already puts it on the LAN. The dry run names that choice, the help text and `docs/admin.md` say it, and the test checks that nothing installs Onyx.
+
+**Specs reconciled** (the ones that still described Onyx as live): ARCHITECTURE (the diagram, §3.5), CODEBASE (the `chat/` tree), CONTEXT (the test table), AGENTS and DOCKER (`DockerBridge` for OpenHands' URL), MIGHTLING_GMAIL (the secret's owner, the hints `ling-admin google start` and `/apps`, the tests), MIGHTLING_APPS §5.1 and §5.3, MIGHTLING_NODE (the binds table, what an advertised node exposes), FLEET (`--web`), SETUP, MODELS (`supports_vision`), PDF_SEARCH (its host is gone), MIGHTLING_DESKTOP, WINDOWS_ARM, EGRESS, AIRGAPPED, ADVISOR_NODE, SKILLS, CAVE_MODE, CHAT, LOCAL_INDEX, PYTHON_QUALITY and the README index. Specs that already describe Onyx as history, and the release notes, were left as written. `AGENTS.md` also gained `google {start,stop,status}` in the command list, and stays under 24 KB (24,533 bytes).
+
+**Verified (2026-10-12)**, with no container, live service, model server or installed `ling` touched, and the SWE-bench night running on this machine:
+- **The Python suite:** 1048 passed, 78 skipped.
+- **`ling-rs/web`:** `cargo test` in a copy beside `../airgapped`, without the UI embedded: 34 unit and 16 server tests.
+- **`desktop/ui`:** 29 vitest cases and the typecheck.
+
+**Not run (left for the review or the release build):**
+- **The launcher's tests** (`cargo test -p ling-launcher` in a Codex export). The branch changes `ling-rs/src/lib.rs`, `ling-rs/src/images.rs` and `ling-rs/apps/src/mcp.rs`; the last run was on 2026-10-09 (§19.5, 235 passed), before the rebase.
+- **`desktop/electron`'s vitest, typecheck, `npm run package` and `npm run e2e`.** This machine has no `node_modules` there, and `npm ci` needs the network. Last run on 2026-10-09.
+- **`ling-admin codex build`, and `audit egress --web` and `--app` on a real build.** Both need the installed `ling` and the model server, which the running benchmark night holds.
+- **Anything §19.5 already lists as not verified:** the sidecars really starting, a real transcription, the microphone prompt, and `chat remove` against this machine's Onyx deployment, which still runs and was not touched.

@@ -38,7 +38,7 @@
 | `dreamference/hardware/` | GB10 detection and telemetry, model matrix, HF downloads and tensorization |
 | `dreamference/vllm_server/` | Docker model-server lifecycle (vLLM and SGLang), launch arguments, chat-template patching, host-safety guards, diffusion sidecar |
 | `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, the `ling` builder, the Codex test runner, `ling-docs`'s model setup |
-| `dreamference/chat/` | Onyx Lite (the web chat until its retirement) lifecycle and patches, the Google service (Gmail, Drive, Calendar), image search, the SearXNG sidecar and the sidecar network, the Matrix homeserver, the desktop app's runner |
+| `dreamference/chat/` | What is left of the retired Onyx web chat (`chat remove`/`status`), the Google service (Gmail, Drive, Calendar), image search, the SearXNG sidecar and the sidecar network, the Matrix homeserver, the desktop app's runner |
 | `dreamference/context_engine/` | AST symbols, TF-IDF, FTS5 and dense retrieval |
 | `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, web tools, and code search through `ling-code` |
 | `dreamference/cli/` | `ling-admin`, deep model inspection, benchmark dataset, code-index tool setup, the Puffin → Mightling migration |
@@ -100,13 +100,8 @@ dreamference/
 │   ├── docs_index_setup.py                      # DocsIndexSetup (ling-admin docs setup: what ling-docs loads)
 │   └── vllm_readiness_waiter.py                 # VLLMReadinessWaiter (wait_for_vllm)
 ├── chat/
-│   ├── onyx_runner.py / onyx_installer.py       # OnyxRunner / OnyxInstaller
-│   ├── onyx_ui_overrides.py                     # OnyxUIOverrides (appended CSS)
-│   ├── onyx_ui_fonts.py                         # OnyxUIFonts (@font-face swap)
-│   ├── onyx_ui_labels.py                        # OnyxUILabels (string rewrites in JS)
-│   ├── onyx_ui_scripts.py                       # OnyxUIScripts (injected behaviour)
-│   ├── onyx_brand_assets.py                     # OnyxBrandAssets (logos, favicon, app icon)
-│   ├── chat_admin_credentials.py                # ChatAdminCredentials (the web chat's per-install admin password)
+│   ├── retired_web_chat.py                      # RetiredWebChat (ling-admin chat remove|status, the one-time offer)
+│   ├── docker_bridge.py                         # DockerBridge (loopback → the Docker bridge, for containers)
 │   ├── gmail_search_service.py                  # GmailSearchService (the Google service inside its container)
 │   ├── google_workspace_reader.py               # GoogleWorkspaceReader (read-only Drive and Calendar, staged beside it)
 │   ├── google_service.py                        # GoogleService (ling-admin google start|stop|status, without the web UI)
@@ -114,6 +109,9 @@ dreamference/
 │   ├── gmail_client.py                          # GmailClient (ling-admin gmail)
 │   ├── matrix_homeserver.py                     # MatrixHomeserver (ling-admin matrix: tuwunel on an internal network)
 │   ├── image_search_service.py                  # ImageSearchService, HardenedFetcher, ImageStore, SearxngClient, SiglipClient, VisionRanker, FetchRejected
+│   ├── image_search_sidecar.py                  # ImageSearchSidecar (ling-admin images start|stop|status)
+│   ├── image_search_mcp.py                      # ImageSearchMcp (ling-admin images mcp: the image_search tool)
+│   ├── speech_sidecar.py                        # SpeechSidecar (ling-admin voice start|stop|status)
 │   ├── searxng_sidecar.py                       # SearxngSidecar (ling-admin searxng start)
 │   ├── sidecar_network.py                       # SidecarNetwork (the user-defined network sidecars are created on)
 │   ├── desktop_protocol_types.py                # DesktopProtocolTypes (the app-server's TypeScript types for Work)

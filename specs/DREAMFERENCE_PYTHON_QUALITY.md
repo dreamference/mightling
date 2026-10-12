@@ -28,7 +28,7 @@ PEP 8 and PEP 257 are the base layer, and the **Google Python Style Guide's docs
 | Function length | median 17 lines, p90 48, max **1,265** | 81 functions over 50 lines, 12 over 100 |
 | McCabe complexity (flake8 `C901`) | 44 functions above 10, 15 above 15, 5 above 25 | |
 | The worst five by complexity | `DreamferenceCLIController.run_cli` **228** (1,265 lines); `GmailSearchService.serve` 37; `VLLMServerManager.build_launch_command` 33; `ContainerDiagnostics.get_diagnostics_line` 30; `VLLMServerManager.start_server` 28 (367 lines) | `run_cli` alone is a fifth of the problem |
-| Other long functions | `build_parser` 414 lines (complexity 1: a flat list, which is fine); `DreamferenceConfig.__init__` 224; `ModelDownloader.tensorize_model` 191; `OnyxRunner.configure` 160 | |
+| Other long functions | `build_parser` 414 lines (complexity 1: a flat list, which is fine); `DreamferenceConfig.__init__` 224; `ModelDownloader.tensorize_model` 191; `OnyxRunner.configure` 160 (deleted with Onyx in 1.7.0) | |
 | Public functions without a docstring | 56 of 674 | the norm is already high |
 | Unannotated parameters | 8 of 1,219 | annotations are already the norm; **`Any` appears 373 times** |
 | `except Exception` | 111 | many are deliberate (host safety must not crash a watchdog), none say so |
