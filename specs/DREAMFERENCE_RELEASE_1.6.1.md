@@ -5,7 +5,8 @@
 board lines) and the decisions of 2026-10-10. Not published: the version is not set and there is
 no tag. The user decided that 1.6.1 is cut **after night 5's result** (the `apply_patch` arm), so
 the two arm sections below carry a `{{TBD}}` each; the rest is fixed. The text between the two
-rules is the GitHub release's description.
+rules is the GitHub release's description: the release workflow publishes it as it stands
+(`scripts/release_notes.py`), and refuses to while a `{{TBD` is left in it.
 
 **Version.** To be set to 1.6.1 in `setup.py`, `dreamference/__init__.py`, the MCP server's
 `serverInfo` and `desktop/electron/package.json` when the release is cut. The release workflow

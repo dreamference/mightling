@@ -106,7 +106,16 @@ release waited for an "Approve" click on GitHub before it was signed and publish
 longer has a required reviewer; its branch policy stays (`main` and `release/*`), so the key is
 still out of reach of a workflow pushed to any other branch, but anyone who can push to those
 branches and dispatch the workflow now gets a signed release without a second person's click.
-The workflow's `draft` input (default true) still decides whether the release is published.
+**A dispatch publishes (2026-10-12, the same decision).** The workflow's `draft` input now
+defaults to false, so a run that passes ends in a published release with no hand step: no notes
+pasted, no Publish button. Its description is the text between the first two `---` lines of
+`specs/DREAMFERENCE_RELEASE_<version>.md` (a pre-release names its own file), extracted and
+unwrapped into single lines by `scripts/release_notes.py` (tested in `tests/test_release_notes.py`),
+after the "Mac desktop app (preview, unsigned)" paragraph when a `-preview.dmg` is attached and
+before GitHub's generated "Full Changelog" line. A spec that is missing, or whose description still
+contains `{{TBD` or a `VARIANT` marker, stops a non-draft run in the `validate` job, before any
+build, and again in the `release` job before the release is created. `draft=true` still builds a
+draft to publish by hand; it goes out with GitHub's generated notes alone when the spec is not ready.
 
 ## 5. Rotating the key
 

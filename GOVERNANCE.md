@@ -19,9 +19,12 @@ Security problems are not proposed in public: see [SECURITY.md](SECURITY.md).
 
 ## Releases
 
-A release is cut by hand from `main`, with the **Release** workflow
-([`.github/workflows/release.yml`](.github/workflows/release.yml)). It builds every binary on GitHub's
-runners and publishes them as a release tagged `v<version>`. The last step runs in the GitHub `release`
+A release is cut from `main` by dispatching the **Release** workflow
+([`.github/workflows/release.yml`](.github/workflows/release.yml)); from there it is automatic. It
+builds every binary on GitHub's runners and publishes them as a release tagged `v<version>`, with no
+approval and no hand step, its description taken from the version's notes in
+`specs/DREAMFERENCE_RELEASE_<version>.md`; a run whose notes are missing or unfinished stops before
+anything is published. The last step runs in the GitHub `release`
 environment, which only `main` and `release/*` can use; its key, held only
 there, signs `SHA256SUMS` (Ed25519), and each file carries a build-provenance attestation. `ling update`
 and `install.sh` check the signature against the keys in `ling-rs/release-signing.pub` before
