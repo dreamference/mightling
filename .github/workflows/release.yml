@@ -19,9 +19,9 @@ on:
         type: boolean
         default: false
       draft:
-        description: "Create the release as a draft (publish it by hand afterwards)"
+        description: "Create the release as a draft (publish it by hand afterwards). Off: the run publishes it, with the notes of specs/DREAMFERENCE_RELEASE_<version>.md"
         type: boolean
-        default: true
+        default: false
       run_tests:
         description: "Gate the release on the test suite"
         type: boolean
@@ -92,6 +92,20 @@ jobs:
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             echo "::error::Tag $TAG already exists"
             exit 1
+          fi
+      # The release's description is the text between the rules of specs/DREAMFERENCE_RELEASE_<version>.md,
+      # published with no hand step after this run. Checked here, before any build, so a missing or
+      # unfinished one stops a published release in a minute, not after the builds; a draft goes out
+      # with GitHub's generated notes only.
+      - name: Check the release notes
+        run: |
+          if ! python3 scripts/release_notes.py --version "$VERSION" > /dev/null 2> notes-error.txt; then
+            if [[ "${{ inputs.draft }}" == "true" ]]; then
+              echo "::warning::$(cat notes-error.txt). The draft carries GitHub's generated notes only."
+            else
+              echo "::error::$(cat notes-error.txt). A published release needs its notes; dispatch with draft to build one without them."
+              exit 1
+            fi
           fi
 
   test:
@@ -341,12 +355,15 @@ jobs:
     steps:
       # Only the trusted keys and a key transition, if one is under way: the signature is checked
       # against what `ling update` and install.sh will check it against before anything is published.
+      # And the release notes with the script that extracts them.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           sparse-checkout: |
             ling-rs/release-signing.pub
             ling-rs/release-key-transition.pub
             ling-rs/release-key-transition.pub.sig
+            scripts/release_notes.py
+            specs/DREAMFERENCE_RELEASE_${{ inputs.version }}.md
           sparse-checkout-cone-mode: false
           path: source
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -405,6 +422,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # GitHub's generated notes come last (the "Full Changelog" line); --notes-file is prepended.
           flags=(--generate-notes --target "$GITHUB_SHA" --title "Mightling $TAG")
           [[ "${{ inputs.prerelease }}" == "true" ]] && flags+=(--prerelease)
           [[ "${{ inputs.draft }}" == "true" ]] && flags+=(--draft)
@@ -412,17 +430,29 @@ jobs:
           # files themselves; handing gh a directory fails the upload after the release is created.
           mapfile -t files < <(find artifacts -type f | sort)
           files+=(SHA256SUMS SHA256SUMS.sig)
-          # The Mac app is a preview and is not notarized: say so above the generated notes.
+          : > notes.md
+          # The Mac app is a preview and is not notarized: say so first. One line, because GitHub
+          # renders every newline in a release body as a line break.
           if printf '%s\n' "${files[@]}" | grep -q -- '-preview\.dmg$'; then
             {
               echo "### Mac desktop app (preview, unsigned)"
               echo
-              echo "\`Mightling-${VERSION}-arm64-preview.dmg\` (Apple silicon) and \`Mightling-${VERSION}-x64-preview.dmg\` (Intel) are a preview of the desktop app for macOS 12 or later, a client of a Mightling node on your network. They are signed ad hoc only, with no Apple Developer ID and no notarization, so macOS refuses to open the app the first time."
-              echo "Drag Mightling to Applications, try to open it once, then allow it in System Settings → Privacy & Security → Open Anyway (on macOS 14 and earlier, Control-click the app and choose Open instead)."
-              echo "Or, in Terminal: \`xattr -dr com.apple.quarantine /Applications/Mightling.app\`. Check the dmg against SHA256SUMS first; steps in docs/desktop.md."
+              echo "\`Mightling-${VERSION}-arm64-preview.dmg\` (Apple silicon) and \`Mightling-${VERSION}-x64-preview.dmg\` (Intel) are a preview of the desktop app for macOS 12 or later, a client of a Mightling node on your network. They are signed ad hoc only, with no Apple Developer ID and no notarization, so macOS refuses to open the app the first time. Drag Mightling to Applications, try to open it once, then allow it in System Settings → Privacy & Security → Open Anyway (on macOS 14 and earlier, Control-click the app and choose Open instead). Or, in Terminal: \`xattr -dr com.apple.quarantine /Applications/Mightling.app\`. Check the dmg against SHA256SUMS first; steps in docs/desktop.md."
               echo
-            } > notes.md
-            flags+=(--notes-file notes.md)
+            } >> notes.md
           fi
+          # Then the description from specs/DREAMFERENCE_RELEASE_<version>.md (checked by `validate`
+          # already; checked again here, before the release exists, since a published release
+          # carries it with no hand step after this one).
+          if python3 source/scripts/release_notes.py source/specs/DREAMFERENCE_RELEASE_"$VERSION".md > body.md 2> notes-error.txt; then
+            cat body.md >> notes.md
+            echo >> notes.md
+          elif [[ "${{ inputs.draft }}" == "true" ]]; then
+            echo "::warning::$(cat notes-error.txt). The draft carries GitHub's generated notes only."
+          else
+            echo "::error::$(cat notes-error.txt). Nothing was published."
+            exit 1
+          fi
+          [[ -s notes.md ]] && flags+=(--notes-file notes.md)
           printf 'Uploading %s\n' "${files[@]}"
           gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" "${flags[@]}"
