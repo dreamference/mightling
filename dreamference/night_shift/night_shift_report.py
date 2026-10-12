@@ -16,7 +16,8 @@ class NightShiftReport:
     """Formats and writes `reports/<date>.md`."""
 
     @classmethod
-    def render(cls, started: datetime, tasks: List[Dict[str, Any]], notes: List[str]) -> str:
+    def render(cls, started: datetime, tasks: List[Dict[str, Any]], notes: List[str],
+               compactions: list[str] | None = None) -> str:
         """
         Renders a report.
 
@@ -24,6 +25,7 @@ class NightShiftReport:
             started: When the run started; it names the report.
             tasks: The records of every task the run looked at, as they ended.
             notes: Admission and scheduling notes (checks that stopped or delayed the run).
+            compactions: The compaction audit's lines (compaction spec §10.3), if any.
 
         Returns:
             str: Markdown.
@@ -37,16 +39,24 @@ class NightShiftReport:
             lines += [f"## {repo}", ""]
             for task in repo_tasks:
                 lines += cls._task_block(task) + [""]
-        lines += ["## Review", ""]
+        if tasks:
+            lines += cls._review(tasks)
+        if compactions:
+            lines += ["", "## Compactions", ""] + [f"- {line}" for line in compactions]
+        if notes:
+            lines += ["", "## Notes", ""] + [f"- {note}" for note in notes]
+        return "\n".join(lines).rstrip() + "\n"
+
+    @classmethod
+    def _review(cls, tasks: list[dict[str, Any]]) -> list[str]:
+        lines = ["## Review", ""]
         branches = [task for task in tasks if (task.get("result") or {}).get("branch")]
         for task in branches:
             lines.append(f"- `git -C {task['repo']} diff {task['base'][:12]}..{task['result']['branch']}`")
         if not branches:
             lines.append("- No branch to review.")
         lines.append("- `git worktree list` shows the worktrees kept for interrupted tasks.")
-        if notes:
-            lines += ["", "## Notes", ""] + [f"- {note}" for note in notes]
-        return "\n".join(lines).rstrip() + "\n"
+        return lines
 
     @classmethod
     def _task_block(cls, task: Dict[str, Any]) -> List[str]:

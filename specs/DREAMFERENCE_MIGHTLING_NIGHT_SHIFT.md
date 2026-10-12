@@ -257,6 +257,7 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `index` | `true` | Refresh each repository's code index before its tasks start (§11.1). |
 | `index_timeout` | `20m` | The most one repository's refresh may take; never more than half of what is left of the window. |
 | `nodes` | `paired` | Other nodes' model servers a run may also use, as extra lanes ([MIGHTLING_NODE §12.3](./DREAMFERENCE_MIGHTLING_NODE.md)): every paired node serving the same model by default, `none`, or a list of node names. |
+| `compaction_audit` | `true` | Before the queue, audit the compactions of the sessions written since the last run for what their summaries lost, by rule and with no model call, into the report's `## Compactions` section; an empty queue still gets a report when there is something to say ([COMPACTION §12.2](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). |
 
 ---
 
