@@ -75,6 +75,9 @@ ling signal remove             # undoes setup and deletes the keys; your Ask thr
 Linked devices**, then remove "Mightling". Signal also removes a linked device that has been offline
 for about 30 days. If the node is switched off that long, run `ling signal setup` again.
 
+While a benchmark run holds the model on the node, Mightling does not answer from Signal. It
+replies with the run, how far it has got and roughly how long is left, and you ask again later.
+
 If you would rather not link your own account, `ling signal setup --number +15551234567` registers a
 separate number for Mightling instead (it needs a CAPTCHA and an SMS or voice code).
 

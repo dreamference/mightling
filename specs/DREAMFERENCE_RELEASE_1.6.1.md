@@ -28,6 +28,7 @@ night 5 is named):
 | 5630dff | Matrix homeserver tests stub the sidecar network |
 | a22b776 | `docs/dev/sessions.md`, the work streams' board |
 | 324a6b6 | ling-engine submodule at 1edc433 |
+| (bridge) | Signal: a question refused by the model gate during a benchmark run gets a clear reply (spec SIGNAL §17.3) |
 | (docs) | Signal's first real-account test (2026-10-12) recorded; Signal drops the preview label, Matrix and Telegram keep it |
 
 **Checklist before publishing:**
@@ -78,6 +79,11 @@ a real Signal account: linked to the owner's own account by QR code, a question 
 and answered there, and `/stop`, with 1.6.0 as published. Nothing in the bridge changed for this.
 Matrix and Telegram (`ling chat`) keep their preview label: neither has yet been tested against a
 real homeserver or Telegram bot.
+
+**Signal says when the model is busy with a benchmark.** While a benchmark run holds the model, a
+question from Signal is not answered, and Mightling now replies in Note to Self with the run, its
+progress and roughly how long is left, so you know when to ask again. Before, the reply was the
+raw server error.
 
 ### Fixed
 

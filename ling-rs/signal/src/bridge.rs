@@ -146,6 +146,19 @@ pub fn duration(ms: u64) -> String {
     }
 }
 
+/// The model gate's refusal while a SWE-bench run holds the model
+/// (`dreamference/vllm_server/model_gate_service.py`, `message`): "The model is running a benchmark
+/// (night 4, 37/100 done, about 9 h left). Try later or run `ling-admin night pause`." Codex passes
+/// it on inside its own error ("unexpected status 503 Service Unavailable: …, url: …"). Returns what
+/// is in the parentheses: the run, its progress and the time left, as the gate words them.
+fn benchmark_holds_model(error: &str) -> Option<String> {
+    const MARK: &str = "The model is running a benchmark (";
+    let rest = &error[error.find(MARK)? + MARK.len()..];
+    let end = rest.find(").").or_else(|| rest.rfind(')'))?;
+    let details = rest[..end].trim();
+    (!details.is_empty()).then(|| details.to_string())
+}
+
 fn model_server_down(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     ["connection refused", "error sending request", "failed to connect", "connection reset", "stream disconnected"]
@@ -395,6 +408,13 @@ impl Bridge {
                     if !self.airgapped() && !stopping {
                         actions.push(Action::Typing(false));
                         match error {
+                            // A benchmark run holds the model: the question is refused, not let through
+                            // the gate (the owner's decision, 2026-10-12), and the owner is told when to
+                            // ask again. The gate's own hint (`night pause`) is not passed on.
+                            Some(error) if let Some(details) = benchmark_holds_model(&error) => actions.push(Action::Notice(format!(
+                                "The model on {} is busy with a benchmark run ({details}), so this question was not answered. Ask again when the run has finished.",
+                                self.node()
+                            ))),
                             Some(error) if model_server_down(&error) => actions.push(Action::Notice(format!(
                                 "The model server on {} isn't answering (`ling-admin server start` on the node).",
                                 self.node()
@@ -744,6 +764,27 @@ mod tests {
         b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
         let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: Some("error sending request for url (http://127.0.0.1:8000/v1/responses)".to_string()) }, 0);
         assert!(notices(&done)[0].contains("model server on gx10 isn't answering"));
+    }
+
+    #[test]
+    fn a_benchmark_holding_the_model_says_when_to_ask_again() {
+        let mut b = connected();
+        b.on_message(msg("hi", 1), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        // What Codex reports after its retries when the model gate answers 503 (`benchmark_running`).
+        let gate = "unexpected status 503 Service Unavailable: The model is running a benchmark (night 4, 37/100 done, about 9 h left). Try later or run `ling-admin night pause`., url: http://127.0.0.1:8000/v1/responses";
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: Some(gate.to_string()) }, 0);
+        let notice = &notices(&done)[0];
+        assert_eq!(
+            notice,
+            "The model on gx10 is busy with a benchmark run (night 4, 37/100 done, about 9 h left), so this question was not answered. Ask again when the run has finished."
+        );
+        assert!(!notice.contains("night pause") && !notice.contains("http") && !notice.contains("503"), "{notice}");
+        assert_eq!(benchmark_holds_model("The model is running a benchmark (SWE-bench run r1). Try later or run `ling-admin night pause`.").as_deref(), Some("SWE-bench run r1"));
+        assert_eq!(benchmark_holds_model("unexpected status 500 Internal Server Error: boom"), None);
+        assert_eq!(benchmark_holds_model("The model is running a benchmark ()."), None);
+        // The next question is taken as usual.
+        assert!(b.on_message(msg("again", 2), 1_000).iter().any(|a| matches!(a, Action::StartTurn { .. } | Action::StartThread | Action::ResumeThread(_))));
     }
 
     #[test]
