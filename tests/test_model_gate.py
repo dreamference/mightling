@@ -90,6 +90,17 @@ def test_the_message_names_the_run_when_there_is_no_label_or_eta_yet():
                        "Try later or run `ling-admin night pause`.")
 
 
+def test_the_message_keeps_the_shape_the_signal_bridge_reads():
+    # The Signal bridge recognises a refused question by this text inside Codex's error and relays
+    # what is in the parentheses (ling-rs/signal/src/bridge.rs, `benchmark_holds_model`; SIGNAL
+    # §17.3). Rewording it here means changing the bridge too, or it falls back to the raw error.
+    message = ModelGateService.message({"label": "night 4", "done": 37, "total": 100, "eta_s": 9 * 3600})
+    assert message.startswith("The model is running a benchmark (")
+    details = message[len("The model is running a benchmark ("):message.index(").")]
+    assert details == "night 4, 37/100 done, about 9 h left"
+    assert ModelGateService.refusal({"message": message})["error"]["message"] == message
+
+
 def test_only_the_runs_network_and_read_only_probes_pass_a_closed_gate():
     closed = {"state": "closed", "networks": ["172.30.0.0/16"]}
     assert ModelGateService.allows(closed, "172.30.0.5", "POST", "/v1/responses")
