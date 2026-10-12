@@ -818,6 +818,14 @@ pub fn index_file(env: &Env, name: &str, label: &str, title: &str, file: &Path, 
         if since.elapsed() >= wait && text_written() {
             return Ok(FileIndexed::Ready(Some(Background { embedding, db, scratch, _lock: Some(lock) })));
         }
+        // A worker that never writes the text (a stalled model load, a stuck database) must not
+        // hold the caller, a single-threaded tool server, for the rest of the session.
+        if since.elapsed() > Duration::from_secs(env.settings.extract_timeout_s) && !text_written() {
+            let _ = embedding.child.kill();
+            let _ = embedding.child.wait();
+            let _ = std::fs::remove_dir_all(&scratch);
+            return Ok(FileIndexed::Stopped(Outcome::Failed(format!("the index worker did not write the text within {} s", env.settings.extract_timeout_s))));
+        }
         std::thread::sleep(env.poll);
     }
 }
