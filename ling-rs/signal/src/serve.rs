@@ -493,6 +493,9 @@ impl Daemon {
         let Some(runtime) = &self.runtime_dir else { return };
         let status = json!({
             "running": running,
+            // Which bridge this is and whose agent it answers with (§18.3), for `ling signal status`.
+            "instance": self.config.instance.as_deref().unwrap_or(crate::unit::DEFAULT_INSTANCE),
+            "user": self.config.user,
             "mode": match self.config.mode { Mode::Dedicated => "dedicated", Mode::Linked { .. } => "linked" },
             "ownerPaired": self.config.owner.is_some(),
             "webConnected": self.agent.as_ref().is_some_and(|a| a.starting.is_none()),

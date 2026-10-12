@@ -604,6 +604,8 @@ def _fake_units(monkeypatch, enabled_units):
 
     monkeypatch.setattr("dreamference.audit.egress_audit.shutil.which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr("dreamference.audit.egress_audit.subprocess.run", fake_run)
+    # No further Signal bridge unless a test makes one (the real /etc/systemd/system is never read).
+    monkeypatch.setattr(EgressAudit, "SYSTEMD_SYSTEM_DIR", "/nonexistent/systemd/system")
     return calls
 
 
@@ -657,3 +659,23 @@ def test_every_bridge_on_is_three_lines(monkeypatch, tmp_path):
     _chat_files(monkeypatch, tmp_path, {"telegram.json": {"token": "t"}, "matrix-admin.json": {"push": False}})
     _fake_units(monkeypatch, {"mightling-signal.service", "mightling-chat.service", "mightling-matrix-proxy.socket"})
     assert [line.split(" ")[0] for line in EgressAudit.declared_exceptions()] == ["Signal", "Telegram", "Matrix"]
+
+
+def test_each_further_signal_bridge_that_is_enabled_is_named(monkeypatch, tmp_path):
+    # SIGNAL §18: one line per enabled instance, found by its enablement link; a disabled one
+    # (a link left behind, `is-enabled` false) gives none.
+    _chat_files(monkeypatch, tmp_path, {})
+    calls = _fake_units(monkeypatch, {"mightling-signal.service", "mightling-signal@work.service", "mightling-signal@home.service"})
+    wants = tmp_path / "systemd" / "multi-user.target.wants"
+    wants.mkdir(parents=True)
+    for name in ("work", "home", "old"):
+        (wants / f"mightling-signal@{name}.service").write_text("")
+    (wants / "mightling-chat.service").write_text("")
+    monkeypatch.setattr(EgressAudit, "SYSTEMD_SYSTEM_DIR", str(tmp_path / "systemd"))
+    lines = EgressAudit.declared_exceptions()
+    signal_lines = [line for line in lines if line.startswith("Signal")]
+    assert len(signal_lines) == 3, lines
+    assert "Signal bridge `home` enabled (mightling-signal@home.service)" in signal_lines[1]
+    assert "`ling signal remove --name work`" in signal_lines[2]
+    assert not any("old" in line for line in lines)
+    assert ["systemctl", "is-enabled", "--quiet", "mightling-signal@old.service"] in calls
