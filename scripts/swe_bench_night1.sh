@@ -44,13 +44,31 @@ IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
 REFINE=${REFINE:-0}
 # The two arms, record first (night 1: default against tests-v2; night 3: night 1's winner against it plus
-# issue-v1, the record arm winning a tie).
+# issue-v1, the record arm winning a tie; night 4: the record arm against `restart-2`). The spelling
+# is `arm_flags`' below.
 ARMS=${ARMS:-"default tests-v2"}
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
 
 log() { echo "$(date -Is) $*"; }
+# An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
+# arm, `--restart-after-compactions N`, SWE_BENCH spec §21), or several of these joined with `+`
+# (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
+# every `,` and `+` into `-` (`n4-restart-2`).
+arm_flags() {
+    local part flags=""
+    for part in $(echo "$1" | tr + ' '); do
+        case "$part" in
+            default) ;;
+            restart-[1-9]|restart-[1-9][0-9]) flags="$flags --restart-after-compactions ${part#restart-}" ;;
+            restart*) echo "❌ Arm $1: write the restart arm as restart-N (N from 1)." >&2; return 2 ;;
+            *) flags="$flags --task-rules $part" ;;
+        esac
+    done
+    echo "${flags# }"
+}
+arm_name() { echo "$1" | tr ,+ --; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
 
 start() {
@@ -73,6 +91,14 @@ start() {
     if ! grep -q -- '"tests-v2"' "$WT/dreamference/swe_bench/swe_bench_instance_run.py"; then
         echo "❌ $WT does not have the tests-v2 task rule: update it to origin/main."; exit 1
     fi
+    for arm in $ARMS; do
+        arm_flags "$arm" > /dev/null || exit 2
+    done
+    case "$ARMS" in *restart-*)
+        if ! grep -q -- '"--restart-after-compactions"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
+            echo "❌ $WT does not have --restart-after-compactions: pin REF to a commit that has it."; exit 1
+        fi ;;
+    esac
     # The universal code index needs codebase-memory-mcp beside ling-code in Mightling's install
     # directory (ling-code never looks on PATH). Without it every index fails and the run refuses
     # to start, which is how the night of 2026-10-09 was lost after the old install folder, which
@@ -105,7 +131,7 @@ start() {
     { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\nnodes = "none"\n' "$RESERVE_GB"; } \
         > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
-        --description="SWE-bench night $NIGHT: default against test discipline (tests-v2) on fresh tasks" \
+        --description="SWE-bench night $NIGHT: $(echo $ARMS | sed 's/ / against /')" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
@@ -128,15 +154,17 @@ run() {
     cd "$WT" || exit 1
     rm -f "$D/failed"
     log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], refine $REFINE"
-    # ARMS names the two arms: the record arm first, then the candidate. An arm is `default` or a
-    # task-rules list (`tests-v2`, `tests-v2,issue-v1`); its run is named by joining the rules with `-`.
+    # ARMS names the two arms: the record arm first, then the candidate (spelling: `arm_flags`).
     set -- $ARMS
     record=$1; candidate=$2
-    rname=$(echo "$record" | tr , -); cname=$(echo "$candidate" | tr , -)
+    rname=$(arm_name "$record"); cname=$(arm_name "$candidate")
+    # A misspelt arm ends the night before either round, not after the record arm's.
     for arm in $record $candidate; do
-        name=$(echo "$arm" | tr , -)
-        extra=""
-        [ "$arm" != default ] && extra="--task-rules $arm"
+        arm_flags "$arm" > /dev/null || fail "arm $arm" 2
+    done
+    for arm in $record $candidate; do
+        name=$(arm_name "$arm")
+        extra=$(arm_flags "$arm")
         [ "$REFINE" = 1 ] && extra="$extra --refine"
         log "round $PREFIX-$name"
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
