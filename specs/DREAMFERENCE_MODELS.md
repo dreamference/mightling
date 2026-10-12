@@ -47,7 +47,7 @@ See `DREAMFERENCE_INFERENCE.md` and `DREAMFERENCE_CODEBASE.md` §5 for the full 
 
 **Aliases outside the matrix:** a name that is neither a matrix key nor a removed model (e.g. `qwen2.5-coder-32b`) still resolves to a tool-call parser by name guess (`hermes` / `mistral`), but has no recipe.
 
-**Vision:** `supports_vision` is recorded per checkpoint from its `config.json`, never inferred from the alias. `ling-admin chat configure` sends it to Onyx as `supports_image_input`, and registers the default vision model.
+**Vision:** `supports_vision` is recorded per checkpoint from its `config.json`, never inferred from the alias. `ling-admin chat configure` sent it to Onyx as `supports_image_input` until Onyx's retirement (1.7.0); Ask sends images whatever it says (MIGHTLING_ASK §17), and the image search sidecar's vision re-rank uses the served model.
 
 ---
 
@@ -107,7 +107,7 @@ A start that fails or fails the canary skips arm B and serves production again.
 **The registry entry** is `qwen3.8-27b-minima-nvfp4-dflash2`. It is not the default and `DEFAULT_MODEL_ALIAS` is unchanged.
 - **One shared recipe.** Production's launch overrides were moved, unchanged, into the module constant `QWEN38_SGLANG_RECIPE`. The entry takes that constant whole and changes two things: the checkpoint's `revision`, and `--kv-cache-dtype bfloat16` appended to `extra_args`.
 - **Everything else is shared:** the image, the 0.50 memory fraction, the 262,144-token context, the parsers, the template patches, the drafter at 16 tokens, the PyTorch sampler and torch.compile.
-- `supports_vision` is false. Switching production to it would take image input away from the web chat, which is a cost of the switch, not of the A/B.
+- `supports_vision` is false. Switching production to it would take image input away from Ask and the image search re-rank, which is a cost of the switch, not of the A/B.
 
 **Fairness.** The two arms differ in the target's weights alone:
 - **Same server setup:** one image, one recipe, one drafter at one depth, one KV dtype, one chat template.

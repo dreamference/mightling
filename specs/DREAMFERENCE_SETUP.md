@@ -39,7 +39,7 @@
   - `git` with submodules (`codex/`), and a Rust toolchain via rustup (`ling-admin codex build` installs rustup if missing);
   - `perl` and a C compiler, because OpenSSL is built from source;
   - no `libssl-dev` or `libcap-dev` is needed.
-- **For the web UI:** `onyx-cli`, installed via pip by `OnyxInstaller` when missing.
+- **For the web UI:** nothing; `ling web` is part of `ling`. (`onyx-cli`, installed by `OnyxInstaller` for the Onyx web chat, went with it in 1.7.0; an older virtualenv may still carry it.)
 - **For the desktop app (a checkout's build):** Node.js 22.13 or newer (Forge 8's minimum) and npm (Electron comes from npm as a prebuilt binary; Vite builds the UI); `dpkg` only to make the `.deb` (no `fakeroot` since Forge 8, whose maker runs `dpkg-deb --root-owner-group` itself). No Rust and no system headers. A dev run on Ubuntu 24.04 needs an AppArmor profile for Chromium's sandbox, which `ling-admin desktop install` writes with sudo (`/etc/apparmor.d/mightling-desktop-dev`); the `.deb` writes its own in `postinst`.
 - **For the document index:** `ling-admin docs setup` fetches what `ling-docs` loads (PDFium, ONNX Runtime, the embedding model; about 320 MB, each pinned).
 - **For the code index:** `ling-admin code setup` installs the pinned tools `ling-code` runs; Go, a JDK 17+ and a .NET SDK 8+ are optional and only enable their languages' exact indexers.
@@ -97,7 +97,7 @@ ling                                       # the terminal agent
 ```
 
 **Extras:**
-- **Web UI:** `ling web start` (Mightling's own, port 3100; `ling web open` signs a browser in). The earlier Onyx chat: `ling-admin chat start`, then `ling-admin chat configure`.
+- **Web UI:** `ling web start` (Mightling's own, port 3100; `ling web open` signs a browser in). The earlier Onyx chat is retired (1.7.0, MIGHTLING_ASK §19): `ling-admin chat status` lists what an older install left and `ling-admin chat remove` takes it away.
 - **Desktop app:** `ling-admin desktop install`, then `ling-admin desktop build` and `desktop run`, or `ling app`.
 - **Google (Gmail, Drive, Calendar in `/apps`):** `ling-admin google start`, then connect an account.
 - **Document index:** `ling-admin docs setup`; `~/Documents` and `~/Downloads` are the default collections, others are added with `ling docs add`.

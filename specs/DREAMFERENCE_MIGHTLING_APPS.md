@@ -101,9 +101,9 @@ The series is at 33,686 of the 33,750-byte cap (`test_the_patches_stay_small`); 
 
 ### 5.1 One service for Google, independent of the web UI
 
-Today the Gmail service is created by `ling-admin chat configure`, so a machine without the web UI has none. `/apps` must work without it:
+When this was written the Gmail service was created by `ling-admin chat configure`, so a machine without the web UI had none. `/apps` must work without it (and since Onyx's retirement, [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §19, `google start` is the only way it is created):
 
-- **`ling-admin google start`** creates `dreamference-gmail` on the `dreamference-sidecars` network (the SearXNG precedent, DOCKER §6: never the default bridge), publishing `127.0.0.1:8767` only. `configure` keeps creating it as now and adopts one that exists. The container keeps its name; the service gains Drive (§9), so the command is named for Google, and `ling-admin gmail …` keeps working.
+- **`ling-admin google start`** creates `dreamference-gmail` on the `dreamference-sidecars` network (the SearXNG precedent, DOCKER §6: never the default bridge), publishing `127.0.0.1:8767` only. `google start` adopts a container that exists, including the one Onyx's `configure` made. The container keeps its name; the service gains Drive (§9), so the command is named for Google, and `ling-admin gmail …` keeps working.
 - **On by default on a node** (decided 2026-10-03): `install.sh`'s node role, `host setup` and `server start` start it when it is absent, so Connect from `/apps` works at once. It holds no token until an account is connected, publishes on loopback only, and `ling-admin google stop` removes it. A client never starts it (the token lives on the node, §3).
 
 ### 5.2 The connect page
@@ -115,9 +115,9 @@ Today the Gmail service is created by `ling-admin chat configure`, so a machine 
 - **The page ends with "Return to `ling` and choose *I've connected it*."** Codex's app page then refreshes `/apps` (§1).
 - **Opened in the browser by Codex** (`webbrowser::open`, no host check on this path). Phase 0 checks the case with no browser (SSH): Codex prints the URL, and the redirect to `localhost:8767` then needs the paste-back path that already exists (`POST /api/google/oauth/complete`), which the page must offer as a text box.
 
-### 5.3 The existing front doors stay
+### 5.3 The other front doors
 
-The web UI's Settings → Gmail Accounts and `ling-admin chat gmail` connect the same accounts in the same store. `/apps` is a third door, not a replacement.
+The web UI's Settings → Gmail Accounts and `ling-admin chat gmail` connected the same accounts in the same store, and `/apps` was planned as a third door, not a replacement. Both went with Onyx (MIGHTLING_ASK §19); `/apps` and the Google service's own connect page remain, and accounts connected before stay in the store.
 
 ## 6. The tools
 
