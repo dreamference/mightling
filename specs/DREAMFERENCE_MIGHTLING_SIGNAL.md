@@ -1,6 +1,6 @@
 # Mightling over Signal: `ling signal`
 
-**Status:** implemented, off by default (2026-10-08). §18 (2026-10-11) proposes several accounts on one node, not built. The bridge is built and tested (§16) end to end against a scripted signal-cli and a stand-in `ling web`, and merged into `main` with the other messengers (§17): `ling signal …` is a launcher subcommand, the `ling-signal` daemon binary ships in the release, and signal-cli and its Java runtime are fetched pinned by setup. Nothing has run against a real Signal account yet. The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
+**Status:** implemented, off by default (2026-10-08). §18 (2026-10-11) proposes several accounts on one node, not built. The bridge is built and tested (§16) end to end against a scripted signal-cli and a stand-in `ling web`, and merged into `main` with the other messengers (§17): `ling signal …` is a launcher subcommand, the `ling-signal` daemon binary ships in the release, and signal-cli and its Java runtime are fetched pinned by setup. It was first run against a real Signal account on 2026-10-12, in linked mode, with the published 1.6.0 (§17.2), and from 1.6.1 it is no longer labelled a preview (the owner's decision, 2026-10-12). The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 **Builds on:**
 - [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md). The bridge is one more client of `ling web`, signed in like a paired phone (§4.3 there). It uses **Ask threads** (§3 there), the bridge policy (`ling-rs/web/policy.json`) and `/api/upload`.
@@ -630,7 +630,7 @@ The account, the keys and the pairing are left alone. `status` already pointed a
 - **signal-cli 0.14.9 on the pinned JRE:** it starts with the arm64 JNI library on its library path, inside an empty network namespace (`unshare -rn`). `--version` and `listAccounts` both answered.
 - **The pins:** all three archives (signal-cli, libsignal for arm64, the JRE) matched their pins when downloaded.
 
-**Not verified:**
+**Not verified** (as of this section; §17.2 records the first real-account run):
 - Anything against a real Signal account.
 - `ling signal setup` and `--refresh` past `--dry-run`, which would need sudo and a phone.
 - A release build of the new asset in CI.
@@ -694,6 +694,24 @@ The plan's text says so: "Every download is checked before it is unpacked; signa
 - `setup --dry-run` printed the new steps in that order.
 
 **When `SIGNAL_CLI_VERSION` moves**, the `.asc` comes from the new release. Setup still checks it against the same pinned key, so a release signed with another key fails closed until the pin is changed here, on the same evidence as above.
+
+### 17.2 First live test against a real account (2026-10-12, gx10-9428)
+
+**What was run.** The owner tested the bridge against their own Signal account on this machine, about 21:00 on 2026-10-12, with Mightling 1.6.0 installed from the published release (`ling update`, replacing a source build):
+1. `ling signal remove`, clearing the attempt of 2026-10-11;
+2. `ling signal setup`, linked mode (the default): sudo, the pinned downloads checked, the QR code scanned from the phone's **Settings → Linked devices**;
+3. a question written in Note to Self, answered in Note to Self;
+4. `/stop`.
+
+The owner reports that all of it worked. `ling signal status` afterwards: running, mode linked, owner paired yes. The model gate was paused for the test while a benchmark night regraded.
+
+**The failure this followed.** The first attempt, on 2026-10-11, stopped after linking: signal-cli writes an INFO line on stderr, and setup parsed the combined output of `listAccounts` for the account id. Fixed in 0cf297a (setup reads the id from the JSON line alone) and shipped in 1.6.0, the build tested here.
+
+**What this verifies:** setup past `--dry-run` with sudo, the pinned downloads and the signature check on the real network, linking by QR code, the system account and unit, pairing with `ling web`, the Note to Self gate and loop guard, an answer sent with `noteToSelf`, and `/stop`, all with a real account and phone.
+
+**Still not verified against a real account:** dedicated-number mode (§4.1), an approval answered YES or NO from the phone, attachments (`getAttachment`), the disappearing-messages timer, the air-gap notice, an identity-key change, `setup --refresh` past `--dry-run`, and the open Phase 0 items of §12.1 (the memory of an idle and a receiving JVM, long messages, the hosts signal-cli connects to). Matrix and Telegram (`specs/DREAMFERENCE_MIGHTLING_CHAT.md`) have still not run against a real homeserver or bot.
+
+**The label.** The owner decided on 2026-10-12 that Signal drops its preview label in 1.6.1 on the strength of this run; Matrix and Telegram keep theirs. No product text printed the label (it was in the 1.6.0 release notes only), so no code changed.
 
 ---
 
