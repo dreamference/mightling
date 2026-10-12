@@ -439,14 +439,16 @@ class NodeProvisioner:
     def _step_web(self, host: str, session: FleetSession) -> bool:
         if not self.options.get("web"):
             return True
-        for arguments in (["ling", "start"], ["ling", "configure"]):
+        # The web chat is `ling-admin chat` (it was `puffin-admin puffin`); the rename once
+        # turned these into `ling-admin ling …`, a subcommand that never existed.
+        for arguments in (["chat", "start"], ["chat", "configure"]):
             answer = session.run_admin(arguments, docker=True, timeout=60 * 60)
             if answer.returncode != 0:
                 return self._fail(
                     host,
                     "the web UI",
                     answer.stdout.strip()[-200:],
-                    f"ssh {self.user}@{host} ling-admin ling start",
+                    f"ssh {self.user}@{host} ling-admin chat start",
                 )
         self._done(host, "web UI installed")
         return True
@@ -597,7 +599,9 @@ class NodeProvisioner:
             changes.append(f"install Mightling ({version})")
         if not FleetProbe.prepared(state):
             changes.append("sudo ling-admin node prepare")
-        if state.get("advertised") != "1":
+        if self.options.get("web"):
+            changes.append("node enable, chat start, chat configure (the web UI)")
+        elif state.get("advertised") != "1":
             changes.append("node enable --no-web")
         for folder in FleetProbe.missing_models(state, self.plan["folders"]):
             changes.append(f"copy {folder}")
