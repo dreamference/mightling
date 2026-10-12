@@ -1,6 +1,8 @@
-//! `ling-docs mcp`: `docs_search` and `docs_read` over MCP (stdio, JSON-RPC 2.0, one message per
-//! line), registered by the launcher like the code index's tools (spec §8.2). They reach the
-//! local model as plain functions (patch 0020).
+//! `ling-docs mcp`: `docs_search`, `docs_read` and `pdf_search` over MCP (stdio, JSON-RPC 2.0, one
+//! message per line), registered by the launcher like the code index's tools (spec §8.2;
+//! PDF_SEARCH §3). They reach the local model as plain functions (patch 0020). `docs_search` is
+//! listed when a collection exists, `pdf_search` when PDFs can be read (the run-time files are
+//! installed), and `docs_read`, which reads the hits of both, when either is.
 //!
 //! Both only read and say so (`readOnlyHint`): Codex runs a read-only tool without asking, and
 //! `exec` (approval `never`) refuses any other. Every chunk comes back wrapped as untrusted text
@@ -20,9 +22,10 @@ use crate::untrusted;
 /// Results a search returns at most, whatever is asked.
 const MAX_K: usize = 12;
 
-fn tools_list() -> Value {
-    json!({ "tools": [
-        {
+fn tools_list(collections: bool, pdf: bool) -> Value {
+    let mut tools = Vec::new();
+    if collections {
+        tools.push(json!({
             "name": "docs_search",
             "description": format!("Search the user's own documents (local collections of PDFs, notes, text files) by meaning and keywords. Returns passages with their file, page or lines, and an id for docs_read. {}", untrusted::NOTE),
             "inputSchema": { "type": "object", "properties": {
@@ -31,17 +34,60 @@ fn tools_list() -> Value {
                 "k": { "type": "integer", "description": "Passages to return (default 8)." }
             }, "required": ["query"] },
             "annotations": { "readOnlyHint": true }
-        },
-        {
+        }));
+    }
+    if pdf {
+        tools.push(json!({
+            "name": "pdf_search",
+            "description": format!("Search inside one PDF that is not in the user's collections, such as a long paper, contract or manual: from a URL, or a file in the workspace (an attachment). Returns the passages that match the query best, with their page and an id for docs_read; the first call on a PDF indexes it (seconds to a minute), later ones are immediate. Prefer it to fetching a long PDF page by page. {}", untrusted::NOTE),
+            "inputSchema": { "type": "object", "properties": {
+                "source": { "type": "string", "description": "An http(s) URL of the PDF, or a path to it (relative to the working directory)." },
+                "query": { "type": "string", "description": "What to find, in the document's language if you can guess it." },
+                "k": { "type": "integer", "description": "Passages to return (default 6, at most 12)." }
+            }, "required": ["source", "query"] },
+            "annotations": { "readOnlyHint": true }
+        }));
+    }
+    if collections || pdf {
+        tools.push(json!({
             "name": "docs_read",
-            "description": format!("Read a document found by docs_search: a page of a PDF (locator \"p.7\") or a range of lines (\"lines 120-180\"); without a locator, from the start. Long documents come a part at a time, with the locator to ask for next. {}", untrusted::NOTE),
+            "description": format!("Read a document found by docs_search or pdf_search: a page of a PDF (locator \"p.7\") or a range of lines (\"lines 120-180\"); without a locator, from the start. Long documents come a part at a time, with the locator to ask for next. {}", untrusted::NOTE),
             "inputSchema": { "type": "object", "properties": {
                 "doc_id": { "type": "string", "description": "The id docs_search gave, like documents:42." },
                 "locator": { "type": "string", "description": "p.7 or lines 120-180." }
             }, "required": ["doc_id"] },
             "annotations": { "readOnlyHint": true }
-        }
-    ]})
+        }));
+    }
+    json!({ "tools": tools })
+}
+
+/// Whether PDFs can be read here: PDFium, and the embedder (or the tests' stand-in).
+pub fn pdf_available() -> bool {
+    let lib = crate::config::lib_dir();
+    if std::env::var("MIGHTLING_DOCS_TEST_EMBEDDER").as_deref() == Ok("hash") {
+        return lib.join("libpdfium.so").is_file();
+    }
+    crate::config::missing_runtime().is_none()
+}
+
+/// The environment a `pdf_search` run uses: the user's systemd, or (tests, with
+/// `MIGHTLING_DOCS_TEST_HOST=direct`) plain children under `RLIMIT_AS`.
+fn pdf_env(settings: &Settings) -> Result<crate::index::Env<'static>> {
+    static SYSTEMD: crate::host::SystemdHost = crate::host::SystemdHost;
+    static DIRECT: std::sync::OnceLock<crate::host::RlimitHost> = std::sync::OnceLock::new();
+    let direct = std::env::var("MIGHTLING_DOCS_TEST_HOST").as_deref() == Ok("direct");
+    let host: &'static dyn crate::host::Host = if direct { DIRECT.get_or_init(crate::host::RlimitHost::in_temp) } else { &SYSTEMD };
+    let mut env = crate::index::Env::real(host)?;
+    env.settings = settings.clone();
+    if direct {
+        env.sandbox = false;
+        env.poll = std::time::Duration::from_millis(20);
+    }
+    if std::env::var("MIGHTLING_DOCS_TEST_EMBEDDER").as_deref() == Ok("hash") {
+        env.worker_args = vec!["--test-embedder".into()];
+    }
+    Ok(env)
 }
 
 /// The server's state between calls.
@@ -50,11 +96,32 @@ pub struct Server {
     embedder: Option<Box<dyn Embed>>,
     embedder_error: Option<String>,
     settings: Settings,
+    pdf: crate::pdf_search::PdfSearch,
+    /// The session's process, whose air-gap seal `pdf_search` honours.
+    parent: u32,
 }
 
 impl Server {
     pub fn new() -> Server {
-        Server { searcher: Searcher::default(), embedder: None, embedder_error: None, settings: Settings::load() }
+        Server {
+            searcher: Searcher::default(),
+            embedder: None,
+            embedder_error: None,
+            settings: Settings::load(),
+            pdf: crate::pdf_search::PdfSearch::default(),
+            parent: std::os::unix::process::parent_id(),
+        }
+    }
+
+    /// The tools this server offers now.
+    pub fn tools(&self) -> Value {
+        let collections = crate::search::collections().map(|c| !c.is_empty()).unwrap_or(false);
+        tools_list(collections, pdf_available())
+    }
+
+    /// Stops background work (the session is ending).
+    pub fn stop(&mut self) {
+        self.pdf.stop();
     }
 
     /// Loads the embedder on first use; a failure is remembered and searches go on by keyword.
@@ -84,9 +151,25 @@ impl Server {
                 let answer = self.searcher.search(&query, k, &filters, self.embedder.as_deref(), self.settings.bm25_weight)?;
                 Ok(render_search(&answer))
             }
+            "pdf_search" => {
+                let cwd = crate::pdf_search::sandbox_cwd(&params["_meta"]).or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| "/".into());
+                self.load_embedder();
+                let settings = self.settings.clone();
+                self.pdf.call(args, &cwd, self.parent, &collections, &settings, &pdf_env, self.embedder.as_deref())
+            }
             "docs_read" => {
                 let doc_id = args["doc_id"].as_str().unwrap_or("");
-                let out = crate::read::read(&collections, doc_id, args["locator"].as_str(), crate::read::BUDGET_TOKENS)?;
+                // A pdf_search hit names its cache entry, which no collection list holds.
+                let entry = crate::read::parse_doc_id(doc_id).ok().map(|(name, _)| name).filter(|name| crate::config::is_pdf_cache_name(name));
+                let collections = match &entry {
+                    Some(name) => {
+                        crate::pdf_search::touch(name);
+                        vec![crate::pdf_search::collection(name)]
+                    }
+                    None => collections,
+                };
+                let out = crate::read::read(&collections, doc_id, args["locator"].as_str(), crate::read::BUDGET_TOKENS)
+                    .map_err(|e| if entry.is_some() { e.context("this PDF's index is gone from the cache: search it again with pdf_search") } else { e })?;
                 let mut fields = vec![("path", out.path.clone()), ("locator", out.loc.clone())];
                 if let Some(pages) = out.pages {
                     fields.push(("pages", pages.to_string()));
@@ -156,10 +239,11 @@ pub fn serve() -> Result<()> {
         let result = match method {
             "initialize" => Ok(json!({
                 "protocolVersion": message["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-                "capabilities": { "tools": {} },
+                // Codex then gives every call the session's working directory (PDF_SEARCH §3.3.3).
+                "capabilities": { "tools": {}, "experimental": { crate::pdf_search::SANDBOX_STATE_META: {} } },
                 "serverInfo": { "name": "ling-docs", "version": env!("CARGO_PKG_VERSION") }
             })),
-            "tools/list" => Ok(tools_list()),
+            "tools/list" => Ok(server.tools()),
             "tools/call" => Ok(match server.call(&message["params"]) {
                 Ok(text) => json!({ "content": [{ "type": "text", "text": text }] }),
                 Err(error) => json!({ "content": [{ "type": "text", "text": format!("{error:#}") }], "isError": true }),
@@ -174,6 +258,7 @@ pub fn serve() -> Result<()> {
         writeln!(stdout, "{response}")?;
         stdout.flush()?;
     }
+    server.stop();
     Ok(())
 }
 
@@ -182,15 +267,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn both_tools_are_read_only_and_say_their_text_is_untrusted() {
-        let list = tools_list();
+    fn every_tool_is_read_only_and_says_its_text_is_untrusted() {
+        let list = tools_list(true, true);
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
         for tool in tools {
             assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
-            assert!(tool["name"].as_str().unwrap().starts_with("docs_"));
             assert!(tool["description"].as_str().unwrap().contains("<untrusted>"));
         }
+    }
+
+    #[test]
+    fn the_tools_follow_what_exists() {
+        let names = |c, p| tools_list(c, p)["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(names(true, false), ["docs_search", "docs_read"]);
+        assert_eq!(names(false, true), ["pdf_search", "docs_read"]);
+        assert!(names(false, false).is_empty());
+        assert!(tools_list(false, true)["tools"][1]["description"].as_str().unwrap().contains("pdf_search"));
     }
 
     #[test]

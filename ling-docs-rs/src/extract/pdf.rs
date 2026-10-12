@@ -217,8 +217,12 @@ pub fn display(text: &str, rtl_base: bool) -> String {
 /// What became of one PDF.
 #[derive(Debug, Default)]
 pub struct PdfText {
-    /// One string per page, in page order.
+    /// One string per page read, in page order.
     pub pages: Vec<String>,
+    /// The document's page count (more than `pages` when a page cap stopped the reading).
+    pub page_count: u32,
+    /// The document information's title, when it has one.
+    pub title: Option<String>,
 }
 
 /// PDFium, bound once per process from the lib directory.
@@ -234,8 +238,9 @@ impl Pdf {
         Ok(Pdf { bindings })
     }
 
-    /// Every page's text. Encrypted, damaged or empty files are errors with a short reason.
-    pub fn extract(&self, path: &Path) -> Result<PdfText> {
+    /// Every page's text, or the first `max_pages`. Encrypted, damaged or empty files are errors
+    /// with a short reason.
+    pub fn extract(&self, path: &Path, max_pages: Option<u32>) -> Result<PdfText> {
         let b = self.bindings.as_ref();
         let file = path.to_str().ok_or_else(|| anyhow!("the path is not UTF-8"))?;
         let doc = unsafe { b.FPDF_LoadDocument(file, None) };
@@ -249,9 +254,18 @@ impl Pdf {
                 _ => "PDFium could not read it",
             });
         }
-        let count = unsafe { b.FPDF_GetPageCount(doc) };
-        let mut out = PdfText::default();
-        for index in 0..count.max(0) {
+        let count = unsafe { b.FPDF_GetPageCount(doc) }.max(0);
+        let needed = unsafe { b.FPDF_GetMetaText(doc, "Title", std::ptr::null_mut(), 0) } as usize;
+        let title = if needed > 2 && needed <= 4096 {
+            let mut buffer = vec![0u8; needed];
+            unsafe { b.FPDF_GetMetaText(doc, "Title", buffer.as_mut_ptr() as *mut std::ffi::c_void, needed as _) };
+            title_from_utf16(&buffer)
+        } else {
+            None
+        };
+        let mut out = PdfText { page_count: count as u32, title, ..PdfText::default() };
+        let read = max_pages.map_or(count, |m| count.min(m.min(i32::MAX as u32) as i32));
+        for index in 0..read {
             let page = unsafe { b.FPDF_LoadPage(doc, index) };
             if page.is_null() {
                 out.pages.push(String::new());
@@ -288,6 +302,13 @@ impl Pdf {
         unsafe { b.FPDF_CloseDocument(doc) };
         Ok(out)
     }
+}
+
+/// The `Title` entry of the document information from PDFium's UTF-16LE bytes, or None when empty.
+fn title_from_utf16(buffer: &[u8]) -> Option<String> {
+    let units: Vec<u16> = buffer.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
+    let title = String::from_utf16_lossy(&units).split_whitespace().collect::<Vec<_>>().join(" ");
+    (!title.is_empty()).then_some(title)
 }
 
 #[cfg(test)]

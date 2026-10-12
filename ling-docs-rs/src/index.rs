@@ -196,7 +196,7 @@ pub fn scan(conn: &mut Connection, found: &[discover::Candidate]) -> Result<Scan
                 continue;
             }
             if *size == candidate.size as i64 && *mtime == candidate.mtime_ns && status == "pending" {
-                out.jobs.push(Job { id: *id, path: candidate.abs.clone(), kind: candidate.kind });
+                out.jobs.push(Job { id: *id, path: candidate.abs.clone(), kind: candidate.kind, max_pages: None });
                 continue;
             }
         }
@@ -225,7 +225,7 @@ pub fn scan(conn: &mut Connection, found: &[discover::Candidate]) -> Result<Scan
         let id = upsert(&tx, candidate, Some(&sha), "pending", None)?;
         by_hash.entry(sha).or_insert(id);
         if previous.is_some() { out.changed += 1 } else { out.new += 1 }
-        out.jobs.push(Job { id, path: candidate.abs.clone(), kind: candidate.kind });
+        out.jobs.push(Job { id, path: candidate.abs.clone(), kind: candidate.kind, max_pages: None });
     }
     tx.commit()?;
     Ok(out)
@@ -303,12 +303,12 @@ fn extract_and_embed(env: &Env, collection: &Collection, db: &Path, scratch: &Pa
     let (extract_peak, embed_peak) = (recorded("extract_peak_mb"), recorded("embed_peak_mb"));
     drop(conn);
     if !jobs.is_empty() {
-        match extract_all(env, collection, scratch, jobs, &events, extract_peak)? {
+        match extract_all(env, &collection.name, &[collection.root.clone()], scratch, jobs, &events, extract_peak)? {
             Ok((peak, cap)) => record_peak(db, "extract", peak, cap)?,
             Err(outcome) => return Ok(outcome),
         }
     }
-    match embed(env, collection, db, scratch, &events, embed_peak)? {
+    match embed(env, &collection.name, db, scratch, &events, embed_peak)? {
         Ok((peak, cap)) => record_peak(db, "embed", peak, cap)?,
         Err(outcome) => return Ok(outcome),
     }
@@ -401,7 +401,7 @@ fn unit_name(collection: &str, phase: &str, n: usize) -> String {
 
 /// Step 2: every job's file through the extractor, restarted after a file that hangs or kills it.
 /// Returns the highest peak and the cap, or the outcome that stopped the run.
-fn extract_all(env: &Env, collection: &Collection, scratch: &Path, jobs: &[Job], events: &Path, recorded_peak_mb: u64) -> Result<std::result::Result<(u64, u64), Outcome>> {
+fn extract_all(env: &Env, name: &str, roots: &[PathBuf], scratch: &Path, jobs: &[Job], events: &Path, recorded_peak_mb: u64) -> Result<std::result::Result<(u64, u64), Outcome>> {
     let mut remaining: Vec<Job> = jobs.to_vec();
     let mut peak_max = 0u64;
     let mut cap_used = 0u64;
@@ -422,7 +422,7 @@ fn extract_all(env: &Env, collection: &Collection, scratch: &Path, jobs: &[Job],
         let spec = Spec {
             home: env.user_home.clone(),
             scratch: scratch.to_path_buf(),
-            read_only: runtime_paths(env, false).into_iter().chain([collection.root.clone()]).collect(),
+            read_only: runtime_paths(env, false).into_iter().chain(roots.iter().cloned()).collect(),
             writable: Vec::new(),
             writable_outside_scratch: Vec::new(),
             env: base_env(),
@@ -436,7 +436,7 @@ fn extract_all(env: &Env, collection: &Collection, scratch: &Path, jobs: &[Job],
                 env.lib_dir.to_string_lossy().into_owned(),
             ],
         };
-        let unit = unit_name(&collection.name, "x", attempt);
+        let unit = unit_name(name, "x", attempt);
         let argv = scope_argv(env, spec, &peak_file);
         let log = scratch.join(format!("extract-{attempt}.log"));
         if std::env::var_os("MIGHTLING_DOCS_TRACE_SCOPES").is_some() {
@@ -581,7 +581,30 @@ fn append_event(path: &Path, event: &Event) -> Result<()> {
 }
 
 /// Step 3: the index worker writes chunks and vectors.
-fn embed(env: &Env, collection: &Collection, db: &Path, scratch: &Path, events: &Path, recorded_peak_mb: u64) -> Result<std::result::Result<(u64, u64), Outcome>> {
+fn embed(env: &Env, name: &str, db: &Path, scratch: &Path, events: &Path, recorded_peak_mb: u64) -> Result<std::result::Result<(u64, u64), Outcome>> {
+    let mut started = match start_embed(env, name, db, scratch, events, recorded_peak_mb)? {
+        Ok(started) => started,
+        Err(outcome) => return Ok(Err(outcome)),
+    };
+    let status = loop {
+        if let Some(status) = started.child.try_wait()? {
+            break status;
+        }
+        std::thread::sleep(env.poll);
+    };
+    Ok(embed_ended(&started, status))
+}
+
+/// A running index worker, its cap and where it writes its peak and log.
+pub struct Embedding {
+    child: Child,
+    cap: u64,
+    peak_file: PathBuf,
+    log: PathBuf,
+}
+
+/// Admits and starts the index worker (step 3) without waiting for it.
+fn start_embed(env: &Env, name: &str, db: &Path, scratch: &Path, events: &Path, recorded_peak_mb: u64) -> Result<std::result::Result<Embedding, Outcome>> {
     let admitted = match host::admit(env.host, host::need(Kind::Embed, recorded_peak_mb), Kind::Embed.ceiling())? {
         Ok(admitted) => admitted,
         Err(_) => return Ok(Err(Outcome::Deferred("memory: the host-wide budget cannot cover the embedder now".into()))),
@@ -592,7 +615,7 @@ fn embed(env: &Env, collection: &Collection, db: &Path, scratch: &Path, events: 
         env.exe.to_string_lossy().into_owned(),
         "index-worker".into(),
         "--collection".into(),
-        collection.name.clone(),
+        name.to_string(),
         "--db".into(),
         db.to_string_lossy().into_owned(),
         "--events".into(),
@@ -615,30 +638,218 @@ fn embed(env: &Env, collection: &Collection, db: &Path, scratch: &Path, events: 
         cwd: scratch.to_path_buf(),
         argv,
     };
-    let unit = unit_name(&collection.name, "e", 1);
+    let unit = unit_name(name, "e", 1);
     let argv = scope_argv(env, spec, &peak_file);
     let log = scratch.join("embed.log");
     let cap = admitted.cap;
-    let mut child = env.host.start_scope(&unit, cap, &argv, &log)?;
+    let child = env.host.start_scope(&unit, cap, &argv, &log)?;
     admitted.release();
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        std::thread::sleep(env.poll);
-    };
-    let peak = read_peak(&peak_file);
+    Ok(Ok(Embedding { child, cap, peak_file, log }))
+}
+
+/// How an index worker's exit reads: its peak and cap, or the outcome that stopped it.
+fn embed_ended(started: &Embedding, status: std::process::ExitStatus) -> std::result::Result<(u64, u64), Outcome> {
+    let peak = read_peak(&started.peak_file);
     use std::os::unix::process::ExitStatusExt;
     if status.success() {
-        return Ok(Ok((peak, cap)));
+        return Ok((peak, started.cap));
     }
-    let tail = std::fs::read_to_string(&log).unwrap_or_default();
+    let tail = std::fs::read_to_string(&started.log).unwrap_or_default();
     let tail: String = tail.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ");
-    Ok(Err(match (status.code(), status.signal()) {
+    Err(match (status.code(), status.signal()) {
         (Some(143), _) | (_, Some(15)) => Outcome::Deferred("stopped (a model load?)".into()),
         (Some(137), _) | (_, Some(9)) => Outcome::Failed("the embedder was killed: over its memory cap, or out of memory".into()),
         _ => Outcome::Failed(format!("the embedder failed: {tail}")),
-    }))
+    })
+}
+
+/// An index worker still embedding when its caller answered (PDF_SEARCH §3.4): kept by the
+/// caller, asked [`Background::finished`] now and then, stopped when the caller ends.
+pub struct Background {
+    embedding: Embedding,
+    db: PathBuf,
+    scratch: PathBuf,
+    /// Held until the worker ends, so no other process indexes the same entry meanwhile.
+    _lock: Option<std::fs::File>,
+}
+
+impl Background {
+    /// Whether the worker has ended; once it has, its peak is recorded and its scratch removed.
+    pub fn finished(&mut self) -> bool {
+        match self.embedding.child.try_wait() {
+            Ok(Some(status)) => {
+                if let Ok((peak, cap)) = embed_ended(&self.embedding, status) {
+                    let _ = record_peak(&self.db, "embed", peak, cap);
+                }
+                let _ = std::fs::remove_dir_all(&self.scratch);
+                true
+            }
+            Ok(None) => false,
+            Err(_) => true,
+        }
+    }
+
+    /// Stops the worker (its vectors so far are kept: it commits every 32 chunks).
+    pub fn stop(mut self) {
+        let _ = self.embedding.child.kill();
+        let _ = self.embedding.child.wait();
+        let _ = std::fs::remove_dir_all(&self.scratch);
+    }
+}
+
+/// What [`index_file`] left.
+pub enum FileIndexed {
+    /// The text is in the database; the embedding is complete, or still running in the
+    /// background worker returned.
+    Ready(Option<Background>),
+    /// Nothing usable: deferred or failed, and why.
+    Stopped(Outcome),
+}
+
+/// The document row of a one-document collection (PDF_SEARCH §3.4): its id, status and how many
+/// chunks still lack a vector.
+fn single_document(db: &Path) -> Result<Option<(i64, String, i64)>> {
+    let Some(conn) = store::open_ro(db)? else { return Ok(None) };
+    let row = conn.query_row("SELECT id, status FROM documents ORDER BY id LIMIT 1", [], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)));
+    let Ok((id, status)) = row else { return Ok(None) };
+    let missing: i64 = conn.query_row("SELECT count(*) FROM chunks WHERE vector IS NULL", [], |r| r.get(0))?;
+    Ok(Some((id, status, missing)))
+}
+
+/// Indexes one file as the only document of the collection `name` (`pdf_search`'s ephemeral
+/// index, PDF_SEARCH §3.4), through the same extractor scope, admission and index worker as a
+/// collection. `label` is what citations name (a URL or a path); `file` is read once. Returns
+/// as soon as the text is searchable and either the embedding has ended or `wait` has passed;
+/// a worker still embedding comes back to the caller. An entry indexed before is reused: only
+/// its missing vectors are embedded.
+pub fn index_file(env: &Env, name: &str, label: &str, title: &str, file: &Path, max_pages: Option<u32>, wait: Duration) -> Result<FileIndexed> {
+    let db = config::db_path(name);
+    let dir = db.parent().unwrap_or(Path::new("/")).to_path_buf();
+    store::create_private_dir(&dir)?;
+    let missing = if env.worker_args.iter().any(|a| a == "--test-embedder") { None } else { config::missing_runtime_at(&env.lib_dir, &env.model_dir) };
+    if let Some(why) = missing {
+        return Ok(FileIndexed::Stopped(Outcome::Deferred(why)));
+    }
+    if !env.host.can_create_scopes() {
+        return Ok(FileIndexed::Stopped(Outcome::Deferred("no user systemd to cap the run's memory".into())));
+    }
+    // One builder per entry across sessions: a second one waits for the first to have the text.
+    let lock = std::fs::File::create(dir.join(format!("{name}.lock")))?;
+    let started = Instant::now();
+    let patience = Duration::from_secs(env.settings.extract_timeout_s + 60);
+    while host::flock(&lock, false).is_err() {
+        if single_document(&db)?.is_some_and(|(_, status, _)| status == "ok") {
+            return Ok(FileIndexed::Ready(None)); // another session embeds it: search what is there
+        }
+        if started.elapsed() > patience {
+            return Ok(FileIndexed::Stopped(Outcome::Deferred("another session is indexing this PDF".into())));
+        }
+        std::thread::sleep(env.poll);
+    }
+    let existing = single_document(&db)?;
+    if let Some((_, status, 0)) = &existing {
+        if status == "ok" {
+            return Ok(FileIndexed::Ready(None));
+        }
+    }
+    let scratch = dir.join(format!("run-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    store::create_private_dir(&scratch)?;
+    let events = scratch.join("events.jsonl");
+    std::fs::write(&events, b"")?;
+    let recorded = |key: &str| -> u64 { store::open_ro(&db).ok().flatten().and_then(|c| store::get_meta(&c, key).ok().flatten()).and_then(|v| v.parse().ok()).unwrap_or(0) };
+    let text_ready = matches!(&existing, Some((_, status, _)) if status == "ok");
+    if !text_ready {
+        let conn = store::open_rw(&db)?;
+        let meta = std::fs::metadata(file)?;
+        conn.execute(
+            "INSERT INTO documents(path, kind, size, mtime_ns, status, title) VALUES (?1, 'pdf', ?2, 0, 'pending', ?3)
+             ON CONFLICT(path) DO UPDATE SET status = 'pending', size = ?2, title = ?3",
+            params![label, meta.len() as i64, title],
+        )?;
+        conn.execute("DELETE FROM documents WHERE path != ?", [label])?;
+        let id: i64 = conn.query_row("SELECT id FROM documents WHERE path = ?", [label], |r| r.get(0))?;
+        store::set_meta(&conn, "source", label)?;
+        drop(conn);
+        let job = Job { id, path: file.to_path_buf(), kind: discover::Kind::Pdf, max_pages };
+        let root = file.parent().unwrap_or(Path::new("/")).to_path_buf();
+        match extract_all(env, name, &[root], &scratch, &[job], &events, recorded("extract_peak_mb"))? {
+            Ok((peak, cap)) => record_peak(&db, "extract", peak, cap)?,
+            Err(outcome) => {
+                let _ = std::fs::remove_dir_all(&scratch);
+                return Ok(FileIndexed::Stopped(outcome));
+            }
+        }
+        // A file the extractor could not read ends here, with its own reason.
+        let mut offset = 0;
+        for event in read_new(&events, &mut offset)? {
+            if let Event::Failed { error, .. } = event {
+                let conn = store::open_rw(&db)?;
+                store::set_status(&conn, id, &format!("failed: {error}"))?;
+                let _ = std::fs::remove_dir_all(&scratch);
+                return Ok(FileIndexed::Stopped(Outcome::Failed(error)));
+            }
+        }
+    }
+    let mut embedding = match start_embed(env, name, &db, &scratch, &events, recorded("embed_peak_mb"))? {
+        Ok(embedding) => embedding,
+        Err(outcome) => {
+            let _ = std::fs::remove_dir_all(&scratch);
+            return Ok(FileIndexed::Stopped(outcome));
+        }
+    };
+    let since = Instant::now();
+    loop {
+        if let Some(status) = embedding.child.try_wait()? {
+            let _ = std::fs::remove_dir_all(&scratch);
+            return Ok(match embed_ended(&embedding, status) {
+                Ok((peak, cap)) => {
+                    record_peak(&db, "embed", peak, cap)?;
+                    FileIndexed::Ready(None)
+                }
+                // Stopped while embedding: what was written is still searchable by keyword.
+                Err(outcome) => match single_document(&db)? {
+                    Some((_, status, _)) if status == "ok" => FileIndexed::Ready(None),
+                    _ => FileIndexed::Stopped(outcome),
+                },
+            });
+        }
+        let text_written = || single_document(&db).ok().flatten().is_some_and(|(_, status, _)| status == "ok");
+        if since.elapsed() >= wait && text_written() {
+            return Ok(FileIndexed::Ready(Some(Background { embedding, db, scratch, _lock: Some(lock) })));
+        }
+        std::thread::sleep(env.poll);
+    }
+}
+
+/// Reads one file through the extractor (scope, admission, sandbox and time limit as for
+/// indexing) and stores nothing: `ling-docs extract` (PDF_SEARCH §4). The error is the
+/// worker's one-line reason, or why the run could not start.
+pub fn extract_one(env: &Env, file: &Path, max_pages: Option<u32>) -> Result<std::result::Result<crate::extract::Extracted, String>> {
+    let scratch = std::env::temp_dir().join(format!("ling-docs-extract-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    store::create_private_dir(&scratch)?;
+    let events = scratch.join("events.jsonl");
+    std::fs::write(&events, b"")?;
+    let file = file.canonicalize().with_context(|| format!("{} does not exist", file.display()))?;
+    let kind = discover::Kind::of(&file.to_string_lossy()).unwrap_or(discover::Kind::Text);
+    let job = Job { id: 1, path: file.clone(), kind, max_pages };
+    let root = file.parent().unwrap_or(Path::new("/")).to_path_buf();
+    let result = extract_all(env, "extract", &[root], &scratch, &[job], &events, 0);
+    let mut offset = 0;
+    let events = read_new(&events, &mut offset).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&scratch);
+    if let Err(outcome) = result? {
+        return Ok(Err(outcome.status()));
+    }
+    for event in events {
+        match event {
+            Event::Done { result, .. } => return Ok(Ok(result)),
+            Event::Failed { error, .. } => return Ok(Err(format!("failed: {error}"))),
+            Event::Start { .. } => {}
+        }
+    }
+    Ok(Err("failed: the extractor gave no result".into()))
 }
 
 /// `ling-docs index-worker`: inside the embedder's sandbox. Writes each extracted document's
@@ -656,7 +867,16 @@ pub fn index_worker(collection: &str, db: &Path, events: &Path, embedder: &dyn c
             Event::Failed { id, error } => store::set_status(&conn, id, &format!("failed: {error}"))?,
             Event::Done { id, result } => {
                 let Ok(path) = conn.query_row("SELECT path FROM documents WHERE id = ?", [id], |r| r.get::<_, String>(0)) else { continue };
-                let title = Path::new(&path).file_stem().map(|s| s.to_string_lossy().replace('_', " ")).unwrap_or_default();
+                let title = if config::is_pdf_cache_name(collection) {
+                    // A PDF of pdf_search: its own title, else the one its source gave.
+                    let given: String = conn.query_row("SELECT title FROM documents WHERE id = ?", [id], |r| r.get(0)).unwrap_or_default();
+                    if let Some(read) = result.pages_read {
+                        store::set_meta(&conn, "pages_read", &read.to_string())?;
+                    }
+                    result.title.clone().filter(|t| !t.is_empty()).unwrap_or(given)
+                } else {
+                    Path::new(&path).file_stem().map(|s| s.to_string_lossy().replace('_', " ")).unwrap_or_default()
+                };
                 let chunks = crate::chunk::chunk(&result.units, counter, config::CHUNK_TOKENS, 0.15);
                 store::write_document(&mut conn, id, &title, result.pages, &result.needs_ocr, &result.units, &chunks, now)?;
                 written += 1;

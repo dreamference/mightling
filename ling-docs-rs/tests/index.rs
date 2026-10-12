@@ -50,18 +50,29 @@ fn lib_dir() -> Option<PathBuf> {
 
 /// A one-page PDF whose text layer is `lines`, in Helvetica.
 fn pdf(lines: &[&str]) -> Vec<u8> {
-    let mut content = String::from("BT /F1 12 Tf 72 720 Td 14 TL\n");
-    for line in lines {
-        content.push_str(&format!("({}) Tj T*\n", line.replace('(', "\\(").replace(')', "\\)")));
-    }
-    content.push_str("ET");
-    let objects = [
+    pdf_pages(&[lines], None)
+}
+
+/// A PDF of one page per entry of `pages` (an empty entry is a page with no text layer, as a
+/// scan reads), with an optional document-information title.
+fn pdf_pages(pages: &[&[&str]], title: Option<&str>) -> Vec<u8> {
+    let n = pages.len();
+    // 1 catalog, 2 pages, 3 font, 4 info, then a page and its content per page.
+    let mut objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
-        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        format!("<< /Type /Pages /Kids [{}] /Count {n} >>", (0..n).map(|i| format!("{} 0 R", 5 + 2 * i)).collect::<Vec<_>>().join(" ")),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        format!("<< /Title ({}) >>", title.unwrap_or("")),
     ];
+    for (i, lines) in pages.iter().enumerate() {
+        let mut content = String::from("BT /F1 12 Tf 72 720 Td 14 TL\n");
+        for line in lines.iter() {
+            content.push_str(&format!("({}) Tj T*\n", line.replace('(', "\\(").replace(')', "\\)")));
+        }
+        content.push_str("ET");
+        objects.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>", 6 + 2 * i));
+        objects.push(format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()));
+    }
     let mut out = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
     for (i, body) in objects.iter().enumerate() {
@@ -73,7 +84,8 @@ fn pdf(lines: &[&str]) -> Vec<u8> {
     for offset in offsets {
         out.extend(format!("{offset:010} 00000 n \n").as_bytes());
     }
-    out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    let info = if title.is_some() { " /Info 4 0 R" } else { "" };
+    out.extend(format!("trailer\n<< /Size {} /Root 1 0 R{info} >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
     out
 }
 
@@ -207,7 +219,8 @@ fn a_collection_is_indexed_searched_read_and_kept_current() {
     };
     ask(serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
     let list = ask(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
-    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 2);
+    // docs_search and docs_read, and pdf_search where PDFium is installed.
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), if with_pdf { 3 } else { 2 });
     let found = ask(serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "docs_search", "arguments": {"query": "notice period", "k": 2}}}));
     let text = found["result"]["content"][0]["text"].as_str().unwrap().to_string();
     assert!(text.starts_with("<untrusted source=\"docs\" id=\"documents:"), "{text}");
@@ -283,4 +296,251 @@ fn a_file_that_hangs_or_kills_the_extractor_fails_alone() {
     drop(conn);
     index::run(&env, &docs, Some("notes"), false).unwrap();
     assert_eq!(host.started.lock().unwrap().len(), 3);
+}
+
+/// A stand-in `ling-fetch --download <file> --max-bytes N <url>`: copies `<dir>/<last segment of
+/// the URL>` into the file, or fails as the real one does.
+fn fake_fetch(dir: &Path) -> PathBuf {
+    let script = dir.join("fake-ling-fetch");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env python3
+import json, os, shutil, sys
+args = sys.argv[1:]
+dest, url = args[args.index("--download") + 1], args[-1]
+name = url.rstrip("/").rsplit("/", 1)[-1]
+src = os.path.join({dir:?}, name)
+if not os.path.exists(src):
+    print("❌ request failed: HTTP 404 Not Found for url: " + url)
+    sys.exit(1)
+shutil.copy(src, dest)
+print(json.dumps({{"final_url": url, "status": 200, "content_type": "application/pdf", "bytes": os.path.getsize(dest)}}))
+"#,
+            dir = dir.join("web")
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::create_dir_all(dir.join("web")).unwrap();
+    script
+}
+
+/// `ling-docs mcp` in a scratch home, its runs as plain children, with `extra` in its environment.
+fn pdf_server(home: &Path, cwd: &Path, extra: &[(&str, &str)]) -> (Child, impl FnMut(serde_json::Value) -> serde_json::Value) {
+    let mut command = Command::new(exe());
+    command
+        .arg("mcp")
+        .current_dir(cwd)
+        .env("HOME", home)
+        .env("CODEX_HOME", home.join(".mightling"))
+        .env("DREAMFERENCE_CONFIG_PATH", home.join("no-config.toml"))
+        .env("XDG_RUNTIME_DIR", home.join("run"))
+        .env("MIGHTLING_DOCS_TEST_EMBEDDER", "hash")
+        .env("MIGHTLING_DOCS_TEST_HOST", "direct")
+        .env("MIGHTLING_FETCH_BIN", fake_fetch(home))
+        .env("TMPDIR", home.join("tmp"))
+        .env_remove("DREAMFERENCE_MIGHTLING_AIRGAPPED")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    std::fs::create_dir_all(home.join("run")).unwrap();
+    std::fs::create_dir_all(home.join("tmp")).unwrap();
+    for (key, value) in extra {
+        command.env(key, value);
+    }
+    let mut server = command.spawn().unwrap();
+    let mut stdin = server.stdin.take().unwrap();
+    let mut stdout = BufReader::new(server.stdout.take().unwrap());
+    let mut next = 0;
+    let ask = move |message: serde_json::Value| -> serde_json::Value {
+        next += 1;
+        let mut message = message;
+        message["jsonrpc"] = "2.0".into();
+        message["id"] = next.into();
+        writeln!(stdin, "{message}").unwrap();
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    (server, ask)
+}
+
+fn call(name: &str, arguments: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "method": "tools/call", "params": { "name": name, "arguments": arguments } })
+}
+
+fn text(answer: &serde_json::Value) -> String {
+    answer["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string()
+}
+
+#[test]
+fn pdf_search_finds_the_page_reads_it_back_and_keeps_to_the_session() {
+    let Some(_) = lib_dir() else {
+        eprintln!("skipped: MIGHTLING_DOCS_LIB_DIR does not name PDFium");
+        return;
+    };
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let work = home.join("work");
+    std::fs::create_dir_all(work.join("papers")).unwrap();
+    // Pages of about 400 words, as a paper's are, so each page is a chunk of its own.
+    let filler: Vec<String> = (0..32).map(|i| format!("Line {i} of measured field observations from the eruption campaign data")).collect();
+    let page = |lead: &[&str]| -> Vec<String> { lead.iter().map(|l| l.to_string()).chain(filler.iter().cloned()).collect() };
+    let pages = [
+        page(&["Scaling laws for volcanic ash dispersal", "We study plume height and wind shear."]),
+        page(&["Training details", "All models used a learning rate of 0.0003 with cosine decay."]),
+        Vec::new(),
+        page(&["Results", "Ash travelled furthest under strong shear."]),
+    ];
+    let refs: Vec<Vec<&str>> = pages.iter().map(|p| p.iter().map(String::as_str).collect()).collect();
+    let slices: Vec<&[&str]> = refs.iter().map(|p| p.as_slice()).collect();
+    let paper = pdf_pages(&slices, Some("Volcanic Ash Transport"));
+    std::fs::write(work.join("papers/ash.pdf"), &paper).unwrap();
+    std::fs::write(work.join("notes.pdf"), b"<html>not a pdf</html>").unwrap();
+    std::fs::create_dir_all(home.join("elsewhere")).unwrap();
+    std::fs::write(home.join("elsewhere/ash.pdf"), &paper).unwrap();
+
+    let (mut server, mut ask) = pdf_server(&home, &work, &[("DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S", "0")]);
+    let init = ask(serde_json::json!({ "method": "initialize", "params": {} }));
+    assert!(init["result"]["capabilities"]["experimental"]["codex/sandbox-state-meta"].is_object(), "{init}");
+    let list = ask(serde_json::json!({ "method": "tools/list" }));
+    let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["pdf_search", "docs_read"], "no collection: no docs_search");
+
+    // The page that holds the answer comes first, cited by source and page.
+    let found = ask(call("pdf_search", serde_json::json!({ "source": "papers/ash.pdf", "query": "learning rate" })));
+    let answer = text(&found);
+    assert!(found["result"]["isError"].is_null(), "{answer}");
+    let path = work.join("papers/ash.pdf");
+    assert!(answer.starts_with(&format!("PDF: {} — \"Volcanic Ash Transport\", 4 pages.", path.display())), "{answer}");
+    assert!(answer.contains("No text layer (scanned?) on p.3"), "{answer}");
+    let first = answer.split("<untrusted").nth(1).unwrap();
+    assert!(first.contains("locator: p.2\n") && first.contains("0.0003"), "{answer}");
+    let id = first.split("id=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+    assert!(id.starts_with("pdf-") && id.ends_with(":1"), "{id}");
+    assert!(answer.contains(&format!("docs_read(doc_id=\"{id}\", locator=\"p.2\")")), "{answer}");
+
+    // docs_read serves the cached pages, a page at a time.
+    let read = text(&ask(call("docs_read", serde_json::json!({ "doc_id": id, "locator": "p.4" }))));
+    assert!(read.contains("Ash travelled furthest") && read.contains(&format!("path: {}", path.display())), "{read}");
+
+    // The same bytes elsewhere in the workspace (another call's working directory from Codex's
+    // `_meta`) are the same entry: no second extraction.
+    let other = home.join("work2");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("copy.pdf"), &paper).unwrap();
+    let meta = serde_json::json!({ "codex/sandbox-state-meta": { "sandbox_cwd": format!("file://{}", other.display()) } });
+    let again = ask(serde_json::json!({ "method": "tools/call", "params": { "name": "pdf_search", "arguments": { "source": "copy.pdf", "query": "wind shear" }, "_meta": meta } }));
+    assert!(text(&again).contains(&id), "{}", text(&again));
+    let entries = ling_docs::pdf_search::entries();
+    assert_eq!(entries.len(), 1, "{entries:?}");
+
+    // Refusals, each in one line.
+    let refuse = |answer: serde_json::Value| -> String {
+        assert_eq!(answer["result"]["isError"], true, "{answer}");
+        text(&answer)
+    };
+    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "../elsewhere/ash.pdf", "query": "x" })))).contains("outside this session's workspace"));
+    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "notes.pdf", "query": "x" })))).contains("not a PDF"));
+    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "drive:1AbC", "query": "x" })))).contains("Drive PDFs cannot be searched yet"));
+    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "papers/ash.pdf" })))).contains("needs a query"));
+
+    // A URL goes through ling-fetch; at /airgapped on (a seal written by the session, this test)
+    // a new one is refused before anything is started, and a local PDF is still searched.
+    std::fs::write(home.join("web/remote.pdf"), pdf_pages(&[&["Remote appendix", "The contract ends after ninety days of notice."]], None)).unwrap();
+    let remote = text(&ask(call("pdf_search", serde_json::json!({ "source": "https://example.org/files/remote.pdf", "query": "notice period" }))));
+    assert!(remote.starts_with("PDF: https://example.org/files/remote.pdf — \"remote\", 1 pages.") && remote.contains("ninety days"), "{remote}");
+    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "https://example.org/files/missing.pdf", "query": "x" })))).contains("HTTP 404"));
+    std::fs::create_dir_all(home.join("run/ling-airgapped")).unwrap();
+    std::fs::write(home.join("run/ling-airgapped/thread-1"), std::process::id().to_string()).unwrap();
+    std::fs::write(home.join("web/other.pdf"), pdf_pages(&[&["Other"]], None)).unwrap();
+    assert!(refuse(ask(call("pdf_search", serde_json::json!({ "source": "https://example.org/other.pdf", "query": "x" })))).contains("/airgapped on"));
+    assert!(text(&ask(call("pdf_search", serde_json::json!({ "source": "papers/ash.pdf", "query": "plume height" })))).contains("p.1"));
+    drop(ask);
+    let _ = server.wait();
+
+    // Every chunk ended up embedded, in the background where the call did not wait.
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path(id.split(':').next().unwrap())).unwrap().unwrap();
+    let counts = ling_docs::store::counts(&conn).unwrap();
+    assert_eq!((counts.indexed, counts.needs_ocr_pages), (1, 1), "{counts:?}");
+    assert_eq!(counts.chunks, counts.embedded, "{counts:?}");
+    // Nothing left behind but the indexes.
+    let left: Vec<String> = std::fs::read_dir(ling_docs::config::pdf_cache_dir()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.ends_with(".db") && !n.ends_with(".lock")).collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
+fn a_pdf_over_the_page_cap_is_indexed_from_the_start_and_says_so() {
+    let Some(_) = lib_dir() else { return };
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let pages: Vec<Vec<String>> = (1..=5).map(|i| vec![format!("Chapter {i}"), format!("marker{i} appears on this page only")]).collect();
+    let refs: Vec<Vec<&str>> = pages.iter().map(|p| p.iter().map(String::as_str).collect()).collect();
+    let slices: Vec<&[&str]> = refs.iter().map(|p| p.as_slice()).collect();
+    std::fs::write(home.join("long.pdf"), pdf_pages(&slices, None)).unwrap();
+    let (mut server, mut ask) = pdf_server(&home, &home, &[("DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES", "2")]);
+    let answer = text(&ask(call("pdf_search", serde_json::json!({ "source": "long.pdf", "query": "marker2" }))));
+    assert!(answer.contains("5 pages (pages 1-2 indexed"), "{answer}");
+    assert!(answer.contains("marker2"), "{answer}");
+    let late = text(&ask(call("pdf_search", serde_json::json!({ "source": "long.pdf", "query": "marker5" }))));
+    assert!(!late.contains("marker5 appears"), "{late}");
+    drop(ask);
+    let _ = server.wait();
+}
+
+#[test]
+fn the_cache_is_evicted_by_age_and_size_and_spares_what_is_in_use() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, _home) = scratch_home();
+    let dir = ling_docs::config::pdf_cache_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let now = std::time::SystemTime::now();
+    let entry = |hex: &str, mb: usize, hours_ago: u64| {
+        let path = dir.join(format!("pdf-{hex}.db"));
+        std::fs::write(&path, vec![0u8; mb << 20]).unwrap();
+        std::fs::File::options().append(true).open(&path).unwrap().set_modified(now - Duration::from_secs(hours_ago * 3600)).unwrap();
+        format!("pdf-{hex}")
+    };
+    let old = entry("000000000001", 1, 30);
+    let big_old = entry("000000000002", 3, 5);
+    let in_use = entry("000000000003", 3, 6);
+    let fresh = entry("000000000004", 2, 1);
+    std::fs::create_dir_all(dir.join("run-pdf-000000000009-999999999")).unwrap();
+    // One day unused goes; then the oldest until under 5 MiB, sparing the one in use.
+    let removed = ling_docs::pdf_search::evict(5, 1, &[in_use.clone()]);
+    let left: Vec<String> = ling_docs::pdf_search::entries().into_iter().map(|(n, ..)| n).collect();
+    assert_eq!(removed, 2, "{left:?}");
+    assert!(!left.contains(&old) && !left.contains(&big_old), "{left:?}");
+    assert!(left.contains(&in_use) && left.contains(&fresh), "{left:?}");
+    assert!(!dir.join("run-pdf-000000000009-999999999").exists(), "a dead run's folder is removed");
+}
+
+#[test]
+fn extract_prints_pages_and_names_the_scans_without_a_scope() {
+    let Some(_) = lib_dir() else { return };
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    std::fs::write(home.join("doc.pdf"), pdf_pages(&[&["First page"], &["Second page text"], &[]], Some("Three Pages"))).unwrap();
+    // No user bus here: the worker runs as a plain child under RLIMIT_AS, as inside the sandbox.
+    let output = Command::new(exe())
+        .args(["extract", "doc.pdf", "--pages", "2-3"])
+        .current_dir(&home)
+        .env("HOME", &home)
+        .env("XDG_RUNTIME_DIR", home.join("no-run"))
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+        .env("DREAMFERENCE_CONFIG_PATH", home.join("no-config.toml"))
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{out} {}", String::from_utf8_lossy(&output.stderr));
+    assert!(out.starts_with("doc.pdf — \"Three Pages\", 3 pages; p.2 returned"), "{out}");
+    assert!(out.contains("--- page 2 of 3 ---\nSecond page text"), "{out}");
+    assert!(!out.contains("First page"), "{out}");
+    assert!(out.contains("p.3: no text layer (scanned?)"), "{out}");
+    let broken = home.join("broken.pdf");
+    std::fs::write(&broken, b"%PDF-1.4\n garbage").unwrap();
+    let output = Command::new(exe()).args(["extract", "broken.pdf"]).current_dir(&home).env("HOME", &home).env("XDG_RUNTIME_DIR", home.join("no-run")).env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent").output().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "failed: not a PDF, or damaged");
 }
