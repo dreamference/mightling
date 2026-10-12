@@ -20,7 +20,7 @@ app, running entirely on your own GB10. No cloud. No account. No API bill. No te
 
 <img src="images/mightling-hero.svg" alt="Install Mightling, start the model, run the agent, then audit what left the machine: every connection on 127.0.0.1, no DNS queries" width="760">
 
-| **0** | **87 tok/s** | **$0** | **262K** |
+| **0** | **84 tok/s** | **$0** | **262K** |
 |:---:|:---:|:---:|:---:|
 | phone-home connections, verified by `audit egress` | JSON on one GB10 | per token, forever | tokens of context |
 
@@ -118,10 +118,10 @@ to reach. [Privacy & security →](docs/privacy.md)
 
 | Single stream on a GB10 | |
 |---|---|
-| Code | **50 tokens/s** |
-| JSON | **87 tokens/s** |
-| Prose | **25 tokens/s** |
-| Reading your code (prefill) | **~1,700 tokens/s** |
+| Code | **69 tokens/s** |
+| JSON | **84 tokens/s** |
+| Prose | **32 tokens/s** |
+| Reading your code (prefill) | **~1,800 tokens/s** |
 | Context window | **262K tokens** |
 
 A small drafter proposes 12 tokens at a time and the model checks them in one pass, which is why
