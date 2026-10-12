@@ -1454,6 +1454,11 @@ class DreamferenceCLIController:
         )
         remote_setup_parser.add_argument("dns_name", help="The box's public DNS name; `ssh <name>` must log in")
         remote_setup_parser.add_argument("--yes", action="store_true", help="Do not ask; never wait for a sudo password")
+        remote_setup_parser.add_argument("--ssh", dest="ssh_to", metavar="DESTINATION",
+                                         help="Your SSH Host alias for the box, when `ssh <dns_name>` itself does not log in "
+                                              "(remembered; never an address)")
+        remote_setup_parser.add_argument("--box-only", action="store_true",
+                                         help="Deploy the box and stop: nothing runs on this node (no container, tunnel or sudo)")
         remote_subparsers.add_parser("status", help="Show the tunnel, the box's units, the certificates and the peers")
         remote_remove_parser = remote_subparsers.add_parser(
             "remove", help="Remove the box's relay and haproxy and the tunnel; keep the CA and the enrolments"
@@ -2841,7 +2846,8 @@ class DreamferenceCLIController:
         elif args.command == "remote":
             from dreamference.remote.remote_access import RemoteAccess
             actions = {
-                "setup": lambda: RemoteAccess.setup(args.dns_name, yes=args.yes),
+                "setup": lambda: RemoteAccess.setup(args.dns_name, yes=args.yes, ssh_to=args.ssh_to,
+                                                    box_only=args.box_only),
                 "status": RemoteAccess.status,
                 "remove": lambda: RemoteAccess.remove(purge=args.purge, yes=args.yes),
                 "code": RemoteAccess.code,

@@ -11,15 +11,17 @@ installed: no Docker, no dashboard, no identity provider.
 The relay binary comes from the relay image's per-architecture manifest, pinned by digest, and is
 checked by SHA-256 on the node after extraction and again on the box before it is installed.
 
-Everything runs through the user's own `ssh <dns-name>` (their key, their configuration), as root or
-through passwordless sudo, in two steps: the staged files are copied, then one generated script
+Everything runs through the user's own `ssh <dns-name>` (their key, their configuration; or the
+`Host` alias they name with `--ssh`), as root or through passwordless sudo, in two steps: the staged files are copied, then one generated script
 installs them and leaves a manifest that `remove` reads. SSH and Docker go through `_run`, the seam
-the tests replace.
+the tests replace; the check of the public port goes through `_handshake`.
 """
 
 import hashlib
 import io
 import shlex
+import socket
+import ssl
 import subprocess
 import tarfile
 from pathlib import Path
@@ -39,6 +41,8 @@ from dreamference.remote.remote_settings import (
 )
 
 STAGE: str = "/tmp/mightling-remote-stage.tgz"
+# A server name that is not the box's: haproxy must refuse it (`check_public_port`).
+OTHER_NAME: str = "not-this-box.invalid"
 RELAY_USER: str = "mightling-relay"
 RELAY_UNIT: str = "mightling-relay.service"
 SSHD_DROP_IN: str = "/etc/ssh/sshd_config.d/mightling-tunnel.conf"
@@ -75,12 +79,13 @@ class RemoteBox:
     # -- preflight --------------------------------------------------------------------------------
 
     @classmethod
-    def probe(cls, dns_name: str) -> Dict[str, str]:
+    def probe(cls, dns_name: str, ssh_to: Optional[str] = None) -> Dict[str, str]:
         """
         Asks the box what it is.
 
         Args:
             dns_name: The box's public DNS name.
+            ssh_to: The user's SSH destination for it (a `Host` alias), when not the DNS name.
 
         Returns:
             Dict[str, str]: `arch` (amd64 or arm64), `root` (`yes` when root or passwordless sudo
@@ -91,7 +96,7 @@ class RemoteBox:
                   "if [ \"$(id -u)\" -eq 0 ] || sudo -n true 2>/dev/null; then echo root=yes; else echo root=no; fi; "
                   "if command -v apt-get >/dev/null; then echo packages=apt; elif command -v dnf >/dev/null; then echo packages=dnf; else echo packages=; fi; "
                   "printf 'host_key=%s\\n' \"$(cat /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null)\"")
-        result = cls._run(cls.ssh(dns_name, script), timeout=60)
+        result = cls._run(cls.ssh(ssh_to or dns_name, script), timeout=60)
         if result.returncode != 0:
             return {"error": (result.stderr or result.stdout).strip()[:300] or f"ssh exited {result.returncode}"}
         facts: Dict[str, str] = {}
@@ -352,7 +357,7 @@ class RemoteBox:
 
     @classmethod
     def deploy(cls, dns_name: str, arch: str, packages: str, secret: str, relay_certificate: Path,
-               relay_key: Path, tunnel_public_key: str) -> bool:
+               relay_key: Path, tunnel_public_key: str, ssh_to: Optional[str] = None) -> bool:
         """
         Installs the relay, haproxy and the tunnel account on the box.
 
@@ -364,10 +369,12 @@ class RemoteBox:
             relay_certificate: The relay's certificate, from the node's CA.
             relay_key: Its key.
             tunnel_public_key: The node's tunnel key.
+            ssh_to: The user's SSH destination for the box, when not the DNS name.
 
         Returns:
             bool: True when the box reported itself ready.
         """
+        destination = ssh_to or dns_name
         from dreamference.remote.remote_tunnel import RemoteTunnel
         binary = cls.relay_binary(arch)
         if binary is None:
@@ -382,44 +389,121 @@ class RemoteBox:
             "authorized_keys": (RemoteTunnel.authorized_line(tunnel_public_key) + "\n").encode(),
             "sshd-tunnel.conf": cls.sshd_drop_in().encode(),
         })
-        copied = cls._run(cls.ssh(dns_name, f"umask 077; cat > {shlex.quote(STAGE)}"), input_bytes=archive)
+        copied = cls._run(cls.ssh(destination, f"umask 077; cat > {shlex.quote(STAGE)}"), input_bytes=archive)
         if copied.returncode != 0:
             print(f"❌ Could not copy the files to {dns_name}: {copied.stderr.strip()[:300]}")
             return False
-        installed = cls._run(cls.ssh(dns_name, AS_ROOT), input_bytes=cls.install_script(arch, packages).encode())
+        installed = cls._run(cls.ssh(destination, AS_ROOT), input_bytes=cls.install_script(arch, packages).encode())
         if installed.returncode != 0 or "mightling-box-ready" not in installed.stdout:
             print(f"❌ Installing on {dns_name} failed:\n{(installed.stderr or installed.stdout).strip()[-800:]}")
             return False
         return True
 
     @classmethod
-    def remove(cls, dns_name: str) -> bool:
+    def remove(cls, dns_name: str, ssh_to: Optional[str] = None) -> bool:
         """
         Removes everything `deploy` installed.
 
         Args:
             dns_name: The box's public DNS name.
+            ssh_to: The user's SSH destination for the box, when not the DNS name.
 
         Returns:
             bool: True when the box reported itself clean.
         """
-        result = cls._run(cls.ssh(dns_name, AS_ROOT), input_bytes=cls.remove_script().encode())
+        result = cls._run(cls.ssh(ssh_to or dns_name, AS_ROOT), input_bytes=cls.remove_script().encode())
         if result.returncode != 0 or "mightling-box-removed" not in result.stdout:
             print(f"⚠️  Removing from {dns_name} did not finish:\n{(result.stderr or result.stdout).strip()[-600:]}")
             return False
         return True
 
     @classmethod
-    def unit_states(cls, dns_name: str) -> Optional[Dict[str, str]]:
+    def unit_states(cls, dns_name: str, ssh_to: Optional[str] = None) -> Optional[Dict[str, str]]:
         """
         Args:
             dns_name: The box's public DNS name.
+            ssh_to: The user's SSH destination for the box, when not the DNS name.
 
         Returns:
             Optional[Dict[str, str]]: haproxy's and the relay's states, or None when SSH failed.
         """
-        result = cls._run(cls.ssh(dns_name, f"systemctl is-active haproxy {RELAY_UNIT}"), timeout=60)
+        result = cls._run(cls.ssh(ssh_to or dns_name, f"systemctl is-active haproxy {RELAY_UNIT}"), timeout=60)
         lines = result.stdout.split()
         if len(lines) != 2:
             return None
         return {"haproxy": lines[0], "relay": lines[1]}
+
+    # -- the public port, from the node -----------------------------------------------------------
+
+    @classmethod
+    def _handshake(cls, host: str, port: int, server_name: str, ca_file: Optional[Path], timeout: int = 10) -> str:
+        """
+        One TLS handshake with the box's public port.
+
+        Args:
+            host: Where to connect: the box's public DNS name.
+            port: Its public port.
+            server_name: The server name to send.
+            ca_file: The node's CA certificate to verify against; None to verify nothing.
+
+        Returns:
+            str: `verified` (the handshake completed under `ca_file`), `answered` (it completed and
+            nothing was verified), `foreign` (it completed under a certificate the CA did not
+            sign), `closed` (the box took the connection and closed it without a handshake) or
+            `unreachable` (no TCP connection).
+        """
+        if ca_file is None:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        else:
+            context = ssl.create_default_context(cafile=str(ca_file))
+        try:
+            connection = socket.create_connection((host, port), timeout=timeout)
+        except OSError:
+            return "unreachable"
+        with connection:
+            try:
+                with context.wrap_socket(connection, server_hostname=server_name):
+                    return "answered" if ca_file is None else "verified"
+            except ssl.SSLCertVerificationError:
+                return "foreign"
+            except (ssl.SSLError, OSError):
+                return "closed"
+
+    @classmethod
+    def check_public_port(cls, dns_name: str, ca_file: Path) -> Dict[str, str]:
+        """
+        Checks port 443 the way a peer meets it: the box's own name must reach the node's control
+        plane, TLS and all, under the node's CA; any other name must be refused by the box.
+
+        Args:
+            dns_name: The box's public DNS name.
+            ca_file: The node's CA certificate.
+
+        Returns:
+            Dict[str, str]: `own` (`verified`, `foreign`, `closed` or `unreachable`) and `other`
+            (`closed` when refused, `answered` when something behind the box spoke TLS for it,
+            or `unreachable`).
+        """
+        return {"own": cls._handshake(dns_name, BOX_PUBLIC_PORT, dns_name, ca_file),
+                "other": cls._handshake(dns_name, BOX_PUBLIC_PORT, OTHER_NAME, None)}
+
+    @classmethod
+    def public_port_line(cls, outcome: Dict[str, str]) -> str:
+        """
+        Args:
+            outcome: `check_public_port`'s answer.
+
+        Returns:
+            str: One line for `remote status`.
+        """
+        own, other = outcome.get("own"), outcome.get("other")
+        if own == "unreachable":
+            return f"port {BOX_PUBLIC_PORT} does not take a connection (haproxy down, or a firewall in front of the box)"
+        refused = "other names refused" if other == "closed" else "⚠️ ANOTHER NAME GOT A TLS ANSWER: the box passes more than its own name"
+        if own == "verified":
+            return f"the box's name reaches this node's control plane (TLS under the node's CA); {refused}"
+        if own == "foreign":
+            return "❌ something other than this node answers for the box's name (a certificate the node's CA did not sign)"
+        return f"the box takes the connection and nothing answers behind it (the tunnel is not up); {refused}"

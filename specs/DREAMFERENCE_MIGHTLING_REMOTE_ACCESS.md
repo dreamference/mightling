@@ -1,6 +1,6 @@
 # Mightling from outside the LAN: remote access (MVP)
 
-**Status:** the user's design (2026-10-10); the open questions answered by the user the same evening (§11); **built** on branch `remote/vpn-mvp` (§13), tested offline and in a local rehearsal on Docker (§12.2). **Not yet run against a real box**: Phase 0 and the live acceptance (§9, §13.3) wait for the box the user is providing. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. MVP clients are Linux, macOS, Windows and a phone (§4).
+**Status:** the user's design (2026-10-10); the open questions answered by the user the same evening (§11); **built** on branch `remote/vpn-mvp` (§13), tested offline and in a local rehearsal on Docker (§12.2). **Phase 0's first half is done on a real box** (2026-10-12, §12.3): the box deployed by `remote setup --box-only` and its port 443 checked from the node. The node's half (control plane, tunnel, the node's peer) and the live acceptance (§9, §13.3) wait for the user's approval to run on the node. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. MVP clients are Linux, macOS, Windows and a phone (§4).
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 
@@ -47,7 +47,7 @@ What the design does **not** protect against: a compromised client (its WireGuar
 |---|---|---|
 | **Management and signal** (network map, peer keys, setup keys, DNS configuration; the rendezvous, end-to-end encrypted between peers) | The node: NetBird's combined server, container `dreamference-remote` (`netbirdio/netbird-server:0.80.0`, pinned by digest), published on `127.0.0.1:33443` only, memory capped at 512 MB. | The network's root of trust stays home. |
 | **Private DNS** (each peer gets a name under `netbird.selfhosted`) | Management on the node; answered by every client's embedded resolver. | The locator's new tier resolves this name (§5). |
-| **Relay and STUN** | The box: NetBird's relay binary, taken from the relay image's per-architecture manifest (pinned by digest, checked by SHA-256 on the node and again on the box), as the system unit `mightling-relay.service` under its own unprivileged account, on port 33080 (TCP for WebSocket, UDP for QUIC) and STUN on 3478/UDP. | It must be reachable from anywhere; it sees only ciphertext. |
+| **Relay and STUN** | The box: NetBird's relay binary, taken from the relay image's per-architecture manifest (pinned by digest, checked by SHA-256 on the node and again on the box), as the system unit `mightling-relay.service` under its own unprivileged account, on port 33080 (TCP for WebSocket, UDP for QUIC) and STUN on 3478/UDP. It also serves Prometheus metrics on 9090 on every interface (its flags choose that port, not the address): counts and byte totals, no key. The box's firewall must leave 9090 closed; `setup` opens only the four ports above in ufw or firewalld, and on a box with neither the provider's firewall is the only cover (§12.3). | It must be reachable from anywhere; it sees only ciphertext. |
 | **TURN** (`coturn`) | Not deployed. | NetBird's relay alone (the user's decision); added only on evidence that a client of the user's fails without it. |
 | **The pass-through** | The box: the distribution's haproxy (the only package added), dropping root after it binds, TCP mode on 443, routing a connection whose TLS server name is the box's own name to the reverse tunnel's loopback listener and refusing any other name. | Peers reach the control plane from anywhere while TLS still ends on the node. |
 | **The reverse tunnel** | From the node to the box, over SSH, kept up by the user unit `mightling-remote-tunnel.service` (`ssh -N -R 127.0.0.1:8443:127.0.0.1:33443`, `ExitOnForwardFailure`, `Restart=always`). The box's account `mightling-tunnel` may only listen on `127.0.0.1:8443` (`restrict,port-forwarding,permitlisten=…` in `authorized_keys`, `AllowTcpForwarding remote` in an `sshd` drop-in). The tunnel has its own key, its own known-hosts file, filled from the box's host key read over the user's SSH at setup (never by a first-use scan), and no SSH configuration (`-F /dev/null`): it reaches the box **by its DNS name on port 22**, whatever alias the user's own configuration gives it. | The node has no public address and opens no port; it dials out. |
@@ -66,9 +66,9 @@ What the design does **not** protect against: a compromised client (its WireGuar
 
 ## 3. `ling-admin remote`: the commands on the node
 
-The box is deployed and removed over the user's own SSH: `ssh <dns-name>` must log in with their key, as root or with passwordless sudo, on a box with apt or dnf, amd64 or arm64, and an ed25519 host key. The command never asks for a password and stores none.
+The box is deployed and removed over the user's own SSH: `ssh <dns-name>` must log in with their key, as root or with passwordless sudo, on a box with apt or dnf, amd64 or arm64, and an ed25519 host key. When the user's SSH configuration knows the box by an alias instead, `--ssh <alias>` names it (remembered in `remote.json` as `ssh`, used by `status` and `remove`; an address is refused, since nothing here writes one down). The alias is only for the user's own connection: the tunnel still reaches the box by its DNS name with no SSH configuration (§2). The command never asks for a password and stores none.
 
-- **`ling-admin remote setup <dns-name> [--yes]`**
+- **`ling-admin remote setup <dns-name> [--ssh <alias>] [--box-only] [--yes]`**
   1. **Says what it will do** on the node and on the box, then asks once (`--yes` for scripts).
   2. **Checks the box** over SSH (architecture, root, package manager, host key) and stops before changing anything if it will not do.
   3. **On the node:** makes the CA if absent (an existing CA that does not permit the new name is refused: a box under another name needs `remove --purge`); issues the control plane's and the relay's certificates; keeps or makes the relay's shared secret; writes the combined server's configuration and starts `dreamference-remote`; makes or renews the management token.
@@ -77,7 +77,8 @@ The box is deployed and removed over the user's own SSH: `ssh <dns-name>` must l
   6. **The node joins** the overlay as `mightling-<node id>` with a setup key it mints and spends: one root script, shown before sudo asks, installs NetBird's client if absent (pinned archive), the CA into the system trust store, starts the client's service and runs `netbird up --hostname mightling-<node id>`. Then management is asked which overlay name it gave the node; anything but `mightling-<node id>.netbird.selfhosted` (a suffix for a duplicate, say) fails the setup loudly, since clients find the node by that name alone.
   7. **Records** `remote.json` (the box's name, the node's overlay name, the domain; no address), adds the `remote` key to the advertisement (§7), and prints the two lines that enrol a laptop.
   Run again, `setup` keeps the CA, the secret, the token and the peers, reissues the certificates, redeploys the box, and does not rejoin the node: that is how a replaced box is set up.
-- **`ling-admin remote status`:** the tunnel's state, the control plane's container, the box's two units over SSH, the certificates' days left (a warning under 30), the peers enrolled and connected. Exit 0 only when all answer.
+  **`--box-only`** does steps 1 to 4 without anything that runs on the node: the CA, the certificates, the relay's secret and the tunnel's key are made (files under `~/.config/dreamference/remote/`), the box is deployed and the tunnel's known-hosts file written; no container, no tunnel unit, no NetBird client, no sudo on the node. `remote.json` records `box_only`, and `setup` without the flag finishes the rest. It lets the box be checked before the node is touched (§12.3). On a setup that already went further it only redeploys the box and keeps the record.
+- **`ling-admin remote status`:** the box's two units over SSH; **port 443 as a peer meets it**: a TLS handshake with the box's name must complete under the node's CA (the box passed it through the tunnel to the control plane) and one with another name must be closed by the box; the certificates' days left (a warning under 30); then the tunnel's state, the control plane's container, the peers enrolled and connected. After `--box-only` it says the node's half is missing and how to finish. Exit 0 only when all answer.
 - **`ling-admin remote code`:** prints an eight-digit code and waits, on the LAN, for one client (§4.1).
 - **`ling-admin remote peers`:** every peer: name, overlay name, connected or last seen, system.
 - **`ling-admin remote revoke <peer>`:** deletes a peer by name or overlay name (an exact name wins over a prefix; an ambiguous prefix deletes nothing; the node itself is refused) (§4.4).
@@ -228,15 +229,28 @@ A lesson from it: NetBird's client image runs `netbird up` from its entrypoint w
 
 Not verified, and Phase 0's: the same across the internet with the real box and the SSH tunnel; the name-constrained CA in NetBird's client (Go enforces name constraints; the rehearsal's CA had none); macOS, Windows, iOS and Android trust (§4).
 
+### 12.3 Phase 0, first half: the real box (2026-10-12)
+
+The box: a 1 GB amd64 Debian 12 cloud VM with a static address and the provider's own DNS name for it, reached by the user's SSH alias, with services of its owner already running (a SOCKS proxy, a mail transfer agent, a service under another account). The provider's firewall opened 22 and 443 only. `ling-admin remote setup <name> --ssh <alias> --box-only --yes`, run from the node:
+
+- **Deployed in one run, unchanged code paths:** the amd64 relay pulled by its manifest digest on the arm64 node, the binary's SHA-256 equal to the pin on the node and on the box; haproxy 2.6 (Debian 12's) installed and recorded in the manifest as `haproxy=installed`; both accounts; the `sshd` drop-in (the effective settings for other accounts unchanged: forwarding stays `yes`, a TTY stays allowed; for `mightling-tunnel`, `AllowTcpForwarding remote`, no TTY); no ufw or firewalld, so no rule was added. Listening afterwards: haproxy on 443/tcp, the relay on 33080 tcp+udp, STUN on 3478/udp, the relay's health on loopback 9000 and its metrics on 9090. The owner's services kept running, their ports untouched. Resident memory: relay about 22 MB, haproxy about 19 MB.
+- **Port 443 from the node, through the provider's firewall:** with the box's name the connection was passed on (haproxy's log: backend `node/tunnel`, and with nothing on the tunnel's port yet, `SC`, closed); with another name, with no server name at all, and with plain HTTP, closed by haproxy (backend `refuse`, `PR`). With a throwaway TLS listener started for the test on the box's loopback 8443 (where the tunnel will land), a handshake with the box's name completed with **that listener's** certificate and an HTTPS request got its page: the TLS was passed through unopened. The listener and its files were removed after.
+- **The tunnel account:** the node's tunnel key, with the tunnel's own known-hosts file (filled from the probe, never a first-use scan) and no SSH configuration, logged in to `mightling-tunnel` by the box's DNS name and got `This account is currently not available` (the forced `nologin`, no shell); the same key was refused for the user's account. No forwarding was attempted from the node.
+- **`remote status`** showed the two units active, 443 "takes the connection and nothing answers behind it (the tunnel is not up); other names refused", the certificates' 824 days, and the missing node half; exit 1, as it should be.
+- **Found:** the relay's metrics port (9090, every interface; §2). The provider's firewall closes it here; from the node 33080, 3478, 8443, 9000 and 9090 took no connection. **The relay is therefore unreachable from outside until the provider's firewall opens 33080/tcp+udp and 3478/udp**, a step in the provider's console that `setup` cannot do. The relay logged that the kernel's UDP receive buffer is below QUIC's wish (416 KiB of 7 MiB); harmless at this scale.
+- **Not yet:** everything on the node (§13.3, step 1's second half), and `remote remove` against the real box.
+
+Caveat of this box's name: it is the provider's name for the address, not one the user owns, and the node's CA is now constrained to it. Moving to an owned name later means `remote remove --purge` and enrolling the clients again (decision 3); before any client is enrolled that costs nothing.
+
 ---
 
 ## 13. Implementation
 
 ### 13.1 Built (branch `remote/vpn-mvp`)
 
-- **Node** (`dreamference/remote/`): `RemoteSettings` (paths, pins, `remote.json`), `RemoteCertificateAuthority` (the constrained CA, `openssl`), `RemoteControlPlane` (the container, `config.yaml`, the API: setup, tokens, setup keys, peers), `RemoteBox` (probe, relay extraction and check, the staged archive, the install and remove scripts, unit states), `RemoteTunnel` (key, known hosts, user unit), `RemoteNodePeer` (the node's client, CA, `netbird up`, leave), `RemoteEnrolment` (code, proofs, the LAN listener), `RemoteAccess` (the six commands). The advertisement's `remote` key (`NodeServiceFile`, `NodeAdvertiser`), the audit's declared exception, `ling-admin remote …` in the CLI.
+- **Node** (`dreamference/remote/`): `RemoteSettings` (paths, pins, `remote.json`), `RemoteCertificateAuthority` (the constrained CA, `openssl`), `RemoteControlPlane` (the container, `config.yaml`, the API: setup, tokens, setup keys, peers), `RemoteBox` (probe, relay extraction and check, the staged archive, the install and remove scripts, unit states, the check of port 443 from the node), `RemoteTunnel` (key, known hosts, user unit), `RemoteNodePeer` (the node's client, CA, `netbird up`, leave), `RemoteEnrolment` (code, proofs, the LAN listener), `RemoteAccess` (the six commands; `setup --ssh` and `--box-only`, 2026-10-12). The advertisement's `remote` key (`NodeServiceFile`, `NodeAdvertiser`), the audit's declared exception, `ling-admin remote …` in the CLI.
 - **Launcher** (`ling-rs/`): `remote_join.rs` (`ling node remote join`), the overlay tier and listing in `node.rs`, the overlay name in `NO_PROXY` (`proxy.rs`), the audit's host for an overlay resolution (`audit.rs`), and in `ling-node-locator` (with its copy in `ling-web-rs`) the `remote` field, the own-name rule and the LAN-or-overlay choice.
-- **Tests:** HMAC vectors shared by the Python and Rust halves (and RFC 4231 case 2), the CA's constraints with real `openssl`, the box's scripts through `bash -n`, the enrolment listener on a scratch loopback port, the commands with every seam faked.
+- **Tests:** HMAC vectors shared by the Python and Rust halves (and RFC 4231 case 2), the CA's constraints with real `openssl`, the box's scripts through `bash -n`, the enrolment listener on a scratch loopback port, the 443 handshake's verdicts against scratch loopback TLS listeners (the node's CA, a stranger's certificate, a bare close, nothing), the commands with every seam faked.
 
 ### 13.2 Not built yet
 
@@ -244,9 +258,10 @@ Not verified, and Phase 0's: the same across the internet with the real box and 
 - `audit egress --remote` (§6), with the Rust audit.
 - A `ling-admin remote` line in `ling-admin status`, and docs on the user site.
 
-### 13.3 When the box exists: Phase 0, then the live acceptance
+### 13.3 Phase 0, then the live acceptance
 
-1. `ling-admin remote setup <box>` on the node; `remote status` all green.
+0. **Done (§12.3):** `ling-admin remote setup <box> --ssh <alias> --box-only`; the box's units active, 443 passing the box's name and refusing others.
+1. The provider's firewall opens 33080/tcp+udp and 3478/udp. Then `ling-admin remote setup <box> --ssh <alias>` on the node (the control plane's container, the tunnel's user unit, NetBird's client and the CA with one sudo, the node's peer); `remote status` all green, its 443 line saying the box's name reaches the control plane under the node's CA.
 2. From the Ubuntu laptop on the LAN: `ling-admin remote code` / `ling node remote join --code …`; then on a hotspot, §9.1.
 3. On the box during that: `tcpdump` for §9.2.
 4. `remote revoke` for §9.3; `audit egress` for §9.4.
