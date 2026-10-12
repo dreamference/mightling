@@ -1,14 +1,17 @@
 # Mightling 1.6.0 — release notes
 
-**Status:** prepared 2026-10-10 on the branch `release/1.6.0` (origin/main plus the speed figures of
-`figures/1.6.0-speed` and the version set to 1.6.0 in `setup.py`, `dreamference/__init__.py`, the MCP
-server's `serverInfo` and `desktop/electron/package.json`). Built from `git log v1.5.1..origin/main` and
-the specs and docs it touched: the local file index (`ling-docs`), the Mac preview, the Mightling web
-UI, the phone messengers (Signal, Matrix, Telegram), 12 draft tokens and the model gate, and the
-SWE-bench scripts. Not yet cut: the pre-release checks that need the model (below) run when the
-model gate opens after the benchmark nights; then the branch is merged and tagged. Every placeholder
-is filled; the refine section states the measured result (refine stays opt-in, MIGHTLING_REFINE §3).
-The text between the two rules is the GitHub release's description.
+**Status:** published 2026-10-12 as `v1.6.0`: the tag is on `b645195`, the head of the branch
+`release/1.6.0` (origin/main of 2026-10-10 plus the speed figures of `figures/1.6.0-speed`, the
+version set to 1.6.0 in `setup.py`, `dreamference/__init__.py`, the MCP server's `serverInfo` and
+`desktop/electron/package.json`, these notes, and the Signal setup fix), built by release workflow
+run 38164040999; its signature was verified with `ssh-keygen -Y verify` against
+`ling-rs/release-signing.pub`. The branch is merged into main. Built from `git log v1.5.1..origin/main`
+and the specs and docs it touched: the local file index (`ling-docs`), the Mac preview, the
+Mightling web UI, the phone messengers (Signal, Matrix, Telegram), 12 draft tokens and the model
+gate, and the SWE-bench scripts. The messengers keep their preview label: none has yet been tested
+live against a real Signal account, Telegram bot or Matrix homeserver. The refine section states the
+measured result (refine stays opt-in, MIGHTLING_REFINE §3). The text between the two rules is the
+GitHub release's description.
 
 **Version.** To be set to 1.6.0 in `setup.py`, `dreamference/__init__.py`, the MCP server's
 `serverInfo` and `desktop/electron/package.json` when the release is cut. The release workflow
