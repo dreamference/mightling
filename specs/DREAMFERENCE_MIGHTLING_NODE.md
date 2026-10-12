@@ -220,6 +220,8 @@ Today the launcher prints dots for up to 600 s when the server does not answer. 
 | Node found, `state=loading` | `Node gx10-9428: model loading` and today's dotted wait |
 | Node found, `state=ready`, port refuses | The advert is stale (the server died without `server stop`): the first message, plus `ling-admin status` on the node |
 
+Added 2026-10-12: when a browse misses (no node found and none remembered; the remembered node did not answer and its last address is tried; `MIGHTLING_NODE` names a node that did not answer) and the client is Linux with a connected Wi-Fi connection that saves power, one more line follows: `Hint: Wi-Fi power saving is on for <interface> (<connection>), and it loses most of the multicast a node is found by. Turn it off: sudo nmcli connection modify <connection> 802-11-wireless.powersave 2 && sudo iw dev <interface> set power_save off`. A hint, never a failure; `ling` runs none of it. A remembered node that did not answer while other nodes did (the question of §6.2) gets no hint.
+
 ### 6.5 Version skew
 
 - `proto` higher than the client knows: refuse, and name `ling update`.
