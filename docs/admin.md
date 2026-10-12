@@ -227,7 +227,7 @@ Install codebase-memory-mcp, the scip CLI and the language indexers, each checke
 
 ### `ling-admin host`
 
-Check or apply the host settings a model load and ling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap).
+Check or apply the host settings a model load and ling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap, Wi-Fi power saving).
 
 #### `ling-admin host check`
 

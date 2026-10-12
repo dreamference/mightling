@@ -151,6 +151,16 @@ def _no_passwordless_sudo(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_wifi_reading(monkeypatch):
+    # Whether this machine is on Wi-Fi with power saving on must not decide a test (`host check`,
+    # `host setup`, `node enable` and `node prepare` all read it), and the reading is a real
+    # nmcli/iw. A test of the Wi-Fi check sets its own `_read`, which lands later and wins.
+    from dreamference.vllm_server import WifiPowerSave
+
+    monkeypatch.setattr(WifiPowerSave, "_read", classmethod(lambda cls, argv: None))
+
+
+@pytest.fixture(autouse=True)
 def _skip_sandbox_gate(monkeypatch):
     monkeypatch.setattr(SandboxPrerequisite, "gate", classmethod(lambda cls, command, subcommand: True))
 
@@ -182,6 +192,10 @@ def _refuse_real_docker(monkeypatch, request):
                 raise AssertionError(f"a test tried to run a real systemd command: {argv!r}; mock it")
             # Provisioning (specs/DREAMFERENCE_MIGHTLING_FLEET.md §14): no test may reach another
             # machine or become root.
+            # Wi-Fi power saving (vllm_server/wifi_power_save.py): a test may never change this
+            # machine's network, which a benchmark night or an SSH session depends on.
+            if os.path.basename(str(program)) in ("nmcli", "iw") and _changes_network(argv):
+                raise AssertionError(f"a test tried to change the network: {argv!r}; mock it")
             if os.path.basename(str(program)) in ("ssh", "scp", "rsync", "sudo", "sg"):
                 raise AssertionError(f"a test tried to run a real {os.path.basename(str(program))}: {argv!r}; mock it")
             # The suite is offline by construction (AGENTS.md): the installed `ling` and the other
@@ -274,6 +288,17 @@ def _changes_systemd(argv) -> bool:
         return True
     verbs = [w for w in words if not w.startswith("-")]
     return bool(verbs) and verbs[0] not in READ_ONLY_SYSTEMCTL
+
+
+# nmcli and iw words that change something; a reading (`device status`, `connection show`,
+# `get power_save`) has none of them.
+NETWORK_CHANGING_WORDS: tuple = ("modify", "set", "up", "down", "reapply", "connect", "disconnect",
+                                 "delete", "add", "edit", "reload", "radio", "networking")
+
+
+def _changes_network(argv) -> bool:
+    words = [str(w) for w in argv[1:]] if isinstance(argv, (list, tuple)) else str(argv).split()[1:]
+    return any(word in NETWORK_CHANGING_WORDS for word in words)
 
 
 def _changes_something(argv) -> bool:

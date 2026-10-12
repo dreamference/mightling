@@ -18,6 +18,10 @@ Host RAM exhaustion and GPU VRAM exhaustion are indistinguishable on GB10; the w
 
 Other memory-safety rules elsewhere: `server start` stops the code index's scopes before its pre-flight ([code-index.md](code-index.md)), the context engine's indexing is bounded because it runs beside a resident model server ([context-engine.md](context-engine.md)), and the diffusion sidecar starts before vLLM when it is switched on ([diffusion.md](diffusion.md)).
 
+## Wi-Fi power saving, the node's own step
+
+`HostSafetySetup.steps()` ends with one step that is neither the model's nor the sandbox's: Wi-Fi power saving, which loses the multicast mDNS clients find a node by (`WifiPowerSave`, `vllm_server/wifi_power_save.py`; why and how measured: [node.md](node.md#advertising-a-node)). `host check` prints the two commands, `host setup` runs them as root like every other step (`nmcli connection modify <connection> 802-11-wireless.powersave 2`, then `iw dev <if> set power_save off` when the radio still says `on`), and `check_host_safety()` does not look at it: it gates model loads, which Wi-Fi does not endanger. `NodePrepare` filters the step out by its name (`STEP_NAME`), as it does the sandbox step.
+
 ## bubblewrap needs an AppArmor profile, and this machine now has one
 
 `kernel.apparmor_restrict_unprivileged_userns` is 1, so without a profile an unconfined process cannot create a user namespace: from a systemd user service (measured 2026-10-02) `bwrap` fails with "setting up uid map: Permission denied" and `ling sandbox -- true` with "bwrap: loopback: Failed RTM_NEWADDR".
