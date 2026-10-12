@@ -231,7 +231,7 @@ Check or apply the host settings a model load and ling's sandbox need (swap, sys
 
 #### `ling-admin host check`
 
-Show what `server start` would refuse over, changing nothing.
+Show what `server start` would refuse over, and Wi-Fi power saving (reported, but it blocks no model load), changing nothing.
 
 #### `ling-admin host setup`
 

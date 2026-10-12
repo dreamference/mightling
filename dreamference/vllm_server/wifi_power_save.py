@@ -26,8 +26,8 @@ import shutil
 import subprocess
 from typing import Any, Dict, Final, List, Optional
 
-# The name of the step in `HostSafetySetup.steps()`; `NodePrepare` leaves it out by this name,
-# because node prepare promises never to touch NetworkManager.
+# The name of the step in `HostSafetySetup.steps()`, which `node prepare` also runs: the one change
+# to NetworkManager it makes (`is_fix_command`; decided 2026-10-12).
 STEP_NAME: Final[str] = "turn off Wi-Fi power saving"
 # NetworkManager's `802-11-wireless.powersave` values: 0 default, 1 ignore, 2 disable, 3 enable.
 # `nmcli -g` prints the keyword; older versions print the number.
@@ -154,6 +154,32 @@ class WifiPowerSave:
                 f"   this node by (up to ~80% of queries went unanswered on a GB10), so a client may not find it.\n"
                 f"   `ling-admin host setup` turns it off, or run:\n"
                 f"{lines}")
+
+    @classmethod
+    def is_fix_command(cls, argv: List[str]) -> bool:
+        """
+        Whether a command is exactly one of the two this class builds, and nothing else: `node
+        prepare` refuses every other nmcli command (and every other use of iw).
+
+        Args:
+            argv: The command, without `sudo`.
+
+        Returns:
+            bool: True for `nmcli connection modify <connection> 802-11-wireless.powersave 2` and
+            `iw dev <interface> set power_save off`, with a name that cannot pass for an option.
+        """
+        parts = [str(part) for part in argv]
+        if len(parts) != 6:
+            return False
+        if parts[0] == "nmcli":
+            name, shape = parts[3], parts[:3] + parts[4:]
+            expected = ["nmcli", "connection", "modify", "802-11-wireless.powersave", DISABLE_VALUE]
+        elif parts[0] == "iw":
+            name, shape = parts[2], parts[:2] + parts[3:]
+            expected = ["iw", "dev", "set", "power_save", "off"]
+        else:
+            return False
+        return shape == expected and bool(name) and not name.startswith("-")
 
     @classmethod
     def _named(cls, found: List[Dict[str, Any]]) -> str:

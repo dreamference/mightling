@@ -20,7 +20,7 @@ Other memory-safety rules elsewhere: `server start` stops the code index's scope
 
 ## Wi-Fi power saving, the node's own step
 
-`HostSafetySetup.steps()` ends with one step that is neither the model's nor the sandbox's: Wi-Fi power saving, which loses the multicast mDNS clients find a node by (`WifiPowerSave`, `vllm_server/wifi_power_save.py`; why and how measured: [node.md](node.md#advertising-a-node)). `host check` prints the two commands, `host setup` runs them as root like every other step (`nmcli connection modify <connection> 802-11-wireless.powersave 2`, then `iw dev <if> set power_save off` when the radio still says `on`), and `check_host_safety()` does not look at it: it gates model loads, which Wi-Fi does not endanger. `NodePrepare` filters the step out by its name (`STEP_NAME`), as it does the sandbox step.
+`HostSafetySetup.steps()` ends with one step that is neither the model's nor the sandbox's: Wi-Fi power saving, which loses the multicast mDNS clients find a node by (`WifiPowerSave`, `vllm_server/wifi_power_save.py`; why and how measured: [node.md](node.md#advertising-a-node)). `host check` prints the two commands, `host setup` runs them as root like every other step (`nmcli connection modify <connection> 802-11-wireless.powersave 2`, then `iw dev <if> set power_save off` when the radio still says `on`), and `check_host_safety()` does not look at it: it gates model loads, which Wi-Fi does not endanger. `NodePrepare` runs it too (since 2026-10-12, the one NetworkManager change it makes; it refuses any other `nmcli` command), and filters out only the sandbox step, which it checks itself.
 
 ## bubblewrap needs an AppArmor profile, and this machine now has one
 

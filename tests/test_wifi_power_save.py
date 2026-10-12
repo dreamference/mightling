@@ -183,6 +183,63 @@ def test_node_enable_warns_but_goes_on(network, monkeypatch, capsys):
     assert "Wi-Fi" not in capsys.readouterr().out
 
 
-def test_node_prepare_leaves_networkmanager_alone(network, only_wifi_to_fix):
-    assert [step["name"] for step in HostSafetySetup.steps()] == [STEP_NAME]
+def test_node_prepare_turns_it_off_too(network, only_wifi_to_fix, monkeypatch, capsys):
+    # Decided 2026-10-12: the one NetworkManager change node prepare makes.
+    from dreamference.node import node_prepare
+    assert [step["name"] for step in NodePrepare._host_steps()] == [STEP_NAME]
+    ran = []
+
+    def fake_run(command, **kwargs):
+        ran.append(command)
+        if command[0] == "nmcli":
+            network["setting"] = "disable"
+        elif command[0] == "iw":
+            network["radio"] = "off"
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(node_prepare.subprocess, "run", fake_run)
+    for command in NodePrepare._host_steps()[0]["commands"]:
+        assert NodePrepare._execute(command) is True
+    assert ran == [["nmcli", "connection", "modify", "TP-Link_DA74", "802-11-wireless.powersave", "2"],
+                   ["iw", "dev", "wlP9s9", "set", "power_save", "off"]]
     assert NodePrepare._host_steps() == []
+    assert "Refused" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", [
+    ["nmcli", "connection", "modify", "TP-Link_DA74", "802-11-wireless.powersave", "2"],
+    ["nmcli", "connection", "modify", "Wired connection 1", "802-11-wireless.powersave", "2"],
+    ["iw", "dev", "wlP9s9", "set", "power_save", "off"],
+])
+def test_node_prepare_allows_exactly_the_two_wifi_commands(command):
+    assert WifiPowerSave.is_fix_command(command) is True
+    assert NodePrepare.allowed(command) is True
+
+
+@pytest.mark.parametrize("command", [
+    ["nmcli", "radio", "wifi", "off"],
+    ["nmcli", "networking", "off"],
+    ["nmcli", "connection", "down", "TP-Link_DA74"],
+    ["nmcli", "connection", "up", "TP-Link_DA74"],
+    ["nmcli", "device", "reapply", "wlP9s9"],
+    ["nmcli", "connection", "add", "type", "wifi", "ifname", "wlP9s9"],
+    ["nmcli", "connection", "modify", "TP-Link_DA74", "ipv4.method", "manual"],
+    ["nmcli", "connection", "modify", "TP-Link_DA74", "802-11-wireless.powersave", "3"],
+    ["nmcli", "connection", "modify", "TP-Link_DA74", "802-11-wireless.powersave", "2", "ipv4.dns", "1.1.1.1"],
+    ["nmcli", "connection", "modify", "--temporary", "802-11-wireless.powersave", "2"],
+    ["nmcli", "connection", "modify", "", "802-11-wireless.powersave", "2"],
+    ["/usr/bin/nmcli", "connection", "modify", "TP-Link_DA74", "802-11-wireless.powersave", "2"],
+    ["iw", "dev", "wlP9s9", "set", "power_save", "on"],
+    ["iw", "dev", "wlP9s9", "disconnect"],
+    ["iw", "reg", "set", "US"],
+    ["iw", "dev", "-x", "set", "power_save", "off"],
+    ["systemctl", "restart", "NetworkManager"],
+    ["sh", "-c", "nmcli connection modify x 802-11-wireless.powersave 2"],
+])
+def test_node_prepare_refuses_every_other_network_command(command, monkeypatch, capsys):
+    from dreamference.node import node_prepare
+    called = []
+    monkeypatch.setattr(node_prepare.subprocess, "run", lambda *a, **k: called.append(a))
+    assert NodePrepare.allowed(command) is False
+    assert NodePrepare._execute(command) is False
+    assert called == [] and "never runs" in capsys.readouterr().out

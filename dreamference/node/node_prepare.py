@@ -6,8 +6,10 @@ It is the one command a person types once on a new GB10, and the one `node provi
 with `sudo`. It acts for the user who invoked sudo (`SUDO_USER`), reads each setting before it
 changes it, prints every command before running it, and changes only what is missing:
 
-- the host settings a model load is refused without (`HostSafetySetup.steps()`, less Wi-Fi power
-  saving, which is NetworkManager's);
+- the host settings a model load is refused without (`HostSafetySetup.steps()`), and with them
+  Wi-Fi power saving turned off on a connected Wi-Fi connection, which loses the multicast mDNS
+  clients find a node by (`WifiPowerSave`; the one NetworkManager setting this command changes,
+  decided 2026-10-12);
 - the user in the `docker` group, which NVIDIA's first-boot wizard does not do;
 - lingering, which jobs and Night Shift need;
 - the Avahi service file, created empty and owned by the user, so `node enable` (run as the user)
@@ -16,9 +18,12 @@ changes it, prints every command before running it, and changes only what is mis
 - NVIDIA's telemetry service, disabled always (decided 2026-10-03), as Mightling disabled vLLM's
   and Onyx's.
 
-What it never touches: sshd, netplan or NetworkManager, the firewall, users and passwords, APT
-sources, kernel parameters other than the host settings' two sysctls, and NVIDIA's services other
-than the telemetry one. A step that can lock someone out of a machine is not automated.
+What it never touches: sshd, netplan, NetworkManager beyond that one Wi-Fi setting, the firewall,
+users and passwords, APT sources, kernel parameters other than the host settings' two sysctls, and
+NVIDIA's services other than the telemetry one. A step that can lock someone out of a machine is not
+automated: the Wi-Fi change is `nmcli connection modify <connection> 802-11-wireless.powersave 2`,
+which takes effect at the next reconnect, and `iw dev <interface> set power_save off`, which takes
+effect now; neither reconnects, so an SSH session that runs it survives.
 """
 
 import grp
@@ -33,6 +38,8 @@ LINGER_DIR: Final[str] = "/var/lib/systemd/linger"
 AVAHI_SERVICES_DIR: Final[str] = "/etc/avahi/services"
 
 # The words a prepare command may never contain: the things provisioning promises not to touch.
+# The two Wi-Fi power-saving commands are the one exception, matched whole
+# (`WifiPowerSave.is_fix_command`); every other nmcli command is refused.
 FORBIDDEN: Final[tuple] = (
     "sshd",
     "ssh.service",
@@ -136,16 +143,14 @@ class NodePrepare:
     @classmethod
     def _host_steps(cls) -> List[Dict[str, Any]]:
         from dreamference.vllm_server.host_safety_setup import HostSafetySetup
-        from dreamference.vllm_server.wifi_power_save import STEP_NAME as WIFI_STEP
 
         # The sandbox check of `HostSafetySetup` runs bubblewrap from the invoking user's systemd,
         # which root does not have; this class checks the profile itself (`_sandbox_step`). Wi-Fi
-        # power saving is a NetworkManager setting, which node prepare never touches: `node
-        # enable` warns about it and `ling-admin host setup` turns it off.
+        # power saving stays in: a node on Wi-Fi with it on is one clients cannot find.
         return [
             step
             for step in HostSafetySetup.steps()
-            if step["name"] not in ("let bubblewrap create its sandbox", WIFI_STEP)
+            if step["name"] != "let bubblewrap create its sandbox"
         ]
 
     @classmethod
@@ -262,8 +267,29 @@ class NodePrepare:
         return result.stdout.strip()
 
     @classmethod
+    def allowed(cls, command: List[str]) -> bool:
+        """
+        Whether node prepare may run a command: one of the two Wi-Fi power-saving commands, matched
+        whole, or a command with none of the `FORBIDDEN` words in it.
+
+        Args:
+            command: The command, as root, without `sudo`.
+
+        Returns:
+            bool: False for anything that would touch sshd, the network beyond that Wi-Fi setting,
+            the firewall, accounts or APT sources.
+        """
+        from dreamference.vllm_server.wifi_power_save import WifiPowerSave
+
+        if WifiPowerSave.is_fix_command(command):
+            return True
+        if command and os.path.basename(str(command[0])) in ("nmcli", "iw"):
+            return False
+        return not any(word in str(part) for part in command for word in FORBIDDEN)
+
+    @classmethod
     def _execute(cls, command: List[str]) -> bool:
-        if any(word in part for part in command for word in FORBIDDEN):
+        if not cls.allowed(command):
             print(f"❌ Refused, node prepare never runs this: {' '.join(command)}")
             return False
         print(f"🔑 {' '.join(command)}")
