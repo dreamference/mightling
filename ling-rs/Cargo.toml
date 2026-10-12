@@ -33,6 +33,9 @@ ling-apps = { path = "apps" }
 # Observation masking: the rule Codex's core calls (patch 0021); the launcher sets its policy.
 ling-masking = { path = "masking" }
 ling-node-locator = { path = "node-locator" }
+# Code Mode's `exec` as a function on a server that drops custom tools: the launcher sets the
+# choice, Codex's core translates (patch 0020; src/exec_tool.rs).
+ling-tools = { path = "tools" }
 # Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
 ling-skills = { path = "skills" }
 rand = { workspace = true }

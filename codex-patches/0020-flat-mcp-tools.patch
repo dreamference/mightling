@@ -7,14 +7,18 @@ index 693fbd7..1444e51 100644
 +ling-tools = { path = "../ling/tools" }
  codex-utils-absolute-path = { workspace = true }
 diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
-index f8faf45..9a0c600 100644
+index f8faf45..6e42f4a 100644
 --- a/codex-rs/core/src/client.rs
 +++ b/codex-rs/core/src/client.rs
 @@ -946,3 +946,3 @@ impl ModelClient {
                  prompt.base_instructions.text.clone(),
 -                Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into()),
-+                Some(ling_tools::flatten_raw(create_tools_raw_json_for_responses_api(&prompt.tools)?).into()),
++                Some(ling_tools::for_server(create_tools_raw_json_for_responses_api(&prompt.tools)?, &mut input).into()),
              )
+@@ -2415,2 +2415,3 @@ where
+                 Ok(ResponseEvent::OutputItemDone(item)) => {
++                    let item = ling_tools::from_server(item);
+                     items_added.push(item.clone());
 diff --git a/codex-rs/core/src/tools/router.rs b/codex-rs/core/src/tools/router.rs
 index d9f1f63..4203a11 100644
 --- a/codex-rs/core/src/tools/router.rs

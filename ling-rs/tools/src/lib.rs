@@ -1,4 +1,4 @@
-//! MCP tools as plain function tools.
+//! MCP tools as plain function tools, and Code Mode's `exec` as one where the server needs it.
 //!
 //! Codex declares the tools of an MCP server to the model as one `{"type": "namespace"}` entry
 //! holding them, a tool type of OpenAI's Responses API. The local model servers (SGLang, vLLM)
@@ -18,6 +18,17 @@
 //!
 //! History needs no rewriting: Codex sends an earlier call back as `name` plus a `namespace`
 //! field the model server ignores, so the model sees the name it called.
+//!
+//! The same two places carry Code Mode's `exec` to a server that drops custom tools
+//! ([`custom`]): [`for_server`], which the request hook calls in place of [`flatten_raw`], also
+//! offers `exec` as a function and replays its earlier calls as function calls, and
+//! [`from_server`] turns the model's call back into the custom tool call Codex expects.
+
+pub mod custom;
+
+pub use custom::exec_as_function;
+pub use custom::from_server;
+pub use custom::set_exec_as_function;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -25,6 +36,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use serde_json::value::RawValue;
 
@@ -42,8 +55,14 @@ fn names() -> &'static Mutex<HashMap<String, (String, String)>> {
     NAMES.get_or_init(Mutex::default)
 }
 
-/// Replaces every `mcp__…` namespace in a request's tools with its tools, as functions.
+/// Replaces every `mcp__…` namespace in a request's tools with its tools, as functions, and
+/// offers `exec` as a function when this process translates it ([`custom`]).
 pub fn flatten(tools: Vec<Value>) -> Vec<Value> {
+    flatten_with(tools, exec_as_function())
+}
+
+/// [`flatten`], with `exec` offered as a function when `exec_as_function` is true.
+pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool) -> Vec<Value> {
     let mut taken: HashSet<String> = tools
         .iter()
         .filter(|tool| tool["type"] != "namespace")
@@ -55,6 +74,10 @@ pub fn flatten(tools: Vec<Value>) -> Vec<Value> {
         let namespace = tool["name"].as_str().unwrap_or_default().to_string();
         let inner = match &tool["tools"] {
             Value::Array(inner) if tool["type"] == "namespace" && namespace.starts_with(MCP_PREFIX) => inner.clone(),
+            _ if exec_as_function && custom::is_translated(&tool) => {
+                flat.push(custom::as_function(&tool));
+                continue;
+            }
             _ => {
                 flat.push(tool);
                 continue;
@@ -84,7 +107,7 @@ pub fn flatten(tools: Vec<Value>) -> Vec<Value> {
 /// namespace, or one that does not parse, is returned as it came (the same allocation, so
 /// Codex's request comparison still sees it unchanged).
 pub fn flatten_raw(tools: Arc<RawValue>) -> Arc<RawValue> {
-    if !tools.get().contains(MCP_PREFIX) {
+    if !tools.get().contains(MCP_PREFIX) && !(exec_as_function() && tools.get().contains("\"custom\"")) {
         return tools;
     }
     let Ok(list) = serde_json::from_str::<Vec<Value>>(tools.get()) else { return tools };
@@ -92,6 +115,16 @@ pub fn flatten_raw(tools: Arc<RawValue>) -> Arc<RawValue> {
         Ok(raw) => Arc::from(raw),
         Err(_) => tools,
     }
+}
+
+/// What the request hook (patch 0020) calls on every request: the tools through [`flatten_raw`],
+/// and, when this process offers `exec` as a function, the input's earlier `exec` calls and their
+/// outputs as the function calls the model saw ([`custom::replay`]).
+pub fn for_server<T: Serialize + DeserializeOwned>(tools: Arc<RawValue>, input: &mut [T]) -> Arc<RawValue> {
+    if exec_as_function() {
+        custom::replay(input);
+    }
+    flatten_raw(tools)
 }
 
 /// Gives a flattened tool its namespace back. A call that already names a namespace, or a name
