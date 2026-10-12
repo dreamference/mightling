@@ -63,10 +63,8 @@
           <h3>Mac and Linux clients</h3>
           <p>Your other computers use the GB10's model over the local network. On a Mac or another Linux machine,
             the same command above installs the <code>ling</code> client; it finds the GB10 by itself.</p>
-          <!-- Shown again once a release carries the Mac app (1.6.0):
           <p>The Mac desktop app is an <b>unsigned preview</b>:
             <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#on-a-mac-preview">how to install and open it</a>.</p>
-          -->
         </div>
         <div class="client">
           <h3>Windows client <span class="tag">preview</span></h3>
@@ -120,7 +118,7 @@
       <table class="bench">
         <tr><th>System</th><th>Same 100<br>tasks</th><th>All 500<br>tasks</th></tr>
         <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">estimated</span></td></tr>
-        <tr class="mine"><td>Mightling {{TBD: version}} + Qwen3.8-27B, refine mode, one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">{{TBD: k}}/100</td><td class="num">≈{{TBD: estimate}}% <span class="est">estimated</span></td></tr>
+        <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), refine mode, one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">69/100</td><td class="num">≈70% <span class="est">estimated</span></td></tr>
         <tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
         <tr><td>GLM-4.6 (Z.ai's agent)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
         <tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
@@ -142,7 +140,8 @@
       Qwen3-Coder-480B and GLM-4.6, models many times its size, but every row uses a different agent, different
       hardware and, for the leaderboard rows, the official x86 test images, where ours ran on community arm64 images.
       In refine mode a first session studies the task without changing anything and a fresh session does it:
-      {{TBD: one sentence on the refine result and its cost in time, and whether it is now the default}}.</p>
+      it resolved one task more than the default (69 against 68, each arm winning tasks the other lost), at about
+      2.2 times the time per task, so it stays opt-in (<code>ling --refine</code>).</p>
 
     <details class="method"><summary>How the ≈69% is estimated</summary>
       <p>100 tasks are a fifth of Verified, so the full-set figure is an estimate. A one-parameter item-response
@@ -162,7 +161,7 @@
 
     <ol class="footnotes">
       <li id="fn1">Mightling: 100 tasks, one attempt each; one DGX Spark (GB10, 128 GB), model served locally,
-        no cloud; default mode measured 2026-10-08, refine mode {{TBD: date}}. Estimate from the
+        no cloud; default mode measured 2026-10-08, refine mode 2026-10-09. Estimate from the
         <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> per-task data.</li>
       <li id="fn2">500 tasks, one attempt; hardware not stated. Source:
         <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>.
