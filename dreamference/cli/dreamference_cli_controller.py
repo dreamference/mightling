@@ -1277,7 +1277,7 @@ class DreamferenceCLIController:
         node_provision_parser.add_argument("--from", dest="source", default="this", help="What to install: this (default) or release[=X.Y.Z]")
         node_provision_parser.add_argument("--per-host-password", action="store_true", help="With several hosts, ask each machine's password separately (default: one password for all)")
         node_provision_parser.add_argument("--mesh", action="store_true", help="Also pair every node with every other (not built yet)")
-        node_provision_parser.add_argument("--web", action="store_true", help="Also install and configure the web UI there (`ling-admin chat start` and `configure`; `node enable` without `--no-web`)")
+        node_provision_parser.add_argument("--web", action="store_true", help="Also share the web UI (`ling web`) on the LAN there: `node enable` without `--no-web`")
         node_provision_parser.add_argument("--no-start", action="store_true", help="Leave the model server stopped")
         node_provision_parser.add_argument("--restart", action="store_true", help="Restart a running model server")
         node_provision_parser.add_argument("--os-update", action="store_true", help="NVIDIA's OS and firmware update first, with a reboot")
