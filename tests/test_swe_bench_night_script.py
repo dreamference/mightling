@@ -66,3 +66,26 @@ def test_a_misspelt_restart_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default {arm}")
     assert status == 2 and runs(recorded) == []
     assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+def test_the_apply_patch_arm_reaches_only_the_candidates_round(tmp_path):
+    status, recorded, folder = night(tmp_path, "default apply-patch-function")
+    assert status == 0 and (folder / "done").exists()
+    record, candidate = runs(recorded)
+    assert "--name n4-default " in record and "--apply-patch" not in record
+    assert "--name n4-apply-patch-function " in candidate and candidate.count("--apply-patch function") == 1
+    assert "--task-rules" not in candidate
+    assert "swe-bench report n4-apply-patch-function --against n4-default" in recorded
+    # It stacks with the other arms like any part.
+    stacked = tmp_path / "stacked"
+    stacked.mkdir()
+    _, recorded, _ = night(stacked, "default restart-2+apply-patch-freeform")
+    candidate = runs(recorded)[1]
+    assert "--restart-after-compactions 2 --apply-patch freeform" in candidate
+
+
+@pytest.mark.parametrize("arm", ["apply-patch", "apply-patch-func", "apply_patch-function"])
+def test_a_misspelt_apply_patch_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"default {arm}")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()

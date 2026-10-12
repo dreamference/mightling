@@ -45,6 +45,10 @@ LOCK_HOLDER: Final[str] = "a SWE-bench run"
 # The prompts compiled into `ling` (ling-rs/src/prompt.rs); any other name is a file in
 # `$CODEX_HOME/system-prompts/`. A run's manifest without a prompt ran the default.
 BUILT_IN_PROMPTS: Final[tuple] = ("default", "offline", "high-swe", "ask")
+# The apply_patch arm (spec §22): the launcher's override variable (ling-rs/src/lib.rs,
+# `APPLY_PATCH_ENV`), and the manifest value for a run that left the launcher's choice alone.
+APPLY_PATCH_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_APPLY_PATCH"
+AUTO_APPLY_PATCH: Final[str] = "auto"
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
 
@@ -195,7 +199,8 @@ class SweBenchRunner:
                        mask: str = "off", strip_names: bool = False, refine: bool = False,
                        task_rules: Optional[List[str]] = None, review_turn: bool = False,
                        refine_version: str = "v1",
-                       hooks: Optional[List[str]] = None, restart_after_compactions: int = 0) -> Dict[str, Any]:
+                       hooks: Optional[List[str]] = None, restart_after_compactions: int = 0,
+                       apply_patch: Optional[str] = None) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -258,6 +263,7 @@ class SweBenchRunner:
             "review_turn": review_turn,
             "restart_after_compactions": int(restart_after_compactions or 0),
             "hooks": sorted(set(hooks or [])),
+            "apply_patch": apply_patch or AUTO_APPLY_PATCH,
             **({"hooks_gate_sha256": SweBenchHooks.gate_digest()} if hooks else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
@@ -327,7 +333,8 @@ class SweBenchRunner:
             review_turn: bool = False,
             refine_version: str = "v1",
             hooks: Optional[List[str]] = None,
-            restart_after_compactions: int = 0) -> int:
+            restart_after_compactions: int = 0,
+            apply_patch: Optional[str] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -373,6 +380,9 @@ class SweBenchRunner:
             restart_after_compactions: Stop the fix session once its N-th compaction is recorded
                 and start one fresh session with the issue and the stopped session's diff as a
                 file (spec §21); 0, the default, never restarts. A new run only, like `code_index`.
+            apply_patch: How the agent is offered Codex's `apply_patch` tool, set for every session
+                through `DREAMFERENCE_MIGHTLING_APPLY_PATCH`: `function`, `freeform` or `off`; None
+                leaves the launcher's choice (spec §22). A new run only, like `code_index`.
             hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
                 holds the first edit once until the files and functions the issue names have
                 been read, and the first stop once until its example has been run; spec §20).
@@ -477,7 +487,8 @@ class SweBenchRunner:
                                                   served, runtime_hash, mightling_bin, parallel, code_index,
                                                   prompt, mask, strip_names, refine, task_rules,
                                                   review_turn, refine_version, hooks,
-                                                  restart_after_compactions=restart_after_compactions)
+                                                  restart_after_compactions=restart_after_compactions,
+                                                  apply_patch=apply_patch)
                     store.write_manifest(manifest)
                 elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                     print(f"❌ Run {store.name} was started with another ling build or model "
@@ -500,6 +511,10 @@ class SweBenchRunner:
                              # The runner orchestrates `--refine` itself; the launcher's own refine mode
                              # would turn each step into two sessions, whatever the setting says.
                              "DREAMFERENCE_MIGHTLING_REFINE": "off"}
+                # The apply_patch arm (spec §22): the launcher's override, only when the run asks.
+                run_apply_patch = str(manifest.get("apply_patch") or AUTO_APPLY_PATCH)
+                if run_apply_patch != AUTO_APPLY_PATCH:
+                    extra_env[APPLY_PATCH_ENV] = run_apply_patch
                 # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
                 # the text a later session of the same instance would start from.
                 custom_prompt = cls.prompt_file(run_prompt)
@@ -710,7 +725,9 @@ class SweBenchRunner:
                             refine_version=str(manifest.get("refine_version") or "v1"),
                             hooks=manifest.get("hooks") or [],
                             # A run made before the option existed never restarted.
-                            restart_after_compactions=int(manifest.get("restart_after_compactions") or 0))
+                            restart_after_compactions=int(manifest.get("restart_after_compactions") or 0),
+                            # A run made before the option existed left the launcher's choice alone.
+                            apply_patch=str(manifest.get("apply_patch") or AUTO_APPLY_PATCH))
                         run.lane_host = lane["host"]
                         if lane.get("node"):
                             run.notes.append(f"model server: {lane['name']} (a replica of this machine's model)")
