@@ -334,8 +334,8 @@ jobs:
     # `desktop`, `ling`, `windows` and `ling-clients` are skipped when their inputs are off; the release still
     # goes out without them.
     if: ${{ !failure() && !cancelled() && needs.python-dist.result == 'success' }}
-    # The signing key lives only in this environment, which runs from `main` alone and waits for
-    # the maintainer's approval: a workflow pushed to any other branch cannot read it.
+    # The signing key lives only in this environment, which only `main` and `release/*` can use: a
+    # workflow pushed to any other branch cannot read it. No approval is asked since 2026-10-12.
     environment: release
     runs-on: ubuntu-latest
     steps:

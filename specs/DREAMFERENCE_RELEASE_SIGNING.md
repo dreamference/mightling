@@ -3,8 +3,8 @@
 *Built on `release/signing` (2026-10-07), closing finding 8 of
 [DREAMFERENCE_SECURITY_REVIEW_2026-10.md](./DREAMFERENCE_SECURITY_REVIEW_2026-10.md); merged into
 `main` (`829a206`). First used by 1.5.1 (2026-10-08), the first signed release: 1.5.0 was built
-but never published. The signing key lives in the `release` environment, whose approval is the
-release's last step.*
+but never published. The signing key lives in the `release` environment, which only `main` and
+`release/*` can use; since 2026-10-12 no approval is asked (§4).*
 
 ## 1. What it protects against
 
@@ -100,7 +100,13 @@ SHA256:6cvnF/4G2TaHAHsimf1FkDSqhCwh1nzFetXN7Ksb54g
 `release` environment, which allows only the branch `main` and requires the maintainer (`dgxcoder`)
 to approve each run; the repository-level secret was deleted. The `release` job declares
 `environment: release`, so a workflow pushed to any other branch cannot read the key, and every
-release waits for an "Approve" click on GitHub before it is signed and published.
+release waited for an "Approve" click on GitHub before it was signed and published.
+
+**Changed 2026-10-12 (the user's decision): releases are automatic.** The `release` environment no
+longer has a required reviewer; its branch policy stays (`main` and `release/*`), so the key is
+still out of reach of a workflow pushed to any other branch, but anyone who can push to those
+branches and dispatch the workflow now gets a signed release without a second person's click.
+The workflow's `draft` input (default true) still decides whether the release is published.
 
 ## 5. Rotating the key
 
