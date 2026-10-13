@@ -82,7 +82,8 @@ If you would rather not link your own account, `ling signal setup --number +1555
 separate number for Mightling instead (it needs a CAPTCHA and an SMS or voice code).
 
 **More than one Signal account.** Each Signal account gets a bridge of its own, with a name. The
-first is `default`; add another with `--name`:
+first is always `default`, set up by plain `ling signal setup` (a name given for the first one is
+refused); add another with `--name`:
 
 ```bash
 ling signal setup --name work            # links a second account (or --number for its own number)
