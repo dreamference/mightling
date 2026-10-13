@@ -104,6 +104,73 @@ pub fn fetch(url: &str, max_chars: i64) -> Result<FetchedPage, String> {
     Ok(page(url, final_url, status, content_type, &body, max_chars))
 }
 
+/// What `ling-fetch --download` saved (one JSON line on stdout).
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct Downloaded {
+    pub final_url: String,
+    pub status: u16,
+    pub content_type: String,
+    pub bytes: u64,
+}
+
+/// The default and the highest `--max-bytes` of a download.
+pub const DOWNLOAD_DEFAULT_BYTES: u64 = 64 * 1024 * 1024;
+pub const DOWNLOAD_CEILING_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Downloads a PDF into `dest` for `ling-docs`' `pdf_search` (specs/DREAMFERENCE_PDF_SEARCH.md
+/// §3.3.1): the same request as a fetch (agent, proxy rules, redirects, timeouts), the body kept
+/// only when it is a PDF and within `max_bytes`. `ling-docs` opens no socket; this is its download.
+pub fn download_pdf(url: &str, dest: &std::path::Path, max_bytes: u64) -> Result<Downloaded, String> {
+    require_http_url(url)?;
+    let proxy = crate::proxy_for(url, |name| std::env::var(name).ok());
+    let response = match agent(proxy).get(url).set("Accept", "application/pdf,*/*;q=0.8").call() {
+        Ok(response) => response,
+        Err(ureq::Error::Status(status, response)) => {
+            return Err(format!("request failed: HTTP {status} {} for url: {}", response.status_text(), response.get_url()));
+        }
+        Err(error) => return Err(format!("request failed: {error}")),
+    };
+    let final_url = response.get_url().to_string();
+    let status = response.status();
+    let content_type = response.header("Content-Type").unwrap_or_default().to_string();
+    let bytes = save_pdf(response.into_reader(), dest, max_bytes.clamp(1, DOWNLOAD_CEILING_BYTES), &content_type)?;
+    Ok(Downloaded { final_url, status, content_type, bytes })
+}
+
+/// Streams `body` into `dest` (created new, mode 600 on Unix) if its first KiB holds `%PDF-`,
+/// stopping at `max_bytes`. Nothing is left behind on a refusal.
+pub fn save_pdf(body: impl Read, dest: &std::path::Path, max_bytes: u64, content_type: &str) -> Result<u64, String> {
+    let mut body = body.take(max_bytes + 1);
+    let mut head = Vec::with_capacity(1024);
+    (&mut body).take(1024).read_to_end(&mut head).map_err(|e| format!("request failed: {e}"))?;
+    if !head.windows(5).any(|w| w == b"%PDF-") {
+        let named = if content_type.is_empty() { "no type".to_string() } else { content_type.to_string() };
+        return Err(format!("not a PDF (no %PDF- header; the server sent {named})"));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(dest).map_err(|e| format!("cannot write {}: {e}", dest.display()))?;
+    let result = (|| -> Result<u64, String> {
+        use std::io::Write;
+        file.write_all(&head).map_err(|e| e.to_string())?;
+        let copied = std::io::copy(&mut body, &mut file).map_err(|e| format!("request failed: {e}"))?;
+        let total = head.len() as u64 + copied;
+        if total > max_bytes {
+            return Err(format!("larger than {} MiB: not downloaded", max_bytes >> 20));
+        }
+        Ok(total)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(dest);
+    }
+    result
+}
+
 /// Builds the page from a response's parts; separate from the request so it can be tested alone.
 pub fn page(
     url: &str,
@@ -186,6 +253,29 @@ pub fn render_text(page: &FetchedPage, max_chars: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_download_is_kept_only_when_it_is_a_pdf_within_the_cap() {
+        let dir = std::env::temp_dir().join(format!("ling-fetch-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pdf = [b"%PDF-1.7\n".as_slice(), &vec![b'x'; 5000]].concat();
+        assert_eq!(save_pdf(pdf.as_slice(), &dir.join("a.pdf"), 1 << 20, "application/octet-stream"), Ok(pdf.len() as u64));
+        assert_eq!(std::fs::read(dir.join("a.pdf")).unwrap(), pdf);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(dir.join("a.pdf")).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let html = save_pdf(b"<html>sorry</html>".as_slice(), &dir.join("b.pdf"), 1 << 20, "text/html").unwrap_err();
+        assert!(html.contains("not a PDF") && html.contains("text/html"), "{html}");
+        assert!(!dir.join("b.pdf").exists());
+        let big = save_pdf(pdf.as_slice(), &dir.join("c.pdf"), 2048, "application/pdf").unwrap_err();
+        assert!(big.contains("larger than"), "{big}");
+        assert!(!dir.join("c.pdf").exists(), "a partial file is removed");
+        assert!(save_pdf(pdf.as_slice(), &dir.join("a.pdf"), 1 << 20, "").is_err(), "never overwrites");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn only_http_and_https_are_accepted() {

@@ -41,9 +41,27 @@ pub fn docs_dir() -> PathBuf {
     home().join("docs")
 }
 
-/// One collection's database.
+/// One collection's database. A PDF's ephemeral index (`pdf-<hash>`, PDF_SEARCH §3.4) is a
+/// collection of one document whose database lives in [`pdf_cache_dir`].
 pub fn db_path(collection: &str) -> PathBuf {
+    if is_pdf_cache_name(collection) {
+        return pdf_cache_dir().join(format!("{collection}.db"));
+    }
     docs_dir().join(format!("{collection}.db"))
+}
+
+/// The ephemeral indexes of `pdf_search` (PDF_SEARCH §3.4), mode 700.
+pub fn pdf_cache_dir() -> PathBuf {
+    docs_dir().join("pdf")
+}
+
+/// Hex digits of a PDF's SHA-256 that name its cache entry.
+pub const PDF_HASH_DIGITS: usize = 12;
+
+/// Whether `name` is a cache entry's (`pdf-` and 12 lower-case hex digits): never a user's
+/// collection.
+pub fn is_pdf_cache_name(name: &str) -> bool {
+    name.strip_prefix("pdf-").is_some_and(|h| h.len() == PDF_HASH_DIGITS && h.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)))
 }
 
 /// The directory of the running executable, symlinks resolved.
@@ -107,6 +125,18 @@ pub struct Settings {
     pub embedding_model: String,
     /// ONNX Runtime threads for indexing (the slice's four cores).
     pub embed_threads: usize,
+    /// `pdf_search` (PDF_SEARCH §3.9): the largest PDF it reads, in MiB.
+    pub pdf_max_mb: u64,
+    /// The pages of one PDF it indexes, from the first.
+    pub pdf_max_pages: u32,
+    /// One PDF's extraction time limit (collections use `extract_timeout_s` per file).
+    pub pdf_timeout_s: u64,
+    /// How long a call waits for the embedding before answering from what is there.
+    pub pdf_wait_s: u64,
+    /// The cache's size before the least recently used entries go.
+    pub pdf_cache_mb: u64,
+    /// Days an unused cache entry is kept.
+    pub pdf_cache_days: u64,
 }
 
 impl Default for Settings {
@@ -119,6 +149,12 @@ impl Default for Settings {
             extract_timeout_s: 30,
             embedding_model: MODEL_NAME.to_string(),
             embed_threads: 4,
+            pdf_max_mb: 64,
+            pdf_max_pages: 2000,
+            pdf_timeout_s: 120,
+            pdf_wait_s: 45,
+            pdf_cache_mb: 1024,
+            pdf_cache_days: 1,
         }
     }
 }
@@ -165,6 +201,24 @@ impl Settings {
         }
         if let Some(v) = number("docs_extract_timeout_s", "DREAMFERENCE_MIGHTLING_DOCS_EXTRACT_TIMEOUT_S").filter(|v| *v >= 1.0) {
             s.extract_timeout_s = v as u64;
+        }
+        if let Some(v) = number("docs_pdf_max_mb", "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_MB").filter(|v| *v >= 1.0) {
+            s.pdf_max_mb = v as u64;
+        }
+        if let Some(v) = number("docs_pdf_max_pages", "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES").filter(|v| *v >= 1.0) {
+            s.pdf_max_pages = v.min(u32::MAX as f64) as u32;
+        }
+        if let Some(v) = number("docs_pdf_timeout_s", "DREAMFERENCE_MIGHTLING_DOCS_PDF_TIMEOUT_S").filter(|v| *v >= 1.0) {
+            s.pdf_timeout_s = v as u64;
+        }
+        if let Some(v) = number("docs_pdf_wait_s", "DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S").filter(|v| *v >= 0.0) {
+            s.pdf_wait_s = v as u64;
+        }
+        if let Some(v) = number("docs_pdf_cache_mb", "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_MB").filter(|v| *v >= 0.0) {
+            s.pdf_cache_mb = v as u64;
+        }
+        if let Some(v) = number("docs_pdf_cache_days", "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_DAYS").filter(|v| *v >= 0.0) {
+            s.pdf_cache_days = v as u64;
         }
         if let Some(v) = env("DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL").or_else(|| table.get("docs_embedding_model").and_then(toml::Value::as_str).map(str::to_string)) {
             s.embedding_model = v;
@@ -215,5 +269,16 @@ mod tests {
         assert_eq!((s.bm25_weight, s.scan_interval_min, s.extract_timeout_s), (0.25, 10, 30));
         assert_eq!(s.max_index_gb, 10.0);
         assert_eq!(CHUNK_TOKENS, 512);
+        assert_eq!((s.pdf_max_mb, s.pdf_max_pages, s.pdf_timeout_s, s.pdf_wait_s, s.pdf_cache_mb, s.pdf_cache_days), (64, 2000, 120, 45, 1024, 1));
+    }
+
+    #[test]
+    fn a_pdf_cache_entry_has_its_own_folder_and_name_pattern() {
+        assert!(is_pdf_cache_name("pdf-3f2a9c01d4e7"));
+        for name in ["pdf-papers", "pdf-3F2A9C01D4E7", "pdf-3f2a9c01d4e", "documents"] {
+            assert!(!is_pdf_cache_name(name), "{name}");
+        }
+        assert_eq!(db_path("pdf-3f2a9c01d4e7"), pdf_cache_dir().join("pdf-3f2a9c01d4e7.db"));
+        assert_eq!(db_path("pdf-papers"), docs_dir().join("pdf-papers.db"));
     }
 }

@@ -5,9 +5,11 @@
 //! 1. `ling docs <command>` runs `ling-docs <command>` (`ling docs add|remove|search|read|status`);
 //! 2. at a session's start it starts `ling-docs session --parent-pid <this process>` detached,
 //!    outside the sandbox, which keeps every collection indexed;
-//! 3. it appends what `ling-docs prompt-block --tools` prints, and when that block is not empty
-//!    (a collection exists) it offers `docs_search` and `docs_read` through the `-c mcp_servers.…`
-//!    arguments that make Codex start `ling-docs mcp` for the session.
+//! 3. it appends what `ling-docs prompt-block --tools` prints, and when that block names a
+//!    collection (`# Your documents`) or PDF search (`# PDFs`, the run-time files are installed:
+//!    specs/DREAMFERENCE_PDF_SEARCH.md §3.2) it offers the tools through the `-c mcp_servers.…`
+//!    arguments that make Codex start `ling-docs mcp` for the session. The server lists what
+//!    applies: `docs_search` with a collection, `pdf_search` with PDFium, `docs_read` with either.
 //!
 //! With `ling-docs` not installed, or `mightling_docs = false`, all of it is skipped. Every
 //! collection is visible to every session (§14.2), so nothing here depends on the directory.
@@ -27,12 +29,15 @@ pub fn binary() -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// The MCP server's name in Codex's configuration; its tools reach the model as `docs_search`
-/// and `docs_read` (patch 0020).
+/// The MCP server's name in Codex's configuration; its tools reach the model as `docs_search`,
+/// `docs_read` and `pdf_search` (patch 0020).
 pub const MCP_SERVER: &str = "ling_docs";
 
 /// What `ling-docs mcp` must see beyond Codex's short allow-list: where the home, the settings
-/// and the installed model are when they are not in their default places.
+/// and the installed model are when they are not in their default places; for `pdf_search`
+/// (PDF_SEARCH §3.2), the user's systemd and the shared admission ledger (a scope cannot be
+/// started without them, and admission would keep a ledger of its own), the air-gap level and
+/// the proxy settings `ling-fetch` downloads with.
 const FORWARDED_ENV: &[&str] = &[
     "CODEX_HOME",
     "DREAMFERENCE_CONFIG_PATH",
@@ -40,7 +45,29 @@ const FORWARDED_ENV: &[&str] = &[
     "DREAMFERENCE_MIGHTLING_DOCS_BM25_WEIGHT",
     "MIGHTLING_DOCS_LIB_DIR",
     "MIGHTLING_DOCS_MODEL_DIR",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DREAMFERENCE_MIGHTLING_AIRGAPPED",
+    "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_MB",
+    "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES",
+    "DREAMFERENCE_MIGHTLING_DOCS_PDF_TIMEOUT_S",
+    "DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S",
+    "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_MB",
+    "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_DAYS",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
 ];
+
+/// Whether a session's docs block offers tools: a collection, or PDF search.
+fn offers_tools(block: &str) -> bool {
+    block.contains("# Your documents") || block.contains("# PDFs")
+}
 
 /// `mightling_docs`: the environment's `DREAMFERENCE_MIGHTLING_DOCS`, then the config file, then on.
 pub fn enabled(config_file: Option<PathBuf>) -> bool {
@@ -107,9 +134,10 @@ fn block_from(binary: &std::path::Path) -> String {
 }
 
 /// Adds the arguments that make Codex start `ling-docs mcp`, when `block` (the session's docs
-/// block) says a collection exists. A `-c mcp_servers.ling_docs…` of the user's own wins.
+/// block) says a collection exists or PDFs can be searched. A `-c mcp_servers.ling_docs…` of the
+/// user's own wins.
 pub fn with_tools(args: Vec<OsString>, block: &str) -> Vec<OsString> {
-    if !block.contains("# Your documents") {
+    if !offers_tools(block) {
         return args;
     }
     let Some(binary) = binary() else { return args };
@@ -167,6 +195,12 @@ mod tests {
         assert_eq!(out[4], "mcp_servers.ling_docs.args=[\"mcp\"]");
         assert!(out[6].starts_with("mcp_servers.ling_docs.env_vars=[\"CODEX_HOME\""), "{}", out[6]);
         assert_eq!(&out[7..], ["exec", "hi"]);
+        // PDF search alone (no collection) offers the server too, with what its runs need.
+        let pdf: Vec<String> = with_tools(base.clone(), "\n\n# PDFs\n\nTo search a long PDF").iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(pdf[4], "mcp_servers.ling_docs.args=[\"mcp\"]");
+        for name in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "DREAMFERENCE_MIGHTLING_AIRGAPPED", "https_proxy", "NO_PROXY"] {
+            assert!(pdf[6].contains(&format!("\"{name}\"")), "{name}: {}", pdf[6]);
+        }
         for setting in [&out[2], &out[4], &out[6]] {
             let (_, value) = setting.split_once('=').unwrap_or_default();
             assert!(format!("v = {value}").parse::<toml::Table>().is_ok(), "{setting}");
