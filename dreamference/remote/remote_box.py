@@ -256,8 +256,12 @@ class RemoteBox:
             f"tar -xzf {STAGE} -C \"$stage\" && rm -f {STAGE}",
             f"echo '{RELAY_BINARY_SHA256[arch]}  '\"$stage\"/netbird-relay | sha256sum -c --quiet -",
             f"install -d -m 0755 {BOX_RELAY_DIR}",
-            f"manifest={BOX_RELAY_DIR}/MANIFEST; : > \"$manifest\"",
-            "if command -v haproxy >/dev/null; then echo 'haproxy=present' >> \"$manifest\"; else",
+            # A rerun (a redeploy, or `setup` after `--box-only`) finds haproxy installed by the
+            # first run; it must stay recorded as ours, or `remove` would leave the package behind.
+            f"manifest={BOX_RELAY_DIR}/MANIFEST",
+            "ours=$(grep -x 'haproxy=installed' \"$manifest\" 2>/dev/null || true); : > \"$manifest\"",
+            "if [ -n \"$ours\" ] && command -v haproxy >/dev/null; then echo 'haproxy=installed' >> \"$manifest\"",
+            "elif command -v haproxy >/dev/null; then echo 'haproxy=present' >> \"$manifest\"; else",
             f"  {install_haproxy}",
             "  echo 'haproxy=installed' >> \"$manifest\"",
             "fi",
