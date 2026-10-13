@@ -418,7 +418,7 @@ and a three-line method on `ContextManager` (`context_manager/history.rs`) that 
 
 ### 13.3 What is stored, and resume
 
-Only the history in memory is rewritten. The rollout keeps every output in full, so the ledger, the nightly audit (§12.2), `compactions_recorded` and every count of `compacted` records are unchanged: **a drop is not a compaction to any of them.** A resumed session (SWE-bench resumes for nudges and the review turn) gets its history from the rollout in full, so what was dropped is kept per history segment in `$CODEX_HOME/masking/dropped/<key>.json` (`call_id` to placeholder; the key is the segment's first `call_id`, as for masking), and the request hook of `0021` (`ling_masking::apply`) first shows those outputs as their placeholders again (`show_dropped`): the resumed session sends what the live one sent, and cannot send a history several times the limit. Each attempt, taken or declined, is one line of `masking/dropped/log.jsonl` (time, segment, size, limit, saving, outputs, accepted). Both are pruned with masking's files after 30 days; the log restarts past 256 KB.
+Only the history in memory is rewritten. The rollout keeps every output in full, so the ledger, the nightly audit (§12.2), `compactions_recorded` and every count of `compacted` records are unchanged: **a drop is not a compaction to any of them.** A resumed session (SWE-bench resumes for nudges and the review turn) gets its history from the rollout in full, so what was dropped is kept per history segment in `$CODEX_HOME/masking/dropped/<key>.json` (`call_id` to placeholder; the key is the segment's first `call_id`, as for masking), and the request hook of `0021` (`ling_masking::apply`) first shows those outputs as their placeholders again (`show_dropped`): the resumed session sends what the live one sent, and cannot send a history several times the limit. Each attempt, taken or declined, is one line of `masking/dropped/log.jsonl` (time, segment, size, limit, saving, outputs, accepted). Both are pruned with masking's files after 30 days; the log restarts past 256 KB. A rewritten output loses `FunctionCallOutputPayload.success` (it does not survive serde), as every output of a resumed session already does.
 
 ### 13.4 The ledger, turn-end compaction and the KV-pool limit
 
@@ -436,19 +436,24 @@ Only the history in memory is rewritten. The rollout keeps every output in full,
 
 ### 13.6 The smoke test, for when a model server is free
 
-Not run: this machine's server is held by the nights and second-puffin's GPU is booked. From a source build of the branch, in a scratch `CODEX_HOME` (never `~/.mightling`), a task that reads more than a 24K limit holds:
+Not run: this machine's server is held by the nights and second-puffin's GPU is booked. It needs a `ling` built from the branch without installing it: the export the builder makes (`CodexBrandedBuilder.prepare_source`) built with `cargo build --release -p codex-cli --bin codex` and a `CARGO_TARGET_DIR` of its own (two exports sharing one target directory write the same artifacts: Cargo's unit hashes do not depend on the export's path). Run it in a scratch `CODEX_HOME`, never `~/.mightling`. A drop needs more than ten outputs before the limit is crossed, and the outputs older than the last ten must free 15% of it: about 25 files of 2.5–4.5 KB and a 26,000-token limit do that (the fixed prefix is ~11K tokens).
 
 ```bash
-S=$(mktemp -d); mkdir -p "$S/home"; BIN=<the branch's built codex binary, run as ling>
+S=$(mktemp -d); BIN=<the branch's codex binary>; REPO=~/PycharmProjects/dgxcoder
+FILES=$(cd "$REPO" && git ls-files 'dreamference/*.py' | xargs ls -l | awk '$5>2500 && $5<4500 {print $9}' | head -25 | tr '\n' ' ')
 for arm in 1 0; do
-  rm -rf "$S/home/sessions" "$S/home/masking"
-  CODEX_HOME="$S/home" DREAMFERENCE_VLLM_HOST=127.0.0.1 DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS=$arm \
-    "$BIN" exec -s read-only -C ~/PycharmProjects/dgxcoder -c model_auto_compact_token_limit=24000 \
-    "Run cat on each of these files, one command per file, then say how many lines each has: dreamference/night_shift/night_shift_task_run.py dreamference/night_shift/night_shift_report.py dreamference/swe_bench/swe_bench_report.py dreamference/swe_bench/swe_bench_runner.py dreamference/runner/codex_branded_builder.py ling-rs/src/compaction.rs ling-rs/masking/src/lib.rs"
-  echo "arm $arm: compactions $(grep -c '"type":"compacted"' "$S"/home/sessions/*/*/*/rollout-*.jsonl)"
-  cat "$S/home/masking/dropped/log.jsonl" 2>/dev/null
+  H="$S/home-$arm"; mkdir -p "$H"
+  export CODEX_HOME="$H" DREAMFERENCE_VLLM_HOST=127.0.0.1 DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS=$arm
+  "$BIN" exec -s read-only -C "$REPO" -c model_auto_compact_token_limit=26000 \
+    "Run cat on each of these files, one command per file, in this order, then list each file with its number of lines: $FILES"
+  "$BIN" exec -s read-only -C "$REPO" -c model_auto_compact_token_limit=26000 resume --last \
+    "Which file did you read first, and what is its first line?"
+  echo "arm $arm: compactions $(cat "$H"/sessions/*/*/*/rollout-*.jsonl | grep -c '"type":"compacted"')"
+  cat "$H/masking/dropped/log.jsonl" 2>/dev/null
+  grep -h '"type":"token_count"' "$H"/sessions/*/*/*/rollout-*.jsonl | grep -o '"last_token_usage":{"input_tokens":[0-9]*' | tail -8
 done
 ```
 
-Pass: with `1`, at least one `"accepted":true` line, fewer `compacted` records than with `0`, the `token_count` event after the drop reporting fewer input tokens than the one before it, the answer still right, and the turn ending without an error; with `0`, no log at all.
+Pass: with `1`, at least one `"accepted":true` log line, fewer `compacted` records than with `0`, the `token_count` after the drop reporting fewer input tokens than the one before it, the line counts right, and both turns ending without an error; after the resume, the first request's input tokens stay near the dropped size (the resumed session is shown the placeholders through `0021`'s request hook, the one path no unit test reaches with a real policy set), and the answer either names the file from the placeholder's command or re-runs it. With `0`, no log at all.
 
+**What the report's `Compaction` line measures:** the seconds of the summaries only. A drop costs a re-prefill from the first output it drops, which lands in the session's wall time and in no compaction record, so the arm is judged on that line, the median wall time and the resolved count together.
