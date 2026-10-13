@@ -207,6 +207,9 @@ pub fn validate_name(name: &str) -> Result<()> {
     if !ok {
         bail!("`{name}` is not a collection name: use lower-case letters, digits, - and _ (up to 40, starting with a letter)");
     }
+    if crate::config::is_pdf_cache_name(name) {
+        bail!("`{name}` is the form of pdf_search's cache entries (pdf- and 12 hex digits): choose another name");
+    }
     Ok(())
 }
 

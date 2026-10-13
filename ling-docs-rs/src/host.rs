@@ -207,6 +207,81 @@ impl Kind {
     }
 }
 
+/// Where no user systemd can be reached (inside Codex's command sandbox, PDF_SEARCH §4): each
+/// run's command is a plain child whose address space is capped at the run's cap with
+/// `RLIMIT_AS`, and the time limit is enforced as for a scope. The ledger is a private one: the
+/// sandbox cannot write the user's runtime directory. Also the stand-in tests use for a scope.
+pub struct RlimitHost {
+    pub lock_dir: PathBuf,
+}
+
+impl RlimitHost {
+    /// A host whose ledger lives in this process's temporary directory.
+    pub fn in_temp() -> RlimitHost {
+        RlimitHost { lock_dir: std::env::temp_dir().join(format!("ling-docs-{}", unsafe { libc::getuid() })) }
+    }
+}
+
+impl Host for RlimitHost {
+    fn mem_available(&self) -> u64 {
+        meminfo("MemAvailable:")
+    }
+
+    fn mem_total(&self) -> u64 {
+        meminfo("MemTotal:")
+    }
+
+    fn earlyoom_percent(&self) -> Option<f64> {
+        SystemdHost.earlyoom_percent()
+    }
+
+    fn live_scopes(&self) -> Vec<LiveScope> {
+        Vec::new()
+    }
+
+    fn set_slice_limits(&self, _memory_max: u64) -> Result<()> {
+        Ok(())
+    }
+
+    fn can_create_scopes(&self) -> bool {
+        true
+    }
+
+    fn start_scope(&self, _unit: &str, cap: u64, argv: &[String], log: &Path) -> Result<Child> {
+        use std::os::unix::process::CommandExt;
+        let log = File::create(log)?;
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]).stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log);
+        // SAFETY: setrlimit is async-signal-safe and touches only the child.
+        unsafe {
+            command.pre_exec(move || {
+                let limit = libc::rlimit { rlim_cur: cap as libc::rlim_t, rlim_max: cap as libc::rlim_t };
+                if libc::setrlimit(libc::RLIMIT_AS, &limit) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        command.spawn().context("starting the worker")
+    }
+
+    fn freeze(&self, _unit: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn thaw(&self, _unit: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn stop(&self, _unit: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn lock_dir(&self) -> PathBuf {
+        self.lock_dir.clone()
+    }
+}
+
 /// `earlyoom's SIGTERM line + 4 GiB`: what admission never hands out.
 pub fn reserve(host: &dyn Host) -> u64 {
     let percent = host.earlyoom_percent().unwrap_or(5.0);
