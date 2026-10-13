@@ -21,6 +21,8 @@ class FakeDocker:
         self.sidecars = {"dreamference-image-search": "onyx_default", "dreamference-stt": SIDECAR_NETWORK}
         # Containers on Onyx's network besides the project's own: name -> the network it was created on.
         self.on_network = {"dreamference-image-search": "onyx_default"}
+        # Stopped containers on it: Docker's network inspect does not list them.
+        self.stopped = {}
         self.commands = []
 
     def __call__(self, argv, **kwargs):
@@ -35,6 +37,11 @@ class FakeDocker:
             out = "\n".join(self.networks)
         elif argv[:2] == ["docker", "images"]:
             out = "\n".join(self.images)
+        elif argv[:2] == ["docker", "inspect"] and "NetworkSettings" in argv[-1]:
+            if argv[2] not in self.sidecars:
+                return subprocess.CompletedProcess(argv, 1, "", "no such container\n")
+            joined = {self.sidecars[argv[2]], self.on_network.get(argv[2]), self.stopped.get(argv[2])}
+            out = " ".join(sorted(n for n in joined if n))
         elif argv[:2] == ["docker", "inspect"]:
             mode = self.sidecars.get(argv[2])
             return subprocess.CompletedProcess(argv, 0 if mode else 1, (mode or "") + "\n", "")
@@ -43,6 +50,7 @@ class FakeDocker:
         elif argv[:3] == ["docker", "network", "disconnect"]:
             assert self.sidecars.get(argv[4]) != argv[3], "disconnected from the network it was created on"
             self.on_network.pop(argv[4], None)
+            self.stopped.pop(argv[4], None)
         elif argv[:2] == ["docker", "compose"]:
             assert "-v" not in argv and "--volumes" not in argv and "--rmi" not in argv
             self.containers = []
@@ -50,6 +58,7 @@ class FakeDocker:
             for name in argv[3:]:
                 self.sidecars.pop(name, None)
                 self.on_network.pop(name, None)
+                self.stopped.pop(name, None)
                 self.containers = [c for c in self.containers if c != name]
         elif argv[:3] == ["docker", "volume", "rm"]:
             self.volumes = [v for v in self.volumes if v not in argv[3:]]
@@ -188,3 +197,19 @@ def test_a_container_of_someone_elses_created_on_onyxs_network_keeps_it(deployme
     out = capsys.readouterr().out
     assert "onyx_default is kept: their-app was created on it" in out
     assert fake.volumes == [] and fake.images == ["postgres:15.2-alpine"]   # the rest still went
+
+
+def test_stopped_containers_of_mightlings_own_are_released_too(deployment, monkeypatch):
+    # A stopped container holds no endpoint, so the network does not list it and Docker would
+    # remove the network under it; `docker start` would then fail for good.
+    from dreamference.chat.google_service import GOOGLE_CONTAINER_NAME, GoogleService
+
+    _, fake = deployment
+    fake.sidecars.update({"dreamference-searxng": SIDECAR_NETWORK, GOOGLE_CONTAINER_NAME: "onyx_default"})
+    fake.stopped.update({"dreamference-searxng": "onyx_default", GOOGLE_CONTAINER_NAME: "onyx_default"})
+    recreated = []
+    monkeypatch.setattr(GoogleService, "start", classmethod(lambda cls: recreated.append(True) or True))
+    assert RetiredWebChat.remove(yes=True, delete_data=True) == 0
+    assert ["docker", "network", "disconnect", "onyx_default", "dreamference-searxng"] in fake.commands
+    assert ["docker", "rm", "-f", GOOGLE_CONTAINER_NAME] in fake.commands and recreated == [True]
+    assert fake.networks == []

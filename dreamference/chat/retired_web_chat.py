@@ -29,6 +29,7 @@ import sys
 from typing import Callable, Final, List, Optional
 
 from dreamference.chat.google_service import GOOGLE_CONTAINER_NAME, GoogleService
+from dreamference.chat.searxng_sidecar import SEARXNG_CONTAINER_NAME
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
 ONYX_DEPLOYMENT_DIR: Final[str] = os.path.expanduser("~/.config/onyx/deployment")
@@ -39,6 +40,8 @@ PROJECT_LABEL: Final[str] = f"label=com.docker.compose.project={ONYX_COMPOSE_PRO
 ONYX_IMAGE_PREFIX: Final[str] = "onyxdotapp/"
 # Sidecars `ling-admin chat configure` created on Onyx's network.
 FORMER_SIDECARS: Final[tuple] = ("dreamference-image-search", "dreamference-siglip", "dreamference-stt")
+# Mightling's own containers Onyx's `configure` put on its network (ONYX §6, §8), kept by `chat remove`.
+OWN_CONTAINERS: Final[tuple] = (SEARXNG_CONTAINER_NAME, GOOGLE_CONTAINER_NAME)
 # Where a declined offer is remembered, so it is made once.
 DECISION_FILE: Final[str] = os.path.expanduser("~/.config/dreamference/web-chat-retired.json")
 
@@ -100,10 +103,29 @@ class RetiredWebChat:
             network (str): One of the project's networks.
 
         Returns:
-            List[str]: The containers still on it, running or not.
+            List[str]: The containers on it: the running ones, which the network lists, and
+            Mightling's own stopped ones, which it does not (a stopped container holds no
+            endpoint, so Docker would remove the network and leave it unable to start).
         """
         result = _run(["docker", "network", "inspect", network, "--format",
                        "{{range .Containers}}{{.Name}} {{end}}"], timeout=30)
+        names = result.stdout.split() if result.returncode == 0 else []
+        for name in OWN_CONTAINERS:
+            if name not in names and network in cls.container_networks(name):
+                names.append(name)
+        return names
+
+    @classmethod
+    def container_networks(cls, name: str) -> List[str]:
+        """
+        Args:
+            name (str): A container's name.
+
+        Returns:
+            List[str]: The networks it is on, read from the container, so a stopped one counts.
+        """
+        result = _run(["docker", "inspect", name, "--format",
+                       "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}"], timeout=30)
         return result.stdout.split() if result.returncode == 0 else []
 
     @classmethod
