@@ -15,18 +15,19 @@ index 1ef016e..ac8d572 100644
 +    ling_launcher::airgapped::install(&mut extensions);
      codex_skills_extension::install(&mut extensions, |config: &Config| {
 diff --git a/codex-rs/linux-sandbox/Cargo.toml b/codex-rs/linux-sandbox/Cargo.toml
-index 17b3fa1..8993fa1 100644
+index 17b3fa1..24250eb 100644
 --- a/codex-rs/linux-sandbox/Cargo.toml
 +++ b/codex-rs/linux-sandbox/Cargo.toml
-@@ -21,2 +21,3 @@ clap = { workspace = true, features = ["derive"] }
+@@ -21,2 +21,4 @@ clap = { workspace = true, features = ["derive"] }
  codex-install-context = { workspace = true }
 +ling-airgapped = { path = "../ling/airgapped" }
++ling-sandbox-home = { path = "../ling/sandbox-home" }
  codex-network-proxy = { workspace = true }
 diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandbox/src/linux_run_main.rs
-index 8ef5165..6917a7e 100644
+index 8ef5165..11affaa 100644
 --- a/codex-rs/linux-sandbox/src/linux_run_main.rs
 +++ b/codex-rs/linux-sandbox/src/linux_run_main.rs
-@@ -394,4 +394,7 @@ fn resolve_permission_profile(
+@@ -394,4 +394,8 @@ fn resolve_permission_profile(
  ) -> Result<EffectivePermissions, ResolvePermissionProfileError> {
 -    let permission_profile =
 +    let mut permission_profile =
@@ -34,6 +35,7 @@ index 8ef5165..6917a7e 100644
 +    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut permission_profile && ling_airgapped::sealed_for_command() {
 +        *network = NetworkSandboxPolicy::Restricted;
 +    }
++    ling_sandbox_home::hide_home(&mut permission_profile);
      let (file_system_sandbox_policy, network_sandbox_policy) =
 diff --git a/codex-rs/tui/src/chatwidget/permission_popups.rs b/codex-rs/tui/src/chatwidget/permission_popups.rs
 index fc98703..8ff3f28 100644

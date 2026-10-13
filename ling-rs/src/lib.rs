@@ -55,6 +55,7 @@ pub mod proxy;
 pub mod refine;
 pub mod release_signature;
 pub mod rename;
+pub mod sandbox_home;
 #[cfg(target_os = "linux")]
 pub mod signal;
 pub mod skills;
@@ -272,6 +273,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "airgapped"
     {
         std::process::exit(airgapped::run_cli(&user_args[index + 1..]));
+    }
+    // `sandbox-home` shows what of the home folder sandboxed commands can read (sandbox_home.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "sandbox-home"
+    {
+        std::process::exit(sandbox_home::run_cli(&user_args[index + 1..]));
     }
     // `node` lists, chooses or forgets the Mightling node this machine uses (node.rs).
     if let Some(index) = subcommand

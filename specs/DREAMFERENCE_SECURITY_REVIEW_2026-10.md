@@ -27,6 +27,7 @@ well, because it runs on every upgrade.
 | 10 | — | Model server (port 8000) | Answers anyone on the local network, with no key | Accepted by design |
 | 11 | Low | Node discovery | The first node found on a network is trusted on first use | Accepted (trusted-LAN premise) |
 | 12 | Low | Rename migration | Two files are rewritten in place rather than atomically; the project's config file in the working directory is rewritten too | Recommendation for `rename/mightling` |
+| 13 | High | Agent, command sandbox | Under the read-only and workspace-write sandboxes a command the agent runs can read the whole home folder: SSH keys, browser profiles, `~/.mightling`'s sessions and secrets, other projects | Fix drafted on `security/sandbox-home` for 1.7.0, not merged ([MIGHTLING_SANDBOX_HOME](./DREAMFERENCE_MIGHTLING_SANDBOX_HOME.md)) |
 
 ### 1. The GitHub token followed download URLs (fixed)
 
@@ -169,6 +170,27 @@ Read on the branch, not changed here:
   node), would surprise no one.
 - The new home is created with mode 700 and copies skip the sign-in, the installation id and the
   logs; links are copied as links, never followed. No issue found there.
+
+### 13. A sandboxed command can read the home folder (fix drafted for 1.7.0)
+
+**Scenario.** Codex's Linux sandbox mounts the whole filesystem read-only (`--ro-bind / /`) and the
+workspace read-write. A command the model runs can therefore read anything the user can. A prompt
+injected through a fetched page, a dependency's files or an email can have the agent read
+`~/.ssh/id_ed25519`, the Gmail tokens under `~/.config/dreamference/gmail` or `~/.mightling`'s
+history, and carry them out through `ling-fetch`, `curl` or a commit. `/airgapped on` closes the
+second step, not the first.
+
+**Fix (drafted, not merged).** Codex's sandbox helper now hands each command's profile to the leaf
+crate `ling-rs/sandbox-home`, through one line beside the air-gap hook in patch `0019`. Under the
+read-only and workspace-write sandboxes, everything outside the home folder reads as before, and
+the home folder becomes an empty directory. Into it are mounted read-only: the workspace (its
+writable roots as before), its repository, the toolchains, ling's own tools and indexes, the
+skills, the shell snapshot, and what the user lists under `[sandbox] readable` in the user-level
+file. Known credential files inside those are hidden again. Codex's own deny-read rules could not
+express this: its bubblewrap builder masks a denied folder and reopens only the *writable* paths
+under it. Full Access and `/airgapped` are unchanged. Design, effects, what is not covered (in-process
+`view_image`, sockets under `/run/user`) and the decisions left to the owner:
+[DREAMFERENCE_MIGHTLING_SANDBOX_HOME.md](./DREAMFERENCE_MIGHTLING_SANDBOX_HOME.md).
 
 ## Not changed and checked
 

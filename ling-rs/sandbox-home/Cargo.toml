@@ -1,0 +1,30 @@
+# The home folder, hidden from the commands `ling` runs (specs/DREAMFERENCE_MIGHTLING_SANDBOX_HOME.md).
+# Codex's sandbox helper calls `hide_home` on every command's permission profile (patch 0019, one
+# line beside the air-gap hook): under the read-only and workspace-write sandboxes the home folder
+# becomes an empty directory with only the workspace, the toolchains and ling's own tools mounted
+# into it. Its own crate, because the sandbox helper depends on it and the launcher crate depends
+# on crates that depend on core. It needs Codex's permission types, so its tests run in the
+# build's export (`cargo test --release -p ling-sandbox-home`), never in `codex/`.
+[package]
+name = "ling-sandbox-home"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_sandbox_home"
+path = "src/lib.rs"
+
+[dependencies]
+codex-protocol = { workspace = true }
+codex-utils-absolute-path = { workspace = true }
+codex-utils-path-uri = { workspace = true }
+# HOME, $CODEX_HOME and the user-level configuration file, decided as the air-gap level decides them.
+ling-airgapped = { path = "../airgapped" }
+toml = { workspace = true }
+
+[dev-dependencies]
+# The live check's profile (spec §8.2) is parsed as the helper parses its argument.
+serde_json = { workspace = true }
+tempfile = { workspace = true }
