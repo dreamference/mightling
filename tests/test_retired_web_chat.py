@@ -19,6 +19,8 @@ class FakeDocker:
         self.images = ["onyxdotapp/onyx-backend:v4.5", "onyxdotapp/onyx-web-server:v4.5", "postgres:15.2-alpine"]
         self.networks = ["onyx_default"]
         self.sidecars = {"dreamference-image-search": "onyx_default", "dreamference-stt": SIDECAR_NETWORK}
+        # Containers on Onyx's network besides the project's own: name -> the network it was created on.
+        self.on_network = {"dreamference-image-search": "onyx_default"}
         self.commands = []
 
     def __call__(self, argv, **kwargs):
@@ -36,18 +38,26 @@ class FakeDocker:
         elif argv[:2] == ["docker", "inspect"]:
             mode = self.sidecars.get(argv[2])
             return subprocess.CompletedProcess(argv, 0 if mode else 1, (mode or "") + "\n", "")
+        elif argv[:3] == ["docker", "network", "inspect"]:
+            out = " ".join(name for name in self.on_network if argv[3] in self.networks)
+        elif argv[:3] == ["docker", "network", "disconnect"]:
+            assert self.sidecars.get(argv[4]) != argv[3], "disconnected from the network it was created on"
+            self.on_network.pop(argv[4], None)
         elif argv[:2] == ["docker", "compose"]:
             assert "-v" not in argv and "--volumes" not in argv and "--rmi" not in argv
             self.containers = []
         elif argv[:3] == ["docker", "rm", "-f"]:
             for name in argv[3:]:
                 self.sidecars.pop(name, None)
+                self.on_network.pop(name, None)
                 self.containers = [c for c in self.containers if c != name]
         elif argv[:3] == ["docker", "volume", "rm"]:
             self.volumes = [v for v in self.volumes if v not in argv[3:]]
         elif argv[:2] == ["docker", "rmi"]:
             self.images = [i for i in self.images if i not in argv[2:]]
         elif argv[:3] == ["docker", "network", "rm"]:
+            if any(n in argv[3:] for n in self.on_network.values()) or (self.on_network and "onyx_default" in argv[3:]):
+                return subprocess.CompletedProcess(argv, 1, "", "error: network has active endpoints\n")
             self.networks = [n for n in self.networks if n not in argv[3:]]
         return subprocess.CompletedProcess(argv, 0, out + "\n", "")
 
@@ -142,3 +152,39 @@ def test_nothing_is_asked_where_onyx_never_was(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", no_docker)
     RetiredWebChat.offer("status")
+
+
+def test_mightlings_own_containers_are_taken_off_onyxs_network_so_it_can_go(deployment, monkeypatch, capsys):
+    # Onyx's `configure` joined SearXNG to its network and created the Google service on it; Docker
+    # refuses to remove a network a container is still on.
+    from dreamference.chat.google_service import GOOGLE_CONTAINER_NAME, GoogleService
+
+    _, fake = deployment
+    fake.sidecars.update({"dreamference-searxng": SIDECAR_NETWORK, GOOGLE_CONTAINER_NAME: "onyx_default"})
+    fake.on_network.update({"dreamference-searxng": "onyx_default", GOOGLE_CONTAINER_NAME: "onyx_default"})
+    recreated = []
+
+    def start(cls):
+        recreated.append(GOOGLE_CONTAINER_NAME)
+        fake.sidecars[GOOGLE_CONTAINER_NAME] = SIDECAR_NETWORK
+        return True
+
+    monkeypatch.setattr(GoogleService, "start", classmethod(start))
+    assert RetiredWebChat.remove(yes=True, delete_data=True) == 0
+    assert ["docker", "network", "disconnect", "onyx_default", "dreamference-searxng"] in fake.commands
+    assert ["docker", "rm", "-f", GOOGLE_CONTAINER_NAME] in fake.commands and recreated == [GOOGLE_CONTAINER_NAME]
+    assert fake.sidecars["dreamference-searxng"] == SIDECAR_NETWORK          # SearXNG itself stays
+    assert fake.networks == [] and "networks are deleted" in capsys.readouterr().out
+
+
+def test_a_container_of_someone_elses_created_on_onyxs_network_keeps_it(deployment, capsys):
+    _, fake = deployment
+    fake.sidecars["their-app"] = "onyx_default"
+    fake.on_network["their-app"] = "onyx_default"
+    assert RetiredWebChat.remove(yes=True, delete_data=True) == 1
+    assert fake.networks == ["onyx_default"] and "their-app" in fake.sidecars
+    assert not any(c[:3] == ["docker", "network", "rm"] for c in fake.commands)
+    assert not any(c[:3] == ["docker", "network", "disconnect"] for c in fake.commands)
+    out = capsys.readouterr().out
+    assert "onyx_default is kept: their-app was created on it" in out
+    assert fake.volumes == [] and fake.images == ["postgres:15.2-alpine"]   # the rest still went
