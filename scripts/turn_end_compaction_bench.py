@@ -819,8 +819,14 @@ class TuiSession:
         return True
 
     def text(self) -> str:
-        """The screen as text."""
-        return "\n".join(line.rstrip() for line in self.screen.display)
+        """The screen as text.
+
+        Read from the buffer, not `Screen.display`: pyte 0.8.2's `display` raises IndexError on the
+        empty cell that follows a wide character (the model answers in Chinese at times, 2026-10-13).
+        """
+        columns = range(self.screen.columns)
+        return "\n".join("".join(self.screen.buffer[y][x].data for x in columns).rstrip()
+                         for y in range(self.screen.lines))
 
     def wait_for(self, predicate: Callable[[str], bool], timeout: float) -> bool:
         """Pumps until `predicate(screen)` holds; False on timeout or exit."""
