@@ -206,11 +206,26 @@ pub fn reads_whole_disk(entries: &[FileSystemSandboxEntry]) -> bool {
 /// Rewrites `entries` by `plan`: `:root = read` is replaced by the plan's outside and readable
 /// paths, the hidden ones are denied, and the working directory is made readable when nothing
 /// names it (the read-only sandbox). Every other entry, the writable roots among them, is kept.
+///
+/// `:minimal = read` is added too. Codex merges readable roots by their real paths, so a link
+/// beside the home folder is mounted at its target only; on a merged-`/usr` system that drops
+/// `/bin`, `/lib` and `/sbin` (links into `/usr`), and with `/lib` the dynamic loader, so nothing
+/// can run (measured 2026-10-13: the helper's own re-entry failed with ENOENT). `:minimal` is
+/// Codex's own list of system paths for exactly this, mounted as written.
 pub fn apply(entries: &mut Vec<FileSystemSandboxEntry>, plan: &Plan) {
     entries.retain(|entry| {
         !(matches!(&entry.path, FileSystemPath::Special { value: FileSystemSpecialPath::Root })
             && entry.access == FileSystemAccessMode::Read)
     });
+    let has_minimal = entries
+        .iter()
+        .any(|entry| matches!(&entry.path, FileSystemPath::Special { value: FileSystemSpecialPath::Minimal }));
+    if !has_minimal {
+        entries.push(FileSystemSandboxEntry::new(
+            FileSystemPath::Special { value: FileSystemSpecialPath::Minimal },
+            FileSystemAccessMode::Read,
+        ));
+    }
     let names_workspace = entries.iter().any(|entry| {
         matches!(&entry.path, FileSystemPath::Special { value: FileSystemSpecialPath::ProjectRoots { subpath: None } })
     });
@@ -382,9 +397,11 @@ fn expand(path: &str, home: &Path) -> Option<PathBuf> {
 
 /// Everything beside `home` and beside each of its ancestors below `top`: the folders a command
 /// reads as before. Skipped: the next folder on the way down, anything that resolves to the home
-/// folder, into it or above it (a link such as `/home -> /data/home`), and `/dev`, which the
-/// sandbox mounts itself.
+/// folder, into it or above it (a link such as `/home -> /data/home`), `/dev`, which the
+/// sandbox mounts itself, and the app-server's socket folder (`/tmp/codex-daemon-<uid>`), which
+/// Codex refuses as a mount root: with the home folder under `/tmp` it would be one.
 pub fn outside(home: &Path, top: &Path) -> Vec<PathBuf> {
+    let daemon_directory = daemon_socket_directory();
     let mut found = Vec::new();
     let Ok(below) = home.strip_prefix(top) else { return found };
     let mut dir = top.to_path_buf();
@@ -395,7 +412,7 @@ pub fn outside(home: &Path, top: &Path) -> Vec<PathBuf> {
         let mut children: Vec<PathBuf> = children.filter_map(|child| child.ok().map(|child| child.path())).collect();
         children.sort();
         for child in children {
-            if child == next || child == Path::new("/dev") {
+            if child == next || child == Path::new("/dev") || Some(&child) == daemon_directory.as_ref() {
                 continue;
             }
             if let Ok(real) = fs::canonicalize(&child)
@@ -408,6 +425,22 @@ pub fn outside(home: &Path, top: &Path) -> Vec<PathBuf> {
         dir = next;
     }
     found
+}
+
+/// Codex's app-server socket folder, as `codex_uds::shared_daemon_socket_directory` names it:
+/// `codex-daemon-<uid>` in the real `/tmp`. The bubblewrap builder masks it inside every mount and
+/// refuses it as a mount root.
+fn daemon_socket_directory() -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let uid = fs::metadata("/proc/self").ok()?.uid();
+        Some(fs::canonicalize("/tmp").ok()?.join(format!("codex-daemon-{uid}")))
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
 }
 
 /// The readable paths under the home folder, as they are collected.
@@ -864,6 +897,7 @@ mod tests {
         assert!(!reads_whole_disk(&entries));
         let policy = FileSystemSandboxPolicy::restricted(entries);
         assert!(!policy.has_full_disk_read_access());
+        assert!(policy.include_platform_defaults(), "/bin, /lib and /sbin are mounted as the links they are");
         assert!(policy.can_write_local_path_with_cwd(&cwd.join("src/main.rs"), &cwd));
         assert!(policy.can_read_local_path_with_cwd(&machine.at("usr/bin/env"), &cwd));
         assert!(policy.can_read_local_path_with_cwd(&machine.at("home/u/.cargo/bin/cargo"), &cwd));

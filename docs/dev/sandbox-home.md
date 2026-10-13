@@ -11,6 +11,8 @@ Developer notes behind the sandbox line in `AGENTS.md`. Spec: `specs/DREAMFERENC
 ## Things found the hard way
 
 - **Codex's deny-read rules cannot reopen a readable folder under a denied one.** `bwrap.rs` masks a denied folder with an empty tmpfs and recreates only the *writable* paths under it. "Deny `~`, read `~/.cargo`" therefore hides `~/.cargo`. The rule instead removes `:root = read` and lists every directory beside the home folder and its ancestors. Codex then builds the sandbox as `--tmpfs /` plus one `--ro-bind` per root, the same mechanism as its `:minimal` profile.
+- **Codex merges readable roots by their real paths,** so a link such as `/lib -> usr/lib` is mounted only at `/usr/lib`, and without `/lib` the dynamic loader is missing (the helper's re-entry failed with ENOENT, 2026-10-13). The rule adds `:minimal = read`, Codex's own list of system paths mounted as written.
+- **Never list Codex's app-server socket folder** (`/tmp/codex-daemon-<uid>`): Codex refuses it as a mount root. It becomes one when the home folder lives under `/tmp`.
 - **Never list `/dev`:** the sandbox mounts its own minimal `/dev`, and a read-only bind of the host's would replace it.
 - **The user's settings are a `[sandbox]` table, not flat keys:** `ConfigFileStorageManager.save_config_dict` rewrites the flat keys it knows and keeps tables, so a flat `mightling_sandbox_*` key would vanish at the next `ling-admin main-model set`.
 - **A shell under PyCharm proves nothing about bubblewrap** (`snap.pycharm.pycharm (complain)`): run the live check in the spec (§8.2) from `systemd-run --user`.
