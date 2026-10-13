@@ -32,24 +32,40 @@ The owner approved items 1–13 on 2026-10-13. The surveys' engine items are bei
 
 ### 1. The chooser test on disk
 
-- **What:** a best-of-N chooser judges the patches that nights 2–4's default runs already produced, for the tasks where those runs disagree (13 of 44). It scores how often the chooser picks a resolving patch.
-  - Model only: no agent run, no container.
-  - Every pair is judged in both orders, against two baselines: a run picked at random, and the oracle.
-- **Why:** survey §3.1 and next step 2.
+- **What:** a best-of-N chooser picks among the patches that nights 2–4's default runs already produced, for the tasks where those runs disagree (13 of 44). It scores how often the pick resolves. No agent run and no container are needed. The chooser is built R2E-Gym's and V1's way (survey §8.4):
+  1. **Regression filter.** Drop the patches that break the repository's existing tests (a PASS_TO_PASS failure), or that did not apply. The outcome is read from the grading logs on disk, not re-run. If every patch breaks something, all go on.
+  2. **Pairwise judge.** The survivors are judged in pairs by the served model, using V1's settings:
+     - one call per pair, showing the issue and the two diffs, never the agent's reasoning;
+     - both rated 1–10, a win weighted by the rating gap (floor 0.1);
+     - random disjoint pairs until each patch has two comparisons, then Swiss rounds within a window of 8. With three patches that is the three pairs.
+  3. **The chooser never sees whether a patch fixed the issue.** It is given no FAIL_TO_PASS result and no `resolved` flag, or the test would grade itself. The script's candidates carry no verdict; a test checks it.
+- **Reported:** the chooser's expected resolved count on the kept tasks, against three baselines:
+  - the regression filter alone (a fair coin among the survivors);
+  - a run picked at random;
+  - the oracle (any run).
+
+  Also which stage made each choice, and the projected best-of-3 on all 44.
+- **Why:** survey §3.1 and next step 2, with the design of §8.1 and §8.4.
   - A single run resolves 29–31 of 44; some run resolves 36.
-  - Best-of-N (item 6) is worth building only if a chooser captures part of that headroom.
-- **Size:** about 1 hour of model time. The script is written: [`scripts/swe_bench_chooser_test.py`](../scripts/swe_bench_chooser_test.py), with its runbook in the docstring and tests in `tests/test_swe_bench_chooser.py` (a fake server on loopback).
-- **Depends on:** a free model server.
-  - It runs on second-puffin's production server, named by node name, when no SWE-bench run, Night Shift task or engine test needs it.
-  - The runs it reads stay on this machine, read only.
+  - R2E-Gym's regression filter alone took Best@26 from 42.9% to 47.4%.
+  - V1 on SWE-bench Lite: pairwise 33.3%, pointwise 28.3%, one run 26.3%.
+  - Best-of-N (item 6) is worth building only if a chooser captures part of the headroom.
+- **Size:** well under an hour of model time. The dry run on nights 2–4 finds:
+  - the filter alone decides 3 of the 13 tasks;
+  - the judge gets the other 10, at 26 calls at most.
+
+  The script is written: [`scripts/swe_bench_chooser_test.py`](../scripts/swe_bench_chooser_test.py). Its runbook is in the docstring, and its tests are in `tests/test_swe_bench_chooser.py` (a fake server on loopback).
+- **Depends on:**
+  - **A free model server.** It runs on second-puffin's production server, named by node name, when no SWE-bench run, Night Shift task or engine test needs it.
+  - **The runs, read only on this machine,** with their gradings' PASS_TO_PASS counts. These come from `grading.json` or, for gradings made before item 2, the harness's `report.json` files.
 - **Command, for later:**
   ```bash
-  .venv/bin/python scripts/swe_bench_chooser_test.py --dry-run     # 13 tasks, 74 calls at most; no server
+  .venv/bin/python scripts/swe_bench_chooser_test.py --dry-run     # 13 tasks, 10 to the judge, 26 calls at most
   .venv/bin/python scripts/swe_bench_chooser_test.py \
       --server http://second-puffin.local:8000 \
-      --runs n2-default,n3-default,n4-default --out ~/swe-bench-chooser-2026-10
+      --runs n2-default,n3-default,n4-default --seed 20261013 --out ~/swe-bench-chooser-2026-10
   ```
-- **Acceptance:** `summary.json` gives the chooser's expected resolved count on the 13 tasks against a random run's (about 6.3) and the oracle's (13).
+- **Acceptance:** `summary.json` gives the chooser's expected resolved count on the 13 tasks against the filter alone, a random run (about 6.3) and the oracle (13).
   - Item 6 goes ahead if the chooser is clearly above the random run.
   - The survey's estimate to beat is +3 to +4 tasks.
 - **Status:** approved by the owner 2026-10-13, not scheduled. The script is on main; it has never been run against a server.
@@ -130,8 +146,8 @@ The owner approved items 1–13 on 2026-10-13. The surveys' engine items are bei
 ### 6. Best-of-N in Night Shift
 
 - **What:** a Night Shift task can ask for `attempts = N`, each attempt in its own worktree as today. The best one is chosen in two steps:
-  1. the tests (the task's test command, then tests the model writes);
-  2. the chooser item 1 measured, as a pairwise judge.
+  1. the regression filter: attempts that break the repository's existing tests are dropped;
+  2. the pairwise judge item 1 measured, over the diffs alone.
 
   The morning report shows the chosen attempt, why it was chosen, and the alternatives' diffs.
 - **Why:** survey §3.1 and §4.4. Night time is free. The estimate is +7–9 points on SWE-bench-like tasks if the chooser works, at N times the agent time.
