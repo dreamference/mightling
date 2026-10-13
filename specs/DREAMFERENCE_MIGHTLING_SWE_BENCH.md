@@ -235,6 +235,7 @@ Not comparable with published SWE-bench scores: see §8 of the spec.
 
 - **Per repository:** resolved over validated, since the validated set is not spread evenly.
 - **Why the unresolved failed** (since 2026-10-13, §24): `Broke a passing test` (a PASS_TO_PASS test fails) is counted apart from `Did not fix` (a FAIL_TO_PASS test fails, every PASS_TO_PASS test passes), and `--against` sets both side by side.
+- **Compactions** (since 2026-10-13, §25): their number, time and share of agent time, and resolved by compaction count (0, 1, 2, 3+), counted from the rollouts kept in each instance's scratch folder.
 - **`--against <run>`:** instances resolved by one run and not the other, and the difference with a paired confidence interval (McNemar on the instances both runs attempted). A difference inside the interval is reported as "no measurable difference", in those words.
 - **Variance:** a single run is one sample. The spec's acceptance criteria (§7.3) include running the smoke set three times to see how much the same configuration varies before any A/B is read.
 - **Optional baseline column:** `swebench infer` (mini-SWE-agent against the same endpoint) measures the model without `ling`. It is not run by default.
@@ -828,3 +829,22 @@ A command ran a Python example when code it runs (a `-c` argument, a here-docume
 Most unresolved patches fail by not fixing the issue; broken passing tests are 2–9% of graded instances, the range the DeepSWE benchmark post reports for its two models (4.4% and 6.9%). One run is one sample, as everywhere in this spec.
 
 **Tests** (`tests/test_swe_bench.py`, +3; the stand-in harness writes `tests_status` for the instances a test names): the three outcomes counted and printed, the side-by-side rows; a grading without the counts split from the logs with no harness call, the regrade series reading the plain grading's logs, a missing report counted as no test results rather than guessed; the first-cause order.
+
+## 25. Compaction columns (2026-10-13)
+
+*Built 2026-10-13, approved by the owner the same day ([BACKLOG](./DREAMFERENCE_BACKLOG.md) item 11, its report half; the probe questions are not built; [compaction survey](./research/compaction-survey-2026-10-13.md) §1 and §3.5).* The survey found compaction to be the largest cost in a long session that is not model work: sessions that compacted three or more times resolved 38% against 75–78% for zero or one, and compactions took 17% of agent time. The report now shows this for every run, so an arm that changes compaction (BACKLOG item 8) is read on it.
+
+**What the report shows.** `Compactions`: how many, in how many of the instances with rollouts, their time in all, its share of those instances' agent time, the median per compaction; and `resolved by count`: resolved over instances for sessions with 0, 1, 2 and 3 or more compactions. `--against` adds `compactions` and `compaction time` to the side-by-side table.
+
+**How it is counted** (the survey's method, `SweBenchRunStore.compactions`): one compaction per `compacted` record in the rollouts under `scratch/<id>/codex-home/sessions/` (every session of the instance: the refine arm's study step and the restart arm's fresh session included). Its time is the gap from its record back to the last earlier record more than 2 s before it, which covers the compaction request's prefill and the summary's decode, an upper bound by a second or two. A record with no time is counted, not timed. An instance whose rollouts are gone is named as not counted.
+
+**On the runs on disk (read 2026-10-13):**
+
+| Run | Compactions | Instances compacting | Time | Share of agent time | Median | Resolved at 0 / 1 / 2 / 3+ |
+|---|---|---|---|---|---|---|
+| n2-default | 36 | 23 of 44 | 63 min | 14% | 94 s | 16/21, 11/16, 1/4, 1/3 |
+| n3-default | 74 | 25 of 44 | 121 min | 18% | 98 s | 15/19, 7/9, 3/4, 4/12 |
+| n4-default | 63 | 23 of 44 | 104 min | 17% | 92 s | 16/21, 6/7, 4/5, 5/11 |
+| n4-restart-2 | 80 | 24 of 44 | 126 min | 18% | 90 s | 17/20, 4/7, 4/5, 3/12 |
+
+**Tests** (`tests/test_swe_bench.py`, +1): the count, the durations (the 2 s rule, a record with no time counted but not timed, a torn last line skipped), an instance without rollouts named, resolved by count, and the side-by-side rows.
