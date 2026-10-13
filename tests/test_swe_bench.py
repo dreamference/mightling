@@ -1127,6 +1127,35 @@ def test_a_grading_recorded_before_the_counts_is_split_from_the_harness_logs_wit
     assert "No test results      1, unresolved with no failing test on disk: beta__gadget-7" in SweBenchReport.render(store)
 
 
+def _rollout(store, instance_id, records):
+    path = store.directory / "scratch" / instance_id / "codex-home" / "sessions" / "2026" / "10" / "13" / "rollout-x.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(record) + "\n" for record in records) + '{"torn')
+
+
+def test_the_report_counts_compactions_their_time_and_resolved_by_count(bench):
+    store = _graded_with_test_results(bench)
+    stamp = lambda s: f"2026-10-13T10:{s // 60:02d}:{s % 60:02d}.000Z"
+    _rollout(store, "acme__widget-1", [{"timestamp": stamp(0), "type": "session_meta"}])
+    # Three compactions: 90 s after the last record more than 2 s before it, 30 s, and one with no time.
+    _rollout(store, "acme__widget-2", [
+        {"timestamp": stamp(0), "type": "response_item"}, {"timestamp": stamp(89), "type": "event_msg"},
+        {"timestamp": stamp(90), "type": "compacted"}, {"timestamp": stamp(100), "type": "response_item"},
+        {"timestamp": stamp(130), "type": "compacted"}, {"type": "compacted"}])
+    record = store.compactions("acme__widget-2")
+    assert record["count"] == 3 and record["seconds"] == [90.0, 30.0, None]
+    assert store.compactions("beta__gadget-7") is None
+    summary = SweBenchReport.summary(store)["compactions"]
+    assert summary["missing"] == ["beta__gadget-7"] and summary["count"] == 3
+    assert summary["by_count"] == {"0": [1, 1], "1": [0, 0], "2": [0, 0], "3+": [0, 1]}
+    text = SweBenchReport.render(store)
+    assert "Compactions         3 in 1 of 2 instance(s); 2 min 0 s in all" in text
+    assert "1 instance(s) without rollouts not counted" in text
+    assert "  resolved by count 0: 1 / 1   1: 0 / 0   2: 0 / 0   3+: 0 / 1" in text
+    compared = SweBenchReport.against(store, store)
+    assert re.search(r"compactions +3 +3", compared) and re.search(r"compaction time +2 min 0 s +2 min 0 s", compared)
+
+
 def test_an_unresolved_patch_is_split_by_its_first_cause():
     store = types.SimpleNamespace(predictions=lambda: [])
     results = {"a": {"resolved": False, "empty": True}, "b": {"resolved": False, "applied": False},

@@ -200,6 +200,52 @@ class SweBenchRunStore:
                     stats[key] += int(usage.get(key) or 0)
         return stats
 
+    def compactions(self, instance_id: str) -> Optional[Dict[str, Any]]:
+        """
+        The compactions of an instance's sessions, from the rollouts kept in its scratch
+        `codex-home` (compaction survey 2026-10-13 §1, §3.5): one per `compacted` record. A
+        compaction's time is the gap between its record and the last earlier record more than
+        2 s before it, which covers the compaction request's prefill and the summary's decode
+        (an upper bound by a second or two).
+
+        Args:
+            instance_id: The instance.
+
+        Returns:
+            Optional[Dict[str, Any]]: `count` and `seconds` (one duration per compaction, None
+            where no earlier record was found); None when no rollout is on disk.
+        """
+        from datetime import datetime
+
+        paths = sorted((self.directory / "scratch" / instance_id / "codex-home" / "sessions").rglob("rollout*.jsonl"))
+        if not paths:
+            return None
+        seconds: List[Optional[float]] = []
+        for path in paths:
+            earlier: List[float] = []
+            try:
+                lines = path.read_text(errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue  # a line still being written
+                if not isinstance(record, dict):
+                    continue
+                try:
+                    stamp: Optional[float] = datetime.fromisoformat(
+                        str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
+                except (ValueError, KeyError):
+                    stamp = None  # counted, but not timed
+                if record.get("type") == "compacted":
+                    before = None if stamp is None else next((t for t in reversed(earlier) if stamp - t > 2), None)
+                    seconds.append(None if before is None else stamp - before)
+                if stamp is not None:
+                    earlier.append(stamp)
+        return {"count": len(seconds), "seconds": seconds}
+
     # -- predictions ---------------------------------------------------------------------------
 
     @property

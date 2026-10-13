@@ -95,7 +95,68 @@ class SweBenchReport:
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
             "causes": cls.unresolved_causes(store, manifest, number, variant, results, graded),
+            "compactions": cls.compaction_summary(store, states, sorted(finished & set(instances)), resolved),
         }
+
+    @classmethod
+    def compaction_summary(cls, store: SweBenchRunStore, states: Dict[str, Any], finished: List[str],
+                           resolved: List[str]) -> Dict[str, Any]:
+        """
+        The compactions of a run's finished instances (compaction survey 2026-10-13 §3.5): how
+        many, what they cost in time, and the resolve rate by how often a session compacted.
+
+        Args:
+            store: The run.
+            states: Its instances' states.
+            finished: The finished instances.
+            resolved: The resolved instances.
+
+        Returns:
+            Dict[str, Any]: `per_instance` (instance to `count` and `seconds`, for the instances
+            with rollouts on disk), `missing` (finished instances without), `count`, `seconds`
+            (the measured durations), `wall` (those instances' wall seconds) and `by_count`
+            (`0`, `1`, `2`, `3+` to [resolved, instances]).
+        """
+        per_instance = {i: record for i in finished if (record := store.compactions(i)) is not None}
+        by_count: Dict[str, List[int]] = {key: [0, 0] for key in ("0", "1", "2", "3+")}
+        for instance_id, record in per_instance.items():
+            bucket = by_count[str(record["count"]) if record["count"] < 3 else "3+"]
+            bucket[1] += 1
+            bucket[0] += 1 if instance_id in resolved else 0
+        return {
+            "per_instance": per_instance, "missing": [i for i in finished if i not in per_instance],
+            "count": sum(record["count"] for record in per_instance.values()),
+            "seconds": [s for record in per_instance.values() for s in record["seconds"] if s is not None],
+            "wall": sum(float((states.get(i) or {}).get("wall_s") or 0) for i in per_instance),
+            "by_count": by_count,
+        }
+
+    @classmethod
+    def compaction_lines(cls, compactions: Dict[str, Any]) -> List[str]:
+        """
+        The report's compaction lines: the count, its time and share of agent time, and the
+        resolve rate by compaction count.
+
+        Args:
+            compactions: The summary's `compactions` entry.
+
+        Returns:
+            List[str]: Report lines; one saying so when no rollout is on disk.
+        """
+        per_instance = compactions["per_instance"]
+        if not per_instance:
+            return ["Compactions         no rollout on disk to count them from"] if compactions["missing"] else []
+        seconds, wall = compactions["seconds"], compactions["wall"]
+        compacting = sum(1 for record in per_instance.values() if record["count"])
+        line = (f"Compactions         {compactions['count']} in {compacting} of {len(per_instance)} instance(s)")
+        if seconds:
+            share = f", {100 * sum(seconds) / wall:.0f}% of their agent time" if wall else ""
+            line += (f"; {cls.duration(sum(seconds))} in all{share}, median "
+                     f"{cls.duration(statistics.median(seconds))} each")
+        if compactions["missing"]:
+            line += f"; {len(compactions['missing'])} instance(s) without rollouts not counted"
+        by_count = "   ".join(f"{key}: {resolved} / {total}" for key, (resolved, total) in compactions["by_count"].items())
+        return [line, f"  resolved by count {by_count}"]
 
     @classmethod
     def unresolved_causes(cls, store: SweBenchRunStore, manifest: Dict[str, Any], number: Optional[int],
@@ -535,6 +596,7 @@ class SweBenchReport:
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines.append(cls.exec_tool_line(summary["exec_tool"]))
         lines += cls.hooks_lines(summary["hooks"])
+        lines += cls.compaction_lines(summary["compactions"])
         not_run = validated - summary["finished"]
         not_graded = summary["finished"] - summary["graded"]
         if not_run or not_graded:
@@ -750,6 +812,10 @@ class SweBenchReport:
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
                 "broke a passing test": sum(1 for i in both if i in summary["causes"]["broke"]),
                 "did not fix": sum(1 for i in both if i in summary["causes"]["not_fixed"]),
+                "compactions": sum(summary["compactions"]["per_instance"].get(i, {}).get("count", 0) for i in both),
+                "compaction time": cls.duration(sum(
+                    s for i in both for s in summary["compactions"]["per_instance"].get(i, {}).get("seconds", [])
+                    if s is not None)),
                 "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",
                 "agent time": cls.duration(sum(walls)),
                 "input tokens": f"{sum(s.get('input_tokens', 0) for s in stats):,}",
