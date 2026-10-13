@@ -848,3 +848,16 @@ Most unresolved patches fail by not fixing the issue; broken passing tests are 2
 | n4-restart-2 | 80 | 24 of 44 | 126 min | 18% | 90 s | 17/20, 4/7, 4/5, 3/12 |
 
 **Tests** (`tests/test_swe_bench.py`, +1): the count, the durations (the 2 s rule, a record with no time counted but not timed, a torn last line skipped), an instance without rollouts named, resolved by count, and the side-by-side rows.
+
+## 26. Drop-first compaction (`--drop-old-outputs`, 2026-10-13)
+
+*Built on branch `compaction/drop-old-outputs`, off by default; the owner approved it on 2026-10-13 as the first compaction change to test, as a night arm after the nights' pause. Not yet run.* What it does and why is [MIGHTLING_COMPACTION](./DREAMFERENCE_MIGHTLING_COMPACTION.md) §13: when a session is about to compact, the output of its older tool calls is dropped from the history (the calls stay; the last 10 outputs and those under 600 characters are kept) and Codex summarises only if that does not leave 15% of the limit free.
+
+**What it does here.** `run --drop-old-outputs` sets `DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS=1` for every session of the run; without the flag the variable is not set. The manifest records `drop_old_outputs` (a resumed run keeps it; an older manifest reads as `False`; `--against` prints `differs: drop_old_outputs`). Every instance's state gets `compaction` in **every** run, so the record arm is measured the same way: `compactions` and `seconds` (each compaction's time from the last rollout line more than 2 s before its `compacted` record, the compaction survey's §1 method), and from `codex-home/masking/dropped/log.jsonl` `drops` (a drop that replaced a summary), `declined` (a drop that would not have been enough, so the summary ran) and `dropped_outputs`. Every report prints a `Compaction` line.
+
+**The night.** `scripts/swe_bench_night1.sh` with `ARMS="default drop-outputs"` (record arm first); the part stacks with the others (`drop-outputs+exec-tool-function`); a misspelt one writes `failed` before either round; `start` refuses a worktree without `--drop-old-outputs` and an installed `ling` that does not read the variable (a `ling` without patch `0026` would run the record arm twice). The `ling` the night runs must be built from a commit that has the patch, as nights 5 and 6 were.
+
+**Acceptance (survey §3.1):** resolved not lower than the record arm, compaction seconds down.
+
+**Tests** (`tests/test_swe_bench.py`, +3, with the fake agent writing a drop log and a timed compaction when the variable is set; `tests/test_swe_bench_night_script.py`, +3): the variable only with the flag, the record and the report line in both arms, untimed compactions counted without seconds, the manifest field told apart by `--against` and read as `False` when absent, the command line; the arm reaches only its round and stacks, a misspelt arm ends the night, `start` refuses a `ling` without the variable.
+

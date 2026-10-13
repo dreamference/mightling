@@ -16,6 +16,10 @@
 //!    `model_post_turn_compact_threshold_percent` compacts after a final answer, while the user
 //!    reads it, instead of in the middle of the next turn. [`with_turn_end`] sets it so that it
 //!    fires below the limit of point 1, for sessions someone reads (not `exec`).
+//! 4. **Drop-first compaction** (§13), off until a night measures it: when Codex is about to
+//!    compact, old tool outputs are dropped from the history first and the summary runs only if
+//!    that is not enough. The rule is `ling_masking::dropping`, which Codex's core calls through
+//!    patch `0026`; [`prepare_drop`] hands it the limit the session uses.
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -76,6 +80,17 @@ const MAX_LIMIT_PERCENT_OF_WINDOW: u64 = 90;
 
 /// Codex's key for the model's window; a `-c` of it narrows the catalog's (`with_config_overrides`).
 const WINDOW_KEY: &str = "model_context_window";
+
+/// The environment variable that switches drop-first compaction on or off for one process
+/// (SWE-bench's `--drop-old-outputs` arm sets it inside the instance's container).
+pub const DROP_ENV: &str = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS";
+
+/// The key in the Dreamference config file.
+pub const DROP_SETTING: &str = "mightling_drop_old_outputs";
+
+/// Off until a SWE-bench night against the default arm shows resolved not lower and compaction
+/// time down (compaction survey 2026-10-13 §3.1).
+pub const DROP_DEFAULT: bool = false;
 
 /// A hook the launcher registers in `config.toml`: `<this binary> <subcommand>` for `event`,
 /// under `matcher`, waited for `timeout` seconds. The trust hash covers every field. The ledger
@@ -188,10 +203,7 @@ pub fn with_limit(args: Vec<OsString>, limit: Option<u64>, config: &str) -> Vec<
 /// Turn-end compaction for this launch: reads the switch and `config.toml`, then
 /// [`with_turn_end`]. Called once the limit of [`prepare`] is on the command line.
 pub fn prepare_turn_end(args: Vec<OsString>, codex_home: &Path, window: u64, is_read: bool) -> Vec<OsString> {
-    let settings = crate::config_file()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| text.parse::<toml::Table>().ok())
-        .unwrap_or_default();
+    let settings = dreamference_settings();
     let enabled = turn_end_enabled(std::env::var(TURN_END_ENV).ok().as_deref(), &settings);
     let config = std::fs::read_to_string(codex_home.join("config.toml")).unwrap_or_default();
     with_turn_end(args, &config, window, is_read, enabled)
@@ -238,6 +250,44 @@ pub fn with_turn_end(args: Vec<OsString>, config: &str, window: u64, is_read: bo
         Some(percent) => with_assignment(args, TURN_END_KEY, percent),
         None => args,
     }
+}
+
+/// Drop-first compaction for this launch: when switched on, hands `ling_masking` the limit the
+/// session will compact at. Called once the limits of [`prepare`] are on the command line, for every
+/// subcommand (`exec` included: the benchmark measures it there). Returns whether it is on.
+pub fn prepare_drop(args: &[OsString], codex_home: &Path, window: u64) -> bool {
+    if !drop_enabled(std::env::var(DROP_ENV).ok().as_deref(), &dreamference_settings()) {
+        return false;
+    }
+    let config = std::fs::read_to_string(codex_home.join("config.toml")).unwrap_or_default();
+    ling_masking::set_drop_policy(ling_masking::DropPolicy::for_limit(drop_limit(args, &config, window)), codex_home);
+    true
+}
+
+/// Whether drop-first compaction is on: [`DROP_ENV`], then [`DROP_SETTING`] in the Dreamference
+/// config file (`settings`), then [`DROP_DEFAULT`].
+pub fn drop_enabled(env: Option<&str>, settings: &toml::Table) -> bool {
+    if let Some(value) = env.filter(|value| !value.is_empty()) {
+        return matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on");
+    }
+    settings.get(DROP_SETTING).and_then(toml::Value::as_bool).unwrap_or(DROP_DEFAULT)
+}
+
+/// The limit Codex will compact at: a `-c` of it on the command line (point 1's, Night Shift's or
+/// SWE-bench's), then `config.toml` (`config`), then the window, never above 90% of the window
+/// (narrowed by a `-c model_context_window`), as `ModelInfo::auto_compact_token_limit` caps it.
+pub fn drop_limit(args: &[OsString], config: &str, window: u64) -> u64 {
+    let number = |key: &str| value_of(args, config, key).and_then(|text| text.parse::<u64>().ok());
+    let window = number(WINDOW_KEY).map_or(window, |narrowed| narrowed.min(window));
+    number(LIMIT_KEY).unwrap_or(window).min(window * MAX_LIMIT_PERCENT_OF_WINDOW / 100)
+}
+
+/// The Dreamference config file as a table; empty when there is none or it does not parse.
+fn dreamference_settings() -> toml::Table {
+    crate::config_file()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .unwrap_or_default()
 }
 
 /// Whether `key` is set on the command line (`-c key=…` in any of its spellings) or at the top of
@@ -603,6 +653,27 @@ mod tests {
         assert_eq!(with_limit(given.clone(), Some(94_144), "model_auto_compact_token_limit = 64000\n"), given);
         // Another `-c` does not count.
         assert_eq!(with_limit(args(&["ling", "-c", "x=1"]), Some(1), "").len(), 5);
+    }
+
+    #[test]
+    fn drop_first_compaction_is_off_unless_switched_on() {
+        let table = |text: &str| text.parse::<toml::Table>().unwrap_or_default();
+        assert!(!drop_enabled(None, &table("")));
+        assert!(drop_enabled(None, &table("mightling_drop_old_outputs = true")));
+        assert!(drop_enabled(Some("1"), &table("mightling_drop_old_outputs = false")));
+        assert!(!drop_enabled(Some("off"), &table("mightling_drop_old_outputs = true")));
+        assert!(!drop_enabled(Some(""), &table("")));
+    }
+
+    #[test]
+    fn drop_first_compaction_measures_against_the_limit_the_session_uses() {
+        // SWE-bench's `-c` after the launcher's, as the benchmark's command line has it.
+        let bench = args(&["ling", "-c", "model_auto_compact_token_limit=94144", "exec", "-c", "model_auto_compact_token_limit=49152", "hi"]);
+        assert_eq!(drop_limit(&bench, "", 262_144), 49_152);
+        assert_eq!(drop_limit(&args(&["ling"]), "model_auto_compact_token_limit = 64000\n", 262_144), 64_000);
+        // No limit anywhere: Codex's own cap, 90% of the window, narrowed by a `-c` of it.
+        assert_eq!(drop_limit(&args(&["ling"]), "", 262_144), 235_929);
+        assert_eq!(drop_limit(&args(&["ling", "-c", "model_context_window=40000"]), "", 262_144), 36_000);
     }
 
     #[test]
