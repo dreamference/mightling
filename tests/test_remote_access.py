@@ -203,6 +203,31 @@ def test_the_install_script_checks_the_binary_and_records_what_it_added():
     assert "docker" not in text
 
 
+def test_a_rerun_keeps_haproxy_recorded_as_installed_by_us(tmp_path):
+    """Found on the real box (2026-10-13): `setup` after `--box-only` rewrote the manifest as
+    `haproxy=present`, so `remove` would have left the package it installed."""
+    text = RemoteBox.install_script("amd64", "apt")
+    start = text.index("manifest=")
+    block = text[start:text.index("fi\n", start) + 3].replace(remote_settings.BOX_RELAY_DIR, str(tmp_path))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in {"apt-get": "exit 0", "haproxy": "exit 0"}.items():
+        (bin_dir / name).write_text(f"#!/bin/sh\n{body}\n")
+        (bin_dir / name).chmod(0o755)
+    manifest = tmp_path / "MANIFEST"
+
+    def run(with_haproxy: bool) -> str:
+        # The stub apt-get comes first on PATH either way: the real one never runs.
+        script = block if with_haproxy else block.replace("command -v haproxy", "false")
+        subprocess.run(["bash", "-euc", script], env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, check=True)
+        return manifest.read_text()
+
+    assert run(with_haproxy=False) == "haproxy=installed\n"
+    assert run(with_haproxy=True) == "haproxy=installed\n", "the second run keeps it ours"
+    manifest.write_text("")
+    assert run(with_haproxy=True) == "haproxy=present\n", "a haproxy found on a fresh box is the owner's"
+
+
 def test_the_tunnel_account_may_only_listen_on_the_boxs_loopback():
     line = RemoteTunnel.authorized_line("ssh-ed25519 AAAA mightling-remote-tunnel")
     assert line.startswith('restrict,port-forwarding,permitlisten="127.0.0.1:8443",command="/usr/sbin/nologin" ')
