@@ -1,0 +1,2246 @@
+{
+ "meta": {
+  "started": "2026-10-13T11:03:54+00:00",
+  "host": "http://node-b.local:8000",
+  "model": "RadixArk/Qwen3.8-27B-NVFP4",
+  "owned_by": "sglang",
+  "window": 262144,
+  "pool": 397916,
+  "limit": 94144,
+  "percent": 26,
+  "threshold": 64750,
+  "binary": {
+   "path": "~/.local/bin/ling",
+   "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+   "sha256": "cd90e2a49e9c5acd",
+   "mtime": "2026-10-13T11:05:10",
+   "knows_turn_end_switch": true
+  },
+  "sandbox": "workspace-write",
+  "order": [
+   "night-shift-off-1",
+   "night-shift-on-1",
+   "click-off-1",
+   "click-on-1",
+   "night-shift-on-2",
+   "night-shift-off-2",
+   "click-on-2",
+   "click-off-2"
+  ],
+  "python": "~/mightling/.venv/bin/python",
+  "code_tools": true,
+  "docs": true
+ },
+ "aggregate": {
+  "click/off": {
+   "sessions": 2,
+   "complete": 2,
+   "mid_turn_per_session": 1.0,
+   "turn_end_per_session": 0.0,
+   "turn_end_wall_median_s": null,
+   "turn_end_wall_max_s": null,
+   "mid_turn_wall_median_s": 117.5,
+   "session_wall_mean_s": 1104.65,
+   "peak_context_max": 94042,
+   "hidden_passed_mean": 3.5,
+   "missed_turn_ends": 5,
+   "missed_turn_ends_clear": 5,
+   "inputs_intact": true,
+   "audit_lossless": 0,
+   "audited": 2,
+   "stray_summaries": 0
+  },
+  "click/on": {
+   "sessions": 2,
+   "complete": 2,
+   "mid_turn_per_session": 1.0,
+   "turn_end_per_session": 1.5,
+   "turn_end_wall_median_s": 81.4,
+   "turn_end_wall_max_s": 110.2,
+   "mid_turn_wall_median_s": 142.2,
+   "session_wall_mean_s": 1871.0,
+   "peak_context_max": 94164,
+   "hidden_passed_mean": 4.0,
+   "missed_turn_ends": 0,
+   "missed_turn_ends_clear": 0,
+   "inputs_intact": true,
+   "audit_lossless": 1,
+   "audited": 5,
+   "stray_summaries": 0
+  },
+  "night-shift/off": {
+   "sessions": 2,
+   "complete": 2,
+   "mid_turn_per_session": 0.5,
+   "turn_end_per_session": 0.0,
+   "turn_end_wall_median_s": null,
+   "turn_end_wall_max_s": null,
+   "mid_turn_wall_median_s": 123.1,
+   "session_wall_mean_s": 1109.1,
+   "peak_context_max": 94117,
+   "hidden_passed_mean": 5.0,
+   "missed_turn_ends": 8,
+   "missed_turn_ends_clear": 7,
+   "inputs_intact": true,
+   "audit_lossless": 0,
+   "audited": 1,
+   "stray_summaries": 0
+  },
+  "night-shift/on": {
+   "sessions": 2,
+   "complete": 1,
+   "mid_turn_per_session": 1.5,
+   "turn_end_per_session": 1.0,
+   "turn_end_wall_median_s": 110.2,
+   "turn_end_wall_max_s": 118.1,
+   "mid_turn_wall_median_s": 165.0,
+   "session_wall_mean_s": 4078.3,
+   "peak_context_max": 94064,
+   "hidden_passed_mean": 4.5,
+   "missed_turn_ends": 0,
+   "missed_turn_ends_clear": 0,
+   "inputs_intact": true,
+   "audit_lossless": 0,
+   "audited": 5,
+   "stray_summaries": 0
+  }
+ },
+ "decision": "keep off",
+ "reasons": [
+  "\u2705 typed messages kept: 4 of 4 probes (1 cut the compaction short)",
+  "\u274c turn-end compaction wall time: median 102.2 s, max 118.1 s (limits 60 s / 120 s)",
+  "\u274c click: mid-turn compactions per session 1.0 off, 1.0 on",
+  "\u2705 click: on-arm turns ending clearly above the threshold with no compaction: 0",
+  "\u26a0\ufe0f click (reported, not deciding): session wall 1104.65 s off, 1871.0 s on; hidden tests passed 3.5 off, 4.0 on",
+  "\u274c night-shift: mid-turn compactions per session 0.5 off, 1.5 on",
+  "\u2705 night-shift: on-arm turns ending clearly above the threshold with no compaction: 0",
+  "\u26a0\ufe0f night-shift (reported, not deciding): session wall 1109.1 s off, 4078.3 s on; hidden tests passed 5.0 off, 4.5 on"
+ ],
+ "sessions": [
+  {
+   "label": "night-shift-off-1",
+   "task": "night-shift",
+   "arm": "off",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=0"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 0,
+   "turn_end_threshold": 64750,
+   "probe_key": null,
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-off-1/repo",
+   "events": [
+    {
+     "t": 1791889442.4513564,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791889569.2995124,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791889572.3082504,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1791889807.5133154,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791889810.5217307,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1791889922.125303,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791889925.1342328,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1791890020.756388,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791890023.7650836,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791890156.7565222,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791890159.7652476,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791890348.108587,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791890351.1168902,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1791890425.5316875,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T12:03:55",
+   "status": "complete",
+   "ended": "2026-10-13T12:20:25",
+   "wall_s": 989.8,
+   "probe_note": null,
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-off-1/home/sessions/2026/10/13/rollout-2026-10-13T12-03-56-01a134ee-eee2-7732-a666-eca8569554f5.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a134ef-0aed-7e93-afa5-963d94183048",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 121.5,
+     "context_at_end": 51117
+    },
+    {
+     "turn_id": "01a134f1-063f-7c31-8b99-4a41069587ba",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 229.7,
+     "context_at_end": 60875
+    },
+    {
+     "turn_id": "01a134f4-a8c0-76b2-9245-bd4a7b0bbd31",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 106.0,
+     "context_at_end": 65746
+    },
+    {
+     "turn_id": "01a134f6-6876-7990-97bc-c35882597362",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 90.1,
+     "context_at_end": 69615
+    },
+    {
+     "turn_id": "01a134f7-e9b9-7100-afbd-4a1e3f90f92e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 127.0,
+     "context_at_end": 73600
+    },
+    {
+     "turn_id": "01a134f9-fcfa-7be3-b983-f93943cef660",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 182.5,
+     "context_at_end": 87109
+    },
+    {
+     "turn_id": "01a134fc-e868-7ac1-9595-88827c652112",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 68.8,
+     "context_at_end": 87459
+    }
+   ],
+   "compactions": [],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 0
+   },
+   "peak_context": 87459,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a134f4-a8c0-76b2-9245-bd4a7b0bbd31",
+    "01a134f6-6876-7990-97bc-c35882597362",
+    "01a134f7-e9b9-7100-afbd-4a1e3f90f92e",
+    "01a134f9-fcfa-7be3-b983-f93943cef660",
+    "01a134fc-e868-7ac1-9595-88827c652112"
+   ],
+   "missed_turn_ends_clear": [
+    "01a134f6-6876-7990-97bc-c35882597362",
+    "01a134f7-e9b9-7100-afbd-4a1e3f90f92e",
+    "01a134f9-fcfa-7be3-b983-f93943cef660",
+    "01a134fc-e868-7ac1-9595-88827c652112"
+   ],
+   "probe": null,
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 3.16s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 43
+     },
+     "tail": [
+      "43 passed in 16.26s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-on-1",
+   "task": "night-shift",
+   "arm": "on",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=26"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 26,
+   "turn_end_threshold": 64750,
+   "probe_key": "enter",
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-on-1/repo",
+   "events": [
+    {
+     "t": 1791890454.6995292,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791890574.9731789,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791890577.9798045,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1791890812.0542507,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791890815.062775,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1791893201.3377626,
+     "event": "probe",
+     "index": 3,
+     "key": "enter"
+    },
+    {
+     "t": 1791893521.6792717,
+     "event": "turn end",
+     "outcome": "timeout"
+    },
+    {
+     "t": 1791893524.6902263,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791896231.1357079,
+     "event": "turn end",
+     "outcome": "timeout"
+    },
+    {
+     "t": 1791896234.1453435,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791897188.573781,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T12:20:47",
+   "status": "session timeout",
+   "ended": "2026-10-13T14:13:08",
+   "wall_s": 6740.6,
+   "probe_note": {
+    "sent_ms": 1791893201337,
+    "key": "enter",
+    "text": "Two smaller changes. Totals in the report: `NightShiftReport.render` adds one line that begins with `Totals:` and lists the count of tasks per status, for example `Totals: 2 done, 1 stalled`, in the order the statuses first appear in the task list. And the command line: `puffin-admin night run` gains a `--dry-run` flag (in dreamference/cli/dreamference_cli_controller.py) that passes `dry_run=True` to `NightShiftRunner.run`. Add a test for each and run the file with `~/mightling/.venv/bin/python -m pytest tests/test_night_shift.py -q -p no:cacheprovider`.",
+    "turn_index": 3
+   },
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-on-1/home/sessions/2026/10/13/rollout-2026-10-13T12-20-48-01a134fe-6175-7d13-81f2-4fb10a6d224b.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a134fe-7d0d-7e52-9078-854b4a12a4a5",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 114.5,
+     "context_at_end": 48786
+    },
+    {
+     "turn_id": "01a13500-5eb7-7043-8163-e474f2f6ac1b",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 228.3,
+     "context_at_end": 61652
+    },
+    {
+     "turn_id": "01a13503-fcbc-7bd0-959c-1b172129c92d",
+     "status": "aborted",
+     "reason": "interrupted",
+     "wall_s": 2700.4,
+     "context_at_end": 69271
+    },
+    {
+     "turn_id": "01a1352d-554d-7343-bf0c-d640065c0c9a",
+     "status": "aborted",
+     "reason": "interrupted",
+     "wall_s": 2700.2,
+     "context_at_end": 23978
+    },
+    {
+     "turn_id": "01a13556-ad04-75f1-a8f7-6f8ab9b63a93",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 948.8,
+     "context_at_end": 40642
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13503-fcbc-7bd0-959c-1b172129c92d",
+     "kind": "mid-turn",
+     "started_ms": 1791893041383,
+     "completed_ms": 1791893200221,
+     "wall_s": 158.8,
+     "context_before": 89262,
+     "context_after": 13976,
+     "summary_chars": 8354,
+     "summary_output_tokens": 2159,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        3,
+        6
+       ],
+       "failed commands": [
+        2,
+        2
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "x.txt",
+        "README.md",
+        "tasks/t1.json"
+       ],
+       "last test result": [
+        "1 passed in 0.27s"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 3/6; last test result 1/1 (ledger covered 1)"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a1352d-554d-7343-bf0c-d640065c0c9a",
+     "kind": "mid-turn",
+     "started_ms": 1791893797685,
+     "completed_ms": 1791893962679,
+     "wall_s": 165.0,
+     "context_before": 89657,
+     "context_after": 14575,
+     "summary_chars": 9508,
+     "summary_output_tokens": 2588,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        4,
+        7
+       ],
+       "failed commands": [
+        1,
+        3
+       ],
+       "last test result": [
+        0,
+        0
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "README.md",
+        "hello.txt",
+        "t1.json"
+       ],
+       "failed commands": [
+        "kill -9 84201 2>/dev/null; pkill -9 -f \"ns_run.sh\" 2>/dev/null; pkill -9 -f \"py\u2026",
+        "python3 - <<'EOF'"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 3/7; failed commands 2/3 (ledger covered 1)"
+     }
+    },
+    {
+     "number": 3,
+     "turn_id": "01a1352d-554d-7343-bf0c-d640065c0c9a",
+     "kind": "mid-turn",
+     "started_ms": 1791895584116,
+     "completed_ms": 1791895750601,
+     "wall_s": 166.5,
+     "context_before": 89287,
+     "context_after": 14548,
+     "summary_chars": 9410,
+     "summary_output_tokens": 2546,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        1,
+        1
+       ],
+       "failed commands": [
+        1,
+        1
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "last test result": [
+        "1 failed in 0.10s"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost last test result 1/1 (ledger covered 1)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 3,
+    "turn-end": 0
+   },
+   "peak_context": 94064,
+   "usable_window": 249036,
+   "missed_turn_ends": [],
+   "missed_turn_ends_clear": [],
+   "probe": {
+    "key": "enter",
+    "compaction": null,
+    "compaction_kind": null,
+    "compaction_finished": false,
+    "compaction_wall_s": null,
+    "typed_after_s": null,
+    "turn_aborted": true,
+    "delivered": true,
+    "delivered_in": "same turn",
+    "waited_s": 11.1,
+    "verdict": "interrupted"
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 1,
+     "counts": {
+      "failed": 1,
+      "passed": 4
+     },
+     "tail": [
+      "1 failed, 4 passed in 600.14s (0:10:00)"
+     ]
+    },
+    "own": {
+     "rc": null,
+     "counts": {},
+     "tail": "timed out"
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "click-off-1",
+   "task": "click",
+   "arm": "off",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=0"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 0,
+   "turn_end_threshold": 64750,
+   "probe_key": null,
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-off-1/repo",
+   "events": [
+    {
+     "t": 1791898696.4928749,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791898841.5008936,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791898844.5101833,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1791899131.3642604,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791899134.3745837,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1791899356.3017516,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791899359.3109243,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1791899477.9020875,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791899480.9114587,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791899632.3592975,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791899635.3702068,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791899705.0274673,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T14:38:09",
+   "status": "complete",
+   "ended": "2026-10-13T14:55:05",
+   "wall_s": 1015.2,
+   "probe_note": null,
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-off-1/home/sessions/2026/10/13/rollout-2026-10-13T14-38-10-01a1357c-243a-7152-84d0-ca90d7cca574.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a1357c-3f85-7542-b566-b0bee74984f7",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 139.0,
+     "context_at_end": 88200
+    },
+    {
+     "turn_id": "01a1357e-81c8-7392-9a98-de5877da61af",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 281.2,
+     "context_at_end": 18050
+    },
+    {
+     "turn_id": "01a13582-ee0e-7f20-97cf-17bba7a0a927",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 216.3,
+     "context_at_end": 48923
+    },
+    {
+     "turn_id": "01a13586-5cb5-76b2-a5f2-fef3d4648bc5",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 112.6,
+     "context_at_end": 59968
+    },
+    {
+     "turn_id": "01a13588-37b7-7ef3-9cc4-ad1817a6c81e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 145.8,
+     "context_at_end": 73971
+    },
+    {
+     "turn_id": "01a1358a-9304-7123-a2ac-c3f2ff303ac2",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 63.9,
+     "context_at_end": 74780
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a1357e-81c8-7392-9a98-de5877da61af",
+     "kind": "mid-turn",
+     "started_ms": 1791898979968,
+     "completed_ms": 1791899104158,
+     "wall_s": 124.2,
+     "context_before": 91263,
+     "context_after": 13042,
+     "summary_chars": 6606,
+     "summary_output_tokens": 1716,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        6,
+        6
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "last test result": [
+        "1 failed, 589 passed, 22 skipped, 1 xfailed, 1 warning in 1.11s"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost last test result 1/1 (ledger covered 1)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 1,
+    "turn-end": 0
+   },
+   "peak_context": 94042,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a1357c-3f85-7542-b566-b0bee74984f7",
+    "01a13588-37b7-7ef3-9cc4-ad1817a6c81e",
+    "01a1358a-9304-7123-a2ac-c3f2ff303ac2"
+   ],
+   "missed_turn_ends_clear": [
+    "01a1357c-3f85-7542-b566-b0bee74984f7",
+    "01a13588-37b7-7ef3-9cc4-ad1817a6c81e",
+    "01a1358a-9304-7123-a2ac-c3f2ff303ac2"
+   ],
+   "probe": null,
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 1,
+     "counts": {
+      "failed": 1,
+      "passed": 3
+     },
+     "tail": [
+      "1 failed, 3 passed in 0.30s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 599,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "599 passed, 22 skipped, 1 xfailed, 1 warning in 0.61s"
+     ]
+    },
+    "changed_files": [
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "tests/test_formatting.py",
+     "tests/test_info_dict.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  },
+  {
+   "label": "click-on-1",
+   "task": "click",
+   "arm": "on",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=26"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 26,
+   "turn_end_threshold": 64750,
+   "probe_key": "enter",
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-on-1/repo",
+   "events": [
+    {
+     "t": 1791899714.248598,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791899838.6178162,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791899841.6261082,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1791900063.7501106,
+     "event": "probe",
+     "index": 2,
+     "key": "enter"
+    },
+    {
+     "t": 1791900415.087817,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791900418.0954278,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1791901212.5215406,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791901215.5316758,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791901336.7152612,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791901339.7252774,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791901394.06675,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T14:55:07",
+   "status": "complete",
+   "ended": "2026-10-13T15:23:14",
+   "wall_s": 1686.5,
+   "probe_note": {
+    "sent_ms": 1791900063750,
+    "key": "enter",
+    "text": "Add a `deprecated` parameter to `click.Option` (False, True, or a string). When an option marked deprecated is given on the command line, print `DeprecationWarning: The option '<name>' is deprecated.` to stderr, followed by the string when one was given, and start its help text in `--help` with `(DEPRECATED)`. Make the change in src/click/core.py and make sure `@click.option(..., deprecated=...)` passes it through. Add tests in tests/test_options.py for the message, the custom string and the help text. Run the whole suite with `~/mightling/.venv/bin/python -m pytest tests -q -p no:cacheprovider` and fix what fails.",
+    "turn_index": 2
+   },
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-on-1/home/sessions/2026/10/13/rollout-2026-10-13T14-55-08-01a1358b-abcc-7ef2-b05c-012617e8acb9.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a1358b-c722-7650-b752-6f327da3533b",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 118.6,
+     "context_at_end": 56173
+    },
+    {
+     "turn_id": "01a1358d-b8c2-70a3-b72e-51e9e9af92ca",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 567.8,
+     "context_at_end": 61183
+    },
+    {
+     "turn_id": "01a13596-8494-7092-85e2-7ff46ef3e1fe",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 788.4,
+     "context_at_end": 49812
+    },
+    {
+     "turn_id": "01a135a2-af93-7620-9c2d-ee61cb0681fb",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 115.3,
+     "context_at_end": 59947
+    },
+    {
+     "turn_id": "01a135a4-94ab-7e03-8f25-cb9387cf7521",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 48.3,
+     "context_at_end": 60828
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a1358d-b8c2-70a3-b72e-51e9e9af92ca",
+     "kind": "turn-end",
+     "started_ms": 1791900062158,
+     "completed_ms": 1791900139734,
+     "wall_s": 77.6,
+     "context_before": 71272,
+     "context_after": 6992,
+     "summary_chars": 3734,
+     "summary_output_tokens": 925,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        6,
+        6
+       ],
+       "failed commands": [
+        0,
+        3
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "failed commands": [
+        "sed -n '40,120p' tests/test_imports.py; echo ====; grep -n \"parser\" tests/test_\u2026",
+        "ls pyproject.toml setup.py setup.cfg 2>/dev/null; grep -n \"packages\\|package_di\u2026",
+        "grep -n \"parser\" docs/api.rst"
+       ]
+      },
+      "ledger_covered": 3,
+      "stray_tool_call": false,
+      "verdict": "lost failed commands 3/3 (ledger covered 3)"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13596-8494-7092-85e2-7ff46ef3e1fe",
+     "kind": "mid-turn",
+     "started_ms": 1791900780750,
+     "completed_ms": 1791900913003,
+     "wall_s": 132.3,
+     "context_before": 90852,
+     "context_after": 13396,
+     "summary_chars": 6866,
+     "summary_output_tokens": 1849,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        4,
+        5
+       ],
+       "failed commands": [
+        2,
+        5
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "tests/test_options.py"
+       ],
+       "failed commands": [
+        "~/mightling/.venv/bin/python -m pytest tests -q -p no:c\u2026",
+        "CLICK_HELP_WIDTH=54 PYTHONPATH=src ~/mightling/.venv/bi\u2026",
+        "CLICK_HELP_WIDTH=54 PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 ~/Pycharm\u2026"
+       ],
+       "last test result": [
+        "2 passed in 0.01s"
+       ]
+      },
+      "ledger_covered": 2,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/5; failed commands 3/5; last test result 1/1 (ledger covered 2)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 1,
+    "turn-end": 1
+   },
+   "peak_context": 94164,
+   "usable_window": 249036,
+   "missed_turn_ends": [],
+   "missed_turn_ends_clear": [],
+   "probe": {
+    "key": "enter",
+    "compaction": 1,
+    "compaction_kind": "turn-end",
+    "compaction_finished": true,
+    "compaction_wall_s": 77.6,
+    "typed_after_s": 1.6,
+    "turn_aborted": false,
+    "delivered": true,
+    "delivered_in": "same turn",
+    "waited_s": 76.1,
+    "verdict": "waited"
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 4
+     },
+     "tail": [
+      "4 passed in 0.27s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 598,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "598 passed, 22 skipped, 1 xfailed, 2 warnings in 0.72s"
+     ]
+    },
+    "changed_files": [
+     "CHANGES.rst",
+     "docs/shell-completion.rst",
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "tests/test_formatting.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-on-2",
+   "task": "night-shift",
+   "arm": "on",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=26"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 26,
+   "turn_end_threshold": 64750,
+   "probe_key": "tab",
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-on-2/repo",
+   "events": [
+    {
+     "t": 1791901403.421904,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791901503.9697256,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791901506.9773169,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1791901752.0992725,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791901755.108216,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1791901992.0738091,
+     "event": "probe",
+     "index": 3,
+     "key": "tab"
+    },
+    {
+     "t": 1791902261.5795763,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791902264.5883205,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791902423.7521532,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791902426.763901,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791902788.8950746,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791902791.905064,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1791902812.64945,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T15:23:16",
+   "status": "complete",
+   "ended": "2026-10-13T15:46:52",
+   "wall_s": 1416.0,
+   "probe_note": {
+    "sent_ms": 1791901992073,
+    "key": "tab",
+    "text": "Two smaller changes. Totals in the report: `NightShiftReport.render` adds one line that begins with `Totals:` and lists the count of tasks per status, for example `Totals: 2 done, 1 stalled`, in the order the statuses first appear in the task list. And the command line: `puffin-admin night run` gains a `--dry-run` flag (in dreamference/cli/dreamference_cli_controller.py) that passes `dry_run=True` to `NightShiftRunner.run`. Add a test for each and run the file with `~/mightling/.venv/bin/python -m pytest tests/test_night_shift.py -q -p no:cacheprovider`.",
+    "turn_index": 3
+   },
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-on-2/home/sessions/2026/10/13/rollout-2026-10-13T15-23-17-01a135a5-7209-77c0-9610-0be806890b25.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a135a5-8d78-7112-998b-03df4a5f5874",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 94.8,
+     "context_at_end": 45688
+    },
+    {
+     "turn_id": "01a135a7-2214-7801-a1c7-b1146b389734",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 239.5,
+     "context_at_end": 62165
+    },
+    {
+     "turn_id": "01a135aa-eb4d-7870-b30f-966cc8987517",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 336.5,
+     "context_at_end": 7517
+    },
+    {
+     "turn_id": "01a135b0-0dfd-77f3-8312-3e4163ac5ac0",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 164.1,
+     "context_at_end": 50778
+    },
+    {
+     "turn_id": "01a135b2-b178-7a83-bbad-e792d7ab547b",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 153.8,
+     "context_at_end": 59199
+    },
+    {
+     "turn_id": "01a135b5-2af0-7223-a9a2-307595d7d151",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 356.1,
+     "context_at_end": 8345
+    },
+    {
+     "turn_id": "01a135ba-bd3d-7d21-8cd5-148955113453",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 15.1,
+     "context_at_end": 16996
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a135aa-eb4d-7870-b30f-966cc8987517",
+     "kind": "turn-end",
+     "started_ms": 1791901990607,
+     "completed_ms": 1791902092781,
+     "wall_s": 102.2,
+     "context_before": 72923,
+     "context_after": 7517,
+     "summary_chars": 5119,
+     "summary_output_tokens": 1271,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        4,
+        5
+       ],
+       "failed commands": [
+        3,
+        4
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "README.md"
+       ],
+       "failed commands": [
+        ""
+       ]
+      },
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/5; failed commands 1/4"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a135b5-2af0-7223-a9a2-307595d7d151",
+     "kind": "turn-end",
+     "started_ms": 1791902665948,
+     "completed_ms": 1791902784007,
+     "wall_s": 118.1,
+     "context_before": 76100,
+     "context_after": 8345,
+     "summary_chars": 6747,
+     "summary_output_tokens": 1680,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        5,
+        5
+       ],
+       "failed commands": [
+        1,
+        1
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "last test result": [
+        "44 passed in 15.72s"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost last test result 1/1 (ledger covered 1)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 2
+   },
+   "peak_context": 79504,
+   "usable_window": 249036,
+   "missed_turn_ends": [],
+   "missed_turn_ends_clear": [],
+   "probe": {
+    "key": "tab",
+    "compaction": 1,
+    "compaction_kind": "turn-end",
+    "compaction_finished": true,
+    "compaction_wall_s": 102.2,
+    "typed_after_s": 1.5,
+    "turn_aborted": false,
+    "delivered": true,
+    "delivered_in": "next turn",
+    "waited_s": 100.7,
+    "verdict": "waited"
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 3.21s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 44
+     },
+     "tail": [
+      "44 passed in 15.98s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-off-2",
+   "task": "night-shift",
+   "arm": "off",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=0"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 0,
+   "turn_end_threshold": 64750,
+   "probe_key": null,
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-off-2/repo",
+   "events": [
+    {
+     "t": 1791902840.1100056,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791902962.3169239,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791902965.3246896,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1791903173.8457062,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791903176.8540895,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1791903326.7925792,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791903329.7997952,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1791903528.9834573,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791903531.9888237,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791903721.3792348,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791903724.3883111,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791904025.7947934,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791904028.8030334,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1791904061.832645,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T15:47:13",
+   "status": "complete",
+   "ended": "2026-10-13T16:07:41",
+   "wall_s": 1228.4,
+   "probe_note": null,
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/night-shift-off-2/home/sessions/2026/10/13/rollout-2026-10-13T15-47-14-01a135bb-5e0f-76a2-a3e8-51de8666e554.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a135bb-7987-7583-a4f4-4a41c186e5d6",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 116.4,
+     "context_at_end": 47105
+    },
+    {
+     "turn_id": "01a135bd-62b5-7642-9bae-2a12e06bf76d",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 202.9,
+     "context_at_end": 60709
+    },
+    {
+     "turn_id": "01a135c0-9d29-7b03-bc68-5653df08b93e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 144.3,
+     "context_at_end": 70852
+    },
+    {
+     "turn_id": "01a135c2-f267-7650-8417-6caaa40152a4",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 193.8,
+     "context_at_end": 83911
+    },
+    {
+     "turn_id": "01a135c6-0834-7990-b8ea-c0996c046e7c",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 184.0,
+     "context_at_end": 93868
+    },
+    {
+     "turn_id": "01a135c8-f7cb-7713-a898-9328668bf94b",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 295.4,
+     "context_at_end": 42936
+    },
+    {
+     "turn_id": "01a135cd-9cd8-7bd3-8a8b-8a0bb291c747",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 27.3,
+     "context_at_end": 43504
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a135c8-f7cb-7713-a898-9328668bf94b",
+     "kind": "mid-turn",
+     "started_ms": 1791903812898,
+     "completed_ms": 1791903936041,
+     "wall_s": 123.1,
+     "context_before": 90784,
+     "context_after": 13449,
+     "summary_chars": 5786,
+     "summary_output_tokens": 1419,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        6,
+        7
+       ],
+       "failed commands": [
+        3,
+        4
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "20261001-0100-zzz.json"
+       ],
+       "failed commands": [
+        "python3 - <<'PYEOF'"
+       ]
+      },
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/7; failed commands 1/4"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 1,
+    "turn-end": 0
+   },
+   "peak_context": 94117,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a135c0-9d29-7b03-bc68-5653df08b93e",
+    "01a135c2-f267-7650-8417-6caaa40152a4",
+    "01a135c6-0834-7990-b8ea-c0996c046e7c"
+   ],
+   "missed_turn_ends_clear": [
+    "01a135c0-9d29-7b03-bc68-5653df08b93e",
+    "01a135c2-f267-7650-8417-6caaa40152a4",
+    "01a135c6-0834-7990-b8ea-c0996c046e7c"
+   ],
+   "probe": null,
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 2.11s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 44
+     },
+     "tail": [
+      "44 passed in 12.61s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "dreamference/night_shift/night_shift_task_run.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "click-on-2",
+   "task": "click",
+   "arm": "on",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=26"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 26,
+   "turn_end_threshold": 64750,
+   "probe_key": "tab",
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-on-2/repo",
+   "events": [
+    {
+     "t": 1791904084.0209188,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791904206.4670658,
+     "event": "probe",
+     "index": 1,
+     "key": "tab"
+    },
+    {
+     "t": 1791904455.2258,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791904458.2338395,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1791905590.3567913,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791905593.3660696,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1791906040.2280464,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791906043.2396054,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791906104.7542953,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791906107.7661572,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791906132.978054,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T16:07:57",
+   "status": "complete",
+   "ended": "2026-10-13T16:42:13",
+   "wall_s": 2055.5,
+   "probe_note": {
+    "sent_ms": 1791904206467,
+    "key": "tab",
+    "text": "Refactor: move the contents of src/click/parser.py into a new private module src/click/_optparse.py. Keep src/click/parser.py as a thin module that re-exports the same public names from the new module and emits a DeprecationWarning when it is imported. Update every import of the parser inside src/click to use the new module, so that `import click` emits no warning. Add tests in tests/test_parser.py that importing click.parser warns and that `import click` does not. Run the whole suite with `~/mightling/.venv/bin/python -m pytest tests -q -p no:cacheprovider` and fix what fails.",
+    "turn_index": 1
+   },
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-on-2/home/sessions/2026/10/13/rollout-2026-10-13T16-07-58-01a135ce-594b-76e2-b5eb-a6d3680bbbab.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a135ce-748e-7e40-a025-be51d26a3a62",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 201.4,
+     "context_at_end": 7121
+    },
+    {
+     "turn_id": "01a135d1-8753-7db2-bc0a-d7a832486bc3",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 164.2,
+     "context_at_end": 30429
+    },
+    {
+     "turn_id": "01a135d4-2a5d-7d70-8915-c3d137278f03",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 1126.5,
+     "context_at_end": 54055
+    },
+    {
+     "turn_id": "01a135e5-7c7f-7ba3-8ccb-3007965597cc",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 441.0,
+     "context_at_end": 7909
+    },
+    {
+     "turn_id": "01a135ec-59cf-7a10-8541-6020dbcc2b03",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 55.9,
+     "context_at_end": 25492
+    },
+    {
+     "turn_id": "01a135ed-55ce-71f3-94bc-12135c5a6bc3",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 19.4,
+     "context_at_end": 26317
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a135ce-748e-7e40-a025-be51d26a3a62",
+     "kind": "turn-end",
+     "started_ms": 1791904205109,
+     "completed_ms": 1791904286524,
+     "wall_s": 81.4,
+     "context_before": 67652,
+     "context_after": 7121,
+     "summary_chars": 4804,
+     "summary_output_tokens": 1256,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        0,
+        0
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        0,
+        0
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "nothing to keep"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a135d4-2a5d-7d70-8915-c3d137278f03",
+     "kind": "mid-turn",
+     "started_ms": 1791905076115,
+     "completed_ms": 1791905228284,
+     "wall_s": 152.2,
+     "context_before": 90898,
+     "context_after": 13737,
+     "summary_chars": 8758,
+     "summary_output_tokens": 2178,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        6,
+        6
+       ],
+       "failed commands": [
+        5,
+        7
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "failed commands": [
+        "~/mightling/.venv/bin/python -m pytest tests/test_optio\u2026",
+        "~/mightling/.venv/bin/python -c \"import click._optparse\u2026"
+       ]
+      },
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "lost failed commands 2/7"
+     }
+    },
+    {
+     "number": 3,
+     "turn_id": "01a135e5-7c7f-7ba3-8ccb-3007965597cc",
+     "kind": "turn-end",
+     "started_ms": 1791905925308,
+     "completed_ms": 1791906035521,
+     "wall_s": 110.2,
+     "context_before": 80444,
+     "context_after": 7909,
+     "summary_chars": 6204,
+     "summary_output_tokens": 1533,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        5,
+        5
+       ],
+       "failed commands": [
+        3,
+        7
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "failed commands": [
+        "~/mightling/.venv/bin/python -m pytest tests -q -p no:c\u2026",
+        "~/mightling/.venv/bin/python - <<'EOF'",
+        "git stash 2>/dev/null; echo \"---\"; ~/mightling/.venv/bi\u2026",
+        "grep -n \"termui\\|_termui_impl\" tests/conftest.py && echo ==== && sed -n '1,30p'\u2026"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost failed commands 4/7 (ledger covered 1)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 1,
+    "turn-end": 2
+   },
+   "peak_context": 94106,
+   "usable_window": 249036,
+   "missed_turn_ends": [],
+   "missed_turn_ends_clear": [],
+   "probe": {
+    "key": "tab",
+    "compaction": 1,
+    "compaction_kind": "turn-end",
+    "compaction_finished": true,
+    "compaction_wall_s": 81.4,
+    "typed_after_s": 1.4,
+    "turn_aborted": false,
+    "delivered": true,
+    "delivered_in": "next turn",
+    "waited_s": 80.1,
+    "verdict": "waited"
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 4
+     },
+     "tail": [
+      "4 passed in 0.22s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 598,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "598 passed, 22 skipped, 1 xfailed, 2 warnings in 0.65s"
+     ]
+    },
+    "changed_files": [
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "src/click/testing.py",
+     "tests/test_formatting.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  },
+  {
+   "label": "click-off-2",
+   "task": "click",
+   "arm": "off",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=0"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 0,
+   "turn_end_threshold": 64750,
+   "probe_key": null,
+   "repo": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-off-2/repo",
+   "events": [
+    {
+     "t": 1791906141.800801,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1791906254.529758,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791906257.5373278,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1791906454.470264,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791906457.4777722,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1791906739.6118205,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791906742.6226397,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1791907114.250512,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791907117.2587821,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1791907281.8702536,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1791907284.8817167,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1791907329.198145,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "~/.local/bin/ling",
+    "resolved": "~/.local/share/dreamference/mightling/bin/ling",
+    "sha256": "cd90e2a49e9c5acd",
+    "mtime": "2026-10-13T11:05:10",
+    "knows_turn_end_switch": true
+   },
+   "started": "2026-10-13T16:42:15",
+   "status": "complete",
+   "ended": "2026-10-13T17:02:09",
+   "wall_s": 1194.1,
+   "probe_note": null,
+   "rollout": "~/.cache/dreamference/turn-end-compaction/2026-10-13/click-off-2/home/sessions/2026/10/13/rollout-2026-10-13T16-42-15-01a135ed-bf56-7e22-ac06-336ca44bed8c.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a135ed-dac3-7160-9bd4-45f500fd5d5f",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 107.0,
+     "context_at_end": 54161
+    },
+    {
+     "turn_id": "01a135ef-9ee4-7450-ad40-56cabe2e7449",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 191.1,
+     "context_at_end": 68912
+    },
+    {
+     "turn_id": "01a135f2-abe7-7e51-a20c-5db790dc4ca6",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 276.5,
+     "context_at_end": 92731
+    },
+    {
+     "turn_id": "01a135f7-05c3-7d91-aceb-7634c235b353",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 366.0,
+     "context_at_end": 38002
+    },
+    {
+     "turn_id": "01a135fc-bd2c-7f30-bbfc-58ae994abad1",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 158.6,
+     "context_at_end": 56243
+    },
+    {
+     "turn_id": "01a135ff-4bec-7653-ab2a-1775f362260c",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 38.5,
+     "context_at_end": 56621
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a135f7-05c3-7d91-aceb-7634c235b353",
+     "kind": "mid-turn",
+     "started_ms": 1791906826447,
+     "completed_ms": 1791906937292,
+     "wall_s": 110.8,
+     "context_before": 90894,
+     "context_after": 12944,
+     "summary_chars": 4878,
+     "summary_output_tokens": 1182,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        1,
+        4
+       ],
+       "failed commands": [
+        1,
+        7
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "src/click/parser.py",
+        "tests/test_parser.py",
+        "tests/test_options.py"
+       ],
+       "failed commands": [
+        "ls src/click/ && head -60 src/click/__init__.py && grep -n \"parser\" setup.cfg M\u2026",
+        "python - <<'EOF'",
+        "grep -n \"def test_deprecat\" tests/test_options.py",
+        "grep -n \"deprecated\" tests/test_options.py",
+        "~/mightling/.venv/bin/python - <<'EOF'",
+        "~/mightling/.venv/bin/python -m pytest tests/test_optio\u2026"
+       ],
+       "last test result": [
+        "594 passed, 22 skipped, 1 xfailed, 1 warning in 0.63s"
+       ]
+      },
+      "ledger_covered": 8,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 3/4; failed commands 6/7; last test result 1/1 (ledger covered 8)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 1,
+    "turn-end": 0
+   },
+   "peak_context": 93971,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a135ef-9ee4-7450-ad40-56cabe2e7449",
+    "01a135f2-abe7-7e51-a20c-5db790dc4ca6"
+   ],
+   "missed_turn_ends_clear": [
+    "01a135ef-9ee4-7450-ad40-56cabe2e7449",
+    "01a135f2-abe7-7e51-a20c-5db790dc4ca6"
+   ],
+   "probe": null,
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 4
+     },
+     "tail": [
+      "4 passed in 0.22s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 598,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "598 passed, 22 skipped, 1 xfailed, 1 warning in 0.57s"
+     ]
+    },
+    "changed_files": [
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "tests/test_formatting.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  }
+ ]
+}
