@@ -1345,8 +1345,8 @@ class DreamferenceCLIController:
 
         # Command: ling-admin gmail -- read-only mail access for the Mightling agent, in the same shape
         # as search/fetch and for the same reason (a shell command the model uses reliably). It is a
-        # client of the service the web UI already runs, not a second IMAP path; connecting an
-        # account is still `ling-admin chat gmail`.
+        # client of the Google service (`ling-admin google start`), not a second IMAP path;
+        # connecting an account is done in `/apps`.
         gmail_parser = subparsers.add_parser("gmail", help="Search and read connected Gmail accounts (read-only)")
         gmail_subparsers = gmail_parser.add_subparsers(dest="gmail_command", required=True)
         gmail_search_parser = gmail_subparsers.add_parser("search", help="Search with Gmail query syntax")

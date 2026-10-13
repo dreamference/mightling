@@ -67,8 +67,10 @@ them; `ling-admin chat remove` does the same at any time, in two steps, each ask
 
 1. **The containers** (`docker compose … down`): the chat stops. Its data is kept.
 2. **The data**: its Docker volumes (saved chats and accounts, which are not imported anywhere),
-   Onyx's images (about 4.9 GB) and the image search and speech containers it had started, which
-   `ling-admin images start` and `voice start` recreate. This cannot be undone.
+   Onyx's images (about 4.9 GB), the image search and speech containers it had started, which
+   `ling-admin images start` and `voice start` recreate, and its Docker network. SearXNG is taken
+   off that network and keeps running; the Google service, if the web chat created it, is
+   recreated on Mightling's own network with its connected accounts. This cannot be undone.
 
 `ling-admin chat status` shows what is left; `ling-admin chat remove --yes --delete-data` does both
 without asking. The deployment folder (`~/.config/onyx/deployment`) is left for you to delete.

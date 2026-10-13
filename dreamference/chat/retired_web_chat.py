@@ -10,7 +10,11 @@ until the user confirms separately. `ling web` and the desktop app replace it.
 - **Step 2, the data, asked again:** the compose project's volumes (saved chats and the Onyx
   accounts, in PostgreSQL), the image search, SigLIP and speech-to-text containers still on
   Onyx's network (`ling-admin images start` and `voice start` recreate them on the sidecar
-  network), Onyx's own images (`onyxdotapp/*`, about 4.9 GB) and its networks.
+  network), Onyx's own images (`onyxdotapp/*`, about 4.9 GB) and its networks. Docker refuses to
+  remove a network a container is still on, and two of Mightling's own were put on Onyx's by its
+  `configure`: SearXNG as a second network, which is disconnected, and the Google service, created
+  on it, which is recreated on the sidecar network (its tokens are in the mounted folder, its
+  secret is the same). Any other container still on it is named and left alone.
 
 The deployment folder (`~/.config/onyx/deployment`, compose files and `.env`) is left as it is,
 and nothing here deletes anything without a yes or the matching flag. The offer is made once, at
@@ -24,6 +28,7 @@ import subprocess
 import sys
 from typing import Callable, Final, List, Optional
 
+from dreamference.chat.google_service import GOOGLE_CONTAINER_NAME, GoogleService
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
 ONYX_DEPLOYMENT_DIR: Final[str] = os.path.expanduser("~/.config/onyx/deployment")
@@ -82,10 +87,52 @@ class RetiredWebChat:
     def networks(cls) -> List[str]:
         """
         Returns:
-            List[str]: The compose project's networks.
+            List[str]: The names of the compose project's networks (names, not ids: a container's
+            `NetworkMode` names the network it was created on).
         """
-        result = _run(["docker", "network", "ls", "-q", "--filter", PROJECT_LABEL], timeout=30)
+        result = _run(["docker", "network", "ls", "--filter", PROJECT_LABEL, "--format", "{{.Name}}"], timeout=30)
         return result.stdout.split() if result.returncode == 0 else []
+
+    @classmethod
+    def attached(cls, network: str) -> List[str]:
+        """
+        Args:
+            network (str): One of the project's networks.
+
+        Returns:
+            List[str]: The containers still on it, running or not.
+        """
+        result = _run(["docker", "network", "inspect", network, "--format",
+                       "{{range .Containers}}{{.Name}} {{end}}"], timeout=30)
+        return result.stdout.split() if result.returncode == 0 else []
+
+    @classmethod
+    def release_network(cls, network: str) -> List[str]:
+        """Takes Mightling's own containers off one of Onyx's networks, so it can be removed.
+
+        A container on it as a second network (SearXNG, joined by Onyx's `configure`) is
+        disconnected. The Google service, which that `configure` created on it, is recreated on the
+        sidecar network: its tokens are in the mounted credentials folder and its secret is
+        `GoogleService.secret`, so nothing is lost. Any other container created on it is left.
+
+        Args:
+            network (str): One of the project's networks.
+
+        Returns:
+            List[str]: The containers still holding the network.
+        """
+        held = []
+        for name in cls.attached(network):
+            if SidecarNetwork.network_mode(name) != network:
+                _run(["docker", "network", "disconnect", network, name], timeout=60)
+            elif name == GOOGLE_CONTAINER_NAME:
+                GoogleService.stop()
+                if not GoogleService.start():
+                    print(f"⚠️  {GoogleService.problem or 'The Google service was not recreated.'} "
+                          "`ling-admin google start` retries.")
+            else:
+                held.append(name)
+        return held
 
     @classmethod
     def images(cls) -> List[str]:
@@ -151,7 +198,7 @@ class RetiredWebChat:
         its networks. Only ever after step 1 and a second yes.
 
         Returns:
-            bool: True if no volume or Onyx image is left.
+            bool: True if no volume, Onyx image or Onyx network is left.
         """
         orphans = cls.orphan_sidecars()
         if orphans:
@@ -163,8 +210,12 @@ class RetiredWebChat:
         if images:
             _run(["docker", "rmi", *images], timeout=600)
         for network in cls.networks():
+            held = cls.release_network(network)
+            if held:
+                print(f"⚠️  {network} is kept: {', '.join(held)} {'was' if len(held) == 1 else 'were'} created on it.")
+                continue
             _run(["docker", "network", "rm", network], timeout=60)
-        return not cls.volumes() and not cls.images()
+        return not cls.volumes() and not cls.images() and not cls.networks()
 
     @classmethod
     def describe(cls) -> List[str]:
@@ -176,6 +227,7 @@ class RetiredWebChat:
         lines.append(f"Volumes (saved chats, accounts): {', '.join(cls.volumes()) or 'none'}")
         lines.append(f"Sidecars still on Onyx's network: {', '.join(cls.orphan_sidecars()) or 'none'}")
         lines.append(f"Onyx images: {', '.join(cls.images()) or 'none'}")
+        lines.append(f"Onyx networks: {', '.join(cls.networks()) or 'none'}")
         lines.append(f"Deployment folder: {ONYX_DEPLOYMENT_DIR if cls.deployed() else 'none'} (left as it is)")
         return lines
 
@@ -206,12 +258,12 @@ class RetiredWebChat:
             print("✅ The Onyx containers are gone; its volumes and images are kept.")
         else:
             print("No Onyx container is left.")
-        volumes, images, orphans = cls.volumes(), cls.images(), cls.orphan_sidecars()
-        if not (volumes or images or orphans):
+        volumes, images, orphans, networks = cls.volumes(), cls.images(), cls.orphan_sidecars(), cls.networks()
+        if not (volumes or images or orphans or networks):
             print("No Onyx data is left either.")
             return 0
         print(f"Kept: volumes {', '.join(volumes) or 'none'}; images {', '.join(images) or 'none'}; "
-              f"sidecars on Onyx's network {', '.join(orphans) or 'none'}.")
+              f"sidecars on Onyx's network {', '.join(orphans) or 'none'}; networks {', '.join(networks) or 'none'}.")
         if orphans:
             print("💡 `ling-admin images start` and `ling-admin voice start` run image search and voice "
                   "without them.")
@@ -220,7 +272,7 @@ class RetiredWebChat:
             print("Kept. `ling-admin chat remove --delete-data` deletes them later.")
             return 0
         if not cls.remove_data():
-            print("❌ Some volumes or images could not be removed (one may still be in use).")
+            print("❌ Some volumes, images or networks could not be removed (one may still be in use).")
             return 1
         print("✅ The Onyx volumes, images and networks are deleted.")
         return 0
