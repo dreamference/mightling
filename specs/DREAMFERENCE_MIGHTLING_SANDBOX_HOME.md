@@ -1,6 +1,6 @@
 # Mightling sandbox: the home folder hidden from commands
 
-**Status:** draft for 1.7.0 on branch `security/sandbox-home`, not merged; it waits for the owner's review and the decisions in §9. It answers finding 13 of the [October 2026 security review](./DREAMFERENCE_SECURITY_REVIEW_2026-10.md). Built and unit-tested; the live bubblewrap check outside PyCharm is §8.2.
+**Status:** draft for 1.7.0 on branch `security/sandbox-home`, not merged; it waits for the owner's review and the decisions in §9. It answers finding 13 of the [October 2026 security review](./DREAMFERENCE_SECURITY_REVIEW_2026-10.md). Built and unit-tested. The sandbox helper built from the export was checked live against a scratch home on 2026-10-13, outside PyCharm (§8.2). A session of a built `ling` against the real home folder's toolchains is still pending.
 **Goal:** under the read-only and workspace-write sandboxes, a command `ling` runs cannot read the user's home folder: SSH keys, browser profiles, `~/.mightling`'s sessions and secrets, other projects. It still sees the workspace, the paths the user allowed, the toolchains it needs and ling's own tools.
 **Target:** `ling` on Linux (bubblewrap). macOS (Seatbelt) and Windows (the elevated sandbox) are unchanged.
 **Related:**
@@ -54,7 +54,7 @@ Patch `0019` adds two lines to Codex's sandbox helper (`linux-sandbox`): a depen
 `hide_home` acts only on a `Managed` profile whose filesystem entries read `:root` and do not write it, which means the read-only and workspace-write sandboxes. For those:
 
 1. it removes `:root = read`;
-2. it adds one `read` entry for every directory beside the home folder and beside each of its ancestors (§2, last paragraph);
+2. it adds one `read` entry for every directory beside the home folder and beside each of its ancestors (§2, last paragraph), and `:minimal = read`. Codex merges readable roots by their real paths, so a link such as `/lib -> usr/lib` would be mounted only at its target. Without `/lib` the dynamic loader is missing and nothing runs: measured, the helper's own re-entry failed with ENOENT. `:minimal` is Codex's list of system paths (`/bin`, `/sbin`, `/lib`, `/lib64`, …), which it mounts as written;
 3. it adds `read` entries for the plan's paths inside the home folder, and `deny` entries for the hidden credential files;
 4. it adds `:project_roots = read` if no entry names the workspace;
 5. it keeps every other entry: writable roots, Codex's protected `.git`/`.codex`/`.agents`, and the user's own deny rules.
@@ -113,7 +113,7 @@ A policy that does not read `/` is built by Codex as `--tmpfs /` plus one `--ro-
 - `git push`/`git fetch` over SSH from a sandboxed command fails (no `~/.ssh`). They need approval to run outside the sandbox. Night Shift never pushes.
 - `ling-admin gmail …` from a sandboxed shell, the fallback used when Mightling's apps are not offered, can no longer read the service secret. The Gmail tools, which are MCP servers, are unaffected.
 - `ling-admin` from a source checkout (its virtualenv is linked from `~/.local/bin`) finds its virtualenv but not the editable package's source, unless the session works in that checkout. A release install is unaffected.
-- **Not yet measured:** writes into the hidden home folder (for example `pip install --user`) may land in the sandbox's own tmpfs, which disappears with the command, rather than failing as before. §8.2 checks this.
+- **Writes into the hidden home folder "succeed" and vanish.** The home folder is a directory in the sandbox's own tmpfs root, so `touch ~/x` or `pip install --user` works and disappears with the command. This was measured under both sandboxes, read-only included; before, these writes failed with "Read-only file system". Codex's `:minimal` profiles behave the same way. Nothing reaches the real home folder.
 - The shell's rc files are hidden. Codex's shell snapshot, which is readable, still gives commands the user's `PATH` and functions.
 
 ## 7. Not covered
@@ -121,6 +121,7 @@ A policy that does not read `/` is built by Codex as `--tmpfs /` plus one `--ro-
 - **`view_image`** reads a path in `ling`'s own process when the session's profile reads `:root`. That is the configuration's profile, not the rewritten one, so it can still show the model an image from the home folder. It cannot return a file's text. Closing it needs a second hook in core (§9, decision 5).
 - **Unix sockets under `/run/user/<uid>`**: `ssh-agent` (`$SSH_AUTH_SOCK`), `gpg-agent`, the session D-Bus (and with it the keyring's Secret Service) and a rootless Docker socket. A read-only mount does not stop `connect()`, so a command can still sign with the user's SSH key or ask the keyring. This is the same finding through another door (§9, decision 4).
 - **Bind mounts of the home folder elsewhere** (`mount --bind ~/x /mnt/x`) are mounted with their parent. The live check lists them with `findmnt`.
+- **Links beside the home folder** are mounted at their targets. The link path itself is missing inside the sandbox, except for the system links `:minimal` covers. Links that lead into the home folder are not mounted at all.
 - **Environment variables** reach commands as Codex's `shell_environment_policy` decides. That is unchanged.
 - **MCP servers and approved escalations** run outside the sandbox, as before.
 
@@ -132,9 +133,9 @@ A policy that does not read `/` is built by Codex as `--tmpfs /` plus one `--ro-
 - `ling-launcher`: `ling sandbox-home`'s text.
 - Python, `tests/test_sandbox_home.py`: the hook and the dependency are in `0019`, after the air-gap hook; no secret is in the default lists; only what commands need of `$CODEX_HOME` is listed; every hidden file lies in a readable folder; `ling-admin`'s `save_config` keeps the `[sandbox]` table. `tests/test_codex_branded_builder.py`: the cap.
 
-### 8.2 Live check (pending, outside PyCharm's AppArmor profile)
+### 8.2 Live check
 
-A shell under PyCharm runs in `snap.pycharm.pycharm (complain)`, where bubblewrap results prove nothing. Run the helper built from the export, not the installed `ling`, from a throwaway user unit, against a scratch home:
+A shell under PyCharm runs in `snap.pycharm.pycharm (complain)`, where bubblewrap results prove nothing. The check uses the helper built from the export (`cargo build --release -p codex-linux-sandbox -p ling-launcher`; the launcher is in the build so Cargo unifies OpenSSL's `vendored` feature), not the installed `ling`. It runs from a throwaway user unit against a scratch home:
 
 ```bash
 S=<scratch>; H=$S/home/u
@@ -145,7 +146,25 @@ systemd-run --user --wait --pty -p WorkingDirectory=$H/proj --setenv=HOME=$H --s
   sh -c 'cat /proc/self/attr/current; ls -a ~; cat ~/.ssh/id; cat ~/.cargo/credentials.toml | wc -c; ls ~/other; touch ~/x && echo wrote-home; touch ~/proj/y && echo wrote-workspace; ls /usr/bin | head -1; findmnt -rn -o TARGET,SOURCE | grep "$HOME" | head'
 ```
 
-Expected: the AppArmor label is not PyCharm's; `ls -a ~` shows only `.cargo` and `proj`; `.ssh/id` and `other` do not exist; the credentials file is empty; the workspace write succeeds; `/usr/bin` lists. Also record whether `touch ~/x` fails or lands in the tmpfs. Then, with a built `ling` (not installed) and a scratch `HOME` and `CODEX_HOME`, run `ling sandbox -- ls ~` and `ling exec` in a scratch repository against a model server that is not night 5's. `ling-admin audit egress` is unaffected because the network policy is unchanged.
+**Measured 2026-10-13** with a scratch home holding `.ssh/id`, `.cargo/{bin/tool,credentials.toml}`, `.mightling/{history.jsonl,sessions,skills/pdf/SKILL.md}`, `other/` and the repository `proj/`, under both sandboxes:
+
+- The AppArmor label was `puffin-bwrap (unconfined)`, not PyCharm's.
+- `ls -A ~` showed `.cargo .mightling proj`, and `~/.mightling` showed `skills` only.
+- `.ssh/id`, `history.jsonl` and `other/` did not exist. `.cargo/bin/tool` and the skill were readable.
+- `credentials.toml` gave "Permission denied" (masked, mode 000).
+- `/usr/bin` listed. The workspace was writable under workspace-write and refused under read-only.
+- `touch ~/x` landed in the tmpfs under both sandboxes (§6).
+- With `[sandbox] home = "visible"` in the scratch user-level file, the whole home folder and `.ssh/id` were readable again.
+
+The first runs found two faults, both fixed and covered here:
+
+- with the home folder under `/tmp`, Codex's app-server socket folder `/tmp/codex-daemon-<uid>` became a mount root, which Codex refuses;
+- `/lib` was missing (see §3.1).
+
+**Still pending:**
+
+- A built `ling` (not installed), with the real home folder's layout but a scratch `CODEX_HOME`, in a scratch repository. Run `ling sandbox-home`, then `ling sandbox linux -- sh -c 'cargo --version; node --version; python3 -c 1; git status; ling-code --help; ling-search --help'`, then one `ling exec` against a model server that is not night 5's.
+- `ling-admin audit egress` after the build. It should be unaffected, because the network policy is unchanged.
 
 ## 9. Decisions for the owner
 
