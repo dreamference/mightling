@@ -1,6 +1,6 @@
 # Mightling Compaction — at night, at idle, and what the diffusion model can do
 
-**Status:** partly implemented on 2026-10-02, after the Phase 0 measurement (§11): the interactive limit follows the KV pool (§4.2, on), the ledger hook is built and registered by the launcher (§10.1, on by default since 2026-10-02), and Night Shift's per-task limit is a setting (§4.1, off by default, because the measurement said so). On 2026-10-03 (§12) turn-end compaction (§4.3) was built as a setting, off until measured, and the nightly audit of §10.3 as a Night Shift built-in, on; both reached main on 2026-10-12 (§12.3). The audit's replay half, §4.4 and §10.2 are not built. Before that: §1 and §3 are measurements and a literature review made on 2026-10-01. §7–§10 were added the same day for a second question, the compaction **prompt and algorithm**: §7 is read from the pinned Codex source, §9 is measured, §8 is literature, §10 is proposed.
+**Status:** partly implemented on 2026-10-02, after the Phase 0 measurement (§11): the interactive limit follows the KV pool (§4.2, on), the ledger hook is built and registered by the launcher (§10.1, on by default since 2026-10-02), and Night Shift's per-task limit is a setting (§4.1, off by default, because the measurement said so). On 2026-10-03 (§12) turn-end compaction (§4.3) was built as a setting, off until measured, and the nightly audit of §10.3 as a Night Shift built-in, on; both reached main on 2026-10-12 (§12.3). The audit's replay half, §4.4 and §10.2 are not built. On 2026-10-13 (§13) drop-first compaction (research survey of that day, §3.1) was built as a setting, off by default, with patch `0026`, for a SWE-bench night arm. Before that: §1 and §3 are measurements and a literature review made on 2026-10-01. §7–§10 were added the same day for a second question, the compaction **prompt and algorithm**: §7 is read from the pinned Codex source, §9 is measured, §8 is literature, §10 is proposed.
 **Question asked:** can Mightling's compaction be improved by running it at night, and continuously with the diffusion model beside the main one?
 **Short answer:** compaction is not slow or poor on this machine; it is **switched off in effect**. The useful changes are two configuration values and one Night Shift task, none needs a Codex patch, and the current diffusion sidecar has no part in any of them.
 **Short answer on the prompt and algorithm (§7–§10):** Codex's stock prompt already writes a good summary with this model, except for the trail of files; a structured prompt fixed the trail and lost the code, a trade and not a gain. What compaction loses is not prose but the **tool history**: every tool call and output is dropped, and the summary alone decides which paths survive. The fix that measured best is not a model at all: a rule-built ledger (files touched, failed commands, last test result) re-injected by a hook after each compaction. At night the useful job is an audit of the day's compactions; the diffusion sidecar failed the three new roles it was tried in.
@@ -397,3 +397,68 @@ Tests: eight in `tests/test_night_shift_compaction_audit.py` (synthetic rollouts
 The branch was written before the product's rename and merged nine days later onto the renamed tree: the switch is `DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION` / `mightling_turn_end_compaction` (beside `mightling_compaction_ledger`), still **off by default**; the audit reads `$CODEX_HOME/sessions` with `CODEX_HOME` defaulting to `~/.mightling`. In the launcher the turn-end step runs after the code index, `ling-docs` and app tools are added to the command line. Re-run then: the launcher's 245 tests (1 ignored) in the build's export, and the Python suite. Still nothing run in a live session.
 
 **Not built:** the replay half of §10.3 (re-summarising each compaction with the §10.2 candidate), which needs the model in the window, and §4.4.
+
+---
+
+## 13. Drop-first compaction (2026-10-13)
+
+*Built on branch `compaction/drop-old-outputs`, off by default; the owner approved it on 2026-10-13 as the first compaction change to test, as a SWE-bench night arm against the default. Code and unit tests only: the model server was held by the nights, so nothing here has run in a live session.* The proposal is §3.1 of [research/compaction-survey-2026-10-13.md](./research/compaction-survey-2026-10-13.md): at the threshold, drop old tool outputs and keep the calls (*The Complexity Trap*, *CliffCompaction*), and summarise only if that is not enough. On nights 1–4 a compaction took a median 98 s; a drop costs one re-prefill from the first output it drops.
+
+### 13.1 Where it hooks in (read from `rust-v0.158.0`)
+
+Every automatic compaction goes through `run_auto_compact` (`core/src/session/turn.rs`): before a turn when the limit was reached (`run_pre_sampling_compact`), in the middle of a turn when a sampling response crosses it, at the end of a turn when §4.3 is on, and on a switch to a model with a smaller window. Patch `0026-drop-old-outputs` (1,039 bytes) adds, right after the token-budget branch:
+
+```rust
+if sess.state.lock().await.history.ling_drop_old_outputs() {
+    sess.recompute_token_usage(turn_context).await;
+    return Ok(());
+}
+```
+
+and a three-line method on `ContextManager` (`context_manager/history.rs`) that hands its items, in place (`Arc::make_mut`), and the size auto-compaction compares with the limit (`get_total_token_usage`) to `ling_masking::drop_first`. When that returns `true` the history in memory already holds the placeholders, Codex re-estimates the context from it as it does after a summary, and the caller carries on (mid-turn: the next request is sent; pre-turn: the turn starts; turn end: the turn ends). When it returns `false` nothing has changed and the summary runs exactly as before. A `/compact` typed by the user does not go through `run_auto_compact` and always summarises. The rule is in the leaf crate `ling-rs/masking` (module `dropping`), which core already depends on through `0021`, so the patch adds no dependency line.
+
+### 13.2 The rule (`ling-rs/masking/src/dropping.rs`)
+
+- **What is dropped:** every tool output (`function_call_output`, `custom_tool_call_output`) except the **10** most recent, outputs under **600** characters, and ones already dropped. The calls, every message, the summary of an earlier compaction and the item metadata are never touched.
+- **When it replaces the summary:** if dropping all of them leaves the context, estimated as the size less each output's bytes / 4 less its placeholder, at or under **85%** of the limit. Otherwise the history is left whole and the summary runs. A drop that freed less would be crossed again within a step or two (one output can be 8,000 tokens, `TOOL_OUTPUT_TOKEN_LIMIT`), which is the thrash of §11.2; the summary is then the cheaper move. The bytes / 4 estimate reads low on this model (CONTEXT_BUDGET §1.9), so the saving is under-counted: the safe direction.
+- **Everything at once, once per crossing:** one re-prefill from the first newly dropped output; between crossings nothing changes, so the prefix cache holds (§2). A later crossing drops only the outputs that have since left the last ten, which sit near the end of the history, so its re-prefill is short.
+- **N = 10** is *The Complexity Trap*'s window of 10 turns, its best setting on SWE-bench Verified, and the value masking already uses and replayed (CONTEXT_BUDGET §4.1). It is a count, not the survey's "last ~20K tokens"; `DropPolicy::keep_recent` is the one field to change if the night says otherwise.
+- **The placeholder:** `[output of <command> dropped at compaction (exit <code>); re-run if needed]`, the command as the call gave it (`cmd` or `command` of the arguments, else the tool's name and arguments, else a custom tool's input), on one line and cut to 80 characters; the exit code when the output's header names it, which keeps the failed-command signal the ledger gives after a summary. About 70–150 characters.
+- **Not built:** CliffCompaction's "never summarise a summary". A summary after drops folds earlier summaries in as before (§7.5).
+
+### 13.3 What is stored, and resume
+
+Only the history in memory is rewritten. The rollout keeps every output in full, so the ledger, the nightly audit (§12.2), `compactions_recorded` and every count of `compacted` records are unchanged: **a drop is not a compaction to any of them.** A resumed session (SWE-bench resumes for nudges and the review turn) gets its history from the rollout in full, so what was dropped is kept per history segment in `$CODEX_HOME/masking/dropped/<key>.json` (`call_id` to placeholder; the key is the segment's first `call_id`, as for masking), and the request hook of `0021` (`ling_masking::apply`) first shows those outputs as their placeholders again (`show_dropped`): the resumed session sends what the live one sent, and cannot send a history several times the limit. Each attempt, taken or declined, is one line of `masking/dropped/log.jsonl` (time, segment, size, limit, saving, outputs, accepted). Both are pruned with masking's files after 30 days; the log restarts past 256 KB.
+
+### 13.4 The ledger, turn-end compaction and the KV-pool limit
+
+- **The ledger (§10.1) runs after every real summary, including one that follows a declined drop:** that path is unchanged, and `replace_compacted_history` queues the `SessionStart` hook as before. **It does not run after a drop that replaced the summary,** by construction (no `replace_compacted_history`, so no hook is queued), and that is the intended behaviour: the ledger exists because a summary removes the tool history, and a drop keeps every call, so the paths acted on are still in context and each placeholder keeps its command and exit code; its first line ("the tool history itself is no longer in context") would be false; it would append a developer message of up to 6,000 characters at each drop, growing the context the drop has just shrunk; and the rollout is intact, so the ledger at the next real summary covers the whole span. What a drop loses that the ledger would have kept: the last test-result line of an *older* output; the last ten outputs, which usually hold the latest test run, are kept.
+- **Turn-end compaction (§4.3, §12.1)** uses the same entry point, so with both on a turn that ends past the turn-end threshold drops instead of summarising when that is enough (the threshold is 70% of the limit, under the 85% a drop must reach, so any drop qualifies there). Turn-end compaction stays off for `exec`, so the benchmark does not see it.
+- **The limit it measures against (§4.2)** is the one Codex compacts at: the last `-c model_auto_compact_token_limit` (SWE-bench's `task_context`, 49,152, or the launcher's 60% of the KV pool), then `config.toml`, then the window, never above Codex's 90% of the window (`compaction::drop_limit`). A context after a drop is at most 85% of it, so the pool keeps the room §4.2 sized.
+- **Masking (CONTEXT_BUDGET §4.1)** is the near relative: view-only, at 85% of the limit, before Codex decides to compact, with saved copies and "do not re-run". With both on, the placeholders are under 600 characters, so masking never touches them; they should be measured separately, and the night arm runs with masking off.
+
+### 13.5 Switch, benchmark arm and tests
+
+- **Switch:** `DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS`, then `mightling_drop_old_outputs` in the Dreamference config file, then off (`compaction.rs`, `prepare_drop`, called for every subcommand after `mask::configure`). No prompt text: the placeholder says what to do, and the instructions, which head every request, do not change.
+- **SWE-bench:** `run --drop-old-outputs` sets the variable to `1` in every session of the run and records `drop_old_outputs` in the manifest (`--against` prints `differs: drop_old_outputs`; an older manifest reads as `False`). Every instance's state now gets a `compaction` record in every run, so the two arms compare: the `compacted` records and their seconds (from the last rollout line more than 2 s before each, the survey's §1 method), and from the drop log the drops that replaced a summary, the attempts declined and the outputs dropped. Every report prints a `Compaction` line. The night script's arm is `drop-outputs` (`ARMS="default drop-outputs"`); its `start` refuses a worktree without the flag and an installed `ling` that does not read the variable.
+- **Acceptance (survey §3.1):** resolved not lower than the default arm, compaction seconds down; the report's `Compaction` lines and the resolved counts give both.
+- **Tests:** the leaf crate's 8 new unit tests (`dropping::tests`: what is dropped and kept, a declined drop changes nothing and is logged, the plan skips outputs dropped before, a resumed session is shown the drops, a second drop adds to the first, the placeholder for every kind of call, pruning, no policy no change), with masking's 11 unchanged; the launcher's 2 (`compaction.rs`: the switch, the limit); `codex-tests/patches/0002-tests-drop-old-outputs.patch`, a Codex-side test on Codex's own items (`ling_drop_old_outputs_rewrites_codex_items_in_place`: no policy no change, the rewrite through the envelopes, calls and the last ten kept, the prompt carries the placeholder, the estimate falls); Python: 3 in `tests/test_swe_bench.py`, 3 in `tests/test_swe_bench_night_script.py` (7 cases with the parametrised ones), and the patch cap raised to 44,000 (43,997 after) in `test_the_patches_stay_small`.
+
+### 13.6 The smoke test, for when a model server is free
+
+Not run: this machine's server is held by the nights and second-puffin's GPU is booked. From a source build of the branch, in a scratch `CODEX_HOME` (never `~/.mightling`), a task that reads more than a 24K limit holds:
+
+```bash
+S=$(mktemp -d); mkdir -p "$S/home"; BIN=<the branch's built codex binary, run as ling>
+for arm in 1 0; do
+  rm -rf "$S/home/sessions" "$S/home/masking"
+  CODEX_HOME="$S/home" DREAMFERENCE_VLLM_HOST=127.0.0.1 DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS=$arm \
+    "$BIN" exec -s read-only -C ~/PycharmProjects/dgxcoder -c model_auto_compact_token_limit=24000 \
+    "Run cat on each of these files, one command per file, then say how many lines each has: dreamference/night_shift/night_shift_task_run.py dreamference/night_shift/night_shift_report.py dreamference/swe_bench/swe_bench_report.py dreamference/swe_bench/swe_bench_runner.py dreamference/runner/codex_branded_builder.py ling-rs/src/compaction.rs ling-rs/masking/src/lib.rs"
+  echo "arm $arm: compactions $(grep -c '"type":"compacted"' "$S"/home/sessions/*/*/*/rollout-*.jsonl)"
+  cat "$S/home/masking/dropped/log.jsonl" 2>/dev/null
+done
+```
+
+Pass: with `1`, at least one `"accepted":true` line, fewer `compacted` records than with `0`, the `token_count` event after the drop reporting fewer input tokens than the one before it, the answer still right, and the turn ending without an error; with `0`, no log at all.
+

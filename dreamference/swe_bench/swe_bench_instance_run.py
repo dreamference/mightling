@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
@@ -325,6 +326,12 @@ MID_WORK_TAIL: Final[int] = 400
 
 STOP_GRACE_S: Final[int] = 30
 LAST_MESSAGE_LIMIT: Final[int] = 2000
+# A compaction's time is measured from the last rollout line more than this many seconds before its
+# `compacted` record (compaction survey 2026-10-13 §1; an upper bound by a second or two).
+COMPACTION_GAP_S: Final[float] = 2.0
+# Drop-first compaction's log, one line per attempt, under the instance's `codex-home`
+# (ling-rs/masking/src/dropping.rs).
+DROP_LOG: Final[str] = "masking/dropped/log.jsonl"
 
 
 class SweBenchInstanceRun:
@@ -579,6 +586,7 @@ class SweBenchInstanceRun:
             status = "interrupted"
         state["apply_patch"] = {"form": self.apply_patch, "calls": self.apply_patch_calls()}
         state["exec_tool"] = {"form": self.exec_tool, "calls": self.exec_calls()}
+        state["compaction"] = self.compaction_record()
         state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
                      wall_s=int(time.time() - self.started), patch_bytes=len(patch.encode()),
                      last_message=self._last_message()[:LAST_MESSAGE_LIMIT], notes=self.notes)
@@ -733,6 +741,64 @@ class SweBenchInstanceRun:
             except OSError:
                 continue
         return count
+
+    def compaction_record(self) -> Dict[str, Any]:
+        """
+        What this instance's sessions spent on compaction, in every run so two arms compare
+        (compaction spec §13): the `compacted` records of its rollouts and the seconds they took,
+        each from the last rollout line more than `COMPACTION_GAP_S` before it (the compaction
+        request's prefill and the summary's decode, as the compaction survey of 2026-10-13 §1
+        measured them), and what drop-first compaction did, from the log the launcher's leaf crate
+        keeps in the scratch `codex-home` (`DROP_LOG`): the drops that replaced a summary, the
+        attempts declined because a drop would not have been enough, and the outputs dropped.
+
+        Returns:
+            Dict[str, Any]: `compactions`, `seconds`, `drops`, `declined`, `dropped_outputs`.
+        """
+        compactions, seconds = 0, 0.0
+        for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
+            times: List[float] = []
+            try:
+                with open(path, "rb") as handle:
+                    for line in handle:
+                        try:
+                            record = json.loads(line)
+                        except ValueError:
+                            continue
+                        if not isinstance(record, dict):
+                            continue
+                        try:
+                            at: Optional[float] = datetime.fromisoformat(
+                                str(record.get("timestamp")).replace("Z", "+00:00")).timestamp()
+                        except ValueError:
+                            at = None
+                        if record.get("type") == "compacted":
+                            compactions += 1
+                            before = next((t for t in reversed(times) if at is not None and t < at - COMPACTION_GAP_S), None)
+                            seconds += at - before if at is not None and before is not None else 0.0
+                        if at is not None:
+                            times.append(at)
+            except OSError:
+                continue
+        drops = declined = dropped = 0
+        try:
+            lines = (self.scratch / "codex-home" / DROP_LOG).read_text().splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("accepted"):
+                drops += 1
+                dropped += int(entry.get("outputs") or 0)
+            else:
+                declined += 1
+        return {"compactions": compactions, "seconds": round(seconds, 1), "drops": drops,
+                "declined": declined, "dropped_outputs": dropped}
 
     def apply_patch_calls(self) -> int:
         """

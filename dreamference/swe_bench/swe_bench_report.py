@@ -24,13 +24,13 @@ COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit", "review_turn", "hooks", "restart_after_compactions",
-    "apply_patch", "exec_tool",
+    "apply_patch", "exec_tool", "drop_old_outputs",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
                                "refine_version": "v1",
                                "task_rules": [], "review_turn": False, "hooks": [], "restart_after_compactions": 0,
-                               "apply_patch": "auto", "exec_tool": "auto"}
+                               "apply_patch": "auto", "exec_tool": "auto", "drop_old_outputs": False}
 
 
 class SweBenchReport:
@@ -96,6 +96,7 @@ class SweBenchReport:
             "restart": cls.restart_summary(manifest, states, finished & set(instances)),
             "apply_patch": cls.apply_patch_summary(manifest, states, finished & set(instances)),
             "exec_tool": cls.exec_tool_summary(manifest, states, finished & set(instances)),
+            "compaction": cls.compaction_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
             "causes": cls.unresolved_causes(store, manifest, number if details else None, variant, results, graded),
@@ -430,6 +431,39 @@ class SweBenchReport:
                 "calls": sum(int(r.get("calls") or 0) for r in recorded.values())}
 
     @classmethod
+    def compaction_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Dict[str, Any]:
+        """
+        What the finished instances spent on compaction, and what drop-first compaction did
+        (compaction spec §13), from each state's `compaction` record. The survey's acceptance rule
+        for the drop arm reads it: resolved not lower, compaction time down.
+
+        Returns:
+            Dict[str, Any]: `drop` (whether the run dropped first), `instances`, `recorded`,
+                `compacting` (ids that compacted), and the totals `compactions`, `seconds`, `drops`,
+                `declined`, `dropped_outputs`.
+        """
+        records = {i: (states.get(i) or {}).get("compaction") for i in finished}
+        recorded = {i: r for i, r in records.items() if isinstance(r, dict)}
+        totals = {key: sum(float(r.get(key) or 0) for r in recorded.values())
+                  for key in ("compactions", "seconds", "drops", "declined", "dropped_outputs")}
+        return {"drop": bool(manifest.get("drop_old_outputs", False)), "instances": len(records),
+                "recorded": len(recorded), "compacting": sorted(i for i, r in recorded.items() if r.get("compactions")),
+                **{key: (round(value, 1) if key == "seconds" else int(value)) for key, value in totals.items()}}
+
+    @classmethod
+    def compaction_line(cls, summary: Dict[str, Any]) -> str:
+        """One line: compactions and their time over the finished instances, and the drops when on."""
+        head = f"{'Compaction':<20}drop old outputs {'on' if summary['drop'] else 'off'}"
+        if not summary["recorded"]:
+            return head + ": no finished instance recorded its compactions" if summary["instances"] else head
+        line = (f"{head}: {summary['compactions']} compaction(s) in {len(summary['compacting'])} of "
+                f"{summary['recorded']} finished instance(s), {cls.duration(summary['seconds'])} compacting")
+        if summary["drop"] or summary["drops"] or summary["declined"]:
+            line += (f"; {summary['drops']} drop(s) instead of a summary ({summary['dropped_outputs']} output(s)), "
+                     f"{summary['declined']} declined")
+        return line
+
+    @classmethod
     def apply_patch_line(cls, summary: Dict[str, Any]) -> str:
         """One line: the apply_patch form and how much the agent used the tool."""
         return cls.tool_line("Apply patch", "freeform on ling-engine, none on SGLang", summary)
@@ -600,6 +634,7 @@ class SweBenchReport:
         lines.append(cls.restart_line(summary["restart"]))
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines.append(cls.exec_tool_line(summary["exec_tool"]))
+        lines.append(cls.compaction_line(summary["compaction"]))
         lines += cls.hooks_lines(summary["hooks"])
         lines += cls.compaction_lines(summary["compactions"])
         not_run = validated - summary["finished"]
