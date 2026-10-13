@@ -475,3 +475,21 @@ def test_the_driver_sees_both_kinds_of_compaction_and_the_probe_against_the_stan
     ling = Path(os.environ.get("MIGHTLING_BIN") or bench.ling_binary(None))
     result = bench.dry_run(tmp_path / "dry", ling, compaction_delay=8.0)
     assert all(result["checks"].values()), result["checks"]
+
+
+def _item(kind, ms, role=None):
+    payload = {"type": kind, **({"role": role} if role else {})}
+    return {"type": "response_item", "payload": payload, "_ms": ms}
+
+
+def test_the_probe_fires_on_a_turn_end_compaction_only():
+    answer = _item("message", T0, "assistant")
+    # A turn-end compaction: the final answer was written before the marker appeared.
+    assert bench.turn_end_compaction_showing([answer], T0 + 500)
+    # A mid-turn compaction: the marker appeared after a tool output; then its summary, an assistant
+    # message, is written while the marker is still on screen (night-shift-on-1, 2026-10-13).
+    tool = _item("function_call_output", T0)
+    summary = _item("message", T0 + 160_000, "assistant")
+    assert not bench.turn_end_compaction_showing([tool], T0 + 500)
+    assert not bench.turn_end_compaction_showing([tool, summary], T0 + 500)
+    assert not bench.turn_end_compaction_showing([answer], None)
