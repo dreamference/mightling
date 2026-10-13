@@ -36,19 +36,19 @@ The work read comprises the LMSYS blog, RadixArk, the SGLang papers, the SGLang 
      - The root-cause threads, [#36548](https://github.com/sgl-project/sglang/issues/36548) and [#35150](https://github.com/sgl-project/sglang/issues/35150), are both **still open**.
      - Their localisation: SGLang's GDN verify path is not bit-equal to its own decode. A width-one verify with every draft rejected diverges from plain decode on 19/32 cases.
      - The packed-FP4 LM head turns that drift into flipped argmaxes. The BF16-head export brings it to 1/304.
-     - Upgrading production is cheap and fixes the first; the second has no upstream fix (§2.9).
+     - Upgrading production fixes the first, at about half a day of re-validation; the second has no upstream fix (§2.9).
    - **What it means for ling-engine.** It is the strongest external argument for exact speculation: ling-engine's `--spec-check` already requires tokens *and* recurrent state equal to plain decoding.
 2. **Mixed chunk against the step savings for the two-stream gap: the savings block closes it; the mixed batch is the only change that also lowers the worst case. SGLang's own mixed chunk is not a design to copy.**
    - **The measurement (new, from stage 4's logs).**
      - 547 and 637 prefill chunk passes ran beside a decode, in 3,849 and 4,370 decode passes (pooled per-stream period 150.0 and 153.4 ms).
      - Each pass carries a fixed cost of about 100–124 ms that production pays once per prefill, not once per 256 tokens.
-     - Production schedules prefill first, in chunks of up to 8,192 tokens. Most warm turns there are one pass; in ling-engine they are 2–4.
+     - Production schedules prefill first, in chunks of up to 8,192 tokens. Most warm turns there are one pass; in ling-engine they are 2–4, split by the 256-token contended size and by checkpoint bounds.
    - **The options (estimates from the same logs):**
 
      | Option | Effect on the mean period | Notes |
      | --- | --- | --- |
      | The step-savings block already planned | −10 to −13 ms | about 137–146 ms |
-     | Running a short turn's whole prefill (≤ 512–768 new tokens) in one pass | −1.5 to −3.5 ms | exact, a scheduler rule |
+     | Running a short turn's whole prefill (≤ 512 new tokens) in one pass | −1.5 to −2 ms | exact, a scheduler rule; must keep the checkpoint it crosses |
      | A contended chunk of 512 | −7 ms | raises the worst wait to about 380–400 ms |
      | A true mixed batch | −11 to −12 ms | cuts the worst wait to about 190–230 ms |
 
@@ -168,8 +168,11 @@ The engine's measured state is ling-engine M4 stage 4, merged 2026-10-13:
 - **Where the chunks come from:**
   - Of the prefills that ran beside a decode, 74 and 77 took 1–2 chunks, 34 and 31 took 3–4, and a dozen new-session prefills took 13–89 chunks each.
   - Prefills of ≤ 1,024 new tokens (mean ~415) account for 236 and 235 of the 547 and 637 chunk passes; the long new-session prefills account for the rest.
-- **What a chunk pass costs.** Fitted per chunk from the same lines (82–256 tokens per chunk at ~23–34K context), a pass costs about **124 ms + 0.34 ms per token**. The stage-2 sweep at 34K (128, 256 and 512 tokens) gives about 100 ms + 0.35 ms per token.
-  - Most of the fixed part is what any pass costs: the weight read (~82 ms) and the per-layer work that does not scale with rows.
+- **What a chunk pass costs.** Two calibrations bracket it:
+  - The stage-2 sweep at 34K (contended chunks of 128, 256 and 512 tokens, period minus the one-row step) gives about **100 ms + 0.35 ms per token**. Stage 4's period split (267 − ~104 ms ≈ 163 ms per 256-token pass) agrees with it.
+  - A fit to the request lines' own compute times (82–256 tokens per chunk at ~23–34K) gives about 124 ms + 0.34 ms per token. Those times are host-side for every chunk but the last (only the last synchronizes), so this is the upper reading.
+  - The estimates below use the fixed part as a 100–124 ms range. Most of it is what any pass costs: the weight read (~82 ms) and the per-layer work that does not scale with rows.
+- **Why a short turn takes several passes.** `Engine::begin_prefill` ends a pass at every checkpoint bound (the ends of the first two messages, and every 2,048 positions up to the 32,768-token checkpoint limit), and `prefill_chunk` caps a contended pass at 256 tokens. A 228-token turn starting at position 30,624 therefore takes two passes, split at 30,720.
 - **Why production's number is lower.** A prefill split into k chunks pays the fixed part k times. Production pays it once per ≤ 8,192 tokens.
   - That is the structural reason production's pooled period is lower even though its single stalls are far longer.
   - The pooled metric the M4 gate uses rewards few large stalls, while the owner's bound (2026-10-12: about twice the two-stream period) rewards many small ones. The two pull in opposite directions; only a mixed batch improves both.
@@ -180,14 +183,14 @@ The engine's measured state is ling-engine M4 stage 4, merged 2026-10-13:
 | --- | --- | --- | --- | --- | --- |
 | Today (stage 4) | 150.0 / 153.4 | ~330 ms | — | — | — |
 | **The step-savings block** (B16, B07, commit overlap, B31, sparse head, B26): −10 to −13 ms off every batched step, a little less off one-row steps | **~137–143 / ~140–146** | ~255–320 ms | yes | ~1 week (already estimated) | in the plan, item 1 |
-| **Short turns in one pass:** if the whole prefill is ≤ 512 (or 768) new tokens, run it as one pass and drop the 256 split and its alignment to 256-token positions | 148.1–148.5 / 151.7–152.0 at 512; 146.5–147.2 / 150.4–150.9 at 768 (**−1.5 to −3.5 ms**) | ~+40–90 ms on those passes only, still under ~330 | yes: scheduling only; chunk ends stay multiples of 32 | ~1 day + one replay pair | **new** |
+| **Short turns in one pass:** if the whole prefill is ≤ 512 new tokens, run it as one pass, keeping the state at any checkpoint bound it crosses | 148.1–148.5 / 151.7–152.0 (**−1.5 to −2 ms**); a 768 cap would give −2.8 to −3.5 ms but breaks the bound | ~385–400 ms on those passes (104 + T(512)), inside the owner's ~440 ms bound; a 768 cap would reach ~470–490 | yes, if the crossed checkpoint's state is captured inside the pass (as the end-of-prompt snap already is, `keep_at`) or that one checkpoint is knowingly skipped; this is #37818's bug class, so §2.6 item 1's test applies | ~1–2 days + one replay pair | **new** |
 | Contended chunk 512 for every prefill | ~143 / ~146 (**−7 ms**) | ~380–400 ms (stage 2 measured 376 mean at 34K) | yes | a flag + one replay pair | against the owner's 256 (2026-10-12) |
 | **True mixed batch:** the chunk's rows and the partner's verify rows in one pass, one weight read | ~139 / ~142 (**−11 to −12 ms**): each of the 547/637 chunk passes stops costing the partner its own ~104 ms one-row step, keeping ~25 ms of drafter, attention, DeltaNet verify and commit | ~190–230 ms | **only with a dual-numerics GEMM**: the decode rows must keep the rows path's FP16 activations while the prefill rows use NVFP4/FP8 activations, from the same weight tiles | weeks: a new fused GEMM for every projection, plus graph and scheduler work | outside the order (MILESTONES §14) |
 | SGLang's mixed chunk under speculation (decode rows become a 1-token decode) | worse: the partner gets 1 token per ~T+10 ms instead of ~5 per ~T+104 | lower | — | — | not a candidate |
 
 What this means:
 - **The savings block closes the mean gap by itself** if it lands near its estimate, as the M4 draft's own arithmetic already said (~7 ms needed).
-- **Short turns in one pass is a cheap exact addition.** It removes about a fifth to a third of what is left of the chunk tax, and it does not touch the bound.
+- **Short turns in one pass is a cheap exact addition,** worth −1.5 to −2 ms, and it stays inside the bound only at a 512-token cap. Its one subtlety is the checkpoint bound a merged pass crosses.
 - **The mixed batch is the only option that improves the mean and the worst case together,** and its price is now concrete: a dual-numerics GEMM, not a scheduler change.
   - **Recommendation:** keep it out of the order; re-decide at stage 5 if the gate run shows the chunk tax still dominant.
   - It weighs most where long new-session prefills meet a decoding stream, for example Night Shift starting a task beside an interactive session.
@@ -378,7 +381,7 @@ Production uses the registry's `QWEN38_SGLANG_RECIPE`: the pinned v0.5.19 image,
 
 **Correctness:**
 - **The checkpoint-crossing bug, fixed in v0.5.20.**
-  - Upgrading to v0.5.20 or v0.5.21 also brings the hybrid fixes listed in their notes. v0.5.21 removes the separate mamba radix cache ([#40313](https://github.com/sgl-project/sglang/pull/40313), not read), so the launch line must be re-validated.
+  - Upgrading to v0.5.20 or v0.5.21 also brings the hybrid fixes listed in their notes. v0.5.21 deletes the old mamba radix cache classes ([#40313](https://github.com/sgl-project/sglang/pull/40313)), but only because they were unreachable: hybrid models already route to the unified cache ([#30468](https://github.com/sgl-project/sglang/pull/30468)), and v0.5.21 still validates `extra_buffer`. The launch line must still be re-validated on the new image.
   - Mightling's canary, chat-template patch and night-2 recipe all need a re-run on the new image.
   - Alternatively, back-port the one-function fix to a locally built image.
 - **The open concurrency corruption** ([#36548](https://github.com/sgl-project/sglang/issues/36548), [#35150](https://github.com/sgl-project/sglang/issues/35150)).
@@ -421,7 +424,7 @@ Per the owner's decision of 2026-10-13, two-node work waits (BACKLOG §19.21). O
 - **Speed (estimate):**
   - **One stream:** no gain; each node reads half the weights, but in turn.
   - **Two streams:** the pipeline fills itself. Stream A runs on node 2 while stream B runs on node 1. Each node reads its half of the weights once per stream per period, so the per-stream period approaches 2 × (~41 ms + half the non-GEMM work) ≈ 90–110 ms, against today's 130–152.
-  - That is roughly **+25–50% per stream at two streams**. TP's 1.5–1.8× applies to one stream too.
+  - That is roughly **+25–50% per stream at two streams**, against today's 130–152 ms. It must be re-estimated after the savings block and the moonshot land, since both shorten the one-node step it is compared with. TP's 1.5–1.8× applies to one stream too.
 - **The drafter** reads target layers 5, 19, 33, 47 and 61, so it sits on the last stage and receives the first stage's features. This is the coordination SGLang's protocol implements for DSpark under PP2.
 - **For the TP note:** PP2 is the exact alternative for the two-stream case; TP stays the one that speeds up a single stream.
 
@@ -490,7 +493,9 @@ Two more:
   - The closest published comparator is a 28B dense NVFP4 decoder with DFlash on a DGX Spark ([Muse Glimmer post](https://lmsys.org/blog/2026-08-10-meta-muse-glimmer/)): 12.1 tok/s per user without speculation, 36.4 with DFlash at batch 1, and 301 tok/s aggregate at batch 8.
     - Its 12.1 tok/s is ~83 ms per token, the same weight-read floor as ours.
     - Our ~48.5 tok/s single stream is ~33% above its DFlash figure, on a different model.
-  - The cookbook's 80 GB10 configurations for our model were checked at concurrency 1 only: "No throughput or acceptance-length numbers were re-taken". SGLang publishes no tok/s for our model on Spark.
+  - The cookbook's 80 GB10 configurations for our model were checked at concurrency 1 only: "No throughput or acceptance-length numbers were re-taken". The SGLang team publishes no tok/s for our model on Spark.
+  - The community cell for our exact flags on a stock Spark ([#35860](https://github.com/sgl-project/sglang/issues/35860), DFlash2 at 8 drafts, unquantized drafter) reports single-stream 39.4 tok/s on code, 43.5 on reasoning and 20.2 on prose, a greedy median of 50.0, and 135–148 tok/s aggregate at concurrency 8. That is the cross-check for our ~48.5 single stream; the GitHub survey's community numbers predate DFlash2.
+- **A second agentic trace set:** the NVFP4-KV post's AgentX benchmark replays traces of a commercial coding agent with 1,200 s windows and a cache flush per point ([post](https://lmsys.org/blog/2026-09-16-nvfp4-kv-cache/)). Its dataset and driver are third-party; worth one look for the M4 gate's traffic, not adopted.
 
 ## 4. Product features
 
@@ -595,7 +600,7 @@ XGrammar-2's structural tags (§2.5) make "the model may write prose, but a tool
 | 1 | **Production: SGLang ≥ v0.5.20** (or the #37818 back-port), with the canary, template patch and launch line re-validated; drop `--num-continuous-decode-steps` (§2.9) | ~½ day on this machine, one model-server restart | Removes a known wrong-state bug from every prefix hit |
 | 2 | **Production probe for #36548 at two and eight streams** (304 copies of a fixed greedy prompt), plus the 32-identical-requests distinct count (§2.9, §2.6) | ~1 GPU-hour on production, no agent runs | Whether the BF16-head mitigation (+8–16% step) is needed |
 | 3 | **ling-engine: the six checkpoint and batch tests of §2.6** into stage 5's exactness checks | ~1 day, mostly host code; minutes of GPU | Guards the checkpoint store against the bugs SGLang shipped |
-| 4 | **ling-engine: short turns in one pass** (whole prefill ≤ 512–768 new tokens in one chunk, no alignment split), measured on the stage-4 replay pair beside the savings block (§2.1) | ~1 day + one replay pair (~1 GPU-hour) | −1.5 to −3.5 ms pooled, exact, within the bound |
+| 4 | **ling-engine: short turns in one pass** (whole prefill ≤ 512 new tokens in one pass, capturing the state at any checkpoint bound it crosses), measured on the stage-4 replay pair beside the savings block (§2.1) | ~1–2 days + one replay pair (~1 GPU-hour) | −1.5 to −2 ms pooled, exact, inside the ~440 ms bound |
 | 5 | **B10's acceptance by context bucket** (1–4K, 8–16K, 16–35K) on the replay, before any drafter training (§2.4) | One replay with logging, ~1 GPU-hour | Whether a long-context DFlash2 fine-tune is the top drafter lever |
 | 6 | **Structured output's design note** written from §2.5: verify-row masks built after the verify launch, XGrammar-2 structural tags for `<tool_call>`/`<function=`, grammar-forced drafts as a measured option | docs, ~½ day | Plan item 4's scope |
 | 7 | **SELF_SPEEDING updated** with the SpecForge recipe, regenerated data in the served reasoning mode, long contexts in the mix and the overfit gate (§2.4) | docs | The drafter plan's recipe |
