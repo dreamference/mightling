@@ -1478,6 +1478,16 @@ its mDNS name, never an address. Speed differs from this machine's server; compa
 """
 
 
+OWNER_RULE: Final[str] = (
+    "Owner's decision (2026-10-13, before the result was known): if the Night Shift task never reaches the "
+    "limit in either repetition of its off arm, the verdict rests on click plus the other hard conditions. "
+    "No typed message lost, turn-end compactions at most 60 s at the median and 120 s at worst, and no "
+    "on-arm turn clearly above the threshold without compacting are checked across all sessions; the "
+    "mid-turn saving is judged on click alone. This is what the rule above computes: a task whose off "
+    "arm never compacted mid-turn is marked ❔ and neither passes nor fails. If the verdict is "
+    "`switch on`, turn-end compaction becomes on by default.")
+
+
 def render_report(meta: dict[str, Any], sessions: list[dict[str, Any]]) -> str:
     """The Markdown report: setup, per-session table, per-arm table, probes, audit, decision, runbook.
 
@@ -1505,6 +1515,8 @@ def render_report(meta: dict[str, Any], sessions: list[dict[str, Any]]) -> str:
         f"**Decision: {decision}.**",
         "",
         *[f"- {line}" for line in reasons],
+        "",
+        OWNER_RULE,
         "",
         "## Sessions",
         "",
