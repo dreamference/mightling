@@ -226,3 +226,49 @@ def test_start_stops_at_the_first_arm_that_fails_its_smoke(tmp_path):
     (tmp_path / "again").mkdir()
     result, _, _, _, folder = start(tmp_path / "again", "default tests-v2")
     assert result.returncode == 0 and "task_timeout" not in (folder / "dreamference.toml").read_text()
+def test_the_drop_outputs_arm_reaches_only_its_round_and_stacks(tmp_path):
+    status, recorded, folder = night(tmp_path, "default drop-outputs")
+    assert status == 0 and (folder / "done").exists()
+    record, candidate = runs(recorded)
+    assert "--name n4-default " in record and "--drop-old-outputs" not in record
+    assert "--name n4-drop-outputs " in candidate and candidate.count("--drop-old-outputs") == 1
+    assert "--task-rules" not in record and "--task-rules" not in candidate
+    assert "swe-bench report n4-drop-outputs --against n4-default" in recorded
+    assert (folder / "drop-outputs-against-default.txt").exists()
+    stacked = tmp_path / "stacked"
+    stacked.mkdir()
+    _, recorded, _ = night(stacked, "default drop-outputs+exec-tool-function")
+    assert "--drop-old-outputs --exec-tool function" in runs(recorded)[1]
+
+
+@pytest.mark.parametrize("arm", ["drop-output", "drop_outputs", "drop-outputs-on", "drop-old-outputs"])
+def test_a_misspelt_drop_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"default {arm}")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+@pytest.mark.parametrize("reads_it", [False, True])
+def test_start_refuses_an_installed_ling_that_does_not_read_the_drop_switch(tmp_path, reads_it):
+    # As for the Code Mode arm: stand-ins for systemctl, git and the venv's Python.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ling = tmp_path / "ling"
+    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ..." if reads_it else b"\x7fELF ... 1.6.0 ...")
+    for name, body in (("systemctl", "exit 1"), ("git", "exit 0")):
+        tool = bin_dir / name
+        tool.write_text(f"#!/bin/bash\n{body}\n")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{tmp_path / "install"}";; esac\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
+           "D": str(tmp_path / "night7"), "NIGHT": "7", "UNIT": "ling-swe-night7-test", "LIVE_UNIT": "ling-swe-night6-test",
+           "ARMS": "default drop-outputs", "LIST": str(tmp_path / "list.txt")}
+    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 1
+    refused = f"{ling} does not read DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS" in result.stdout
+    assert refused is not reads_it
+    if reads_it:
+        assert "ling-code is missing" in result.stdout
+    assert not (tmp_path / "night7").exists()

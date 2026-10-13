@@ -467,6 +467,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let args = compaction::prepare(args, &codex_home, &host, &model).await;
     // Old tool outputs are masked in what is sent once the request nears that limit (mask.rs).
     mask::configure(masking, &args, &codex_home, model.max_model_len);
+    // Old tool outputs are dropped first when the session is about to compact, when switched on
+    // (compaction.rs; compaction spec §13).
+    compaction::prepare_drop(&args, &codex_home, model.max_model_len);
     // What was said above, shown inside the TUI too: its first frame covers stderr (notice.rs).
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.

@@ -1,0 +1,92 @@
+diff --git a/codex-rs/core/src/context_manager/history_tests.rs b/codex-rs/core/src/context_manager/history_tests.rs
+index 693d9c8..6237d58 100644
+--- a/codex-rs/core/src/context_manager/history_tests.rs
++++ b/codex-rs/core/src/context_manager/history_tests.rs
+@@ -3293 +3293,87 @@ fn text_only_items_count_decoded_content() {
+ }
++
++fn ling_exec_call(call_id: &str, cmd: &str) -> ResponseItem {
++    ResponseItem::FunctionCall {
++        id: None,
++        name: "exec_command".to_string(),
++        namespace: None,
++        arguments: serde_json::json!({ "cmd": cmd }).to_string(),
++        call_id: call_id.to_string(),
++        encrypted_function_args: None,
++        internal_chat_message_metadata_passthrough: None,
++    }
++}
++
++fn ling_exec_output(call_id: &str, code: i32, lines: usize) -> ResponseItem {
++    let body: Vec<String> = (0..lines).map(|n| format!("line {n} of {call_id} {}", "x".repeat(40))).collect();
++    ResponseItem::FunctionCallOutput {
++        id: None,
++        call_id: Some(call_id.to_string()),
++        name: None,
++        namespace: None,
++        output: FunctionCallOutputPayload::from_text(format!(
++            "Chunk ID: ab\nWall time: 0.1 seconds\nProcess exited with code {code}\nOriginal token count: 9\nOutput:\n{}",
++            body.join("\n")
++        )),
++        internal_chat_message_metadata_passthrough: None,
++    }
++}
++
++/// Mightling's drop-first compaction (patch 0026, `ling-rs/masking/src/dropping.rs`) on Codex's own
++/// items: without a policy the hook changes nothing; the rule rewrites old outputs in place through
++/// their envelopes, keeps calls, messages, metadata and the last ten outputs, and the prompt and
++/// the history's estimate follow.
++#[test]
++fn ling_drop_old_outputs_rewrites_codex_items_in_place() {
++    let mut items = vec![user_msg("fix the widget")];
++    for n in 0..30 {
++        let id = format!("call-{n}");
++        items.push(ling_exec_call(&id, &format!("cat file{n}.py")));
++        items.push(ling_exec_output(&id, i32::from(n == 1), 20));
++    }
++    let mut history = create_history_with_items(items);
++    let before = raw_items(&history);
++    let estimate_before = history.estimate_token_count_with_base_instructions(&BaseInstructions::default());
++    // No policy is set in this process, so the hook is a no-op, as in any build nobody configured.
++    assert!(!history.ling_drop_old_outputs());
++    assert_eq!(raw_items(&history), before);
++
++    let dir = tempfile::tempdir().expect("tempdir");
++    let policy = ling_masking::DropPolicy::for_limit(20_000);
++    assert!(ling_masking::dropping::drop_with(
++        &policy,
++        dir.path(),
++        Arc::make_mut(&mut history.items).as_mut_slice(),
++        20_000,
++        |envelope| &mut envelope.item,
++    ));
++    let after = raw_items(&history);
++    assert_eq!(after.len(), before.len());
++    let output = |item: &ResponseItem| match item {
++        ResponseItem::FunctionCallOutput { call_id, output, .. } => {
++            (call_id.clone(), output.text_content().map(str::to_string))
++        }
++        other => panic!("expected an output, got {other:?}"),
++    };
++    assert_eq!(
++        output(&after[2]),
++        (
++            Some("call-0".to_string()),
++            Some("[output of cat file0.py dropped at compaction (exit 0); re-run if needed]".to_string())
++        )
++    );
++    assert_eq!(
++        output(&after[4]).1.as_deref(),
++        Some("[output of cat file1.py dropped at compaction (exit 1); re-run if needed]")
++    );
++    // The calls and the message are untouched; so are the last ten outputs.
++    for index in (0..after.len()).filter(|index| index % 2 == 1 || *index == 0) {
++        assert_eq!(after[index], before[index]);
++    }
++    assert_eq!(after[after.len() - 20..], before[before.len() - 20..]);
++    // What is sent is what is stored, and the estimate Codex recomputes after it is smaller.
++    let prompt = history.clone().for_prompt(&default_input_modalities());
++    assert_eq!(output(&prompt[2]).1, output(&after[2]).1);
++    let estimate_after = history.estimate_token_count_with_base_instructions(&BaseInstructions::default());
++    assert!(estimate_after < estimate_before, "{estimate_after:?} < {estimate_before:?}");
++}
