@@ -653,10 +653,10 @@ No code in the rebased tree names a deleted module (`onyx_runner`, `onyx_install
 - any other container created on it keeps the network, is named, and `chat remove` exits 1;
 - `chat status` lists the networks, and a deployment with nothing left but a network still gets the second question.
 
-The networks are listed by name (`--format {{.Name}}`, not `-q`), since a container's `NetworkMode` names its network. Two tests drive it through the recording `docker`, which now refuses `network rm` while a container is on the network. Also: a comment in the CLI still sent Gmail accounts to `ling-admin chat gmail`.
+SearXNG and the Google service are found on the network even when stopped, read from the container's side: a stopped container holds no endpoint, so the network does not list it, and Docker would remove the network under it and leave it unable to start. The networks are listed by name (`--format {{.Name}}`, not `-q`), since a container's `NetworkMode` names its network. Three tests drive it through the recording `docker`, which now refuses `network rm` while a container is on the network. Also: a comment in the CLI still sent Gmail accounts to `ling-admin chat gmail`.
 
 **Verified (2026-10-13)**, with no container, live service, model server or installed `ling` touched, and SWE-bench night 5 running on this machine:
-- **The Python suite:** 1099 passed, 78 skipped.
+- **The Python suite:** 1100 passed, 78 skipped.
 - **The launcher** (`cargo test --release -p ling-launcher` in a scratch export of the pinned Codex with the patches and this branch's `ling-rs/`, a scratch `HOME`, in a memory-capped scope): 254 passed, 1 ignored, the five `images::` tests among them. `ling-apps` in the same export: 20 passed.
 - **`ling-rs/web`** (`cargo test` in a copy beside `../airgapped`, without the UI embedded): 34 unit and 16 server tests.
 - **`desktop/ui`:** 29 vitest cases, the typecheck and the production build. **`desktop/electron`** (after `npm ci`): 33 vitest cases passed and 1 skipped, and the typecheck.
