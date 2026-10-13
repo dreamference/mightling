@@ -752,7 +752,10 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
     let java_present = setup::java_home().join("bin/java").exists();
     let signal_cli_present = setup::signal_cli_program().exists() && (arch != "aarch64" || setup::native_dir().join("libsignal_jni.so").exists());
     let qrencode_present = Command::new("sh").args(["-c", "command -v qrencode"]).stdout(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
-    let plan = setup::install_plan(&instance, &bridge, &work, arch, account_exists, java_present, signal_cli_present, linked && !qrencode_present);
+    // The bridges already here run from the installed binary: it is replaced only when it differs.
+    let others: Vec<Instance> = host.instances();
+    let installed = setup::installed_bridge(&host.path(unit::BRIDGE_PATH), &bridge);
+    let plan = setup::install_plan(&instance, &bridge, &work, arch, account_exists, java_present, signal_cli_present, linked && !qrencode_present, installed, &others);
 
     let named = if instance.is_first() { String::new() } else { format!(" `{instance}`") };
     match &number {
@@ -765,6 +768,10 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
     if !instance.is_first() {
         println!("signal-cli and Java are shared with the other bridges and fetched only if missing; this");
         println!("bridge's account, keys, unit and `ling web` device ({}) are its own.", instance.device_name());
+    }
+    if installed == setup::InstalledBridge::Different && !others.is_empty() {
+        println!("⚠️  The bridge binary installed here is another build than this one, and {} run{} from it: this", names(&others), if others.len() > 1 { "" } else { "s" });
+        println!("   replaces it. `ling signal setup --refresh` restarts them on it; until then a running one keeps the old.");
     }
     println!("It changes these things:\n");
     for step in &plan {
@@ -1358,6 +1365,23 @@ mod tests {
         // A half-removed further bridge still gets the `remove` hint, not this one.
         let half = Node::new("first-half").account("mightling-signal-work");
         assert_eq!(run(&args(&["setup", "--name", "work", "--dry-run"]), &half.invocation()), 2);
+    }
+
+    #[test]
+    fn setup_reads_the_installed_bridge_binary_under_the_nodes_root() {
+        let node = Node::new("binary").with("default");
+        let installed = node.0.join(unit::BRIDGE_PATH.trim_start_matches('/'));
+        let invocation = node.invocation();
+        let bridge = invocation.bridge.clone().unwrap();
+        let host = node.host();
+        assert_eq!(setup::installed_bridge(&host.path(unit::BRIDGE_PATH), &bridge), setup::InstalledBridge::Missing);
+        std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        std::fs::copy(&bridge, &installed).unwrap();
+        assert_eq!(setup::installed_bridge(&host.path(unit::BRIDGE_PATH), &bridge), setup::InstalledBridge::Same);
+        assert_eq!(run(&args(&["setup", "--name", "work", "--dry-run"]), &invocation), 0);
+        std::fs::write(&installed, b"an older build").unwrap();
+        assert_eq!(setup::installed_bridge(&host.path(unit::BRIDGE_PATH), &bridge), setup::InstalledBridge::Different);
+        assert_eq!(run(&args(&["setup", "--name", "work", "--dry-run"]), &invocation), 0);
     }
 
     #[test]
