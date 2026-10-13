@@ -28,5 +28,7 @@ futures = { version = "0.3", default-features = false, features = ["std"] }
 pgp = { version = "0.21", default-features = false }
 rand = "0.9"
 serde_json = "1"
+# Setup compares the bridge binary it would install with the one installed, by SHA-256 (§18.8).
+sha2 = "0.10"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
