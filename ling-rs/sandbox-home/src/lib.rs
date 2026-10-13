@@ -660,11 +660,11 @@ mod tests {
                 "home/u/.local/share/keyrings",
                 "home/u/.mightling/sessions",
                 "home/u/.mightling/skills/pdf",
-                "home/u/.mightling/skills/from-claude",
+                "home/u/.mightling/skills/from-otheragent",
                 "home/u/.mightling/shell_snapshots",
                 "home/u/.mightling/tmp/arg0",
                 "home/u/.mightling/airgapped",
-                "home/u/.claude/skills/review",
+                "home/u/.otheragent/skills/review",
                 "home/u/projects/app/.git",
                 "home/u/projects/app/src",
                 "home/u/projects/other/.git",
@@ -681,7 +681,7 @@ mod tests {
             ] {
                 fs::write(top.join(file), text).unwrap();
             }
-            symlink(top.join("home/u/.claude/skills/review"), top.join("home/u/.mightling/skills/from-claude/review")).unwrap();
+            symlink(top.join("home/u/.otheragent/skills/review"), top.join("home/u/.mightling/skills/from-otheragent/review")).unwrap();
             Machine { _dir: dir, top, home }
         }
 
@@ -749,12 +749,12 @@ mod tests {
             "home/u/.mightling/shell_snapshots",
             "home/u/.mightling/tmp/arg0",
             "home/u/.mightling/airgapped",
-            "home/u/.claude/skills/review",
+            "home/u/.otheragent/skills/review",
             "home/u/projects/app/src",
         ] {
             assert!(visible(&plan, &machine.at(path)), "{path} is hidden: {plan:?}");
         }
-        assert!(!visible(&plan, &machine.at("home/u/.claude")), "only the linked skill, not the agent's folder");
+        assert!(!visible(&plan, &machine.at("home/u/.otheragent")), "only the linked skill, not the agent's folder");
     }
 
     #[test]

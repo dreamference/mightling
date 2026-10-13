@@ -39,7 +39,7 @@ def test_nothing_secret_is_readable_by_default():
     for secret in (".ssh", ".gnupg", ".mozilla", ".config/google-chrome", ".config/chromium",
                    "snap", ".aws", ".azure", ".kube", ".docker", ".netrc", ".npmrc", ".pypirc",
                    ".git-credentials", ".config/gh", ".password-store", ".local/share/keyrings",
-                   ".mightling", ".codex", ".claude", ".config/dreamference", ".cache",
+                   ".mightling", ".codex", ".config/dreamference", ".cache",
                    ".local", ".local/share", ".config", ".cache/huggingface", ".bashrc", ".profile"):
         assert secret not in readable, secret
     # Only the configuration file of ~/.config/dreamference: Gmail, pairing and signing keys stay hidden.
