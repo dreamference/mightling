@@ -158,13 +158,47 @@ fn runtime_steps(bridge: &Path, work: &Path, arch: &str, java_present: bool, sig
     steps
 }
 
+/// The bridge binary already installed in /usr/local/lib/mightling, against the one setup would
+/// install (§18.8).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstalledBridge {
+    /// None there (or unreadable): installed.
+    Missing,
+    /// The same file, by SHA-256: left alone, so a second setup does not rewrite the binary under
+    /// the bridges already running.
+    Same,
+    /// Another build: installed, and the plan says that it replaces the binary under them.
+    Different,
+}
+
+/// A file's SHA-256, in hex; None when it cannot be read.
+pub fn sha256_of(path: &Path) -> Option<String> {
+    use sha2::Digest;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = sha2::Sha256::new();
+    std::io::copy(&mut file, &mut hasher).ok()?;
+    Some(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Compares `installed` (the bridge's path on the node) with `bridge` (the binary setup installs).
+pub fn installed_bridge(installed: &Path, bridge: &Path) -> InstalledBridge {
+    match (sha256_of(installed), sha256_of(bridge)) {
+        (None, _) => InstalledBridge::Missing,
+        (Some(have), Some(want)) if have == want => InstalledBridge::Same,
+        _ => InstalledBridge::Different,
+    }
+}
+
 /// Everything up to registering the number, for one bridge instance (§18). `bridge` is the
 /// `ling-signal` binary being installed, `work` a scratch folder of the user's for downloads, `arch`
 /// `std::env::consts::ARCH`. The shared runtime (Java, signal-cli, libsignal) is fetched only where
-/// it is missing, so a second instance downloads nothing; the bridge binary is installed every time,
-/// because a further instance needs the binary that knows instances (an older one would pair as the
-/// first instance's device). The account, the state folder and the unit are the instance's own; a
-/// further instance's unit is the shared template, written again with the same text.
+/// it is missing, so a second instance downloads nothing. The bridge binary is installed unless
+/// the one installed is the same file (`installed`, by SHA-256): a further instance needs the
+/// binary that knows instances (an older one would pair as the first instance's device), but
+/// rewriting an identical one would only touch the file the bridges already here (`others`) run
+/// from. When it differs and bridges are here, the step says that it replaces their binary. The
+/// account, the state folder and the unit are the instance's own; a further instance's unit is the
+/// shared template, written again with the same text.
 #[allow(clippy::too_many_arguments)]
 pub fn install_plan(
     instance: &Instance,
@@ -175,6 +209,8 @@ pub fn install_plan(
     java_present: bool,
     signal_cli_present: bool,
     need_qrencode: bool,
+    installed: InstalledBridge,
+    others: &[Instance],
 ) -> Vec<Step> {
     let account = instance.account();
     let state_dir = instance.state_dir();
@@ -189,7 +225,20 @@ pub fn install_plan(
         steps.push(Step::root("Install qrencode, to show the linking QR code in this terminal", &["apt-get", "install", "-y", "qrencode"]));
     }
     steps.extend(runtime_steps(bridge, work, arch, java_present, signal_cli_present));
-    steps.push(Step::root("Install the bridge where the system account can run it", &["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH]));
+    let install_bridge = ["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH];
+    match installed {
+        InstalledBridge::Same => {}
+        InstalledBridge::Different if !others.is_empty() => {
+            let names: Vec<String> = others.iter().map(|other| format!("`{other}`")).collect();
+            let (them, runs) = if others.len() > 1 { ("bridges", "run") } else { ("bridge", "runs") };
+            let what = format!(
+                "Replace the bridge binary the {them} already here ({}) {runs} from: the installed one is another build (its SHA-256 differs). A running bridge keeps the old build until it restarts, then runs this one",
+                names.join(", "),
+            );
+            steps.push(Step::root(&what, &install_bridge));
+        }
+        InstalledBridge::Different | InstalledBridge::Missing => steps.push(Step::root("Install the bridge where the system account can run it", &install_bridge)),
+    }
     steps.push(Step::root("Create its private state folder", &["install", "-d", "-m", "0700", "-o", &account, "-g", &account, &state_dir]));
     let what = if instance.is_first() { "Write the system unit" } else { "Write the system unit every further bridge runs from" };
     let mut write_unit = Step::root(what, &["tee", &instance.unit_file()]);
@@ -458,7 +507,7 @@ mod tests {
 
     #[test]
     fn the_plan_on_arm64_brings_the_jni_library_and_prints_every_root_step() {
-        let plan = install_plan(&first(), Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/tmp/w"), "aarch64", false, false, false, true);
+        let plan = install_plan(&first(), Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/tmp/w"), "aarch64", false, false, false, true, InstalledBridge::Missing, &[]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(shown[0].starts_with("sudo useradd --system --no-create-home"), "{shown:?}");
         // Java is fetched pinned, never from the package manager.
@@ -494,11 +543,11 @@ mod tests {
 
     #[test]
     fn an_existing_account_and_java_are_not_redone_and_x86_needs_no_library() {
-        let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "x86_64", true, true, false, false);
+        let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "x86_64", true, true, false, false, InstalledBridge::Missing, &[]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(!shown.iter().any(|s| s.contains("useradd") || s.contains("apt-get") || s.contains("libsignal") || s.contains("OpenJDK25U")));
         // x86_64 gets its own pinned JRE when it has none.
-        let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "x86_64", true, false, false, false);
+        let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "x86_64", true, false, false, false, InstalledBridge::Missing, &[]);
         assert!(plan.iter().any(|s| s.display().contains(JRE_X86_64_SHA256)));
         assert!(plan.iter().any(|s| s.display().contains("OpenJDK25U-jre_x64_linux_hotspot_25.0.4.1_1.tar.gz")));
         assert!(jre_archive("riscv64").is_none());
@@ -592,7 +641,7 @@ mod tests {
     #[test]
     fn a_second_instance_downloads_nothing_and_makes_only_its_own_things() {
         let work = named("work");
-        let plan = install_plan(&work, Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false);
+        let plan = install_plan(&work, Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Missing, &[]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(!shown.iter().any(|s| s.starts_with("curl") || s.contains("sudo tar") || s.contains("/opt/mightling")), "{shown:?}");
         assert!(shown.iter().any(|s| s == "sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin mightling-signal-work"));
@@ -609,6 +658,46 @@ mod tests {
         // signal-cli runs as the instance's account on the instance's data.
         let link = signal_cli_bare(&work, "aarch64", &["link", "-n", "Mightling (gx10, work)"]).join(" ");
         assert!(link.starts_with("sudo -u mightling-signal-work env ") && link.contains("--config /var/lib/mightling-signal-work/signal-cli link"), "{link}");
+    }
+
+    #[test]
+    fn the_bridge_binary_is_compared_by_hash() {
+        let dir = std::env::temp_dir().join(format!("ling-signal-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (new, same, other) = (dir.join("new"), dir.join("same"), dir.join("other"));
+        std::fs::write(&new, b"ling-signal build 2").unwrap();
+        std::fs::write(&same, b"ling-signal build 2").unwrap();
+        std::fs::write(&other, b"ling-signal build 1").unwrap();
+        let found = (installed_bridge(&dir.join("absent"), &new), installed_bridge(&same, &new), installed_bridge(&other, &new));
+        let digest = sha256_of(&new);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found, (InstalledBridge::Missing, InstalledBridge::Same, InstalledBridge::Different));
+        // The SHA-256 of the bytes, in hex (as `sha256sum` prints it).
+        assert_eq!(digest.as_deref(), Some("c6e7b4f83cfe2169910422f47b941d2386297109ffad0f18014455cfbfed3b5f"));
+    }
+
+    #[test]
+    fn a_second_setup_leaves_an_identical_bridge_binary_alone_and_names_what_a_different_one_replaces() {
+        let work = named("work");
+        let install = |plan: &[Step]| plan.iter().filter(|s| s.command.last().map(String::as_str) == Some(unit::BRIDGE_PATH)).cloned().collect::<Vec<Step>>();
+        // The same build: not installed again under the running `default`.
+        let plan = install_plan(&work, Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Same, &[first()]);
+        assert!(install(&plan).is_empty(), "{plan:?}");
+        assert!(!plan.iter().any(|s| s.display().contains(unit::BRIDGE_PATH)));
+        // Another build: installed, and the plan says it replaces the binary under `default`.
+        let plan = install_plan(&work, Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Different, &[first()]);
+        let step = install(&plan);
+        assert_eq!(step.len(), 1);
+        assert_eq!(step[0].display(), "sudo install -D -m 0755 /b /usr/local/lib/mightling/ling-signal");
+        assert!(step[0].what.starts_with("Replace the bridge binary the bridge already here (`default`) runs from") && step[0].what.contains("SHA-256"), "{}", step[0].what);
+        let plan = install_plan(&named("home"), Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Different, &[first(), work.clone()]);
+        assert!(install(&plan)[0].what.contains("the bridges already here (`default`, `work`) run from"), "{:?}", install(&plan));
+        // None installed, or a different one with no bridge using it: a plain install.
+        for (installed, others) in [(InstalledBridge::Missing, vec![]), (InstalledBridge::Missing, vec![first()]), (InstalledBridge::Different, vec![])] {
+            let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "aarch64", true, true, true, false, installed, &others);
+            let step = install(&plan);
+            assert_eq!((step.len(), step[0].what.as_str()), (1, "Install the bridge where the system account can run it"), "{installed:?}");
+        }
     }
 
     #[test]
