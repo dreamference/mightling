@@ -1,6 +1,6 @@
 # Mightling Ask, the Mightling web server, and retiring Onyx
 
-**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0, ships in **1.7.0**, the user's decision of 2026-10-09), see §19; **rebased onto `main` after the 1.6.0 release on 2026-10-12 and not merged, for the owner's review** (§19.7). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
+**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0, ships in **1.7.0**, the user's decision of 2026-10-09), see §19; **rebased onto `main` after the 1.6.0 release on 2026-10-12** (§19.7) **and again on 2026-10-13** (§19.8); **not merged: it ships in 1.7.0 after its live checks** (§19.8). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
 **Names:** written with the post-rename names ([RENAME_MIGHTLING](./DREAMFERENCE_RENAME_MIGHTLING.md), branch `rename/mightling`): `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app`, `~/.mightling`, `mightling_*` settings, `_mightling-node._tcp`. Where `main` still says Puffin, read `puffin` for `ling`.
 **Builds on:**
 - [MIGHTLING_DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
@@ -262,7 +262,10 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 | **C** | **1.7.0** (the user's decision of 2026-10-09; first planned for 1.8); built 2026-10-09 (§19), merged after 1.6.0 | Onyx code removed | **Gone:** on upgrade, `ling-admin` offers to stop and remove the containers; the volumes are kept until the user confirms |
 
 **For the 1.7.0 release notes** (Phase C ships in 1.7.0; no 1.7.0 notes file exists yet, so the line is kept here until one does):
+- The Onyx web chat is retired: the web UI is `ling web` (port 3100) and the desktop app shows the same page; image search and voice are `ling-admin images start` and `ling-admin voice start`, and `server start` starts both on a node.
 - Saved Onyx chats aren't exported; `ling-admin chat remove` keeps them until you choose to delete them.
+- Pictures in saved Onyx chats no longer show: the `/puffin-images/` route went with Onyx's nginx. The pictures stay in the image search store, and `ling web` serves them at `/images/`.
+- `ling-admin node provision --web` shares `ling web` on the LAN through `node enable`; it no longer installs a web chat (1.6.1 had made it run `chat start` and `chat configure`).
 
 **The history export (Phase B):** `ling-admin chat export` reads every chat session through Onyx's own API (with the per-install admin password) and writes each as a Markdown file in `~/.mightling/ask/imported/<date>-<title>.md`, with the question, answer and citations. It adds that folder to `ling-docs`, so old chats are searchable from Ask. They aren't converted into live threads, because the app-server's thread format isn't a stable public schema.
 
@@ -566,7 +569,7 @@ The docs' web-chat page became `docs/web.md` ("Web UI"): `ling web`, image searc
 - **`chat status`** lists the containers, volumes, images, the sidecars still on Onyx's network and the deployment folder.
 - **`chat remove`** (`RetiredWebChat`, `chat/retired_web_chat.py`) asks twice:
   1. Stop and remove the containers: `docker compose -p onyx … down --remove-orphans`, never `-v`. Without compose files, the containers go by name.
-  2. Then, as a separate question, delete the compose project's volumes (saved chats and the Onyx accounts), Onyx's own images (`onyxdotapp/*`; PostgreSQL's and nginx's generic images stay), its networks, and the image search, SigLIP and speech containers still on its network.
+  2. Then, as a separate question, delete the compose project's volumes (saved chats and the Onyx accounts), Onyx's own images (`onyxdotapp/*`; PostgreSQL's and nginx's generic images stay), its networks, and the image search, SigLIP and speech containers still on its network. Before a network is removed, Mightling's own containers are taken off it (§19.8): SearXNG, joined as a second network, is disconnected; the Google service, created on it, is recreated on the sidecar network; any other container created on it keeps the network, is named, and the command exits 1.
 
   `--yes` answers the first question and `--delete-data` the second, for scripts. A no keeps everything, and `chat remove` asks again later.
 - **On upgrade:** an interactive `ling-admin` run on a machine whose `~/.config/onyx/deployment` exists and whose Onyx containers are found makes the same offer once. A no is remembered in `~/.config/dreamference/web-chat-retired.json`. No terminal, no question and no Docker call.
@@ -636,3 +639,33 @@ No code in the rebased tree names a deleted module (`onyx_runner`, `onyx_install
 - **`desktop/electron`'s vitest, typecheck, `npm run package` and `npm run e2e`.** This machine has no `node_modules` there, and `npm ci` needs the network. Last run on 2026-10-09.
 - **`ling-admin codex build`, and `audit egress --web` and `--app` on a real build.** Both need the installed `ling` and the model server, which the running benchmark night holds.
 - **Anything §19.5 already lists as not verified:** the sidecars really starting, a real transcription, the microphone prompt, and `chat remove` against this machine's Onyx deployment, which still runs and was not touched.
+
+### 19.8 Rebased onto `main` again, and ready for 1.7.0 (2026-10-13)
+
+**The rebase.** The nine commits were replayed onto `main` at `05e32b9`, 20 commits later (the Wi-Fi power-saving check, Code Mode's exec tool on SGLang, turn-end compaction, the Signal bridge's model-gate answer, SWE-bench's night 5 and 6 switches, two research notes). Three conflicts:
+- `ling-rs/src/lib.rs`: `main` added turn-end compaction where this branch declares `image_search`. Both are kept, `image_search` first, then compaction, so the two `-c` groups do not interleave.
+- **Fleet `--web`** (`node_provisioner.py`, its test, the help text and `docs/admin.md`): `main` (9ef8363, a 1.6.1 Fixed line) had fixed the same `ling-admin ling start` leftover by running `chat start` and `chat configure`. With Onyx retired there is nothing to start, so this branch's version stands: no web step, `node enable` without `--no-web`, and a dry run that names `ling web`. `main`'s other help texts in the same files (the Wi-Fi line of `host check`, SWE-bench's `--apply-patch` and `--exec-tool`) are kept; `docs/admin.md` regenerates unchanged.
+- **PDF_SEARCH:** `main` rewrote the spec around `ling` on 2026-10-12, which made this branch's note on it moot. `main`'s text is kept, and its three sentences about Onyx now say it is retired and that option C is closed.
+
+**Found and fixed.** `chat remove`'s second step ran `docker network rm` on Onyx's network while two of Mightling's own containers could still be on it: SearXNG, which Onyx's `configure` joined to it as a second network, and the Google service, which that `configure` created on it (ONYX §6, §8). Docker refuses to remove a network with endpoints, the failure was not checked, and the step still printed that the networks were deleted. Now:
+- SearXNG, or any container on that network as a second network, is disconnected; it keeps running on the sidecar network;
+- the Google service, created on it, is recreated on the sidecar network by `GoogleService.start()`: the tokens are in the mounted folder (`~/.config/dreamference/gmail`, the mount Onyx's `configure` used too) and the secret is the same file;
+- any other container created on it keeps the network, is named, and `chat remove` exits 1;
+- `chat status` lists the networks, and a deployment with nothing left but a network still gets the second question.
+
+The networks are listed by name (`--format {{.Name}}`, not `-q`), since a container's `NetworkMode` names its network. Two tests drive it through the recording `docker`, which now refuses `network rm` while a container is on the network. Also: a comment in the CLI still sent Gmail accounts to `ling-admin chat gmail`.
+
+**Verified (2026-10-13)**, with no container, live service, model server or installed `ling` touched, and SWE-bench night 5 running on this machine:
+- **The Python suite:** 1099 passed, 78 skipped.
+- **The launcher** (`cargo test --release -p ling-launcher` in a scratch export of the pinned Codex with the patches and this branch's `ling-rs/`, a scratch `HOME`, in a memory-capped scope): 254 passed, 1 ignored, the five `images::` tests among them. `ling-apps` in the same export: 20 passed.
+- **`ling-rs/web`** (`cargo test` in a copy beside `../airgapped`, without the UI embedded): 34 unit and 16 server tests.
+- **`desktop/ui`:** 29 vitest cases, the typecheck and the production build. **`desktop/electron`** (after `npm ci`): 33 vitest cases passed and 1 skipped, and the typecheck.
+- **`mkdocs build --strict`** with the docs workflow's pins (`docs/web-chat.md` is outside the nav on purpose, §19.6). `AGENTS.md` is 24,533 bytes.
+
+**Still to run, on a slot with the model server free** (none of them was run, by the rule that the benchmark nights hold this machine's model server and second-puffin's GPU is busy):
+1. `ling-admin codex build` (it runs `ling-admin audit egress` at the end), then `ling-admin audit egress --web` and `ling-admin audit egress --app`: the verdict passes and the report says `Image search turn: answered with an image`.
+2. `ling-admin images start`, `ling-admin images status`, `ling-admin voice start`, `ling-admin voice status`: both on `dreamference-sidecars` (`docker inspect -f '{{.HostConfig.NetworkMode}}' dreamference-image-search dreamference-stt`).
+3. `ling-admin server stop` then `ling-admin server start` on this node with the two sidecars removed first (`ling-admin images stop`, `ling-admin voice stop`): both come back and the model loads.
+4. In `ling web` (`ling web start`, then `ling web open` on this machine): one image question shows pictures from `/images/`; one dictation with the 🎤 button lands in the draft. The same two in the app (`ling app`), where the microphone prompt is the app's own.
+5. `cd desktop/electron && npm run package && npm run e2e`.
+6. This machine's Onyx: `ling-admin chat status`, then `ling-admin chat remove`, answering no, then yes and no (containers gone, volumes kept: `docker volume ls --filter label=com.docker.compose.project=onyx`), then `ling-admin chat remove --delete-data` once the owner agrees the saved chats may go; afterwards `docker network ls` has no `onyx_default`, `ling-search "GB10 memory"` still answers and `ling-admin google status` shows the service running on `dreamference-sidecars` with its accounts.
