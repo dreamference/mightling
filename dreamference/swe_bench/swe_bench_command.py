@@ -401,7 +401,7 @@ class SweBenchCommand:
         print(f"Validated here: {len(SweBenchImages.validated())} instance(s); "
               f"rejected: {len(SweBenchImages.rejected())}")
         for name in SweBenchRunStore.runs():
-            summary = SweBenchReport.summary(SweBenchRunStore(name)) or {}
+            summary = SweBenchReport.summary(SweBenchRunStore(name), details=False) or {}
             print(f"  {name}: {summary.get('finished', 0)} of {summary.get('validated', 0)} run, "
                   f"{summary.get('graded', 0)} graded, {summary.get('resolved', 0)} resolved")
         images = SweBenchImages.local_images()

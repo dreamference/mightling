@@ -8,7 +8,7 @@
 - [together-ai-survey-2026-10-13](./research/together-ai-survey-2026-10-13.md) (items 1–6);
 - [compaction-survey-2026-10-13](./research/compaction-survey-2026-10-13.md) (items 7–13).
 
-The owner approved items 1–13 on 2026-10-13. The surveys' engine items went to ling-engine's backlog the same day: the drafter's NVFP4 scales re-quantized, tool-wait-aware eviction, and state saved at tool-output boundaries.
+The owner approved items 1–13 on 2026-10-13. The surveys' engine items are being added to ling-engine's backlog separately: the drafter's NVFP4 scales re-quantized, tool-wait-aware eviction, and state saved at tool-output boundaries.
 
 | # | Item | Area | Status |
 |---|---|---|---|

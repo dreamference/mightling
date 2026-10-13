@@ -37,7 +37,8 @@ class SweBenchReport:
     """Renders reports."""
 
     @classmethod
-    def summary(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def summary(cls, store: SweBenchRunStore, variant: Optional[str] = None,
+                details: bool = True) -> Optional[Dict[str, Any]]:
         """
         Counts a run.
 
@@ -45,6 +46,9 @@ class SweBenchReport:
             store: The run.
             variant: The grading series the verdicts come from; None for the plain one
                 (`drop-test-hunks`: the same predictions with their test files left out).
+            details: Also split the unresolved by cause and count the compactions, which reads
+                the harness's reports and every rollout; `status`, which counts every run on
+                disk, leaves them out.
 
         Returns:
             Optional[Dict[str, Any]]: The counts and per-instance verdicts; None when the run
@@ -94,8 +98,9 @@ class SweBenchReport:
             "exec_tool": cls.exec_tool_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
-            "causes": cls.unresolved_causes(store, manifest, number, variant, results, graded),
-            "compactions": cls.compaction_summary(store, states, sorted(finished & set(instances)), resolved),
+            "causes": cls.unresolved_causes(store, manifest, number if details else None, variant, results, graded),
+            "compactions": cls.compaction_summary(store, states, sorted(finished & set(instances)) if details else [],
+                                                  resolved),
         }
 
     @classmethod
