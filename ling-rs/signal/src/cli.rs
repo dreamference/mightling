@@ -182,6 +182,25 @@ fn chosen(args: &[String], host: &Host) -> Result<Instance, i32> {
     }
 }
 
+/// The instance `start`, `stop`, `trust` and `remove` act on: as [`chosen`], and it must be on this
+/// node, so a mistyped name is refused here, before any sudo. `start`, `stop` and `trust` need the
+/// instance itself (its state folder); `remove` takes any trace of it (`half`), so a half-removed
+/// instance can still be cleaned up.
+fn chosen_present(args: &[String], host: &Host, half: bool) -> Result<Instance, i32> {
+    let instance = chosen(args, host)?;
+    let instances = host.instances();
+    let present = if half { host.trace_of(&instance).is_some() } else { instances.contains(&instance) };
+    if present {
+        return Ok(instance);
+    }
+    if instances.is_empty() {
+        eprintln!("Mightling over Signal is not set up here; `ling signal setup` sets it up.");
+    } else {
+        eprintln!("There is no Signal bridge `{instance}` here; this node has {}.", names(&instances));
+    }
+    Err(2)
+}
+
 /// The Linux user running this command.
 fn current_user() -> String {
     run_command(&["id".to_string(), "-un".to_string()], None).map(|out| out.trim().to_string()).unwrap_or_default()
@@ -217,7 +236,7 @@ pub fn run(args: &[String], invocation: &Invocation) -> i32 {
             }
         },
         Some("verify-signal-cli") => run_verify_signal_cli(&args[1..]),
-        Some("trust") => match chosen(&args[1..], &invocation.host) {
+        Some("trust") => match chosen_present(&args[1..], &invocation.host, false) {
             Ok(instance) => run_trust(&instance),
             Err(code) => code,
         },
@@ -225,12 +244,12 @@ pub fn run(args: &[String], invocation: &Invocation) -> i32 {
         Some("setup") if has(&args[1..], "--refresh") => run_refresh(&args[1..], invocation),
         Some("setup") => run_setup(&args[1..], invocation),
         Some("status") => run_status(&args[1..], &invocation.host),
-        Some("start") => match chosen(&args[1..], &invocation.host) {
+        Some("start") => match chosen_present(&args[1..], &invocation.host, false) {
             Ok(instance) => systemctl(&["enable", "--now", &instance.unit_name()]),
             Err(code) => code,
         },
         // Disabled as well as stopped, so it stays off across a reboot until `ling signal start`.
-        Some("stop") => match chosen(&args[1..], &invocation.host) {
+        Some("stop") => match chosen_present(&args[1..], &invocation.host, false) {
             Ok(instance) => systemctl(&["disable", "--now", &instance.unit_name()]),
             Err(code) => code,
         },
@@ -1040,7 +1059,7 @@ fn bridge_account_of(instance: &Instance) -> Option<setup::BridgeAccount> {
 }
 
 fn run_remove(args: &[String], host: &Host) -> i32 {
-    let instance = match chosen(args, host) {
+    let instance = match chosen_present(args, host, true) {
         Ok(instance) => instance,
         Err(code) => return code,
     };
@@ -1273,7 +1292,8 @@ mod tests {
         let present = node.invocation();
         assert_eq!(run(&args(&["setup", "--dry-run"]), &present), 0);
         assert_eq!(run(&args(&["setup", "--refresh", "--dry-run"]), &present), 0);
-        assert_eq!(run(&args(&["remove", "--dry-run"]), &present), 0);
+        // No bridge here: nothing to remove, so no removal plan either.
+        assert_eq!(run(&args(&["remove", "--dry-run"]), &present), 2);
         assert_eq!(run(&args(&["unknown"]), &present), 2);
         assert_eq!(run(&args(&["help"]), &present), 0);
         // Nothing was made.
@@ -1348,6 +1368,38 @@ mod tests {
         let one = Node::new("one").with("work");
         assert_eq!(run(&args(&["remove", "--dry-run"]), &one.invocation()), 0);
         assert_eq!(run(&args(&["unit"]), &one.invocation()), 0);
+    }
+
+    #[test]
+    fn a_bridge_that_is_not_here_is_refused_before_any_sudo() {
+        // Only names that match no unit on any real node go through `run`: if the check were
+        // missing, the sudo after it would act on a unit that does not exist.
+        let node = Node::new("ghost").with("default").with("work");
+        let invocation = node.invocation();
+        for command in ["start", "stop", "trust", "remove"] {
+            assert_eq!(run(&args(&[command, "--name", "ghost"]), &invocation), 2, "{command}");
+        }
+        assert_eq!(run(&args(&["remove", "--name", "ghost", "--dry-run"]), &invocation), 2);
+        assert_eq!(run(&args(&["remove", "--name", "work", "--dry-run"]), &invocation), 0);
+        // One bridge, another name.
+        let one = Node::new("ghost-one").with("default");
+        assert_eq!(run(&args(&["remove", "--name", "ghost", "--dry-run"]), &one.invocation()), 2);
+        assert_eq!(run(&args(&["start", "--name", "ghost"]), &one.invocation()), 2);
+        // No bridge at all: nothing to act on, with or without a name. Checked on the choice
+        // itself, so no test can reach the sudo for `default` that a real node's bridge answers to.
+        let empty = Node::new("ghost-empty");
+        for half in [false, true] {
+            assert_eq!(chosen_present(&[], &empty.host(), half), Err(2));
+            assert_eq!(chosen_present(&args(&["--name", "default"]), &empty.host(), half), Err(2));
+            assert_eq!(chosen_present(&args(&["--name", "work"]), &empty.host(), half), Err(2));
+        }
+        assert_eq!(run(&args(&["remove", "--name", "work", "--dry-run"]), &empty.invocation()), 2);
+        // A half-removed bridge (its account left, its state gone) can still be removed,
+        // but not started.
+        let half = Node::new("ghost-half").with("default").account("mightling-signal-old");
+        assert_eq!(chosen_present(&args(&["--name", "old"]), &half.host(), true), Ok(Instance::parse("old").unwrap()));
+        assert_eq!(chosen_present(&args(&["--name", "old"]), &half.host(), false), Err(2));
+        assert_eq!(run(&args(&["remove", "--name", "old", "--dry-run"]), &half.invocation()), 0);
     }
 
     #[test]
