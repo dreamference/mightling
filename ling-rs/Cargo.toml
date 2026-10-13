@@ -33,6 +33,9 @@ ling-apps = { path = "apps" }
 # Observation masking: the rule Codex's core calls (patch 0021); the launcher sets its policy.
 ling-masking = { path = "masking" }
 ling-node-locator = { path = "node-locator" }
+# The home folder hidden from sandboxed commands: the rule Codex's sandbox helper applies (patch 0019);
+# the launcher shows it (`ling sandbox-home`, src/sandbox_home.rs).
+ling-sandbox-home = { path = "sandbox-home" }
 # Code Mode's `exec` as a function on a server that drops custom tools: the launcher sets the
 # choice, Codex's core translates (patch 0020; src/exec_tool.rs).
 ling-tools = { path = "tools" }

@@ -59,6 +59,7 @@ There is no linter or formatter configured.
 - **Host safety.** On unified memory a model load can freeze the whole host. Keep both layers, `check_host_safety()` before a load and the PSI watchdog during it, when touching `start_server()`; anything that runs beside a resident model server (indexing, sidecars) must bound its memory. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md).
 - **Two install modes.** A checkout has `codex/`, `codex-patches/` and the crates beside the package; a release install has only the wheel and prebuilt binaries. Anything new that reaches for a path under `REPO_ROOT` needs the `has_source()` guard. Details: [docs/dev/install-modes.md](docs/dev/install-modes.md).
 - **Sandbox results need the AppArmor profile.** `kernel.apparmor_restrict_unprivileged_userns` is 1, so `bwrap` (and Chromium's sandbox) need a profile to create a user namespace. Shells under PyCharm run in a permissive profile and pass anyway; units, the Night Shift timer and SSH jobs do not. Check `cat /proc/self/attr/current` before trusting a sandbox result; `ling-admin host setup` installs the profile. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md#bubblewrap-needs-an-apparmor-profile-and-this-machine-now-has-one).
+- **Sandboxed commands do not see the home folder** (`ling-rs/sandbox-home`, patch `0019`): only the workspace, toolchains, ling's tools, `[sandbox] readable` ([more](docs/dev/sandbox-home.md)).
 - **Unattended callers of `ling`** (Night Shift, the egress audit, SWE-bench, the Codex test runner) name the model server in `DREAMFERENCE_VLLM_HOST`: a node browse is a multicast DNS query, which the egress audit counts as a failure.
 - **Launch flags belong in the model registry**, not in the launch builder ([docs/dev/models-and-engines.md](docs/dev/models-and-engines.md)). Ask the *server* which model is running (`model_key_for_served_id`), never the config.
 - **The default model is `qwen3.8-27b-nvfp4-dflash2` on SGLang** (since 2026-09-29), and the only model served. Beside it, the registry holds one candidate, `qwen3.8-27b-minima-nvfp4-dflash2`, which runs only in night 2's A/B (`specs/DREAMFERENCE_MODELS.md` §2.2).
@@ -179,6 +180,7 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/prompt.md](docs/dev/prompt.md): named system prompts
 - [docs/dev/egress-audit.md](docs/dev/egress-audit.md): `ling-admin audit egress`
 - [docs/dev/airgapped.md](docs/dev/airgapped.md): `/airgapped`
+- [docs/dev/sandbox-home.md](docs/dev/sandbox-home.md): the home folder hidden from sandboxed commands
 - [docs/dev/skills.md](docs/dev/skills.md): skills from other agents
 - [docs/dev/night-shift.md](docs/dev/night-shift.md): Night Shift
 - [docs/dev/swe-bench.md](docs/dev/swe-bench.md): the SWE-bench harness

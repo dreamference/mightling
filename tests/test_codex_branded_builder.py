@@ -84,7 +84,11 @@ def test_the_patches_stay_small():
     # given with the other absent, and the two together make 42,741. Not raised on 2026-10-12 when
     # 0020 grew by 217 bytes (the request hook also takes the request's input, and one line turns each
     # output item back) so Code Mode's `exec` is offered as a function on SGLang; 42,958 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 43_000
+    # Raised to 43,250 on 2026-10-13, on branch security/sandbox-home and pending approval, for the
+    # home folder's hook in 0019 (115 bytes: a dependency line and one call beside the air-gap hook
+    # in the sandbox helper, handing each command's profile to the leaf crate ling-rs/sandbox-home;
+    # specs/DREAMFERENCE_MIGHTLING_SANDBOX_HOME.md); 43,073 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 43_250
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
