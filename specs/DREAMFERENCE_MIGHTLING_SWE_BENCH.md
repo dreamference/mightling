@@ -832,7 +832,7 @@ Most unresolved patches fail by not fixing the issue; broken passing tests are 2
 
 ## 25. Compaction columns (2026-10-13)
 
-*Built 2026-10-13, approved by the owner the same day ([BACKLOG](./DREAMFERENCE_BACKLOG.md) item 11, its report half; the probe questions are not built; [compaction survey](./research/compaction-survey-2026-10-13.md) §1 and §3.5).* The survey found compaction to be the largest cost in a long session that is not model work: sessions that compacted three or more times resolved 38% against 75–78% for zero or one, and compactions took 17% of agent time. The report now shows this for every run, so an arm that changes compaction (BACKLOG item 8) is read on it.
+*Built 2026-10-13, approved by the owner the same day ([BACKLOG](./DREAMFERENCE_BACKLOG.md) item 11, its report half; the probe questions are not built; [compaction survey](./research/compaction-survey-2026-10-13.md) §1 and §3.5).* The survey found compaction to be the largest cost in a long session that is not model work: sessions that compacted three or more times resolved 38% against 75–78% for zero or one, and compactions took 17% of agent time. The report now shows this for every run, so an arm that changes compaction (BACKLOG item 7, drop-first compaction) is read on it.
 
 **What the report shows.** `Compactions`: how many, in how many of the instances with rollouts, their time in all, its share of those instances' agent time, the median per compaction; and `resolved by count`: resolved over instances for sessions with 0, 1, 2 and 3 or more compactions. `--against` adds `compactions` and `compaction time` to the side-by-side table.
 
