@@ -234,6 +234,7 @@ Not comparable with published SWE-bench scores: see §8 of the spec.
 ```
 
 - **Per repository:** resolved over validated, since the validated set is not spread evenly.
+- **Why the unresolved failed** (since 2026-10-13, §24): `Broke a passing test` (a PASS_TO_PASS test fails) is counted apart from `Did not fix` (a FAIL_TO_PASS test fails, every PASS_TO_PASS test passes), and `--against` sets both side by side.
 - **`--against <run>`:** instances resolved by one run and not the other, and the difference with a paired confidence interval (McNemar on the instances both runs attempted). A difference inside the interval is reported as "no measurable difference", in those words.
 - **Variance:** a single run is one sample. The spec's acceptance criteria (§7.3) include running the smoke set three times to see how much the same configuration varies before any A/B is read.
 - **Optional baseline column:** `swebench infer` (mini-SWE-agent against the same endpoint) measures the model without `ling`. It is not run by default.
@@ -804,3 +805,26 @@ A command ran a Python example when code it runs (a `-c` argument, a here-docume
 **Night 6.** `scripts/swe_bench_night1.sh` with `ARMS="exec-tool-freeform default"` on `docs/dev/swe-bench/night2-no-mismatch.txt` (44 tasks): the record arm first, as on every night, is `exec` as 1.6.0 offered it (`--exec-tool freeform`, which SGLang drops); the candidate is `default`, the launcher's own choice, which on SGLang is now the function. An arm part `exec-tool-function|freeform` stacks with the others; a misspelt one writes `failed` before either round; `start` refuses a worktree without `--exec-tool` and an installed `ling` that does not read the variable (1.6.0 would run the record arm twice). The chain that starts it (`~/.local/share/dreamference/swe-bench/chain/night6-after-night5.sh`, unit `ling-swe-chain6`) waits for night 5's `done`, builds `ling` from the night-6 worktree, requires the egress audit to pass and the binary to read the variable, and runs one live `ling exec` through a recording loopback proxy in front of the model server before the night: the request must offer `exec` as a function (one string parameter `input`) and no `custom` `exec`, and the session must end without an error; whether the model called `exec` is recorded, not required. Any failure writes `chain/night6-blocked` and waits for the owner.
 
 **Tests** (`tests/test_swe_bench.py`, +3, with the fake agent fixing the issue in one `exec` cell recorded as Codex records a translated call when the switch says `function`; `tests/test_swe_bench_night_script.py`, +3): the variable is set only when the flag is, the call is counted for the function form and not for a shell command naming the tool, `freeform` is passed through, the report line and `--against` tell the arms apart, a resumed run keeps the arm, an old manifest reads as `auto`, the command line rejects any other form; night 6's arms reach the right rounds, a misspelt arm ends the night before either, and `start` refuses a `ling` without the variable.
+
+## 24. Broken passing tests, counted apart (2026-10-13)
+
+*Built 2026-10-13, approved by the owner the same day ([BACKLOG](./DREAMFERENCE_BACKLOG.md) item 2; survey [together-ai-survey-2026-10-13](./research/together-ai-survey-2026-10-13.md) §3.2).* "Resolved" requires every FAIL_TO_PASS test to pass and every PASS_TO_PASS test to keep passing, so an unresolved patch failed in one of two ways with different remedies: it did not fix the issue, or it broke something that worked (the failure `tests-v2`'s discipline rules aim at).
+
+**What the report shows.** Each unresolved verdict gets the first cause that applies: empty patch, patch did not apply, the instance's test patch did not apply on top of it, **broke a passing test** (a PASS_TO_PASS test fails; how many of those also left a FAIL_TO_PASS test failing is said), **did not fix** (a FAIL_TO_PASS test fails, every PASS_TO_PASS test passes), or no test results on disk. `report` prints the broke line with its share of graded instances and the instances with their failing PASS_TO_PASS counts; `--against` adds both counts to the side-by-side table and marks `broke P2P` in the per-instance rows.
+
+**Where the numbers come from.** `eval` now records the two lists' sizes and failures in `grading.json` (`f2p`, `f2p_failed`, `p2p`, `p2p_failed`; counts only, the names stay in the harness's logs). A grading made before that is split from the harness's per-instance `report.json` (`tests_status`) in the grading's directory, read only, with no regrade; a `drop-test-hunks` verdict taken over from the plain grading is read from the plain grading's logs.
+
+**On the runs on disk (read 2026-10-13):**
+
+| Run | Resolved | Broke a passing test | of which also not fixed | Did not fix | Other unresolved |
+|---|---|---|---|---|---|
+| n2-default | 29 / 44 | 1 (2.3%) | 1 | 14 | 0 |
+| n3-default | 29 / 44 | 4 (9.1%) | 3 | 10 | 1 empty |
+| n4-default | 31 / 44 | 2 (4.5%) | 1 | 11 | 0 |
+| n4-restart-2 | 28 / 44 | 4 (9.1%) | 3 | 10 | 1 empty, 1 did not apply |
+| n2-tests-v2 | 31 / 44 | 2 (4.5%) | 1 | 11 | 0 |
+| im100-default | 68 / 100 | 7 (7.0%) | 3 | 24 | 1 test patch rejected |
+
+Most unresolved patches fail by not fixing the issue; broken passing tests are 2–9% of graded instances, the range the DeepSWE benchmark post reports for its two models (4.4% and 6.9%). One run is one sample, as everywhere in this spec.
+
+**Tests** (`tests/test_swe_bench.py`, +3; the stand-in harness writes `tests_status` for the instances a test names): the three outcomes counted and printed, the side-by-side rows; a grading without the counts split from the logs with no harness call, the regrade series reading the plain grading's logs, a missing report counted as no test results rather than guessed; the first-cause order.

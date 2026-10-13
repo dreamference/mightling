@@ -94,7 +94,100 @@ class SweBenchReport:
             "exec_tool": cls.exec_tool_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
+            "causes": cls.unresolved_causes(store, manifest, number, variant, results, graded),
         }
+
+    @classmethod
+    def unresolved_causes(cls, store: SweBenchRunStore, manifest: Dict[str, Any], number: Optional[int],
+                          variant: Optional[str], results: Dict[str, Any], graded: List[str]) -> Dict[str, Any]:
+        """
+        Splits the unresolved verdicts by what went wrong (survey 2026-10-13 §3.2): a patch that
+        broke a test that passed before (PASS_TO_PASS) is a different failure from one that did
+        not fix the issue (FAIL_TO_PASS), with a different remedy. "Resolved" already requires
+        both lists to pass, so this only splits the unresolved.
+
+        Each unresolved instance gets one cause, the first that applies: `empty` (no patch),
+        `not_applied` (the patch did not apply), `test_patch` (the instance's test patch did not
+        apply on top of it), `broke` (a PASS_TO_PASS test fails), `not_fixed` (a FAIL_TO_PASS
+        test fails and every PASS_TO_PASS test passes), `unknown` (no test results on disk).
+
+        Args:
+            store: The run.
+            manifest: Its manifest.
+            number: The grading the results come from; None when there is none.
+            variant: Its grading series; None for the plain one.
+            results: The grading's results.
+            graded: The graded instances.
+
+        Returns:
+            Dict[str, Any]: Cause to the sorted instance ids, plus `broke_unfixed` (the `broke`
+            ones whose FAIL_TO_PASS tests fail too) and `p2p_failed` (instance to the number of
+            PASS_TO_PASS tests it broke).
+        """
+        causes: Dict[str, Any] = {key: [] for key in
+                                  ("empty", "not_applied", "test_patch", "broke", "not_fixed", "unknown")}
+        causes["broke_unfixed"], causes["p2p_failed"] = [], {}
+        if number is None:
+            return causes
+        models = {p["instance_id"]: p.get("model_name_or_path") for p in store.predictions()}
+        for instance_id in sorted(graded):
+            result = results[instance_id]
+            if result.get("resolved"):
+                continue
+            if result.get("empty"):
+                causes["empty"].append(instance_id)
+                continue
+            if result.get("applied") is False:
+                causes["not_applied"].append(instance_id)
+                continue
+            if result.get("test_patch_failed"):
+                causes["test_patch"].append(instance_id)
+                continue
+            model = str(models.get(instance_id) or manifest.get("model_name_or_path") or "")
+            counts = SweBenchEvaluator.logged_test_counts(store, number, variant, result, instance_id, model)
+            if counts is None:
+                causes["unknown"].append(instance_id)
+            elif counts["p2p_failed"]:
+                causes["broke"].append(instance_id)
+                causes["p2p_failed"][instance_id] = counts["p2p_failed"]
+                if counts["f2p_failed"]:
+                    causes["broke_unfixed"].append(instance_id)
+            elif counts["f2p_failed"]:
+                causes["not_fixed"].append(instance_id)
+            else:
+                causes["unknown"].append(instance_id)
+        return causes
+
+    @classmethod
+    def causes_lines(cls, causes: Dict[str, Any], graded: int) -> List[str]:
+        """
+        The report's lines for the split of the unresolved: the patches that broke a passing
+        test, apart from those that did not fix the issue.
+
+        Args:
+            causes: The summary's `causes` entry.
+            graded: The number of graded instances.
+
+        Returns:
+            List[str]: Report lines; none before grading.
+        """
+        if not graded:
+            return []
+        broke = causes["broke"]
+        line = f"Broke a passing test {len(broke)} of {graded} graded ({100 * len(broke) / graded:.1f}%)"
+        if broke:
+            line += (f", {len(causes['broke_unfixed'])} of them not fixing the issue either: "
+                     + ", ".join(f"{i} ({causes['p2p_failed'][i]} PASS_TO_PASS)" for i in broke))
+        lines = [line, f"Did not fix          {len(causes['not_fixed'])}: a FAIL_TO_PASS test still fails, "
+                       "every PASS_TO_PASS test passes"]
+        if causes["empty"]:
+            lines.append(f"Graded empty         {len(causes['empty'])}: no patch to grade ({', '.join(causes['empty'])})")
+        if causes["not_applied"]:
+            lines.append(f"Patch did not apply  {len(causes['not_applied'])}: {', '.join(causes['not_applied'])}")
+        if causes["unknown"]:
+            lines.append(f"No test results      {len(causes['unknown'])}, unresolved with no failing test on disk: "
+                         + ", ".join(causes["unknown"]))
+        return lines
 
     @classmethod
     def nudge_counts(cls, states: Dict[str, Any], finished: Any) -> Dict[str, int]:
@@ -431,6 +524,7 @@ class SweBenchReport:
             f"Empty patch         {statuses.get('empty', 0)}     Stalled {statuses.get('stalled', 0)}     "
             f"Timeout {statuses.get('timeout', 0)}     Agent error {statuses.get('error', 0)}",
             f"Patch broke test_patch application     {summary['test_patch_failed']}",
+            *cls.causes_lines(summary["causes"], summary["graded"]),
             f"Nudges              stall {summary['nudges_fired'].get('stall', 0)}     "
             f"completion {summary['nudges_fired'].get('completion', 0)}",
         ]
@@ -654,6 +748,8 @@ class SweBenchReport:
                 "hooks": ",".join(summary["manifest"].get("hooks") or []) or "none",
                 "grading": "test files dropped" if summary.get("variant") == DROP_TEST_HUNKS else "plain",
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
+                "broke a passing test": sum(1 for i in both if i in summary["causes"]["broke"]),
+                "did not fix": sum(1 for i in both if i in summary["causes"]["not_fixed"]),
                 "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",
                 "agent time": cls.duration(sum(walls)),
                 "input tokens": f"{sum(s.get('input_tokens', 0) for s in stats):,}",
@@ -679,7 +775,8 @@ class SweBenchReport:
                 state = summary["states"].get(instance_id, {})
                 calls = summary["stats"].get(instance_id, {}).get("puffin_code_calls", 0)
                 cells.append(f"{state.get('status', '?')} {state.get('wall_s', '?')} s"
-                             + (f", {calls} ling-code" if summary["code_index"] != "off" else ""))
+                             + (f", {calls} ling-code" if summary["code_index"] != "off" else "")
+                             + (", broke P2P" if instance_id in summary["causes"]["broke"] else ""))
             table.append(f"  {instance_id:<34} {verdict:<16} {cells[0]:<28} {cells[1]}")
         lines.append("Resolved in " + ", ".join(f"{label}: {counts.get(label, 0)}"
                                                  for label in ("both", f"only {name}", f"only {other}", "neither")))

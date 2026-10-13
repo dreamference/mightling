@@ -311,10 +311,69 @@ class SweBenchEvaluator:
                 "test_patch_failed": SweBenchHarness.test_patch_failed(work, run_id, model, instance_id),
                 "digest": digests[instance_id],
             }
+            counts = cls.test_counts(report)
+            if counts is not None:
+                record["results"][instance_id].update(counts)
             if variant == DROP_TEST_HUNKS:
                 record["results"][instance_id]["dropped"] = dropped.get(instance_id, [])
         store.write_grading(number, record, variant)
         return record["results"]
+
+    @classmethod
+    def test_counts(cls, report: Optional[Dict[str, Any]]) -> Optional[Dict[str, int]]:
+        """
+        Counts the two test lists of a harness verdict (survey 2026-10-13 §3.2): the tests the
+        fix must make pass (FAIL_TO_PASS) and the tests that passed before and must still pass
+        (PASS_TO_PASS). Only counts are kept; the names stay in the harness's logs.
+
+        Args:
+            report: The harness's report for one instance, as `instance_report` returns it.
+
+        Returns:
+            Optional[Dict[str, int]]: `f2p`, `f2p_failed`, `p2p`, `p2p_failed`; None when the
+            report has no test results (no report, or the tests never ran).
+        """
+        status = (report or {}).get("tests_status")
+        if not isinstance(status, dict) or not status:
+            return None
+        counts: Dict[str, int] = {}
+        for key, name in (("f2p", "FAIL_TO_PASS"), ("p2p", "PASS_TO_PASS")):
+            lists = status.get(name) or {}
+            passed, failed = len(lists.get("success") or []), len(lists.get("failure") or [])
+            counts[key], counts[f"{key}_failed"] = passed + failed, failed
+        return counts
+
+    @classmethod
+    def logged_test_counts(cls, store: SweBenchRunStore, number: int, variant: Optional[str],
+                           result: Dict[str, Any], instance_id: str, model: str) -> Optional[Dict[str, int]]:
+        """
+        A recorded verdict's test counts: from the grading record when it has them, otherwise
+        read back from the harness's report in the grading's directory, so a grading made
+        before the counts were recorded needs no regrade. Reads files only.
+
+        Args:
+            store: The run.
+            number: The grading number the result belongs to.
+            variant: Its grading series; None for the plain one.
+            result: The recorded result.
+            instance_id: The instance.
+            model: The predictions' `model_name_or_path`.
+
+        Returns:
+            Optional[Dict[str, int]]: As `test_counts`; None when no test results are on disk.
+        """
+        if "p2p_failed" in result:
+            return {key: int(result.get(key) or 0) for key in ("f2p", "f2p_failed", "p2p", "p2p_failed")}
+        reused = str(result.get("reused") or "")
+        if reused.startswith("plain grading "):
+            # A regrade that took the plain grading's verdict: its logs are there.
+            try:
+                number, variant = int(reused.rsplit(" ", 1)[1]), None
+            except ValueError:
+                return None
+        run_id = f"{store.name}-{variant}-{number}" if variant else f"{store.name}-{number}"
+        report = SweBenchHarness.instance_report(store.grading_dir(number, variant), run_id, model, instance_id)
+        return cls.test_counts(report)
 
     @classmethod
     def results(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> tuple:

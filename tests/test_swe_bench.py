@@ -394,6 +394,9 @@ class FakeHarness:
         self.version = swe_bench_settings.HARNESS_VERSION
         self.bad_gold = set()
         self.noop_resolves = set()
+        # Instance to (FAIL_TO_PASS failures, PASS_TO_PASS failures): written as the harness's
+        # `tests_status` for those instances; the others' reports carry no test results.
+        self.test_failures = {}
 
     def __call__(self, command, **kwargs):
         done = lambda out="": subprocess.CompletedProcess(command, 0, out, "")
@@ -421,8 +424,14 @@ class FakeHarness:
         for instance_id, (model, resolved, applied) in verdicts.items():
             directory = work / "logs/run_evaluation" / run_id / model.replace("/", "__") / instance_id
             directory.mkdir(parents=True, exist_ok=True)
-            (directory / "report.json").write_text(json.dumps(
-                {instance_id: {"resolved": resolved, "patch_successfully_applied": applied}}))
+            verdict = {"resolved": resolved, "patch_successfully_applied": applied}
+            if instance_id in self.test_failures:
+                f2p, p2p = self.test_failures[instance_id]
+                verdict["tests_status"] = {
+                    "FAIL_TO_PASS": {"success": ["f2p ok"] * (1 - min(f2p, 1)), "failure": ["f2p"] * f2p},
+                    "PASS_TO_PASS": {"success": ["p2p ok"] * 3, "failure": ["p2p"] * p2p},
+                    "FAIL_TO_FAIL": {"success": [], "failure": []}, "PASS_TO_FAIL": {"success": [], "failure": []}}
+            (directory / "report.json").write_text(json.dumps({instance_id: verdict}))
         return done()
 
 
@@ -1062,6 +1071,73 @@ def test_against_compares_instance_by_instance_and_refuses_mismatched_sets(bench
     assert "No measurable difference." in text  # one discordant pair proves nothing
     refused = SweBenchReport.against(SweBenchRunStore("a"), SweBenchRunStore("c"))
     assert refused.startswith("Not compared") and "different instances" in refused
+
+
+def _graded_with_test_results(bench):
+    """A run of three instances: one resolved, one that broke passing tests, one that fixed nothing."""
+    ids = ["acme__widget-1", "acme__widget-2", "beta__gadget-7"]
+    run(bench, instances=ids)
+    store = SweBenchRunStore("r1")
+    patches = {"acme__widget-1": "diff FIX", "acme__widget-2": "diff broke", "beta__gadget-7": "diff wrong"}
+    store.predictions_path.write_text("".join(json.dumps(
+        {"instance_id": i, "model_name_or_path": "m/x", "model_patch": patches[i]}) + "\n" for i in ids))
+    bench["harness"].test_failures = {"acme__widget-1": (0, 0), "acme__widget-2": (1, 2), "beta__gadget-7": (1, 0)}
+    SweBenchEvaluator.grade(store, bench["settings"])
+    return store
+
+
+def test_the_report_counts_patches_that_broke_a_passing_test_apart_from_those_that_fixed_nothing(bench):
+    store = _graded_with_test_results(bench)
+    results = store.grading(1)["results"]
+    # The grading keeps the counts, not the test names.
+    assert {k: results["acme__widget-2"][k] for k in ("f2p", "f2p_failed", "p2p", "p2p_failed")} == \
+        {"f2p": 1, "f2p_failed": 1, "p2p": 5, "p2p_failed": 2}
+    causes = SweBenchReport.summary(store)["causes"]
+    assert causes["broke"] == ["acme__widget-2"] and causes["broke_unfixed"] == ["acme__widget-2"]
+    assert causes["not_fixed"] == ["beta__gadget-7"] and causes["unknown"] == []
+    text = SweBenchReport.render(store)
+    assert ("Broke a passing test 1 of 3 graded (33.3%), 1 of them not fixing the issue either: "
+            "acme__widget-2 (2 PASS_TO_PASS)") in text
+    assert "Did not fix          1: a FAIL_TO_PASS test still fails" in text
+    compared = SweBenchReport.against(store, store)
+    assert re.search(r"broke a passing test +1 +1", compared) and re.search(r"did not fix +1 +1", compared)
+    assert "broke P2P" in next(line for line in compared.splitlines() if line.strip().startswith("acme__widget-2"))
+
+
+def test_a_grading_recorded_before_the_counts_is_split_from_the_harness_logs_without_a_regrade(bench):
+    store = _graded_with_test_results(bench)
+    record = store.grading(1)
+    for result in record["results"].values():
+        for key in ("f2p", "f2p_failed", "p2p", "p2p_failed"):
+            result.pop(key, None)
+    store.write_grading(1, record)
+    calls = len(bench["harness"].calls)
+    causes = SweBenchReport.summary(store)["causes"]
+    assert causes["broke"] == ["acme__widget-2"] and causes["not_fixed"] == ["beta__gadget-7"]
+    assert len(bench["harness"].calls) == calls and store.gradings() == [1]
+    # A regrade that took the plain grading's verdict finds the logs in the plain grading.
+    reused = dict(record["results"]["beta__gadget-7"], dropped=[], reused="plain grading 1")
+    store.write_grading(1, {"grader": {}, "results": {"beta__gadget-7": reused}}, DROP_TEST_HUNKS)
+    assert SweBenchReport.summary(store, DROP_TEST_HUNKS)["causes"]["not_fixed"] == ["beta__gadget-7"]
+    # With no report on disk, the verdict is counted as having no test results, not guessed.
+    report = next(store.grading_dir(1).rglob("beta__gadget-7/report.json"))
+    report.unlink()
+    causes = SweBenchReport.summary(store)["causes"]
+    assert causes["not_fixed"] == [] and causes["unknown"] == ["beta__gadget-7"]
+    assert "No test results      1, unresolved with no failing test on disk: beta__gadget-7" in SweBenchReport.render(store)
+
+
+def test_an_unresolved_patch_is_split_by_its_first_cause():
+    store = types.SimpleNamespace(predictions=lambda: [])
+    results = {"a": {"resolved": False, "empty": True}, "b": {"resolved": False, "applied": False},
+               "c": {"resolved": False, "applied": True, "test_patch_failed": True},
+               "d": {"resolved": False, "applied": True, "f2p": 1, "f2p_failed": 0, "p2p": 4, "p2p_failed": 1},
+               "e": {"resolved": True, "applied": True}}
+    causes = SweBenchReport.unresolved_causes(store, {}, 1, None, results, sorted(results))
+    assert (causes["empty"], causes["not_applied"], causes["test_patch"]) == (["a"], ["b"], ["c"])
+    assert causes["broke"] == ["d"] and causes["broke_unfixed"] == [] and causes["p2p_failed"] == {"d": 1}
+    assert SweBenchReport.unresolved_causes(store, {}, None, None, {}, [])["broke"] == []
+    assert SweBenchEvaluator.test_counts({"resolved": False}) is None
 
 
 def test_mcnemar_and_the_paired_interval():
