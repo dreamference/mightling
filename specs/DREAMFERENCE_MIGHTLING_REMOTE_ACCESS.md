@@ -1,6 +1,6 @@
 # Mightling from outside the LAN: remote access (MVP)
 
-**Status:** the user's design (2026-10-10); the open questions answered by the user the same evening (§11); **built** on branch `remote/vpn-mvp` (§13), tested offline and in a local rehearsal on Docker (§12.2). **Phase 0's first half is done on a real box** (2026-10-12, §12.3): the box deployed by `remote setup --box-only` and its port 443 checked from the node. The node's half (control plane, tunnel, the node's peer) and the live acceptance (§9, §13.3) wait for the user's approval to run on the node. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. MVP clients are Linux, macOS, Windows and a phone (§4).
+**Status:** the user's design (2026-10-10); the open questions answered by the user the same evening (§11); **built** on branch `remote/vpn-mvp` (§13), tested offline and in a local rehearsal on Docker (§12.2). **Phase 0's first half is done on a real box** (2026-10-12, §12.3): the box deployed by `remote setup --box-only` and its port 443 checked from the node. **Phase 0's second half is done on the node** (2026-10-13, §12.4): control plane, tunnel and the node's peer up, `remote status` all green, the relay reachable. The live acceptance with a client (§9, §13.3 from step 2) waits for the laptop. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. MVP clients are Linux, macOS, Windows and a phone (§4).
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 
@@ -242,6 +242,18 @@ The box: a 1 GB amd64 Debian 12 cloud VM with a static address and the provider'
 
 Caveat of this box's name: it is the provider's name for the address, not one the user owns, and the node's CA is now constrained to it. Moving to an owned name later means `remote remove --purge` and enrolling the clients again (decision 3); before any client is enrolled that costs nothing.
 
+### 12.4 Phase 0, second half: the node (2026-10-13)
+
+The provider's firewall now opens 33080/tcp+udp and 3478/udp. The owner ran `ling-admin remote setup <box> --ssh <alias>` on the node (gx10-1a2b) from the branch, while SWE-bench night 5 held the model server; nothing of night 5, the model gate or the model server was touched. Checked from the node and the box, with no client:
+
+- **Setup:** one run; the container `dreamference-remote` (86 MB of its 512 MB cap), the user unit `mightling-remote-tunnel.service` (active, no restart), NetBird's client 0.80.0 joined under exactly `mightling-<node id>.netbird.selfhosted`.
+- **`remote status`:** exit 0. Box units active; port 443 "the box's name reaches this node's control plane (TLS under the node's CA); other names refused"; certificates 824 days; tunnel active; control plane running; peers 1 enrolled, 1 connected (the node).
+- **From the node, by `openssl s_client` with the node's CA:** 443 with the box's name gives the control plane's certificate, verified; 443 with another name, no certificate (haproxy closes it); **33080/tcp gives the relay's certificate, verified**. NetBird's client on the node reports management and signal connected, `rels://<box>:33080` available **via QUIC** and STUN on 3478 available: the relay is reachable across the internet over UDP and TCP.
+- **The overlay name resolves on the node** through NetBird's resolver on its interface (IPv4 and IPv6), not through the system's DNS servers.
+- **On the box:** the tunnel lands on loopback 8443 only; relay and haproxy active, resident memory about 24 MB and 20 MB, about 490 MB of the box's 1 GB free.
+- **Found and fixed:** the install script rewrote the box's `MANIFEST` on every run, so this second run recorded the haproxy that the first run had installed as `haproxy=present`, and `remote remove` would have left the package behind. A rerun now keeps `haproxy=installed` (test `test_a_rerun_keeps_haproxy_recorded_as_installed_by_us`); the box's manifest was corrected by hand, `dpkg.log` confirming the 2026-10-12 install.
+- **Not yet, waiting for the laptop** (not on the LAN on 2026-10-13): enrolment, the overlay name and the model server from a client, the relay forced, and §9.1 to §9.3. The model server over the overlay was not probed from the node either: during night 5 only the gate answers, and the check belongs to the client. **§9.4 waits for night 5 to end:** `audit egress` runs a real `ling exec` against the model server, which would need `night pause`.
+
 ---
 
 ## 13. Implementation
@@ -261,8 +273,8 @@ Caveat of this box's name: it is the provider's name for the address, not one th
 ### 13.3 Phase 0, then the live acceptance
 
 0. **Done (§12.3):** `ling-admin remote setup <box> --ssh <alias> --box-only`; the box's units active, 443 passing the box's name and refusing others.
-1. The provider's firewall opens 33080/tcp+udp and 3478/udp. Then `ling-admin remote setup <box> --ssh <alias>` on the node (the control plane's container, the tunnel's user unit, NetBird's client and the CA with one sudo, the node's peer); `remote status` all green, its 443 line saying the box's name reaches the control plane under the node's CA.
-2. From the Ubuntu laptop on the LAN: `ling-admin remote code` / `ling node remote join --code …`; then on a hotspot, §9.1.
+1. **Done (§12.4):** the provider's firewall opens 33080/tcp+udp and 3478/udp; `ling-admin remote setup <box> --ssh <alias>` on the node; `remote status` all green, its 443 line saying the box's name reaches the control plane under the node's CA.
+2. From the Ubuntu laptop on the LAN: `ling` built from the branch (the installed 1.6.0 has no `ling node remote join`), then `ling-admin remote code` / `ling node remote join --code …`; on the laptop the node's overlay name resolves, the model server answers over the overlay (a 503 with `Retry-After` from the gate counts during a benchmark night), and again with `NB_FORCE_RELAY=true` on the laptop's NetBird service, which proves the box's relay since the LAN would otherwise win; then on a hotspot, §9.1.
 3. On the box during that: `tcpdump` for §9.2.
 4. `remote revoke` for §9.3; `audit egress` for §9.4.
 5. A Mac and a Windows machine as in step 2; an iPhone and an Android phone by hand (§4.2), recording which trust the CA. Android's result goes to the user (§11.3).
