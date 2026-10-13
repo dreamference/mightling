@@ -26,8 +26,10 @@
 
 pub mod custom;
 
+pub use custom::custom_tools_dropped;
 pub use custom::exec_as_function;
 pub use custom::from_server;
+pub use custom::set_custom_tools_dropped;
 pub use custom::set_exec_as_function;
 
 use std::collections::HashMap;
@@ -55,14 +57,18 @@ fn names() -> &'static Mutex<HashMap<String, (String, String)>> {
     NAMES.get_or_init(Mutex::default)
 }
 
-/// Replaces every `mcp__…` namespace in a request's tools with its tools, as functions, and
-/// offers `exec` as a function when this process translates it ([`custom`]).
+/// Replaces every `mcp__…` namespace in a request's tools with its tools, as functions, offers
+/// `exec` as a function when this process translates it, and leaves out Code Mode's `wait` when
+/// the model cannot see `exec` ([`custom`]).
 pub fn flatten(tools: Vec<Value>) -> Vec<Value> {
-    flatten_with(tools, exec_as_function())
+    flatten_with(tools, exec_as_function(), custom_tools_dropped())
 }
 
-/// [`flatten`], with `exec` offered as a function when `exec_as_function` is true.
-pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool) -> Vec<Value> {
+/// [`flatten`], with `exec` offered as a function when `exec_as_function` is true, on a server
+/// that drops custom tools when `custom_tools_dropped` is.
+pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool, custom_tools_dropped: bool) -> Vec<Value> {
+    let orphaned: Vec<bool> =
+        tools.iter().map(|tool| custom::is_orphaned_wait(tool, &tools, exec_as_function, custom_tools_dropped)).collect();
     let mut taken: HashSet<String> = tools
         .iter()
         .filter(|tool| tool["type"] != "namespace")
@@ -70,7 +76,10 @@ pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool) -> Vec<Value> {
         .collect();
     let mut flat = Vec::with_capacity(tools.len());
     let mut map = names().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    for tool in tools {
+    for (tool, orphaned) in tools.into_iter().zip(orphaned) {
+        if orphaned {
+            continue;
+        }
         let namespace = tool["name"].as_str().unwrap_or_default().to_string();
         let inner = match &tool["tools"] {
             Value::Array(inner) if tool["type"] == "namespace" && namespace.starts_with(MCP_PREFIX) => inner.clone(),
@@ -107,7 +116,8 @@ pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool) -> Vec<Value> {
 /// namespace, or one that does not parse, is returned as it came (the same allocation, so
 /// Codex's request comparison still sees it unchanged).
 pub fn flatten_raw(tools: Arc<RawValue>) -> Arc<RawValue> {
-    if !tools.get().contains(MCP_PREFIX) && !(exec_as_function() && tools.get().contains("\"custom\"")) {
+    let custom = (exec_as_function() || custom_tools_dropped()) && tools.get().contains("\"custom\"");
+    if !tools.get().contains(MCP_PREFIX) && !custom {
         return tools;
     }
     let Ok(list) = serde_json::from_str::<Vec<Value>>(tools.get()) else { return tools };

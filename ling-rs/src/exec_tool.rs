@@ -12,6 +12,11 @@
 //! [`ENV`] overrides the choice for a benchmark arm: `freeform` sends Codex's custom tool as it is
 //! (the off arm of the Code Mode A/B: on SGLang the model then never sees `exec`), `function`
 //! translates even on ling-engine.
+//!
+//! Where `exec` stays custom on a server that drops it (`freeform` on SGLang or vLLM), Code Mode's
+//! `wait` is left out of the request too: alone, it can only fail ("exec cell … not found"), and
+//! the model passed it `exec_command`'s ids instead of polling with `write_stdin`
+//! (`ling_tools::custom::is_orphaned_wait`).
 
 use crate::ServedModel;
 
@@ -29,9 +34,11 @@ pub fn as_function(model: &ServedModel, setting: Option<&str>) -> bool {
     }
 }
 
-/// Sets this process's choice, before Codex sends its first request.
+/// Sets this process's choice, before Codex sends its first request: the form of `exec`, and
+/// whether the server drops custom tools (which takes `wait` out when `exec` stays custom).
 pub fn configure(model: &ServedModel) {
     ling_tools::set_exec_as_function(as_function(model, std::env::var(ENV).ok().as_deref()));
+    ling_tools::set_custom_tools_dropped(!model.runs_custom_tools());
 }
 
 #[cfg(test)]
@@ -61,5 +68,30 @@ mod tests {
         // A word the switch does not know leaves the automatic choice.
         assert!(as_function(&served("sglang"), Some("off-ish")));
         assert!(!as_function(&served(LING_ENGINE_OWNER), Some("yes")));
+    }
+
+    #[test]
+    fn wait_reaches_the_model_only_beside_an_exec_it_can_see() {
+        // Codex's two Code Mode tools, as every request carries them.
+        let tools = vec![
+            serde_json::json!({"type": "custom", "name": "exec", "description": "Run"}),
+            serde_json::json!({"type": "function", "name": "wait", "description": "Waits on a yielded `exec` cell"}),
+        ];
+        let sent = |owner: &str, setting: Option<&str>| -> Vec<String> {
+            let model = served(owner);
+            ling_tools::flatten_with(tools.clone(), as_function(&model, setting), !model.runs_custom_tools())
+                .iter()
+                .map(|tool| format!("{} {}", tool["type"].as_str().unwrap_or_default(), tool["name"].as_str().unwrap_or_default()))
+                .collect()
+        };
+        // SGLang, automatic: `exec` as a function, and `wait` for its cells.
+        assert_eq!(sent("sglang", None), ["function exec", "function wait"]);
+        // SGLang with `freeform` (the Code Mode A/B's off arm): the server drops `exec`, so `wait`
+        // is not offered alone.
+        assert_eq!(sent("sglang", Some("freeform")), ["custom exec"]);
+        assert_eq!(sent("vllm", Some("freeform")), ["custom exec"]);
+        // ling-engine runs custom tools: both as Codex sends them, or both as functions.
+        assert_eq!(sent(LING_ENGINE_OWNER, None), ["custom exec", "function wait"]);
+        assert_eq!(sent(LING_ENGINE_OWNER, Some("function")), ["function exec", "function wait"]);
     }
 }
