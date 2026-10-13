@@ -85,7 +85,10 @@ def test_the_patches_stay_small():
     # 0020 grew by 217 bytes (the request hook also takes the request's input, and one line turns each
     # output item back) so Code Mode's `exec` is offered as a function on SGLang; 42,958 after.
     # Raised to 45,000 on 2026-10-14, once, by the owner, to cover three changes together: drop-first
-    # compaction (0026, ~1 KB), the sandbox fix and the coming compaction cache patch.
+    # compaction (0026, 1,039 bytes: a method on the history that hands its items and size to
+    # ling-rs/masking's `drop_first`, and three lines at the top of `run_auto_compact` that skip the
+    # summary when the drop was enough; 43,997 after), the sandbox fix and the coming compaction
+    # cache patch.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 45_000
 
 
