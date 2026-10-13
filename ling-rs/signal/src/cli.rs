@@ -636,6 +636,15 @@ fn setup_instance(args: &[String], host: &Host) -> Result<Instance, i32> {
         eprintln!("A Signal bridge named `{instance}` is already here ({trace}). `ling signal remove{name}` removes it first.");
         return Err(2);
     }
+    // §18.1 decision 5: the first instance is `default`, so a node with one bridge looks exactly as
+    // it always did. It does not say what a name given for the first one means; rather than set
+    // `default` up under another name the user typed, or a named bridge with no `default`, refused.
+    if !instance.is_first() && host.instances().is_empty() {
+        eprintln!("This node has no Signal bridge yet, and the first one is always `default` (it keeps the names a");
+        eprintln!("single bridge has). Run plain `ling signal setup` first; `ling signal setup --name {instance}` then");
+        eprintln!("adds `{instance}` beside it.");
+        return Err(2);
+    }
     Ok(instance)
 }
 
@@ -1327,6 +1336,28 @@ mod tests {
         std::fs::write(enabled.0.join("etc/systemd/system/multi-user.target.wants/mightling-signal@work.service"), "").unwrap();
         assert_eq!(run(&args(&["setup", "--name", "work", "--dry-run"]), &enabled.invocation()), 2);
         assert_eq!(run(&args(&["setup", "--name", "home", "--dry-run"]), &enabled.invocation()), 0);
+    }
+
+    #[test]
+    fn the_first_bridge_is_default_so_a_named_first_one_is_refused() {
+        // §18.1 decision 5: on a node with no bridge, `--name work` would make a named first bridge
+        // and no `default`; refused, pointing at plain `setup`. Nothing is made.
+        let empty = Node::new("first-named");
+        assert_eq!(run(&args(&["setup", "--name", "work", "--dry-run"]), &empty.invocation()), 2);
+        assert_eq!(run(&args(&["setup", "--name", "work", "--number", "+15551234567", "--dry-run"]), &empty.invocation()), 2);
+        assert!(empty.host().instances().is_empty());
+        // Plain `setup`, or naming `default` itself, sets up the first one.
+        assert_eq!(run(&args(&["setup", "--dry-run"]), &empty.invocation()), 0);
+        assert_eq!(run(&args(&["setup", "--name", "default", "--dry-run"]), &empty.invocation()), 0);
+        // Beside `default` a name is what is wanted.
+        let first = Node::new("first-there").with("default");
+        assert_eq!(run(&args(&["setup", "--name", "work", "--dry-run"]), &first.invocation()), 0);
+        // With `default` removed and a further bridge left, the node is not empty: another name is fine.
+        let left = Node::new("first-gone").with("work");
+        assert_eq!(run(&args(&["setup", "--name", "home", "--dry-run"]), &left.invocation()), 0);
+        // A half-removed further bridge still gets the `remove` hint, not this one.
+        let half = Node::new("first-half").account("mightling-signal-work");
+        assert_eq!(run(&args(&["setup", "--name", "work", "--dry-run"]), &half.invocation()), 2);
     }
 
     #[test]
