@@ -230,6 +230,27 @@ def last_response_item(records: list[dict[str, Any]]) -> dict[str, Any] | None:
     return None
 
 
+def turn_end_compaction_showing(records: list[dict[str, Any]], shown_ms: int | None) -> bool:
+    """Whether the compaction on screen is a turn-end one: the newest response item is an assistant
+    message written before "Compacting context" appeared.
+
+    A mid-turn compaction also ends in an assistant message, its summary, written as the compaction
+    finishes; the marker can still be on screen then. On 2026-10-13 the probe took that summary for a
+    final answer and typed the next turn into the middle of one (night-shift-on-1).
+
+    Args:
+        records: The rollout read so far.
+        shown_ms: When the marker was first seen for this compaction (epoch milliseconds).
+
+    Returns:
+        bool: True for a turn-end compaction.
+    """
+    last = last_response_item(records)
+    if last is None or not is_final_answer(last) or shown_ms is None:
+        return False
+    return last.get("_ms") is not None and last["_ms"] < shown_ms
+
+
 def context_tokens(record: dict[str, Any]) -> tuple[int, int] | None:
     """`(input, total)` of a `token_count` event's last usage, or None for another record."""
     if _event(record) != "token_count":
@@ -1064,15 +1085,19 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
             events.append({"t": time.time(), "event": "turn", "index": index})
             session.type_text(texts[index])
             index += 1
-            consumed = {"next": index}
+            consumed = {"next": index, "shown_ms": None, "seen_ms": None}
 
             def maybe_probe() -> None:
-                # Fire once per session, only on a turn-end compaction (the turn's last output is an
-                # assistant message) and only when a scripted turn is left to type.
+                # Fire once per session, only on a turn-end compaction (the turn's last output, written
+                # before "Compacting context" appeared, is an assistant message) and only when a
+                # scripted turn is left to type.
+                now_ms = int(time.time() * 1000)
+                if consumed["seen_ms"] is None or now_ms - consumed["seen_ms"] > 3000:
+                    consumed["shown_ms"] = now_ms  # a new compaction on screen
+                consumed["seen_ms"] = now_ms
                 if probe or plan.probe_key is None or consumed["next"] >= len(texts):
                     return
-                last = last_response_item(tail.records)
-                if last is None or not is_final_answer(last):
+                if not turn_end_compaction_showing(tail.records, consumed["shown_ms"]):
                     return
                 (plan.root / "probe-screen.txt").write_text(session.text())
                 text = texts[consumed["next"]]
