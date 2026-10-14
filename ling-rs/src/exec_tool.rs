@@ -62,4 +62,13 @@ mod tests {
         assert!(as_function(&served("sglang"), Some("off-ish")));
         assert!(!as_function(&served(LING_ENGINE_OWNER), Some("yes")));
     }
+
+    #[test]
+    fn the_night_6_fixes_switch_is_one_variable_in_both_crates() {
+        // The ledger hook is its own process and reads the variable itself: one name, one reading.
+        assert_eq!(crate::ledger::CODE_MODE_FIXES_ENV, ling_tools::custom::FIXES_ENV);
+        for value in [None, Some(""), Some("on"), Some("off"), Some(" OFF ")] {
+            assert_eq!(crate::ledger::code_mode_fixes_on(value), ling_tools::custom::fixes_on_from(value), "{value:?}");
+        }
+    }
 }
