@@ -11,7 +11,7 @@
 # REFINE=1, which adds `--refine` to both arms: set it when refine has become the default, so the
 # night tests tests-v2 on top of what users run.
 #
-#   scripts/swe_bench_night1.sh start   checks, then runs `run` as the user unit ling-swe-night1
+#   scripts/swe_bench_night1.sh start   checks, smokes every arm, then runs `run` as the user unit ling-swe-night1
 #   scripts/swe_bench_night1.sh run     the night itself (what the unit runs)
 #
 # The nights run on this machine alone (`nodes = "none"`, the owner's decision of 2026-10-10): a paired
@@ -43,6 +43,16 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
 REFINE=${REFINE:-0}
+# The per-task time limit (`[swe_bench] task_timeout`, e.g. 60m); the runner's default (45m) when unset.
+TASK_TIMEOUT=${TASK_TIMEOUT:-}
+# The smoke check `start` runs before the unit (mandatory, the owner's decision of 2026-10-14, after
+# night 5's candidate arm failed at startup on all 44 tasks and its round still exited 0): one real
+# task per arm, with the arm's exact settings and a short time limit, against the model server. A
+# known-easy validated task (the harness's own agent-smoke task, resolved in 1-3 min by every arm of
+# nights 4-6), kept out of every fresh list by construction. Its image stays on disk for the next
+# night's smoke.
+SMOKE_INSTANCE=${SMOKE_INSTANCE:-sympy__sympy-13480}
+SMOKE_TIMEOUT=${SMOKE_TIMEOUT:-6m}
 # The two arms, record first (night 1: default against tests-v2; night 3: night 1's winner against it plus
 # issue-v1, the record arm winning a tie; night 4: the record arm against `restart-2`; night 5: the
 # record arm against `apply-patch-function`; night 6, the Code Mode A/B: `exec-tool-freeform`, exec
@@ -78,6 +88,42 @@ arm_flags() {
 }
 arm_name() { echo "$1" | tr ,+ --; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
+
+# The smoke check: one real task per arm (SMOKE_INSTANCE), with the night's settings and the arm's
+# own options, under SMOKE_TIMEOUT and without nudges, against the model server, from the worktree
+# the unit will run. It refuses (exit 1, a ❌ line) when an arm's agent errors, exits non-zero or
+# never gets an answer from the model; a wrong or empty patch is fine. Judged from the run's files
+# by SweBenchArmSmoke, never from the round's exit status alone (night 5's exited 0). Each smoke is
+# a run of its own (`<PREFIX>-smoke-<arm>-<time>`: a reused name would resume a finished run and
+# run nothing); its config and output are kept in $SMOKE_DIR.
+smoke() {
+    local arm name extra run rc stamp
+    stamp=$(date +%Y%m%d-%H%M%S)
+    SMOKE_DIR=${SMOKE_DIR:-$(dirname "$D")/smoke/$PREFIX-$stamp}
+    mkdir -p "$SMOKE_DIR" || return 1
+    { cat "$WT/dreamference.toml"
+      printf '\n[swe_bench]\nmax_parallel = 1\ndisk_reserve = "%sG"\nnodes = "none"\ntask_timeout = "%s"\nnudges = 0\n' \
+          "$RESERVE_GB" "$SMOKE_TIMEOUT"; } > "$SMOKE_DIR/dreamference.toml"
+    for arm in $ARMS; do
+        name=$(arm_name "$arm")
+        extra=$(arm_flags "$arm") || return 2
+        [ "$REFINE" = 1 ] && extra="$extra --refine"
+        run="$PREFIX-smoke-$name-$stamp"
+        echo "🔥 Smoke check of arm $arm: $SMOKE_INSTANCE as run $run (limit $SMOKE_TIMEOUT)..."
+        ( cd "$WT" && export PYTHONPATH="$WT" DREAMFERENCE_CONFIG_PATH="$SMOKE_DIR/dreamference.toml" &&
+          timeout -s INT -k 2m 25m "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" \
+              swe-bench run --instances "$SMOKE_INSTANCE" --name "$run" --code-index universal --mask off \
+              --prompt default $extra --label "night $NIGHT smoke, $name arm" ) > "$SMOKE_DIR/$name.log" 2>&1
+        rc=$?
+        ( cd "$WT" && PYTHONPATH="$WT" "$PY" -c "import sys; from dreamference.swe_bench.swe_bench_arm_smoke import SweBenchArmSmoke; sys.exit(SweBenchArmSmoke.check(sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]))" \
+            "$run" "$SMOKE_INSTANCE" "$rc" "$arm" )
+        if [ $? -ne 0 ]; then
+            tail -5 "$SMOKE_DIR/$name.log" | sed 's/^/   /'
+            echo "❌ Night $NIGHT not started: arm $arm failed its smoke check (log: $SMOKE_DIR/$name.log)."
+            return 1
+        fi
+    done
+}
 
 start() {
     if systemctl --user is-active --quiet "$LIVE_UNIT"; then
@@ -154,17 +200,20 @@ start() {
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
     fi
+    # Every arm runs one real task first; nothing below happens unless each one ran.
+    smoke || exit 1
     # A finished or failed night keeps its folder; this one starts clean.
     if [ -e "$D/done" ] || [ -e "$D/failed" ]; then
         aside="$D.$(date +%Y%m%d-%H%M%S)"
         mv "$D" "$aside" && echo "ℹ️  Previous night moved to $aside"
     fi
     mkdir -p "$D"
-    { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\nnodes = "none"\n' "$RESERVE_GB"; } \
+    { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\nnodes = "none"\n' "$RESERVE_GB"
+      [ -n "$TASK_TIMEOUT" ] && printf 'task_timeout = "%s"\n' "$TASK_TIMEOUT"; } \
         > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: $(echo $ARMS | sed 's/ / against /')" \
-        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" \
+        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
 }
@@ -185,7 +234,7 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], refine $REFINE"
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
     # ARMS names the two arms: the record arm first, then the candidate (spelling: `arm_flags`).
     set -- $ARMS
     record=$1; candidate=$2
