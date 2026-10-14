@@ -81,6 +81,8 @@ ferrisetw = "1.2"
 clap = { workspace = true, features = ["derive"] }
 # Codex's own hook types, to check the trust hashes the launcher computes (refine.rs's tests).
 codex-config = { workspace = true }
+# Codex's catalog type, to check every catalog the launcher writes is one Codex accepts.
+codex-protocol = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tar = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

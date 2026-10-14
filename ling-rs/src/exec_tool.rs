@@ -6,8 +6,8 @@
 //! offers `exec` as a function on every server that is not ling-engine and turns the model's call
 //! back into the custom tool call Codex expects (the leaf crate `ling-rs/tools`, through patch
 //! 0020's hooks). The test is the one the catalog's `apply_patch` gate uses:
-//! [`ServedModel::runs_custom_tools`]. `apply_patch` is not touched here; it keeps its own switch
-//! ([`crate::APPLY_PATCH_ENV`]).
+//! [`ServedModel::runs_custom_tools`]. `apply_patch` is not decided here; it keeps its own switch
+//! ([`crate::APPLY_PATCH_ENV`], [`crate::apply_patch_as_function`]).
 //!
 //! [`ENV`] overrides the choice for a benchmark arm: `freeform` sends Codex's custom tool as it is
 //! (the off arm of the Code Mode A/B: on SGLang the model then never sees `exec`), `function`
