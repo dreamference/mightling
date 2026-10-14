@@ -15,20 +15,30 @@ the commit overlap): ~101 ms. Where it goes, and which kind of time it is:
 
 | Component | ms | Kind | What a megakernel's first build does to it |
 | --- | --- | --- | --- |
-| NVFP4 and FP8 weight GEMMs, 16 GB | ~86 | bus-bound (233–244 of 273 GB/s) | removes ramps and tails; 90–93% of bus is the realistic ceiling |
+| NVFP4 and FP8 weight GEMMs, 17.6 GB | ~80 | bus-bound: step-average ~220 GB/s (17.6 GB / 80 ms) against 233–244 GB/s steady inside one kernel (B16) | the gap between those two rates, 5–8 ms, is the bubble ceiling Z; B08's trace says how much of Z is idle bus |
 | Attention over the KV cache | ~11 | bus-bound (~2.2 GB of BF16 KV at ~205 GB/s) | nothing: it needs the same bytes per second the weights need |
 | DeltaNet recurrence, conv, gating | ~3 | latency-bound, bus idle | overlaps with the weight stream on spare SMs |
 | Norms, β/α projections, conversions, top-k | ~4 | latency-bound | overlaps |
 | Drafter (5 layers, 1.55 GB, its attention) | ~7–10 | serial: needs the commit before, the verify after | bubbles removed inside it; nothing else |
 | Host: lattice walk, accept, graph launches | <1 | serial | unchanged while draft, verify and commit stay three kernels |
 
-Two facts fix the floor. The bus delivers 257–259 GB/s with the production server resident and
-262–264 bare (`reports/micro-2026-10-10.md`, measured); and a read stream from **8 SMs already
-reaches 257 GB/s** (measured), so the other 40 SMs are free for anything that is not bytes. The
-exact floor of the step is therefore the bytes it must move, 16 GB of weights plus 2.2 GB of KV plus
-the drafter's 1.55 GB, about **75 ms at 262 GB/s**, plus the serial parts no overlap removes. Every
-exact lever below moves the step from the low 90s toward the low 80s; only the non-exact levers
-(fewer bytes) move the floor itself.
+Three facts fix the floor. The bus delivers 257–259 GB/s with the production server resident and
+262–264 bare (`reports/micro-2026-10-10.md`, measured), and on unified memory the host's own traffic
+(ling-serve, the tokenizer, the agent process) shares it, so the loaded figure is the one to plan
+with (RESEARCH §16.8). A read stream from **8 SMs already reaches 257 GB/s** (measured), so the
+other 40 SMs are free for anything that is not bytes. And the bytes are known
+(`specs/DREAMFERENCE_LING_ENGINE_MODEL.md` §5.2): 17.6 GB of target weights per pass (NVFP4 FFN
+and head 10.35, FP8 projections 7.2), the drafter's 1.55 + 0.16 GB, ~2.2 GB of BF16 KV at 35K
+(64 KB per token), 0.3 GB of DeltaNet state: **~21.8 GB per step, 83 ms at 262 GB/s and 85 ms at
+257**. The weights alone are 67 ms. That is the exact floor; every exact lever below moves the step
+from the low 90s toward it, and only the non-exact levers (fewer bytes) move the floor itself.
+
+The quantity to measure first is Z, the bubble ceiling inside the GEMM component: bytes divided by
+the step-average rate minus bytes divided by the steady per-kernel rate (17.6 GB at 220 versus
+233–244 GB/s gives 5–8 ms). A megakernel can recover at most Z plus the ~1 ms of idle the trace
+shows between kernels plus whatever latency-bound work it overlaps; B08's trace (`bench/profile/
+step_breakdown.py`) splits Z into idle bus, ramps and small-matrix inefficiency, and only the first
+two are the megakernel's.
 
 ## 2. The levers
 
@@ -97,11 +107,18 @@ Replace whole-tensor waits with chunked counters so a consumer starts on the par
   prefetching the *next* layer's weights gained 1.7% "because the lines got evicted before use".
 - **Here.** DeltaNet recurrence, conv, gating, the norms, the β/α projections, the FP16 conversions
   and the top-k are ~7 ms of bus-idle time per step; running them on SMs that are not streaming
-  weights hides most of it, ~3–5 ms. The attention is **not** in this set: its KV read is bytes, and
-  interleaving it with the weight stream only shares the bus. What does help the attention is the
-  B07 split (more warps per key range) and, later, FP8 KV (2.7).
+  weights hides most of it, ~3–5 ms. The attention's KV read is bytes and cannot be hidden, but the attention
+  phase has **bus slack**: it runs at ~205 GB/s against ~257 achievable, so for ~11 ms per step a
+  fifth of the bus is idle. The worklog kernel's biggest prefetch win (−9.5%) was exactly this: SMs
+  idle during attention issuing L2 prefetches of *this* layer's remaining weights. Here the attention
+  layers' o-projection and the FFN that follows can stream into L2 during the attention, bounded by
+  what L2 can hold without evicting the KV tiles in flight (the 25 MB L2 holds ~2 ms of weights at
+  257 GB/s, so the distance is short). Worth ~2 ms, exact. What helps the attention's own rate is
+  the B07 split (more warps per key range) and, later, FP8 KV (2.7).
 - **Decides.** Nsight Compute `dram__bytes_read` per instruction class from the timings store's
-  window: a class that moves few bytes but takes long is overlap material.
+  window: a class that moves few bytes but takes long is overlap material; and the bus rate during
+  the attention instructions alone (bytes of KV read over their span), whose gap to 257 GB/s is the
+  prefetch budget.
 
 ### 2.5 Weight-stream pipeline depth, prefetch distance and L2 policy (exact)
 
@@ -122,7 +139,8 @@ Replace whole-tensor waits with chunked counters so a consumer starts on the par
 
 ### 2.6 One partitioning for the whole layer, redundant small work (exact)
 
-- **Evidence.** The worklog kernel's second-biggest win (3.90 → 3.49 ms, −10%) was letting every
+- **Evidence.** The worklog kernel's biggest single win (3.90 → 3.49 ms, −10.5%, ahead of its
+  −9.5% prefetch win) was letting every
   SM normalise its own copy of the activation in shared memory instead of two grid barriers per
   layer: "the flops were free, the `grid.sync()` plus global round-trip were not". Its remaining
   1.65× gap to graphs it attributes to a "partition mismatch": GEMVs partition by output row, norms
@@ -146,7 +164,7 @@ megakernel; it makes them compound because, once the bubbles are gone, bytes are
 | FP8 KV cache (64 → 32 KB per token) | ~1.1 GB | ~4 | non-exact (§13 quality gate; SGLang serves BF16 KV) | RESEARCH §16, not scheduled |
 | NVFP4 for the FP8 projections (DeltaNet in/out, attention q/k/v/o: 7.2 GB → ~4.0) | ~3.2 GB | ~12 | non-exact; the ARCHITECTURE precision map allows it only where the quality gate passes, group by group | the re-quant item is the drafter first |
 | B26 6-bit scale codes | small (scales are 1/16 of values) | <1 | exact decode of a re-encoded tensor | built, measuring |
-| Drafter in BF16 (accepts more) | −1.55 GB (costs ~6 ms) | −6, repaid only by acceptance | the owner's decision: re-quantize NVFP4 better instead | in progress |
+| Drafter in BF16 (accepts more) | +1.55 GB (BF16 doubles the drafter's bytes) | +6, repaid only by acceptance | the owner's decision: re-quantize NVFP4 better instead | in progress |
 
 The second row is the single largest lever left anywhere in the step, and it is a quality
 question, not a kernel question: the paper's §13 gate on GPQA, LiveCodeBench and IFBench subsets
@@ -172,8 +190,8 @@ decides it per projection group.
 
 ### 2.9 Device-side decisions and a resident kernel (exact, low value)
 
-- **Evidence.** FlashSpec runs the accept test on the GPU so the per-token decision does not stall
-  on the CPU; SwiftSpec's kernels poll flags in global memory instead of waiting on the host; the
+- **Evidence.** FlashSpec (a Research Square preprint, not peer-reviewed) runs the accept test on
+  the GPU so the per-token decision does not stall on the CPU; SwiftSpec's kernels poll flags in global memory instead of waiting on the host; the
   Hopper utilization study puts raw dispatch at ~30% of a *kernel-per-op* decode iteration at a
   fixed 5 µs per launch, which the graph path has already removed here (idle ≤ 1 ms per step, the
   B08 gate).
@@ -233,21 +251,27 @@ decides it per projection group.
 
 ## 3. Expected cumulative effect
 
+The rows overlap: the first build, 2.2 and 2.5 all recover parts of the same Z; 2.4 and 2.6 both
+work on the same ~7 ms of latency-bound time. The table is a path toward a ceiling, not a sum, and
+the exact rows cannot pass the ~85 ms that 21.8 GB costs on the loaded bus.
+
 | Stage | Step, 1 stream | Accepted / step | tok/s | Class |
 | --- | --- | --- | --- | --- |
 | Today (graphs, PDL, B16, commit overlap) | ~101 ms | ~5 | ~49 | measured |
-| First megakernel build (bubbles, ramps, tails) | ~92–95 | 5 | ~53–54 | exact |
-| + 2.1 schedule search, 2.2 chunked deps, 2.3 cheap sync | ~88–91 | 5 | ~56 | exact |
-| + 2.4 overlap of latency-bound work, 2.6 one partitioning | ~84–87 | 5 | ~59 | exact |
-| + 2.8 cluster reductions | ~83–85 | 5 | ~60 | exact if order preserved |
-| + 2.7 FP8 KV | ~79–81 | 5 | ~63 | non-exact, quality gate |
-| + 2.7 NVFP4 projections where the gate passes | ~68–72 | 5 | ~71 | non-exact, quality gate |
-| + acceptance work (re-quantized drafter, gated copy proposer) | same | ~6–6.5 | 85–95 | separate programme |
+| First megakernel build (Z's idle bus and ramps, the inter-kernel idle) | ~93–96 | 5 | ~52–54 | exact |
+| + 2.1 schedule search, 2.2 chunked dependencies, 2.3 cheap sync | ~90–93 | 5 | ~54–56 | exact |
+| + 2.4 overlap incl. attention-phase prefetch, 2.6 one partitioning | ~87–90 | 5 | ~56–57 | exact |
+| + 2.8 cluster reductions | ~86–89 | 5 | ~57–58 | exact if order preserved; the exact floor is ~85 |
+| + 2.7 FP8 KV (−1.1 GB) | ~82–85 | 5 | ~60 | non-exact, quality gate |
+| + 2.7 NVFP4 projections where the gate passes (−3.2 GB) | ~70–73 | 5 | ~70 | non-exact, quality gate |
+| + acceptance work (re-quantized drafter, gated copy proposer) | same | ~6–6.5 | 85–93 | separate programme |
 
-The exact programme is worth about 20% on the step (101 → ~84); the byte levers another 15–20%
-behind quality gates; acceptance multiplies both. None of it reaches the 59 ms weight-only floor,
-and none of it needs to: at ~70 ms and 6.5 accepted the single stream is at ~90 tok/s, which is the
-figure the owner should hold in mind for "the end of the road" on this model and this box.
+The exact programme is worth about 15% on the step (101 → ~87); the byte levers another 15–20%
+behind quality gates; acceptance multiplies both. None of it reaches the 67 ms weight-only floor,
+and none of it needs to: at ~71 ms and 6.5 accepted the single stream is at ~90 tok/s, which is the
+figure to hold in mind for "the end of the road" on this model and this box. **For the owner:** a
+megakernel alone takes the single stream from 49 to about 52–56 tok/s; with every exact lever
+~57–58; with FP8 KV and NVFP4 projections ~70; with the drafter work on top 85–93.
 
 ## 4. The order, and the loop that runs it
 
