@@ -75,7 +75,7 @@ class Rollout:
             "last_token_usage": {"input_tokens": input_tokens, "output_tokens": total - input_tokens, "total_tokens": total},
             "model_context_window": 249_036})
 
-    def compaction(self, turn, wall_ms, summary="Summary.", before=70_000, after=8_000, record_summary=True):
+    def compaction(self, turn, wall_ms, summary="Summary.", before=70_000, after=8_000, record_summary=True, cached=0):
         """A compaction: mid-turn/pre-turn ones record their summary first; post-turn ones do not."""
         started = self.now + 1
         self.now += wall_ms
@@ -85,7 +85,8 @@ class Rollout:
         self.tokens(before, before + 300, after_ms=1)
         self.add("compacted", {"message": "Prefix\n" + summary, "compaction_response_id": "resp-c",
                                "latest_token_usage_record": {"response_id": "resp-c",
-                                                             "usage": {"input_tokens": before, "output_tokens": 300}}}, 1)
+                                                             "usage": {"input_tokens": before, "cached_input_tokens": cached,
+                                                                       "output_tokens": 300}}}, 1)
         self.tokens(0, after, after_ms=1)
         self.event("item_completed", 1, turn_id=turn, item={"type": "ContextCompaction", "id": "x"},
                    started_at_ms=started, completed_at_ms=started + wall_ms)
@@ -356,11 +357,20 @@ def test_the_report_carries_the_decision_the_tables_and_the_runbook():
 
 
 def test_sessions_alternate_arm_order_and_probe_keys_by_repetition(tmp_path):
-    plans = bench.plans_for(["night-shift", "click"], 2, tmp_path, ["enter", "tab"])
+    plans = bench.plans_for(["night-shift", "click"], 2, tmp_path, ["enter", "tab"], ("off", "on"))
     assert [plan.label for plan in plans] == [
         "night-shift-off-1", "night-shift-on-1", "click-off-1", "click-on-1",
         "night-shift-on-2", "night-shift-off-2", "click-on-2", "click-off-2"]
     assert [plan.probe_key for plan in plans] == [None, "enter", None, "enter", "tab", None, "tab", None]
+
+
+def test_v2_runs_twelve_sessions_three_arms_and_probes_both_turn_end_arms(tmp_path):
+    plans = bench.plans_for(["night-shift", "click"], 2, tmp_path, ["enter", "tab"])
+    assert [plan.label for plan in plans] == [
+        "night-shift-off-1", "night-shift-on-1", "night-shift-drop-1", "click-off-1", "click-on-1", "click-drop-1",
+        "night-shift-drop-2", "night-shift-on-2", "night-shift-off-2", "click-drop-2", "click-on-2", "click-off-2"]
+    assert [plan.probe_key for plan in plans] == [None, "enter", "enter", None, "enter", "enter",
+                                                  "tab", "tab", None, "tab", "tab", None]
 
 
 def test_a_session_runs_in_throwaway_homes_with_masking_off_and_the_arm_on_the_command_line(tmp_path, monkeypatch):
@@ -378,6 +388,23 @@ def test_a_session_runs_in_throwaway_homes_with_masking_off_and_the_arm_on_the_c
         "-a", "never", "-s", "workspace-write", "-c", "model_auto_compact_token_limit=94144",
         "-c", "model_post_turn_compact_threshold_percent=26"]
     assert bench.session_args("off", 94_144, 26, "workspace-write")[-1] == "model_post_turn_compact_threshold_percent=0"
+
+
+def test_v2_arms_differ_only_in_their_two_switches_and_all_cap_the_summary(tmp_path, monkeypatch):
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS", "1")
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_COMPACTION_TOOLS", "0")
+    switches = {}
+    for arm in bench.ARMS:
+        plan = bench.SessionPlan(bench.TASKS["click"], arm, 1, tmp_path / arm, None)
+        env = bench.session_env(plan, "http://node.local:8000", None, code_tools=True, docs=True)
+        switches[arm] = (env["DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION"], env["DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"],
+                         env["DREAMFERENCE_MIGHTLING_COMPACT_SUMMARY_WORDS"])
+        # The cache fix is on in every arm: an inherited switch-off does not reach the session.
+        assert "DREAMFERENCE_MIGHTLING_COMPACTION_TOOLS" not in env
+    assert switches == {"off": ("0", "0", "800"), "on": ("1", "0", "800"), "drop": ("1", "1", "800")}
+    assert bench.session_args("drop", 94_144, 20, "workspace-write")[-1] == "model_post_turn_compact_threshold_percent=20"
+    # The owner's threshold: 20% of the usable window.
+    assert bench.turn_end_threshold_tokens(262_144, bench.TURN_END_PERCENT_V2) == 49_808
 
 
 def test_the_bench_refuses_to_run_without_a_named_server_or_against_this_machines_own(tmp_path):
@@ -454,6 +481,87 @@ def test_the_stand_in_answers_titles_compactions_and_steers_turn_two_into_a_shel
     final = ask("DRYRUN-2 Run one command, then say done.")
     assert final[1]["item"]["type"] == "message"
     assert [request["kind"] for request in server.requests] == ["title", "turn", "turn", "compaction", "turn"]
+    assert all(request["tools"] == json.dumps(tools) for request in server.requests)
+
+
+def test_each_compactions_cache_hit_is_read_from_its_own_usage(tmp_path):
+    def build(r):
+        r.turn_start("t1")
+        r.user("Explain.")
+        r.call("ls")
+        r.tokens(90_000, 90_500)
+        r.compaction("t1", 20_000, before=90_000, cached=88_000)
+        r.assistant("Explained.")
+        r.tokens(66_000, 66_400)
+        r.compaction("t1", 30_000, before=66_000, record_summary=False)
+        r.turn_end("t1")
+
+    path, _ = _session(tmp_path, build)
+    first, second = bench.analyze_session(path, 49_808, None)["compactions"]
+    assert (first["cached_tokens"], first["input_tokens"], first["cache_hit"]) == (88_000, 90_000, 0.978)
+    assert (second["cached_tokens"], second["cache_hit"]) == (0, 0.0)
+
+
+def test_drop_first_compactions_are_read_from_their_log(tmp_path):
+    log = tmp_path / "masking" / "dropped" / "log.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("\n".join(json.dumps(entry) for entry in [
+        {"accepted": True, "outputs": 12}, {"accepted": False, "outputs": 0}, {"accepted": True, "outputs": 3}]) + "\nbroken\n")
+    assert bench.drops_of(tmp_path) == {"attempts": 3, "drops": 2, "declined": 1, "dropped_outputs": 15}
+    assert bench.drops_of(tmp_path / "nowhere")["attempts"] == 0
+    assert bench.drops_of(None)["attempts"] == 0
+
+
+def test_with_three_arms_each_turn_end_arm_is_judged_against_off():
+    on = _result("a", "on", mid=2, turn_end=(35.0,), probe=WAITED)
+    drop = _result("a", "drop", mid=0, turn_end=(30.0, 40.0), probe=WAITED)
+    for compaction in on["compactions"] + drop["compactions"]:
+        compaction["cache_hit"] = 0.97
+    drop["drops"] = {"attempts": 3, "drops": 2, "declined": 1, "dropped_outputs": 20}
+    sessions = [_result("a", "off", mid=2), on, drop]
+    table = bench.aggregate(sessions)
+    decision, lines = bench.decide(sessions, table)
+    assert decision == "on: keep off; drop: switch on", lines
+    assert any(line.startswith("**drop**") for line in lines)
+    assert any("prefix cache: median 97% of the prompt over 5 compactions, 0 below half" in line for line in lines)
+    assert table["a/drop"]["drops_per_session"] == 2 and table["a/on"]["cache_hit_mean"] == 0.97
+    text = bench.render_report({"host": "http://node.local:8000", "limit": 94_144, "percent": 20, "threshold": 49_808,
+                                "binary": {}, "summary_words": 800}, sessions)
+    assert "**Decision: on: keep off; drop: switch on.**" in text
+    assert "Compaction cache hit (mean)" in text and "| 97% |" in text
+    assert "caps the summary at 800 words" in text
+
+
+def test_the_stand_in_records_tools_and_serves_a_matching_prompt_from_its_cache():
+    server = bench.FakeModelServer(compaction_delay=0)
+    tools = [{"type": "function", "name": "exec_command"}, {"type": "function", "name": "code_def"}]
+
+    def ask(text, offered, extra=()):
+        items = [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}, *extra]
+        body = server.respond({"input": items, "tools": offered}).decode()
+        return [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+
+    compact = [{"type": "message", "role": "user", "content": [{"type": "input_text",
+                "text": "You are performing a CONTEXT CHECKPOINT COMPACTION. Keep the summary under 800 words."}]}]
+    assert ask("DRYRUN-1 Say done.", tools)[2]["response"]["usage"]["input_tokens_details"]["cached_tokens"] == 0
+    hot = ask("DRYRUN-1 Say done.", tools, compact)[2]["response"]["usage"]
+    assert hot["input_tokens_details"]["cached_tokens"] == hot["input_tokens"] - 1000
+    cold = ask("DRYRUN-1 Say done.", [], compact)[2]["response"]["usage"]
+    assert cold["input_tokens_details"]["cached_tokens"] == 0
+    # The tool-less compaction (what Codex sent before patch 0027) does not count as matching.
+    assert bench.compaction_tools_checks(server.requests) == {"compactions": 2, "matching": 1, "capped": 2}
+
+
+def test_the_binary_is_checked_for_v2s_switches(tmp_path):
+    binary = tmp_path / "bin" / "ling"
+    binary.parent.mkdir()
+    binary.write_bytes(b"\0" * (1 << 20) + b"DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION\0DREAMFERENCE_MIGHTLING_COMPACT_SUMMARY_WORDS")
+    info = bench.binary_info(binary)
+    assert info["knows_turn_end_switch"] and info["knows_summary_cap"]
+    assert not info["knows_compaction_tools"] and not info["knows_drop_old_outputs"]
+    assert not info["code_mode_host_beside"]
+    (binary.parent / "codex-code-mode-host").write_bytes(b"x")
+    assert bench.binary_info(binary)["code_mode_host_beside"]
 
 
 def test_the_stand_in_serves_models_and_metrics_on_a_loopback_port():
@@ -471,7 +579,7 @@ def test_the_stand_in_serves_models_and_metrics_on_a_loopback_port():
 @pytest.mark.installed_binary
 @pytest.mark.skipif(os.environ.get("MIGHTLING_TEC_DRY_RUN") != "1",
                     reason="drives the installed ling for ~2 min; set MIGHTLING_TEC_DRY_RUN=1")
-def test_the_driver_sees_both_kinds_of_compaction_and_the_probe_against_the_stand_in(tmp_path):
+def test_the_driver_sees_both_kinds_of_compaction_the_probe_and_the_compaction_tools_against_the_stand_in(tmp_path):
     ling = Path(os.environ.get("MIGHTLING_BIN") or bench.ling_binary(None))
     result = bench.dry_run(tmp_path / "dry", ling, compaction_delay=8.0)
     assert all(result["checks"].values()), result["checks"]

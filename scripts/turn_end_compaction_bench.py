@@ -6,7 +6,17 @@
 typed during one waits or interrupts it, and how many mid-turn compactions it saves; masking off.
 This script runs that experiment and writes `results.json` and `report.md`.
 
-Each session is the installed `ling` on a pseudo-terminal (rendered by pyte), with a throwaway
+v2 (2026-10-14). The first run (`docs/dev/turn-end-compaction/2026-10-13.md`) kept it off and found
+why compactions were slow: every compaction request missed the server's prefix cache, because Codex
+sends it without tools and the chat template puts them first. The owner approved a re-run with three
+arms, all on a `ling` built with patch 0027 (the compaction request offers the turn's tools) and with
+the summary capped at about 800 words (`DREAMFERENCE_MIGHTLING_COMPACT_SUMMARY_WORDS`, Codex's
+`compact_prompt`): `off`; `on`, turn-end compaction at 20% of the usable window (not 26); and `drop`,
+the same plus drop-old-outputs (`DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS`, patch 0026). The decision
+rule is unchanged and applied to each of `on` and `drop` against `off`; each compaction's cache hit
+(cached / input tokens of its request) is reported. The binary is always named with `--ling`.
+
+Each session is a `ling` (`--ling`) on a pseudo-terminal (rendered by pyte), with a throwaway
 CODEX_HOME and a throwaway Dreamference config file, in a scratch repository built for the task, fed
 a scripted list of user turns. Nothing reads or writes `~/.mightling` or the user's config. The two
 arms differ only in `model_post_turn_compact_threshold_percent` (0, or the launcher's value: 26 on
@@ -82,7 +92,21 @@ LIMIT_KEY: Final[str] = "model_auto_compact_token_limit"
 TURN_END_KEY: Final[str] = "model_post_turn_compact_threshold_percent"
 TURN_END_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION"
 MASK_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_MASK"
-ARMS: Final[tuple] = ("off", "on")
+# v2 (2026-10-14): three arms. "on" is turn-end compaction tuned as the owner approved (threshold 20,
+# summary capped); "drop" is the same plus drop-old-outputs (patch 0026). Every arm runs on a `ling`
+# with patch 0027 (the compaction request offers the turn's tools, so it hits the prefix cache) and
+# with the summary cap, so the arms differ only in the two switches.
+ARMS: Final[tuple] = ("off", "on", "drop")
+TURN_END_ARMS: Final[tuple] = ("on", "drop")
+ARM_TITLES: Final[dict] = {"off": "off", "on": "turn-end", "drop": "turn-end + drop old outputs"}
+DROP_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"
+DROP_LOG: Final[str] = "masking/dropped/log.jsonl"
+SUMMARY_WORDS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_COMPACT_SUMMARY_WORDS"
+COMPACTION_TOOLS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_COMPACTION_TOOLS"
+# The owner's values for v2: turn-end at 20% of the usable window (49,808 tokens on the default model,
+# not the launcher's 26 = 64,750), and a summary of about 800 words.
+TURN_END_PERCENT_V2: Final[int] = 20
+SUMMARY_WORDS: Final[int] = 800
 
 # What the TUI draws (codex-rs/tui): the composer, the busy line, the compaction status header.
 READY_MARKERS: Final[tuple] = (">_ Mightling", "›")
@@ -346,7 +370,8 @@ def compactions_of(records: list[dict[str, Any]], turns: list[dict[str, Any]] | 
     Returns:
         list[dict[str, Any]]: Per compaction: `number`, `turn_id`, `kind`, `started_ms`,
             `completed_ms`, `wall_s`, `context_before`, `context_after`, `summary_chars`,
-            `summary_output_tokens`, `stray_tool_call`.
+            `summary_output_tokens`, `input_tokens`, `cached_tokens`, `cache_hit` (cached / input of
+            the compaction request; None when the rollout holds no usage of its own), `stray_tool_call`.
     """
     turns = turns_of(records) if turns is None else turns
     items = [record for record in records if _event(record) == "item_completed"
@@ -394,6 +419,10 @@ def compactions_of(records: list[dict[str, Any]], turns: list[dict[str, Any]] | 
         prior = [tokens for other in records[:index] if other["_ms"] is not None and other["_ms"] <= started_ms
                  and (tokens := context_tokens(other)) and tokens[0] > 0]
         context_before = int(usage.get("input_tokens") or 0) if is_compaction_usage else (prior[-1][1] if prior else None)
+        # The compaction request's own usage: how much of its prompt the server's prefix cache served
+        # (on 2026-10-13, 0 in 12 of 13: the request had no tools, and the template puts them first).
+        input_tokens = int(usage.get("input_tokens") or 0) if is_compaction_usage else None
+        cached_tokens = int(usage.get("cached_input_tokens") or 0) if is_compaction_usage else None
         following = [tokens for other in records[index + 1:] if (tokens := context_tokens(other))]
         summary = str(payload.get("message", ""))
         found.append({
@@ -407,6 +436,9 @@ def compactions_of(records: list[dict[str, Any]], turns: list[dict[str, Any]] | 
             "context_after": following[0][1] if following else None,
             "summary_chars": len(summary),
             "summary_output_tokens": int(usage.get("output_tokens") or 0) if is_compaction_usage else None,
+            "input_tokens": input_tokens,
+            "cached_tokens": cached_tokens,
+            "cache_hit": round(cached_tokens / input_tokens, 3) if input_tokens else None,
             "stray_tool_call": STRAY_TOOL_CALL in summary,
         })
     return found
@@ -547,17 +579,53 @@ def audit_verdicts(rollout: Path) -> list[dict[str, Any]]:
     return verdicts
 
 
-def analyze_session(rollout: Path, threshold: int | None, probe: dict[str, Any] | None) -> dict[str, Any]:
+def drops_of(codex_home: Path | None) -> dict[str, int]:
+    """What drop-first compaction did in a session: the log `ling_masking::dropping` keeps in its
+    CODEX_HOME (`masking/dropped/log.jsonl`, one line per attempt, taken or declined).
+
+    A drop that is taken replaces a summary (no `compacted` record); a declined one lets the summary
+    run as before.
+
+    Args:
+        codex_home: The session's CODEX_HOME, or None.
+
+    Returns:
+        dict[str, int]: `attempts`, `drops` (taken), `declined`, `dropped_outputs`.
+    """
+    found = {"attempts": 0, "drops": 0, "declined": 0, "dropped_outputs": 0}
+    if codex_home is None:
+        return found
+    for name in (DROP_LOG + ".old", DROP_LOG):
+        path = codex_home / name
+        if not path.is_file():
+            continue
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            found["attempts"] += 1
+            if entry.get("accepted"):
+                found["drops"] += 1
+                found["dropped_outputs"] += int(entry.get("outputs") or 0)
+            else:
+                found["declined"] += 1
+    return found
+
+
+def analyze_session(rollout: Path, threshold: int | None, probe: dict[str, Any] | None,
+                    codex_home: Path | None = None) -> dict[str, Any]:
     """Everything the report needs from one session's rollout.
 
     Args:
         rollout: The rollout file.
         threshold: The turn-end threshold in tokens (for `missed_turn_ends`), or None.
         probe: The driver's probe note, or None when no probe was typed.
+        codex_home: The session's CODEX_HOME, for drop-first compaction's log.
 
     Returns:
         dict[str, Any]: `turns`, `compactions` (each with its audit verdict), `counts` by kind,
-            `peak_context`, `usable_window`, `missed_turn_ends`, `probe`.
+            `peak_context`, `usable_window`, `missed_turn_ends`, `probe`, `drops`.
     """
     records = read_records(rollout)
     turns = turns_of(records)
@@ -582,6 +650,7 @@ def analyze_session(rollout: Path, threshold: int | None, probe: dict[str, Any] 
         "missed_turn_ends_clear": missed_turn_ends(turns, compactions, threshold * (100 + MISSED_MARGIN_PERCENT) // 100)
         if threshold else [],
         "probe": probe_outcome(records, turns, compactions, probe) if probe else None,
+        "drops": drops_of(codex_home),
     }
 
 
@@ -886,22 +955,35 @@ def ling_binary(explicit: str | None) -> Path:
     return path
 
 
+# What v2 needs compiled in: each switch's name is a string only the code that reads it carries.
+# The compaction-tools switch is read inside ling-tools' `same_tools`, which only patch 0027 calls,
+# so the linker keeps it only when the patch is in.
+REQUIRED_SWITCHES: Final[dict] = {
+    "knows_turn_end_switch": TURN_END_ENV,
+    "knows_compaction_tools": COMPACTION_TOOLS_ENV,
+    "knows_summary_cap": SUMMARY_WORDS_ENV,
+    "knows_drop_old_outputs": DROP_ENV,
+}
+
+
 def binary_info(path: Path) -> dict[str, Any]:
-    """Which binary a session ran, and whether it knows the turn-end switch (built after 2c3ee03)."""
+    """Which binary a session ran, and which of v2's switches it knows (`REQUIRED_SWITCHES`)."""
     real = path.resolve()
     digest = hashlib.sha256()
-    knows_switch = False
+    known = {key: False for key in REQUIRED_SWITCHES}
     with real.open("rb") as handle:
         tail = b""
         while chunk := handle.read(1 << 20):
             digest.update(chunk)
-            if not knows_switch and TURN_END_ENV.encode() in tail + chunk:
-                knows_switch = True
+            for key, name in REQUIRED_SWITCHES.items():
+                if not known[key] and name.encode() in tail + chunk:
+                    known[key] = True
             tail = chunk[-64:]
     stat = real.stat()
+    host = real.with_name("codex-code-mode-host")
     return {"path": str(path), "resolved": str(real), "sha256": digest.hexdigest()[:16],
             "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-            "knows_turn_end_switch": knows_switch}
+            "code_mode_host_beside": host.is_file(), **known}
 
 
 @dataclass
@@ -919,8 +1001,11 @@ class SessionPlan:
         return f"{self.task.name}-{self.arm}-{self.rep}"
 
 
-def session_env(plan: SessionPlan, host: str, home: Path | None, code_tools: bool, docs: bool) -> dict[str, str]:
-    """The environment of one session: throwaway homes, the target server, masking off, the arm's switch."""
+def session_env(plan: SessionPlan, host: str, home: Path | None, code_tools: bool, docs: bool,
+                summary_words: int = SUMMARY_WORDS) -> dict[str, str]:
+    """The environment of one session: throwaway homes, the target server, masking off, the arm's
+    switches (turn-end for "on" and "drop", drop-old-outputs for "drop"), and the summary cap in
+    every arm (0 leaves Codex's own prompt)."""
     env = dict(os.environ)
     for key in [key for key in env if key.startswith(("DREAMFERENCE_MIGHTLING_", "CODEX_")) or key == "MIGHTLING_NODE"]:
         env.pop(key)
@@ -929,7 +1014,9 @@ def session_env(plan: SessionPlan, host: str, home: Path | None, code_tools: boo
         "DREAMFERENCE_CONFIG_PATH": str(plan.root / "dreamference.toml"),
         "DREAMFERENCE_VLLM_HOST": host,
         MASK_ENV: "0",
-        TURN_END_ENV: "1" if plan.arm == "on" else "0",
+        TURN_END_ENV: "1" if plan.arm in TURN_END_ARMS else "0",
+        DROP_ENV: "1" if plan.arm == "drop" else "0",
+        SUMMARY_WORDS_ENV: str(summary_words),
         "DREAMFERENCE_MIGHTLING_GMAIL": "0",
         "TERM": "xterm-256color",
     })
@@ -943,9 +1030,10 @@ def session_env(plan: SessionPlan, host: str, home: Path | None, code_tools: boo
 
 
 def session_args(arm: str, limit: int, percent: int | None, sandbox: str) -> list[str]:
-    """`ling`'s arguments: no approvals, the sandbox, the pinned limit and the arm's turn-end percentage."""
+    """`ling`'s arguments: no approvals, the sandbox, the pinned limit and the arm's turn-end percentage
+    (passed to Codex directly; the launcher leaves a percentage on the command line alone)."""
     return ["-a", "never", "-s", sandbox, "-c", f"{LIMIT_KEY}={limit}",
-            "-c", f"{TURN_END_KEY}={percent if arm == 'on' and percent else 0}"]
+            "-c", f"{TURN_END_KEY}={percent if arm in TURN_END_ARMS and percent else 0}"]
 
 
 def prepare_session(plan: SessionPlan, python: str, cache: Path) -> Path:
@@ -1025,7 +1113,8 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
                 sandbox: str = "workspace-write", home: Path | None = None, code_tools: bool = True,
                 docs: bool = True, turn_timeout: float = 1800, session_timeout: float = 5400,
                 think_s: float = 3.0, settle: float = 4.0, ready_timeout: float = 300,
-                turns: list[str] | None = None) -> dict[str, Any]:
+                turns: list[str] | None = None, percent: int | None = None,
+                summary_words: int = SUMMARY_WORDS, stop_by: float | None = None) -> dict[str, Any]:
     """Runs one scripted TUI session and returns its measurements.
 
     Args:
@@ -1046,20 +1135,25 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
         settle: Seconds the TUI must stay idle for a turn to count as finished.
         ready_timeout: Seconds to wait for the composer.
         turns: The user's turns (default: the task's), with `{python}` filled in.
+        percent: The turn-end percentage of the turn-end arms (default: the launcher's arithmetic).
+        summary_words: The summary cap every arm runs with (0: Codex's own prompt).
+        stop_by: A wall-clock time (epoch seconds) by which the session ends: no turn is typed after
+            it, and a running turn is interrupted at it.
 
     Returns:
         dict[str, Any]: The session's record for `results.json`.
     """
-    percent = turn_end_percent(window, limit)
+    percent = turn_end_percent(window, limit) if percent is None else percent
     threshold = turn_end_threshold_tokens(window, percent) if percent else None
     repo = prepare_session(plan, python, cache)
     texts = [turn.replace("{python}", python) for turn in (turns or plan.task.turns)]
     args = session_args(plan.arm, limit, percent, sandbox)
-    env = session_env(plan, host, home, code_tools, docs)
+    env = session_env(plan, host, home, code_tools, docs, summary_words)
     events: list[dict[str, Any]] = []
     result: dict[str, Any] = {
         "label": plan.label, "task": plan.task.name, "arm": plan.arm, "rep": plan.rep,
-        "args": args, "limit": limit, "window": window, "turn_end_percent": percent if plan.arm == "on" else 0,
+        "args": args, "limit": limit, "window": window, "turn_end_percent": percent if plan.arm in TURN_END_ARMS else 0,
+        "drop_old_outputs": plan.arm == "drop", "summary_words": summary_words,
         "turn_end_threshold": threshold, "probe_key": plan.probe_key, "repo": str(repo), "events": events,
         "binary": binary_info(ling),
         "started": datetime.now().isoformat(timespec="seconds"), "status": "running",
@@ -1079,6 +1173,9 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
         while index < len(texts):
             if time.monotonic() - begin > session_timeout:
                 result["status"] = "session timeout"
+                break
+            if stop_by is not None and time.time() >= stop_by:
+                result["status"] = "stopped at the window's end"
                 break
             session.pump(think_s)
             before = tail.count("task_started")
@@ -1107,8 +1204,9 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
                 events.append({"t": time.time(), "event": "probe", "index": consumed["next"], "key": plan.probe_key})
                 consumed["next"] += 1
 
-            outcome = wait_turns_done(session, tail, before, turn_timeout, settle,
-                                      maybe_probe if plan.arm == "on" else None, events)
+            timeout = turn_timeout if stop_by is None else max(min(turn_timeout, stop_by - time.time()), 30.0)
+            outcome = wait_turns_done(session, tail, before, timeout, settle,
+                                      maybe_probe if plan.arm in TURN_END_ARMS else None, events)
             index = consumed["next"]
             events.append({"t": time.time(), "event": "turn end", "outcome": outcome})
             if outcome in ("exited", "no start"):
@@ -1124,7 +1222,7 @@ def run_session(plan: SessionPlan, *, ling: Path, host: str, limit: int, window:
     result["probe_note"] = probe or None
     rollout = find_rollout(plan.root / "home")
     if rollout is not None:
-        result.update(analyze_session(rollout, threshold, probe or None))
+        result.update(analyze_session(rollout, threshold, probe or None, plan.root / "home"))
         typed = sorted({event["index"] for event in events if event["event"] in ("turn", "probe")})
         result["inputs_missing"] = inputs_missing(read_records(rollout), {index: texts[index] for index in typed})
         result["inputs_intact"] = not result["inputs_missing"]
@@ -1154,6 +1252,11 @@ class FakeModelServer:
     94,144 limit), the first request of `DRYRUN-2` answers with a shell call and 100,000 tokens (above
     the limit: a mid-turn compaction follows the call), and a compaction request (recognised by
     Codex's compaction prompt) is answered after `compaction_delay` seconds, so a probe can be typed.
+
+    Every request's `tools` are recorded whole, in order, so the dry run can check that a compaction
+    request offers exactly the tools of the turn request before it (patch 0027). A stand-in for the
+    prefix cache: a request whose tools are those of the previous request reports all but 1,000 of
+    its input tokens as cached, any other none, so the report's cache-hit column is exercised.
     """
 
     def __init__(self, compaction_delay: float = 8.0, window: int = DEFAULT_WINDOW):
@@ -1216,10 +1319,10 @@ class FakeModelServer:
             self.httpd.server_close()
 
     @staticmethod
-    def sse(item: dict[str, Any], input_tokens: int, output_tokens: int) -> bytes:
+    def sse(item: dict[str, Any], input_tokens: int, output_tokens: int, cached_tokens: int = 0) -> bytes:
         """One streamed response holding `item`, with the given usage."""
         rid = f"resp-{time.time_ns()}"
-        usage = {"input_tokens": input_tokens, "input_tokens_details": {"cached_tokens": 0},
+        usage = {"input_tokens": input_tokens, "input_tokens_details": {"cached_tokens": cached_tokens},
                  "output_tokens": output_tokens, "output_tokens_details": {"reasoning_tokens": 0},
                  "total_tokens": input_tokens + output_tokens}
         events = [{"type": "response.created", "response": {"id": rid}},
@@ -1251,11 +1354,15 @@ class FakeModelServer:
         items = request.get("input") or []
         tail_text = json.dumps(items[-2:])
         received = round(time.time(), 2)
+        tools = json.dumps(request.get("tools") or [])
         if TITLE_REQUEST_MARK in json.dumps(items[-1:]):
             # Codex's side request for the session's title: answered, not counted as a turn's request.
             with self.lock:
-                self.requests.append({"t": received, "kind": "title"})
+                self.requests.append({"t": received, "kind": "title", "tools": tools})
             return self.sse(self.message("Dry run"), 500, 5)
+        with self.lock:
+            previous = next((r["tools"] for r in reversed(self.requests) if r["kind"] != "title"), None)
+        cache = (lambda tokens: max(tokens - 1000, 0)) if previous == tools else (lambda tokens: 0)
         key = ""
         for item in reversed(items):
             if isinstance(item, dict) and item.get("role") == "user":
@@ -1266,7 +1373,8 @@ class FakeModelServer:
         with self.lock:
             self.requests.append({"t": received, "kind": "compaction" if COMPACTION_PROMPT_MARK in tail_text else "turn",
                                   "key": key, "items": [str(item.get("role") or item.get("type"))
-                                                        for item in items if isinstance(item, dict)]})
+                                                        for item in items if isinstance(item, dict)],
+                                  "tools": tools, "tail": tail_text[-400:]})
             if COMPACTION_PROMPT_MARK in tail_text:
                 compaction = True
             else:
@@ -1276,20 +1384,46 @@ class FakeModelServer:
         if compaction:
             time.sleep(self.compaction_delay)
             return self.sse(self.message("Summary: the user asked for short answers; one command ran, `echo dry-run`."),
-                            70_000, 200)
+                            70_000, 200, cache(70_000))
         if key == "DRYRUN-1":
-            return self.sse(self.message("done"), 70_000, 50)
+            return self.sse(self.message("done"), 70_000, 50, cache(70_000))
         if key == "DRYRUN-2" and count == 1:
             call = self.shell_call(request)
             if call is not None:
-                return self.sse(call, 100_000, 30)
+                return self.sse(call, 100_000, 30, cache(100_000))
         if key == "DRYRUN-2":
-            return self.sse(self.message("done"), 20_000, 20)
-        return self.sse(self.message("goodbye"), 5_000, 10)
+            return self.sse(self.message("done"), 20_000, 20, cache(20_000))
+        return self.sse(self.message("goodbye"), 5_000, 10, cache(5_000))
+
+
+def compaction_tools_checks(requests: list[dict[str, Any]]) -> dict[str, Any]:
+    """Whether each compaction request offered exactly the tools of the turn request before it.
+
+    Args:
+        requests: What `FakeModelServer` recorded, in order.
+
+    Returns:
+        dict[str, Any]: `compactions` (how many), `matching` (how many offered the previous turn
+            request's tools, same order, not empty), `capped` (how many carry the summary bound).
+    """
+    compactions = matching = capped = 0
+    last_turn_tools = None
+    for request in requests:
+        if request["kind"] == "turn":
+            last_turn_tools = request.get("tools")
+        elif request["kind"] == "compaction":
+            compactions += 1
+            tools = request.get("tools")
+            if tools and tools != "[]" and tools == last_turn_tools:
+                matching += 1
+            if f"under {SUMMARY_WORDS} words" in request.get("tail", ""):
+                capped += 1
+    return {"compactions": compactions, "matching": matching, "capped": capped}
 
 
 def dry_run(out: Path, ling: Path, compaction_delay: float = 8.0, probe_key: str = "enter") -> dict[str, Any]:
-    """Both arms against `FakeModelServer`, with a throwaway HOME: proves the driver, not the model.
+    """Every arm against `FakeModelServer`, with a throwaway HOME: proves the driver and the binary's
+    switches, not the model.
 
     Args:
         out: Where the sessions go (avoid `/tmp`: Codex refuses its helper links under a temporary
@@ -1300,7 +1434,8 @@ def dry_run(out: Path, ling: Path, compaction_delay: float = 8.0, probe_key: str
 
     Returns:
         dict[str, Any]: `sessions` (each session's record), `requests` (what the stand-in was asked),
-            `tools` (the tool names it was offered) and `checks` (name to bool).
+            `tools` (the tool names it was offered), `compaction_tools` (per arm,
+            `compaction_tools_checks`) and `checks` (name to bool).
     """
     home = out / "fake-home"
     home.mkdir(parents=True, exist_ok=True)
@@ -1313,31 +1448,51 @@ def dry_run(out: Path, ling: Path, compaction_delay: float = 8.0, probe_key: str
         server = FakeModelServer(compaction_delay=compaction_delay)
         host = server.start()
         try:
-            plan = SessionPlan(task, arm, 1, out / f"dry-run-{arm}-1", probe_key if arm == "on" else None)
+            plan = SessionPlan(task, arm, 1, out / f"dry-run-{arm}-1", probe_key if arm in TURN_END_ARMS else None)
+            # The fake's 70,000-token answer to DRYRUN-1 must cross the turn-end threshold: the
+            # launcher's 26 (64,750), as in v1; v2's 20 (49,808) lies below it too.
             sessions.append(run_session(plan, ling=ling, host=host, limit=DEFAULT_LIMIT, window=DEFAULT_WINDOW,
                                         python=sys.executable, cache=out / "sources", home=home, code_tools=False,
                                         docs=False, turn_timeout=120, session_timeout=600, think_s=1.0, settle=3.0,
-                                        ready_timeout=120))
+                                        ready_timeout=120, percent=TURN_END_PERCENT_V2))
         finally:
             server.stop()
         requests[arm] = server.requests
         tools = server.tools or tools
         (plan.root / "session.json").write_text(json.dumps(sessions[-1], indent=1, default=str))
-    off, on = sessions
+    by_arm = {session["arm"]: session for session in sessions}
+    off = by_arm.get("off", {})
+    tool_checks = {arm: compaction_tools_checks(requests.get(arm, [])) for arm in ARMS}
     checks = {
-        "both sessions reached the composer and finished": all(s["status"] == "complete" for s in sessions),
+        "every session reached the composer and finished": all(s["status"] == "complete" for s in sessions),
         "off: no turn-end compaction": off.get("counts", {}).get("turn-end", -1) == 0,
         "off: a mid-turn compaction": off.get("counts", {}).get("mid-turn", 0) >= 1,
-        "on: a turn-end compaction": on.get("counts", {}).get("turn-end", 0) >= 1,
-        "on: a mid-turn compaction": on.get("counts", {}).get("mid-turn", 0) >= 1,
-        "on: every compaction timed": all(c["wall_s"] is not None for c in on.get("compactions", [])),
-        "on: the probe was typed during a turn-end compaction": bool(on.get("probe"))
-        and on["probe"]["compaction_kind"] == "turn-end",
-        "on: the probe's message was not lost": bool(on.get("probe")) and on["probe"]["delivered"],
+    }
+    for arm in TURN_END_ARMS:
+        on = by_arm.get(arm, {})
+        checks.update({
+            f"{arm}: a turn-end compaction": on.get("counts", {}).get("turn-end", 0) >= 1,
+            f"{arm}: a mid-turn compaction": on.get("counts", {}).get("mid-turn", 0) >= 1,
+            f"{arm}: every compaction timed": all(c["wall_s"] is not None for c in on.get("compactions", [])),
+            f"{arm}: the probe was typed during a turn-end compaction": bool(on.get("probe"))
+            and on["probe"]["compaction_kind"] == "turn-end",
+            f"{arm}: the probe's message was not lost": bool(on.get("probe")) and on["probe"]["delivered"],
+        })
+    checks.update({
+        "every compaction request offers the tools of the turn request before it, same order (patch 0027)":
+            all(t["compactions"] >= 1 and t["matching"] == t["compactions"] for t in tool_checks.values()),
+        f"every compaction request carries the {SUMMARY_WORDS}-word bound (compact_prompt)":
+            all(t["capped"] == t["compactions"] for t in tool_checks.values()),
+        "every compaction's cache hit is read from the rollout, and is above 0": all(
+            c.get("cache_hit") for s in sessions for c in s.get("compactions", [])),
+        "drop: drop-first compaction was attempted (its log is written)":
+            (by_arm.get("drop", {}).get("drops") or {}).get("attempts", 0) >= 1,
+        "off and on: drop-first compaction never ran": all(
+            (by_arm.get(arm, {}).get("drops") or {}).get("attempts", 1) == 0 for arm in ("off", "on")),
         "every compaction has an audit verdict": all("audit" in c for s in sessions for c in s.get("compactions", [])),
         "every typed turn reached the model whole (a long paste included)": all(s.get("inputs_intact") for s in sessions),
-    }
-    return {"sessions": sessions, "requests": requests, "tools": tools, "checks": checks}
+    })
+    return {"sessions": sessions, "requests": requests, "tools": tools, "compaction_tools": tool_checks, "checks": checks}
 
 
 def _tiny_repo(repo: Path) -> None:
@@ -1368,7 +1523,9 @@ def aggregate(sessions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         sessions: Session records.
 
     Returns:
-        dict[str, dict[str, Any]]: Keyed `<task>/<arm>`.
+        dict[str, dict[str, Any]]: Keyed `<task>/<arm>`; besides the counts, `cache_hit_mean` (the
+            compaction requests' cached share) and drop-first compaction's drops and declined
+            attempts per session.
     """
     groups: dict[str, list[dict[str, Any]]] = {}
     for session in sessions:
@@ -1397,41 +1554,47 @@ def aggregate(sessions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "audit_lossless": sum(1 for c in compactions if (c.get("audit") or {}).get("verdict") in ("kept all", "nothing to keep")),
             "audited": len(compactions),
             "stray_summaries": sum(1 for c in compactions if c.get("stray_tool_call")),
+            "cache_hit_mean": _mean(c.get("cache_hit") for c in compactions),
+            "cache_measured": sum(1 for c in compactions if c.get("cache_hit") is not None),
+            "drops_per_session": _mean((s.get("drops") or {}).get("drops", 0) for s in members),
+            "declined_per_session": _mean((s.get("drops") or {}).get("declined", 0) for s in members),
         }
     return table
 
 
-def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> tuple[str, list[str]]:
-    """Applies the decision rule.
+def decide_arm(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]], arm: str = "on") -> tuple[str, list[str]]:
+    """Applies the decision rule to one turn-end arm (`on`, or `drop`), paired against `off`.
 
-    Hard conditions, all needed to switch turn-end compaction on by default: (1) at least one probe,
+    Hard conditions, all needed to switch the arm's settings on by default: (1) at least one probe,
     and no typed message lost; (2) turn-end compactions took at most `MAX_MEDIAN_TURN_END_S` at the
     median and `MAX_TURN_END_S` at worst; (3) for every task whose "off" arm compacted mid-turn, fewer
-    mid-turn compactions per session in the "on" arm; (4) no turn of the "on" arm ended clearly
-    (`MISSED_MARGIN_PERCENT` above) over the threshold without compacting. Reported, not deciding,
-    because two sessions per arm cannot resolve them (Phase 0 saw the same task vary twofold): a task
-    more than `MAX_WALL_INCREASE` slower per session in the "on" arm, or passing more than
-    `MAX_HIDDEN_DROP` fewer hidden tests. Inconclusive: no "off" session compacted mid-turn (the tasks
-    were too small, not the setting useless), or a typed turn did not reach the model intact (the
-    driver failed, not the setting).
+    mid-turn compactions per session in the arm (a drop that replaced a summary is not a compaction);
+    (4) no turn of the arm ended clearly (`MISSED_MARGIN_PERCENT` above) over the threshold without
+    compacting. Reported, not deciding, because two sessions per arm cannot resolve them (Phase 0 saw
+    the same task vary twofold): a task more than `MAX_WALL_INCREASE` slower per session in the arm, or
+    passing more than `MAX_HIDDEN_DROP` fewer hidden tests. Inconclusive: no "off" session compacted
+    mid-turn (the tasks were too small, not the setting useless), or a typed turn did not reach the
+    model intact (the driver failed, not the setting).
 
     Args:
         sessions: Session records.
         table: `aggregate(sessions)`.
+        arm: The arm judged against "off".
 
     Returns:
         tuple[str, list[str]]: `switch on`, `keep off` or `inconclusive`, and one line per condition.
     """
     lines = []
     passed = True
-    probes = [s["probe"] for s in sessions if s.get("probe")]
+    mine = [s for s in sessions if s["arm"] == arm]
+    probes = [s["probe"] for s in mine if s.get("probe")]
     lost = [p for p in probes if p["verdict"] == "lost"]
     interrupted = [p for p in probes if p["verdict"] == "interrupted"]
     lines.append(f"{'✅' if not lost and probes else '❌'} typed messages kept: {len(probes) - len(lost)} of {len(probes)} probes"
                  + (f" ({len(interrupted)} cut the compaction short)" if interrupted else "")
                  + ("" if probes else " (no probe fired: not shown)"))
     passed &= bool(probes) and not lost
-    walls = [c["wall_s"] for s in sessions if s["arm"] == "on" for c in s.get("compactions", [])
+    walls = [c["wall_s"] for s in mine for c in s.get("compactions", [])
              if c["kind"] == "turn-end" and c["wall_s"] is not None]
     median = _median(walls)
     fast = bool(walls) and median <= MAX_MEDIAN_TURN_END_S and max(walls) <= MAX_TURN_END_S
@@ -1440,7 +1603,7 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
     passed &= fast
     reached = False
     for task in sorted({s["task"] for s in sessions}):
-        off, on = table.get(f"{task}/off"), table.get(f"{task}/on")
+        off, on = table.get(f"{task}/off"), table.get(f"{task}/{arm}")
         if not off or not on:
             lines.append(f"❔ {task}: one arm has no session")
             passed = False
@@ -1449,13 +1612,13 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
             reached = True
             saves = (on["mid_turn_per_session"] or 0) < off["mid_turn_per_session"]
             lines.append(f"{'✅' if saves else '❌'} {task}: mid-turn compactions per session {off['mid_turn_per_session']} "
-                         f"off, {on['mid_turn_per_session']} on")
+                         f"off, {on['mid_turn_per_session']} {arm}")
             passed &= saves
         else:
             lines.append(f"❔ {task}: the off arm never compacted mid-turn (peak {off['peak_context_max']}), so it shows "
                          "no saving to measure")
         missed = on["missed_turn_ends_clear"]
-        lines.append(f"{'❌' if missed else '✅'} {task}: on-arm turns ending clearly above the threshold with no compaction: "
+        lines.append(f"{'❌' if missed else '✅'} {task}: {arm}-arm turns ending clearly above the threshold with no compaction: "
                      f"{missed}" + (f" ({on['missed_turn_ends']} within {MISSED_MARGIN_PERCENT}% of it)"
                                     if on["missed_turn_ends"] > missed else ""))
         passed &= not missed
@@ -1463,9 +1626,9 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
                       and on["session_wall_mean_s"] > off["session_wall_mean_s"] * (1 + MAX_WALL_INCREASE))
         worse = (on["hidden_passed_mean"] or 0) < (off["hidden_passed_mean"] or 0) - MAX_HIDDEN_DROP
         lines.append(f"{'⚠️' if slower or worse else '➖'} {task} (reported, not deciding): session wall "
-                     f"{off['session_wall_mean_s']} s off, {on['session_wall_mean_s']} s on; hidden tests passed "
-                     f"{off['hidden_passed_mean']} off, {on['hidden_passed_mean']} on")
-    intact = all(row["inputs_intact"] for row in table.values())
+                     f"{off['session_wall_mean_s']} s off, {on['session_wall_mean_s']} s {arm}; hidden tests passed "
+                     f"{off['hidden_passed_mean']} off, {on['hidden_passed_mean']} {arm}")
+    intact = all(row["inputs_intact"] for key, row in table.items() if key.endswith(("/off", f"/{arm}")))
     if not intact:
         lines.append("❔ a typed turn did not reach the model intact: the driver failed, see `inputs_missing`")
     if not reached or not intact:
@@ -1473,32 +1636,76 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
     return ("switch on" if passed else "keep off"), lines
 
 
+def cache_line(sessions: list[dict[str, Any]]) -> str:
+    """The prefix cache on compaction requests, across all arms (reported, not deciding)."""
+    hits = [c["cache_hit"] for s in sessions for c in s.get("compactions", []) if c.get("cache_hit") is not None]
+    cold = sum(1 for hit in hits if hit < 0.5)
+    stray = sum(1 for s in sessions for c in s.get("compactions", []) if c.get("stray_tool_call"))
+    return (f"{'✅' if hits and not cold else '⚠️' if hits else '❔'} (reported, not deciding) compaction requests served from "
+            f"the prefix cache: median {_percent(statistics.median(hits)) if hits else None} of the prompt over {len(hits)} "
+            f"compactions, {cold} below half "
+            f"(2026-10-13: 0 in 12 of 13); summaries that are a stray tool call: {stray}")
+
+
+def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> tuple[str, list[str]]:
+    """The decision rule (`decide_arm`) for every turn-end arm present, each paired against "off".
+
+    With one such arm the verdict is that arm's (`switch on`, `keep off`, `inconclusive`); with
+    several it names each (`on: keep off; drop: switch on`). The cache line is added, reported only.
+
+    Args:
+        sessions: Session records.
+        table: `aggregate(sessions)`.
+
+    Returns:
+        tuple[str, list[str]]: The verdict and one line per condition.
+    """
+    arms = [arm for arm in TURN_END_ARMS if any(s["arm"] == arm for s in sessions)] or ["on"]
+    verdicts, lines = [], []
+    for arm in arms:
+        verdict, reasons = decide_arm(sessions, table, arm)
+        verdicts.append((arm, verdict))
+        if len(arms) > 1:
+            lines.append(f"**{arm}** ({ARM_TITLES[arm]}) against off: **{verdict}**")
+            lines += [f"  {line}" for line in reasons]
+        else:
+            lines += reasons
+    if any(c.get("cache_hit") is not None for s in sessions for c in s.get("compactions", [])):
+        lines.append(cache_line(sessions))
+    if len(verdicts) == 1:
+        return verdicts[0][1], lines
+    return "; ".join(f"{arm}: {verdict}" for arm, verdict in verdicts), lines
+
+
 RUNBOOK: Final[str] = """\
-## Runbook
+## Runbook (v2, 2026-10-14)
 
 Target: second-puffin's reference server (`m0-prod8000`, the default model, 16 draft tokens), named by
 its mDNS name, never an address. Speed differs from this machine's server; compaction behaviour does not.
 
-0. On second-puffin only one model server runs at a time: stop the engine's `ling-serve` if it is up,
-   `ssh second-puffin 'docker start m0-prod8000'`, wait for `/v1/models` on port 8000, post a crew note.
-   Undo it the same way when the run ends.
-1. From the checkout of `bench/turn-end-compaction` (`cd ~/PycharmProjects/dgxcoder-wt-tec`), with
-   `PY=~/PycharmProjects/dgxcoder/.venv/bin/python`. Pre-flight (server, model, window, KV pool, binary,
-   sandbox label, click clone): `$PY scripts/turn_end_compaction_bench.py preflight --host http://second-puffin.local:8000`
-2. The run (from a terminal outside PyCharm, so the sandbox runs as it does for users; `cat /proc/self/attr/current`
-   should not say `pycharm`):
+0. On second-puffin only one model server runs at a time: `ling-serve` stopped, `m0-prod8000` up and
+   answering `/v1/models` on port 8000 (`ssh second-puffin 'docker ps --format "{{.Names}}"'`).
+1. The binary: a `ling` built from branch `compaction/cache-hit` (patches 0026 and 0027, the launcher's
+   summary cap), never installed, with `codex-code-mode-host` beside it: `~/mightling-bench-build/bin/ling`.
+   From the checkout of that branch (`cd ~/PycharmProjects/wt-cache-hit`), with
+   `PY=~/PycharmProjects/dgxcoder/.venv/bin/python`. Pre-flight (server, model, window, KV pool, the
+   binary's four switches, sandbox label, click clone):
+   `$PY scripts/turn_end_compaction_bench.py preflight --host http://second-puffin.local:8000 --ling ~/mightling-bench-build/bin/ling`
+2. The run, as a user unit (outside PyCharm, so the sandbox runs as it does for users):
 
-       setsid nohup $PY scripts/turn_end_compaction_bench.py run \\
-           --host http://second-puffin.local:8000 --reps 2 \\
-           --out ~/.cache/dreamference/turn-end-compaction/2026-10-13 \\
-           > ~/.cache/dreamference/turn-end-compaction/2026-10-13.log 2>&1 < /dev/null &
+       systemd-run --user --unit tec-bench-v2-<date> --working-directory=$PWD \\
+           -p StandardOutput=append:$HOME/.cache/dreamference/turn-end-compaction/<date>.log \\
+           -p StandardError=append:$HOME/.cache/dreamference/turn-end-compaction/<date>.log \\
+           $PY -u scripts/turn_end_compaction_bench.py run --host http://second-puffin.local:8000 \\
+           --reps 2 --ling $HOME/mightling-bench-build/bin/ling --stop-by <ISO time> \\
+           --out $HOME/.cache/dreamference/turn-end-compaction/<date>
 
-   Order: repetition 1 runs night-shift off, night-shift on, click off, click on; repetition 2 the arms
-   reversed. The probe presses Enter in repetition 1 and Tab (queue) in repetition 2.
-3. Expected duration: about 25 min per session (Phase 0's unlimited runs of the same Night Shift work took
-   14–18 min as one `exec`; six TUI turns plus compactions add to that), so 8 sessions ≈ 3.5 h; one
-   repetition (`--reps 1`) ≈ 1.7 h. Ceilings: 45 min per turn (`--turn-timeout`), 105 min per session
-   (`--session-timeout`). Do not rebuild `ling` during the run: each session records the binary it ran.
+   Order: repetition 1 runs night-shift off, on, drop, then click off, on, drop; repetition 2 the arms
+   reversed. The probe (in the on and drop arms) presses Enter in repetition 1 and Tab (queue) in 2.
+3. Expected duration: 12 sessions at ~22 min (2026-10-13: 18.5 min off, 23.6–31 min on, before the
+   cache fix) ≈ 4.5 h; ask for a 6 h window. Ceilings: 45 min per turn (`--turn-timeout`), 105 min per
+   session (`--session-timeout`); `--stop-by` starts no session within 20 min of it and interrupts a turn
+   at it, so a short window ends with whole sessions. Do not rebuild the binary during the run.
 4. Watch: `tail -f` the log; `results.json` and this report are rewritten after every session.
 """
 
@@ -1510,7 +1717,13 @@ OWNER_RULE: Final[str] = (
     "on-arm turn clearly above the threshold without compacting are checked across all sessions; the "
     "mid-turn saving is judged on click alone. This is what the rule above computes: a task whose off "
     "arm never compacted mid-turn is marked ❔ and neither passes nor fails. If the verdict is "
-    "`switch on`, turn-end compaction becomes on by default.")
+    "`switch on`, turn-end compaction becomes on by default. v2 (2026-10-14, the owner's): the same rule, applied "
+    "to each turn-end arm against off; every arm runs with the cache fix (patch 0027) and the 800-word summary "
+    "cap, the turn-end threshold is 20, and the compaction requests' cache hit is reported.")
+
+
+def _percent(share: float | None) -> str:
+    return "—" if share is None else f"{share:.0%}"
 
 
 def render_report(meta: dict[str, Any], sessions: list[dict[str, Any]]) -> str:
@@ -1526,27 +1739,33 @@ def render_report(meta: dict[str, Any], sessions: list[dict[str, Any]]) -> str:
     table = aggregate(sessions)
     decision, reasons = decide(sessions, table)
     binary = meta.get("binary") or {}
+    arms = [arm for arm in ARMS if any(s.get("arm") == arm for s in sessions)] or list(ARMS)
+    switches = ", ".join(f"{key.removeprefix('knows_')}: {binary.get(key)}" for key in REQUIRED_SWITCHES)
+    words = meta.get("summary_words")
     out = [
-        "# Turn-end compaction in the TUI: measurement",
+        "# Turn-end compaction in the TUI: measurement" + (" (v2)" if len(arms) > 2 else ""),
         "",
         f"Run {meta.get('started', '?')} against `{meta.get('host', '?')}` (model `{meta.get('model', '?')}`, window "
         f"{meta.get('window')}, KV pool {meta.get('pool')}). Binary `{binary.get('resolved', '?')}` "
-        f"(sha256 {binary.get('sha256', '?')}…, built {binary.get('mtime', '?')}, knows the switch: "
-        f"{binary.get('knows_turn_end_switch')}). Limit pinned at {meta.get('limit')} in both arms; the on arm "
-        f"sets `{TURN_END_KEY}={meta.get('percent')}`, a turn-end compaction once the context passes "
-        f"{meta.get('threshold')} tokens. Masking off, ledger on (its default), approvals off, sandbox "
-        f"`{meta.get('sandbox', 'workspace-write')}`.",
+        f"(sha256 {binary.get('sha256', '?')}…, built {binary.get('mtime', '?')}; {switches}). Arms: "
+        + ", ".join(f"`{arm}` ({ARM_TITLES.get(arm, arm)})" for arm in arms)
+        + f". Limit pinned at {meta.get('limit')} in every arm; the turn-end arms set `{TURN_END_KEY}={meta.get('percent')}`, "
+        f"a turn-end compaction once the context passes {meta.get('threshold')} tokens"
+        + (f"; the drop arm also sets `{DROP_ENV}=1`" if "drop" in arms else "")
+        + (f". Every arm caps the summary at {words} words (`{SUMMARY_WORDS_ENV}`, Codex's `compact_prompt`)"
+           if words else "")
+        + f". Masking off, ledger on (its default), approvals off, sandbox `{meta.get('sandbox', 'workspace-write')}`.",
         "",
         f"**Decision: {decision}.**",
         "",
-        *[f"- {line}" for line in reasons],
+        *[f"  - {line.strip()}" if line.startswith("  ") else f"- {line}" for line in reasons],
         "",
         OWNER_RULE,
         "",
         "## Sessions",
         "",
-        "| Session | Status | Wall | Turn walls (s) | Peak context | Pre / mid / turn-end | Turn-end walls (s) | Mid-turn walls (s) | Hidden tests | Own tests |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Session | Status | Wall | Turn walls (s) | Peak context | Pre / mid / turn-end | Turn-end walls (s) | Mid-turn walls (s) | Drops / declined | Hidden tests | Own tests |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s in sessions:
         counts = s.get("counts", {})
@@ -1560,18 +1779,21 @@ def render_report(meta: dict[str, Any], sessions: list[dict[str, Any]]) -> str:
             f"| {s.get('peak_context')} | {counts.get('pre-turn', 0)} / {counts.get('mid-turn', 0)} / {counts.get('turn-end', 0)} "
             f"| {', '.join(str(c['wall_s']) for c in compactions if c['kind'] == 'turn-end') or '—'} "
             f"| {', '.join(str(c['wall_s']) for c in compactions if c['kind'] != 'turn-end') or '—'} "
+            f"| {(s.get('drops') or {}).get('drops', 0)} / {(s.get('drops') or {}).get('declined', 0)} "
             f"| {hidden.get('passed', 0)} passed, {hidden.get('failed', 0)} failed "
             f"| {own.get('passed', 0)} passed, {own.get('failed', 0)} failed |")
     out += ["", "## Per task and arm", "",
             "| Task / arm | Sessions | Mid-turn per session | Turn-end per session | Turn-end wall median / max (s) "
-            "| Mid-turn wall median (s) | Session wall mean (min) | Peak | Hidden passed (mean) | Summaries lossless (audit) |",
-            "|---|---|---|---|---|---|---|---|---|---|"]
+            "| Mid-turn wall median (s) | Session wall mean (min) | Peak | Hidden passed (mean) | Summaries lossless (audit) "
+            "| Compaction cache hit (mean) | Drops / declined per session |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for key, row in table.items():
         wall = round(row["session_wall_mean_s"] / 60, 1) if row["session_wall_mean_s"] else None
         out.append(f"| {key} | {row['sessions']} ({row['complete']} complete) | {row['mid_turn_per_session']} "
                    f"| {row['turn_end_per_session']} | {row['turn_end_wall_median_s']} / {row['turn_end_wall_max_s']} "
                    f"| {row['mid_turn_wall_median_s']} | {wall} | {row['peak_context_max']} | {row['hidden_passed_mean']} "
-                   f"| {row['audit_lossless']} of {row['audited']} |")
+                   f"| {row['audit_lossless']} of {row['audited']} | {_percent(row.get('cache_hit_mean'))} "
+                   f"| {row.get('drops_per_session')} / {row.get('declined_per_session')} |")
     out += ["", "## Typing during a turn-end compaction", "",
             "| Session | Key | Typed after (s) | Compaction finished | Turn aborted | Message taken up | Waited (s) | Verdict |",
             "|---|---|---|---|---|---|---|---|"]
@@ -1583,22 +1805,27 @@ def render_report(meta: dict[str, Any], sessions: list[dict[str, Any]]) -> str:
     if not any(s.get("probe") for s in sessions):
         out.append("| — | | | | | | | no probe fired |")
     out += ["", "## Compactions and the nightly audit", "",
-            "| Session | # | Kind | Wall (s) | Context before → after | Summary chars | Audit |", "|---|---|---|---|---|---|---|"]
+            "| Session | # | Kind | Wall (s) | Context before → after | Cached / input (hit) | Summary tokens / chars | Audit |",
+            "|---|---|---|---|---|---|---|---|"]
     for s in sessions:
         for c in s.get("compactions", []):
             out.append(f"| {s['label']} | {c['number']} | {c['kind']} | {c['wall_s']} | {c['context_before']} → {c['context_after']} "
-                       f"| {c['summary_chars']} | {(c.get('audit') or {}).get('verdict', '—')} |")
+                       f"| {c.get('cached_tokens')} / {c.get('input_tokens')} ({_percent(c.get('cache_hit'))}) "
+                       f"| {c.get('summary_output_tokens')} / {c['summary_chars']} | {(c.get('audit') or {}).get('verdict', '—')} |")
     out += ["", "## Decision rule", "",
-            f"Switch `mightling_turn_end_compaction` on by default only if all hold: at least one probe and no typed "
+            "Each turn-end arm is judged against `off` on its own (v2: `on`, and `drop`, which adds drop-old-outputs). "
+            f"Switch the arm's settings on by default only if all hold: at least one probe and no typed "
             f"message lost; turn-end compactions at most {MAX_MEDIAN_TURN_END_S:.0f} s at the median and "
             f"{MAX_TURN_END_S:.0f} s at worst (about the time it takes to read an answer); for each task whose off arm "
-            "compacted mid-turn, fewer mid-turn compactions per session in the on arm; and no turn of the on arm ended "
+            "compacted mid-turn, fewer mid-turn compactions per session in the arm (a drop that replaced a summary is "
+            "not a compaction); and no turn of the arm ended "
             f"clearly ({MISSED_MARGIN_PERCENT}% or more) above the threshold without compacting. Reported but not deciding, "
             "since two sessions per arm cannot resolve them (Phase 0 saw one task vary twofold): an on arm more than "
             f"{MAX_WALL_INCREASE:.0%} slower per session, or passing more than {MAX_HIDDEN_DROP:.0f} fewer hidden tests. "
             "Inconclusive when no off session compacted mid-turn (the tasks were too small, not the setting useless) or a "
             "typed turn did not reach the model intact. An interrupted compaction is not a failure if the typed message "
-            "was kept; it is reported.",
+            "was kept; it is reported. The compaction requests' cache hit (cached / input tokens of each, from its usage "
+            "in the rollout) is reported, not deciding.",
             "", RUNBOOK]
     return "\n".join(out) + "\n"
 
@@ -1668,7 +1895,7 @@ def command_preflight(options: argparse.Namespace) -> int:
             print(f"❌ the served model is not {options.expect_model}")
             ok = False
         window = facts["window"] or DEFAULT_WINDOW
-        percent = turn_end_percent(window, options.limit)
+        percent = options.turn_end_percent or turn_end_percent(window, options.limit)
         print(f"💡 limit {options.limit}, turn-end percentage {percent}, threshold "
               f"{turn_end_threshold_tokens(window, percent) if percent else None} tokens; the server's own pool would give "
               f"{facts['pool'] * 60 // 100 if facts['pool'] else 'no'} limit")
@@ -1676,8 +1903,12 @@ def command_preflight(options: argparse.Namespace) -> int:
         print(f"❌ {host} does not answer: {error}")
         ok = False
     info = binary_info(ling_binary(options.ling))
-    print(f"{'✅' if info['knows_turn_end_switch'] else '⚠️ '} ling {info['resolved']} (built {info['mtime']}, sha256 "
-          f"{info['sha256']}…): knows the switch: {info['knows_turn_end_switch']} (the bench passes Codex's key directly either way)")
+    missing = [key for key in REQUIRED_SWITCHES if not info[key]]
+    print(f"{'❌' if missing else '✅'} ling {info['resolved']} (built {info['mtime']}, sha256 {info['sha256']}…): "
+          + ", ".join(f"{key.removeprefix('knows_')} {info[key]}" for key in REQUIRED_SWITCHES)
+          + (": a binary without them cannot run v2's arms (build compaction/cache-hit)" if missing else ""))
+    print(f"{'✅' if info['code_mode_host_beside'] else '❌'} codex-code-mode-host beside it: {info['code_mode_host_beside']}")
+    ok &= not missing and info["code_mode_host_beside"]
     label = Path("/proc/self/attr/current").read_text(errors="replace").strip() if Path("/proc/self/attr/current").exists() else "?"
     print(f"{'⚠️ ' if 'pycharm' in label else '✅'} AppArmor label {label!r}"
           + (": a PyCharm shell sandboxes more permissively than a user's terminal" if "pycharm" in label else ""))
@@ -1718,7 +1949,7 @@ def write_outputs(out: Path, meta: dict[str, Any], sessions: list[dict[str, Any]
     (out / "report.md").write_text(render_report(meta, sessions))
 
 
-def plans_for(tasks: list[str], reps: int, root: Path, probe_keys: list[str]) -> list[SessionPlan]:
+def plans_for(tasks: list[str], reps: int, root: Path, probe_keys: list[str], arms: tuple = ARMS) -> list[SessionPlan]:
     """The sessions in run order: per repetition every task, its arms alternating which goes first.
 
     Args:
@@ -1726,17 +1957,20 @@ def plans_for(tasks: list[str], reps: int, root: Path, probe_keys: list[str]) ->
         reps: Repetitions.
         root: The run's directory.
         probe_keys: The probe's key per repetition (cycled).
+        arms: The arms, in repetition 1's order.
 
     Returns:
         list[SessionPlan]: In order.
     """
     plans = []
+    order = tuple(arms)
     for rep in range(1, reps + 1):
-        arms = ARMS if rep % 2 else tuple(reversed(ARMS))
+        arms = order if rep % 2 else tuple(reversed(order))
         key = probe_keys[(rep - 1) % len(probe_keys)] if probe_keys else None
         for name in tasks:
             for arm in arms:
-                plans.append(SessionPlan(TASKS[name], arm, rep, root / f"{name}-{arm}-{rep}", key if arm == "on" else None))
+                plans.append(SessionPlan(TASKS[name], arm, rep, root / f"{name}-{arm}-{rep}",
+                                         key if arm in TURN_END_ARMS else None))
     return plans
 
 
@@ -1752,32 +1986,45 @@ def command_run(options: argparse.Namespace) -> int:
     if options.expect_model and options.expect_model not in str(facts["model"]):
         raise SystemExit(f"❌ {host} serves {facts['model']}, not {options.expect_model}")
     window = options.window or facts["window"] or DEFAULT_WINDOW
-    percent = turn_end_percent(window, options.limit)
-    plans = [plan for plan in plans_for(options.tasks, options.reps, out, options.probe_keys)
+    percent = options.turn_end_percent or turn_end_percent(window, options.limit)
+    info = binary_info(ling)
+    missing = [key for key in REQUIRED_SWITCHES if not info[key]]
+    if missing and not options.allow_old_binary:
+        raise SystemExit(f"❌ {ling} lacks {', '.join(missing)}: build compaction/cache-hit (or pass --allow-old-binary)")
+    stop_by = datetime.fromisoformat(options.stop_by).timestamp() if options.stop_by else None
+    plans = [plan for plan in plans_for(options.tasks, options.reps, out, options.probe_keys, tuple(options.arms))
              if not options.only or plan.label in options.only]
     meta = {"started": datetime.now(timezone.utc).isoformat(timespec="seconds"), "host": host, **facts,
             "window": window, "limit": options.limit, "percent": percent,
             "threshold": turn_end_threshold_tokens(window, percent) if percent else None,
-            "binary": binary_info(ling), "sandbox": options.sandbox, "order": [plan.label for plan in plans],
+            "summary_words": options.summary_words, "arms": list(options.arms), "stop_by": options.stop_by,
+            "binary": info, "sandbox": options.sandbox, "order": [plan.label for plan in plans],
             "python": options.python, "code_tools": not options.no_code_tools, "docs": not options.no_docs}
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     for plan in plans:
         if (plan.root / "session.json").exists() and not options.redo:
             print(f"⏭️  {plan.label}: already measured")
             continue
+        if stop_by is not None and time.time() > stop_by - options.min_session_minutes * 60:
+            print(f"⏹️  {datetime.now():%H:%M:%S} {plan.label}: not started, under {options.min_session_minutes} min "
+                  f"left before {options.stop_by}", flush=True)
+            continue
         print(f"🚀 {datetime.now():%H:%M:%S} {plan.label}", flush=True)
         try:
             result = run_session(plan, ling=ling, host=host, limit=options.limit, window=window, python=options.python,
                                  cache=Path(options.cache), sandbox=options.sandbox, code_tools=not options.no_code_tools,
                                  docs=not options.no_docs, turn_timeout=options.turn_timeout,
-                                 session_timeout=options.session_timeout)
+                                 session_timeout=options.session_timeout, percent=percent,
+                                 summary_words=options.summary_words, stop_by=stop_by)
         except Exception as error:  # noqa: BLE001 - one broken session must not end the run
             result = {"label": plan.label, "task": plan.task.name, "arm": plan.arm, "rep": plan.rep,
                       "status": f"driver error: {error!r}"}
         (plan.root / "session.json").write_text(json.dumps(result, indent=1, default=str))
         counts = result.get("counts", {})
+        hits = [c.get("cache_hit") for c in result.get("compactions", [])]
         print(f"   {result.get('status')}: {round((result.get('wall_s') or 0) / 60, 1)} min, peak {result.get('peak_context')}, "
-              f"compactions {counts}, probe {(result.get('probe') or {}).get('verdict')}", flush=True)
+              f"compactions {counts}, cache hits {hits}, drops {(result.get('drops') or {}).get('drops')}, "
+              f"probe {(result.get('probe') or {}).get('verdict')}", flush=True)
         write_outputs(out, meta, load_sessions(out))
     print(f"✅ {out / 'report.md'}")
     return 0
@@ -1791,7 +2038,8 @@ def command_report(options: argparse.Namespace) -> int:
     for session in sessions:
         rollout = find_rollout(out / session["label"] / "home")
         if rollout is not None:
-            session.update(analyze_session(rollout, session.get("turn_end_threshold"), session.get("probe_note")))
+            session.update(analyze_session(rollout, session.get("turn_end_threshold"), session.get("probe_note"),
+                                           out / session["label"] / "home"))
     write_outputs(out, meta, sessions)
     print(out / "report.md")
     return 0
@@ -1803,15 +2051,18 @@ def command_dry_run(options: argparse.Namespace) -> int:
     out.mkdir(parents=True, exist_ok=True)
     ling = ling_binary(options.ling)
     meta = {"started": datetime.now(timezone.utc).isoformat(timespec="seconds"), "host": "stand-in", "model": "fake-model",
-            "window": DEFAULT_WINDOW, "limit": DEFAULT_LIMIT, "percent": turn_end_percent(DEFAULT_WINDOW, DEFAULT_LIMIT),
-            "threshold": turn_end_threshold_tokens(DEFAULT_WINDOW, 26), "binary": binary_info(ling),
-            "order": [f"dry-run-{arm}-1" for arm in ARMS]}
+            "window": DEFAULT_WINDOW, "limit": DEFAULT_LIMIT, "percent": TURN_END_PERCENT_V2,
+            "threshold": turn_end_threshold_tokens(DEFAULT_WINDOW, TURN_END_PERCENT_V2), "binary": binary_info(ling),
+            "summary_words": SUMMARY_WORDS, "order": [f"dry-run-{arm}-1" for arm in ARMS]}
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     result = dry_run(out, ling, probe_key=options.probe_key)
     (out / "dry-run.json").write_text(json.dumps(result, indent=1, default=str))
     write_outputs(out, meta, load_sessions(out))
     for name, passed in result["checks"].items():
         print(f"{'✅' if passed else '❌'} {name}")
+    for arm, counts in result["compaction_tools"].items():
+        print(f"💡 {arm}: {counts['matching']} of {counts['compactions']} compaction requests offered the turn's tools; "
+              f"{counts['capped']} carried the summary bound")
     print(f"💡 {out}")
     return 0 if all(result["checks"].values()) else 1
 
@@ -1830,6 +2081,8 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="the compaction limit pinned on both arms")
         sub.add_argument("--expect-model", default="Qwen3.8-27B", help="refuse a server serving another model ('' to skip)")
         sub.add_argument("--cache", default=str(SOURCE_CACHE), help="where task sources are kept")
+        sub.add_argument("--turn-end-percent", type=int, default=TURN_END_PERCENT_V2,
+                         help="the turn-end arms' percentage (v2: 20; 0 for the launcher's arithmetic, 26)")
 
     preflight = commands.add_parser("preflight", help="check the server, binary, sandbox and task sources")
     common(preflight)
@@ -1848,11 +2101,18 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--python", default=sys.executable, help="the interpreter the tasks' tests use (default: this one)")
     run.add_argument("--no-code-tools", action="store_true", help="switch ling-code's tools off (default: the product's)")
     run.add_argument("--no-docs", action="store_true", help="switch ling-docs's tools off (default: the product's)")
+    run.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS), help="the arms, in repetition 1's order")
+    run.add_argument("--summary-words", type=int, default=SUMMARY_WORDS,
+                     help=f"the summary cap every arm runs with ({SUMMARY_WORDS_ENV}; 0: Codex's own prompt)")
+    run.add_argument("--stop-by", help="ISO time by which the run ends: no session starts within --min-session-minutes "
+                                       "of it, and a running turn is interrupted at it")
+    run.add_argument("--min-session-minutes", type=float, default=20.0)
+    run.add_argument("--allow-old-binary", action="store_true", help="run a binary that lacks v2's switches")
     run.add_argument("--turn-timeout", type=float, default=2700, help="seconds before a turn is interrupted")
     run.add_argument("--session-timeout", type=float, default=6300, help="seconds after which no further turn is typed")
     report = commands.add_parser("report", help="re-analyze the rollouts and rewrite the report")
     report.add_argument("--out", required=True)
-    dry = commands.add_parser("dry-run", help="both arms against a stand-in server on loopback")
+    dry = commands.add_parser("dry-run", help="every arm against a stand-in server on loopback")
     common(dry)
     dry.add_argument("--out", help="where to put it (not under /tmp)")
     dry.add_argument("--probe-key", default="enter", choices=list(PROBE_KEYS))
