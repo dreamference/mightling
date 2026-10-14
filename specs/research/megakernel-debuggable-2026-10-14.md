@@ -91,9 +91,11 @@ Two things decide between 5% and 10% and are cheap to measure before any kernel 
 
 1. **The layer-boundary bubble** in an Nsight Systems trace of 60 steps (`bench/profile/step_breakdown.py`,
    the B08 measurement): the sum of gaps and ramps at the 333 boundaries is the launch-side ceiling.
-2. **Whether 36 of 48 SMs saturate the bus** on `stream_gemm_nvfp4` (§16.7's 16.1(2), B16's SM
-   sweep gives most of this): if they do, the other 12 can hide attention, DeltaNet and norms; if
-   not, overlap buys nothing and the megakernel is only the bubble removal.
+2. **Whether a subset of SMs saturates the bus.** Already measured (`reports/micro-2026-10-10.md`
+   §2, server resident but idle): 4 SMs reach 248 GB/s, 8 SMs 257, 48 SMs 255–259. So §16.7's
+   condition 16.1(2) holds with margin: a dozen SMs can stream the weights while the rest do the
+   latency-bound work. What the overlap cannot hide is work that is itself bus-bound: the
+   attention's KV read (~2.2 GB at 35K, ~8 ms at 273 GB/s) competes for the same bytes per second.
 
 B32's toy (FFN up then down at M = 16 as one persistent kernel with a per-tile counter, against the
 PDL graph of the same two kernels) measures both the bubble and the counter cost on this exact
