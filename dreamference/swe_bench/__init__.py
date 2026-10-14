@@ -22,9 +22,11 @@ from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
+from dreamference.swe_bench.swe_bench_arm_smoke import SweBenchArmSmoke
 from dreamference.swe_bench.swe_bench_command import SweBenchCommand
 
 __all__ = [
+    "SweBenchArmSmoke",
     "SweBenchCodeIndex",
     "SweBenchCommand",
     "SweBenchDocker",
