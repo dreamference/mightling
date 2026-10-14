@@ -20,11 +20,26 @@
 //! switch in the launcher (`DREAMFERENCE_MIGHTLING_APPLY_PATCH`). The launcher decides once per
 //! process whether to translate ([`set_exec_as_function`]), from `/v1/models`' `owned_by` and
 //! `DREAMFERENCE_MIGHTLING_EXEC_TOOL`; nothing changes when it does not.
+//!
+//! Two things reach only the function form, after SWE-bench night 6 (2026-10-14; the analysis in
+//! `docs/dev/code-mode-night6.md`: 7.7% of cells failed, mostly JavaScript syntax errors from
+//! Python or shell heredocs pasted into a string, and `exec_command` called without the `tools.`
+//! prefix; 92% of the cells wrapped one shell command):
+//!
+//! - [`GUIDANCE`], appended to `exec`'s description before the grammar: when to call
+//!   `exec_command` directly, the `tools.` prefix, what a cell gets back, no heredocs in a string;
+//! - a [`hint`] appended to a failed cell's output when the error is one of the known kinds, so
+//!   the model learns from one failure instead of a burst of them. The hint is a pure function of
+//!   the cell and its output, so the cached prefix holds.
+//!
+//! Both are on unless [`FIXES_ENV`] says `off` (a benchmark arm that reproduces night 6's form).
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 
 use serde::Serialize;
@@ -54,6 +69,83 @@ pub fn exec_as_function() -> bool {
     EXEC_AS_FUNCTION.load(Ordering::Relaxed)
 }
 
+/// The environment variable that switches the night-6 fixes off for a benchmark arm: `off` sends
+/// `exec`'s description and a failed cell's output as night 6 saw them (and tells the ledger hook,
+/// which reads the same variable, to leave its two Code Mode lines out). Unset, empty or anything
+/// else leaves them on.
+pub const FIXES_ENV: &str = "DREAMFERENCE_MIGHTLING_CODE_MODE_FIXES";
+
+/// 0: not read yet; 1: on; 2: off.
+static FIXES: AtomicU8 = AtomicU8::new(0);
+
+/// Whether the guidance and the hints are on in this process: [`FIXES_ENV`], read once.
+pub fn fixes_on() -> bool {
+    match FIXES.load(Ordering::Relaxed) {
+        0 => {
+            let on = fixes_on_from(std::env::var(FIXES_ENV).ok().as_deref());
+            FIXES.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            on
+        }
+        state => state == 1,
+    }
+}
+
+/// [`fixes_on`] from the variable's value.
+pub fn fixes_on_from(setting: Option<&str>) -> bool {
+    !setting.is_some_and(|value| value.trim().eq_ignore_ascii_case("off"))
+}
+
+/// What the function form adds to `exec`'s description, before the grammar. Each line answers one
+/// kind of failure night 6 counted, or the wrapper cells that made up 92% of the calls.
+pub const GUIDANCE: &str = "How to use `exec` here:
+- For one shell command, call `exec_command` directly. Use `exec` only to chain several tool calls or to work on their output in JavaScript.
+- Inside a cell the nested tools are on `tools`: `const r = await tools.exec_command({cmd: \"...\"}); text(r.output);`. A bare `exec_command(...)` is not defined. `exec_command` returns `{output, exit_code, ...}`: print `r.output` and check `r.exit_code`.
+- Tools offered to you directly (`code_show`, `code_search`, ...) are not reachable from a cell: call them directly. `exec` cannot call itself.
+- The input is JavaScript only: no Python statements, and no shell heredoc (`<<'EOF'`) inside a JavaScript string, where its quotes break the cell. Run a script by calling `exec_command` directly with `python - <<'EOF' ... EOF`, or write it to a file first.
+- Each cell is a fresh isolate: a variable from an earlier cell is gone (`store`/`load` carry values across cells).";
+
+/// What is put between a failed cell's output and its hint.
+const HINT_PREFIX: &str = "\n\nHint: ";
+
+/// The hint for a failed cell, from its input and output text, or `None` when the output is not a
+/// failure of a known kind. Policy refusals (`exec_command failed: … rejected`) and failures the
+/// model could not have written differently get none.
+pub fn hint(input: &str, output: &str) -> Option<&'static str> {
+    if !output.starts_with("Script failed") || output.contains(HINT_PREFIX) {
+        return None;
+    }
+    let error = output.split("Script error:\n").nth(1)?.lines().next()?.trim();
+    if let Some(rest) = error.strip_prefix("ReferenceError: ")
+        && let Some(name) = rest.strip_suffix(" is not defined")
+    {
+        return Some(if name == "exec_command" || name == "write_stdin" || name == "exec" || name == "tools" {
+            "nested tools are on `tools`: `const r = await tools.exec_command({cmd: \"...\"}); text(r.output);`. For one shell command, call `exec_command` directly instead of wrapping it in a cell."
+        } else {
+            "each cell is a fresh isolate: a variable from an earlier cell is gone, so declare it in this cell (`store`/`load` carry values across cells). A failed line also defines nothing."
+        });
+    }
+    if let Some(rest) = error.strip_prefix("TypeError: tools.")
+        && let Some(name) = rest.strip_suffix(" is not a function")
+    {
+        return Some(if name == "exec" {
+            "`exec` cannot call itself: put the JavaScript in the cell, or call `exec_command` directly."
+        } else {
+            "that tool is not reachable from a cell: call it directly, as its own tool call, if it is offered to you. Inside a cell use `tools.exec_command`."
+        });
+    }
+    if error.starts_with("SyntaxError") {
+        let python = input.lines().map(str::trim).filter(|line| !line.is_empty()).take(3).any(|line| {
+            line.starts_with("import ") || line.starts_with("from ") || line.starts_with("print(") || line.starts_with("def ")
+        });
+        return Some(if input.contains("<<") || python {
+            "the cell's input is JavaScript only. A shell heredoc or Python inside a JavaScript string breaks the cell's quoting: call `exec_command` directly with the command (`python - <<'EOF' ... EOF` is fine there), or write the script to a file first. One command per call is fine."
+        } else {
+            "the cell's input is JavaScript only, with no quoting around it. For one shell command, call `exec_command` directly instead; use a cell only to chain tool calls or process their output."
+        });
+    }
+    None
+}
+
 /// The names offered as functions so far in this process: only a call to one of these is turned
 /// back into a custom tool call.
 fn offered() -> &'static Mutex<HashSet<String>> {
@@ -67,10 +159,22 @@ pub fn is_translated(tool: &Value) -> bool {
 }
 
 /// A custom tool as the function ling-engine offers in its place: the one string parameter
-/// [`INPUT`], and the description followed by the grammar from `format`.
+/// [`INPUT`], and the description followed by the grammar from `format`, with [`GUIDANCE`]
+/// between them unless the fixes are off.
 pub fn as_function(tool: &Value) -> Value {
+    as_function_with(tool, fixes_on())
+}
+
+/// [`as_function`], with the guidance when `fixes` is true.
+pub fn as_function_with(tool: &Value, fixes: bool) -> Value {
     let name = tool["name"].as_str().unwrap_or_default();
     let mut description = tool["description"].as_str().unwrap_or_default().to_string();
+    if fixes {
+        if !description.is_empty() {
+            description.push_str("\n\n");
+        }
+        description.push_str(GUIDANCE);
+    }
     let format = &tool["format"];
     if format["type"] == "grammar"
         && let Some(definition) = format["definition"].as_str()
@@ -167,17 +271,23 @@ pub fn replay<T: Serialize + DeserializeOwned>(items: &mut [T]) {
     }
 }
 
-/// [`replay`] on JSON: the index and new form of each item that changes.
+/// [`replay`] on JSON: the index and new form of each item that changes. A failed cell's output
+/// gets its [`hint`] unless the fixes are off.
 pub fn replay_values(items: &[Value]) -> Vec<(usize, Value)> {
-    let calls: HashSet<&str> = items
+    replay_values_with(items, fixes_on())
+}
+
+/// [`replay_values`], with the hints when `fixes` is true.
+pub fn replay_values_with(items: &[Value], fixes: bool) -> Vec<(usize, Value)> {
+    let calls: HashMap<&str, &str> = items
         .iter()
         .filter(|item| item["type"] == "custom_tool_call" && item["namespace"].is_null())
         .filter(|item| item["name"].as_str().is_some_and(|name| TRANSLATED.contains(&name)))
-        .filter_map(|item| item["call_id"].as_str())
+        .filter_map(|item| Some((item["call_id"].as_str()?, item["input"].as_str().unwrap_or_default())))
         .collect();
     let mut changed = Vec::new();
     for (index, item) in items.iter().enumerate() {
-        let Some(call_id) = item["call_id"].as_str().filter(|id| calls.contains(id)) else { continue };
+        let Some((call_id, input)) = item["call_id"].as_str().and_then(|id| calls.get_key_value(id)) else { continue };
         let mut replayed = if item["type"] == "custom_tool_call" {
             let mut arguments = serde_json::Map::new();
             arguments.insert(INPUT.to_string(), Value::String(item["input"].as_str().unwrap_or_default().to_string()));
@@ -188,7 +298,15 @@ pub fn replay_values(items: &[Value]) -> Vec<(usize, Value)> {
                 "call_id": call_id,
             })
         } else if item["type"] == "custom_tool_call_output" {
-            json!({"type": "function_call_output", "call_id": call_id, "output": output_text(&item["output"])})
+            let mut output = output_text(&item["output"]);
+            if fixes
+                && let Value::String(text) = &mut output
+                && let Some(hint) = hint(input, text)
+            {
+                text.push_str(HINT_PREFIX);
+                text.push_str(hint);
+            }
+            json!({"type": "function_call_output", "call_id": call_id, "output": output})
         } else {
             continue;
         };
@@ -232,18 +350,27 @@ mod tests {
         let exec = &tools[0];
         assert_eq!((exec["type"].as_str(), exec["name"].as_str()), (Some("custom"), Some("exec")));
         let sent = flatten_with(tools.clone(), true);
-        // The custom tool is now a function with one string parameter; the description is Codex's
-        // followed by the grammar, worded as ling-engine words it (its API spec §4).
+        // The custom tool is now a function with one string parameter; the description is Codex's,
+        // then the night-6 guidance, then the grammar worded as ling-engine words it (its API
+        // spec §4). The tests run with the variable unset, so the fixes are on.
         let function = &sent[0];
         assert_eq!(function["type"], "function");
         assert_eq!(function["name"], "exec");
         let description = function["description"].as_str().unwrap_or_default();
-        let expected = format!(
+        let night6 = format!(
             "{}\n\nThe input must follow this lark grammar:\n{}",
             exec["description"].as_str().unwrap_or_default(),
             exec["format"]["definition"].as_str().unwrap_or_default()
         );
+        let expected = format!(
+            "{}\n\n{GUIDANCE}\n\nThe input must follow this lark grammar:\n{}",
+            exec["description"].as_str().unwrap_or_default(),
+            exec["format"]["definition"].as_str().unwrap_or_default()
+        );
         assert_eq!(description, expected);
+        assert!(fixes_on(), "the tests run with {FIXES_ENV} unset");
+        // The off arm sends what night 6 sent.
+        assert_eq!(as_function_with(exec, false)["description"], night6);
         assert_eq!(
             function["parameters"],
             json!({"type": "object", "properties": {"input": {"type": "string", "description": "The tool's input, as free text"}}, "required": ["input"]})
@@ -330,6 +457,69 @@ mod tests {
         let changed = replay_values(&items);
         assert_eq!(changed.len(), 2);
         assert_eq!(changed[1].1["output"], items[1]["output"]);
+    }
+
+    /// Failed cells as night 6 recorded them (`docs/dev/code-mode-night6.md`, "Failed cells").
+    const FAILED: &str = "Script failed\nWall time 0.0 seconds\nOutput:\nScript error:\n";
+
+    #[test]
+    fn a_failed_cell_of_a_known_kind_gets_a_hint_and_the_rest_do_not() {
+        let failed = |error: &str| format!("{FAILED}{error}");
+        // The call without the `tools.` prefix: 36 cells.
+        let prefix = hint("const r = await exec_command({cmd: 'ls'});", &failed("ReferenceError: exec_command is not defined"));
+        assert!(prefix.is_some_and(|hint| hint.contains("tools.exec_command")), "{prefix:?}");
+        assert_eq!(hint("exec('ls')", &failed("ReferenceError: exec is not defined")), prefix);
+        // A variable from an earlier cell, or from a line that failed.
+        let variable = hint("text(r.output)", &failed("ReferenceError: r is not defined"));
+        assert!(variable.is_some_and(|hint| hint.contains("fresh isolate")), "{variable:?}");
+        // Tools that are not in the isolate: 28 cells.
+        let itself = hint("await tools.exec('text(1)')", &failed("TypeError: tools.exec is not a function\n    at exec_main.mjs:1:13"));
+        assert!(itself.is_some_and(|hint| hint.contains("cannot call itself")), "{itself:?}");
+        let direct = hint("await tools.code_show({name: 'x'})", &failed("TypeError: tools.code_show is not a function"));
+        assert!(direct.is_some_and(|hint| hint.contains("call it directly")), "{direct:?}");
+        assert_eq!(hint("await tools.apply_patch(`x`)", &failed("TypeError: tools.apply_patch is not a function")), direct);
+        // Python or a heredoc in a cell: ~115 syntax errors.
+        let python = hint("import subprocess\nout = subprocess.run(['ls'])\n", &failed("SyntaxError: Unexpected identifier 'out'"));
+        assert!(python.is_some_and(|hint| hint.contains("heredoc") && hint.contains("`exec_command` directly")), "{python:?}");
+        let heredoc = hint("const r = await tools.exec_command({cmd: `python - <<'EOF'\nprint('x')\nEOF`});", &failed("SyntaxError: Unexpected token ')'"));
+        assert_eq!(heredoc, python);
+        let quoting = hint("await tools.exec_command({cmd: \"grep -rn \\\"x\\\" .\"});", &failed("SyntaxError: missing ) after argument list"));
+        assert!(quoting.is_some_and(|hint| hint.contains("JavaScript only")) && quoting != python, "{quoting:?}");
+        // A policy refusal, a cell that worked, and a hinted output already, get nothing.
+        assert_eq!(hint("await tools.exec_command({cmd: 'rm -rf x'})", &failed("exec_command failed: CreateProcess { message: \"rejected: rm -f style commands are not permitted\" }")), None);
+        assert_eq!(hint("text(1)", "Script completed\nWall time 0.0 seconds\nOutput:\n1"), None);
+        assert_eq!(hint("text(1)", "Script running with cell ID 3\nWall time 30.0 seconds\nOutput:\n"), None);
+        let hinted = format!("{}{HINT_PREFIX}{}", failed("ReferenceError: exec is not defined"), prefix.unwrap_or_default());
+        assert_eq!(hint("exec('ls')", &hinted), None);
+    }
+
+    #[test]
+    fn the_replayed_output_of_a_failed_cell_carries_the_hint_unless_the_fixes_are_off() {
+        let items = vec![
+            json!({"type": "custom_tool_call", "call_id": "a", "name": "exec", "input": "const r = await exec_command({cmd: 'ls'});"}),
+            json!({"type": "custom_tool_call_output", "call_id": "a", "output": [
+                {"type": "input_text", "text": "Script failed\nWall time 0.0 seconds\nOutput:\n"},
+                {"type": "input_text", "text": "Script error:\nReferenceError: exec_command is not defined"},
+            ]}),
+            json!({"type": "custom_tool_call", "call_id": "b", "name": "exec", "input": "text(1)"}),
+            json!({"type": "custom_tool_call_output", "call_id": "b", "output": "Script completed\nWall time 0.0 seconds\nOutput:\n1"}),
+        ];
+        let on = replay_values_with(&items, true);
+        let output = on[1].1["output"].as_str().unwrap_or_default();
+        assert!(output.starts_with("Script failed\nWall time 0.0 seconds\nOutput:\nScript error:\nReferenceError: exec_command is not defined\n\nHint: nested tools are on `tools`"), "{output}");
+        assert_eq!(on[3].1["output"], items[3]["output"]);
+        // The same request every time: a hinted history gets no second hint.
+        let mut again = items.clone();
+        for (index, item) in on.clone() {
+            again[index] = item;
+        }
+        assert!(replay_values_with(&again, true).is_empty());
+        // The off arm: the output as night 6 saw it.
+        let off = replay_values_with(&items, false);
+        assert_eq!(off[1].1["output"], "Script failed\nWall time 0.0 seconds\nOutput:\nScript error:\nReferenceError: exec_command is not defined");
+        // The variable's spellings.
+        assert!(fixes_on_from(None) && fixes_on_from(Some("")) && fixes_on_from(Some("on")));
+        assert!(!fixes_on_from(Some("off")) && !fixes_on_from(Some(" OFF ")));
     }
 
     /// A stand-in for Codex's `ResponseItem`: the hooks only round-trip it through JSON.
