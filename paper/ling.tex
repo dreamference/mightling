@@ -105,9 +105,9 @@ compaction limit the server's memory sets, and tool types the server silently dr
 for a local agent's output and the terse-answer mode built on it (\cref{sec:local}). A
 \textbf{task-level evaluation on SWE-bench Verified} on an arm64 desk machine (\cref{sec:swebench})
 with a calibrated overall estimate, a classification of every failure, and paired A/B nights that
-measure what one night can detect. A code index (\cref{sec:index}), an overnight task queue
-(\cref{sec:night}), workstation pairing (\cref{sec:node}) and the design principles behind them
-(\cref{sec:lessons}).
+measure what one night can detect. The first results of an inference engine for this one model, exact by rule, on a second
+workstation (\cref{sec:engine}), the rest of the stack in brief (\cref{sec:rest}) and the design principles
+behind it all (\cref{sec:lessons}).
 
 \section{Background}
 
@@ -183,10 +183,8 @@ behaves as documented, apart from the cloud surfaces of \cref{sec:cloud}. Three 
 beside \code{ling} give it web search, page fetching and code navigation (\code{ling-search},
 \code{ling-fetch}, \code{ling-code}); \code{ling-admin}, the Python management CLI, provides Gmail
 reading and manages the model-server container, a browser chat UI built on Onyx \cite{onyx}, the
-overnight queue, workstation pairing, SWE-bench runs and the build of \code{ling}. A desktop app and
-prebuilt macOS and Windows clients reach the same server over the local network, \code{ling web}
-serves a phone through a Signal, Matrix or Telegram bridge, and a local file index,
-\code{ling-docs}, searches the user's documents without opening a socket.
+overnight queue, workstation pairing, SWE-bench runs and the build of \code{ling}. The other
+surfaces (a desktop app, phone messengers, a local file index) are summarised in \cref{sec:rest}.
 
 \section{A patch-minimal fork}
 \label{sec:fork}
@@ -261,7 +259,7 @@ Patch & Files & $+/-$ & Purpose \\
 0022 ling-apps & 2 & 6/1 & \code{/apps} lists local Gmail, Drive and Calendar connectors, no vendor sign-in \\
 0023 airgapped-app-server & 2 & 2/0 & The app server refuses Full Access at \code{on} for every client \\
 0024 airgapped-windows & 4 & 12/0 & The same enforcement in the Windows sandbox \\
-0025 node-slash-command & 4 & 15/1 & \code{/node}: provision, pair and check nodes from the TUI (\cref{sec:node}) \\
+0025 node-slash-command & 4 & 15/1 & \code{/node}: provision, pair and check nodes from the TUI (\cref{sec:rest}) \\
 \midrule
 Total (23 patches, 42{,}958 bytes) & 43 & 170/53 & against 4{,}894 Rust files, 1.93M lines \\
 \bottomrule
@@ -485,7 +483,7 @@ Decode throughput, single stream, 262k context & prose 32.0 / code 68.6 / JSON 8
 Decode, replayed agent sessions, 1 / 2 streams & 48.3 / 33.9 tok/s each; 5.2 of 12 accepted \\
 SWE-bench Verified, 100-task sample (\cref{sec:swebench}) & 68 resolved; $\approx$69\% overall (64--73\%) \\
 Code-index query, warm, this repository (20 runs) & p50 0.09\,s, p95 0.11--0.12\,s \\
-Overnight task, live (one task, \cref{sec:night}) & 7\,s; test passed; checkout untouched \\
+Overnight task, live (one task, \cref{sec:rest}) & 7\,s; test passed; checkout untouched \\
 \bottomrule
 \end{tabular}
 \caption{Measurements on one GB10 (128\,GB). Sizes are binary megabytes. Single-stream throughput
@@ -595,109 +593,10 @@ conditions, not leaderboard results: they do not account for training-data conta
 quantised model, the community images and our validation filter, or run-to-run variation of
 several points.
 
-\section{Compiler-exact code navigation}
-\label{sec:index}
+\section{An engine for one model}
+\label{sec:engine}
 
-An agent that navigates with \code{rg} and file reads spends many rounds on a 4{,}894-file
-workspace and silently misses calls through traits, generics and re-exports. Under the constraints
-of a vendor-free AGPL product (a compatible licence, no network or telemetry, arm64 availability),
-\code{ling-code}, a Rust binary beside \code{ling}, combines two layers. The \emph{universal} layer
-is codebase-memory-mcp \cite{codebasememorymcp,vogel2026codebasememory}, a single MIT-licensed C
-binary with 158 tree-sitter \cite{treesitter} grammars that builds an approximate call graph for
-every language; the \emph{exact} layer is SCIP \cite{scip} indexes from compiler front-ends
-(\cref{tab:indexers}), converted to SQLite. \code{ling-code} answers \code{def}, \code{refs},
-\code{callers}, \code{callees}, \code{impl}, \code{impact}, \code{show}, \code{outline} and
-\code{search} by reading both stores directly as SQLite, joins them through a definition's location,
-and tags every row \emph{exact} or \emph{heuristic}; the agent's prompt requires verification when
-a heuristic row decides a rename, a signature change or a deletion, and a store with an unknown
-schema is reported while the other layer answers. This follows LocAgent's graph-guided
-localisation \cite{chen2025locagent} and CodeNib's multi-view serving \cite{yu2026codenib},
-specialised to one self-contained machine.
-
-\begin{table}[tbp]
-\centering
-\small
-\begin{tabularx}{\linewidth}{@{}l l X@{}}
-\toprule
-Language & Indexer & Runs / state on this machine \\
-\midrule
-Python & scip-python & every repository; static once its environment is controlled \\
-TypeScript, JavaScript & scip-typescript & every repository; 732 files in about 2\,s, 271\,MiB peak \\
-Go & scip-go & on request, offline enforced; 21\,MiB peak on a fixture module \\
-Rust & rust-analyzer & trusted repositories only: it runs build scripts and procedural macros \\
-Java, Kotlin & scip-java & trusted only, on a scratch copy; needs a recorded JDK~17+; run on a small Gradle project \\
-C\#, VB & scip-dotnet & trusted only, on a scratch copy; needs a recorded .NET SDK~8+; run on a console project \\
-C, C++ & scip-clang & no linux-arm64 build upstream; universal layer only \\
-\bottomrule
-\end{tabularx}
-\caption{The exact layer by language. Indexers that execute project code run only in repositories
-the user has marked trusted.}
-\label{tab:indexers}
-\end{table}
-
-\paragraph{Why two layers, and the decisions measurement forced.} At file level, the universal
-layer's call edges recall 78\% of what rust-analyzer's SCIP index holds for the upstream workspace
-(15{,}660 functions with cross-file references) and 58\% of what scip-python holds for our Python
-package, 86\% for functions but 52\% for methods; for a method whose name another class shares it
-finds no caller of either, where scip-python resolves each. It is good enough to orient and not good
-enough to rename by. The router reads the layers' databases directly, because the universal layer's
-CLI spends 6.6\,s per invocation on start-up while the same query takes under 10\,ms. Exact Rust
-indexing is admitted, not assumed: \code{rust-analyzer scip} on the upstream workspace takes 691\,s
-cold and 569\,s warm under a 22\,GiB cap with a peak of at least 21.3\,GiB, an 8\,GB cap is not
-enough, and there is no cheaper mode. A snapshot cannot say what it is missing, so every query asks
-git which files changed since each layer's snapshot (39\,ms) and searches those for the name
-(3\,ms), marking the hits as heuristic text matches; an edit is never a silent miss. A vendored
-upstream would make 97\% of our universal index third-party code, so a submodule is indexed only
-when it is the user's own, by two offline tests (same host and owner as the superproject, most
-recent commits by its authors), or when the user includes it, a choice recorded in the agent's
-home, never in the repository. Queries only read, inside the agent's sandbox; indexing runs outside it under one host-wide memory
-budget in a network-less Bubblewrap sandbox. Warm queries on our repository answer in 0.09\,s at the
-median and 0.11--0.12\,s at the 95th percentile, and \code{refs} on a TypeScript type in the
-upstream schema returns the same 48 files a whole-word search finds, in 40\,ms. Not built or not
-measured: search by meaning, \code{impact} used by the model, and the effect of an index run on
-decode speed; on SWE-bench the agent does not query the index unprompted.
-
-\section{Unattended overnight work}
-\label{sec:night}
-
-\emph{Night Shift} lets the user queue coding tasks during the day (\code{/night add}, optionally
-with the test command that decides success) and finds a branch and a report for each in the
-morning. The slash command writes a task record and never calls the model; the runner, in
-\code{ling-admin} under a systemd user timer, runs each task as \code{ling exec} in a git worktree
-of its own, on a branch named after the task, in a transient systemd scope with a memory cap. The
-runner, not the agent, commits; nothing is merged, pushed or rebased. A task whose worktree is
-unchanged and whose last message announces work is resumed with ``go ahead'', at most twice, then
-recorded as stalled; a task the window cuts off keeps its worktree and session for the next night.
-The run never starts the model server and gives way to the user: admission requires the server to
-be answering, the host-safety checks to pass, memory headroom, no build or index run in progress,
-and the server's prompt-token counter unchanged for a period, since a gauge of running requests
-sampled every 30\,s misses short requests. Each task is budgeted 49{,}152 tokens, which allows two
-or three concurrent tasks. The runner's own test run executes code the model wrote, so it runs in
-the agent's command sandbox: it can write in its worktree and \code{/tmp} but not in the user's
-checkout, its \code{.git} or the home folder, and at \code{/airgapped on} reaches neither the
-internet nor the model server. Live, one task has run end to end (\cref{tab:eval}), an interrupted
-task has been resumed on a second night, and two tasks have run in parallel while a third waited
-at the memory gate; a stall is covered by tests against a scripted stand-in for the agent.
-
-\section{Several workstations}
-\label{sec:node}
-
-A machine that serves the model is a \emph{node}; anything else running \code{ling} is a
-\emph{client}, which resolves the model server through fixed tiers: an explicit address, the node it
-remembered (found again by its identifier, never by address), and finally a multicast DNS browse.
-Every unattended caller of \code{ling} names its server explicitly, because a browse is a multicast
-query the egress audit would count as traffic. Inference stays open on the local network, which we
-treat as trusted; control goes over SSH, never an open port: \code{ling-admin node add} has the
-other node authorise a key for one forced command that refuses everything but its own operations
-and pins the node's host key to its identifier. A \emph{job} is a command run on a node as a systemd
-user unit with a mandatory memory cap and time limit, inside Bubblewrap with the home folder hidden
-and no GPU; its changes come back as a git branch. A paired node serving the same model is an extra
-model server for Night Shift and SWE-bench. A DHCP lease moves, so a node is resolved by its
-identifier before every connection and refused rather than guessed if it does not answer a browse
-within a minute; on the GB10's Wi-Fi chip, NetworkManager's default power saving loses up to about
-80\% of multicast DNS queries, so the host check reports it and host setup turns it off.
-
-\paragraph{An engine for one model.} The second machine is dedicated to a single-model inference
+A second GB10, paired with the first (\cref{sec:rest}), is dedicated to a single-model inference
 engine for Qwen3.8-27B with DFlash2, written in C++ and CUDA and outside this paper's build. Its
 rule is exactness: every speed change must leave greedy output byte-identical to non-speculative
 decoding. It matches the production server on one stream (a step of about 103\,ms) and is within
@@ -715,6 +614,38 @@ before it did, each request drew its own acceptance, which puts noise of a few p
 earlier figure here, 33.4 against 33.9 included, and a comparison is now reported only when both
 runs produce the same tokens in the same number of steps. Decode is bound by reading the weights,
 17.6\,GB per step, so the remaining gains are in fewer bytes read per accepted token.
+
+\section{The rest of the stack}
+\label{sec:rest}
+
+Four further parts of Mightling follow the same method, a hook in Codex at most and the logic in a
+crate or service of ours. This paper only places them; each has a developer note in the
+repository's \path{docs/dev/} and a user page under \path{docs/}.
+
+\paragraph{Unattended overnight work.} \emph{Night Shift} lets the user queue coding tasks during
+the day (\code{/night add}, optionally with the test command that decides success) and finds a
+branch and a report for each in the morning. The slash command writes a task record and never calls
+the model; the runner, in \code{ling-admin} under a systemd user timer, runs each task as
+\code{ling exec} in a git worktree of its own, in a memory-capped systemd scope, and itself commits;
+nothing is merged, pushed or rebased, and the run gives way to the user, starting only while the
+server is answering and idle, the host-safety checks pass and no build or index run is in progress.
+Live, one task has run end to end (\cref{tab:eval}), an interrupted task has been resumed on a
+second night, and two tasks have run in parallel while a third waited at the memory gate
+(\path{docs/dev/night-shift.md}).
+
+\paragraph{Code navigation, nodes and other surfaces.} \code{ling-code}, a Rust binary beside
+\code{ling}, answers \code{def}, \code{refs}, \code{callers}, \code{impact} and their kin from a
+tree-sitter knowledge graph \cite{treesitter,codebasememorymcp,vogel2026codebasememory} that covers
+every language approximately and from compiler-exact SCIP \cite{scip} indexes where a front-end
+exists, each row tagged \emph{exact} or \emph{heuristic} (\path{docs/dev/code-index.md});
+\code{ling-docs} indexes the user's documents without opening a socket
+(\path{docs/dev/local-file-index.md}). A machine that serves the model is a \emph{node}, which a
+client finds by its identifier and never by an address, and which is managed over SSH through one
+forced command, never an open port (\path{docs/dev/node.md}). A desktop app and prebuilt macOS and
+Windows clients reach the same server over the local network, a browser chat is built on Onyx, and
+\code{ling web} serves a phone through a Signal, Matrix or Telegram bridge, each off until a command
+turns it on and named in the egress report while it is on (\path{docs/desktop.md},
+\path{docs/web-chat.md}, \path{docs/messengers.md}).
 
 \section{Design principles}
 \label{sec:lessons}
@@ -757,7 +688,7 @@ agent-computer interface and evaluate on SWE-bench \cite{jimenez2024swebench}; w
 new agent, but show how to take a vendor's production client, keep it upgradable, and make it
 vendor-free and self-contained. LocAgent's code graphs \cite{chen2025locagent}, CodeNib's
 multi-view context serving \cite{yu2026codenib} and tree-sitter knowledge graphs served over MCP
-\cite{vogel2026codebasememory} inform \cref{sec:index}. On the serving side we rely on vLLM's paged
+\cite{vogel2026codebasememory} inform the code index (\cref{sec:rest}). On the serving side we rely on vLLM's paged
 attention \cite{kwon2023vllm}, speculative decoding \cite{leviathan2023speculative} and
 block-diffusion drafting \cite{chen2026dflash}; our contribution there is the host-level safety
 unified memory requires, not a serving algorithm.
@@ -772,13 +703,10 @@ configuration. Agent-session throughput is a replay of recorded sessions, reachi
 recorded output lengths, taken before the replay sent a sampling seed, so it carries acceptance
 noise of a few percent. Upstream's own suite last ran against an earlier patched tree (20{,}380
 tests, 20{,}362 passed; sixteen app-server timeouts unexplained), and the slash-command suite of
-\cref{tab:eval} on a 16-patch build; both predate patches 0017 on. The code index has no exact
-layer for C and C++ on this architecture, its Java and .NET indexers have run only on small
-projects, search by meaning and the cost of an index run on decode speed are unmeasured, and on
-SWE-bench the agent does not use the index unprompted. Night Shift has run a handful of tasks, and
-a stall has not been provoked live. The advertised context still exceeds the KV pool; what the
-server does with a larger prompt is untested. The Signal bridge has run live against one account,
-the Matrix and Telegram bridges only against stand-ins.
+\cref{tab:eval} on a 16-patch build; both predate patches 0017 on. On SWE-bench the agent
+does not use the code index unprompted, and the cost of an index run on decode speed is unmeasured.
+Night Shift has run a handful of tasks, and a stall has not been provoked live. The advertised
+context still exceeds the KV pool; what the server does with a larger prompt is untested.
 
 \section{Conclusion}
 
