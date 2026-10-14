@@ -292,7 +292,7 @@ fn dreamference_settings() -> toml::Table {
 
 /// Whether `key` is set on the command line (`-c key=…` in any of its spellings) or at the top of
 /// `config.toml` (`config`).
-fn is_set(args: &[OsString], config: &str, key: &str) -> bool {
+pub(crate) fn is_set(args: &[OsString], config: &str, key: &str) -> bool {
     command_line_value(args, key).is_some()
         || config.parse::<toml::Table>().is_ok_and(|table| table.contains_key(key))
 }
@@ -331,7 +331,7 @@ fn command_line_value(args: &[OsString], key: &str) -> Option<String> {
 }
 
 /// `args` with `-c key=value` after the program name.
-fn with_assignment(args: Vec<OsString>, key: &str, value: impl std::fmt::Display) -> Vec<OsString> {
+pub(crate) fn with_assignment(args: Vec<OsString>, key: &str, value: impl std::fmt::Display) -> Vec<OsString> {
     let mut args = args.into_iter();
     let mut out: Vec<OsString> = args.next().into_iter().collect();
     out.extend(["-c".into(), format!("{key}={value}").into()]);
