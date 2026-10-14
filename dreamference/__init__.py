@@ -2,4 +2,4 @@
 Mightling by Dreamference - Autonomous local agentic coding engine for NVIDIA GB10
 """
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
