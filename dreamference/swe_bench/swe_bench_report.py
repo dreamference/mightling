@@ -23,12 +23,13 @@ CAVEATS: Final[str] = (
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "turn_end_compaction",
     "parallelism", "harness", "repository_commit", "review_turn", "hooks", "restart_after_compactions",
     "apply_patch", "exec_tool",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
-                               "refine_version": "v1",
+                               "refine_version": "v1", "turn_end_compaction": "auto",
                                "task_rules": [], "review_turn": False, "hooks": [], "restart_after_compactions": 0,
                                "apply_patch": "auto", "exec_tool": "auto"}
 
@@ -392,6 +393,21 @@ class SweBenchReport:
                 + ", ".join(restart["restarted"]))
 
     @classmethod
+    def turn_end_line(cls, manifest: Dict[str, Any]) -> str:
+        """One line: what the run pinned `model_post_turn_compact_threshold_percent` at, if anything (spec §16)."""
+        from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
+        setting = str(manifest.get("turn_end_compaction") or "auto")
+        percent = SweBenchRunner.turn_end_percent(setting, int(manifest.get("served_context") or 0),
+                                                  int(manifest.get("task_context") or 0))
+        if percent is None:
+            return f"{'Turn-end compaction':<20}auto (the key not set: exec never compacts at a turn's end)"
+        if percent == 0:
+            return f"{'Turn-end compaction':<20}off (the key pinned at 0 in every session)"
+        how = (f"the launcher's rule, 70% of the {manifest.get('task_context')}-token limit" if setting == "on"
+               else "as asked")
+        return f"{'Turn-end compaction':<20}{setting} ({percent}% of the usable window on every exec command line: {how})"
+
+    @classmethod
     def apply_patch_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Dict[str, Any]:
         """
         The apply_patch arm's measures (spec §22): the form the run asked for and, over the
@@ -597,6 +613,7 @@ class SweBenchReport:
         if manifest.get("task_rules"):
             lines.append(f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)")
         lines.append(cls.review_line(summary["review"]))
+        lines.append(cls.turn_end_line(manifest))
         lines.append(cls.restart_line(summary["restart"]))
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines.append(cls.exec_tool_line(summary["exec_tool"]))

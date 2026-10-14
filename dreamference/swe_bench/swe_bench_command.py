@@ -99,6 +99,11 @@ class SweBenchCommand:
                          help="Once the fix session's N-th compaction is recorded, stop it and start one fresh session "
                               "with the task and the stopped session's diff as a file it may apply or discard; "
                               "the tree is reset first, the time limit is not (default 0: never)")
+        run.add_argument("--turn-end-compaction", default=None, metavar="SETTING",
+                         help="Compaction at the end of a turn in every session, through Codex's "
+                              "model_post_turn_compact_threshold_percent on the exec command line: on (the launcher's "
+                              "rule for the run's limit), off (pinned at 0) or a percentage of the usable window (1-99); "
+                              "absent, the key is not set and exec never compacts at a turn's end (spec §16, night 10)")
         run.add_argument("--apply-patch", choices=("off", "function", "freeform"), default=None, metavar="FORM",
                          help="How the agent is offered Codex's apply_patch tool: function (a function tool, which "
                               "SGLang serves), freeform (a custom tool, which only ling-engine serves) or off; "
@@ -161,7 +166,7 @@ class SweBenchCommand:
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
                 task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn,
-                refine_version=args.refine_version or "v1",
+                refine_version=args.refine_version or "v1", turn_end_compaction=args.turn_end_compaction,
                 hooks=cls._ids(args.hooks), restart_after_compactions=args.restart_after_compactions,
                 apply_patch=args.apply_patch, exec_tool=args.exec_tool)
         if command == "eval":
