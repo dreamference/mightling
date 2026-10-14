@@ -8,7 +8,7 @@
 - [together-ai-survey-2026-10-13](./research/together-ai-survey-2026-10-13.md) (items 1–6);
 - [compaction-survey-2026-10-13](./research/compaction-survey-2026-10-13.md) (items 7–13).
 
-The owner approved items 1–13 on 2026-10-13. The surveys' engine items are being added to ling-engine's backlog separately: the drafter's NVFP4 scales re-quantized, tool-wait-aware eviction, and state saved at tool-output boundaries.
+The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The surveys' engine items are being added to ling-engine's backlog separately: the drafter's NVFP4 scales re-quantized, tool-wait-aware eviction, and state saved at tool-output boundaries.
 
 | # | Item | Area | Status |
 |---|---|---|---|
@@ -25,6 +25,7 @@ The owner approved items 1–13 on 2026-10-13. The surveys' engine items are bei
 | 11 | Compaction columns and probe questions | SWE-bench | Columns **built 2026-10-13**; probes not scheduled |
 | 12 | A context meter and `/compact <focus>` | TUI, desktop | Not scheduled |
 | 13 | Exploration in a sub-session | Agent | Not scheduled |
+| 14 | Per-output summaries, precomputed off the critical path | Compaction | Approved 2026-10-14, not scheduled; after the v2 bench |
 
 ---
 
@@ -289,3 +290,16 @@ On nights 1–4, sessions that compacted three or more times resolved 38%, again
   - fewer compactions per task;
   - the main context's peak lower.
 - **Status:** approved by the owner 2026-10-13, not scheduled.
+
+### 14. Per-output summaries, precomputed off the critical path
+
+- **What:** each long tool output is summarised right after it arrives, append-only, so the agent reads a few hundred tokens instead of 10–50K and a later compaction has less to compress. The summary is made where the agent is not waiting for it: by the main model in a second, low-priority stream between turns first; by a resident fast model only if one is ever accepted beside the main one. Paths, line numbers, test names and error strings are kept verbatim; where the output has a grammar (test logs, build logs, diffs) a rule-built extraction does it with no model at all, as the ledger does for compaction.
+- **Why:** the owner's idea of 2026-10-14 (summaries by a fast diffusion model instead of compaction), read against the 2026-10-13 bench: of a compaction's 80–118 s, 47–75 s was a cache-cold re-read of 62–91K tokens and ~16 s the summary, so the compaction request made cache-hot (compaction spec §14), the 800-word cap and item 7 come first; what remains after them is the mid-turn compaction inside tool-heavy turns, which only less ingested text can shorten. Compaction spec §4.6 role 1 and Fast Tools §2 already name this role. Not a diffusion model as the premise: the only one that fits (Tiny-A2D 0.5B) was measured unusable (compaction spec §9.3); DiffusionGemma 26B A4B is a candidate summariser if the fast slot ever gets a resident model, a small autoregressive instruct model another, each gated by the identifier-survival test of compaction spec §5 and by the one-resident-model memory rule.
+- **Size:** two to three days for the main-model stream and the rule-built extractors; the resident-model variant is Fast Tools work.
+- **Depends on:** the v2 compaction bench's verdict (2026-10-14 night); item 9 is the no-model alternative for the same outputs and the two should be compared on the same night arm; a second stream at low priority on the model server (the engine's session release/pin, SGLang survey proposal 9).
+- **Acceptance:**
+  - The identifier-survival test: every path, line number, test name and error string of a 20K-token log is in its summary.
+  - No user-visible wait: the summary is ready before the agent's next request or the raw output is used instead.
+  - A night arm against default: resolved not lower, fewer mid-turn compactions per task, the context's growth per task down.
+- **Status:** approved by the owner 2026-10-14, not scheduled; after the v2 bench and item 7.
+
