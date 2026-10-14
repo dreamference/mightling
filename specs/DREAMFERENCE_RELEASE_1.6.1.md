@@ -38,7 +38,8 @@ night 5 is named):
   `ling-search` or `ling-fetch` (`ling prompt show offline --composed`).
 - **The catalog:** against this machine's SGLang, `~/.mightling/model_catalog.json` has no
   `apply_patch_tool_type`; against ling-engine (`owned_by: ling-engine` in `/v1/models`) it says
-  `"freeform"`; `DREAMFERENCE_MIGHTLING_APPLY_PATCH=function ling exec …` writes `"function"`.
+  `"freeform"`; `DREAMFERENCE_MIGHTLING_APPLY_PATCH=function ling exec …` writes `"freeform"` too (Codex accepts
+  no other value) and the request offers `apply_patch` as a function tool.
 - **The suite:** `.venv/bin/python -m pytest tests/ -q` passes offline, about two minutes; nothing
   in it spawns the installed `ling` or reaches port 8000 (the guard in `tests/conftest.py`).
 - **Night 4 and night 5** are reported (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §21, §22) and the

@@ -1,0 +1,14 @@
+{
+  "about": "The freeform apply_patch tool as Codex rust-v0.158.0 sends it when the catalog's apply_patch_tool_type is freeform (core/src/tools/handlers/apply_patch_spec.rs, grammar core/assets/tools/apply_patch.lark, verbatim), and a patch for it.",
+  "freeform_tool": {
+    "type": "custom",
+    "name": "apply_patch",
+    "description": "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+    "format": {
+      "type": "grammar",
+      "syntax": "lark",
+      "definition": "start: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\n\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\n\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF -> line\n\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n\n%import common.LF\n"
+    }
+  },
+  "patch": "*** Begin Patch\n*** Update File: src/app.py\n@@ def greet():\n-    print(\"Hi\")\n+    print(\"Hello \\\"world\\\"\tand a tab\")\n*** Add File: notes.txt\n+one\n+two\n*** End Patch\n"
+}

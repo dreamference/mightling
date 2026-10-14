@@ -213,16 +213,27 @@ impl ServedModel {
 /// Unset, empty or anything else leaves the automatic choice ([`apply_patch_tool_type`]).
 pub const APPLY_PATCH_ENV: &str = "DREAMFERENCE_MIGHTLING_APPLY_PATCH";
 
-/// Codex's `apply_patch_tool_type` for the catalog: the override from [`APPLY_PATCH_ENV`] when it
-/// names a form, else `freeform` on a server that runs custom tools and nothing elsewhere (the
-/// model then edits through the shell, as it did before the field existed).
+/// Codex's `apply_patch_tool_type` for the catalog: `freeform` when [`APPLY_PATCH_ENV`] names a
+/// form (`function` included), nothing for `off`, else `freeform` on a server that runs custom
+/// tools and nothing elsewhere (the model then edits through the shell, as it did before the field
+/// existed). Never `function`: Codex 0.158 knows only `freeform` and exits at start on any other
+/// value, so the function form is the freeform tool offered as a function by ling-tools
+/// ([`apply_patch_as_function`]).
 pub fn apply_patch_tool_type(model: &ServedModel, setting: Option<&str>) -> Option<&'static str> {
     match setting.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
         Some("off") => None,
-        Some("function") => Some("function"),
-        Some("freeform") => Some("freeform"),
+        Some("function" | "freeform") => Some("freeform"),
         _ => model.runs_custom_tools().then_some("freeform"),
     }
+}
+
+/// Whether `apply_patch` is offered as a function: only when [`APPLY_PATCH_ENV`] says `function`
+/// (SWE-bench night 8's arm). Codex builds its freeform tool and handler from the catalog
+/// ([`apply_patch_tool_type`]); ling-tools sends that tool as a function with one string parameter,
+/// `input`, which SGLang passes to the model, and turns the call back into the freeform call
+/// Codex's handler applies (patch 0020's hooks; no hook of its own).
+pub fn apply_patch_as_function(setting: Option<&str>) -> bool {
+    setting.is_some_and(|s| s.trim().eq_ignore_ascii_case("function"))
 }
 
 /// Parses the process's command line into Codex's CLI type `T`, after [`prepare_args`] has pointed
@@ -407,8 +418,10 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // the network (node.rs; specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1).
     let host = node::resolve_host(interactive).await?;
     let model = wait_for_model(&host).await?;
-    // Code Mode's `exec` as a function where the server drops custom tools (exec_tool.rs).
+    // Code Mode's `exec` as a function where the server drops custom tools (exec_tool.rs), and
+    // `apply_patch` as one when a benchmark arm asks for it.
     exec_tool::configure(&model);
+    ling_tools::set_apply_patch_as_function(apply_patch_as_function(std::env::var(APPLY_PATCH_ENV).ok().as_deref()));
     let codex_home = codex_utils_home_dir::find_codex_home()
         .context("could not resolve CODEX_HOME")?
         .as_path()
@@ -951,7 +964,9 @@ pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Val
     // set). Its freeform form is a `custom` tool, which only ling-engine runs: verified on
     // 2026-10-10 (one `custom_tool_call apply_patch`, applied). On SGLang or vLLM the tool would
     // be dropped by the server, so the field stays absent there and the model edits by shell,
-    // unless a benchmark arm asks for a form (`APPLY_PATCH_ENV`, SWE-bench night 5: `function`).
+    // unless a benchmark arm asks for a form (`APPLY_PATCH_ENV`). The arm's `function` is written
+    // as `freeform`, the one value Codex accepts, and ling-tools offers that tool as a function
+    // (`apply_patch_as_function`; SWE-bench night 8).
     if let Some(form) = apply_patch_tool_type(model, std::env::var(APPLY_PATCH_ENV).ok().as_deref()) {
         entry["apply_patch_tool_type"] = json!(form);
     }
@@ -1364,12 +1379,41 @@ mod tests {
         assert!(!parse_served_model(&json!({"data": [{"id": "m"}]})).unwrap().runs_custom_tools());
         // The override, for an arm: a form by name, `off` for none, anything else is automatic.
         let sglang = ServedModel { id: "m".into(), max_model_len: 65536, owned_by: "sglang".into() };
-        assert_eq!(apply_patch_tool_type(&sglang, Some("function")), Some("function"));
+        // The function form is Codex's freeform tool in the catalog (the one value it accepts),
+        // offered as a function by ling-tools; only `function` turns that on.
+        assert_eq!(apply_patch_tool_type(&sglang, Some("function")), Some("freeform"));
         assert_eq!(apply_patch_tool_type(&sglang, Some("FreeForm ")), Some("freeform"));
+        assert!(apply_patch_as_function(Some("function")) && apply_patch_as_function(Some(" Function ")));
+        for setting in [None, Some(""), Some("freeform"), Some("off"), Some("maybe")] {
+            assert!(!apply_patch_as_function(setting), "{setting:?}");
+        }
         assert_eq!(apply_patch_tool_type(&engine, Some("off")), None);
         assert_eq!(apply_patch_tool_type(&engine, Some("")), Some("freeform"));
         assert_eq!(apply_patch_tool_type(&sglang, Some("maybe")), None);
         assert_eq!(apply_patch_tool_type(&sglang, None), None);
+    }
+
+    #[test]
+    fn every_apply_patch_setting_writes_a_catalog_codex_accepts() {
+        // Night 5's arm wrote `"apply_patch_tool_type": "function"`, which Codex 0.158 rejects, and
+        // `ling` exited at start. Every setting must parse as Codex's own catalog type.
+        for owner in ["sglang", LING_ENGINE_OWNER] {
+            let model = ServedModel { id: "m".into(), max_model_len: 65536, owned_by: owner.into() };
+            for setting in [None, Some("function"), Some("freeform"), Some("off"), Some("x")] {
+                let mut catalog = model_catalog(&model, "x");
+                let entry = &mut catalog["models"][0];
+                entry.as_object_mut().map(|entry| entry.remove("apply_patch_tool_type"));
+                if let Some(form) = apply_patch_tool_type(&model, setting) {
+                    entry["apply_patch_tool_type"] = json!(form);
+                }
+                let parsed = serde_json::from_value::<codex_protocol::openai_models::ModelsResponse>(catalog);
+                assert!(parsed.is_ok(), "{owner} {setting:?}: {parsed:?}");
+            }
+            // What night 5 wrote is rejected, so the check above can fail.
+            let mut rejected = model_catalog(&model, "x");
+            rejected["models"][0]["apply_patch_tool_type"] = json!("function");
+            assert!(serde_json::from_value::<codex_protocol::openai_models::ModelsResponse>(rejected).is_err());
+        }
     }
 
     #[test]
