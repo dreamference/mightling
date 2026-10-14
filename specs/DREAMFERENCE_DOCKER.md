@@ -170,7 +170,7 @@ A recipe can pin its own image in `launch_overrides["docker_image"]`, and name i
 
 | Model | Image | Built from |
 | --- | --- | --- |
-| `qwen3.8-27b-nvfp4-dflash2` (SGLang) | `lmsysorg/sglang@sha256:d6e7288627be…` (v0.5.19, pinned by digest) | Pulled from the registry, not built |
+| `qwen3.8-27b-nvfp4-dflash2` (SGLang) | `lmsysorg/sglang@sha256:b1259f3ea327…` (v0.5.21, pinned by digest; v0.5.19 until 1.6.1) | Pulled from the registry, not built |
 
 **Removed 2026-10-07:** the DFlash vLLM images for the 122B recipes (`dreamference-vllm-dflash:0.23.0-aeon-dense5` and `-dense9`, ~41 GB each, built by hand from `Dockerfile.dflash` and `Dockerfile.dense` on top of the AEON sm121 vLLM) went with their recipes, and so did both Dockerfiles. Images already on a machine are not deleted by Mightling; `docker image rm` frees them.
 
