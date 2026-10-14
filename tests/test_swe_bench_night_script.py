@@ -114,6 +114,46 @@ def test_a_misspelt_exec_tool_arm_ends_the_night_before_any_round(tmp_path, arm)
     assert (folder / "failed").exists() and not (folder / "done").exists()
 
 
+def test_night_10s_arms_pin_codexs_turn_end_key_off_and_on(tmp_path):
+    status, recorded, folder = night(tmp_path, "turn-end-compaction-off turn-end-compaction-on")
+    assert status == 0 and (folder / "done").exists()
+    record, candidate = runs(recorded)
+    assert "--name n4-turn-end-compaction-off " in record and record.count("--turn-end-compaction off") == 1
+    assert "--name n4-turn-end-compaction-on " in candidate and candidate.count("--turn-end-compaction on") == 1
+    assert "--task-rules" not in record and "--task-rules" not in candidate
+    assert "swe-bench report n4-turn-end-compaction-on --against n4-turn-end-compaction-off" in recorded
+    assert (folder / "turn-end-compaction-on-against-turn-end-compaction-off.txt").exists()
+    # A percentage of the usable window, and stacking with the other arms like any part.
+    stacked = tmp_path / "stacked"
+    stacked.mkdir()
+    _, recorded, _ = night(stacked, "turn-end-compaction-off turn-end-compaction-20+exec-tool-function")
+    assert "--turn-end-compaction 20 --exec-tool function" in runs(recorded)[1]
+
+
+@pytest.mark.parametrize("arm", ["turn-end-compaction", "turn-end-compaction-auto", "turn_end_compaction-on",
+                                 "turn-end-compaction-0", "turn-end-compaction-100", "turn-end-on"])
+def test_a_misspelt_turn_end_compaction_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"{arm} turn-end-compaction-on")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+def test_start_refuses_a_turn_end_night_where_only_one_arm_pins_the_key(tmp_path):
+    # In `exec` the key is off unless an arm pins it: `default` beside `turn-end-compaction-off`
+    # would measure off twice. Nothing is smoked and nothing is started.
+    result, recorded, verdicts, units, folder = start(tmp_path, "turn-end-compaction-off default")
+    assert result.returncode == 1 and "Arm default pins no turn-end compaction" in result.stdout
+    assert runs(recorded) == [] and verdicts == [] and units == [] and not folder.exists()
+    both = tmp_path / "both"
+    both.mkdir()
+    result, recorded, verdicts, units, folder = start(both, "turn-end-compaction-off turn-end-compaction-on")
+    assert result.returncode == 0, result.stdout + result.stderr
+    record, candidate = runs(recorded)
+    assert "--name n7-smoke-turn-end-compaction-off-" in record and record.count("--turn-end-compaction off") == 1
+    assert "--name n7-smoke-turn-end-compaction-on-" in candidate and candidate.count("--turn-end-compaction on") == 1
+    assert len(units) == 1
+
+
 @pytest.mark.parametrize("reads_it", [False, True])
 def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch(tmp_path, reads_it):
     # `start` with stand-ins: no unit is active (systemctl), git succeeds and changes nothing,
