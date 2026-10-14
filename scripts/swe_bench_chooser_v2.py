@@ -156,6 +156,7 @@ MAX_TEST_CHARS: Final[int] = 20_000
 TEST_TIMEOUT_S: Final[int] = 120          # one test script
 SETUP_TIMEOUT_S: Final[int] = 900         # the grader's set-up (pip install -e . for some)
 START_TIMEOUT_S: Final[int] = 300         # docker run of a local image
+PULL_TIMEOUT_S: Final[int] = 1800         # one image, inside the task's cap
 OUTPUT_KEPT_CHARS: Final[int] = 4_000     # a test's output, as kept and as the judge sees it
 JUDGE_QUERIES: Final[int] = 3
 CONTAINER_LABEL: Final[str] = "ling.swe-bench.chooser=v2"
@@ -790,7 +791,12 @@ class Runner:
             else:
                 pulled = SweBenchDocker.image_digest(image) is None
                 try:
-                    if not SweBenchDocker.ensure_image(image):
+                    # The pull is the task's first bounded step (`ensure_image` waits up to an hour).
+                    if pulled:
+                        SweBenchDocker.run(["pull", "-q", image], timeout=deadline.bound(PULL_TIMEOUT_S))
+                    if SweBenchDocker.image_digest(image) is None:
+                        if deadline.left() <= 1:
+                            raise TaskTimeout()
                         record["note"] = f"could not pull {image}"
                     else:
                         record["image"] = image
