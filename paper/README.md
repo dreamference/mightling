@@ -29,8 +29,8 @@ These are deliberately left open; the draft makes a provisional choice for each.
    - the decode rate while an index run is active;
    - a live Night Shift stall;
    - what the server does with a session larger than its KV pool;
-   - the A/B nights still running at the time of writing (apply_patch as a function, Code Mode on
-     SGLang) and the turn-end compaction bench.
+   - the turn-end compaction bench;
+   - the engine's remaining step savings and its gate run against production.
 
    Resolved since the first draft, and now reported as results: the first-run sign-in screen
    (fixed), the memory needed by `rust-analyzer scip` on the Codex workspace (measured), task-level
@@ -38,7 +38,9 @@ These are deliberately left open; the draft makes a provisional choice for each.
    Night Shift runs of a resumed task and parallel tasks (2026-10-08 update); the 100-task
    SWE-bench pair (default and refine), the failure analysis, A/B nights 1–4, the compaction limit
    tied to the KV pool, throughput at 12 draft tokens and on replayed agent sessions (2026-10-13
-   update).
+   update); A/B night 5 (void: the candidate arm failed at start) and night 6 (Code Mode, 31
+   against 30, with the time analysis), and the engine's first two step savings on seeded replays
+   (2026-10-14 update).
 8. **The title carries no number** (decided 2026-10-02). It used to quote the patch series' size
    ("21 KB", then "27 KB"), which went stale each time a patch was added; the size is in the
    abstract and the evaluation table instead.
@@ -51,8 +53,8 @@ Terminal coding agents such as the Codex CLI are open source, but they are built
 
 Every figure in the paper was measured on the author's GB10 or read from this repository, first on
 2026-09-28, again on 2026-10-01 (commit `05b1c8e`), updated on 2026-10-08 (from `origin/main` at `6aca2f2`)
-and on 2026-10-13 (from `origin/main` at `05e32b9`). Re-derive them before submission if the
-code has moved:
+on 2026-10-13 (from `origin/main` at `05e32b9`) and on 2026-10-14 (from `origin/main` at
+`a24d127`). Re-derive them before submission if the code has moved:
 
 | Figure | Source |
 |---|---|
@@ -69,9 +71,12 @@ code has moved:
 | Throughput (32.0 / 68.6 / 84.1 and 3.4 / 4.4 / 5.9 accepted per step at 12 draft tokens; 25.5 / 50.3 / 87.0 at 16; 23.8 / 49.9 / 53.1 for the removed 122B model) | `specs/DREAMFERENCE_INFERENCE.md`, 2026-10-09 row (`scripts/decode_speed.py --runs 3`); registry entries in `model_matrix_registry.py` (the 122B one in git history before 2026-10-07) |
 | Agent-session throughput (48.3 against 45.1 tok/s at 12 and 16 draft tokens, 5.23 against 4.99 accepted; 47 tok/s at 105 ms per step and 33.9 tok/s per stream with two streams at 16; the earlier ~30 tok/s logged with two sessions on a loaded machine; replayed outputs 77% of recorded length) | ling-engine `reports/M0.md` §1 and §3–4; `specs/DREAMFERENCE_INFERENCE.md` drafter row |
 | ling-engine status (one stream ~103 ms per step, two streams 33.4 against 33.9 tok/s per stream; 17.6 GB read per step) | ling-engine main, `specs/drafts/M4-sessions-and-batches-2026-10-10.md` ("Stage 4 as built", merged 2026-10-13 as `ac8d6e8`) |
+| ling-engine step savings (two tiles per block: per-stream period at two streams 154.2 → 147.5 ms, 32.6 → 34.1 tok/s per stream at equal acceptance; commit overlap: the step 102.6 → 101.4 ms and 48.6 → 49.2 tok/s on one stream, the per-stream period 147.8 → 146.3 ms and 34.0 → 34.3 on two; the third cp.async stage, the batched step in place 122.3 → 124.1 ms, rejected; GEMMs at 233–244 GB/s at 1–16 rows, 110–190 at 17–32; replays unseeded before `--sampling-seed`) | ling-engine main, the same draft's "The step savings as built" (`221da7a`, `0dc30cb`, `a06fad6`; the seed `3f1ef55`) |
 | SWE-bench (rounds, 71% and 69% estimates, bands, comparisons, refine timing, the 100-task pair) | `specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_COMPARISON.md`, `specs/DREAMFERENCE_MIGHTLING_REFINE.md` §2 and §2.1, `specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md` |
 | Failure categories of the 32, A/B nights 1–2 | `specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md`, Conclusion and §9.4 |
 | Nights 3–4 (26 against 29, p 0.51; 28 against 31, p 0.45) and the best-of-3 ceiling (29/29/31, 23 every time, 36 by some run) | `~/.local/share/dreamference/swe-bench/night3/` and `night4/` reports; `specs/research/together-ai-survey-2026-10-13.md` §3.1 |
+| Night 5 void (0 of 44, 44 agent errors, 7 s median; the default arm 29; `unknown variant function, expected freeform`) and the per-arm smoke check | `~/.local/share/dreamference/swe-bench/night5/` reports and `run.log`, `chain/night5.log`, the run's instance logs; commit `9367c42` |
+| Night 6 (31 against 30, +2.3 points, McNemar p 1.000; medians 7:07 and 5:38; 6 and 1 timeouts; 2,865 `exec` calls in 44 of 44) and its time analysis (5.03 against 5.01 s per request, 6,353 against 5,738 requests; 221 of 2,864 cells failed, 12% after a compaction; 2,646 single-command cells, 2.80 against 2.43 s; 60 against 55 compactions; 194.7M against 174.0M real input tokens) | `~/.local/share/dreamference/swe-bench/night6/` reports; `docs/dev/code-mode-night6.md` on branch `analysis/code-mode-night6` (`cdfa321`) |
 | Model gate | `specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md` §18; commit `008c90c` |
 | Airgapped, egress audit | `specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md` §14, `specs/DREAMFERENCE_MIGHTLING_EGRESS.md` §10 |
 | Nodes, second machine | `specs/DREAMFERENCE_MIGHTLING_NODE.md` §18; the second GB10 paired on 2026-10-08 (commits `2e81039`, `596c248`) |

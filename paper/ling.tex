@@ -606,10 +606,13 @@ tool crate now offers \code{exec} as a function with one string parameter, the g
 its description, turns the model's function call back into the custom-tool call Codex expects
 before Codex records it, and replays earlier calls in the form the model saw. The free-form
 \code{apply\_patch} is offered only to our own engine, which accepts custom tools; elsewhere the
-agent edits files through the shell as before. Whether Code Mode, and an \code{apply\_patch} offered
-as a function, help the local model are each being measured as a benchmark A/B. The lesson is about where to look: a local serving stack can silently filter
-what a vendor harness sends, and the request that reaches the model, not the one the harness
-built, is the thing to inspect.
+agent edits files through the shell as before. Both were then measured as paired A/B nights
+(\cref{sec:swebench}). With \code{exec} offered as a function the model called it in every one of
+44 benchmark tasks, 2{,}865 times, so the translation works; the \code{apply\_patch}-as-function
+arm never started, because the pinned Codex's catalogue parser accepts only the free-form variant.
+The lesson is about where to look: a local serving stack can silently filter what a vendor harness
+sends, and the request that reaches the model, not the one the harness built, is the thing to
+inspect.
 
 \paragraph{Timers sized for a hosted service.} Before the first token, the only timer Codex runs is
 a 300\,s stream-idle timeout, and it covers the server's queue as well as prompt processing. One
@@ -875,8 +878,9 @@ example a change that broke an existing test, after which the agent rewrote the 
 also found two defects in our harness, both fixed.
 
 \paragraph{What one night can measure.} The failure analysis proposed changes to the task prompt
-and the harness. Each was measured as a paired A/B night on tasks outside the 100: two arms on the
-same 44 or 50 freshly validated tasks, each arm one session per task.
+and the harness, and the tool findings of \cref{sec:local} two more. Each was measured as a paired
+A/B night on tasks outside the 100: two arms on the same 44 or 50 freshly validated tasks, each
+arm one session per task.
 \begin{center}
 \small
 \begin{tabular}{@{}l l r r r@{}}
@@ -887,16 +891,49 @@ Night & Candidate arm & Tasks & Default & Candidate ($p$) \\
 2 & the same, second sample & 44 & 29 & 31 (0.73) \\
 3 & the issue as a contract to check & 44 & 29 & 26 (0.51) \\
 4 & restart after a second compaction & 44 & 31 & 28 (0.45) \\
+5 & \code{apply\_patch} offered as a function & 44 & 29 & void (see below) \\
+6 & Code Mode off: \code{exec} left to the server to drop & 44 & 31 & 30 (1.0) \\
 \bottomrule
 \end{tabular}
 \end{center}
-None differs measurably from the default, which stays. The default arm's own runs on the same 44
-tasks say why: they resolved 29, 29 and 31, only 23 tasks were resolved every time, and 36 were
+None of the five that ran differs measurably from the default, which stays. The default arm's
+runs of nights 2--4 on the same 44 tasks say why: they resolved 29, 29 and 31, only 23 tasks were resolved every time, and 36 were
 resolved by at least one of the three. A quarter of a run's resolved set is therefore the luck of
 that run, and a single night can confirm only a large effect; the arms are judged first by the
 behaviour they target and only then by the count. The same runs bound what choosing among several
 attempts could gain: a perfect chooser over the three would resolve 36 of 44, about 14 points above
 a single run's average, at three times the agent time.
+
+\paragraph{Night 5 is void.} Its candidate arm failed at start in all 44 tasks: the launcher wrote
+\code{function} as the \code{apply\_patch} tool type into the model catalogue, the pinned Codex's
+parser accepts only \code{freeform}, and every session ended within seconds with no tokens; the
+round still exited 0, and only the report at the end of the round showed 0 of 44 with 44 agent
+errors. The
+chain's pre-flight had checked that the binary read the override, not that a session starts. Every
+night now begins with one real task per arm, with the arm's exact options, and the unit does not
+start unless each session ran to its end (a wrong patch passes; a dead session does not). The default arm, whose tools were those of night 6's candidate, resolved 29.
+
+\paragraph{Night 6: Code Mode.} The default arm ran Code Mode with \code{exec} offered as a
+function (\cref{sec:local}) and resolved 31 of 44 at a median of 7\,min 7\,s per task, with six
+timeouts; the candidate left \code{exec} as the custom tool the server drops, so the model saw the
+shell tools directly, and resolved 30 at 5\,min 38\,s with one timeout (+2.3 points for Code Mode;
+McNemar $p = 1.0$). Code Mode stays on. The time is the finding. An offline reading of every
+session's rollout shows a request costing the same in both arms (5.03 against 5.01\,s) and the
+Code Mode arm making 11\% more of them (6{,}353 against 5{,}738). Three causes account for most of
+it. 221 of its 2{,}864 \code{exec} cells (7.7\%) failed before running anything (Python heredocs
+inside a JavaScript string, a nested tool called without its \code{tools.} prefix, tools that are
+not in the isolate), each a full round trip, and 12\% of the cells right after a compaction failed
+against 6.9\% elsewhere. 2{,}646 of the cells (92\%) wrapped exactly one shell command, at 2.80\,s
+per call against 2.43\,s for a direct shell call in the same arm. And \code{exec}'s description adds
+about 1{,}000 tokens to the fixed prefix, which cost five more compactions (60 against 55). Of the
+six timeouts, two trace to failed cells after a compaction, one is unclear, and three would have
+happened without Code Mode. The reading also corrected the harness: its report sums tokens over
+completed turns, and a session the timeout kills never completes one, so the printed 111M against
+160M input tokens is wrong; from the rollouts the arms used 194.7M with Code Mode against 174.0M
+without (+12\%). No task used what Code Mode adds (11 cells composed two tools). The remedies the
+reading proposes, telling the model in \code{exec}'s own description when a direct call is right,
+restating the convention after a compaction and naming the fault when a cell fails, are each an arm
+to measure.
 
 These are estimates of what this agent, model and machine would score on all 500 tasks under these
 conditions, not leaderboard results. They do not account for training-data contamination, the
@@ -1090,11 +1127,25 @@ client whose browse misses adds a one-line hint.
 \paragraph{An engine for one model.} The second machine is dedicated to a single-model inference
 engine for Qwen3.8-27B with DFlash2, written in C++ and CUDA and kept outside this paper's build.
 Its rule is exactness: every speed change must leave greedy output byte-identical to
-non-speculative decoding. At the time of writing it matches the production server on one stream
-(a step of about 103\,ms) and comes within 2\% on two (33.4 against 33.9 tokens/s per stream),
-where the rest is steps that wait behind the other stream's prompt processing. Decode on this
-machine is bound by reading the weights, 17.6\,GB per step, so the remaining gains are in fewer
-bytes read per accepted token. We leave the engine to future work.
+non-speculative decoding. After its batching stages it matched the production server on one stream
+(a step of about 103\,ms) and came within 2\% on two (33.4 against 33.9 tokens/s per stream), where
+the rest is steps that wait behind the other stream's prompt processing. A block of single-step
+savings followed, each on its own branch and kept only if bit-identical to the day's main and no
+slower at one stream and at two. Two 16-row tiles per block in the weight-streaming GEMM were
+kept: the hoped-for 6\,ms on one stream was not there, since the step's GEMMs already streamed at
+233--244\,GB/s at 1--16 rows, but at 17--32 rows, the batched verify of two sequences, the narrow
+matrices had fallen to 110--190\,GB/s; the change took the per-stream step period at two
+streams from 154.2 to 147.5\,ms (32.6 to 34.1 tokens/s per stream). The commit's state replay on a second CUDA stream
+beside the next draft was kept: a step of 102.6 to 101.4\,ms on one stream (48.6 to 49.2
+tokens/s), a per-stream period of 147.8 to 146.3\,ms on two (34.0 to 34.3). A third \code{cp.async} stage in the verify attention was
+rejected: the kernel already read its keys at the plain-read rate, and the stage made the batched
+step in place slower (122.3 to 124.1\,ms). Those comparisons are at equal acceptance, and a methods fix made
+them so: the replay had sent no sampling seed, so each request drew its own acceptance and two
+runs were two workloads, which puts noise of a few percent on every earlier figure here, 33.4
+against 33.9 included. A comparison is now reported only when both runs produce the same tokens in
+the same number of steps. Decode on this machine is bound by reading the weights, 17.6\,GB per
+step, so the remaining gains are in fewer bytes read per accepted token. We leave the engine to
+future work.
 
 \section{Lessons}
 \label{sec:lessons}
@@ -1118,7 +1169,11 @@ boundary, than to wait for either to adapt to the surface.
 44 tasks, resolved between 29 and 31: 23 tasks every time, 8 never, and the other 13 in some runs
 but not in others. Every candidate we have tested so far moved the count by three tasks or
 fewer. A single run of each arm can only reject large effects, so
-each candidate is first judged by the behaviour it was meant to change.
+each candidate is first judged by the behaviour it was meant to change. The same lesson reached
+the two measuring instruments: the engine's replays carried sampled-acceptance noise until they
+were seeded, and a benchmark night whose candidate arm died at start in every task still exited 0
+until each arm was made to run one task to its end before the night begins
+(\cref{sec:swebench}).
 
 \paragraph{Unified memory needs admission control, not just limits.} A container memory cap bounds
 the container. It does not decide who dies when the host runs short, and it does not prevent a
@@ -1167,7 +1222,8 @@ rather than any serving algorithm.
     model configuration.
   \item \textbf{Agent-session throughput is a replay.} The figures for agent sessions come from
     replaying recorded sessions against the production configuration on the second machine; the
-    replayed outputs reach 77\% of the recorded lengths.
+    replayed outputs reach 77\% of the recorded lengths, and they were taken before the replay
+    sent a sampling seed (\cref{sec:node}), so they carry acceptance noise of a few percent.
   \item \textbf{Upstream's own tests are not green.} In the last full run of Codex's own suite
     against the patched tree (20{,}380 tests, 20{,}362 passed), sixteen app-server tests timed out
     for a reason we have not confirmed. That run predates the patches from 0017 on, which change
@@ -1197,11 +1253,12 @@ tools, connectors without a vendor sign-in, workstation pairing) cost a hook in 
 logic in crates of ours, with no change to the method. The cloud surface is audited and neutralised
 explicitly and re-checked by a trace after every build, and the host is protected by admission
 checks and a pressure watchdog. On a 100-task sample of SWE-bench Verified the agent's local
-result corresponds to about 69\% overall; neither a study-then-fix mode nor four prompt and harness
-changes measured above the run-to-run noise. The next steps are compaction that drops old tool
+result corresponds to about 69\% overall; neither a study-then-fix mode, nor four prompt and
+harness changes, nor Code Mode's \code{exec} measured above the run-to-run noise. The next steps are compaction that drops old tool
 output before it summarises, choosing among several attempts where time allows (overnight), and
 speed: an engine for this one model, on the second workstation, already matches the production
-server and has to pass it while keeping its output exact.
+server, is taking milliseconds off each step with its output bit-identical, and has to pass
+production on seeded replays of both.
 
 \section*{Availability}
 The system is developed in a public repository (\code{github.com/dreamference/mightling}). The
