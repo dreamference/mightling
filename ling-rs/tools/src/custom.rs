@@ -20,6 +20,14 @@
 //! switch in the launcher (`DREAMFERENCE_MIGHTLING_APPLY_PATCH`). The launcher decides once per
 //! process whether to translate ([`set_exec_as_function`]), from `/v1/models`' `owned_by` and
 //! `DREAMFERENCE_MIGHTLING_EXEC_TOOL`; nothing changes when it does not.
+//!
+//! Code Mode's other tool, `wait`, is a function, so it reaches the model on every server. Where
+//! `exec` stays custom and the server drops it, `wait` is offered alone: it can only name a cell
+//! `exec` started, and no cell can exist. The model then passed it `exec_command`'s session and
+//! chunk ids ("exec cell … not found"): 424 calls in the SWE-bench runs of 2026-10-08 to 10-12 and
+//! the compaction bench of 2026-10-13, every one failed; in the bench the model then relaunched
+//! its test run instead of polling it with `write_stdin`. That `wait` is taken out of the request
+//! ([`is_orphaned_wait`], [`set_custom_tools_dropped`]).
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -52,6 +60,33 @@ pub fn set_exec_as_function(on: bool) {
 /// Whether `exec` is offered as a function in this process.
 pub fn exec_as_function() -> bool {
     EXEC_AS_FUNCTION.load(Ordering::Relaxed)
+}
+
+/// Code Mode's `wait`: a function that waits on a cell `exec` started.
+pub const WAIT: &str = "wait";
+
+static CUSTOM_TOOLS_DROPPED: AtomicBool = AtomicBool::new(false);
+
+/// Sets, for this process, whether the model server drops custom tools (SGLang, vLLM; not
+/// ling-engine). The launcher sets it with [`set_exec_as_function`].
+pub fn set_custom_tools_dropped(on: bool) {
+    CUSTOM_TOOLS_DROPPED.store(on, Ordering::Relaxed);
+}
+
+/// Whether the model server drops custom tools, in this process.
+pub fn custom_tools_dropped() -> bool {
+    CUSTOM_TOOLS_DROPPED.load(Ordering::Relaxed)
+}
+
+/// Whether `tool` is Code Mode's `wait` in a request whose `exec` never reaches the model:
+/// `tools` holds `exec` as a custom tool, it is not offered as a function, and the server drops
+/// custom tools.
+pub fn is_orphaned_wait(tool: &Value, tools: &[Value], exec_as_function: bool, custom_tools_dropped: bool) -> bool {
+    !exec_as_function
+        && custom_tools_dropped
+        && tool["type"] == "function"
+        && tool["name"] == WAIT
+        && tools.iter().any(is_translated)
 }
 
 /// The names offered as functions so far in this process: only a call to one of these is turned
@@ -231,7 +266,7 @@ mod tests {
         let tools = list(&recorded()["production_tools"]);
         let exec = &tools[0];
         assert_eq!((exec["type"].as_str(), exec["name"].as_str()), (Some("custom"), Some("exec")));
-        let sent = flatten_with(tools.clone(), true);
+        let sent = flatten_with(tools.clone(), true, true);
         // The custom tool is now a function with one string parameter; the description is Codex's
         // followed by the grammar, worded as ling-engine words it (its API spec §4).
         let function = &sent[0];
@@ -250,16 +285,39 @@ mod tests {
         );
         // The other tools are sent as they came.
         assert_eq!(sent[1..], tools[1..]);
-        // Off (ling-engine, or the switch's `freeform`), nothing changes.
-        assert_eq!(flatten_with(tools.clone(), false), tools);
+        // Off on ling-engine (which runs custom tools), nothing changes: `exec` and `wait` both.
+        assert_eq!(flatten_with(tools.clone(), false, false), tools);
         // Every request sends the tools again: the result must not drift (cached prefix).
-        assert_eq!(flatten_with(tools.clone(), true), sent);
+        assert_eq!(flatten_with(tools.clone(), true, true), sent);
+    }
+
+    #[test]
+    fn wait_is_not_offered_without_an_exec_the_model_can_see() {
+        // The recorded tools are Codex's two Code Mode tools: `exec` (custom) and `wait` (function).
+        let tools = list(&recorded()["production_tools"]);
+        assert_eq!((tools[1]["type"].as_str(), tools[1]["name"].as_str()), (Some("function"), Some(WAIT)));
+        // SGLang with `exec` left custom (the switch's `freeform`): the server drops `exec`, so
+        // `wait` goes too. Every `wait` sent this way failed ("exec cell 83043 not found": the
+        // model passed it `exec_command`'s session id).
+        let sent = flatten_with(tools.clone(), false, true);
+        assert_eq!(sent, tools[..1]);
+        assert_eq!(flatten_with(tools.clone(), false, true), sent);
+        // `exec` as a function on the same server: `wait` has its cells, and stays.
+        let sent = flatten_with(tools.clone(), true, true);
+        assert_eq!(sent.iter().map(|tool| tool["name"].as_str()).collect::<Vec<_>>(), [Some("exec"), Some(WAIT)]);
+        // A `wait` with no Code Mode `exec` in the request is not Code Mode's: left alone.
+        let other = vec![json!({"type": "function", "name": "wait", "description": "Sleeps"})];
+        assert_eq!(flatten_with(other.clone(), false, true), other);
+        // Nor is a `wait` inside a namespace (`multi_agent_v1`'s `wait_agent` lives there).
+        let mut nested = tools.clone();
+        nested[1] = json!({"type": "namespace", "name": "multi_agent_v1", "tools": [tools[1].clone()]});
+        assert_eq!(flatten_with(nested.clone(), false, true), nested);
     }
 
     #[test]
     fn a_function_call_to_exec_comes_back_as_the_custom_call_ling_engine_returned() {
         let recorded = recorded();
-        flatten_with(list(&recorded["production_tools"]), true);
+        flatten_with(list(&recorded["production_tools"]), true, true);
         let engine = &recorded["engine_output_item"];
         // What SGLang returns for the call ling-engine returned as a custom tool call.
         let arguments = json!({"input": engine["input"]}).to_string();
@@ -346,7 +404,7 @@ mod tests {
     #[test]
     fn the_hooks_round_trip_codexs_items_and_do_nothing_when_off() {
         // The only test that sets the process's switch; the others pass it explicitly.
-        flatten_with(vec![json!({"type": "custom", "name": "exec", "description": "Run"})], true);
+        flatten_with(vec![json!({"type": "custom", "name": "exec", "description": "Run"})], true, true);
         let call = || Item::FunctionCall { name: "exec".into(), arguments: r#"{"input":"text(1)"}"#.into(), call_id: "c".into() };
         set_exec_as_function(false);
         assert_eq!(from_server(call()), call());
