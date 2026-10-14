@@ -52,6 +52,10 @@ Since 2026-10-09 a run has priority over the model server (spec §18). `server s
 
 The lists the rounds run on are committed under `docs/dev/swe-bench/` (the user's decision, 2026-10-09), so a report can be read against the exact list it was run on: `sample-100.txt` (the fixed 100-task sample of the first rounds and the refine pair) and `fresh-50.txt` (the 50 fresh tasks of night 1, drawn by `scripts/swe_bench_fresh.py draw --seed 20261009` from the 75 tasks validated outside the sample; its header says how). The runner reads its copy from `~/.cache/dreamference/swe-bench/`, where `swe_bench_fresh.py` writes it; the committed file is the record, byte for byte the same. A later list is drawn with `--exclude docs/dev/swe-bench/fresh-50.txt` (repeatable) once a night's failures on the earlier one have been read, so that no rule is measured on the transcripts it was designed from; the header names every excluded list.
 
+## The best-of-N chooser test
+
+`scripts/swe_bench_chooser_test.py` (v1: the regression filter and a pairwise judge, no container) and `scripts/swe_bench_chooser_v2.py` (v2: reproduction tests written from the issue, run in each task's image, then the filter, behaviour groups and the judge) choose among the patches of runs already on disk (backlog item 1). v2 reuses `SweBenchDocker`, `SweBenchImages` and the grader's set-up (the row's `eval_script` up to the hidden tests' reset), runs each container with no network, so the grader's `pip install -e .` fails there and the image's editable install (with `/testbed` first on `PYTHONPATH`) is what the tests import, and it never writes under the runs.
+
 ## Tests
 
 Every `docker` call goes through `SweBenchDocker`, and the cache and results directories are module-level constants, so the tests (`tests/test_swe_bench.py`, where a container is a scratch git repository) never start a container or touch the real cache.

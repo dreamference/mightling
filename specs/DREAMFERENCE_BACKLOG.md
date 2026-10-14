@@ -12,7 +12,7 @@ The owner approved items 1–13 on 2026-10-13. The surveys' engine items are bei
 
 | # | Item | Area | Status |
 |---|---|---|---|
-| 1 | The chooser test on disk | SWE-bench | Script ready, not run |
+| 1 | The chooser test on disk | SWE-bench | v1 run 2026-10-13 (33/44); **v2 built 2026-10-14**, not run |
 | 2 | Broken passing tests counted apart | SWE-bench | **Built 2026-10-13** |
 | 3 | `docs_ask` over long documents | `ling-docs` | Not scheduled |
 | 4 | A local deep-research skill | Skills | Not scheduled |
@@ -58,6 +58,14 @@ The owner approved items 1–13 on 2026-10-13. The surveys' engine items are bei
 - **Depends on:**
   - **A free model server.** It runs on node-b's production server, named by node name, when no SWE-bench run, Night Shift task or engine test needs it.
   - **The runs, read only on this machine,** with their gradings' PASS_TO_PASS counts. These come from `grading.json` or, for gradings made before item 2, the harness's `report.json` files.
+- **Result of v1 (2026-10-13, `~/swe-bench-chooser-2026-10`):** best-of-3 33/44 against single runs 29/29/31 and an oracle of 36. On the 13 disagreeing tasks: chooser 10, the filter alone 9.33, a random run 6.67. The filter was right 3/3, the judge 7/10 (wrong on django 11477, 12663 and 13807).
+- **v2, approved and built 2026-10-14:** [`scripts/swe_bench_chooser_v2.py`](../scripts/swe_bench_chooser_v2.py), an R2E-Gym-style hybrid verifier over the same three runs and seed. Its stages, in order:
+  1. **Reproduction tests:** one to three standalone scripts written from the issue text only, kept when they fail on the unpatched repository in the task's container; every candidate is run against them, each in a fresh container with no network.
+  2. **Existing tests:** v1's regression filter.
+  3. **Groups by behaviour:** identical pass/fail vectors form a group; most reproduction tests passed wins, then the largest group (in runs).
+  4. **Judge last:** only when a tie remains, shown the tests' results too, three calls per pair with the order swapped, the majority wins.
+
+  It reports v1 and v2 side by side and which stage decided each task, with a 40-minute cap per task and the images it pulled removed after each task. Runbook and command line in its docstring; tests in `tests/test_swe_bench_chooser_v2.py`.
 - **Command, for later:**
   ```bash
   .venv/bin/python scripts/swe_bench_chooser_test.py --dry-run     # 13 tasks, 10 to the judge, 26 calls at most
