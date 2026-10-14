@@ -35,7 +35,8 @@ from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLL
                                                           SCRUB_SCRIPT, TASK_RULES)
 from dreamference.swe_bench.swe_bench_instance_run import RESTART_DIFF, RESTART_PREAMBLE, REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
-from dreamference.swe_bench.swe_bench_runner import APPLY_PATCH_ENV, BUILT_IN_PROMPTS, EXEC_TOOL_ENV, RUN_NAME
+from dreamference.swe_bench.swe_bench_runner import (APPLY_PATCH_ENV, BUILT_IN_PROMPTS, CODE_MODE_FIXES_ENV, EXEC_TOOL_ENV,
+                                                      RUN_NAME)
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -3204,6 +3205,54 @@ def test_the_freeform_exec_arm_is_passed_through_and_a_shell_command_naming_exec
     store = SweBenchRunStore("free")
     assert store.state("acme__widget-1")["exec_tool"] == {"form": "freeform", "calls": 0}
     assert "Exec tool           freeform: called in 0 of 1 finished instance(s), 0 call(s)" in SweBenchReport.render(store)
+
+
+def test_the_code_mode_fixes_arm_sets_the_switch_records_it_and_is_parsed(bench, monkeypatch):
+    monkeypatch.delenv(CODE_MODE_FIXES_ENV, raising=False)
+    # Night 9's record arm: the switch off in every container, recorded in the manifest and the report.
+    assert run(bench, name="off", instances=["acme__widget-1", "acme__widget-2"], code_mode_fixes="off") == 0
+    env, _ = container_env(bench)
+    assert env[CODE_MODE_FIXES_ENV] == "off" and EXEC_TOOL_ENV not in env
+    store = SweBenchRunStore("off")
+    assert store.manifest()["code_mode_fixes"] == "off"
+    assert "Code Mode fixes     off (night 6's form)" in SweBenchReport.render(store)
+    # Resuming the run keeps the switch.
+    kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
+    store.predictions_path.write_text("".join(line + "\n" for line in kept))
+    bench["docker"].calls.clear()
+    assert run(bench, name="off") == 0
+    env, _ = container_env(bench)
+    assert env[CODE_MODE_FIXES_ENV] == "off"
+    # The candidate arm leaves the variable unset (a ling built with the fixes reads that as on).
+    bench["docker"].calls.clear()
+    assert run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"]) == 0
+    env, _ = container_env(bench)
+    assert CODE_MODE_FIXES_ENV not in env
+    plain = SweBenchRunStore("plain")
+    assert plain.manifest()["code_mode_fixes"] == "auto"
+    assert "Code Mode fixes     auto (the switch unset: on in a ling built with them, absent before)" in SweBenchReport.render(plain)
+    for name in ("off", "plain"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    assert "differs: code_mode_fixes: auto | off" in SweBenchReport.against(plain, store)
+    # A manifest from before the option existed ran with the switch unset.
+    manifest_path = plain.manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["code_mode_fixes"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "code_mode_fixes" not in SweBenchReport.against(plain, plain)
+    assert "Code Mode fixes     auto" in SweBenchReport.render(plain)
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--code-mode-fixes", "off", "--name", "x"])) == 0
+    assert seen["code_mode_fixes"] == "off"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["code_mode_fixes"] is None
+    for setting in ("auto", "1", "night6"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["swe-bench", "run", "--code-mode-fixes", setting, "--name", "z"])
 
 
 def test_the_exec_tool_arm_is_kept_on_resume_told_apart_by_against_and_parsed(bench, monkeypatch):

@@ -114,6 +114,58 @@ def test_a_misspelt_exec_tool_arm_ends_the_night_before_any_round(tmp_path, arm)
     assert (folder / "failed").exists() and not (folder / "done").exists()
 
 
+def test_night_9s_record_arm_is_the_code_mode_fixes_off_and_the_candidate_the_fixes_on(tmp_path):
+    status, recorded, folder = night(tmp_path, "code-mode-fixes-off default")
+    assert status == 0 and (folder / "done").exists()
+    record, candidate = runs(recorded)
+    assert "--name n4-code-mode-fixes-off " in record and record.count("--code-mode-fixes off") == 1
+    assert "--name n4-default " in candidate and "--code-mode-fixes" not in candidate
+    assert "--task-rules" not in record and "--task-rules" not in candidate
+    assert "swe-bench report n4-default --against n4-code-mode-fixes-off" in recorded
+    assert (folder / "default-against-code-mode-fixes-off.txt").exists()
+    # The forced setting, and stacking with the other arms like any part.
+    stacked = tmp_path / "stacked"
+    stacked.mkdir()
+    _, recorded, _ = night(stacked, "default exec-tool-function+code-mode-fixes-on")
+    assert "--exec-tool function --code-mode-fixes on" in runs(recorded)[1]
+
+
+@pytest.mark.parametrize("arm", ["code-mode-fixes", "code-mode-fixes-auto", "code_mode_fixes-off", "codemode-fixes-off", "code-mode-fixes-0"])
+def test_a_misspelt_code_mode_fixes_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"{arm} default")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+@pytest.mark.parametrize("binary", ["old", "switch-only", "fixes"])
+def test_start_refuses_an_installed_ling_without_the_code_mode_fixes(tmp_path, binary):
+    # As for the exec-tool switch: stand-ins for systemctl, git and the venv's Python; the fake
+    # `ling` reads the switch and carries the guidance's text only in the `fixes` build.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ling = tmp_path / "ling"
+    ling.write_bytes({"old": b"\x7fELF ... 1.6.1 ...",
+                      "switch-only": b"\x7fELF ... DREAMFERENCE_MIGHTLING_CODE_MODE_FIXES ...",
+                      "fixes": b"\x7fELF ... DREAMFERENCE_MIGHTLING_CODE_MODE_FIXES ... How to use `exec` here:\n- For one ..."}[binary])
+    for name, body in (("systemctl", "exit 1"), ("git", "exit 0")):
+        tool = bin_dir / name
+        tool.write_text(f"#!/bin/bash\n{body}\n")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{tmp_path / "install"}";; esac\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
+           "D": str(tmp_path / "night9"), "NIGHT": "9", "UNIT": "ling-swe-night9-test", "LIVE_UNIT": "ling-swe-night8-test",
+           "ARMS": "code-mode-fixes-off default", "LIST": str(tmp_path / "list.txt")}
+    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 1
+    refused = f"{ling} does not have the Code Mode night-6 fixes" in result.stdout
+    assert refused is (binary != "fixes")
+    if binary == "fixes":
+        assert "ling-code is missing" in result.stdout
+    assert not (tmp_path / "night9").exists()
+
+
 @pytest.mark.parametrize("reads_it", [False, True])
 def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch(tmp_path, reads_it):
     # `start` with stand-ins: no unit is active (systemctl), git succeeds and changes nothing,

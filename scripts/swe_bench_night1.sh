@@ -59,6 +59,10 @@ SMOKE_TIMEOUT=${SMOKE_TIMEOUT:-6m}
 # as 1.6.0 offered it, which SGLang drops, against `default`, which now offers it as a function).
 # The spelling is `arm_flags`' below.
 ARMS=${ARMS:-"default tests-v2"}
+# Text of the guidance the Code Mode night-6 fixes add to `exec`'s function-form description
+# (ling-rs/tools/src/custom.rs, GUIDANCE), looked for in the `ling` a code-mode-fixes night runs.
+CODE_MODE_FIXES_MARK='How to use `exec` here:'
+
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
@@ -67,7 +71,8 @@ log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
 # arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM function,
 # freeform or off: `--apply-patch FORM`, spec §22), `exec-tool-FORM` (FORM function or freeform:
-# `--exec-tool FORM`, spec §23), or several of these joined with `+`
+# `--exec-tool FORM`, spec §23), `code-mode-fixes-SETTING` (SETTING on or off: `--code-mode-fixes
+# SETTING`, spec §26), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -81,6 +86,8 @@ arm_flags() {
             apply-patch*|apply_patch*) echo "❌ Arm $1: write the apply_patch arm as apply-patch-function, -freeform or -off." >&2; return 2 ;;
             exec-tool-function|exec-tool-freeform) flags="$flags --exec-tool ${part#exec-tool-}" ;;
             exec-tool*|exec_tool*) echo "❌ Arm $1: write the Code Mode arm as exec-tool-function or exec-tool-freeform." >&2; return 2 ;;
+            code-mode-fixes-on|code-mode-fixes-off) flags="$flags --code-mode-fixes ${part#code-mode-fixes-}" ;;
+            code-mode-fixes*|code_mode_fixes*|codemode-fixes*) echo "❌ Arm $1: write the Code Mode fixes arm as code-mode-fixes-on or code-mode-fixes-off." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
@@ -175,6 +182,18 @@ start() {
         ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
         if ! grep -q -a DREAMFERENCE_MIGHTLING_EXEC_TOOL "$ling"; then
             echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_EXEC_TOOL: rebuild it (\`ling-admin codex build\`) from a commit that has the Code Mode translation."; exit 1
+        fi ;;
+    esac
+    case "$ARMS" in *code-mode-fixes-*)
+        if ! grep -q -- '"--code-mode-fixes"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
+            echo "❌ $WT does not have --code-mode-fixes: pin REF to a commit that has it."; exit 1
+        fi
+        # The arm only sets the switch (DREAMFERENCE_MIGHTLING_CODE_MODE_FIXES); a `ling` built
+        # without the fixes ignores it, and the night would measure night 6's form twice. The
+        # guidance's text is in the binary (GUIDANCE in custom.rs).
+        ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
+        if ! grep -q -a DREAMFERENCE_MIGHTLING_CODE_MODE_FIXES "$ling" || ! grep -q -a -F "$CODE_MODE_FIXES_MARK" "$ling"; then
+            echo "❌ $ling does not have the Code Mode night-6 fixes: rebuild it (\`ling-admin codex build\`) from a commit that has them (codemode/night6-fixes)."; exit 1
         fi ;;
     esac
     # The universal code index needs codebase-memory-mcp beside ling-code in Mightling's install
