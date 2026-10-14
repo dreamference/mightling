@@ -96,7 +96,7 @@ class SweBenchReport:
             "restart": cls.restart_summary(manifest, states, finished & set(instances)),
             "apply_patch": cls.apply_patch_summary(manifest, states, finished & set(instances)),
             "exec_tool": cls.exec_tool_summary(manifest, states, finished & set(instances)),
-            "compaction": cls.compaction_summary(manifest, states, finished & set(instances)),
+            "compaction": cls.drop_compaction_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
             "causes": cls.unresolved_causes(store, manifest, number if details else None, variant, results, graded),
@@ -431,7 +431,7 @@ class SweBenchReport:
                 "calls": sum(int(r.get("calls") or 0) for r in recorded.values())}
 
     @classmethod
-    def compaction_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Dict[str, Any]:
+    def drop_compaction_summary(cls, manifest: Dict[str, Any], states: Dict[str, Any], finished: Any) -> Dict[str, Any]:
         """
         What the finished instances spent on compaction, and what drop-first compaction did
         (compaction spec §13), from each state's `compaction` record. The survey's acceptance rule
@@ -451,7 +451,7 @@ class SweBenchReport:
                 **{key: (round(value, 1) if key == "seconds" else int(value)) for key, value in totals.items()}}
 
     @classmethod
-    def compaction_line(cls, summary: Dict[str, Any]) -> str:
+    def drop_compaction_line(cls, summary: Dict[str, Any]) -> str:
         """One line: compactions and their time over the finished instances, and the drops when on."""
         head = f"{'Compaction':<20}drop old outputs {'on' if summary['drop'] else 'off'}"
         if not summary["recorded"]:
@@ -634,7 +634,7 @@ class SweBenchReport:
         lines.append(cls.restart_line(summary["restart"]))
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines.append(cls.exec_tool_line(summary["exec_tool"]))
-        lines.append(cls.compaction_line(summary["compaction"]))
+        lines.append(cls.drop_compaction_line(summary["compaction"]))
         lines += cls.hooks_lines(summary["hooks"])
         lines += cls.compaction_lines(summary["compactions"])
         not_run = validated - summary["finished"]
