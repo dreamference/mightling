@@ -854,3 +854,17 @@ Most unresolved patches fail by not fixing the issue; broken passing tests are 2
 | n4-restart-2 | 80 | 24 of 44 | 126 min | 18% | 90 s | 17/20, 4/7, 4/5, 3/12 |
 
 **Tests** (`tests/test_swe_bench.py`, +1): the count, the durations (the 2 s rule, a record with no time counted but not timed, a torn last line skipped), an instance without rollouts named, resolved by count, and the side-by-side rows.
+
+## 26. The Code Mode night-6 fixes (`DREAMFERENCE_MIGHTLING_CODE_MODE_FIXES`, 2026-10-14)
+
+*The owner's decision of 2026-10-14, after the offline analysis of night 6 (`docs/dev/code-mode-night6.md`): build all three on a branch for a later night's A/B.* Night 6's Code Mode arm resolved as many tasks as the arm without it (31 against 30 of 44, McNemar p = 1.0) but ran slower (median 7 min 7 s against 5 min 38 s, 6 timeouts against 1): a request costs the same in both arms, Code Mode made 11% more of them. 221 of 2,864 `exec` cells (7.7%) failed, mostly JavaScript syntax errors from Python or shell heredocs pasted into a string and `exec_command` called without the `tools.` prefix; cells failed 12% of the time in the ten after a compaction against 7% elsewhere; 6 of 60 compaction summaries were only a tool call.
+
+**What it does.** Three changes, all in `ling-rs/` (no patch bytes; the series stays at 42,958), on unless the variable says `off`:
+
+1. `exec`'s description, where it is offered as a function (`ling-rs/tools/src/custom.rs`, `GUIDANCE`), says when to call `exec_command` directly, that nested tools are on `tools` and return `{output, exit_code, ...}`, that tools offered directly are not reachable from a cell, that the input is JavaScript only (no heredoc inside a string: call `exec_command` directly with it), and that each cell is a fresh isolate. The off arm sends night 6's description.
+2. A failed cell's output, on the replay path of the next request, carries a hint for the known kinds (`custom::hint`): the missing `tools.` prefix, a variable from an earlier cell, `exec` calling itself, a tool not in the isolate, a syntax error with or without a heredoc or Python in the cell. A policy refusal gets none. The hint is a function of the cell and its output, so the cached prefix holds and a hinted history gets no second hint.
+3. The ledger hook (`ling-rs/src/ledger.rs`) restates one working `exec` cell of the session (the last short one that nests `exec_command` and prints its output; the canonical two-liner when there is none) and, when the last summary is only a tool call, a line of prose before one, or under 400 characters, carries the previous sound summary within the ledger's 6,000-character budget.
+
+**The arm.** The off arm needs the variable in every session of the run, as `--exec-tool` sets `DREAMFERENCE_MIGHTLING_EXEC_TOOL` (§23): a `run --code-mode-fixes on|off` option recorded in the manifest and passed through the containers' environment, and an `arm_flags` part `code-mode-fixes-off` in `scripts/swe_bench_night1.sh`. Neither is built yet; the night is `ARMS="code-mode-fixes-off default"` on a `ling` built from the branch, the record arm first.
+
+**Tests**: the ling-tools crate's (the description with and without the guidance, each hint and the outputs that get none, the replayed output with and without the fixes), the ledger's (the example chosen, the canonical fallback, a session without `exec`, the degenerate summaries of night 6's three shapes, the budget, the hook's switch), and the launcher's (one variable name and one reading in both crates).

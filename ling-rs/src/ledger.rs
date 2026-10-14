@@ -10,6 +10,13 @@
 //! to the conversation after the summary, before the next request to the model. It only appends,
 //! so it costs no cached prefix.
 //!
+//! Two more things since SWE-bench night 6 (2026-10-14, `docs/dev/code-mode-night6.md`): cells
+//! of Code Mode's `exec` failed 12% of the time right after a compaction against 7% elsewhere,
+//! because the summary drops the examples of working cells, so the ledger restates one working
+//! cell from the session; and 6 of 60 summaries were only a tool call, so when the last summary is
+//! degenerate the ledger carries the previous one. Both are left out when
+//! [`CODE_MODE_FIXES_ENV`] says `off` (the benchmark arm that reproduces night 6).
+//!
 //! It depends on nothing but the standard library and `serde_json`, so it can be compiled and run
 //! outside the Codex workspace.
 
@@ -39,6 +46,25 @@ const MAX_FAILED: usize = 5;
 const MAX_COMMAND_CHARS: usize = 160;
 /// Codex spills a hook's context to a file past ~2,500 tokens; the ledger stays well under it.
 const MAX_CHARS: usize = 6_000;
+/// A restored summary shorter than this is not worth its line.
+const MIN_RESTORED_CHARS: usize = 200;
+/// A summary body under this many characters is degenerate (night 6's six were 120 to 308).
+const MIN_SUMMARY_CHARS: usize = 400;
+/// The longest working cell restated as the example; a longer one is not an example.
+const MAX_EXAMPLE_CHARS: usize = 240;
+
+/// The same variable `ling-rs/tools` reads (`ling_tools::custom::FIXES_ENV`; the hook is its own
+/// process, so it reads the environment itself): `off` leaves the Code Mode lines out.
+pub const CODE_MODE_FIXES_ENV: &str = "DREAMFERENCE_MIGHTLING_CODE_MODE_FIXES";
+
+/// Codex's summary message opens with a fixed preamble ending in this; the summary is what
+/// follows. A message without it is taken whole.
+const SUMMARY_PREAMBLE_END: &str = "assist with your own analysis:\n";
+
+/// The cell restated when the session used `exec` but none of its working cells is short enough
+/// to serve: the form 92% of night 6's cells took.
+pub const CANONICAL_EXAMPLE: &str =
+    "const r = await tools.exec_command({cmd: \"cd /testbed && git status --short\"});\ntext(r.output);";
 
 /// The trail of one session, as far as rules can rebuild it.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -52,6 +78,10 @@ pub struct Ledger {
     pub failed: Vec<(i64, String)>,
     /// The last test summary line a command printed, and that command's first line.
     pub last_test: Option<(String, String)>,
+    /// A working `exec` cell of this session, when it used Code Mode's `exec`.
+    pub exec_example: Option<String>,
+    /// The previous summary, when the last one was degenerate (only a tool call, or too short).
+    pub restored_summary: Option<String>,
 }
 
 impl Ledger {
@@ -61,11 +91,16 @@ impl Ledger {
         let mut calls: Vec<Call> = Vec::new();
         // Index into `calls` of the first call after each compaction.
         let mut compactions: Vec<usize> = Vec::new();
+        // Each compaction's summary, without Codex's preamble.
+        let mut summaries: Vec<String> = Vec::new();
         for line in rollout.lines() {
             let Ok(record) = serde_json::from_str::<Value>(line) else { continue };
             let payload = &record["payload"];
             match (record["type"].as_str(), payload["type"].as_str()) {
-                (Some("compacted"), _) => compactions.push(calls.len()),
+                (Some("compacted"), _) => {
+                    compactions.push(calls.len());
+                    summaries.push(summary_body(payload["message"].as_str().unwrap_or_default()).to_string());
+                }
                 (Some("response_item"), Some("function_call")) => {
                     let arguments: Value = payload["arguments"]
                         .as_str()
@@ -85,6 +120,7 @@ impl Ledger {
                     };
                     calls.push(Call {
                         id: payload["call_id"].as_str().unwrap_or_default().to_string(),
+                        name: payload["name"].as_str().unwrap_or_default().to_string(),
                         command,
                         workdir: arguments["workdir"].as_str().map(PathBuf::from),
                         output: String::new(),
@@ -92,6 +128,7 @@ impl Ledger {
                 }
                 (Some("response_item"), Some("custom_tool_call")) => calls.push(Call {
                     id: payload["call_id"].as_str().unwrap_or_default().to_string(),
+                    name: payload["name"].as_str().unwrap_or_default().to_string(),
                     command: payload["input"].as_str().unwrap_or_default().to_string(),
                     workdir: None,
                     output: String::new(),
@@ -149,7 +186,34 @@ impl Ledger {
             Some((summary.trim().trim_matches('=').trim().to_string(), first_line(&call.command)))
         });
 
-        Ledger { changed, read, failed, last_test }
+        // The last working cell that nested `exec_command` and is short enough to read as an
+        // example; the canonical one when the session used `exec` but no such cell is.
+        let cells: Vec<&Call> = calls.iter().filter(|call| call.name == "exec").collect();
+        let exec_example = cells
+            .iter()
+            .rev()
+            .find(|cell| {
+                cell.output.starts_with("Script completed")
+                    && cell.command.contains("tools.exec_command")
+                    && cell.command.contains("text(")
+                    && cell.command.trim().chars().count() <= MAX_EXAMPLE_CHARS
+            })
+            .map(|cell| cell.command.trim().to_string())
+            .or_else(|| (!cells.is_empty()).then(|| CANONICAL_EXAMPLE.to_string()));
+
+        // The hook runs just after a compaction: when its summary is degenerate, the nearest
+        // earlier summary that is not.
+        let restored_summary = match summaries.last() {
+            Some(last) if is_degenerate_summary(last) => summaries
+                .iter()
+                .rev()
+                .skip(1)
+                .find(|summary| !is_degenerate_summary(summary))
+                .map(|summary| summary.trim().to_string()),
+            _ => None,
+        };
+
+        Ledger { changed, read, failed, last_test, exec_example, restored_summary }
     }
 
     /// The text handed to the model.
@@ -170,26 +234,81 @@ impl Ledger {
         if let Some((summary, command)) = &self.last_test {
             lines.push(format!("Last test result, from `{command}`: {summary}"));
         }
+        if let Some(example) = &self.exec_example {
+            lines.push("A Code Mode `exec` cell that worked in this session (nested tools are on `tools`; for one shell command, call `exec_command` directly):".to_string());
+            lines.push(example.clone());
+        }
         let mut text = lines.join("\n");
-        if text.len() > MAX_CHARS {
-            let mut end = MAX_CHARS;
-            while !text.is_char_boundary(end) {
-                end -= 1;
+        truncate_chars(&mut text, MAX_CHARS);
+        // The restored summary takes what is left of the budget, never more.
+        if let Some(summary) = &self.restored_summary {
+            let mut restored = summary.clone();
+            let budget = MAX_CHARS.saturating_sub(text.len() + RESTORED_LINE.len() + 2);
+            if budget >= MIN_RESTORED_CHARS {
+                truncate_chars(&mut restored, budget);
+                text.push_str("\n\n");
+                text.push_str(RESTORED_LINE);
+                text.push('\n');
+                text.push_str(&restored);
             }
-            text.truncate(end);
-            text.push_str("\n…");
         }
         text
     }
 
     /// True when there is nothing to tell: a session that ran no command.
     pub fn is_empty(&self) -> bool {
-        self.changed.is_empty() && self.read.is_empty() && self.failed.is_empty() && self.last_test.is_none()
+        self.changed.is_empty()
+            && self.read.is_empty()
+            && self.failed.is_empty()
+            && self.last_test.is_none()
+            && self.exec_example.is_none()
+            && self.restored_summary.is_none()
     }
+
+    /// The ledger as it was before night 6's fixes: without the Code Mode lines.
+    pub fn without_code_mode_fixes(mut self) -> Ledger {
+        self.exec_example = None;
+        self.restored_summary = None;
+        self
+    }
+}
+
+/// What introduces a restored summary.
+const RESTORED_LINE: &str =
+    "The last compaction summary was empty or only a tool call; the previous summary follows, older than the lines above:";
+
+/// Cuts `text` to at most `max` bytes at a character boundary, marking the cut.
+fn truncate_chars(text: &mut String, max: usize) {
+    if text.len() > max {
+        let mut end = max;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        text.push_str("\n…");
+    }
+}
+
+/// The summary in a `compacted` record's message: what follows Codex's preamble.
+fn summary_body(message: &str) -> &str {
+    match message.find(SUMMARY_PREAMBLE_END) {
+        Some(start) => &message[start + SUMMARY_PREAMBLE_END.len()..],
+        None => message,
+    }
+}
+
+/// A summary that is only a tool call (the model answered the compaction request with a call,
+/// at most a line of prose before it: night 6's sympy-18698 wrote "Let me create a comprehensive
+/// handoff summary" and then called `exec`), or too short to have kept anything.
+fn is_degenerate_summary(summary: &str) -> bool {
+    let prose = summary.split("<tool_call>").next().unwrap_or_default();
+    let prose = prose.split("<function").next().unwrap_or_default().trim();
+    prose.chars().count() < MIN_SUMMARY_CHARS
 }
 
 struct Call {
     id: String,
+    name: String,
     command: String,
     workdir: Option<PathBuf>,
     output: String,
@@ -322,6 +441,12 @@ pub fn git_status(cwd: &Path) -> Option<String> {
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Whether the Code Mode lines are on, from [`CODE_MODE_FIXES_ENV`]'s value: only `off` turns
+/// them off (the same reading as `ling_tools::custom::fixes_on_from`).
+pub fn code_mode_fixes_on(setting: Option<&str>) -> bool {
+    !setting.is_some_and(|value| value.trim().eq_ignore_ascii_case("off"))
+}
+
 /// Answers the hook: `input` is the JSON Codex writes to a `SessionStart` hook's stdin. Returns
 /// the JSON to print, or `None` when there is nothing to add (the session start was not a
 /// compaction, the rollout cannot be read, or no command has run).
@@ -332,7 +457,10 @@ pub fn hook(input: &str) -> Option<String> {
     }
     let rollout = std::fs::read_to_string(input["transcript_path"].as_str()?).ok()?;
     let cwd = PathBuf::from(input["cwd"].as_str()?);
-    let ledger = Ledger::from_rollout(&rollout, &cwd, git_status(&cwd).as_deref());
+    let mut ledger = Ledger::from_rollout(&rollout, &cwd, git_status(&cwd).as_deref());
+    if !code_mode_fixes_on(std::env::var(CODE_MODE_FIXES_ENV).ok().as_deref()) {
+        ledger = ledger.without_code_mode_fixes();
+    }
     if ledger.is_empty() {
         return None;
     }
@@ -524,5 +652,106 @@ mod tests {
         };
         let text = ledger.render();
         assert!(text.len() <= MAX_CHARS + 8 && text.contains("… and 160 more"), "{}", text.len());
+    }
+
+    /// A Code Mode cell and its output, as Codex records a translated `exec` call.
+    fn cell(id: &str, input: &str, status: &str) -> String {
+        [
+            json!({"type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec", "call_id": id, "input": input}}).to_string(),
+            json!({"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": id,
+                "output": format!("{status}\nWall time 0.0 seconds\nOutput:\n")}}).to_string(),
+        ]
+        .join("\n")
+    }
+
+    /// A `compacted` record whose summary is `body`, behind Codex's preamble.
+    fn compacted(body: &str) -> String {
+        let message = format!("Another language model started to solve this problem and produced a summary. Here is the summary, use the information in this summary to {SUMMARY_PREAMBLE_END}{body}");
+        json!({"type": "compacted", "payload": {"message": message}}).to_string()
+    }
+
+    #[test]
+    fn a_working_exec_cell_is_restated_and_a_session_without_exec_gets_none() {
+        let dir = scratch("cell");
+        let long = format!("const r = await tools.exec_command({{cmd: \"{}\"}});\ntext(r.output);", "x".repeat(300));
+        let rollout = [
+            cell("1", "const r = await exec_command({cmd: 'ls'});", "Script failed"),
+            cell("2", "const r = await tools.exec_command({cmd: \"cd /testbed && git diff --stat\"});\ntext(r.output);\n", "Script completed"),
+            cell("3", &long, "Script completed"),
+            cell("4", "text('plan')", "Script completed"),
+            cell("5", "await tools.exec_command({cmd: 'git diff'})", "Script completed"),
+            COMPACTED.to_string(),
+        ]
+        .join("\n");
+        let ledger = Ledger::from_rollout(&rollout, &dir, Some(""));
+        // The last working cell that nests `exec_command`, prints its output and is short
+        // enough: not the failed one, not the long one, not the one that calls no tool, not the
+        // one that prints nothing.
+        assert_eq!(
+            ledger.exec_example.as_deref(),
+            Some("const r = await tools.exec_command({cmd: \"cd /testbed && git diff --stat\"});\ntext(r.output);")
+        );
+        let text = ledger.render();
+        assert!(text.contains("A Code Mode `exec` cell that worked in this session") && text.contains("git diff --stat"), "{text}");
+        // Only failed cells: the canonical example stands in.
+        let only_failed = [cell("1", "exec_command({cmd: 'ls'})", "Script failed"), COMPACTED.to_string()].join("\n");
+        assert_eq!(Ledger::from_rollout(&only_failed, &dir, Some("")).exec_example.as_deref(), Some(CANONICAL_EXAMPLE));
+        // A session that never used `exec` says nothing about it.
+        let plain = [call("1", "ls"), output("1", 0, "a"), COMPACTED.to_string()].join("\n");
+        let ledger = Ledger::from_rollout(&plain, &dir, Some(""));
+        assert_eq!(ledger.exec_example, None);
+        assert!(!ledger.render().contains("Code Mode"));
+    }
+
+    #[test]
+    fn a_degenerate_last_summary_brings_the_previous_one_back() {
+        let dir = scratch("summary");
+        let good = format!("## Task\nFix the thing.\n{}", "The details of what was found. ".repeat(40));
+        let tool_call = "<tool_call>\n<function=exec>\n<parameter=input>\nconst r = await tools.exec_command({cmd: \"cd /testbed && git diff\"});\ntext(r.output);\n</parameter>\n</function>\n</tool_call>";
+        let rollout = [call("1", "ls"), output("1", 0, "a"), compacted(&good), call("2", "ls"), output("2", 0, "a"), compacted(tool_call)].join("\n");
+        let ledger = Ledger::from_rollout(&rollout, &dir, Some(""));
+        assert_eq!(ledger.restored_summary.as_deref(), Some(good.trim()));
+        let text = ledger.render();
+        assert!(text.contains(RESTORED_LINE) && text.ends_with(good.trim()), "{text}");
+        assert!(text.len() <= MAX_CHARS + 8);
+        // A short one is degenerate too, and so is a line of prose before the tool call (night
+        // 6's sympy-18698); two degenerate in a row reach back further.
+        let prose_then_call = format!("Let me create a comprehensive handoff summary for the next LLM.\n\n{tool_call}");
+        assert!(is_degenerate_summary(&prose_then_call) && is_degenerate_summary("Done.") && !is_degenerate_summary(&good));
+        let rollout = [compacted(&good), compacted(&prose_then_call), compacted(tool_call)].join("\n");
+        assert_eq!(Ledger::from_rollout(&rollout, &dir, Some("")).restored_summary.as_deref(), Some(good.trim()));
+        // Nothing to restore when every summary is degenerate, or the last one is sound.
+        assert_eq!(Ledger::from_rollout(&compacted(tool_call), &dir, Some("")).restored_summary, None);
+        let rollout = [compacted(tool_call), compacted(&good)].join("\n");
+        assert_eq!(Ledger::from_rollout(&rollout, &dir, Some("")).restored_summary, None);
+        // A message without the preamble is read whole.
+        assert_eq!(summary_body("no preamble"), "no preamble");
+        // The restored summary never pushes the ledger past the spill threshold.
+        let huge = Ledger {
+            changed: (0..60).map(|index| format!(" M {}", "x".repeat(80) + &index.to_string())).collect(),
+            restored_summary: Some("s".repeat(40_000)),
+            ..Ledger::default()
+        };
+        let text = huge.render();
+        assert!(text.len() <= MAX_CHARS + 8 && text.contains(RESTORED_LINE), "{}", text.len());
+        // A ledger with nothing else still carries a restored summary.
+        let only = Ledger { restored_summary: Some(good.clone()), ..Ledger::default() };
+        assert!(!only.is_empty() && only.render().ends_with(&good));
+        assert!(only.without_code_mode_fixes().is_empty());
+    }
+
+    #[test]
+    fn the_hook_leaves_the_code_mode_lines_out_when_the_fixes_are_off() {
+        assert!(code_mode_fixes_on(None) && code_mode_fixes_on(Some("")) && code_mode_fixes_on(Some("on")));
+        assert!(!code_mode_fixes_on(Some("off")) && !code_mode_fixes_on(Some(" Off ")));
+        let dir = scratch("fixes");
+        let rollout = dir.join("rollout.jsonl");
+        std::fs::write(&rollout, [cell("1", "const r = await tools.exec_command({cmd: 'ls'});\ntext(r.output);", "Script completed"), COMPACTED.to_string()].join("\n"))
+            .unwrap_or_default();
+        let input = json!({"source": "compact", "transcript_path": rollout, "cwd": dir, "hook_event_name": "SessionStart"}).to_string();
+        // The tests run with the variable unset: the cell is restated.
+        let answer: Value = serde_json::from_str(&hook(&input).unwrap_or_default()).unwrap_or_default();
+        let context = answer["hookSpecificOutput"]["additionalContext"].as_str().unwrap_or_default();
+        assert!(context.contains("A Code Mode `exec` cell that worked"), "{context}");
     }
 }
