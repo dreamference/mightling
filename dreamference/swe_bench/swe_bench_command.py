@@ -107,6 +107,10 @@ class SweBenchCommand:
                          help="How the agent is offered Code Mode's exec tool: function (translated, which SGLang "
                               "serves) or freeform (Codex's custom tool, which only ling-engine serves and SGLang "
                               "drops); the launcher's own choice when absent: function on SGLang and vLLM (spec §23)")
+        run.add_argument("--code-mode-fixes", choices=("on", "off"), default=None, metavar="SETTING",
+                         help="The Code Mode night-6 fixes (the guidance in exec's description, the hint on a failed "
+                              "cell, the ledger's exec example and kept summary): on, or off for the arm that "
+                              "reproduces night 6; a ling built with them has them on when absent (spec §26)")
         run.add_argument("--review-turn", action="store_true",
                          help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
                               "read its diff, run the tests of the modules it changed and fix what does not hold, "
@@ -163,7 +167,7 @@ class SweBenchCommand:
                 task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn,
                 refine_version=args.refine_version or "v1",
                 hooks=cls._ids(args.hooks), restart_after_compactions=args.restart_after_compactions,
-                apply_patch=args.apply_patch, exec_tool=args.exec_tool)
+                apply_patch=args.apply_patch, exec_tool=args.exec_tool, code_mode_fixes=args.code_mode_fixes)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":

@@ -24,13 +24,13 @@ COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit", "review_turn", "hooks", "restart_after_compactions",
-    "apply_patch", "exec_tool",
+    "apply_patch", "exec_tool", "code_mode_fixes",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
                                "refine_version": "v1",
                                "task_rules": [], "review_turn": False, "hooks": [], "restart_after_compactions": 0,
-                               "apply_patch": "auto", "exec_tool": "auto"}
+                               "apply_patch": "auto", "exec_tool": "auto", "code_mode_fixes": "auto"}
 
 
 class SweBenchReport:
@@ -440,6 +440,14 @@ class SweBenchReport:
         return cls.tool_line("Exec tool", "function on SGLang and vLLM, freeform on ling-engine", summary)
 
     @classmethod
+    def code_mode_fixes_line(cls, manifest: Dict[str, Any]) -> str:
+        """One line: whether the run asked for the Code Mode night-6 fixes (spec §26) or left the switch alone."""
+        setting = str(manifest.get("code_mode_fixes") or "auto")
+        if setting == "auto":
+            return f"{'Code Mode fixes':<20}auto (the switch unset: on in a ling built with them, absent before)"
+        return f"{'Code Mode fixes':<20}{setting}" + (" (night 6's form)" if setting == "off" else "")
+
+    @classmethod
     def tool_line(cls, label: str, auto: str, summary: Dict[str, Any]) -> str:
         """
         One line of a tool arm: its form, what `auto` means, and how much the agent used the tool.
@@ -600,6 +608,7 @@ class SweBenchReport:
         lines.append(cls.restart_line(summary["restart"]))
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines.append(cls.exec_tool_line(summary["exec_tool"]))
+        lines.append(cls.code_mode_fixes_line(manifest))
         lines += cls.hooks_lines(summary["hooks"])
         lines += cls.compaction_lines(summary["compactions"])
         not_run = validated - summary["finished"]
