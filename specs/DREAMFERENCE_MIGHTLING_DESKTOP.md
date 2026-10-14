@@ -37,6 +37,8 @@ The app-server it drives is the one in our submodule. Its client requests (`app-
 
 ## 2. What the Codex app offers (the feature inventory)
 
+> **Superseded 2026-10-14** by [DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md](./DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md) §2, the inventory as documented on 2026-10-14. Kept as the February 2026 baseline.
+
 **From the launch announcement** (2 February 2026, macOS; Windows on 4 March 2026): "a command center for agents".
 - **Multiple agents in parallel:** "agents run in separate threads organized by projects, so you can seamlessly switch between tasks without losing context."
 - **Review in the thread:** "review the agent's changes in the thread, comment on the diff, and even open it in your editor to make manual changes."
@@ -158,6 +160,8 @@ The installed `ling` (0.158.0, built 2 October) was driven over stdio by a scrip
 ---
 
 ## 6. Feature by feature
+
+> **Superseded 2026-10-14** by [DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md](./DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md) §2 and §4, which carry every row below forward with the current status.
 
 Status: **Same** (the Codex app's behaviour, on our server), **Mightling's** (the same idea through a Mightling mechanism), **Later** (a named phase), **No** (not offered, with the reason).
 

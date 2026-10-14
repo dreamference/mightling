@@ -1,7 +1,7 @@
 # Mightling Desktop — parity with the Codex app, October 2026: every feature, the binary's architecture, and the look
 
 > - **Status:** proposed 2026-10-14 (owner: "I want the same functionality", "the same architecture as the Codex binary", "make it look like the original Codex desktop"). Supersedes §2 and §6 of [DREAMFERENCE_MIGHTLING_DESKTOP.md](./DREAMFERENCE_MIGHTLING_DESKTOP.md) (2026-10-03) as the feature inventory; that document's §3 (what identical can mean), §8 (security) and §13 (risks) still hold, and [DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) and [DREAMFERENCE_MIGHTLING_ASK.md](./DREAMFERENCE_MIGHTLING_ASK.md) describe what is built.
-> - **What "the Codex app" is now:** on 2026-10-07 the upstream vendor folded the Codex app into the **ChatGPT desktop app** (macOS, Windows, and a Linux preview); Codex is one of its three surfaces (Chat, Work, Codex). Every feature below is read from the vendor's documentation as it stood on 2026-10-14, from the three videos the owner named (§8), and from the Codex source pinned in `codex/` (`rust-v0.158.0`). Nothing below was read from the vendor's app bundle beyond what §1 of the 2026-10-03 spec recorded.
+> - **What "the Codex app" is now:** by 2026-10-03 the upstream vendor's package was already named after its chat product (DESKTOP §1), and its documentation now describes one **desktop app** (macOS, Windows, and a Linux preview) with three surfaces, Chat, Work and Codex; this document covers the Codex surface. Every feature below is read from the vendor's documentation as it stood on 2026-10-14, from the three videos the owner named (§8), and from the Codex source pinned in `codex/` (`rust-v0.158.0`). Nothing below was read from the vendor's app bundle beyond what §1 of the 2026-10-03 spec recorded.
 > - **Trade dress (DESKTOP §13):** layout and interaction may follow the vendor's; name, icon, colours, sounds and copy must not. §3 stays inside that line.
 > - **Dark mode** stays light-only for now (DESKTOP §14 question 3, decided 2026-10-03). §3.6 prepares the theme tokens the Appearance settings of §2.15 need, so the decision can be reversed in one change.
 
@@ -9,12 +9,12 @@
 
 ## 0. Summary
 
-The Codex app is a window over an open protocol served by an open binary. Mightling already has the same shape: `ling` is that binary, built from the same source with Mightling's patches, and the desktop app is a stock Electron window that spawns `ling app-server` and speaks the same JSON-RPC over stdio. What differs is **how much of the protocol the window uses** (43 of about 230 request methods today, §4.1) and **how many of the window-side features exist** (tabs, terminal, review pane, worktrees, settings, shortcuts: none yet).
+The Codex app is a window over an open protocol served by an open binary. Mightling already has the same shape: `ling` is that binary, built from the same source with Mightling's patches, and the desktop app is a stock Electron window that spawns `ling app-server` and speaks the same JSON-RPC over stdio. What differs is **how much of the protocol the window uses** (43 of the 107 client request methods the pinned binary's generated schema lists, plus 10 server requests and 85 notifications, §4.1) and **how many of the window-side features exist** (tabs, terminal, review pane, worktrees, settings, shortcuts: none yet).
 
 This document does three things:
 
 1. **§1** writes down the architecture of the Codex binary as it is, so Mightling's desktop work follows it rather than inventing a parallel one: the crates, the app-server's internals, the protocol's domains, and the line between what the server owns and what the vendor's window owns.
-2. **§2** inventories every feature of the Codex surface of the ChatGPT desktop app, feature by feature, with the protocol method or window mechanism behind it, Mightling's status today, and the phase that delivers it. Features that exist only as the vendor's hosted services are listed in §2.20 with the reason they are not offered.
+2. **§2** inventories every feature of the Codex surface of the vendor's desktop app, feature by feature, with the protocol method or window mechanism behind it, Mightling's status today, and the phase that delivers it. Features that exist only as the vendor's hosted services are listed in §2.21 with the reason they are not offered.
 3. **§3** specifies the look: fonts, libraries, shapes, spacing and motion, taken from how the vendor's product surface is built, with Mightling's own colours.
 
 §4 is the gap list and phases, §5 the tests, §6 the risks, §7 the open questions, §8 the sources.
@@ -84,7 +84,7 @@ Three properties of this layering matter for Mightling:
 
 ### 1.4 The protocol, by domain
 
-The v2 methods, read from `app-server-protocol/src/protocol/common.rs` (0.158.0; names are what a client sends or receives):
+The methods, read from the generated schema `app-server-protocol/schema/typescript/{ClientRequest,ServerRequest,ServerNotification,ClientNotification}.ts` (0.158.0: 107 client requests, 10 server requests, 85 server notifications, 1 client notification; the same files `desktop/ui/src/protocol/` carries), grouped here by domain. Names are what a client sends or receives; the v1 methods `initialize`, `fuzzyFileSearch`, `gitDiffToRemote`, `getAuthStatus` and `getConversationSummary` have no slash:
 
 | Domain | Methods (client → server unless noted) |
 |---|---|
@@ -112,7 +112,7 @@ The v2 methods, read from `app-server-protocol/src/protocol/common.rs` (0.158.0;
 | Remote control (vendor) | `remoteControl/enable|disable|status/read|pairing/*|client/*`, `remoteControl/status/changed` |
 | Platform | `windowsSandbox/readiness|setupStart|setupCompleted`, `windows/worldWritableWarning`, `userVerification/*`, `attestation/generate`, `feedback/upload` |
 
-A `tests/` drift test (§5) regenerates this table from the submodule so a Codex bump that adds or renames a method is caught.
+A `tests/` drift test (§5) recounts the four generated schema files so a Codex bump that adds or renames a method is caught.
 
 ### 1.5 Mightling's binding
 
@@ -126,19 +126,39 @@ A `tests/` drift test (§5) regenerates this table from the submodule so a Codex
 | Telemetry (Statsig, Sentry) | None; egress closed in the main process; `ling-admin audit egress --app` |
 | Window-side git, terminal, previews | Not built (§4) |
 
-**The mandate, stated once:** a feature in §2 is implemented at the layer the vendor implements it at. Server features use the server's method and nothing else (the policy allow-list grows by that method, with a vector); window features live in the main process (`desktop/electron/src/`) or the UI (`desktop/ui/`), never in a second agent process. Where the vendor's window calls `git`, Mightling's calls `git`. Where the vendor added a crate (`codex-worktree`) rather than a method, Mightling links the same crate from `ling-rs/` and exposes it to the window through the launcher (`ling worktree …`, as `ling airgapped --thread` already is) rather than through a new protocol method.
+**The mandate, stated once:** a feature in §2 is implemented at the layer the vendor implements it at. Server features use the server's method and nothing else (the policy allow-list grows by that method, with a vector); window features live in the main process (`desktop/electron/src/`) or the UI (`desktop/ui/`), never in a second agent process. Where the vendor's window calls `git`, Mightling's calls `git`. Where the vendor added a crate (`codex-worktree`) rather than a method, Mightling links the same crate from `ling-rs/` and exposes it to the window through the launcher (`ling worktree …`, as `ling airgapped --thread` already is) rather than through a new protocol method, provided the crate builds outside Codex's workspace (DESKTOP §11 Phase 0 item 9, open); the fallback is the window calling `git` as the vendor's does.
+
+### 1.6 The window, module by module
+
+The vendor's window is an Electron main process plus a bundled UI (DESKTOP §1). Its modules, inferred from what the protocol does not provide and what the documentation attributes to the app, against `desktop/electron/src/` today and what Phase 2 adds:
+
+| Window module (vendor) | Mightling today (`desktop/electron/src/`) | Phase 2 |
+|---|---|---|
+| Spawn the agent (`codex … app-server`, `CODEX_CLI_PATH` override) | `server.ts` (spawns `<resources>/ling … app-server`) | unchanged |
+| JSON-RPC router between UI and server; approval routing | `bridge.ts` + `policy.ts` (the allow-list, the dropped thread fields, the prompt field) | the allow-list grows per §2; one vector per new method |
+| Egress and privacy switches | `egress.ts`, `app-protocol.ts` (privileged scheme, CSP) | unchanged; the preview tab adds its own rules (Phase 3) |
+| Deep-link scheme (`codex://…`, §2.21) | `ling app --thread` argument only (`args.ts`) | `ling://` registered by the `.desktop` entry; `args.ts` parses the routes of §2.21 |
+| Window state, frameless title bar, native controls | `window-state.ts`, `work.ts` | pop-out windows, always-on-top, tabs and layout state |
+| Menu and accelerators | `shell.ts` | the keymap of §2.19 as data; the shortcuts settings page |
+| Preferences (window settings) | none (window state only) | `prefs.ts`: a JSON file under the app's data folder for everything §2.15 marks as window-side |
+| Git: worktrees, hand-off, stage, commit, push, PR | none | `git.ts` (child `git`; `ling worktree` when §1.5's condition holds) |
+| Terminal PTY | none (the server's `command/exec` tty is the PTY) | xterm.js in the UI over `command/exec`/`process/*`; no PTY code of ours |
+| Notifications, prevent sleep | none | `notify.ts` (`Notification`, `powerSaveBlocker`) |
+| Air-gap level per thread | `airgapped.ts` (`ling airgapped --thread`) | unchanged |
+| Night Shift busy marker | written by the server-side ledger; recognised by `NightShiftHost` | unchanged |
+| Pets overlay, Appshots, computer-use runtime, browser plugin, telemetry | none | none (§2.21); the preview tab in Phase 3 |
 
 ---
 
 ## 2. Every feature of the Codex surface, and Mightling's answer
 
-Status words: **Built** (in the app today; the method is in `policy.json`), **Partial** (some of it), **Same** (to build, the Codex behaviour on our server), **Mightling's** (the same idea through a Mightling mechanism), **Later** (a named phase), **No** (not offered, with the reason). Shortcuts are the Linux bindings (§2.19).
+Status words: **Built** (the UI exists in the app today), **Allowed** (the method is in `policy.json` but no UI calls it yet), **Partial** (some of it), **Same** (to build, the Codex behaviour on our server), **Mightling's** (the same idea through a Mightling mechanism), **Later** (a named phase), **No** (not offered, with the reason). Shortcuts are the Linux bindings (§2.19).
 
 ### 2.1 Shell, window and navigation
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| One window; three surfaces: Chat, Work, Codex (Ctrl+1/2/3) | window | **Mightling's:** two views, Ask and Work (Ctrl+Shift+C / Ctrl+Shift+W today; add Ctrl+1 / Ctrl+2) — **Built** | — |
+| One window; three surfaces: Chat, Work, Codex (Alt+1/2/3 on Windows and Linux) | window | **Mightling's:** two views, Ask and Work, **Built** (menu accelerators Ctrl+1 / Ctrl+2 today, `desktop/electron/src/shell.ts`); Phase 2 moves them to Alt+1 / Alt+2 so Ctrl+1–9 can mean "go to chat" as in the vendor's app | 2 |
 | Sidebar: projects with pinned ones on top, Recents, New chat, Scheduled, Plugins (pinnable), Code Review, Search chats; toggle Ctrl+B | window; `project/list`, `thread/list`, `threadSection/*` | **Partial:** threads grouped by folder, rename, search, archive; no pins, sections, Recents, Scheduled or sidebar toggle | 2 |
 | Pin a project or a chat | `thread/metadata/update` (pin flag), window prefs for projects | **Same** | 2 |
 | Mark chat unread; unread indicators; next chat needing attention (Ctrl+Alt+A); clear all (Shift+Esc) | window state over `thread/status/changed`, `item/*/requestApproval` | **Same** | 2 |
@@ -151,11 +171,11 @@ Status words: **Built** (in the app today; the method is in `policy.json`), **Pa
 | Undo / redo the last app action (archive, rename, pin…) | window | **Same** | 2 |
 | Full screen (F11), quit (Ctrl+Q), close tab or window (Ctrl+W) | window | **Same**; Ctrl+W closes a tab, never the last window | 2 |
 | Pop-out: a chat in its own window, **Always on top** | window | **Same** (a second `BrowserWindow` on the same app-server; still one app-server) | 2 |
-| Quick chat (Ctrl+Alt+N): an ordinary ChatGPT chat beside Codex | vendor's Chat | **Mightling's:** Ask is Quick chat; Ctrl+Alt+N opens a new Ask thread | 2 |
+| Quick chat (Ctrl+Alt+N): an ordinary chat of the vendor's chat surface beside Codex | the vendor's Chat surface | **Mightling's:** Ask is Quick chat; Ctrl+Alt+N opens a new Ask thread | 2 |
 | Side chat (Ctrl+Alt+S): a status recap without interrupting the main chat | a second thread with the main thread's context | **Same** (a thread started with a reference to the main thread's id; the server has no side-chat method, so the window forks: `thread/fork` then a turn asking for a recap) | 2 |
 | Standalone chat (Ctrl+Alt+O): a chat with no project | `thread/start` with `cwd` = home | **Same** | 2 |
-| Search chats (unassigned shortcut); Find in chat (Ctrl+F, Ctrl+G, Shift+F3) | `thread/search`, `thread/searchOccurrences`; window find | **Partial:** search exists; find in chat to build | 2 |
-| Copy chat deep link (Ctrl+Alt+L), copy conversation path, copy working directory | window; `ling://threads/<id>` | **Same** (`ling://` scheme registered by the app; `ling app --thread <id>` already exists) | 2 |
+| Search chats (unassigned shortcut); Find in chat (Ctrl+F, Ctrl+G, Shift+F3) | `thread/search`, `thread/searchOccurrences`; window find | **Partial:** the sidebar search is Built; find in chat to build | 2 |
+| Copy chat deep link (Ctrl+Alt+L), copy conversation path, copy working directory | window; `ling://threads/<id>` (§2.20) | **Same** | 2 |
 | Notifications when a turn completes or needs approval; prompt for permission | window (`Notification`) | **Same**, no bundled sounds | 2 |
 | Prevent sleep while running | window (`powerSaveBlocker`) | **Same** | 2 |
 | Appshots (screenshot of another app as context, Cmd+Cmd) | macOS/Windows runtime | **No:** Linux first; a screenshot attachment is §2.3's image input | — |
@@ -165,7 +185,7 @@ Status words: **Built** (in the app today; the method is in `policy.json`), **Pa
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Projects view: local projects (folders) and, in ChatGPT, cloud projects | `project/list|read|create|update|move|delete|import` | **Partial:** `project/*` allowed, the sidebar groups by folder; a Projects view to build | 2 |
+| Projects view: local projects (folders) and, in the vendor's chat surface, cloud projects | `project/list|read|create|update|move|delete|import` | **Partial:** `project/list|read|create|update` Allowed, the sidebar groups threads by folder; a Projects view to build | 2 |
 | Open folder (Ctrl+O), project picker (Ctrl+Alt+Shift+O) | window dialog; `project/create` | **Same** | 2 |
 | A project with several folders; **Make primary** (new chats start there; git, `AGENTS.md`, skills and `config.toml` discovery use it); secondary folders searchable and editable | `project/update`; `turn/start` `cwd` plus `runtimeWorkspaceRoots` | **Same**; the air-gap rule of DESKTOP §8.2 applies to every added root | 2 |
 | Edit project, archive all its chats, delete | `project/update|delete`, `thread/archive` | **Same** | 2 |
@@ -177,21 +197,21 @@ Status words: **Built** (in the app today; the method is in `policy.json`), **Pa
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Text; `@` file mentions; `$` skill picker; `/` commands | `turn/start`, `fuzzyFileSearch/*`, `skills/list` | **Partial:** text and send built; `@`, `$` and `/` to build | 2 |
+| Text; `@` file mentions; `$` skill picker; `/` commands | `turn/start`, `fuzzyFileSearch`, `skills/list` | **Partial:** text and send Built; `fuzzyFileSearch` and `skills/list` Allowed; `@`, `$` and `/` to build | 2 |
 | Enter sends, or Ctrl+Enter for multiline or always (Settings › General) | window | **Same** | 2 |
-| Follow-up behaviour: a message sent while running **steers** the run or **waits** for the next run (Settings › General) | `turn/steer` vs `thread/queue/add` | **Built** (Steer button, queue methods allowed); the setting to build | 2 |
+| Follow-up behaviour: a message sent while running **steers** the run or **waits** for the next run (Settings › General) | `turn/steer` vs `thread/queue/add` | **Partial:** Steer is Built; the queue is Allowed (no UI); the setting to build | 2 |
 | Restore previous composer prompt (↑ when empty) | window | **Same** | 2 |
 | Images: paste, attach, Shift+drag | `thread/attachment/*`, input items | **Built** in Ask (attachments shown when the served model has vision); Shift+drag to build | 2 |
 | Model picker (Ctrl+Shift+M), recent models (Alt+M), intelligence level / reasoning effort | `model/list`, `turn/start` `model` / `effort` | **Mightling's:** the served model is shown as a chip; one model is served at a time (`model_key_for_served_id`), so the picker lists it and the effort levels the catalog allows | 2 |
-| Plan mode (`/plan`), interview-then-goal | `turn/start` `collaborationMode` (`collaborationMode/list` allowed) | **Same** | 2 |
+| Plan mode (`/plan`), interview-then-goal | `turn/start` `collaborationMode` | **Allowed** (`collaborationMode/list`); the picker to build | 2 |
 | Goal mode (`/goal`): the goal is prompt and completion criteria; a progress row above the composer with pause, resume, edit, clear | `thread/goal/set|get|clear`, `thread/goal/updated` | **Same** | 2 |
 | Composer predictions (suggested completions while typing) | vendor | **Later:** needs a fast local completion path (the engine's or the sidecar's); COMPACTION §4.6's fast slot | 3 |
 | Voice chat (Ctrl+Shift+V) | `thread/realtime/*`, vendor realtime | **Mightling's:** the speech-to-text sidecar (`dream-stt`) for dictation; `thread/realtime/*` never sent | 2 |
 | Approve (Enter) / decline (Esc) an open approval | `item/*/requestApproval` answers | **Built**; keys to add | 2 |
 | Steer while running; queued follow-ups; stop (Esc) | `turn/steer`, `thread/queue/*`, `turn/interrupt` | **Built** | — |
-| Edit the previous message (Esc Esc) | `thread/revert` then `turn/start` | **Same** (`thread/revert` allowed) | 2 |
-| Fork a thread | `thread/fork` | **Same** (allowed; no UI yet) | 2 |
-| Context indicator and **Compress** | `thread/tokenUsage/updated`, `thread/compact/start` | **Built** (usage chip); Compress button to add | 2 |
+| Edit the previous message (Esc Esc) | `thread/revert` then `turn/start` | **Partial:** a per-turn **revert** link is Built; Esc Esc and re-editing the text to build | 2 |
+| Fork a thread | `thread/fork` | **Allowed** | 2 |
+| Context indicator and **Compress** | `thread/tokenUsage/updated`, `thread/compact/start` | **Built** (usage chip and a compact link) | — |
 | Slash commands of the TUI available in the app (`/model`, `/permissions`, `/review`, `/plan`, `/goal`, `/memories`, `/skills`, `/mcp`, `/plugins`, `/agents`, `/side`, `/btw`, `/compact`, `/recap`, `/diff`, `/status`, `/new`, `/resume`, `/fork`, `/worktree`, `/rename`, `/archive`, `/pet` …; the pinned TUI's list is in `tui/src/slash_command.rs`) | window parses `/`; each maps to a method or a window action | **Same** for every command whose method the server has, plus Mightling's `/airgapped`, `/cavemode`, `/night`, `/prompt`, `/apps` (each a launcher command) | 2 |
 
 ### 2.4 The stream
@@ -227,13 +247,13 @@ Status words: **Built** (in the app today; the method is in `policy.json`), **Pa
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| **Worktree** under the composer when starting a chat in a git project; choose the base branch (main, a feature branch, or the current branch with its uncommitted changes applied) | window `git`; the Codex Desktop worktree contract: `$CODEX_HOME/worktrees/<bucket>/<repo>`, `git worktree add --detach` | **Same**, under `~/.mightling/worktrees`, through the `codex-worktree` crate linked by `ling-rs/` and exposed as `ling worktree …` (§1.5) | 2 |
+| **Worktree** under the composer when starting a chat in a git project; choose the base branch (main, a feature branch, or the current branch with its uncommitted changes applied) | window `git`; the Codex Desktop worktree contract: `$CODEX_HOME/worktrees/<bucket>/<repo>`, `git worktree add --detach` | **Same**, under `~/.mightling/worktrees`. Mechanism: the `codex-worktree` crate linked by `ling-rs/` and exposed as `ling worktree …`, **if** DESKTOP §11 Phase 0 item 9 finds it builds outside Codex's workspace (still open); otherwise the window runs `git worktree` itself against the same directory contract | 2 |
 | Detached HEAD by default; **Create branch here** in the chat header | window `git` | **Same** | 2 |
 | **Hand off** in the chat header, both directions (Local ↔ Worktree); the chat keeps its worktree; `.gitignore`d files move only via `.worktreeinclude`; `AGENTS.override.md` always copied | window `git` | **Same**, including `.worktreeinclude` | 2 |
 | Codex-managed (disposable) vs permanent worktrees (a project of their own) | window | **Same** | 2 |
 | Cleanup: keep the last 15 managed worktrees (Settings › Worktrees), never a pinned, running or permanent one; archive deletes; a snapshot before deletion and **Restore** on reopening | window | **Same** | 2 |
 | Worktree root (Settings › Worktrees) | window prefs | **Same** | 2 |
-| Local environments (`.codex/` in the project, shareable): setup scripts per platform, run when a worktree is created; **actions** with icons in the top bar, run in the integrated terminal; **Run environment action 1** (Win+Shift+D) | window; `environment/*` | **Same**, read from `.codex/` (the same files, so a repository shared with Codex users needs nothing extra); Mightling's own additions, if any, go in `.mightling/` | 2 |
+| Local environments (`.codex/` in the project, shareable): setup scripts per platform, run when a worktree is created; **actions** with icons in the top bar, run in the integrated terminal; **Run environment action 1** (Super+Shift+D) | window; `environment/*` | **Same**, read from `.codex/` (the same files, so a repository shared with Codex users needs nothing extra); Mightling's own additions, if any, go in `.mightling/` | 2 |
 | Open in editor / terminal / file manager from the header | window | **Same** | 2 |
 | Cloud environments, remote development environments | vendor | **No**; a node is reached through its own agent (NODE spec), not an environment | — |
 
@@ -277,13 +297,13 @@ Status words: **Built** (in the app today; the method is in `policy.json`), **Pa
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Skills: list, enable / disable, create, `$` picker, where local skills load from | `skills/list`, `skills/config/write`, `skills/extraRoots/set`, `plugin/skill/read` | **Partial:** `skills/list` allowed; the UI and the `from-<agent>/` sources (SKILLS spec) to show | 2 |
-| Plugins directory: tabs OpenAI / workspace / personal, **Installed** row, install (+), connect on first use, pin a plugin to the sidebar; `/plugins` | `plugin/list|search|install|uninstall|read|installed`, `marketplace/*` | **Same** for local and repository marketplaces; the vendor's catalogue stays closed (patch `0015`) | 2 |
-| MCP: recommended servers, add your own, OAuth flow, status, reload, tool call, resource read; Settings › Integrations | `mcpServerStatus/list`, `config/mcpServer/reload`, `mcpServer/*` | **Partial:** status allowed; the pages to build | 2 |
+| Skills: list, enable / disable, create, `$` picker, where local skills load from | `skills/list`, `skills/config/write`, `skills/extraRoots/set`, `plugin/skill/read` | **Allowed** (`skills/list`); the UI and the `from-<agent>/` sources (SKILLS spec) to show | 2 |
+| Plugins directory: tabs vendor / workspace / personal, **Installed** row, install (+), connect on first use, pin a plugin to the sidebar; `/plugins` | `plugin/list|search|install|uninstall|read|installed`, `marketplace/*` | **Same** for local and repository marketplaces; the vendor's catalogue stays closed (patch `0015`) | 2 |
+| MCP: recommended servers, add your own, OAuth flow, status, reload, tool call, resource read; Settings › Integrations | `mcpServerStatus/list`, `config/mcpServer/reload`, `mcpServer/*` | **Allowed** (`mcpServerStatus/list`); the pages to build | 2 |
 | Apps (Gmail, Drive…) | `app/list|read|installed` | **Mightling's:** MIGHTLING_APPS, local sign-in, read-only tools | 2 |
 | Hooks (plugin hooks at lifecycle points) | `hooks/list`, `hook/started|completed` | **Same**, read-only list showing the ledger hook | 2 |
 | Import another agent's configuration and histories | `externalAgentConfig/*` | **Same**, beside the SKILLS links | 3 |
-| Sign in with ChatGPT for partner plugins | vendor | **No** | — |
+| Sign in with the vendor's account at partner plugins | vendor | **No** | — |
 
 ### 2.12 Scheduled tasks (automations)
 
@@ -362,7 +382,7 @@ The vendor's settings panel (Ctrl+,) has these pages. Mightling's reads and writ
 
 ### 2.19 Keyboard shortcuts (Linux)
 
-The vendor's Linux bindings follow its Windows column (Ctrl for Cmd, Alt for Option). Mightling adopts them unchanged, so a user of both apps keeps one set of hands; the only Mightling-specific keys are the view switch. Rebindable in Settings (§2.15), stored with the window's preferences.
+The vendor's Linux bindings (read from its commands reference, 143 rows) equal its Windows column except Super for the Windows key. Mightling adopts them unchanged, so a user of both apps keeps one set of hands; the only Mightling-specific keys are the view switch. Rebindable in Settings (§2.15), stored with the window's preferences.
 
 | Group | Action | Binding |
 |---|---|---|
@@ -387,9 +407,9 @@ The vendor's Linux bindings follow its Windows column (Ctrl for Cmd, Alt for Opt
 | Input | Model picker; recent models; project picker | Ctrl+Shift+M; Alt+M; Ctrl+Alt+Shift+O |
 | | Restore previous prompt | ↑ (empty composer) |
 | | Approve / decline | Enter / Esc |
-| | Switch view: Ask / Work | Alt+1 / Alt+2 (Mightling; the vendor's Chat / Work / Codex) |
+| | Switch view: Ask / Work | Alt+1 / Alt+2 (the vendor's Chat / Work / Codex; Mightling's today are Ctrl+1 / Ctrl+2) |
 | | Activity view | Ctrl+Alt+U |
-| Workspace | Environment action 1 | Win+Shift+D |
+| Workspace | Environment action 1 | Super+Shift+D |
 | | Search files; file tree; review tab | Ctrl+P; Ctrl+Shift+E; Ctrl+Shift+G |
 | | Chat ↔ tabs; cycle layout; full view | Ctrl+Alt+B; Ctrl+Shift+B; Ctrl+Shift+F |
 | | Go to line / address bar | Ctrl+L |
@@ -398,14 +418,25 @@ The vendor's Linux bindings follow its Windows column (Ctrl for Cmd, Alt for Opt
 
 A test holds this table as data and checks the window's keymap against it (§5).
 
-### 2.20 Not offered, and why
+### 2.20 Deep links and remote connections
+
+The vendor's app registers a `codex://` scheme (its commands reference): `codex://threads/<id>`, `codex://threads/new`, `codex://new?prompt=…&path=…&originUrl=…` (a new chat with composer text, in a folder, or in the workspace whose git remote matches), `codex://settings`, `codex://settings/connections/{computer,devices,ssh}`, `codex://settings/connections/ssh/add?name=<ssh-config-host>`, `codex://skills`, `codex://automations` (Scheduled with the create flow open), `codex://plugins/install/<name>?marketplace=…`, `codex://plugins/<id>?hostId=local|<remote>`, `codex://pets/install?…`.
+
+| Codex app | Mightling | Phase |
+|---|---|---|
+| `codex://threads/<id>`, `threads/new`, `new?prompt&path&originUrl` | **Same** as `ling://threads/<id>`, `ling://threads/new`, `ling://new?prompt&path&originUrl`, registered by the `.desktop` entry's `MimeType=x-scheme-handler/ling`; `ling app --thread <id>` stays the shell form | 2 |
+| `codex://settings`, `codex://skills`, `codex://automations`, `codex://plugins/…` | **Same** as `ling://settings`, `ling://skills`, `ling://night` (the Scheduled view), `ling://plugins/…` | 2 |
+| `codex://pets/install` | **Later (3)** with Mightling's pets | 3 |
+| **Remote connections:** SSH hosts added from the SSH config become Codex hosts (`hostId`), so the app runs the agent on another machine; "control this Mac or PC from another device" | **Mightling's:** a node (NODE spec) is reached by its name, pairing and jobs, with the model server on the node and the agent local; the vendor's `ssh` host kind (DESKTOP §4.3, Phase 3) is the equivalent for running `ling app-server` on the node itself. Remote control of this machine from a phone is the vendor's service: **No** | 3 |
+
+### 2.21 Not offered, and why
 
 | Codex app | Why not |
 |---|---|
 | Sign-in, plans, credits, rate limits, profile sharing, invitations | No hosted account; `requiresOpenaiAuth: false` |
 | Cloud tasks, Work Cloud sync, remote development environments, event-triggered tasks, Team Tasks, automatic cloud reviews | The vendor's cloud; `cloud` is refused by the launcher, remote control is `disabled` |
 | Computer Use, Appshots, Computer History, the Browser plugin's agent runtime, image generation, deep research, Dots | Need the vendor's models or runtimes; Qwen3.8 is text-only; Linux unsupported by the vendor for most |
-| The vendor's plugin directory, Sign in with ChatGPT | Patch `0015`; the vendor's identity |
+| The vendor's plugin directory, signing in to partners with the vendor's account | Patch `0015`; the vendor's identity |
 | Feedback upload, analytics, attestation, user verification | Uploads to the vendor; no telemetry (product decision 2026-10-07) |
 | IDE extension sync | No IDE extension |
 | The vendor's pets, sounds, icons, strings | Trade dress |
@@ -414,7 +445,7 @@ A test holds this table as data and checks the window's keymap against it (§5).
 
 ## 3. The look: fonts, libraries, shapes
 
-The vendor's product surface, read from its public design language rather than its bundle: a true-white canvas, near-black ink, one accent used sparingly, soft 8–12 px radii, pills for chips, hairline borders used rarely with whitespace as the divider, a sans-serif at weights 400/500/600 with generous line height. Its proprietary fonts (Söhne in its products, OpenAI Sans in its brand) are not available to us and fall back to the system stack in its own CSS. Mightling takes the **structure** of that language and keeps its **own colours** (TIFFANY_BLUE `#0ABAB5` as the one accent, `onyx_brand_assets.py`) and its own mark.
+The vendor's product surface, read from its public design language rather than its bundle: a true-white canvas, near-black ink, one accent used sparingly, soft 8–12 px radii, pills for chips, hairline borders used rarely with whitespace as the divider, a sans-serif at weights 400/500/600 with generous line height. Its proprietary fonts (a commercial grotesque in its products, its own brand face in its marks) are not available to us and fall back to the system stack in its own CSS. Mightling takes the **structure** of that language and keeps its **own colours** (TIFFANY_BLUE `#0ABAB5` as the one accent, `onyx_brand_assets.py`) and its own mark.
 
 ### 3.1 Typography
 
@@ -486,7 +517,7 @@ The name and wordmark; TIFFANY_BLUE as the accent and the air-gap chip's colour;
 
 ### 4.1 Built today (1.6.1)
 
-One window with Ask and Work; one `ling app-server` on stdio through the vetted IPC channel (43 requests: initialize, account/read, config read/write, model/list, permission profiles, collaboration modes, project list/read/create/update, thread start/resume/fork/list/read/loaded/turns/items/search/name/metadata/archive/unarchive/unsubscribe/compact/revert, queue add/list/update/delete/reorder/start, turn start/steer/interrupt, fuzzyFileSearch, gitDiffToRemote, skills/list, mcpServerStatus/list, app/list); threads grouped by folder with rename, search and running markers; streaming items (messages, reasoning, commands, file changes, plan, the turn's diff); inline approvals; the permissions picker with the air-gap courtesy; Steer and Stop; attachments in Ask; the served-model, usage and air-gap chips; the devices link for `ling web`; the start-up screen; narrow-window drawer; `ling web` serving the same UI to browsers with the same policy; the egress audit's `--app` mode; Night Shift's busy marker.
+One window with Ask and Work; one `ling app-server` on stdio through the vetted IPC channel. **Allowed** (43 of the 107 client requests: initialize, account/read, config read/write, model/list, permission profiles, collaboration modes, project list/read/create/update, thread start/resume/fork/list/read/loaded/turns/items/search/name/metadata/archive/unarchive/unsubscribe/compact/revert, queue add/list/update/delete/reorder/start, turn start/steer/interrupt, fuzzyFileSearch, gitDiffToRemote, skills/list, mcpServerStatus/list, app/list). **Built** (a UI exists): threads grouped by folder with rename, search, archive, running markers and a per-turn revert link; streaming items (messages, reasoning, commands, file changes, plan, the turn's diff); inline approvals; the permissions picker with the air-gap courtesy; Steer and Stop; a compact link; attachments in Ask; the served-model, usage and air-gap chips; the devices link for `ling web`; the start-up screen; narrow-window drawer; `ling web` serving the same UI to browsers with the same policy; the egress audit's `--app` mode; Night Shift's busy marker. **Allowed without a UI:** project create/update, fork, the queue, `fuzzyFileSearch`, `collaborationMode/list`, `skills/list`, `mcpServerStatus/list`, `app/list`.
 
 ### 4.2 Phase 2 — the Codex surface (this spec's main body)
 
@@ -513,13 +544,13 @@ File tree and file tabs; search files and go to line; the artifacts viewer (Mark
 
 ### 4.4 Not proposed
 
-§2.20.
+§2.21.
 
 ---
 
 ## 5. Tests and acceptance
 
-- **Protocol inventory drift:** a test regenerates §1.4's method list from `codex/codex-rs/app-server-protocol/src/protocol/common.rs` and compares it with a checked-in copy; a Codex bump that changes it fails until this spec and `policy.json` are reviewed.
+- **Protocol inventory drift:** a test reads the method names of the four generated schema files (`app-server-protocol/schema/typescript/ClientRequest.ts`, `ServerRequest.ts`, `ServerNotification.ts`, `ClientNotification.ts`), compares them with the copy under `desktop/ui/src/protocol/` and with a checked-in list grouped as §1.4; a Codex bump that changes it fails until this spec and `policy.json` are reviewed.
 - **Policy coverage:** every §2 row marked Built or Same with a method names a method present in `policy.json` or in a list of methods still to add; the test prints the methods a phase still lacks.
 - **Keymap:** §2.19 as JSON under `desktop/ui/src/keymap.json`; a test checks it against the UI's registered bindings and that no two actions share a binding in the same context.
 - **Look:** a snapshot test of the rendered tokens (`getComputedStyle` of `:root` in the test renderer) against §3.6; a grep test that no stylesheet references a remote URL and that the only font sources are bundled files.
