@@ -84,7 +84,9 @@ def test_the_patches_stay_small():
     # given with the other absent, and the two together make 42,741. Not raised on 2026-10-12 when
     # 0020 grew by 217 bytes (the request hook also takes the request's input, and one line turns each
     # output item back) so Code Mode's `exec` is offered as a function on SGLang; 42,958 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 43_000
+    # Raised to 45,000 on 2026-10-14, once, by the owner, to cover three changes together: drop-first
+    # compaction (0026, ~1 KB), the sandbox fix and the coming compaction cache patch.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 45_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
