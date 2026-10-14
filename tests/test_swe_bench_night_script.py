@@ -140,3 +140,89 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch
         # Past the check, `start` stops at the next one: the indexers missing from the fake install.
         assert "ling-code is missing" in result.stdout
     assert not (tmp_path / "night6").exists()
+
+
+def start(tmp_path, arms, smoke_fails=None, task_timeout=""):
+    """
+    Runs `start` with stand-ins for everything it reaches: no unit is active (systemctl), git
+    succeeds and changes nothing, systemd-run records its arguments, and the venv's Python names a
+    fake `ling` and a fake install folder, records every `ling-admin` call and every smoke verdict,
+    and fails the verdict of the arm named in `smoke_fails`. Returns (result, admin calls, verdicts,
+    systemd-run calls, D).
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ling = tmp_path / "ling"
+    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL DREAMFERENCE_MIGHTLING_APPLY_PATCH ...")
+    install = tmp_path / "install"
+    (install / "bin").mkdir(parents=True)
+    for tool in ("ling-code", "codebase-memory-mcp"):
+        (install / "bin" / tool).write_text("#!/bin/bash\n")
+        (install / "bin" / tool).chmod(0o755)
+    units = tmp_path / "systemd-run.txt"
+    for name, body in (("systemctl", "exit 1"), ("git", "exit 0"), ("systemd-run", f'echo "$*" >> "{units}"')):
+        tool = bin_dir / name
+        tool.write_text(f"#!/bin/bash\n{body}\n")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    calls, verdicts = tmp_path / "calls.txt", tmp_path / "verdicts.txt"
+    fake = tmp_path / "python"
+    fake.write_text(f"""#!/bin/bash
+case "$2" in
+    *executable_path*) echo "{ling}";;
+    *INSTALL_DIR*) echo "{install}";;
+    *SweBenchArmSmoke*) shift 2; echo "$* $PYTHONPATH" >> "{verdicts}"
+        [ "$4" = "{smoke_fails}" ] && {{ echo "❌ Smoke check of arm $4: no answer from the model."; exit 1; }}
+        echo "✅ Smoke check of arm $4"; exit 0;;
+    *) shift 2; echo "$*" >> "{calls}";;
+esac
+""")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    task_list = tmp_path / "list.txt"
+    task_list.write_text("acme__widget-1\nacme__widget-2\n")
+    folder = tmp_path / "night7"
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
+           "D": str(folder), "NIGHT": "7", "PREFIX": "n7", "UNIT": "ling-swe-night7-test",
+           "LIVE_UNIT": "ling-swe-night6-test", "ARMS": arms, "LIST": str(task_list), "RESERVE_GB": "0",
+           "TASK_TIMEOUT": task_timeout}
+    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    read = lambda path: path.read_text().splitlines() if path.exists() else []  # noqa: E731
+    return result, read(calls), read(verdicts), read(units), folder
+
+
+def test_start_smokes_every_arm_with_its_own_options_before_the_unit(tmp_path):
+    result, recorded, verdicts, units, folder = start(tmp_path, "default exec-tool-function", task_timeout="60m")
+    assert result.returncode == 0, result.stdout + result.stderr
+    record, candidate = runs(recorded)
+    # One real task per arm, a run of its own each, the arm's options and nothing else.
+    assert "--instances sympy__sympy-13480 --name n7-smoke-default-" in record and "--exec-tool" not in record
+    assert "--name n7-smoke-exec-tool-function-" in candidate and candidate.count("--exec-tool function") == 1
+    assert "--code-index universal --mask off --prompt default" in candidate
+    assert [line.split()[3] for line in verdicts] == ["default", "exec-tool-function"]
+    # From the worktree, with the smoke's own config: a short limit and no nudges.
+    run_name, _, _, _, pythonpath = verdicts[0].split()
+    assert run_name in record and pythonpath == ROOT
+    smoke_config = next((tmp_path / "smoke").glob("n7-*/dreamference.toml")).read_text()
+    assert 'task_timeout = "6m"' in smoke_config and "nudges = 0" in smoke_config and "max_parallel = 1" in smoke_config
+    # Only then the unit, with the night's own limit in its config.
+    assert len(units) == 1 and "--unit=ling-swe-night7-test" in units[0] and "TASK_TIMEOUT=60m" in units[0]
+    assert 'task_timeout = "60m"' in (folder / "dreamference.toml").read_text()
+    assert "✅ Started ling-swe-night7-test" in result.stdout
+
+
+def test_start_refuses_when_an_arm_fails_its_smoke_and_touches_nothing_else(tmp_path):
+    result, recorded, verdicts, units, folder = start(tmp_path, "default drop-outputs+exec-tool-function",
+                                                      smoke_fails="drop-outputs+exec-tool-function")
+    assert result.returncode == 1
+    assert "❌ Night 7 not started: arm drop-outputs+exec-tool-function failed its smoke check" in result.stdout
+    assert len(runs(recorded)) == 2 and len(verdicts) == 2
+    assert units == [] and not folder.exists()
+
+
+def test_start_stops_at_the_first_arm_that_fails_its_smoke(tmp_path):
+    result, recorded, verdicts, units, folder = start(tmp_path, "default tests-v2", smoke_fails="default")
+    assert result.returncode == 1 and len(runs(recorded)) == 1 and len(verdicts) == 1
+    assert units == [] and not folder.exists()
+    # Without TASK_TIMEOUT a night keeps the runner's default limit.
+    (tmp_path / "again").mkdir()
+    result, _, _, _, folder = start(tmp_path / "again", "default tests-v2")
+    assert result.returncode == 0 and "task_timeout" not in (folder / "dreamference.toml").read_text()
