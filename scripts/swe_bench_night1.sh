@@ -59,6 +59,9 @@ SMOKE_TIMEOUT=${SMOKE_TIMEOUT:-6m}
 # as 1.6.0 offered it, which SGLang drops, against `default`, which now offers it as a function).
 # The spelling is `arm_flags`' below.
 ARMS=${ARMS:-"default tests-v2"}
+# Night 10 (spec §16): `turn-end-compaction-off` against `turn-end-compaction-on`, both named, since
+# in `exec` Codex's turn-end key is off unless an arm pins it (`--turn-end-compaction`): `default`
+# would be a second off arm, so `start` refuses a night where only one arm names it.
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
@@ -75,6 +78,8 @@ arm_flags() {
     for part in $(echo "$1" | tr + ' '); do
         case "$part" in
             default) ;;
+            turn-end-compaction-on|turn-end-compaction-off|turn-end-compaction-[1-9]|turn-end-compaction-[1-9][0-9]) flags="$flags --turn-end-compaction ${part#turn-end-compaction-}" ;;
+            turn-end*|turn_end*) echo "❌ Arm $1: write the turn-end compaction arm as turn-end-compaction-on, -off or -N (N a percentage, 1-99)." >&2; return 2 ;;
             restart-[1-9]|restart-[1-9][0-9]) flags="$flags --restart-after-compactions ${part#restart-}" ;;
             restart*) echo "❌ Arm $1: write the restart arm as restart-N (N from 1)." >&2; return 2 ;;
             apply-patch-function|apply-patch-freeform|apply-patch-off) flags="$flags --apply-patch ${part#apply-patch-}" ;;
@@ -148,6 +153,18 @@ start() {
     for arm in $ARMS; do
         arm_flags "$arm" > /dev/null || exit 2
     done
+    case "$ARMS" in *turn-end-compaction-*)
+        if ! grep -q -- '"--turn-end-compaction"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
+            echo "❌ $WT does not have --turn-end-compaction: pin REF to a commit that has it."; exit 1
+        fi
+        # Codex's key is off in `exec` unless an arm pins it, so an arm without the part (`default`)
+        # is a second off arm, and the night would measure off twice.
+        for arm in $ARMS; do
+            case "$arm" in *turn-end-compaction-*) ;;
+                *) echo "❌ Arm $arm pins no turn-end compaction while another arm does: name it in every arm (turn-end-compaction-off against turn-end-compaction-on)."; exit 1 ;;
+            esac
+        done ;;
+    esac
     case "$ARMS" in *restart-*)
         if ! grep -q -- '"--restart-after-compactions"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
             echo "❌ $WT does not have --restart-after-compactions: pin REF to a commit that has it."; exit 1
