@@ -23,7 +23,12 @@
 //! ([`custom`]): [`for_server`], which the request hook calls in place of [`flatten_raw`], also
 //! offers `exec` as a function and replays its earlier calls as function calls, and
 //! [`from_server`] turns the model's call back into the custom tool call Codex expects.
+//!
+//! Patch 0027 calls [`for_request`] in place of [`for_server`]: the same, and a compaction
+//! request offers the tools of its thread's last request ([`compaction`]), so its prompt shares
+//! the cached prefix.
 
+pub mod compaction;
 pub mod custom;
 
 pub use custom::custom_tools_dropped;
@@ -135,6 +140,17 @@ pub fn for_server<T: Serialize + DeserializeOwned>(tools: Arc<RawValue>, input: 
         custom::replay(input);
     }
     flatten_raw(tools)
+}
+
+/// What the request hook calls since patch 0027: [`for_server`], then [`compaction::same_tools`]
+/// with the request's thread id and whether it is a compaction.
+pub fn for_request<T: Serialize + DeserializeOwned>(
+    tools: Arc<RawValue>,
+    input: &mut [T],
+    thread: &str,
+    compaction: bool,
+) -> Arc<RawValue> {
+    compaction::same_tools(for_server(tools, input), thread, compaction)
 }
 
 /// Gives a flattened tool its namespace back. A call that already names a namespace, or a name
