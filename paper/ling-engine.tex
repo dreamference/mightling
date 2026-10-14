@@ -45,7 +45,7 @@ invent every gain reported here, so every comparison is now made on seeded repla
 \section{Introduction}
 
 Mightling is a local, air-gapped coding agent for a single DGX Spark. Its agent, \code{ling}, is a branded build of a
-vendor command-line agent, and its model server is SGLang running Qwen3.8-27B with the DFlash2 block
+vendor command-line agent, and its model server is SGLang~\cite{zheng2023sglang} running Qwen3.8-27B with the DFlash2 block
 drafter~\cite{chen2026dflash,dflash2drafter}. Measured over 168 recorded agent sessions (11,431 model requests), 92\% of a
 session's wall time is spent in the model; a request writes a median of 98 and a mean of 177 tokens, 71\% of them
 tool-call arguments; 46\% of what the agent writes is copied from its own context; and every new session re-reads a
@@ -76,10 +76,10 @@ threads streaming their own buffers take 27\,GB/s from the GPU's read stream. Th
 262\,GB/s, and anything co-resident with a model server, such as an indexer, is budgeted as bus traffic.
 
 \paragraph{The model.}
-Qwen3.8-27B is a dense hybrid of 64 layers in 16 repeats of three Gated DeltaNet blocks followed by one gated
+Qwen3.8-27B is a dense hybrid of 64 layers in 16 repeats of three Gated DeltaNet~\cite{yang2024deltanet,yang2025gateddeltanet} blocks followed by one gated
 full-attention block, each with its own SwiGLU FFN (hidden 5,120, intermediate 17,408), a 248,320-token vocabulary and a
 262,144-token native context. The checkpoint Mightling serves is mixed precision: the FFNs and the LM head are NVFP4
-(one FP8 scale per 16 values), every DeltaNet and attention projection is FP8. One pass over the target weights reads
+(one FP8 scale per 16 values: the NVFP4 format~\cite{nvfp4blog,ocpmx2023}), every DeltaNet and attention projection is FP8. One pass over the target weights reads
 17.6\,GB (\cref{tab:bytes}); moving the FP8 projections to NVFP4 would save 18\%, which the checkpoint's makers chose
 not to do and which the engine therefore does not do either. Per-sequence state is small by comparison: a BF16 KV cache
 of 64\,KB per token over the 16 attention layers and a DeltaNet state of 151\,MB in FP32 that does not grow with context.
@@ -134,7 +134,7 @@ shapes and slower on the other, and one tiled copy of the weights serves both pa
 \paragraph{One graph per step.}
 A speculative step has two data-dependent decisions, the lattice walk after the draft and the accept rule after the
 verify, and both already ended in a synchronization. The three GPU phases between them, about 200, 1,300 and 100 launches,
-are each captured once into a CUDA graph and replayed every step; positions and tokens travel through device memory and
+are each captured once into a CUDA graph~\cite{cudaguide} and replayed every step; positions and tokens travel through device memory and
 pinned host buffers at fixed addresses, and the commit has one graph per accepted count. Programmatic dependent launch lets
 each kernel on the rows path start as its predecessor drains, under one rule: every kernel waits on the grid dependency
 before its first read of a predecessor's output and before its first write.
@@ -151,7 +151,7 @@ interleaved in 256-token chunks, so the decoding stream's step period stays with
 \section{Exactness}
 \label{sec:exact}
 
-Speculative decoding preserves the output distribution in theory~\cite{leviathan2023speculative}; the engine makes it hold
+Speculative decoding preserves the output distribution in theory~\cite{leviathan2023speculative,chen2023speculative}; the engine makes it hold
 in the bits, so that every change can be judged by equality. Two design rules carry it.
 
 \paragraph{Row invariance.}
@@ -244,7 +244,7 @@ traffic, not a second weight read.
 \label{sec:negative}
 
 \paragraph{The context-lookup draft branch.}
-The spec's second lever was a lookup of the continuation of the last three tokens' most recent earlier occurrence, verified
+The spec's second lever was a lookup of the continuation of the last three tokens' most recent earlier occurrence (prompt lookup~\cite{saxena2023pld,he2023rest,lan2023copy}), verified
 in place of the drafter's chain on a long match, on the argument that 46\% of agent output is copied. Scored in shadow on
 every step, it lost to the drafter in every match-length bucket, even on verbatim copies of 32 tokens or more (6.9
 against 9.9 accepted), and the best of both per step was only $+4\%$; the simulated $\times1.2$ had assumed independent
@@ -258,7 +258,7 @@ the drafter, under a stricter whole-session bar.
 Block 12 shortens the engine's step by 2.8\,ms but loses 10\% of acceptance (45.8 against 49.8 tokens/s), the opposite of
 production's experience; the engine keeps 16. A third \code{cp.async} stage in the verify attention (B07) was exact and
 slower at two streams (122.3 to 124.1\,ms per batched step) because the kernel already read its KV at 219\,GB/s against a
-plain read's 225. A per-sequence draft block of 16 under batching (B31) was worth about 1\% and was closed. FP8 KV gave no
+plain read's 225. A per-sequence draft block of 16 under batching (B31) was worth about 1\% and was closed. FP8 KV~\cite{hooper2024kvquant} gave no
 step gain on this hardware, and a wide variant of the streaming GEMM for prefill ran at a third of the speed because every
 16-row weight tile re-read all 128 activation rows from L2.
 
@@ -290,8 +290,34 @@ production's own run-to-run noise is within that noise. The engine has not yet r
 benchmark night, two agent tasks at once on real SWE-bench instances, at no less than production's numbers, and the
 remaining single-step savings (a context-aware sparse drafter head, 6-bit scale codes, and re-quantizing the drafter
 until it accepts as its BF16 original does) are measured one at a time against the main of their day. After that:
-structured output and images, which the agent needs; the spec's tree verify; and a repository-aware copy proposer under
+structured output and images, which the agent needs; the spec's tree verify in the manner of SpecInfer~\cite{miao2023specinfer}; and a repository-aware copy proposer under
 its gate. Tensor parallelism across two Sparks is last, after every one-node improvement is settled.
+
+\section{Related work}
+\label{sec:related}
+Speculative decoding descends from blockwise parallel decoding~\cite{stern2018blockwise} and was given its exact
+acceptance rule by Leviathan et al.~\cite{leviathan2023speculative} and Chen et al.~\cite{chen2023speculative};
+Xia et al.~\cite{xia2024survey} survey the field. Drafters that read the target's hidden features rather than its tokens
+run from Medusa~\cite{cai2024medusa} through EAGLE and its successors~\cite{li2024eagle,li2024eagle2,li2025eagle3} to the
+multi-token prediction heads trained into DeepSeek-V3~\cite{deepseek2024v3}; DFlash~\cite{chen2026dflash}, the engine's
+drafter, proposes a whole block at once by diffusion over the same features. Tree verification~\cite{miao2023specinfer} and
+dynamic draft trees~\cite{li2024eagle2} widen the draft; the engine verifies one chain and leaves the tree for later.
+Retrieval and copy drafts, from the prompt~\cite{saxena2023pld}, a datastore~\cite{he2023rest}, or by treating copying
+as the model's output~\cite{lan2023copy}, and lookahead decoding~\cite{fu2024lookahead} are the family the context-lookup
+branch of \cref{sec:negative} belongs to; its failure here is a statement about the drafter it competed with, not about the
+family. The engine's target is a hybrid of Gated DeltaNet~\cite{yang2024deltanet,yang2025gateddeltanet} and attention
+from the Qwen3 line~\cite{qwen3tr}; commit by replay is how its recurrent state survives rejection.
+
+That decode is bound by weight bandwidth is the roofline argument~\cite{williams2009roofline} applied to transformer
+inference~\cite{pope2022scaling}; the production servers the engine is measured against, vLLM~\cite{kwon2023vllm} and
+SGLang~\cite{zheng2023sglang}, descend from continuous batching~\cite{yu2022orca} and trade single-stream latency for
+throughput across many requests, which this engine does not. The weight formats are the OCP microscaling
+formats~\cite{ocpmx2023} and NVIDIA's NVFP4~\cite{nvfp4blog}; the checkpoint was made with AutoRound~\cite{cheng2023autoround},
+in the lineage of GPTQ~\cite{frantar2022gptq} and AWQ~\cite{lin2023awq}, and the re-quantization of the drafter planned in
+the next section follows model-preserving rounding~\cite{tseng2025mpar}. The attention kernels follow the IO-aware
+design of FlashAttention~\cite{dao2022flashattention,dao2023flashattention2}; the step's graph capture and programmatic
+dependent launch are CUDA features~\cite{cudaguide}, and the persistent ``megakernel'' that would fuse the step
+further~\cite{spector2025megakernel} is the subject of a separate study.
 
 \section{Limitations}
 
