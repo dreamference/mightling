@@ -45,30 +45,29 @@ Terminal coding agents such as the Codex CLI are open source, but they are built
 hosted model, a vendor account and a cloud of companion services. We describe \emph{Mightling}, a
 coding agent whose model runs on one NVIDIA GB10 workstation (128\,GB of CPU--GPU unified memory):
 a 27B-parameter model (Qwen3.8-27B, NVFP4) served locally through SGLang with a block-diffusion
-drafter. Source code, prompts and
-inference never leave the machine, and no vendor account is involved. Mightling is a fork of
-the Codex CLI (release \code{rust-v0.158.0}, 4{,}894 Rust source files, 1.93 million lines). Its
-central engineering choice is to keep the fork almost identical to upstream. The upstream tree is
-never edited. Each build exports it, applies a series of 23 patches totalling 43.0\,KB (43 files,
-$+170/-53$ lines), and links in a separate crate that does the actual work of localisation: model
-discovery, configuration, prompt rebranding, help-text rewriting, a signed release-based updater
-and refusal of cloud-bound commands. We report how the series shrank from an initial 406\,KB to
-about 9\,KB, which techniques did it, and how seven later features each cost only a hook. We also
-report an inventory of the cloud dependencies we had to switch off, a trace-based audit that keeps
-them off, an enforced network switch, integration findings that are not visible from the
-documentation, and the host-safety layer that unified memory forced on us after model loads froze
-the machine. On a 100-task sample of SWE-bench Verified, run inside each task's container on this
-machine, the agent resolves 68; calibrated against the 175 published leaderboard submissions on the
-same tasks, that corresponds to about 69\% on all of Verified (95\% band 64--73\%). A two-session
-``study, then fix'' mode that led by three tasks on a 24-task sample resolved 69 of the 100 at 2.2
+drafter. Source code, prompts and inference never leave the machine, and no vendor account is
+involved. Mightling is a fork of the Codex CLI (release \code{rust-v0.158.0}, 4{,}894 Rust source
+files, 1.93 million lines). Its central engineering choice is to keep the fork almost identical to
+upstream. The upstream tree is never edited. Each build exports it, applies a series of 23 patches
+totalling 43.0\,KB (43 files, $+170/-53$ lines), and links in a separate crate that does the actual
+work of localisation: model discovery, configuration, prompt rebranding, help-text rewriting, a
+signed release-based updater and refusal of cloud-bound commands. The localisation itself takes
+about 9\,KB of the series; every feature beyond it costs one hook in Codex and puts its logic in a
+crate of ours. We describe the inventory of the cloud dependencies that are switched off, the
+trace-based audit that keeps them off, an enforced network switch, the integration points between a
+vendor harness and a local model that are not visible from the documentation, and the host-safety
+layer that unified memory requires. On a 100-task sample of SWE-bench Verified, run inside each
+task's container on this machine, the agent resolves 68; calibrated against the 175 published
+leaderboard submissions on the same tasks, that corresponds to about 69\% on all of Verified
+(95\% band 64--73\%). A two-session ``study, then fix'' mode resolves 69 of the same 100 at 2.2
 times the time, and four prompt and harness changes measured as paired A/B nights on fresh tasks
-showed no measurable difference; three runs of one configuration on the same 44 tasks resolved 29,
-29 and 31, and some run resolved 36. We then report what was built on the fork, each from the same
-launcher crate or beside it: a terse-answer mode that halves answers to questions and leaves coding
-work unchanged, a compaction limit tied to the server's KV pool with a rule-built ledger of what
-summaries lose, a two-layer code index (a tree-sitter knowledge graph plus compiler-exact SCIP
-data), an overnight task queue that works in git worktrees, and a client/node split that pairs
-workstations over SSH. We are explicit about what is estimated rather than measured.
+show no measurable difference; three runs of one configuration on the same 44 tasks resolve 29, 29
+and 31, and some run resolves 36. The fork also carries, each from the same launcher crate or
+beside it: a terse-answer mode that halves answers to questions and leaves coding work unchanged, a
+compaction limit tied to the server's KV pool with a rule-built ledger of what summaries lose, a
+two-layer code index (a tree-sitter knowledge graph plus compiler-exact SCIP data), an overnight
+task queue that works in git worktrees, and a client/node split that pairs workstations over SSH.
+We are explicit about what is estimated rather than measured.
 \end{abstract}
 
 \section{Introduction}
@@ -88,8 +87,8 @@ tool-calling loop, sandboxing, approval flows and the terminal user interface.
 
 Reusing a fast-moving upstream has a cost. A fork that edits the code freely soon stops being able
 to take upstream releases. A fork that edits nothing cannot remove the parts that assume a cloud.
-This paper reports how we navigated that tension in Mightling, a local AI stack for the NVIDIA GB10
-made by Dreamference; its subject is Mightling's terminal coding agent.
+This paper describes how Mightling, a local AI stack for the NVIDIA GB10 made by Dreamference,
+resolves that tension; its subject is Mightling's terminal coding agent.
 
 \paragraph{What ``local'' means here.} The model, the agent and all session state run on one
 workstation. Source code, prompts, tool output and model traffic never leave it, no vendor
@@ -116,31 +115,31 @@ to upstream engines through SearXNG, and they can contain fragments of code or c
   \item A \textbf{patch-minimal fork method} for a large Rust agent (\cref{sec:fork}). The method has
     four parts: an unmodified pinned submodule, a build-time export, a small series of one- and
     two-line hooks, and an external crate linked into the binary. We quantify the result: 43.0\,KB
-    of patches against a 1.93M-line upstream, of which the localisation itself took about 9\,KB.
-    We also report the techniques that reduced the series from 406\,KB.
+    of patches against a 1.93M-line upstream, of which the localisation itself takes about 9\,KB,
+    and we name the four techniques that keep the series that small.
   \item An \textbf{inventory of the cloud surface} of a modern coding-agent client, and how each part
-    was refused, hidden, replaced or repurposed (\cref{sec:cloud}), with a trace-based audit that
+    is refused, hidden, replaced or repurposed (\cref{sec:cloud}), with a trace-based audit that
     re-checks it after every build and a network switch enforced in the command sandbox.
-  \item \textbf{Integration findings} for running a vendor agent against a local model
+  \item \textbf{Integration points} for running a vendor agent against a local model
     (\cref{sec:local}). They cover discovering the served model, the undocumented catalogue schema,
-    a configuration-scoping failure, why Model Context Protocol tools and Code Mode's \code{exec}
-    were invisible to the local model until they were sent as plain functions, and a compaction
-    limit the server's memory, not the model's window, has to set.
+    configuration scoping, why Model Context Protocol tools and Code Mode's \code{exec} have to be
+    sent as plain functions to reach the local model, and a compaction limit the server's memory,
+    not the model's window, sets.
   \item A \textbf{host-safety layer for unified memory} (\cref{sec:safety}). It combines pre-load
-    admission checks with a pressure-stall watchdog, and was motivated by real incidents in which
-    model loads froze the workstation.
+    admission checks with a pressure-stall watchdog, because a model load that outruns reclaim
+    freezes the workstation without invoking the kernel's OOM killer.
   \item A \textbf{measured cost model for a local agent's output} and the terse-answer mode built on
-    it (\cref{sec:local}): on this machine one token of prose costs the time of about 67 prompt
+    it (\cref{sec:local}): on this machine one token of prose costs the time of about 50--70 prompt
     tokens, and three quarters of the agent's output is tool-call arguments that no speaking style
     touches.
   \item A \textbf{task-level evaluation on SWE-bench Verified} run on an arm64 desk machine
     (\cref{sec:swebench}), with an estimate of the matching overall score calibrated on every
     published leaderboard submission's per-task results, a classification of every failure, and
     paired A/B nights that measure how large a change one night can detect.
-  \item An \textbf{evaluation} of what exists (\cref{sec:eval}), an implemented code index that
-    combines a tree-sitter graph with SCIP and reports which of the two answered
-    (\cref{sec:index}), an overnight task queue (\cref{sec:night}), pairing of several workstations
-    (\cref{sec:node}), and lessons for fork-based agent products (\cref{sec:lessons}).
+  \item An \textbf{evaluation} of what exists (\cref{sec:eval}), a code index that combines a
+    tree-sitter graph with SCIP and reports which of the two answered (\cref{sec:index}), an
+    overnight task queue (\cref{sec:night}), pairing of several workstations (\cref{sec:node}), and
+    the design principles behind them (\cref{sec:lessons}).
 \end{itemize}
 
 \section{Background}
@@ -161,26 +160,18 @@ self-updater needs no account, but it installs from the vendor's distribution ch
 the desktop and every other process draw from the same pool. This one fact shapes much of
 \cref{sec:safety}.
 
-\paragraph{The model.} Mightling's default model is Qwen3.8-27B in an NVFP4 checkpoint, served by
-SGLang and accelerated by a calibrated NVFP4 DFlash2 block-diffusion drafter
+\paragraph{The model.} Mightling's model is Qwen3.8-27B in an NVFP4 checkpoint, served by SGLang
+and accelerated by a calibrated NVFP4 DFlash2 block-diffusion drafter
 \cite{chen2026dflash,dflash2drafter} that proposes twelve tokens per step. SGLang serves it
 because the drafter runs nowhere else yet. The model runs with a 262k-token context and leaves
 about 38\,GB of memory free while serving. Single-stream, it decodes 32.0, 68.6 and 84.1 tokens/s
-on prose, code and JSON (measured with recorded prompts; an earlier measurement at sixteen draft
-tokens, whose prompts were not recorded, gave 25.5, 50.3 and 87.0). Agent sessions, where prompts
-are long and output is mostly tool calls, were measured by replaying recorded sessions against the
-server: single-stream it decodes about 48 tokens/s at a step of about 103\,ms, with about 5.2
-tokens accepted per step. Twelve draft tokens replaced sixteen on 2026-10-09 because they measured
-7\% faster on that replay (48.3 against 45.1 tokens/s; 5.23 against 4.99 accepted per step); eight,
-ten and fourteen gained nothing. The about 30 tokens/s that production had logged were two
-concurrent sessions on a loaded machine; two replayed streams on an idle machine decode 33.9
-tokens/s each. It is the only model served. The default until 2026-09-29 was
-Qwen3.5-122B-A10B, a mixture-of-experts model with about 10B parameters active per token, in
-Intel's AutoRound int4 checkpoint \cite{qwen35int4,cheng2023autoround} with FP8 dense layers,
-served by vLLM \cite{kwon2023vllm} with a twelve-token DFlash drafter \cite{dflashdrafter}. It ran with a 32k-token
-context, a limit forced by memory headroom (\cref{sec:safety}), and decoded 23.8, 49.9 and 53.1
-tokens/s on the same three kinds of output; it was kept as a fallback until 2026-10-07 and then
-removed with its images. The vLLM launcher remains, so the method does not depend on one engine.
+on prose, code and JSON (measured with recorded prompts). Agent sessions, where prompts are long and
+output is mostly tool calls, are measured by replaying recorded sessions against the server:
+single-stream it decodes about 48 tokens/s at a step of about 103\,ms, with about 5.2 tokens
+accepted per step; two concurrent streams decode 33.9 tokens/s each. Twelve draft tokens are the
+measured optimum on that replay (7\% faster than sixteen; eight, ten and fourteen gain nothing). It
+is the only model served. The server manager also drives vLLM \cite{kwon2023vllm}, so the method
+does not depend on one engine.
 
 \section{System overview}
 \label{sec:overview}
@@ -275,20 +266,22 @@ share one crate and \code{ling-code} has another, each with its own lockfile, bu
 \code{-{}-locked} and keyed separately, so changing them never relinks Codex.
 
 Moving to a new upstream release means bumping the submodule and resolving whichever hunks stop
-applying. Because the hunks are few and small, conflicts are local and obvious.
+applying. Because the hunks are few and small, conflicts are local and obvious. A file lock in
+the builder keeps concurrent builds from wiping each other's export, and the launcher is copied
+in with fresh timestamps so Cargo never links a stale copy.
 
-\subsection{From 406\,KB to 9\,KB, then features at a hook each}
+\subsection{Four techniques keep the series small}
 
-The first working series had four patches totalling 406{,}116 bytes. \Cref{tab:patches} shows the
-current one. Four techniques brought it to about 9\,KB.
+\Cref{tab:patches} shows the series. Four techniques keep it at a few kilobytes of hooks rather
+than hundreds of kilobytes of diff.
 
-\paragraph{Rename at run time, not in the tree.} 395{,}156 bytes of the original series came from a
-single patch renaming the agent in Codex's bundled model catalogue (\code{models.json}). That file
-stores each system-prompt template, about 20\,KB, as one JSON line, so a one-word change produces a
-whole-line diff. The launcher now reads the bundled catalogue through the upstream crate's public
-function (\code{bundled\_models\_response}). It takes the longest template, replaces the identity
-sentence, which also names a model Mightling does not run, and hands the result to Codex in the model
-catalogue it writes anyway. The patch disappeared.
+\paragraph{Rename at run time, not in the tree.} Renaming the agent inside Codex's bundled model
+catalogue (\code{models.json}) would cost about 395\,KB of diff: that file stores each
+system-prompt template, about 20\,KB, as one JSON line, so a one-word change produces a whole-line
+diff. The launcher instead reads the bundled catalogue through the upstream crate's public
+function (\code{bundled\_models\_response}), takes the longest template, replaces the identity
+sentence, which also names a model Mightling does not run, and hands the result to Codex in the
+model catalogue it writes anyway. No patch touches the catalogue.
 
 \paragraph{Rewrite presentation where it is assembled.} Help text is spread across doc comments in
 dozens of files. Patching each string would grow with every upstream release. Instead, one hook
@@ -300,23 +293,22 @@ because renaming them would describe files that do not exist. Only literal usage
 does not expose remain in the patch.
 
 \paragraph{Use the build system's own unification.} Upstream vendors OpenSSL only for musl targets,
-so a glibc build needed system headers, and we had patched \code{codex-core}'s manifest to change
-that. Cargo unifies a dependency's features across the whole build graph. A single
+so a glibc build would need system headers or a patched manifest in \code{codex-core}. Cargo
+unifies a dependency's features across the whole build graph. A single
 \code{openssl-sys = \{features = ["vendored"]\}} line in \emph{our} crate's manifest therefore
-applies to every crate that links OpenSSL, and that patch disappeared too. Similarly, a path
-dependency located inside the workspace root makes the launcher a workspace member without editing
-the workspace manifest, and the binary is renamed at install time rather than in Cargo metadata.
+applies to every crate that links OpenSSL. Similarly, a path dependency located inside the
+workspace root makes the launcher a workspace member without editing the workspace manifest, and
+the binary is renamed at install time rather than in Cargo metadata.
 
 \paragraph{One line per behaviour.} What remains is mostly one-line hooks, as
 \cref{tab:patches} shows. Examples: return \code{false} from a slash command's visibility predicate,
 mark a subcommand \code{hide = true}, or send a subcommand's dispatch into the launcher. The
-largest remaining hunks are presentation strings (patch 0001) and \code{/usage} (0011), which
+largest hunks are presentation strings (patch 0001) and \code{/usage} (0011), which
 repurposes a hosted-plan usage screen as local token statistics.
 
-\paragraph{New features cost a hook, not a diff.} The series reached its smallest size, about
-9\,KB, when the four techniques above were done; everything since has been hooks. Up to 0016 they
-are removals. From 0017 on they are features, and each puts its logic in a crate of ours and only
-its entry point in Codex:
+\paragraph{A feature costs a hook, not a diff.} The localisation itself, patches 0001 to 0016,
+is about 9\,KB and consists of removals and redirections. From 0017 on the patches are features,
+and each puts its logic in a crate of ours and only its entry point in Codex:
 \begin{itemize}
   \item \code{/cavemode} (0017, \cref{sec:local}) and \code{/night} (0018, \cref{sec:night}) each
     add a slash-command variant, its description and the dispatch arms that call into the launcher
@@ -325,13 +317,13 @@ its entry point in Codex:
     command's permissions are resolved: Linux's sandbox helper, the app server's configuration and
     Windows' sandbox, all asking one std-only resolver crate;
   \item flattening MCP tools (0020, \cref{sec:local}) and observation masking (0021, off by
-    default) each route one step of request assembly through a crate of ours; when Code Mode's
-    \code{exec} had to reach the model as a function too, 0020 grew by 217 bytes, one argument and
-    one line that maps each answer back as it arrives, and the cap was not raised;
+    default) each route one step of request assembly through a crate of ours; the same hook
+    carries Code Mode's \code{exec} to the model as a function, one argument and one line that
+    maps each answer back as it arrives;
   \item \code{/apps} without a vendor sign-in (0022) answers Codex's connector list from the
     launcher, and \code{/node} (0025, \cref{sec:node}) suspends the TUI to run node management in the real terminal, so a password typed there never enters the session.
 \end{itemize}
-A test caps the series' total size, now at 43{,}000 bytes. The cap is raised only explicitly, in
+A test caps the series' total size, at 43{,}000 bytes. The cap is raised only explicitly, in
 the commit that needs it and with the reason recorded, so the series cannot grow by drift.
 
 \begin{table}[tbp]
@@ -368,15 +360,14 @@ Patch & Files & $+/-$ & Purpose \\
 Total (23 patches, 42{,}958 bytes) & 43 & 170/53 & against 4{,}894 Rust files, 1.93M lines \\
 \bottomrule
 \end{tabularx}
-\caption{The patch series at the time of writing. Numbers 0003 and 0004 were retired when their
-content moved into the launcher crate. The total counts each upstream file once; the per-patch
-column counts it once per patch.}
+\caption{The patch series. Numbers 0003 and 0004 are unused. The total counts each upstream file
+once; the per-patch column counts it once per patch.}
 \label{tab:patches}
 \end{table}
 
 \subsection{Build-reproducibility details}
 
-Three upstream build assumptions did not hold outside upstream's release pipeline.
+Three upstream build assumptions do not hold outside upstream's release pipeline.
 \begin{itemize}
   \item \textbf{V8 flavour.} Code Mode links V8 built with pointer compression and the V8 sandbox.
     The \code{v8} crate's build script downloads a matching prebuilt library \cite{rustyv8}, but that
@@ -387,9 +378,9 @@ Three upstream build assumptions did not hold outside upstream's release pipelin
   \item \textbf{Lockfile versions.} Upstream's \code{Cargo.lock} records the 158 workspace crates at
     version \code{0.0.0}, which its release job bumps just before building. A \code{-{}-locked} build
     therefore fails. The only entries Cargo rewrites are those 158 workspace versions, so we build
-    without \code{-{}-locked} and have confirmed that every third-party pin is unchanged.
+    without \code{-{}-locked}; every third-party pin is unchanged.
   \item \textbf{Debug information.} The upstream release profile keeps line tables and strips only
-    at packaging. Built as-is, the agent binary was 1.4\,GB. Setting
+    at packaging, which makes the agent binary 1.4\,GB. Setting
     \code{CARGO\_PROFILE\_RELEASE\_DEBUG=none} and \code{\_STRIP=debuginfo} through the environment,
     which needs no patch, yields 315\,MB. This also matters at run time
     (\cref{sec:local}).
@@ -398,9 +389,8 @@ Three upstream build assumptions did not hold outside upstream's release pipelin
 \section{Cutting the cloud cord}
 \label{sec:cloud}
 
-We audited every subcommand and slash command of Codex 0.158.0 for a dependency on vendor-hosted
-services. \Cref{tab:cloud} lists what we changed. We used four treatments, deliberately
-distinguished:
+Every subcommand and slash command of Codex 0.158.0 was audited for a dependency on vendor-hosted
+services. \Cref{tab:cloud} lists the result. Four treatments are deliberately distinguished:
 \begin{itemize}
   \item \emph{Refuse}: the launcher rejects the command before Codex parses it, with an explanation.
   \item \emph{Hide}: the command is removed from help and menus, but its code stays compiled for a
@@ -414,25 +404,24 @@ vendor sign-in, and \code{cloud} and \code{cloud-tasks}, which browse tasks on t
 \code{remote-control}, \code{/voice} and \code{/approve} are only hidden. Each needs a vendor
 account that Mightling does not have, so none of them can succeed.
 The refusal finds the subcommand the way Codex will: it reads Codex's own clap definitions to learn
-which options consume the next token, so \code{ling -c k=v cloud} is refused too. An earlier
-version checked only the first argument and let that form through.
+which options consume the next token, so \code{ling -c k=v cloud} is refused too.
 
 \subsection{Traffic an audit of commands does not find}
 \label{sec:egress}
 
-Auditing commands found every channel a user starts deliberately. It found none of the channels
-Codex opens by itself. We found those by tracing: a real \code{ling exec} session, and a real
+Auditing commands finds every channel a user starts deliberately. It finds none of the channels
+Codex opens by itself. Those are found by tracing: a real \code{ling exec} session, and a real
 interactive session driven through a pseudo-terminal with a fresh configuration directory, each
 under \code{strace -f -e trace=connect,execve}, with the HTTP client's debug logging on to name the
 URLs. With the model served on the loopback interface, anything else in the trace is traffic we
 did not intend.
 
-The first traces were not clean, although no vendor login was present. Codex exported OpenTelemetry
-metrics to Statsig at \code{ab.chatgpt.com}, the default in release builds, with an API key compiled
-in; it ran \code{git ls-remote https://github.com/openai/plugins.git} to sync the vendor's curated
-plugins; it requested \code{chatgpt.com/backend-api/plugins/featured}; and the interactive
-interface fetched an announcement from \code{raw.githubusercontent.com} on every start. Two further
-channels needed the login that an earlier upstream installation had left in the shared
+Traced that way, an upstream build with no vendor login opens four channels. Codex exports
+OpenTelemetry metrics to Statsig at \code{ab.chatgpt.com}, the default in release builds, with an
+API key compiled in; it runs \code{git ls-remote https://github.com/openai/plugins.git} to sync
+the vendor's curated plugins; it requests \code{chatgpt.com/backend-api/plugins/featured}; and the
+interactive interface fetches an announcement from \code{raw.githubusercontent.com} on every
+start. Two further channels open whenever a login is present in the shared
 \code{\textasciitilde/.codex}: usage analytics and token refresh.
 
 Each is closed where it originates rather than by configuration, so no setting or later login can
@@ -440,22 +429,21 @@ reopen it. The analytics client and the metrics exporter resolve to ``disabled''
 and the two fetches return before any request, and Mightling keeps its state in
 \code{\textasciitilde/.mightling}, copying sessions and settings across but never the login. As a
 second line, the launcher points Codex's \code{chatgpt\_base\_url} at a closed local port, so any
-vendor-backend call we did not find fails on the machine. Re-traced, both sessions contacted only
-two loopback services: the model server and the local mail service. The lesson is general: for a
-vendor client, the list of what it sends is an empirical question, and has to be re-measured after
-every upstream update.
+vendor-backend call we did not find fails on the machine. A traced session then contacts only two
+loopback services: the model server and the local mail service. For a vendor client, the list of
+what it sends is an empirical question, and is re-measured after every upstream update.
 
-\paragraph{The audit as a command.} That trace is now \code{ling-admin audit egress}, and every
+\paragraph{The audit as a command.} That trace is \code{ling-admin audit egress}, and every
 build of \code{ling} runs it after installing a new binary. It runs one real \code{ling exec}
 session in a throwaway repository and home under \code{strace -f -e
 trace=connect,sendto,sendmsg,sendmmsg,execve} and passes only if every destination is an
 allowlisted loopback port (the model server, the mail service, SearXNG), no DNS query was sent
-and no git command reached a network. A trace that itself failed is never a pass. Two details came
-from recordings: glibc sends name lookups with \code{sendmmsg}, so tracing \code{connect} alone
-misses a query, and a connection to the local stub resolver at \code{127.0.0.53:53} is loopback
-yet still a query that leaves the machine. A phone messenger's bridge talks to its network by
-design and outside the agent's process, so the trace cannot see it; instead every report names
-each bridge that is switched on as a declared exception, and none is ever passed over in silence.
+and no git command reached a network. A trace that itself failed is never a pass. Two details
+matter: glibc sends name lookups with \code{sendmmsg}, so tracing \code{connect} alone misses a
+query, and a connection to the local stub resolver at \code{127.0.0.53:53} is loopback yet still
+a query that leaves the machine. A phone messenger's bridge talks to its network by design and
+outside the agent's process, so the trace cannot see it; instead every report names each bridge
+that is switched on as a declared exception, and none is ever passed over in silence.
 
 \paragraph{An enforced network switch.} \code{/airgapped} has two levels. At \code{off}, the
 default, the agent's commands may use the network. At \code{on}, every command the agent runs gets
@@ -465,9 +453,7 @@ the helper, which runs in the command's own environment and so finds the session
 thread identifier. The level resolves from the session, then an environment variable, then the
 stricter of the repository's and the user's configuration, because the agent can write the
 former. Full Access has no sandbox, so the two are never allowed together: the launcher, the
-permission menus and the app server each refuse the combination and say why. A third level,
-search through one engine only, was built and then removed when that engine answered SearXNG with
-a CAPTCHA, so the level searched nothing.
+permission menus and the app server each refuse the combination and say why.
 
 \begin{table}[tbp]
 \centering
@@ -489,7 +475,7 @@ update check at start-up & Compares against upstream Codex releases & disabled i
 \midrule
 \multicolumn{3}{@{}l}{\emph{Found only by tracing a session (\S\ref{sec:egress})}} \\
 usage analytics & Posted to \code{chatgpt.com} whenever a vendor login is present & disabled \\
-shared \code{\textasciitilde/.codex} & Inherited an upstream vendor login and its token refresh & own \code{\textasciitilde/.mightling} \\
+shared \code{\textasciitilde/.codex} & Inherits an upstream vendor login and its token refresh & own \code{\textasciitilde/.mightling} \\
 OTEL metrics & Exported to Statsig (\code{ab.chatgpt.com}) by default in release builds & disabled \\
 curated plugin sync & \code{git ls-remote} of the vendor's plugin repository on GitHub at start-up & removed \\
 featured plugins & Request for featured plugins to \code{chatgpt.com} & removed \\
@@ -507,49 +493,42 @@ the binary at release build time, and downloads the gzipped \code{ling} and
 \code{codex-code-mode-host} with a SHA-256 manifest. It verifies both files before replacing either,
 and swaps them in next to the running executable, so a failed download leaves the installation
 intact. A shell installer downloads the same assets, with the same checks, on a fresh machine.
-Releases with prebuilt binaries have been published since 1.3.0 (the first one lacked them and was
-withdrawn, \cref{sec:lessons}). Releases from 1.5.1 on, the first under the new name, are
-\emph{signed}: the checksum file lists every asset and carries an Ed25519 signature made in a
-protected CI environment, the public key is compiled into \code{ling}, and both the updater and the
-installer refuse a release from that version on whose signature is missing or does not verify.
-1.5.1 and 1.6.0 were published this way. The environment first required a person's approval for
-each signature; since 2026-10-12 a release run publishes itself, its notes taken from the
-repository, and the key stays usable only from the main and release branches. An upgrade from a
-real 1.4.1 installation, including the rename's one-time migration of the home folder, was
-exercised in a scratch home.
+Releases are \emph{signed}: the checksum file lists every asset and carries an Ed25519 signature
+made in a protected CI environment, the public key is compiled into \code{ling}, and both the
+updater and the installer refuse a release whose signature is missing or does not verify. A
+release run publishes itself, its notes taken from the repository, and the key is usable only from
+the main and release branches. The updater also performs the one-time migration of an older
+installation's home folder to the current name.
 
 \section{Running a vendor agent against a local model}
 \label{sec:local}
 
-\paragraph{Discover, do not configure.} The local server's model can change between sessions, and
-an earlier version of our launcher left Codex advertising the previous model with the wrong context
-length. The server's \code{/v1/models} endpoint reports both the served model's identifier and its
-\code{max\_model\_len}. The launcher therefore derives the model catalogue entry from the running
-server, with no copy of the model registry: context window, auto-compaction limit and truncation
-policy all come from that value.
+\paragraph{Discover, do not configure.} The local server's model can change between sessions, so
+nothing in the launcher records which model is served. The server's \code{/v1/models} endpoint
+reports both the served model's identifier and its \code{max\_model\_len}. The launcher derives the
+model catalogue entry from the running server, with no copy of the model registry: context window,
+auto-compaction limit and truncation policy all come from that value.
 
-That value turned out not to be the whole truth. The default model is launched with a 262{,}144-token
-context and reports it, but the server's KV-cache pool, sized at launch from free memory and shared
-by every stream, held 156{,}907 tokens when we looked. Both the window the catalogue advertises and
-the compaction limit derived from it were therefore above what the server can hold. None of the 111
-interactive sessions recorded at the time contained a compaction (the largest peaked at 71{,}421
-prompt tokens), but a deliberately extreme limit of 6{,}000, set through Codex's own
-\code{model\_auto\_compact\_token\_limit}, showed what a compaction costs here: one small task
-compacted seven times and ran thirteen commands where three were needed, because the model re-ran
-what each summary had dropped. Two changes followed, neither a patch.
+That value is not the whole truth. The model is launched with a 262{,}144-token context and
+reports it, but the server's KV-cache pool, sized at launch from free memory and shared by every
+stream, holds about 157{,}000 tokens. Both the window the catalogue advertises and a compaction
+limit derived from it would therefore be above what the server can hold, and a compaction is
+expensive here: at a deliberately extreme limit of 6{,}000, set through Codex's own
+\code{model\_auto\_compact\_token\_limit}, one small task compacted seven times and ran thirteen
+commands where three were needed, because the model re-ran what each summary had dropped. Two
+mechanisms follow, neither a patch.
 \begin{itemize}
   \item \emph{The limit follows the pool.} At every start the launcher reads the pool from the
     server's metrics and passes 60\% of it as the compaction limit unless the user set one: 94{,}144
-    tokens on the default model, against the 262{,}144 the catalogue advertises.
+    tokens on this model, against the 262{,}144 the catalogue advertises.
   \item \emph{A ledger replaces what summaries lose.} Codex's summary keeps the conversation's prose
     but drops every tool call and output, so which files were touched and which commands failed
     survives only if the summary happens to name it. A hook that Codex runs after each compaction
     calls the launcher, which rebuilds by rule, with no model, in about 15\,ms, the files the session
     touched, the commands that failed since the last compaction and the last test result, and hands
     them back as context. On one long task at a 32k limit, the session with the ledger compacted 11
-    times instead of 24 and ran 114 commands instead of 245. It has been on by default since
-    2026-10-02; registering it as a hook Codex trusts meant recomputing Codex's own hash of the
-    hook's definition, which a test pins.
+    times instead of 24 and ran 114 commands instead of 245. It is on by default; a test pins
+    Codex's own hash of the hook's definition, which registering a trusted hook requires.
 \end{itemize}
 Benchmark sessions compact far more than interactive ones, since each task runs at a limit of
 49{,}152 tokens. Across seven benchmark runs of 320 tasks in all, tasks that compacted at most once
@@ -557,13 +536,9 @@ resolved 75--78\%, twice 57\%, and three times or more 38\%; compaction took 17\
 time, a median of 98\,s each with two sessions sharing the server. Part of that gradient is that
 hard tasks run longer, but on the 18 tasks that ran both ways the low-compaction runs still
 resolved more (50\% against 40\%, too few to measure a size). After a compaction only 1\% of
-commands repeated an earlier one exactly, so the ledger does what it was built for. A third change,
-compacting at the end of a turn while the user reads the answer instead of in the middle of the
-next one, is built as a setting and off until a benchmark of interactive sessions decides it. We
-also tried a 0.5B diffusion model, run as a sidecar, as a compressor of tool output: of 50 file
-names, hashes and numbers in a \code{git log}, 14 survived, so it has no role in compaction. It
-was unusable in every other role we tried as well, and the sidecar has been switched off since
-2026-10-03.
+commands repeat an earlier one exactly, so the ledger does what it was built for. A third
+mechanism, compacting at the end of a turn while the user reads the answer instead of in the middle
+of the next one, is built as a setting and off until a benchmark of interactive sessions decides it.
 
 \paragraph{The catalogue is a hard schema.} Codex refuses a model it has no catalogue entry for, and
 parses entries with strict \code{serde} structs. A wrongly shaped field is a start-up failure, not
@@ -573,64 +548,55 @@ an ignored key. Several fields have non-obvious shapes:
   \item \code{visibility} is one of \code{list|hide|none};
   \item truncation is \code{\{mode, limit\}};
   \item \code{base\_instructions} is required in practice, and it is the \emph{entire} system prompt,
-    not a label.
+    not a label: with a placeholder there, the model has no description of its tools, guesses tool
+    names that do not exist, and falls back to \code{curl} for work a tool is provided for.
 \end{itemize}
-An early version filled \code{base\_instructions} with a one-line placeholder. The model then had no
-description of its tools, guessed tool names that do not exist, and fell back to \code{curl} for
-work a tool was provided for. Supplying Codex's own template, with the identity sentence rebranded,
-fixed this.
+The launcher therefore supplies Codex's own template, with the identity sentence rebranded.
 
 \paragraph{Configuration scoping.} Codex's \code{config.toml} accumulates tables written by Codex
 itself, for example \code{[tui.model\_availability\_nux]}. Appending a top-level key such as
-\code{model\_catalog\_json = "..."} to such a file silently makes it a member of the last table. The
-result is the start-up error \emph{invalid type: string, expected u32}. The same failure recurred
-later with a different table. The launcher now edits the file as a syntax tree
-(\code{toml\_edit}). It sets keys that must follow the server unconditionally, and adds keys that
-the user may override only when they are absent.
+\code{model\_catalog\_json = "..."} to such a file silently makes it a member of the last table,
+and Codex fails at start-up with \emph{invalid type: string, expected u32}. The launcher therefore
+edits the file as a syntax tree (\code{toml\_edit}). It sets keys that must follow the server
+unconditionally, and adds keys that the user may override only when they are absent.
 
-\paragraph{Tools as shell commands, and why MCP failed.} Code Mode exposes MCP tools only inside
-its JavaScript runtime, as \code{tools.mcp\_\_server\_\_tool(args)}. We wired a SearXNG
-\cite{searxng} MCP server for web search. The server initialised and its tools appeared to reach
-the model's context, but the local model repeatedly called the namespace directly, received
-\emph{unsupported call}, and gave up. Plain shell commands described in the system prompt worked
-reliably: \code{ling-search}, \code{ling-fetch} and, later, \code{gmail search|read|status}. We
-first read this as a property of the model. It was not: Codex sends MCP tools in a
-\code{namespace} tool type of its own, and both SGLang and vLLM drop tools of a type they do not
-know, so no MCP server, the code index's included, had ever been visible to the model. Patch 0020
-sends each MCP tool as a plain function, so it now reaches the model; the shell commands remain the
-primary path. The same filter hid Code Mode itself. Codex offers Code Mode's \code{exec}, and the
-free-form variant of its \code{apply\_patch}, as \emph{custom} tools whose argument is raw text
-under a grammar, and the servers drop that type too: in eleven recorded turns the model never
-called \code{exec}, because it never saw it. On a server other than our own engine the launcher's
-tool crate now offers \code{exec} as a function with one string parameter, the grammar appended to
-its description, turns the model's function call back into the custom-tool call Codex expects
-before Codex records it, and replays earlier calls in the form the model saw. The free-form
+\paragraph{Tools as shell commands, and tool types at the boundary.} The agent's primary tools are
+shell commands described in the system prompt: \code{ling-search}, \code{ling-fetch},
+\code{ling-code} and \code{gmail search|read|status}. A local model calls them reliably, and they
+need no tool type the server has to understand. That last point matters because Codex sends two
+kinds of tool that a local server drops: MCP tools go out in a \code{namespace} tool type of
+Codex's own, and Code Mode's \code{exec}, as well as the free-form variant of \code{apply\_patch},
+go out as \emph{custom} tools whose argument is raw text under a grammar. Both SGLang and vLLM drop
+tools of a type they do not know, so none of them reaches the model as sent. Patch 0020 therefore
+sends each MCP tool as a plain function. On a server other than our own engine, the launcher's tool
+crate offers \code{exec} as a function with one string parameter, the grammar appended to its
+description, turns the model's function call back into the custom-tool call Codex expects before
+Codex records it, and replays earlier calls in the form the model saw. The free-form
 \code{apply\_patch} is offered only to our own engine, which accepts custom tools; elsewhere the
-agent edits files through the shell as before. Both were then measured as paired A/B nights
-(\cref{sec:swebench}). With \code{exec} offered as a function the model called it in every one of
-44 benchmark tasks, 2{,}865 times, so the translation works; the \code{apply\_patch}-as-function
-arm never started, because the pinned Codex's catalogue parser accepts only the free-form variant.
-The lesson is about where to look: a local serving stack can silently filter what a vendor harness
-sends, and the request that reaches the model, not the one the harness built, is the thing to
-inspect.
+agent edits files through the shell. Whether Code Mode, and an \code{apply\_patch} offered as a
+function, help the local model are each measured as a benchmark A/B (\cref{sec:swebench}): with
+\code{exec} offered as a function the model calls it in every one of 44 benchmark tasks, 2{,}865
+times, so the translation works; the \code{apply\_patch}-as-function arm never started, because
+the pinned Codex's catalogue parser accepts only the free-form variant. The request that reaches
+the model, not the one the harness builds, is the thing to inspect.
 
 \paragraph{Timers sized for a hosted service.} Before the first token, the only timer Codex runs is
 a 300\,s stream-idle timeout, and it covers the server's queue as well as prompt processing. One
 stream fits: a prompt that fills the whole KV pool takes about three minutes. Several queued
-streams do not, and an overnight run hit the limit. The launcher now writes a 900\,s timeout into
-its provider entry when the user has not set one. Two smaller defences came from the same review:
-\code{server start} checks that a tool call survives the streamed path \code{ling} uses and names
-the parser or chat template likely at fault if it does not, and every process that reaches the
-model exempts loopback and the model server from any proxy the environment leaves behind.
+streams do not. The launcher therefore writes a 900\,s timeout into its provider entry when the
+user has not set one. Two smaller defences: \code{server start} checks that a tool call survives
+the streamed path \code{ling} uses and names the parser or chat template likely at fault if it does
+not, and every process that reaches the model exempts loopback and the model server from any proxy
+the environment leaves behind.
 
 \paragraph{Prose is the expensive output.} Hosted agents are priced per token, so the usual argument
 for terse output is money. Locally the currency is time, and its exchange rate is lopsided. This
-model decodes prose at 25.5 tokens/s and reads a prompt at about 1{,}700, so one token of prose
-costs the time of about 67 prompt tokens; and 81\% of the input of our recorded sessions came from
-the prefix cache. A few hundred tokens of standing instructions are therefore nearly free, while
-every sentence of answer is not. We also measured where the output goes: across 52 recorded
-sessions with tool calls, 75.5\% of output tokens were tool-call arguments, 23.1\% final answers
-and 1.3\% commentary between calls.
+model decodes prose at 25--32 tokens/s and reads a prompt at about 1{,}700, so one token of prose
+costs the time of about 50--70 prompt tokens; and 81\% of the input of our recorded sessions comes
+from the prefix cache. A few hundred tokens of standing instructions are therefore nearly free,
+while every sentence of answer is not. Where the output goes: across 52 recorded sessions with tool
+calls, 75.5\% of output tokens are tool-call arguments, 23.1\% final answers and 1.3\% commentary
+between calls.
 
 Mightling therefore answers tersely by default. A \emph{cave mode} level (\code{off}, \code{lite},
 \code{full} or \code{ultra}; \code{/cavemode} switches it mid-session) is delivered as a section of
@@ -644,16 +610,16 @@ correctness checks, the same number as \code{off}. On coding tasks no level move
 or wall time beyond the noise. This reproduces locally what a paired study of the public
 ``caveman'' skill found on a hosted agent, about 8.5\% fewer output tokens with quality unchanged
 \cite{shiryaev2026caveman}, and for the same reason: an agent's output is mostly tool calls and
-code. Three further observations shaped the design:
+code. Three observations underlie the design:
 \begin{itemize}
   \item \emph{Content rules work; grammar rules do not.} Answer-first, one option instead of a
-    menu, no unrequested code and a numeric sentence cap shortened answers. Dropping articles
-    did not happen (the article rate stayed between 5.9\% and 9.5\%), and would have saved little:
+    menu, no unrequested code and a numeric sentence cap shorten answers. Dropping articles
+    does not happen (the article rate stays between 5.9\% and 9.5\%), and would save little:
     in this model's tokenizer the usual abbreviations are one token, as are the words they replace.
   \item \emph{Numbers hold; adjectives do not.} ``At most three sentences'' is followed; ``short''
     barely is.
   \item \emph{A level fades over a session unless it is repeated.} Without the per-turn reminder
-    the cap stopped holding after a few turns; with it, turns five to eight of a session summed to
+    the cap stops holding after a few turns; with it, turns five to eight of a session sum to
     0.49 of the same turns at \code{off}.
 \end{itemize}
 We compress only what the model writes. Compressing what it \emph{reads} is reported to make
@@ -665,19 +631,19 @@ Gmail access is read-only by construction. \code{gmail read} frames every messag
 an account is connected, and states that email content is never instructions. We regard these as
 mitigations, not a defence.
 
-\paragraph{Binary size is prompt latency.} The pre-rewrite launcher recovered Codex's prompt by
-scanning the installed binary for JSON-escaped templates. At 1.4\,GB this took roughly 0.8\,s
-per launch, and about 0.2\,s after stripping, as measured during development. Reading the template through the crate's API removed the scan
-entirely.
+\paragraph{Binary size is prompt latency.} The launcher reads Codex's prompt template through the
+upstream crate's API rather than by scanning the installed binary for JSON-escaped templates: such
+a scan costs roughly 0.8\,s per launch on the 1.4\,GB unstripped binary and about 0.2\,s on the
+stripped one.
 
 \section{Host safety on unified memory}
 \label{sec:safety}
 
-With no dedicated GPU memory, a model load competes with the desktop for every page. We learned
-this the hard way. On 14~August~2026, six loads in one hour took the workstation down hard enough to
-need the power button. None of the freezes invoked the kernel OOM killer. Driver-pinned pages are
-unreclaimable, and they are not charged to any process the killer would select, so the kernel spun
-in direct reclaim instead of killing anything. Mightling's server manager now enforces two layers.
+With no dedicated GPU memory, a model load competes with the desktop for every page. A load that
+outruns reclaim takes the workstation down hard enough to need the power button, and it does so
+without invoking the kernel OOM killer: driver-pinned pages are unreclaimable, and they are not
+charged to any process the killer would select, so the kernel spins in direct reclaim instead of
+killing anything. Mightling's server manager enforces two layers.
 
 \paragraph{Admission checks (before a load).} All conditions are checked and reported together,
 because each fix needs its own \code{sudo}.
@@ -696,8 +662,8 @@ The container is also nominated as the preferred OOM victim (\code{oom\_score\_a
 \code{ling-admin host setup} applies what the checks report, and the installer runs it on a GB10,
 together with an AppArmor profile that lets Bubblewrap create the sandbox's user namespace (Ubuntu
 refuses that to unconfined processes, and a systemd unit, unlike a terminal under an IDE, is
-unconfined). Installing a second GB10 found one gap: killed partway through a swap resize, the
-step left the machine with no swap at all. It now completes an interrupted resize when run again.
+unconfined). An interrupted swap resize, which would otherwise leave the machine with no swap at
+all, is completed when setup runs again.
 
 \paragraph{Watchdog (during a load).} A thread samples \code{/proc/pressure/memory} once per second.
 It resolves the container's cgroup and kills the container on either of two rules:
@@ -717,17 +683,16 @@ afford:
     during a reclaim livelock.
 \end{enumerate}
 
-\paragraph{Consequences for serving.} These margins are why the earlier 122B model ran at a 32k
-context rather than 131k: a longer context was refused at start-up for want of 3.3\,GiB of KV
-cache. (The 27B model leaves about 38\,GB free and runs at 262k.) They also fixed the order of
-start-up while a diffusion sidecar existed: it started \emph{before} the model server, with a fixed
-8\,GB cgroup cap, because the server's pre-flight reads current free memory. A resident sidecar is
-accounted for, whereas the reverse order lets a marginal check pass and then lose the memory
-mid-load. Every heavy background job we have added since runs under
-\code{systemd-run -p MemoryMax=\ldots{} -p MemorySwapMax=0}, so exhaustion kills the job instead
-of the host. Index runs share one slice and one memory ledger (\cref{sec:index}); each overnight
-task has a scope of its own (\cref{sec:night}); and while a night run holds its lock, a model
-load, a build of \code{ling} and a re-index all refuse to start.
+\paragraph{Consequences for serving.} The margins decide the context a model can run at: the 27B
+model leaves about 38\,GB free and runs at 262k, and a longer context is refused at start-up when
+the KV cache would not fit. They also fix the order of start-up: anything resident beside the
+model server, such as a sidecar, starts \emph{before} it with a fixed cgroup cap, because the
+server's pre-flight reads current free memory; a resident sidecar is then accounted for, whereas
+the reverse order lets a marginal check pass and then lose the memory mid-load. Every heavy
+background job runs under \code{systemd-run -p MemoryMax=\ldots{} -p MemorySwapMax=0}, so
+exhaustion kills the job instead of the host. Index runs share one slice and one memory ledger
+(\cref{sec:index}); each overnight task has a scope of its own (\cref{sec:night}); and while a
+night run holds its lock, a model load, a build of \code{ling} and a re-index all refuse to start.
 
 \section{Evaluation}
 \label{sec:eval}
@@ -743,7 +708,7 @@ We evaluate what the system does today. Task-level coding accuracy, on SWE-bench
 Metric & Value \\
 \midrule
 Upstream (Codex \code{rust-v0.158.0}) & 4{,}894 Rust files, 1.93M lines \\
-Patch series, initial $\rightarrow$ smallest $\rightarrow$ current & 406{,}116 B (4) $\rightarrow$ $\approx$9\,KB $\rightarrow$ 42{,}958 B (23 patches) \\
+Patch series & 42{,}958 B, 23 patches (localisation $\approx$9\,KB) \\
 Upstream files touched / lines changed & 43 files / $+170,\ -53$ \\
 Launcher crates (\code{ling-rs} and its sub-crates) & 35{,}900 lines, 553 tests \\
 Code-index router (\code{ling-code}) & 10{,}444 lines, 131 tests \\
@@ -751,7 +716,6 @@ Agent binary, unstripped $\rightarrow$ stripped & 1.4\,GB $\rightarrow$ 315\,MB 
 Incremental rebuild after a launcher edit & $\approx$7 min (thin LTO relink) \\
 Management and services (Python) & 155 modules, 45.5k lines; 1{,}269 tests \\
 Live slash-command suite, Qwen3.8-27B$^\dagger$ & 77 tests: 75 pass, 2 skip; 651.3\,s \\
-Live slash-command suite, Qwen3.5-122B$^\dagger$ & 77 tests: 75 pass, 2 skip; 806.7\,s \\
 Decode throughput, single stream, 262k context & prose 32.0 / code 68.6 / JSON 84.1 tok/s \\
 Decode, replayed agent sessions, 1 / 2 streams & 48.3 / 33.9 tok/s each; 5.2 of 12 accepted \\
 SWE-bench Verified, 100-task sample (\cref{sec:swebench}) & 68 resolved; $\approx$69\% overall (64--73\%) \\
@@ -760,10 +724,9 @@ Overnight task, live (one task, \cref{sec:night}) & 7\,s; test passed; checkout 
 \bottomrule
 \end{tabular}
 \caption{Measurements on one GB10 (128\,GB). Sizes are binary megabytes. Single-stream throughput
-was measured on 2026-10-09 at twelve draft tokens; the replay rows on the second GB10 with
-production's image and flags (two streams at sixteen draft tokens). $^\dagger$Run with
-the 16-patch build of \cref{sec:fork}'s first version, before the 122B model was removed; not yet
-re-run on the current series.}
+at twelve draft tokens; the replay rows were measured on the second GB10 with production's image
+and flags. $^\dagger$Run on an earlier 16-patch build of the series; not yet re-run on the current
+one.}
 \label{tab:eval}
 \end{table}
 
@@ -771,37 +734,29 @@ re-run on the current series.}
 on a pseudo-terminal, in a throwaway git repository and \code{CODEX\_HOME}, against the running
 local model. It asserts per command that the expected screen or reply appears, and that removed
 commands are rejected. \Cref{tab:eval} gives the totals. Two commands that upstream labels ``DO NOT
-USE'' are skipped. An earlier run, before the fixes in this paper, had three failures, each
-diagnosed from the session transcript.
-\begin{enumerate}
-  \item \emph{Fresh-home start}: with an empty configuration directory, \code{ling} opened on
-    Codex's vendor sign-in screen. The start-up account check reads the configured
-    \code{model\_provider}, not \code{--oss}; the launcher now also passes
-    \code{-c model\_provider=\ldots}, and the test passes.
-  \item \code{/btw}: an alias of \code{/side}, unavailable until a conversation exists. The test
-    must converse first; this was a harness bug.
-  \item \code{/init}: first a harness bug (a single missed ``esc to interrupt'' marker between tool
-    calls ended the wait early), fixed by requiring the marker to stay away for three seconds. The
-    remaining failures were the model: it explored the repository, announced ``I'll create a
-    concise AGENTS.md'', and ended its turn without the tool call. The same prompt through
-    \code{ling exec} wrote the file in 6 of 6 runs, with or without an extra
-    ``act, don't announce'' instruction, so we did not change the prompt. The test now does what a
-    user would: it says ``go ahead'' once, and fails only if the file still does not appear.
-\end{enumerate}
+USE'' are skipped. Three details of the harness come from the model's and Codex's behaviour. The
+launcher passes \code{-c model\_provider=\ldots} as well as \code{-{}-oss}, because Codex's start-up
+account check reads the configured provider and would otherwise open the vendor sign-in screen on
+an empty configuration directory. \code{/btw}, an alias of \code{/side}, is unavailable until a
+conversation exists, so the test converses first. The wait for a turn's end requires the ``esc to
+interrupt'' marker to stay away for three seconds, because a single missed marker between tool
+calls ends it early; and for \code{/init}, where the model sometimes explores the repository,
+announces ``I'll create a concise AGENTS.md'' and ends its turn without the tool call (the same
+prompt through \code{ling exec} writes the file in 6 of 6 runs), the test does what a user would:
+it says ``go ahead'' once, and fails only if the file still does not appear.
 
-\paragraph{Throughput.} On both models we served, decode speed for code is about twice that for
-prose (68.6 against 32.0 tokens/s on the 27B model at twelve draft tokens, 49.9 against 23.8 on the
-earlier 122B), and JSON is faster still (84.1 and 53.1). The reason is speculative decoding: per
-step the 27B model accepts 3.4 drafted tokens on prose, 4.4 on code and 5.9 on JSON. It suits an
-agent whose output is dominated by tool calls and code: 75.5\% of output tokens in our recorded
-sessions were tool-call arguments (\cref{sec:local}).
+\paragraph{Throughput.} Decode speed for code is about twice that for prose (68.6 against 32.0
+tokens/s), and JSON is faster still (84.1). The reason is speculative decoding: per step the model
+accepts 3.4 drafted tokens on prose, 4.4 on code and 5.9 on JSON. It suits an agent whose output
+is dominated by tool calls and code: 75.5\% of output tokens in our recorded sessions are
+tool-call arguments (\cref{sec:local}).
 
 \section{Task-level accuracy on SWE-bench Verified}
 \label{sec:swebench}
 
 \paragraph{Running it on a desk machine.} \code{ling-admin swe-bench} runs \code{ling} inside each
 instance's own container on the GB10 and grades the patches with the official harness. Several
-things had to be found first.
+things are specific to that.
 \begin{itemize}
   \item \emph{Images.} The official instance images are built for \code{linux/amd64} only. The only
     arm64 images are a community build covering 400 of the 500 instances \cite{swebencharm64}; the
@@ -815,55 +770,44 @@ things had to be found first.
     so the agent runs with it bypassed, on an internal Docker network that reaches the model server
     and nothing else.
   \item \emph{The model to itself.} A benchmark run shares the model server with whoever else uses
-    it, and an interactive session in the middle of a run would change both. The server now sits
+    it, and an interactive session in the middle of a run would change both. The server sits
     behind a small streaming proxy, the \emph{model gate}, on the public port. While a run holds
     it, a request from outside the run's network is answered with a 503 that names the run and the
     time left, and the user can let requests through for a while; the run's report names each such
     pause.
 \end{itemize}
-Each instance gets a 45-minute limit, 8\,GB of memory and four CPUs; two run at once from the
-100-task sample on (the 24-task rounds ran up to three). Nothing is chosen by running tests: one session, one patch,
-as a single attempt in the leaderboard's sense.
+Each instance gets a 45-minute limit, 8\,GB of memory and four CPUs; two run at once. Nothing is
+chosen by running tests: one session, one patch, as a single attempt in the leaderboard's sense.
 
 \paragraph{From a local subset to an overall score.} A local result on a few dozen tasks is not a
-leaderboard score, and our sample is not average: across the 175 submissions that publish
+leaderboard score, and a sample is not average: across the 175 submissions that publish
 per-instance results \cite{swebenchexperiments}, systems resolve on average 5.9 points fewer of our
-24 tasks than of all 500. We therefore estimate the overall score a local result corresponds to,
-with two estimators fitted on those submissions: a regression of overall on subset score, and a
+24-task sample than of all 500. We therefore estimate the overall score a local result corresponds
+to, with two estimators fitted on those submissions: a regression of overall on subset score, and a
 one-parameter item-response (Rasch) model fitted on the full 175$\times$500 matrix, in which a
 local round's ability is the one whose expected count on its tasks equals its resolved count.
 Back-tested by predicting each published submission's overall score from its 24 subset results
 alone, the Rasch estimate has an RMSE of 5.3 points (the regression 5.1); the 95\% bands below are
-the Rasch estimate $\pm 1.96$ times that error.
+the Rasch estimate $\pm 1.96$ times that error. On a 100-task sample, published systems score only
+1.0 to 1.5 points below their overall score, and the back-test error falls to 2.4 points, so the
+band narrows to about $\pm 5$.
 
-\paragraph{Results on 24 tasks.}
-\begin{itemize}
-  \item \emph{Default configuration.} Six rounds with the default prompt resolved 17, 16, 17, 15,
-    16 and 15 of the 24 tasks. The median, 16, corresponds to about 71\% on all of Verified
-    (Rasch 70.9\%, regression 70.3\%; band 60--81\%). On exactly these 24 tasks, 16 is what
-    several published systems built on much larger hosted or open models scored, with overall
-    scores between 66.6\% and 77.6\%.
-  \item \emph{Study, then fix.} A \emph{refine} mode runs two sessions: one that may read and run
-    the code but changes nothing writes a structured description of the task (intent,
-    requirements, every code path involved, edge cases, what must not change, acceptance checks),
-    and a fresh session fixes the task with that description, told that the task text wins where
-    they disagree. Its one round resolved 20 of 24 ($p = 0.25$ against the matching default
-    round), at a median of 16\,min 22\,s per instance against 4\,min 7\,s. In three instances the
-    study wrote down the wrong thing and the fix followed it.
-  \item \emph{The same weight class.} The best published result on these 24 tasks from a model of
-    20B to 40B parameters is 15 (with more than one attempt); the best single attempt is 14. Those
-    are 2025 models; no Qwen 3.5, 3.6 or 3.8 model has a published submission.
-  \item \emph{The code index.} In the first paired rounds with and without the index of
-    \cref{sec:index}, both resolved 13; the agent never queried the index, so that pair says
-    nothing about it. The harness now reports when that happens.
-\end{itemize}
+\paragraph{Results.} On the 100-task sample the default configuration resolves 68, about 69\% on
+all of Verified (band 64--73\%). On the 24-task sample, six rounds with the default prompt resolve
+17, 16, 17, 15, 16 and 15; the median, 16, corresponds to about 71\% (band 60--81\%), consistent
+with the larger sample, and is what several published systems built on much larger hosted or open
+models score on exactly those 24 tasks, with overall scores between 66.6\% and 77.6\%. The best
+published result on those 24 tasks from a model of 20B to 40B parameters is 15 (with more than one
+attempt); the best single attempt is 14. Those are 2025 models; no Qwen 3.5, 3.6 or 3.8 model has a
+published submission.
 
-\paragraph{Results on 100 tasks.} On a 100-task sample, published systems score only 1.0 to 1.5
-points below their overall score, and the back-test error falls to 2.4 points, so the band narrows
-to about $\pm 5$. The default configuration resolved 68 of the 100, about 69\% on all of Verified
-(band 64--73\%), consistent with the 24-task estimate. Paired with it, refine resolved 69: each
-mode alone resolved about ten tasks the other missed ($p = 1.0$), at 2.2 times the time per task.
-The 24-task lead did not hold, and refine stays opt-in.
+A \emph{refine} mode runs two sessions: one that may read and run the code but changes nothing
+writes a structured description of the task (intent, requirements, every code path involved, edge
+cases, what must not change, acceptance checks), and a fresh session fixes the task with that
+description, told that the task text wins where they disagree. Paired with the default on the 100
+tasks, refine resolves 69: each mode alone resolves about ten tasks the other misses ($p = 1.0$),
+at 2.2 times the time per task (on the 24-task sample, a median of 16\,min 22\,s per instance
+against 4\,min 7\,s). Refine is opt-in.
 
 \paragraph{Why the 32 failed.} We read every failed run against the task's difficulty, measured as
 the share of the 78 published submissions scoring 60\% or more that solve it. Nineteen of the 32
@@ -874,13 +818,11 @@ own test edits (2), stopped mid-work (2) and out of time (1). None came from an 
 tool or environment error, or a malformed tool call. The easy losses came from how the agent
 treated tests, not from finding the bug: in four of the seven failed tasks that at least 75\% of
 those systems solve, the source change was in the right place and a test decided the outcome, for
-example a change that broke an existing test, after which the agent rewrote the test. The reading
-also found two defects in our harness, both fixed.
+example a change that broke an existing test, after which the agent rewrote the test.
 
-\paragraph{What one night can measure.} The failure analysis proposed changes to the task prompt
-and the harness, and the tool findings of \cref{sec:local} two more. Each was measured as a paired
-A/B night on tasks outside the 100: two arms on the same 44 or 50 freshly validated tasks, each
-arm one session per task.
+\paragraph{What one night can measure.} Changes to the task prompt and the harness, and the tool
+findings of \cref{sec:local}, are measured as paired A/B nights on tasks outside the 100: two arms
+on the same 44 or 50 freshly validated tasks, each arm one session per task.
 \begin{center}
 \small
 \begin{tabular}{@{}l l r r r@{}}
@@ -896,8 +838,9 @@ Night & Candidate arm & Tasks & Default & Candidate ($p$) \\
 \bottomrule
 \end{tabular}
 \end{center}
-None of the five that ran differs measurably from the default, which stays. The default arm's
-runs of nights 2--4 on the same 44 tasks say why: they resolved 29, 29 and 31, only 23 tasks were resolved every time, and 36 were
+None of the five that ran differs measurably from the default, which stays. The default arm's own
+runs on the same 44 tasks say why: they resolve 29, 29 and 31, only 23 tasks are resolved every
+time, and 36 are
 resolved by at least one of the three. A quarter of a run's resolved set is therefore the luck of
 that run, and a single night can confirm only a large effect; the arms are judged first by the
 behaviour they target and only then by the count. The same runs bound what choosing among several
@@ -944,10 +887,10 @@ that the nights show to be several points.
 \label{sec:index}
 
 An agent that navigates with \code{rg} and file reads spends many rounds on the 4{,}894-file
-upstream workspace, and it silently misses calls through traits, generics and re-exports. We
-surveyed open-source code-intelligence tools with the constraints of a vendor-free AGPL product in
-mind: a compatible licence, no network or telemetry, and arm64 availability. The result is a
-two-layer index, implemented as \code{ling-code}, a Rust binary of its own beside \code{ling}.
+upstream workspace, and it silently misses calls through traits, generics and re-exports. The
+constraints of a vendor-free AGPL product, a compatible licence, no network or telemetry, and
+arm64 availability, leave two kinds of open-source code intelligence, and Mightling combines them
+in a two-layer index, implemented as \code{ling-code}, a Rust binary of its own beside \code{ling}.
 \begin{itemize}
   \item \emph{Universal layer}: codebase-memory-mcp \cite{codebasememorymcp,vogel2026codebasememory}.
     It is a single MIT-licensed C binary with 158 tree-sitter \cite{treesitter} grammars. It builds
@@ -959,7 +902,8 @@ two-layer index, implemented as \code{ling-code}, a Rust binary of its own besid
 \code{impact}, \code{show}, \code{outline} and \code{search} by reading both stores directly as SQLite. It joins
 them through a definition's location, tags every row \emph{exact} or \emph{heuristic}, and the
 agent's prompt requires verification when a heuristic row decides a rename, a signature change
-or a deletion. This follows the graph-guided localisation idea of LocAgent
+or a deletion. A store whose schema the router does not know is reported, and the other layer
+answers. This follows the graph-guided localisation idea of LocAgent
 \cite{chen2025locagent} and the multi-view serving of CodeNib \cite{yu2026codenib}, specialised to
 a single self-contained machine.
 
@@ -984,55 +928,51 @@ the user has marked trusted.}
 \label{tab:indexers}
 \end{table}
 
-\paragraph{Why two layers.} We measured the universal layer against the exact one before building
-the router. At file level, its call edges recalled 78\% of what rust-analyzer's SCIP index holds
-for the upstream workspace (15{,}660 functions with cross-file references), and 58\% of what
-scip-python holds for our own Python package: 86\% for functions but 52\% for methods. For a
-method of one class that shares its name with a method of another, it found no caller of either,
-where scip-python resolved each call to the right class. The approximate layer is good enough to
-orient and not good enough to rename by.
+\paragraph{Why two layers.} Measured against the exact layer, at file level, the universal layer's
+call edges recall 78\% of what rust-analyzer's SCIP index holds for the upstream workspace
+(15{,}660 functions with cross-file references), and 58\% of what scip-python holds for our own
+Python package: 86\% for functions but 52\% for methods. For a method of one class that shares its
+name with a method of another, it finds no caller of either, where scip-python resolves each call
+to the right class. The approximate layer is good enough to orient and not good enough to rename
+by.
 
-\paragraph{What measurement changed.} Several assumptions of the first design did not survive the
-tools.
+\paragraph{Design decisions, each from a measurement.}
 \begin{itemize}
   \item \emph{No per-query command line.} The universal layer's CLI takes 6.6\,s per invocation,
     all of it fixed start-up, while the same question as a read-only SQL query on its database
     takes under 10\,ms. The router reads the database.
-  \item \emph{Exact Rust indexing is expensive, and now measured.} The first attempts under an
-    8\,GB cap were OOM-killed inside the cap. Under a 22\,GiB cap, \code{rust-analyzer scip} on
-    the upstream workspace completes in 691\,s cold and 569\,s warm, with a peak of at least
-    21.3\,GiB (cap-bounded, so the unconstrained peak is unknown). There is no cheaper mode: its
-    SCIP path always runs build scripts and procedural macros. Such a run is admitted only when
-    the machine can spare the memory.
-  \item \emph{A snapshot cannot say what it is missing.} Replaying a store five commits old found
-    two files that had gained a reference since, and that appeared in no row. Checking the
-    freshness of the files an answer names can never find them. Every query therefore asks git
-    which files changed since each layer's snapshot (39\,ms) and searches those for the name
-    (3\,ms), marking what it finds as heuristic text matches. An edit is never a silent miss.
-  \item \emph{The vendored upstream swamped the index.} With the Codex submodule included, 97\% of
-    the universal index of our repository was third-party code. A submodule is now indexed only
-    when it is the user's own, by two offline tests (same host and owner as the superproject, and
-    most recent commits by the superproject's authors), or when the user includes it; the choice is
-    recorded in the agent's home, never in the repository, where a clone or the agent could write
-    it. The URL alone does not tell a fork of someone else's project from one's own work: our Codex
-    fork lives under our own namespace and is correctly left out.
+  \item \emph{Exact Rust indexing is admitted, not assumed.} Under a 22\,GiB cap,
+    \code{rust-analyzer scip} on the upstream workspace completes in 691\,s cold and 569\,s warm,
+    with a peak of at least 21.3\,GiB (cap-bounded, so the unconstrained peak is unknown), and an
+    8\,GB cap is not enough. There is no cheaper mode: its SCIP path always runs build scripts
+    and procedural macros. Such a run is admitted only when the machine can spare the memory.
+  \item \emph{A snapshot cannot say what it is missing.} A store a few commits old holds no row
+    for a file that gained a reference since, and checking the freshness of the files an answer
+    names can never find such a file. Every query therefore asks git which files changed since
+    each layer's snapshot (39\,ms) and searches those for the name (3\,ms), marking what it finds
+    as heuristic text matches. An edit is never a silent miss.
+  \item \emph{A vendored upstream would swamp the index.} Including the Codex submodule makes 97\%
+    of the universal index of our repository third-party code. A submodule is therefore indexed
+    only when it is the user's own, by two offline tests (same host and owner as the superproject,
+    and most recent commits by the superproject's authors), or when the user includes it; the
+    choice is recorded in the agent's home, never in the repository, where a clone or the agent
+    could write it. The URL alone does not tell a fork of someone else's project from one's own
+    work: our Codex fork lives under our own namespace and is correctly left out.
 \end{itemize}
 
 \paragraph{Safety.} Queries only read: they run inside the agent's sandbox, where \code{.git} is
 read-only. Indexing is a separate process the launcher starts outside it. Every index run of every
 kind is admitted against one host-wide memory budget and runs in a network-less Bubblewrap sandbox
-inside one systemd slice. In that sandbox a deliberately hostile build script could not write to
-the Cargo home, read a marker file in the home directory or overwrite the store, and the index was
+inside one systemd slice. In that sandbox a deliberately hostile build script cannot write to
+the Cargo home, read a marker file in the home directory or overwrite the store, and the index is
 still produced. Starting the model server stops those scopes before its own pre-flight.
 
 \paragraph{Results and gaps.} On our repository, warm queries answer in 0.09\,s at the median and
 0.11--0.12\,s at the 95th percentile, and \code{refs} on a TypeScript type in the upstream schema
-returns the same 48 files a whole-word search finds, in 40\,ms. Since then the router has gained
-an \code{impact} query, a fallback that reports an unknown store schema and lets the other layer
-answer, and the submodule policy above; the Java and .NET indexers have run on small offline
-projects. Not built or not measured: search by meaning, \code{impact} used by the model, and the
-effect of an index run on decode speed. On SWE-bench the agent did not query the index unprompted
-(\cref{sec:swebench}).
+returns the same 48 files a whole-word search finds, in 40\,ms. The Java and .NET indexers have run
+only on small offline projects. Not built or not measured: search by meaning, \code{impact} used
+by the model, and the effect of an index run on decode speed. On SWE-bench the agent does not
+query the index unprompted; the harness reports when a run never did.
 
 \section{Unattended overnight work}
 \label{sec:night}
@@ -1046,45 +986,37 @@ task record and never calls the model, so it answers at once, mid-turn included.
 
 Each task runs \code{ling exec} in a git worktree of its own, on a branch named after the task,
 inside a transient systemd scope with a memory cap. The runner, not the agent, commits: the
-agent's sandbox cannot write the repository's metadata. Nothing is merged, pushed or rebased. The
-live suite had shown a failure mode that matters when nobody is watching: the model sometimes
-announces a change and ends its turn (\cref{sec:eval}). A task whose worktree is unchanged and
-whose last message announces work is therefore resumed with ``go ahead'', at most twice, and
-otherwise recorded as stalled. A task the window cuts off keeps its worktree and session and is
-resumed the next night.
+agent's sandbox cannot write the repository's metadata. It stages the agent's changes before its
+own test run, so the byte-code files a test run leaves in a repository that does not ignore them
+are not committed. Nothing is merged, pushed or rebased. The model sometimes announces a change and
+ends its turn without the tool call (\cref{sec:eval}), which matters when nobody is watching: a
+task whose worktree is unchanged and whose last message announces work is therefore resumed with
+``go ahead'', at most twice, and otherwise recorded as stalled. A task the window cuts off keeps
+its worktree and session and is resumed the next night.
 
 The run never starts or loads the model server, and gives way to the user. Admission requires the
 server to be answering, the host-safety checks of \cref{sec:safety} to pass, memory headroom, no
-build or index run in progress, and a period in which no request reached the model. Two details
-came from measurement.
+build or index run in progress, and a period in which no request reached the model. Two admission
+rules come from measurement.
 \begin{itemize}
   \item \emph{Parallelism cannot assume the full context.} The obvious rule, the KV pool divided
-    by the context length, gives zero on the default model (\cref{sec:local}). Each task is
-    budgeted 49{,}152 tokens, which gave two or three concurrent tasks depending on the launch.
-    The budget can now be enforced as each task's compaction limit (\code{[night] compact\_at});
-    it is off by default, so a task compacts at the launcher's 60\% of the pool
-    (\cref{sec:local}).
+    by the context length, gives zero on this model (\cref{sec:local}). Each task is budgeted
+    49{,}152 tokens, which gives two or three concurrent tasks depending on the launch. The budget
+    can be enforced as each task's compaction limit (\code{[night] compact\_at}); it is off by
+    default, so a task compacts at the launcher's 60\% of the pool (\cref{sec:local}).
   \item \emph{Idle is a counter, not a gauge.} A gauge of running requests sampled every 30\,s
     misses short requests, so the run also requires the server's prompt-token counter to stay
     unchanged.
 \end{itemize}
 
-One task has run for real: a repository with a function that subtracts where it should add, and
-a failing test. Queued from a shell and listed in the interactive interface, it was fixed in 7\,s;
-the detected test command passed; the commit sat on its own branch, and the checkout was
-untouched. That run exposed a defect: the commit also carried the byte-code files a test run leaves in a
-repository that does not ignore them. The runner now stages the agent's changes before its own
-test run, which removes its share of them; what the agent's own commands leave is still committed.
-
-A day later an interrupted task was resumed on a second night and finished, and two tasks ran in
-parallel while a third waited at the memory gate, all live against the default model. A stall has
-still not been provoked live; it is covered by tests against a scripted stand-in for the agent.
-The runner's own test run, which executes code the model wrote, now runs in the agent's command
-sandbox with a policy the runner fixes: measured through the real path, it could write in its
-worktree and \code{/tmp} but not in the user's checkout, its \code{.git} or the home folder, and
-at \code{/airgapped on} it reached neither the internet nor the model server. Before the first
-task the run refreshes each repository's code index, and a task can be handed to a paired
-workstation's own runner (\cref{sec:node}).
+The runner's own test run executes code the model wrote, so it runs in the agent's command sandbox
+with a policy the runner fixes: measured through the real path, it can write in its worktree and
+\code{/tmp} but not in the user's checkout, its \code{.git} or the home folder, and at
+\code{/airgapped on} it reaches neither the internet nor the model server. Before the first task
+the run refreshes each repository's code index, and a task can be handed to a paired workstation's
+own runner (\cref{sec:node}). Live, one task has run end to end (\cref{tab:eval}), an interrupted
+task has been resumed on a second night, and two tasks have run in parallel while a third waited
+at the memory gate; a stall is covered by tests against a scripted stand-in for the agent.
 
 \section{Several workstations}
 \label{sec:node}
@@ -1105,24 +1037,17 @@ pinned to its identifier at pairing, so a different machine answering at the sam
 refused. A \emph{job} is a command sent to a node and run there as a systemd user unit with a
 mandatory memory cap and time limit, inside Bubblewrap with the home folder hidden and no GPU; its
 changes come back as a git branch. A paired node serving the same model is also an extra model
-server for Night Shift and SWE-bench, and a night task can be handed to its runner.
+server for Night Shift and SWE-bench, and a night task can be handed to its runner. A second node
+is installed from a release over SSH: the installer, run with no terminal, performs every host step
+itself and asks at most for one password at the start.
 
-\paragraph{The second machine.} On 2026-10-08 a second GB10 was installed from a release over SSH
-and paired with the first. The pairing itself worked as designed. It found two defects the tests
-had not: the browse had returned the node's link-local IPv6 address without its interface, which
-SSH cannot use (pairing now prefers IPv4 and adds the scope otherwise), and the installer, run with
-no terminal, had left the host settings and advertising as printed instructions rather than doing
-them (it now does every step, asking at most for one password at the start).
-
-\paragraph{Addresses are not identities.} The first night that used the second machine as an extra
-model server lost it: the machine's DHCP lease had moved, and every connection went to the address
-recorded at pairing. A node is now resolved on the network by its identifier before every
-connection; a recorded address is never connected to, and a node that does not answer a browse for
-a minute is refused rather than guessed. Resolving by browse then exposed the next layer. On the
-Wi-Fi chip of both machines, NetworkManager's default power saving lost up to about 80\% of the
-multicast DNS queries sent to a node, so clients intermittently could not find it. The host check
-now reports power saving on a Wi-Fi interface, host setup and node preparation turn it off, and a
-client whose browse misses adds a one-line hint.
+\paragraph{Addresses are not identities.} A DHCP lease moves, so a node is resolved on the network
+by its identifier before every connection; a recorded address is never connected to, and a node
+that does not answer a browse for a minute is refused rather than guessed. The browse prefers IPv4
+and, for a link-local IPv6 address, adds the interface scope SSH needs. On the GB10's Wi-Fi chip,
+NetworkManager's default power saving loses up to about 80\% of the multicast DNS queries sent to a
+node, so the host check reports power saving on a Wi-Fi interface, host setup and node preparation
+turn it off, and a client whose browse misses adds a one-line hint.
 
 \paragraph{An engine for one model.} The second machine is dedicated to a single-model inference
 engine for Qwen3.8-27B with DFlash2, written in C++ and CUDA and kept outside this paper's build.
@@ -1147,54 +1072,41 @@ the same number of steps. Decode on this machine is bound by reading the weights
 step, so the remaining gains are in fewer bytes read per accepted token. We leave the engine to
 future work.
 
-\section{Lessons}
+\section{Design principles}
 \label{sec:lessons}
 
-\paragraph{Keep the fork boring.} Every behaviour that could live in a linked crate went there.
+\paragraph{Keep the fork boring.} Every behaviour that can live in a linked crate lives there.
 Every remaining hook is a single call or predicate. The measure of success is how long an upstream
 bump takes, not how little code we wrote. A 43\,KB series of one- and two-line hooks across 43
 files turns an upstream release into an afternoon's review rather than a merge project.
 
-\paragraph{Presentation diffs are the expensive ones.} Almost all of the original series' size, 97\%,
-was a one-word rename inside machine-formatted data. Renaming at run time, or at the point where
-presentation is assembled, removed it. We expect this to be the common case for rebranded forks.
+\paragraph{Presentation diffs are the expensive ones.} A one-word rename inside machine-formatted
+data costs hundreds of kilobytes of diff. Renaming at run time, or at the point where presentation
+is assembled, costs nothing in the series. We expect this to be the common case for rebranded forks.
 
 \paragraph{Local models change the tool contract.} A harness tuned for a frontier hosted model
-exposes tools in ways a smaller local model may not use, and in ways a local server may silently
-drop: twice, a whole class of tools never reached the model. It is cheaper to adapt the tool
+exposes tools in ways a smaller local model may not use, and in ways a local server silently
+drops, so that a whole class of tools never reaches the model. It is cheaper to adapt the tool
 surface to the model and its server, here by shell commands and by translating tool types at the
 boundary, than to wait for either to adapt to the surface.
 
 \paragraph{Measure the noise before the effect.} The same configuration, run three times on the same
-44 tasks, resolved between 29 and 31: 23 tasks every time, 8 never, and the other 13 in some runs
-but not in others. Every candidate we have tested so far moved the count by three tasks or
-fewer. A single run of each arm can only reject large effects, so
-each candidate is first judged by the behaviour it was meant to change. The same lesson reached
-the two measuring instruments: the engine's replays carried sampled-acceptance noise until they
-were seeded, and a benchmark night whose candidate arm died at start in every task still exited 0
-until each arm was made to run one task to its end before the night begins
-(\cref{sec:swebench}).
+44 tasks, resolves between 29 and 31: 23 tasks every time, 8 never, and the other 13 in some runs
+but not in others. Every candidate tested so far moves the count by three tasks or fewer. A
+single run of each arm can only reject large effects, so each candidate is first judged by the
+behaviour it was meant to change. The measuring instruments need the same care: the engine's
+replays carried sampled-acceptance noise until they were seeded, and a benchmark night whose
+candidate arm died at start in every task still exited 0 until each arm was made to run one task
+to its end before the night begins (\cref{sec:swebench}).
 
 \paragraph{Unified memory needs admission control, not just limits.} A container memory cap bounds
 the container. It does not decide who dies when the host runs short, and it does not prevent a
 reclaim livelock in which nothing dies. Pre-flight checks, pressure-based watchdogs and caps on
-every auxiliary job were all necessary.
+every auxiliary job are all necessary.
 
-\paragraph{Parallel work needs discipline, even in one working tree.} During development, several
-builds and tasks often ran concurrently in one working tree. Three failure modes appeared that are
-familiar from team development, in faster form.
-\begin{itemize}
-  \item Concurrent builds wiped each other's shared source tree. A file lock in the builder fixed
-    this.
-  \item A copy that preserved file timestamps let Cargo link a stale launcher. Copying with fresh
-    timestamps fixed this.
-  \item Commits swept up another task's staged changes, in one case deleting the patch series from
-    a commit. Checking the index before every commit and staging only named hunks prevented
-    recurrences.
-\end{itemize}
-Separately, a stopped release task had already triggered a workflow that published a release
-without the agent binaries. It was cancelled too late and then deleted. Outward-facing actions
-started by automation need their own kill switch.
+\paragraph{Outward-facing automation needs its own kill switch.} Releases publish themselves, so
+a release run is started only from a release branch, signs with a key usable only there, and is
+checked against the repository's notes before it is dispatched.
 
 \section{Related work}
 
@@ -1226,13 +1138,13 @@ rather than any serving algorithm.
     sent a sampling seed (\cref{sec:node}), so they carry acceptance noise of a few percent.
   \item \textbf{Upstream's own tests are not green.} In the last full run of Codex's own suite
     against the patched tree (20{,}380 tests, 20{,}362 passed), sixteen app-server tests timed out
-    for a reason we have not confirmed. That run predates the patches from 0017 on, which change
-    the screen snapshots that list the slash commands; the suite has not been re-run since.
+    for a reason we have not confirmed. That run predates patches 0017 on, which change the screen
+    snapshots that list the slash commands.
   \item \textbf{The live suite predates the current series.} The slash-command suite of
-    \cref{tab:eval} was last run on the 16-patch build.
+    \cref{tab:eval} was last run on a 16-patch build.
   \item \textbf{The code index is partial.} C and C++ have no exact layer on this architecture, the
     Java and .NET indexers have run only on small projects, and neither search by meaning nor the
-    effect of an index run on decode speed has been measured; on SWE-bench the agent did not use
+    effect of an index run on decode speed has been measured; on SWE-bench the agent does not use
     the index unprompted (\cref{sec:index}).
   \item \textbf{Night Shift has run a handful of tasks.} A stall has not been provoked live
     (\cref{sec:night}).
@@ -1247,18 +1159,18 @@ rather than any serving algorithm.
 
 Mightling shows that a production coding-agent client can be made vendor-free, with its model on a
 single unified-memory workstation, without giving up the ability to take upstream releases. The
-localisation took about 9\,KB of patches; the series is now 43.0\,KB because every later feature
-(a terse-answer mode, an overnight queue, an enforced network switch, flattened MCP and Code Mode
-tools, connectors without a vendor sign-in, workstation pairing) cost a hook in Codex and put its
-logic in crates of ours, with no change to the method. The cloud surface is audited and neutralised
-explicitly and re-checked by a trace after every build, and the host is protected by admission
-checks and a pressure watchdog. On a 100-task sample of SWE-bench Verified the agent's local
-result corresponds to about 69\% overall; neither a study-then-fix mode, nor four prompt and
-harness changes, nor Code Mode's \code{exec} measured above the run-to-run noise. The next steps are compaction that drops old tool
-output before it summarises, choosing among several attempts where time allows (overnight), and
-speed: an engine for this one model, on the second workstation, already matches the production
-server, is taking milliseconds off each step with its output bit-identical, and has to pass
-production on seeded replays of both.
+localisation itself is about 9\,KB of the 43.0\,KB series; every feature beyond it (a terse-answer
+mode, an overnight queue, an enforced network switch, flattened MCP and Code Mode tools, connectors
+without a vendor sign-in, workstation pairing) costs a hook in Codex and puts its logic in crates of
+ours, with no change to the method. The cloud surface is audited and neutralised explicitly and
+re-checked by a trace after every build, and the host is protected by admission checks and a
+pressure watchdog. On a 100-task sample of SWE-bench Verified the agent's local result corresponds
+to about 69\% overall; neither a study-then-fix mode, nor four prompt and harness changes, nor
+Code Mode's \code{exec} measure above the run-to-run noise. The next steps are compaction that
+drops old tool output before it summarises, choosing among several attempts where time allows
+(overnight), and speed: an engine for this one model, on the second workstation, already matches
+the production server, is taking milliseconds off each step with its output bit-identical, and has
+to pass production on seeded replays of both.
 
 \section*{Availability}
 The system is developed in a public repository (\code{github.com/dreamference/mightling}). The
@@ -1269,8 +1181,8 @@ notices are retained. The Codex submodule tracks a public fork (\code{github.com
 which is an unmodified copy of upstream at the pinned tag.
 
 \section*{Measurements}
-All numbers in this paper were measured on the author's machines during development or read from
-the repository, and each arXiv citation was checked against the arXiv record.
+All numbers in this paper were measured on the author's machines or read from the repository,
+and each arXiv citation was checked against the arXiv record.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
