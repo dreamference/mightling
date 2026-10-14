@@ -153,7 +153,7 @@ def start(tmp_path, arms, smoke_fails=None, task_timeout=""):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     ling = tmp_path / "ling"
-    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL DREAMFERENCE_MIGHTLING_APPLY_PATCH ...")
+    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL DREAMFERENCE_MIGHTLING_APPLY_PATCH DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ...")
     install = tmp_path / "install"
     (install / "bin").mkdir(parents=True)
     for tool in ("ling-code", "codebase-memory-mcp"):
