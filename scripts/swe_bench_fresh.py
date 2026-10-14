@@ -24,7 +24,11 @@ tasks of ``sample-100.txt``, so they are measured on tasks outside it. This scri
     earlier one have been read (FAILURES §9.4). The PR-issue mismatch list (``MISMATCH_LIST``, 68
     tasks whose PR does not match its issue; from night 2 on they are out of every list, the user's
     decision of 2026-10-10) is excluded by default; ``--keep-mismatch`` leaves it in. Commit the list
-    before any arm runs.
+    before any arm runs. ``--reuse-from <list>`` (repeatable) names an earlier list whose tasks may
+    recur, under the rotation rule of 2026-10-14 (SWE_BENCH spec §16: a night may reuse the tasks of
+    lists used three or more nights earlier, both arms seeing the same list): the draw treats them
+    like any other validated task, the header names each list and how many drawn tasks come from it,
+    and the excluded lists still win over them. A list named for both is refused.
 
 Run it with the repository's code on ``PYTHONPATH`` and the project's virtualenv::
 
@@ -33,6 +37,9 @@ Run it with the repository's code on ``PYTHONPATH`` and the project's virtualenv
     PYTHONPATH=<checkout> .venv/bin/python scripts/swe_bench_fresh.py draw --count 50 --seed 20261009
     PYTHONPATH=<checkout> .venv/bin/python scripts/swe_bench_fresh.py draw --count 50 --seed <new> \
         --exclude docs/dev/swe-bench/fresh-50.txt --out ~/.cache/dreamference/swe-bench/fresh-50b.txt
+    PYTHONPATH=<checkout> .venv/bin/python scripts/swe_bench_fresh.py draw --count 50 --seed <new> \
+        --exclude <the last two nights' lists> --reuse-from docs/dev/swe-bench/fresh-50.txt \
+        --reuse-from docs/dev/swe-bench/fresh-50b.txt --out ~/.cache/dreamference/swe-bench/fresh-50f.txt
 
 It refuses to validate while another benchmark run holds the runner lock or a named systemd unit is
 active, since both would pull and grade on the same Docker.
@@ -200,7 +207,8 @@ FAILURES_PURPOSE: Final[str] = ("the failure analysis's A/B rounds\n"
 
 
 def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAILURES_PURPOSE,
-         exclude: Optional[List[Path]] = None, keep_mismatch: bool = False) -> int:
+         exclude: Optional[List[Path]] = None, keep_mismatch: bool = False,
+         reuse: Optional[List[Path]] = None) -> int:
     """Draws ``count`` validated tasks outside ``sample-100.txt`` and every ``exclude`` list into ``out``.
 
     Args:
@@ -214,6 +222,11 @@ def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAI
             repeat the earlier list.
         keep_mismatch: Leave the tasks of ``MISMATCH_LIST`` in the pool. By default they are out,
             and the list is named in the header like an excluded one.
+        reuse: Earlier lists whose tasks may recur (the rotation rule, SWE_BENCH spec §16). They
+            are not excluded, which is all a draw does with them, and the header names each with
+            the number of drawn tasks it holds, so that a report can say which tasks were seen
+            before. A list that is missing or empty is an error, as is one also in ``exclude``;
+            the excluded lists win over a task they share with a reused one.
 
     Returns:
         int: 0 when the list was written, 1 otherwise.
@@ -227,6 +240,16 @@ def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAI
     lists = list(exclude or [])
     if not keep_mismatch:
         lists.insert(0, MISMATCH_LIST)
+    reused: Dict[Path, List[str]] = {}
+    for path in reuse or []:
+        if any(path.resolve() == other.resolve() for other in lists):
+            print(f"❌ --reuse-from {path}: the same list is excluded; name it for one or the other.")
+            return 1
+        ids = read_ids(path)
+        if not ids:
+            print(f"❌ --reuse-from {path}: no task ids found; an earlier list must be named by its real path.")
+            return 1
+        reused[path] = ids
     for path in lists:
         ids = read_ids(path)
         if not ids:
@@ -241,8 +264,12 @@ def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAI
         return 1
     rng = random.Random(seed)
     rates = strong_rates(experiments)
-    lines = [f"# {count} fresh SWE-bench Verified tasks for {purpose}, drawn {time.strftime('%Y-%m-%d')}",
+    lines = [f"# {count} {'fresh ' if not reused else ''}SWE-bench Verified tasks for {purpose}, drawn {time.strftime('%Y-%m-%d')}",
              f"# from the {len(pool)} tasks validated on this machine outside {outside}, seed {seed}."]
+    if reused:
+        lines.append("# Reuse (the rotation rule of 2026-10-14, SWE_BENCH spec §16): the tasks of "
+                     + ", ".join(f"{path.name} ({len(ids)})" for path, ids in reused.items())
+                     + " stay in the pool; the excluded lists win over a task they share with one of them.")
     if rates is None:
         chosen = sorted(rng.sample(pool, count))
         lines.append("# Not stratified: the comparison data (--experiments) was not found.")
@@ -272,9 +299,16 @@ def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAI
         lines.append(f"# wanted {wanted['easy']}/{wanted['medium']}/{wanted['hard']}, drawn "
                      f"{got['easy']}/{got['medium']}/{got['hard']}"
                      + (f" ({short} filled from other tiers, which were short)" if short else "") + ".")
+    seen = ""
+    if reused:
+        counts = {path.name: sum(1 for i in chosen if i in set(ids)) for path, ids in reused.items()}
+        unseen = sum(1 for i in chosen if not any(i in set(ids) for ids in reused.values()))
+        seen = (", ".join(f"{n} from {name}" for name, n in counts.items())
+                + f", {unseen} in none of them")
+        lines.append(f"# Drawn: {seen}.")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n" + "".join(f"{i}\n" for i in chosen))
-    print(f"✅ {len(chosen)} tasks written to {out}")
+    print(f"✅ {len(chosen)} tasks written to {out}" + (f" ({seen})" if seen else ""))
     return 0
 
 
@@ -302,6 +336,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                          help="an earlier fresh list whose tasks are left out too (repeatable)")
     drawing.add_argument("--keep-mismatch", action="store_true",
                          help=f"keep the tasks of the PR-issue mismatch list ({MISMATCH_LIST.name}), out by default")
+    drawing.add_argument("--reuse-from", type=Path, action="append", default=[], metavar="LIST",
+                         help="an earlier list whose tasks may recur (the rotation rule: lists used three or more "
+                              "nights earlier); named in the header with how many drawn tasks it holds (repeatable)")
     args = parser.parse_args(argv)
     if args.command == "candidates":
         found = candidates()
@@ -310,7 +347,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     if args.command == "validate":
         return validate(args.count, args.batch, args.wait_for_unit, args.disk_reserve)
-    return draw(args.count, args.seed, args.out, args.experiments, args.purpose, args.exclude, args.keep_mismatch)
+    return draw(args.count, args.seed, args.out, args.experiments, args.purpose, args.exclude, args.keep_mismatch,
+                args.reuse_from)
 
 
 if __name__ == "__main__":
