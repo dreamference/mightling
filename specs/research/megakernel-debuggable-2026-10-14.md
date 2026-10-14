@@ -14,9 +14,10 @@ and backlog item B32 (`reports/backlog-2026-10-09.md`), and changes neither.
    at 233–244 GB/s of the box's ~273 GB/s (85–89%). Cohere's megakernel reaches 62% of its speed of
    light, Hazy Research's 78%, ForgeMegakernel's 51–86%. The engine's own estimate for a persistent
    step is **3–6%** (§16.7: 1–2% launch and ramp gaps, 2–4% overlap of the non-streaming work),
-   and the bandwidth floor bounds everything: 16 GB of weights plus the attention's KV at 273 GB/s
-   is about 65–70 ms against today's ~101 ms. A megakernel is the way to approach that floor, not a
-   way past it, and the numbers in §3 say the honest expectation is a step of **90–95 ms**, not 70.
+   and the bandwidth floor bounds everything: 17.6 GB of target weights per pass (MODEL §5.2) are
+   67 ms at the bare bus, and with the drafter, the KV and the state the step moves ~21.8 GB, 83–85 ms.
+   A megakernel is the way to approach that floor, not a way past it, and the numbers in §3 say the
+   honest expectation for the first build is a step of **93–96 ms**, not 70.
 2. **Testability is a design choice, not a tool.** None of the four published systems describes a
    test method beyond end-to-end comparison; the one that mentions it says the hard part is that "a
    miscounted barrier can cause deadlock much later" and that "barrier accounting needs explicit
@@ -65,8 +66,8 @@ Three facts matter for ling-engine:
 
 ## 3. What it would buy ling-engine's step
 
-The step breakdown at ~35K context with graphs on (`reports/M3.md` §5, GPU time per one-row step):
-NVFP4 and FP8 GEMMs 89.1 ms, attention 11.2, DeltaNet recurrence, conv and gating 3.3, the
+The step breakdown at ~35K context with graphs on (`reports/M3.md` §5 and M1 §5, GPU time per one-row
+step): the 17.6 GB of NVFP4 and FP8 GEMMs 81.7 ms at 215 GB/s (now ~80 after B16), attention 11.2, DeltaNet recurrence, conv and gating 3.3, the
 drafter's GEMMs and attention ~7–10, projections, norms, conversions and top-k ~4, idle ≤ 1 (the
 B08 gate, "as production has"). The step-savings items since (B16, commit overlap) took it to ~101 ms
 for 1 stream and ~146 ms per batched step at 2 streams.
@@ -75,14 +76,16 @@ What a megakernel can and cannot recover:
 
 | Component | Today | Megakernel lever | Bound |
 | --- | --- | --- | --- |
-| Weight GEMMs | 89 ms at 233–244 GB/s | next layer's weight stream starts during this layer's reduction and norm; no ramp per kernel | 16 GB / 273 GB/s = 59 ms is the floor; realistic 80–85 ms (90–93% of bus, Hazy's 78% was on HBM with a 1B model) |
+| Weight GEMMs, 17.6 GB | ~80 ms: step-average ~220 GB/s against 233–244 GB/s steady inside one kernel (B16) | next layer's weight stream starts during this layer's reduction and norm; no ramp or tail per kernel | the gap between the two rates is the bubble ceiling Z = 5–8 ms; 17.6 GB / 262 GB/s = 67 ms is the floor nothing exact passes |
 | Attention | 11 ms, ~205 GB/s, 10–20% short of FlashInfer | runs on a subset of SMs while others stream FFN weights (needs the rest to saturate the bus alone, §16.7's condition 16.1(2)) | hidden only if the weight stream saturates with fewer SMs; otherwise B07's split is the lever, not the megakernel |
 | DeltaNet, norms, conversions, top-k | ~7 ms, bandwidth-idle | overlap with the weight stream on spare SMs | up to ~5 ms recovered |
 | Drafter | ~7–10 ms | **not overlappable**: the draft of step n+1 needs the commit of step n, the verify needs the draft | none (own instruction stream, same bubbles removed) |
 | Launch gaps, ramps, tails | ≤ 1 ms idle measured, plus per-kernel ramp inside the kernels | gone | 1–2 ms |
 
-Sum: a step of roughly **90–95 ms from ~101**, i.e. 5–10%, with the drafter and the serial
-dependency between draft, verify and commit untouched. That agrees with §16.7's 3–6% plus whatever
+Sum: a step of roughly **93–96 ms from ~101**, i.e. 5–8%, with the drafter and the serial
+dependency between draft, verify and commit untouched; the sequel note
+([megakernel-optimization-2026-10-14.md](./megakernel-optimization-2026-10-14.md)) takes the exact
+levers after the first build to ~87 ms and the byte levers to ~71. That agrees with §16.7's 3–6% plus whatever
 the attention overlap yields. It does **not** support a 70–75 ms step: that figure would need the
 weight stream at 100% of the bus for the whole step and every non-GEMM millisecond hidden, which no
 published megakernel achieves. The parent conversation's estimate should be revised to this range.
