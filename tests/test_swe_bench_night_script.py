@@ -226,3 +226,14 @@ def test_start_stops_at_the_first_arm_that_fails_its_smoke(tmp_path):
     (tmp_path / "again").mkdir()
     result, _, _, _, folder = start(tmp_path / "again", "default tests-v2")
     assert result.returncode == 0 and "task_timeout" not in (folder / "dreamference.toml").read_text()
+
+
+def test_the_function_form_mark_is_the_description_ling_compiles_in():
+    """`start` refuses an apply-patch-function night whose `ling` lacks this text (night 5's build
+    wrote `function` into the catalog, which Codex rejects); it must stay a piece of the description
+    ling-tools offers, on one source line so it is contiguous in the binary."""
+    script = open(SCRIPT).read()
+    mark = script.split("APPLY_PATCH_FUNCTION_MARK='", 1)[1].split("'", 1)[0]
+    custom = open(os.path.join(ROOT, "ling-rs", "tools", "src", "custom.rs")).read()
+    description = custom.split("pub const APPLY_PATCH_DESCRIPTION: &str = ", 1)[1].split(";\n", 1)[0]
+    assert mark and any(mark in line for line in description.splitlines())

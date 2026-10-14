@@ -63,6 +63,10 @@ ARMS=${ARMS:-"default tests-v2"}
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
 
+# Text of the function form's description (ling-rs/tools/src/custom.rs, APPLY_PATCH_DESCRIPTION),
+# looked for in the `ling` an apply-patch-function arm runs.
+APPLY_PATCH_FUNCTION_MARK='Pass the whole patch as the `input` string'
+
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
 # arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM function,
@@ -163,7 +167,15 @@ start() {
         ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
         if ! grep -q -a DREAMFERENCE_MIGHTLING_APPLY_PATCH "$ling"; then
             echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_APPLY_PATCH: rebuild it (\`ling-admin codex build\`) from a commit that has the launcher's override."; exit 1
-        fi ;;
+        fi
+        # A `ling` that reads it but writes `function` into the catalog (night 5's build) exits at
+        # start; the function form is ling-tools' (APPLY_PATCH_DESCRIPTION in custom.rs), and its
+        # description's text is in the binary.
+        case "$ARMS" in *apply-patch-function*)
+            if ! grep -q -a -F "$APPLY_PATCH_FUNCTION_MARK" "$ling"; then
+                echo "❌ $ling has no function form of apply_patch: rebuild it (\`ling-admin codex build\`) from a commit that has it (bench/apply-patch-function-v2)."; exit 1
+            fi ;;
+        esac ;;
     esac
     case "$ARMS" in *exec-tool-*)
         if ! grep -q -- '"--exec-tool"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
