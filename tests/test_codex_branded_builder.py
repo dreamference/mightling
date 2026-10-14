@@ -89,6 +89,9 @@ def test_the_patches_stay_small():
     # ling-rs/masking's `drop_first`, and three lines at the top of `run_auto_compact` that skip the
     # summary when the drop was enough; 43,997 after), the sandbox fix and the coming compaction
     # cache patch.
+    # Not raised for 0027 (675 bytes, 2026-10-14: the request hook also gets the thread id and whether
+    # the request is a compaction, so a compaction offers the turn's tools and hits the prefix cache;
+    # logic in ling-rs/tools/src/compaction.rs), the cache patch the cap allowed for; 44,672 after.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 45_000
 
 
