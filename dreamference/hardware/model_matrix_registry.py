@@ -76,7 +76,7 @@ QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     "engine": "sglang",
     "docker_image": (
         "lmsysorg/sglang@sha256:"
-        "d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9"
+        "b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469"
     ),
     "revision": "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854",
     "max_model_len": 262144,
@@ -136,7 +136,10 @@ QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
         "--sampling-backend", "pytorch",
         "--chunked-prefill-size", "8192",
         "--disable-prefill-cuda-graph",
-        "--cuda-graph-max-bs", "8",
+        # v0.5.21 split --cuda-graph-max-bs into -decode and -prefill, and rejects the old
+        # name as ambiguous (the first start on it restart-looped, 2026-10-14). Prefill
+        # graphs are off above, so the decode one is the same setting as before.
+        "--cuda-graph-max-bs-decode", "8",
         "--disable-flashinfer-autotune",
         "--mamba-radix-cache-strategy", "extra_buffer",
         "--mamba-ssm-dtype", "bfloat16",
@@ -185,7 +188,9 @@ class ModelMatrixRegistry:
                 "and structured output is faster; the larger gains are quality (Terminal-Bench 2.1 "
                 "73.0), context (262K against 32K) and memory (~20 GB of weights against ~71).\n\n"
                 "Recipe: github.com/hasso5703/dgx-spark-qwen38 (v1.18, measured 2026-09-17): the "
-                "pinned lmsysorg/sglang v0.5.19 image, RadixArk's NVFP4 conversion and the "
+                "pinned lmsysorg/sglang image (v0.5.19 until 1.6.1; v0.5.21 since 2026-10-14, "
+                "which carries the DFlash checkpoint-crossing fix, after the wrong-answer probe of "
+                "docs/dev/sglang-probe-2026-10-14.md), RadixArk's NVFP4 conversion and the "
                 "RTN-calibrated NVFP4 DFlash2 drafter at the revisions pinned below, 12 draft "
                 "tokens (the recipe says 16; 12 measured +7% on the replay set, 48.3 against "
                 "45.1 tok/s single stream, speculation still exact, applied 2026-10-09), "
@@ -225,7 +230,7 @@ class ModelMatrixRegistry:
                 "lm_head of its own, and reads hidden states of width 5,120 at layers 5, 19, 33, "
                 "47 and 61 of 64, which this checkpoint has; its acceptance is measured, not "
                 "assumed, because it was trained against other hidden states.\n\n"
-                "SGLang v0.5.19 serves the architecture (models/qwen3_5_text.py, with DFlash "
+                "SGLang v0.5.19 and v0.5.21 serve the architecture (models/qwen3_5_text.py, with DFlash "
                 "capture and the extra_buffer mamba cache) and the format "
                 "(CompressedTensorsW4A4Fp4). That scheme takes the largest global scale of a fused "
                 "group (qkv+z, b+a, q/k/v, gate/up) without rescaling, which the paper shows "
