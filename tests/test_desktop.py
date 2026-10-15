@@ -322,9 +322,11 @@ def test_identifier_comes_from_the_app_config():
 
 def test_window_background_is_painted_rather_than_left_black():
     # A repaint gap shows the window's own background. The app window's is transparent (its title
-    # bar overlay needs that), so the page paints the white itself.
+    # bar overlay needs that), so the page paints its canvas itself, in either theme.
     styles = (ELECTRON.parent / "ui" / "src" / "styles.css").read_text(encoding="utf-8")
-    assert "body { background: #fff; }" in styles
+    assert "body { background: var(--canvas); }" in styles
+    assert "--canvas: #ffffff;" in styles
+    assert ':root[data-theme="dark"] {\n  --canvas: #181818;' in styles
 
 
 def test_run_packages_the_app_and_opens_the_packaged_binary():

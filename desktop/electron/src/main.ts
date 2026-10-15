@@ -122,7 +122,18 @@ export async function main(options: MainOptions): Promise<void> {
     }
   }
 
-  nativeTheme.on("updated", () => deliver({ channel: "theme", payload: nativeTheme.shouldUseDarkColors ? "dark" : "light" }));
+  nativeTheme.on("updated", () => {
+    const dark = nativeTheme.shouldUseDarkColors;
+    // The minimise/maximise/close symbols the overlay paints follow the page's theme (work.ts).
+    if (window && !window.isDestroyed()) {
+      try {
+        window.setTitleBarOverlay({ color: "#00000000", symbolColor: dark ? "#ffffff" : "#1f1f1f", height: 36 });
+      } catch {
+        // No overlay to restyle (macOS draws its own traffic lights).
+      }
+    }
+    deliver({ channel: "theme", payload: dark ? "dark" : "light" });
+  });
 
   // A second instance, or a `mightling://` link: show what it asked for, in the one window.
   app.on("second-instance", (_event, argv, _cwd, data) => {
