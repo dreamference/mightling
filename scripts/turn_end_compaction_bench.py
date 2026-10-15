@@ -81,10 +81,10 @@ ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 SCRIPTS: Final[Path] = ROOT / "scripts"
 
 # The launcher's numbers (ling-rs/src/compaction.rs): the interactive limit is 60% of the KV pool,
-# 94,144 with the default model on this machine's server; turn-end compaction sits at 70% of it,
+# 94,144 with the default model on this machine's server; turn-end compaction sits at 53% of it (70% before the 2026-10-14 run),
 # expressed as a percentage of Codex's usable window (95% of the model's window).
 DEFAULT_LIMIT: Final[int] = 94_144
-TURN_END_SHARE_PERCENT: Final[int] = 70
+TURN_END_SHARE_PERCENT: Final[int] = 53  # 70 until the 2026-10-14 run; 53 gives 20 on the default model
 EFFECTIVE_WINDOW_PERCENT: Final[int] = 95
 MAX_LIMIT_PERCENT_OF_WINDOW: Final[int] = 90
 DEFAULT_WINDOW: Final[int] = 262_144

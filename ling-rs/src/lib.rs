@@ -494,7 +494,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         .and_then(|index| command.find_subcommand(&user_args[index]))
         .is_some_and(|found| matches!(found.get_name(), "exec" | "review"));
     let args = compaction::prepare_turn_end(args, &codex_home, model.max_model_len, !one_shot);
-    // A length bound on the compaction summary, when the bench asks for one (summary_cap.rs).
+    // A length bound on the compaction summary, 800 words unless switched off (summary_cap.rs).
     let args = summary_cap::prepare(args, &codex_home);
     // `default` is `model_catalog.json`, already named in `config.toml`; another prompt's catalog
     // is named for this process only, so a session it resumes keeps the prompt it recorded.

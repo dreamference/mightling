@@ -61,13 +61,17 @@ pub const TURN_END_ENV: &str = "DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION";
 /// The key in the Dreamference config file.
 pub const TURN_END_SETTING: &str = "mightling_turn_end_compaction";
 
-/// Off until the measurement of §5 Phase 2 says what a turn-end compaction costs a user who types
-/// at once (about 24 s per compaction measured, §9.2).
-pub const TURN_END_DEFAULT: bool = false;
+/// On since the v2 measurement of 2026-10-14 (spec §14.3, `docs/dev/turn-end-compaction/2026-10-14.md`):
+/// with the compaction request cache-hot (patch 0027) and the summary capped, a turn-end compaction
+/// took a median 53.5 s, no typed message was lost, and the mid-turn compactions of both tasks went
+/// to none. Off with `DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION=0` or `mightling_turn_end_compaction = false`.
+pub const TURN_END_DEFAULT: bool = true;
 
-/// Where the turn-end threshold sits, as a share of the session's compaction limit: 70% of
-/// today's 94K limit is about 66K, the spec's example (§4.3: 25% of 262K ≈ 65K).
-pub const TURN_END_SHARE_PERCENT: u64 = 70;
+/// Where the turn-end threshold sits, as a share of the session's compaction limit: 53% of the
+/// 94,144 limit on this machine's server is 49,896, which Codex reads as 20% of its usable window
+/// (the owner's threshold for the 2026-10-14 bench, which passed; 70%, i.e. 26, left turns that
+/// ended at 60–61K uncompacted on 2026-10-13 and the next turn hit the limit mid-way).
+pub const TURN_END_SHARE_PERCENT: u64 = 53;
 
 /// The headroom Codex keeps off a model's window when it has no `effective_context_window_percent`
 /// (the catalog sets none): `default_effective_context_window_percent` in
@@ -220,8 +224,8 @@ pub fn turn_end_enabled(env: Option<&str>, settings: &toml::Table) -> bool {
 
 /// The percentage to give [`TURN_END_KEY`] so that a turn ends in a compaction once the context
 /// passes [`TURN_END_SHARE_PERCENT`] of `limit`. Codex reads the percentage against the usable
-/// window, `window` less its 5% headroom, so the share is converted to that base: 26 for the
-/// default model (64,749 of its 262,144 tokens, below the 94,144 limit). At most 66, since Codex
+/// window, `window` less its 5% headroom, so the share is converted to that base: 20 for the
+/// default model (49,807 of its 262,144 tokens, below the 94,144 limit). At most 50, since Codex
 /// never compacts later than 90% of the window. `None` only for a window of 0.
 pub fn turn_end_percent(window: u64, limit: u64) -> Option<u8> {
     let usable = window * EFFECTIVE_WINDOW_PERCENT / 100;
@@ -678,23 +682,24 @@ mod tests {
 
     #[test]
     fn the_turn_end_threshold_sits_below_the_limit_on_codexs_base() {
-        // The default model: 70% of the 94,144 limit is 65,900; on the usable window of
-        // 249,036 (95% of 262,144) that is 26%, i.e. 64,749 tokens.
-        assert_eq!(turn_end_percent(262_144, 94_144), Some(26));
-        let threshold = 262_144 * EFFECTIVE_WINDOW_PERCENT / 100 * 26 / 100;
+        // The default model: 53% of the 94,144 limit is 49,896; on the usable window of
+        // 249,036 (95% of 262,144) that is 20%, i.e. 49,807 tokens (the 2026-10-14 bench's threshold).
+        assert_eq!(turn_end_percent(262_144, 94_144), Some(20));
+        let threshold = 262_144 * EFFECTIVE_WINDOW_PERCENT / 100 * 20 / 100;
         assert!(threshold < 94_144 && threshold > 94_144 / 2, "{threshold}");
-        // With no limit below the window, Codex's own 90% cap is the limit: 63% of the window.
-        assert_eq!(turn_end_percent(262_144, 262_144), Some(66));
+        // With no limit below the window, Codex's own 90% cap is the limit: 48% of the window.
+        assert_eq!(turn_end_percent(262_144, 262_144), Some(50));
         // Never 0 (which would switch it off), and nothing for an empty window.
         assert_eq!(turn_end_percent(262_144, 100), Some(1));
         assert_eq!(turn_end_percent(0, 0), None);
     }
 
     #[test]
-    fn turn_end_compaction_is_off_unless_switched_on() {
+    fn turn_end_compaction_is_on_unless_switched_off() {
         let on: toml::Table = "mightling_turn_end_compaction = true".parse().unwrap();
         let off: toml::Table = "mightling_turn_end_compaction = false".parse().unwrap();
-        assert!(!turn_end_enabled(None, &toml::Table::new()));
+        assert!(turn_end_enabled(None, &toml::Table::new()));
+        assert!(!turn_end_enabled(None, &off));
         assert!(turn_end_enabled(None, &on));
         assert!(!turn_end_enabled(Some("0"), &on));
         assert!(turn_end_enabled(Some("on"), &off));
@@ -706,15 +711,15 @@ mod tests {
         let given = with_limit(args(&["ling"]), Some(94_144), "");
         assert_eq!(
             with_turn_end(given.clone(), "", 262_144, true, true),
-            [args(&["ling", "-c", "model_post_turn_compact_threshold_percent=26"]), given[1..].to_vec()].concat()
+            [args(&["ling", "-c", "model_post_turn_compact_threshold_percent=20"]), given[1..].to_vec()].concat()
         );
         // The limit in config.toml counts when the command line has none.
         let from_file = with_turn_end(args(&["ling"]), "model_auto_compact_token_limit = 94144\n", 262_144, true, true);
-        assert_eq!(from_file, args(&["ling", "-c", "model_post_turn_compact_threshold_percent=26"]));
+        assert_eq!(from_file, args(&["ling", "-c", "model_post_turn_compact_threshold_percent=20"]));
         // A narrower window on the command line is the base Codex uses.
-        // 65,900 of a usable 124,518 (95% of 131,072) is 52%.
+        // 49,896 of a usable 124,518 (95% of 131,072) is 40%.
         let narrowed = args(&["ling", "-c", "model_context_window=131072", "-c", "model_auto_compact_token_limit=94144"]);
-        assert_eq!(command_line_value(&with_turn_end(narrowed, "", 262_144, true, true), TURN_END_KEY).as_deref(), Some("52"));
+        assert_eq!(command_line_value(&with_turn_end(narrowed, "", 262_144, true, true), TURN_END_KEY).as_deref(), Some("40"));
     }
 
     #[test]
