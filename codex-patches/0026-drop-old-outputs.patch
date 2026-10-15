@@ -1,0 +1,23 @@
+diff --git a/codex-rs/core/src/context_manager/history.rs b/codex-rs/core/src/context_manager/history.rs
+index 6d86025..0c0663d 100644
+--- a/codex-rs/core/src/context_manager/history.rs
++++ b/codex-rs/core/src/context_manager/history.rs
+@@ -849,2 +849,7 @@ impl ContextManager {
+ 
++    pub(crate) fn ling_drop_old_outputs(&mut self) -> bool {
++        let size = self.get_total_token_usage(/*server_reasoning_included*/ false);
++        ling_masking::drop_first(Arc::make_mut(&mut self.items).as_mut_slice(), size, |envelope| &mut envelope.item)
++    }
++
+     /// When true, the server already accounted for past reasoning tokens and
+diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
+index 4e86837..f66c810 100644
+--- a/codex-rs/core/src/session/turn.rs
++++ b/codex-rs/core/src/session/turn.rs
+@@ -1461,2 +1461,6 @@ async fn run_auto_compact(
+     }
++    if sess.state.lock().await.history.ling_drop_old_outputs() {
++        sess.recompute_token_usage(turn_context).await;
++        return Ok(());
++    }
+ 

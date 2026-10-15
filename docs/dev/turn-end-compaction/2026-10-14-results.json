@@ -1,0 +1,3080 @@
+{
+ "meta": {
+  "started": "2026-10-14T19:00:25+00:00",
+  "host": "http://second-puffin.local:8000",
+  "model": "RadixArk/Qwen3.8-27B-NVFP4",
+  "owned_by": "sglang",
+  "window": 262144,
+  "pool": 410797,
+  "limit": 94144,
+  "percent": 20,
+  "threshold": 49808,
+  "summary_words": 800,
+  "arms": [
+   "off",
+   "on",
+   "drop"
+  ],
+  "stop_by": "2026-10-15T01:00:00+00:00",
+  "binary": {
+   "path": "/home/kladko/mightling-bench-build/bin/ling",
+   "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+   "sha256": "548fc504f83c3b01",
+   "mtime": "2026-10-14T08:28:47",
+   "code_mode_host_beside": true,
+   "knows_turn_end_switch": true,
+   "knows_compaction_tools": true,
+   "knows_summary_cap": true,
+   "knows_drop_old_outputs": true
+  },
+  "sandbox": "workspace-write",
+  "order": [
+   "night-shift-off-1",
+   "night-shift-on-1",
+   "night-shift-drop-1",
+   "click-off-1",
+   "click-on-1",
+   "click-drop-1",
+   "night-shift-drop-2",
+   "night-shift-on-2",
+   "night-shift-off-2",
+   "click-drop-2",
+   "click-on-2",
+   "click-off-2"
+  ],
+  "python": "/home/kladko/compaction-bench-v2/venv/bin/python",
+  "code_tools": true,
+  "docs": true
+ },
+ "aggregate": {
+  "click/drop": {
+   "sessions": 2,
+   "complete": 1,
+   "mid_turn_per_session": 0.5,
+   "turn_end_per_session": 1.0,
+   "turn_end_wall_median_s": 45.6,
+   "turn_end_wall_max_s": 62.0,
+   "mid_turn_wall_median_s": 71.2,
+   "session_wall_mean_s": 4369.0,
+   "peak_context_max": 96028,
+   "hidden_passed_mean": 3.5,
+   "missed_turn_ends": 4,
+   "missed_turn_ends_clear": 4,
+   "inputs_intact": true,
+   "audit_lossless": 1,
+   "audited": 3,
+   "stray_summaries": 0,
+   "cache_hit_mean": 1.0,
+   "cache_measured": 3,
+   "drops_per_session": 3.5,
+   "declined_per_session": 1.5
+  },
+  "click/off": {
+   "sessions": 1,
+   "complete": 1,
+   "mid_turn_per_session": 2.0,
+   "turn_end_per_session": 0.0,
+   "turn_end_wall_median_s": null,
+   "turn_end_wall_max_s": null,
+   "mid_turn_wall_median_s": 61.8,
+   "session_wall_mean_s": 1761.0,
+   "peak_context_max": 96829,
+   "hidden_passed_mean": 4.0,
+   "missed_turn_ends": 1,
+   "missed_turn_ends_clear": 1,
+   "inputs_intact": true,
+   "audit_lossless": 0,
+   "audited": 2,
+   "stray_summaries": 0,
+   "cache_hit_mean": 0.99,
+   "cache_measured": 2,
+   "drops_per_session": 0.0,
+   "declined_per_session": 0.0
+  },
+  "click/on": {
+   "sessions": 1,
+   "complete": 1,
+   "mid_turn_per_session": 0.0,
+   "turn_end_per_session": 3.0,
+   "turn_end_wall_median_s": 44.1,
+   "turn_end_wall_max_s": 45.0,
+   "mid_turn_wall_median_s": null,
+   "session_wall_mean_s": 1277.1,
+   "peak_context_max": 64587,
+   "hidden_passed_mean": 4.0,
+   "missed_turn_ends": 0,
+   "missed_turn_ends_clear": 0,
+   "inputs_intact": true,
+   "audit_lossless": 1,
+   "audited": 3,
+   "stray_summaries": 0,
+   "cache_hit_mean": 1.0,
+   "cache_measured": 3,
+   "drops_per_session": 0.0,
+   "declined_per_session": 0.0
+  },
+  "night-shift/drop": {
+   "sessions": 2,
+   "complete": 2,
+   "mid_turn_per_session": 0.0,
+   "turn_end_per_session": 0.0,
+   "turn_end_wall_median_s": null,
+   "turn_end_wall_max_s": null,
+   "mid_turn_wall_median_s": null,
+   "session_wall_mean_s": 846.15,
+   "peak_context_max": 57526,
+   "hidden_passed_mean": 5.0,
+   "missed_turn_ends": 5,
+   "missed_turn_ends_clear": 5,
+   "inputs_intact": true,
+   "audit_lossless": 0,
+   "audited": 0,
+   "stray_summaries": 0,
+   "cache_hit_mean": null,
+   "cache_measured": 0,
+   "drops_per_session": 2.5,
+   "declined_per_session": 0.0
+  },
+  "night-shift/off": {
+   "sessions": 2,
+   "complete": 2,
+   "mid_turn_per_session": 2.5,
+   "turn_end_per_session": 0.0,
+   "turn_end_wall_median_s": null,
+   "turn_end_wall_max_s": null,
+   "mid_turn_wall_median_s": 79.2,
+   "session_wall_mean_s": 2537.1,
+   "peak_context_max": 97001,
+   "hidden_passed_mean": 5.0,
+   "missed_turn_ends": 5,
+   "missed_turn_ends_clear": 5,
+   "inputs_intact": true,
+   "audit_lossless": 1,
+   "audited": 5,
+   "stray_summaries": 0,
+   "cache_hit_mean": 0.99,
+   "cache_measured": 5,
+   "drops_per_session": 0.0,
+   "declined_per_session": 0.0
+  },
+  "night-shift/on": {
+   "sessions": 2,
+   "complete": 2,
+   "mid_turn_per_session": 0.0,
+   "turn_end_per_session": 3.0,
+   "turn_end_wall_median_s": 81.0,
+   "turn_end_wall_max_s": 119.9,
+   "mid_turn_wall_median_s": null,
+   "session_wall_mean_s": 1462.0,
+   "peak_context_max": 61787,
+   "hidden_passed_mean": 5.0,
+   "missed_turn_ends": 0,
+   "missed_turn_ends_clear": 0,
+   "inputs_intact": true,
+   "audit_lossless": 4,
+   "audited": 6,
+   "stray_summaries": 0,
+   "cache_hit_mean": 1.0,
+   "cache_measured": 6,
+   "drops_per_session": 0.0,
+   "declined_per_session": 0.0
+  }
+ },
+ "decision": "on: switch on; drop: keep off",
+ "reasons": [
+  "**on** (turn-end) against off: **switch on**",
+  "  \u2705 typed messages kept: 3 of 3 probes",
+  "  \u2705 turn-end compaction wall time: median 53.5 s, max 119.9 s (limits 60 s / 120 s)",
+  "  \u2705 click: mid-turn compactions per session 2.0 off, 0.0 on",
+  "  \u2705 click: on-arm turns ending clearly above the threshold with no compaction: 0",
+  "  \u2796 click (reported, not deciding): session wall 1761.0 s off, 1277.1 s on; hidden tests passed 4.0 off, 4.0 on",
+  "  \u2705 night-shift: mid-turn compactions per session 2.5 off, 0.0 on",
+  "  \u2705 night-shift: on-arm turns ending clearly above the threshold with no compaction: 0",
+  "  \u2796 night-shift (reported, not deciding): session wall 2537.1 s off, 1462.0 s on; hidden tests passed 5.0 off, 5.0 on",
+  "**drop** (turn-end + drop old outputs) against off: **keep off**",
+  "  \u2705 typed messages kept: 1 of 1 probes",
+  "  \u2705 turn-end compaction wall time: median 45.6 s, max 62.0 s (limits 60 s / 120 s)",
+  "  \u2705 click: mid-turn compactions per session 2.0 off, 0.5 drop",
+  "  \u274c click: drop-arm turns ending clearly above the threshold with no compaction: 4",
+  "  \u26a0\ufe0f click (reported, not deciding): session wall 1761.0 s off, 4369.0 s drop; hidden tests passed 4.0 off, 3.5 drop",
+  "  \u2705 night-shift: mid-turn compactions per session 2.5 off, 0.0 drop",
+  "  \u274c night-shift: drop-arm turns ending clearly above the threshold with no compaction: 5",
+  "  \u2796 night-shift (reported, not deciding): session wall 2537.1 s off, 846.15 s drop; hidden tests passed 5.0 off, 5.0 drop",
+  "\u2705 (reported, not deciding) compaction requests served from the prefix cache: median 100% of the prompt over 19 compactions, 0 below half (2026-10-13: 0 in 12 of 13); summaries that are a stray tool call: 0"
+ ],
+ "sessions": [
+  {
+   "label": "night-shift-off-1",
+   "task": "night-shift",
+   "arm": "off",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=0"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 0,
+   "drop_old_outputs": false,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": null,
+   "repo": "/home/kladko/compaction-bench-v2/results/night-shift-off-1/repo",
+   "events": [
+    {
+     "t": 1792004433.1257932,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792004574.785318,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792004577.7975383,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1792005904.6000452,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792005907.61479,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792006391.0481157,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792006394.0598228,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792006815.1765199,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792006818.1873372,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792007158.8835526,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792007161.8985474,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792007251.133079,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792007254.146943,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1792007276.4984505,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T19:00:25",
+   "status": "complete",
+   "ended": "2026-10-14T19:47:56",
+   "wall_s": 2850.6,
+   "probe_note": null,
+   "rollout": "/home/kladko/compaction-bench-v2/results/night-shift-off-1/home/sessions/2026/10/14/rollout-2026-10-14T19-00-26-01a13bc9-8c67-7321-bbf2-46d4585741ac.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13bc9-a940-7c80-a71b-9c5d1041dc8e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 135.7,
+     "context_at_end": 59985
+    },
+    {
+     "turn_id": "01a13bcb-de68-7091-8309-96b322d8b249",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 1321.0,
+     "context_at_end": 88577
+    },
+    {
+     "turn_id": "01a13be0-2901-7371-8ecd-020965df78e8",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 477.6,
+     "context_at_end": 50416
+    },
+    {
+     "turn_id": "01a13be7-952c-7a33-9479-9da153f8a36b",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 415.5,
+     "context_at_end": 79807
+    },
+    {
+     "turn_id": "01a13bee-0dec-7612-a1e3-b2002ec5202d",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 334.7,
+     "context_at_end": 20199
+    },
+    {
+     "turn_id": "01a13bf3-4c90-7a41-a12d-d815a675a62a",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 83.4,
+     "context_at_end": 27104
+    },
+    {
+     "turn_id": "01a13bf4-b4de-7242-b23b-2c30c4a7a7f3",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 16.6,
+     "context_at_end": 27442
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13bcb-de68-7091-8309-96b322d8b249",
+     "kind": "mid-turn",
+     "started_ms": 1792005085490,
+     "completed_ms": 1792005088330,
+     "wall_s": 2.8,
+     "context_before": 94701,
+     "context_after": 8225,
+     "summary_chars": 461,
+     "summary_output_tokens": 66,
+     "input_tokens": 94701,
+     "cached_tokens": 94464,
+     "cache_hit": 0.997,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        0,
+        1
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        0,
+        0
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "dreamference/night_shift/night_shift_runner.py"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/1 (ledger covered 1)"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13be0-2901-7371-8ecd-020965df78e8",
+     "kind": "mid-turn",
+     "started_ms": 1792006056481,
+     "completed_ms": 1792006154280,
+     "wall_s": 97.8,
+     "context_before": 94281,
+     "context_after": 10614,
+     "summary_chars": 9471,
+     "summary_output_tokens": 2496,
+     "input_tokens": 94281,
+     "cached_tokens": 93952,
+     "cache_hit": 0.997,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        3,
+        4
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "README.md"
+       ]
+      },
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/4"
+     }
+    },
+    {
+     "number": 3,
+     "turn_id": "01a13bee-0dec-7612-a1e3-b2002ec5202d",
+     "kind": "mid-turn",
+     "started_ms": 1792007007626,
+     "completed_ms": 1792007090052,
+     "wall_s": 82.4,
+     "context_before": 94419,
+     "context_after": 10826,
+     "summary_chars": 9085,
+     "summary_output_tokens": 2582,
+     "input_tokens": 94419,
+     "cached_tokens": 93760,
+     "cache_hit": 0.993,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        5,
+        5
+       ],
+       "failed commands": [
+        1,
+        1
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "last test result": [
+        "44 passed in 15.06s"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost last test result 1/1 (ledger covered 1)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 3,
+    "turn-end": 0
+   },
+   "peak_context": 97001,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a13bc9-a940-7c80-a71b-9c5d1041dc8e",
+    "01a13be7-952c-7a33-9479-9da153f8a36b"
+   ],
+   "missed_turn_ends_clear": [
+    "01a13bc9-a940-7c80-a71b-9c5d1041dc8e",
+    "01a13be7-952c-7a33-9479-9da153f8a36b"
+   ],
+   "probe": null,
+   "drops": {
+    "attempts": 0,
+    "drops": 0,
+    "declined": 0,
+    "dropped_outputs": 0
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 2.78s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 44
+     },
+     "tail": [
+      "44 passed in 14.26s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-on-1",
+   "task": "night-shift",
+   "arm": "on",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=20"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 20,
+   "drop_old_outputs": false,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": "enter",
+   "repo": "/home/kladko/compaction-bench-v2/results/night-shift-on-1/repo",
+   "events": [
+    {
+     "t": 1792007301.7922626,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792007439.8194442,
+     "event": "probe",
+     "index": 1,
+     "key": "enter"
+    },
+    {
+     "t": 1792007748.3333814,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792007751.3446484,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792007989.6777608,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792007992.689552,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792008321.8902848,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792008324.90033,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792008495.7653544,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792008498.7756283,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792008653.011126,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792008656.0265691,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1792008695.4071712,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T19:48:14",
+   "status": "complete",
+   "ended": "2026-10-14T20:11:35",
+   "wall_s": 1400.9,
+   "probe_note": {
+    "sent_ms": 1792007439819,
+    "key": "enter",
+    "text": "First change, a dry run. Add a keyword argument `dry_run: bool = False` to `NightShiftRunner.run` in dreamference/night_shift/night_shift_runner.py. When it is true the run must not start any task, must not change any task file, must not write a report and must not wait for the model to be idle; it prints one line per pending task, in the order the tasks would start (the round-robin order), each line containing the task's id, its repository and the test command that would be detected for it, and returns 0. Add a test for it to tests/test_night_shift.py (do not rename or remove any existing test or helper in that file) and run the file with `/home/kladko/compaction-bench-v2/venv/bin/python -m pytest tests/test_night_shift.py -q -p no:cacheprovider`.",
+    "turn_index": 1
+   },
+   "rollout": "/home/kladko/compaction-bench-v2/results/night-shift-on-1/home/sessions/2026/10/14/rollout-2026-10-14T19-48-15-01a13bf5-522f-7973-994e-061cd2e4647f.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13bf5-6ef8-7bc1-b377-71e9c3efac8a",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 440.8,
+     "context_at_end": 46527
+    },
+    {
+     "turn_id": "01a13bfc-4b12-7ca1-95b2-e37ba5ace1e5",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 232.8,
+     "context_at_end": 9981
+    },
+    {
+     "turn_id": "01a13bff-f9cd-7782-ab44-a10bcbfd2511",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 323.6,
+     "context_at_end": 7974
+    },
+    {
+     "turn_id": "01a13c05-0b83-7c73-91c2-a076713d5356",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 164.9,
+     "context_at_end": 36438
+    },
+    {
+     "turn_id": "01a13c07-b2b5-70c2-add0-3bfd702d8620",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 148.3,
+     "context_at_end": 48189
+    },
+    {
+     "turn_id": "01a13c0a-18f4-7960-bc2a-57b7835b0f24",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 33.8,
+     "context_at_end": 48573
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13bf5-6ef8-7bc1-b377-71e9c3efac8a",
+     "kind": "turn-end",
+     "started_ms": 1792007438463,
+     "completed_ms": 1792007555370,
+     "wall_s": 116.9,
+     "context_before": 55856,
+     "context_after": 8882,
+     "summary_chars": 11765,
+     "summary_output_tokens": 3264,
+     "input_tokens": 55856,
+     "cached_tokens": 55552,
+     "cache_hit": 0.995,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        0,
+        0
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        0,
+        0
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "nothing to keep"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13bfc-4b12-7ca1-95b2-e37ba5ace1e5",
+     "kind": "turn-end",
+     "started_ms": 1792007865314,
+     "completed_ms": 1792007985227,
+     "wall_s": 119.9,
+     "context_before": 57476,
+     "context_after": 9981,
+     "summary_chars": 14913,
+     "summary_output_tokens": 4165,
+     "input_tokens": 57476,
+     "cached_tokens": 57344,
+     "cache_hit": 0.998,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        3,
+        3
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "kept all"
+     }
+    },
+    {
+     "number": 3,
+     "turn_id": "01a13bff-f9cd-7782-ab44-a10bcbfd2511",
+     "kind": "turn-end",
+     "started_ms": 1792008263944,
+     "completed_ms": 1792008317431,
+     "wall_s": 53.5,
+     "context_before": 53166,
+     "context_after": 7974,
+     "summary_chars": 6388,
+     "summary_output_tokens": 1782,
+     "input_tokens": 53166,
+     "cached_tokens": 52992,
+     "cache_hit": 0.997,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        3,
+        3
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "kept all"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 3
+   },
+   "peak_context": 61641,
+   "usable_window": 249036,
+   "missed_turn_ends": [],
+   "missed_turn_ends_clear": [],
+   "probe": {
+    "key": "enter",
+    "compaction": 1,
+    "compaction_kind": "turn-end",
+    "compaction_finished": true,
+    "compaction_wall_s": 116.9,
+    "typed_after_s": 1.4,
+    "turn_aborted": false,
+    "delivered": true,
+    "delivered_in": "same turn",
+    "waited_s": 115.6,
+    "verdict": "waited"
+   },
+   "drops": {
+    "attempts": 0,
+    "drops": 0,
+    "declined": 0,
+    "dropped_outputs": 0
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 3.06s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 45
+     },
+     "tail": [
+      "45 passed in 13.64s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-drop-1",
+   "task": "night-shift",
+   "arm": "drop",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=20"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 20,
+   "drop_old_outputs": true,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": "enter",
+   "repo": "/home/kladko/compaction-bench-v2/results/night-shift-drop-1/repo",
+   "events": [
+    {
+     "t": 1792008720.1255531,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792008876.2290761,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792008879.2398994,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1792009028.756101,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792009031.769886,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792009106.8661027,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792009109.8774755,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792009193.1088612,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792009196.1212623,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792009307.5022998,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792009310.5177453,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792009388.3095326,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792009391.3225806,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1792009424.9156396,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T20:11:52",
+   "status": "complete",
+   "ended": "2026-10-14T20:23:44",
+   "wall_s": 712.1,
+   "probe_note": null,
+   "rollout": "/home/kladko/compaction-bench-v2/results/night-shift-drop-1/home/sessions/2026/10/14/rollout-2026-10-14T20-11-53-01a13c0a-f687-7fb3-9fe9-71edc5ae00ec.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13c0b-1359-7a80-8067-fd4cd9a4ae9c",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 150.5,
+     "context_at_end": 45508
+    },
+    {
+     "turn_id": "01a13c0d-80eb-7a01-bca1-60d4b7f5815f",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 143.5,
+     "context_at_end": 54902
+    },
+    {
+     "turn_id": "01a13c0f-d4bb-72e3-bc3d-648c412c9595",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 69.3,
+     "context_at_end": 32080
+    },
+    {
+     "turn_id": "01a13c11-05d4-7cc2-a4ae-ed3c5cda0d46",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 77.9,
+     "context_at_end": 39373
+    },
+    {
+     "turn_id": "01a13c12-56b5-7921-854c-4830426ae4ca",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 105.6,
+     "context_at_end": 44398
+    },
+    {
+     "turn_id": "01a13c14-1597-7dc3-9fac-db15ee281a90",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 71.9,
+     "context_at_end": 56489
+    },
+    {
+     "turn_id": "01a13c15-5136-7422-ab5d-5978e73acf54",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 27.8,
+     "context_at_end": 44022
+    }
+   ],
+   "compactions": [],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 0
+   },
+   "peak_context": 56489,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a13c0d-80eb-7a01-bca1-60d4b7f5815f",
+    "01a13c14-1597-7dc3-9fac-db15ee281a90"
+   ],
+   "missed_turn_ends_clear": [
+    "01a13c0d-80eb-7a01-bca1-60d4b7f5815f",
+    "01a13c14-1597-7dc3-9fac-db15ee281a90"
+   ],
+   "probe": null,
+   "drops": {
+    "attempts": 2,
+    "drops": 2,
+    "declined": 0,
+    "dropped_outputs": 31
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 2.15s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 45
+     },
+     "tail": [
+      "45 passed in 14.31s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "click-off-1",
+   "task": "click",
+   "arm": "off",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=0"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 0,
+   "drop_old_outputs": false,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": null,
+   "repo": "/home/kladko/compaction-bench-v2/results/click-off-1/repo",
+   "events": [
+    {
+     "t": 1792009449.4252093,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792009565.0529184,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792009568.065115,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1792009810.3821857,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792009813.3952634,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792010369.0623274,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792010372.077778,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792010539.3694541,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792010542.3813689,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792011171.730064,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792011174.7434218,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792011203.146288,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T20:24:02",
+   "status": "complete",
+   "ended": "2026-10-14T20:53:23",
+   "wall_s": 1761.0,
+   "probe_note": null,
+   "rollout": "/home/kladko/compaction-bench-v2/results/click-off-1/home/sessions/2026/10/14/rollout-2026-10-14T20-24-02-01a13c16-1682-72c3-8df2-f91bf4344996.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13c16-342b-70e2-bc6b-ca3a895ccce8",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 110.1,
+     "context_at_end": 48669
+    },
+    {
+     "turn_id": "01a13c18-03a0-7241-bfcb-bdccca12239e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 236.5,
+     "context_at_end": 65799
+    },
+    {
+     "turn_id": "01a13c1b-c1f5-70b0-b061-de9b42a69577",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 549.7,
+     "context_at_end": 31305
+    },
+    {
+     "turn_id": "01a13c24-484f-72a2-a937-2bb095acc6c2",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 161.3,
+     "context_at_end": 49090
+    },
+    {
+     "turn_id": "01a13c26-e18b-7611-a36d-a1824b86d061",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 623.3,
+     "context_at_end": 26844
+    },
+    {
+     "turn_id": "01a13c30-87af-7ca1-9aeb-78fc2b69ab58",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 22.6,
+     "context_at_end": 27606
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13c1b-c1f5-70b0-b061-de9b42a69577",
+     "kind": "mid-turn",
+     "started_ms": 1792010184588,
+     "completed_ms": 1792010247110,
+     "wall_s": 62.5,
+     "context_before": 95025,
+     "context_after": 9937,
+     "summary_chars": 7119,
+     "summary_output_tokens": 1804,
+     "input_tokens": 95025,
+     "cached_tokens": 94208,
+     "cache_hit": 0.991,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        4,
+        5
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "src/click/__init__.py"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/5 (ledger covered 1)"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13c26-e18b-7611-a36d-a1824b86d061",
+     "kind": "mid-turn",
+     "started_ms": 1792011036788,
+     "completed_ms": 1792011097892,
+     "wall_s": 61.1,
+     "context_before": 94399,
+     "context_after": 10046,
+     "summary_chars": 6640,
+     "summary_output_tokens": 1699,
+     "input_tokens": 94399,
+     "cached_tokens": 93760,
+     "cache_hit": 0.993,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        1,
+        1
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "last test result": [
+        "1 failed in 0.01s"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost last test result 1/1 (ledger covered 1)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 2,
+    "turn-end": 0
+   },
+   "peak_context": 96829,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a13c18-03a0-7241-bfcb-bdccca12239e"
+   ],
+   "missed_turn_ends_clear": [
+    "01a13c18-03a0-7241-bfcb-bdccca12239e"
+   ],
+   "probe": null,
+   "drops": {
+    "attempts": 0,
+    "drops": 0,
+    "declined": 0,
+    "dropped_outputs": 0
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 4
+     },
+     "tail": [
+      "4 passed in 0.08s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 599,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "599 passed, 22 skipped, 1 xfailed, 2 warnings in 0.35s"
+     ]
+    },
+    "changed_files": [
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "tests/test_formatting.py",
+     "tests/test_info_dict.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  },
+  {
+   "label": "click-on-1",
+   "task": "click",
+   "arm": "on",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=20"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 20,
+   "drop_old_outputs": false,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": "enter",
+   "repo": "/home/kladko/compaction-bench-v2/results/click-on-1/repo",
+   "events": [
+    {
+     "t": 1792011211.3750813,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792011305.254383,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792011308.2680228,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1792011518.0583665,
+     "event": "probe",
+     "index": 2,
+     "key": "enter"
+    },
+    {
+     "t": 1792011914.6809535,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792011917.694523,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792012378.4133356,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792012381.4246893,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792012454.2914176,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792012457.3059556,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792012481.3302438,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T20:53:24",
+   "status": "complete",
+   "ended": "2026-10-14T21:14:41",
+   "wall_s": 1277.1,
+   "probe_note": {
+    "sent_ms": 1792011518058,
+    "key": "enter",
+    "text": "Add a `deprecated` parameter to `click.Option` (False, True, or a string). When an option marked deprecated is given on the command line, print `DeprecationWarning: The option '<name>' is deprecated.` to stderr, followed by the string when one was given, and start its help text in `--help` with `(DEPRECATED)`. Make the change in src/click/core.py and make sure `@click.option(..., deprecated=...)` passes it through. Add tests in tests/test_options.py for the message, the custom string and the help text. Run the whole suite with `/home/kladko/compaction-bench-v2/venv/bin/python -m pytest tests -q -p no:cacheprovider` and fix what fails.",
+    "turn_index": 2
+   },
+   "rollout": "/home/kladko/compaction-bench-v2/results/click-on-1/home/sessions/2026/10/14/rollout-2026-10-14T20-53-25-01a13c30-f9f3-7e41-8b9f-be972ab99643.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13c31-16c9-71b1-8a38-beda81e1e9de",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 87.9,
+     "context_at_end": 43469
+    },
+    {
+     "turn_id": "01a13c32-9150-7683-83ee-f9765fca5d98",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 600.8,
+     "context_at_end": 7739
+    },
+    {
+     "turn_id": "01a13c3b-dde4-7442-a3d3-6da42bbba553",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 455.1,
+     "context_at_end": 7894
+    },
+    {
+     "turn_id": "01a13c42-f14f-7161-b9ff-8f452d09d06a",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 67.1,
+     "context_at_end": 23847
+    },
+    {
+     "turn_id": "01a13c44-19b4-7d73-810f-341a100dc51f",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 18.3,
+     "context_at_end": 24537
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13c32-9150-7683-83ee-f9765fca5d98",
+     "kind": "turn-end",
+     "started_ms": 1792011516831,
+     "completed_ms": 1792011556697,
+     "wall_s": 39.9,
+     "context_before": 58972,
+     "context_after": 7451,
+     "summary_chars": 5364,
+     "summary_output_tokens": 1315,
+     "input_tokens": 58972,
+     "cached_tokens": 58624,
+     "cache_hit": 0.994,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        0,
+        1
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "JSON.stringify"
+       ]
+      },
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/1"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13c32-9150-7683-83ee-f9765fca5d98",
+     "kind": "turn-end",
+     "started_ms": 1792011866139,
+     "completed_ms": 1792011910212,
+     "wall_s": 44.1,
+     "context_before": 53964,
+     "context_after": 7739,
+     "summary_chars": 5858,
+     "summary_output_tokens": 1476,
+     "input_tokens": 53964,
+     "cached_tokens": 53760,
+     "cache_hit": 0.996,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        3,
+        3
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "kept all"
+     }
+    },
+    {
+     "number": 3,
+     "turn_id": "01a13c3b-dde4-7442-a3d3-6da42bbba553",
+     "kind": "turn-end",
+     "started_ms": 1792012328921,
+     "completed_ms": 1792012373949,
+     "wall_s": 45.0,
+     "context_before": 63110,
+     "context_after": 7894,
+     "summary_chars": 5945,
+     "summary_output_tokens": 1477,
+     "input_tokens": 63110,
+     "cached_tokens": 62976,
+     "cache_hit": 0.998,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        2,
+        2
+       ],
+       "failed commands": [
+        0,
+        2
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "failed commands": [
+        "/home/kladko/compaction-bench-v2/venv/bin/python - <<'EOF'",
+        "/home/kladko/compaction-bench-v2/venv/bin/python -c \"import click, inspect; pri\u2026"
+       ]
+      },
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "lost failed commands 2/2"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 3
+   },
+   "peak_context": 64587,
+   "usable_window": 249036,
+   "missed_turn_ends": [],
+   "missed_turn_ends_clear": [],
+   "probe": {
+    "key": "enter",
+    "compaction": 1,
+    "compaction_kind": "turn-end",
+    "compaction_finished": true,
+    "compaction_wall_s": 39.9,
+    "typed_after_s": 1.2,
+    "turn_aborted": false,
+    "delivered": true,
+    "delivered_in": "same turn",
+    "waited_s": 38.7,
+    "verdict": "waited"
+   },
+   "drops": {
+    "attempts": 0,
+    "drops": 0,
+    "declined": 0,
+    "dropped_outputs": 0
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 4
+     },
+     "tail": [
+      "4 passed in 0.08s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 594,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "594 passed, 22 skipped, 1 xfailed, 1 warning in 0.29s"
+     ]
+    },
+    "changed_files": [
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "tests/test_formatting.py",
+     "tests/test_info_dict.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  },
+  {
+   "label": "click-drop-1",
+   "task": "click",
+   "arm": "drop",
+   "rep": 1,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=20"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 20,
+   "drop_old_outputs": true,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": "enter",
+   "repo": "/home/kladko/compaction-bench-v2/results/click-drop-1/repo",
+   "events": [
+    {
+     "t": 1792012489.490978,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792012608.1495519,
+     "event": "probe",
+     "index": 1,
+     "key": "enter"
+    },
+    {
+     "t": 1792012781.5103629,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792012784.5201738,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792012995.0386097,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792012998.0480158,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792013708.451944,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792013711.4678545,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792013947.847925,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792013950.8622177,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792013977.4965107,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T21:14:42",
+   "status": "complete",
+   "ended": "2026-10-14T21:39:37",
+   "wall_s": 1495.2,
+   "probe_note": {
+    "sent_ms": 1792012608149,
+    "key": "enter",
+    "text": "Refactor: move the contents of src/click/parser.py into a new private module src/click/_optparse.py. Keep src/click/parser.py as a thin module that re-exports the same public names from the new module and emits a DeprecationWarning when it is imported. Update every import of the parser inside src/click to use the new module, so that `import click` emits no warning. Add tests in tests/test_parser.py that importing click.parser warns and that `import click` does not. Run the whole suite with `/home/kladko/compaction-bench-v2/venv/bin/python -m pytest tests -q -p no:cacheprovider` and fix what fails.",
+    "turn_index": 1
+   },
+   "rollout": "/home/kladko/compaction-bench-v2/results/click-drop-1/home/sessions/2026/10/14/rollout-2026-10-14T21-14-43-01a13c44-7a9f-70f2-a3bd-7a552e7669da.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13c44-976f-7f10-96e2-24d1ccd7bb4a",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 286.1,
+     "context_at_end": 30280
+    },
+    {
+     "turn_id": "01a13c49-17e4-7cb0-80a9-99370d48e3be",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 204.6,
+     "context_at_end": 53552
+    },
+    {
+     "turn_id": "01a13c4c-59fe-7432-b702-ed60f8bf7db1",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 704.4,
+     "context_at_end": 90990
+    },
+    {
+     "turn_id": "01a13c57-3cce-7f60-a230-1bca6c8601e7",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 230.8,
+     "context_at_end": 8215
+    },
+    {
+     "turn_id": "01a13c5a-e3e7-7c51-a098-2d090238b766",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 21.1,
+     "context_at_end": 15409
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13c44-976f-7f10-96e2-24d1ccd7bb4a",
+     "kind": "turn-end",
+     "started_ms": 1792012606691,
+     "completed_ms": 1792012635890,
+     "wall_s": 29.2,
+     "context_before": 73762,
+     "context_after": 6865,
+     "summary_chars": 3783,
+     "summary_output_tokens": 992,
+     "input_tokens": 73762,
+     "cached_tokens": 73472,
+     "cache_hit": 0.996,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        0,
+        0
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        0,
+        0
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "nothing to keep"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13c57-3cce-7f60-a230-1bca6c8601e7",
+     "kind": "turn-end",
+     "started_ms": 1792013881321,
+     "completed_ms": 1792013943364,
+     "wall_s": 62.0,
+     "context_before": 86285,
+     "context_after": 8215,
+     "summary_chars": 7073,
+     "summary_output_tokens": 1826,
+     "input_tokens": 86285,
+     "cached_tokens": 86016,
+     "cache_hit": 0.997,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        6,
+        6
+       ],
+       "failed commands": [
+        1,
+        2
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "failed commands": [
+        "cat setup.cfg 2>/dev/null | head -40; echo ---; cat pyproject.toml 2>/dev/null \u2026"
+       ],
+       "last test result": [
+        "148 passed, 1 warning in 0.05s"
+       ]
+      },
+      "ledger_covered": 2,
+      "stray_tool_call": false,
+      "verdict": "lost failed commands 1/2; last test result 1/1 (ledger covered 2)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 2
+   },
+   "peak_context": 90990,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a13c49-17e4-7cb0-80a9-99370d48e3be",
+    "01a13c4c-59fe-7432-b702-ed60f8bf7db1"
+   ],
+   "missed_turn_ends_clear": [
+    "01a13c49-17e4-7cb0-80a9-99370d48e3be",
+    "01a13c4c-59fe-7432-b702-ed60f8bf7db1"
+   ],
+   "probe": {
+    "key": "enter",
+    "compaction": 1,
+    "compaction_kind": "turn-end",
+    "compaction_finished": true,
+    "compaction_wall_s": 29.2,
+    "typed_after_s": 1.5,
+    "turn_aborted": false,
+    "delivered": true,
+    "delivered_in": "same turn",
+    "waited_s": 27.8,
+    "verdict": "waited"
+   },
+   "drops": {
+    "attempts": 4,
+    "drops": 2,
+    "declined": 2,
+    "dropped_outputs": 76
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 4
+     },
+     "tail": [
+      "4 passed in 0.08s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 600,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "600 passed, 22 skipped, 1 xfailed, 2 warnings in 0.29s"
+     ]
+    },
+    "changed_files": [
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "tests/test_formatting.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-drop-2",
+   "task": "night-shift",
+   "arm": "drop",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=20"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 20,
+   "drop_old_outputs": true,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": "tab",
+   "repo": "/home/kladko/compaction-bench-v2/results/night-shift-drop-2/repo",
+   "events": [
+    {
+     "t": 1792013985.6474578,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792014115.8893301,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792014118.901701,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1792014272.9103115,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792014275.9247868,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792014378.2399528,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792014381.250509,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792014501.3121436,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792014504.3231268,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792014700.641622,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792014703.651565,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792014916.9635527,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792014919.9734955,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1792014958.7243385,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T21:39:38",
+   "status": "complete",
+   "ended": "2026-10-14T21:55:58",
+   "wall_s": 980.2,
+   "probe_note": null,
+   "rollout": "/home/kladko/compaction-bench-v2/results/night-shift-drop-2/home/sessions/2026/10/14/rollout-2026-10-14T21-39-39-01a13c5b-4f00-7240-b23c-2d20e34f5bb7.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13c5b-6bc6-76b2-8c11-117356325a0e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 124.9,
+     "context_at_end": 40672
+    },
+    {
+     "turn_id": "01a13c5d-745c-7060-86ce-ef8c070d762d",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 148.1,
+     "context_at_end": 57526
+    },
+    {
+     "turn_id": "01a13c5f-d9b8-7533-b8a3-4b0dab8a21cb",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 96.5,
+     "context_at_end": 33135
+    },
+    {
+     "turn_id": "01a13c61-7520-7ec3-942c-c0113d42bd7c",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 114.7,
+     "context_at_end": 43176
+    },
+    {
+     "turn_id": "01a13c63-55e6-7af0-8002-f26f717b08a4",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 190.7,
+     "context_at_end": 55475
+    },
+    {
+     "turn_id": "01a13c66-6083-7d22-9eab-97fdd331e923",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 207.3,
+     "context_at_end": 54370
+    },
+    {
+     "turn_id": "01a13c69-ad80-7b10-90eb-6dfce48a312a",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 33.0,
+     "context_at_end": 47316
+    }
+   ],
+   "compactions": [],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 0
+   },
+   "peak_context": 57526,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a13c5d-745c-7060-86ce-ef8c070d762d",
+    "01a13c63-55e6-7af0-8002-f26f717b08a4",
+    "01a13c66-6083-7d22-9eab-97fdd331e923"
+   ],
+   "missed_turn_ends_clear": [
+    "01a13c5d-745c-7060-86ce-ef8c070d762d",
+    "01a13c63-55e6-7af0-8002-f26f717b08a4",
+    "01a13c66-6083-7d22-9eab-97fdd331e923"
+   ],
+   "probe": null,
+   "drops": {
+    "attempts": 3,
+    "drops": 3,
+    "declined": 0,
+    "dropped_outputs": 51
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 3.53s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 45
+     },
+     "tail": [
+      "45 passed in 13.61s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-on-2",
+   "task": "night-shift",
+   "arm": "on",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=20"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 20,
+   "drop_old_outputs": false,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": "tab",
+   "repo": "/home/kladko/compaction-bench-v2/results/night-shift-on-2/repo",
+   "events": [
+    {
+     "t": 1792014983.859641,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792015323.596319,
+     "event": "probe",
+     "index": 1,
+     "key": "tab"
+    },
+    {
+     "t": 1792015575.7643642,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792015578.776434,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792015772.447579,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792015775.4593997,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792015954.4097586,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792015957.420708,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792016311.411571,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792016314.4214904,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792016471.182431,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792016474.194905,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1792016499.7286167,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T21:56:16",
+   "status": "complete",
+   "ended": "2026-10-14T22:21:39",
+   "wall_s": 1523.1,
+   "probe_note": {
+    "sent_ms": 1792015323596,
+    "key": "tab",
+    "text": "First change, a dry run. Add a keyword argument `dry_run: bool = False` to `NightShiftRunner.run` in dreamference/night_shift/night_shift_runner.py. When it is true the run must not start any task, must not change any task file, must not write a report and must not wait for the model to be idle; it prints one line per pending task, in the order the tasks would start (the round-robin order), each line containing the task's id, its repository and the test command that would be detected for it, and returns 0. Add a test for it to tests/test_night_shift.py (do not rename or remove any existing test or helper in that file) and run the file with `/home/kladko/compaction-bench-v2/venv/bin/python -m pytest tests/test_night_shift.py -q -p no:cacheprovider`.",
+    "turn_index": 1
+   },
+   "rollout": "/home/kladko/compaction-bench-v2/results/night-shift-on-2/home/sessions/2026/10/14/rollout-2026-10-14T21-56-17-01a13c6a-8a34-7f33-9f67-a00b1c098595.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13c6a-a710-7b31-a848-9e6f6a2d9ddc",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 440.6,
+     "context_at_end": 8598
+    },
+    {
+     "turn_id": "01a13c71-605c-7423-ba24-58293eb1030c",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 145.9,
+     "context_at_end": 42208
+    },
+    {
+     "turn_id": "01a13c73-baf7-7fb1-ac86-21d4f577bfd2",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 188.3,
+     "context_at_end": 7567
+    },
+    {
+     "turn_id": "01a13c76-bb41-7a33-8e22-2ed9a3cf014c",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 173.6,
+     "context_at_end": 32498
+    },
+    {
+     "turn_id": "01a13c79-8209-7ee3-86dd-274b480d74e9",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 348.0,
+     "context_at_end": 8361
+    },
+    {
+     "turn_id": "01a13c7e-f492-7d12-bbff-002e48e9e14e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 151.0,
+     "context_at_end": 31912
+    },
+    {
+     "turn_id": "01a13c81-64ae-72a0-8b95-8e794e69f579",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 19.8,
+     "context_at_end": 32379
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13c6a-a710-7b31-a848-9e6f6a2d9ddc",
+     "kind": "turn-end",
+     "started_ms": 1792015322139,
+     "completed_ms": 1792015425606,
+     "wall_s": 103.5,
+     "context_before": 56417,
+     "context_after": 8598,
+     "summary_chars": 10402,
+     "summary_output_tokens": 2777,
+     "input_tokens": 56417,
+     "cached_tokens": 56064,
+     "cache_hit": 0.994,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        1,
+        2
+       ],
+       "failed commands": [
+        0,
+        0
+       ],
+       "last test result": [
+        0,
+        0
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "NightShiftSettings.read_table"
+       ]
+      },
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/2"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13c73-baf7-7fb1-ac86-21d4f577bfd2",
+     "kind": "turn-end",
+     "started_ms": 1792015727085,
+     "completed_ms": 1792015768195,
+     "wall_s": 41.1,
+     "context_before": 56959,
+     "context_after": 7567,
+     "summary_chars": 5142,
+     "summary_output_tokens": 1248,
+     "input_tokens": 56959,
+     "cached_tokens": 56832,
+     "cache_hit": 0.998,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        4,
+        5
+       ],
+       "failed commands": [
+        1,
+        2
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "Cargo.toml"
+       ],
+       "failed commands": [
+        "rg -n 'detect_test_command' dreamference/night_shift/night_shift_task_run.py | \u2026"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 1/5; failed commands 1/2 (ledger covered 1)"
+     }
+    },
+    {
+     "number": 3,
+     "turn_id": "01a13c79-8209-7ee3-86dd-274b480d74e9",
+     "kind": "turn-end",
+     "started_ms": 1792016248027,
+     "completed_ms": 1792016306527,
+     "wall_s": 58.5,
+     "context_before": 59938,
+     "context_after": 8361,
+     "summary_chars": 7062,
+     "summary_output_tokens": 1849,
+     "input_tokens": 59938,
+     "cached_tokens": 59648,
+     "cache_hit": 0.995,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        4,
+        4
+       ],
+       "failed commands": [
+        3,
+        3
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "kept all"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 0,
+    "turn-end": 3
+   },
+   "peak_context": 61787,
+   "usable_window": 249036,
+   "missed_turn_ends": [],
+   "missed_turn_ends_clear": [],
+   "probe": {
+    "key": "tab",
+    "compaction": 1,
+    "compaction_kind": "turn-end",
+    "compaction_finished": true,
+    "compaction_wall_s": 103.5,
+    "typed_after_s": 1.5,
+    "turn_aborted": false,
+    "delivered": true,
+    "delivered_in": "next turn",
+    "waited_s": 102.0,
+    "verdict": "waited"
+   },
+   "drops": {
+    "attempts": 0,
+    "drops": 0,
+    "declined": 0,
+    "dropped_outputs": 0
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 1.27s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 44
+     },
+     "tail": [
+      "44 passed in 12.75s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "night-shift-off-2",
+   "task": "night-shift",
+   "arm": "off",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=0"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 0,
+   "drop_old_outputs": false,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": null,
+   "repo": "/home/kladko/compaction-bench-v2/results/night-shift-off-2/repo",
+   "events": [
+    {
+     "t": 1792016521.7713223,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792016652.0774953,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792016655.0897796,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1792016894.3832612,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792016897.3974948,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792017949.3432493,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792017952.3550725,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792018188.1831038,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792018191.1980565,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792018341.766461,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792018344.781521,
+     "event": "turn",
+     "index": 5
+    },
+    {
+     "t": 1792018697.5711741,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792018700.582553,
+     "event": "turn",
+     "index": 6
+    },
+    {
+     "t": 1792018738.1926641,
+     "event": "turn end",
+     "outcome": "done"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T22:21:54",
+   "status": "complete",
+   "ended": "2026-10-14T22:58:58",
+   "wall_s": 2223.6,
+   "probe_note": null,
+   "rollout": "/home/kladko/compaction-bench-v2/results/night-shift-off-2/home/sessions/2026/10/14/rollout-2026-10-14T22-21-55-01a13c82-01bf-7fb1-a475-8b0a9ebdf08a.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13c82-1e84-7981-b7e0-fcbf36a79064",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 124.5,
+     "context_at_end": 42534
+    },
+    {
+     "turn_id": "01a13c84-2753-7440-82f2-cdf419c3fdbc",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 233.7,
+     "context_at_end": 62001
+    },
+    {
+     "turn_id": "01a13c87-d9d6-76d1-bbe9-e6fc970f475e",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 1046.2,
+     "context_at_end": 69936
+    },
+    {
+     "turn_id": "01a13c97-f2c5-7563-bcb5-151acdc7e166",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 229.8,
+     "context_at_end": 84118
+    },
+    {
+     "turn_id": "01a13c9b-97c1-72f1-b61e-4b649791b897",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 144.8,
+     "context_at_end": 89010
+    },
+    {
+     "turn_id": "01a13c9d-efb1-7473-8ad7-6863305de6df",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 346.8,
+     "context_at_end": 45649
+    },
+    {
+     "turn_id": "01a13ca3-5d80-7261-ab5b-af3dbe9b5ac5",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 32.0,
+     "context_at_end": 46030
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13c87-d9d6-76d1-bbe9-e6fc970f475e",
+     "kind": "mid-turn",
+     "started_ms": 1792017304108,
+     "completed_ms": 1792017368585,
+     "wall_s": 64.5,
+     "context_before": 94678,
+     "context_after": 9817,
+     "summary_chars": 6497,
+     "summary_output_tokens": 1709,
+     "input_tokens": 94678,
+     "cached_tokens": 93696,
+     "cache_hit": 0.99,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        3,
+        6
+       ],
+       "failed commands": [
+        2,
+        2
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "files changed": [
+        "README.md",
+        "package.json",
+        "dreamference.toml"
+       ],
+       "last test result": [
+        "1 error in 0.12s"
+       ]
+      },
+      "ledger_covered": 1,
+      "stray_tool_call": false,
+      "verdict": "lost files changed 3/6; last test result 1/1 (ledger covered 1)"
+     }
+    },
+    {
+     "number": 2,
+     "turn_id": "01a13c9d-efb1-7473-8ad7-6863305de6df",
+     "kind": "mid-turn",
+     "started_ms": 1792018446350,
+     "completed_ms": 1792018525518,
+     "wall_s": 79.2,
+     "context_before": 94577,
+     "context_after": 10428,
+     "summary_chars": 7289,
+     "summary_output_tokens": 1978,
+     "input_tokens": 94577,
+     "cached_tokens": 91904,
+     "cache_hit": 0.972,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        5,
+        5
+       ],
+       "failed commands": [
+        2,
+        2
+       ],
+       "last test result": [
+        1,
+        1
+       ]
+      },
+      "lost": {},
+      "ledger_covered": 0,
+      "stray_tool_call": false,
+      "verdict": "kept all"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 2,
+    "turn-end": 0
+   },
+   "peak_context": 96555,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a13c84-2753-7440-82f2-cdf419c3fdbc",
+    "01a13c97-f2c5-7563-bcb5-151acdc7e166",
+    "01a13c9b-97c1-72f1-b61e-4b649791b897"
+   ],
+   "missed_turn_ends_clear": [
+    "01a13c84-2753-7440-82f2-cdf419c3fdbc",
+    "01a13c97-f2c5-7563-bcb5-151acdc7e166",
+    "01a13c9b-97c1-72f1-b61e-4b649791b897"
+   ],
+   "probe": null,
+   "drops": {
+    "attempts": 0,
+    "drops": 0,
+    "declined": 0,
+    "dropped_outputs": 0
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 0,
+     "counts": {
+      "passed": 5
+     },
+     "tail": [
+      "5 passed in 3.52s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 46
+     },
+     "tail": [
+      "46 passed in 20.15s"
+     ]
+    },
+    "changed_files": [
+     "dreamference/cli/dreamference_cli_controller.py",
+     "dreamference/night_shift/night_shift_report.py",
+     "dreamference/night_shift/night_shift_runner.py",
+     "dreamference/night_shift/night_shift_settings.py",
+     "dreamference/night_shift/night_shift_task_run.py",
+     "tests/test_night_shift.py"
+    ]
+   }
+  },
+  {
+   "label": "click-drop-2",
+   "task": "click",
+   "arm": "drop",
+   "rep": 2,
+   "args": [
+    "-a",
+    "never",
+    "-s",
+    "workspace-write",
+    "-c",
+    "model_auto_compact_token_limit=94144",
+    "-c",
+    "model_post_turn_compact_threshold_percent=20"
+   ],
+   "limit": 94144,
+   "window": 262144,
+   "turn_end_percent": 20,
+   "drop_old_outputs": true,
+   "summary_words": 800,
+   "turn_end_threshold": 49808,
+   "probe_key": "tab",
+   "repo": "/home/kladko/compaction-bench-v2/results/click-drop-2/repo",
+   "events": [
+    {
+     "t": 1792018769.7895005,
+     "event": "turn",
+     "index": 0
+    },
+    {
+     "t": 1792018879.2112772,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792018882.2218363,
+     "event": "turn",
+     "index": 1
+    },
+    {
+     "t": 1792019058.6575062,
+     "event": "turn end",
+     "outcome": "done"
+    },
+    {
+     "t": 1792019061.673086,
+     "event": "turn",
+     "index": 2
+    },
+    {
+     "t": 1792021768.1134398,
+     "event": "turn end",
+     "outcome": "timeout"
+    },
+    {
+     "t": 1792021771.1214607,
+     "event": "turn",
+     "index": 3
+    },
+    {
+     "t": 1792024477.4090629,
+     "event": "turn end",
+     "outcome": "timeout"
+    },
+    {
+     "t": 1792024480.4150844,
+     "event": "turn",
+     "index": 4
+    },
+    {
+     "t": 1792026005.3415308,
+     "event": "turn end",
+     "outcome": "timeout"
+    }
+   ],
+   "binary": {
+    "path": "/home/kladko/mightling-bench-build/bin/ling",
+    "resolved": "/home/kladko/mightling-bench-build/bin/ling",
+    "sha256": "548fc504f83c3b01",
+    "mtime": "2026-10-14T08:28:47",
+    "code_mode_host_beside": true,
+    "knows_turn_end_switch": true,
+    "knows_compaction_tools": true,
+    "knows_summary_cap": true,
+    "knows_drop_old_outputs": true
+   },
+   "started": "2026-10-14T22:59:22",
+   "status": "session timeout",
+   "ended": "2026-10-15T01:00:05",
+   "wall_s": 7242.8,
+   "probe_note": null,
+   "rollout": "/home/kladko/compaction-bench-v2/results/click-drop-2/home/sessions/2026/10/14/rollout-2026-10-14T22-59-23-01a13ca4-4f0e-7161-8fd6-990b5002b1ac.jsonl",
+   "turns": [
+    {
+     "turn_id": "01a13ca4-6bd6-7100-86de-06dcd7758dc4",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 103.5,
+     "context_at_end": 57195
+    },
+    {
+     "turn_id": "01a13ca6-230f-73a3-8e3e-f4fd7046c3fc",
+     "status": "complete",
+     "reason": null,
+     "wall_s": 170.8,
+     "context_at_end": 75271
+    },
+    {
+     "turn_id": "01a13ca8-e00c-7071-8a64-0e2b753eaa85",
+     "status": "aborted",
+     "reason": "interrupted",
+     "wall_s": 2700.3,
+     "context_at_end": 94069
+    },
+    {
+     "turn_id": "01a13cd2-37ec-7533-b297-04d866d222fa",
+     "status": "aborted",
+     "reason": "interrupted",
+     "wall_s": 2700.3,
+     "context_at_end": 10014
+    },
+    {
+     "turn_id": "01a13cfb-8f05-7912-811b-8d646de75b13",
+     "status": "aborted",
+     "reason": "interrupted",
+     "wall_s": 1518.8,
+     "context_at_end": null
+    }
+   ],
+   "compactions": [
+    {
+     "number": 1,
+     "turn_id": "01a13cd2-37ec-7533-b297-04d866d222fa",
+     "kind": "mid-turn",
+     "started_ms": 1792022067935,
+     "completed_ms": 1792022139159,
+     "wall_s": 71.2,
+     "context_before": 94277,
+     "context_after": 10014,
+     "summary_chars": 6879,
+     "summary_output_tokens": 1751,
+     "input_tokens": 94277,
+     "cached_tokens": 94016,
+     "cache_hit": 0.997,
+     "stray_tool_call": false,
+     "audit": {
+      "kept": {
+       "files changed": [
+        8,
+        8
+       ],
+       "failed commands": [
+        6,
+        8
+       ],
+       "last test result": [
+        0,
+        1
+       ]
+      },
+      "lost": {
+       "failed commands": [
+        "/home/kladko/compaction-bench-v2/venv/bin/python -W error::DeprecationWarning -\u2026",
+        "sed -n '1,10p' tests/conftest.py; grep -n \"stderr\" tests/conftest.py"
+       ],
+       "last test result": [
+        "7 passed in 0.09s"
+       ]
+      },
+      "ledger_covered": 2,
+      "stray_tool_call": false,
+      "verdict": "lost failed commands 2/8; last test result 1/1 (ledger covered 2)"
+     }
+    }
+   ],
+   "counts": {
+    "pre-turn": 0,
+    "mid-turn": 1,
+    "turn-end": 0
+   },
+   "peak_context": 96028,
+   "usable_window": 249036,
+   "missed_turn_ends": [
+    "01a13ca4-6bd6-7100-86de-06dcd7758dc4",
+    "01a13ca6-230f-73a3-8e3e-f4fd7046c3fc"
+   ],
+   "missed_turn_ends_clear": [
+    "01a13ca4-6bd6-7100-86de-06dcd7758dc4",
+    "01a13ca6-230f-73a3-8e3e-f4fd7046c3fc"
+   ],
+   "probe": null,
+   "drops": {
+    "attempts": 6,
+    "drops": 5,
+    "declined": 1,
+    "dropped_outputs": 108
+   },
+   "inputs_missing": [],
+   "inputs_intact": true,
+   "grade": {
+    "hidden": {
+     "rc": 1,
+     "counts": {
+      "failed": 1,
+      "passed": 3
+     },
+     "tail": [
+      "1 failed, 3 passed in 0.17s"
+     ]
+    },
+    "own": {
+     "rc": 0,
+     "counts": {
+      "passed": 597,
+      "skipped": 22,
+      "xfailed": 1
+     },
+     "tail": [
+      "597 passed, 22 skipped, 1 xfailed, 1 warning in 0.64s"
+     ]
+    },
+    "changed_files": [
+     "src/click/__init__.py",
+     "src/click/core.py",
+     "src/click/formatting.py",
+     "src/click/parser.py",
+     "src/click/shell_completion.py",
+     "tests/test_options.py",
+     "tests/test_parser.py",
+     "src/click/_optparse.py"
+    ]
+   }
+  }
+ ]
+}
