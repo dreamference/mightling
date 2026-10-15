@@ -8,18 +8,23 @@
 //! `-c compact_prompt=…`. It also asks for the summary as the reply and no tool call: since patch
 //! 0027 the compaction request offers the turn's tools (ling-tools' `compaction`).
 //!
-//! Off unless the variable is set: for now only the turn-end compaction bench sets it, in all
-//! of its arms (`scripts/turn_end_compaction_bench.py`). A `compact_prompt` or
-//! `experimental_compact_prompt_file` the user set, on the command line or in `config.toml`, is
-//! left alone.
+//! On by default at [`DEFAULT_WORDS`] since the 2026-10-14 bench (spec §14.3): every arm ran with
+//! it, and turn-end compactions took a median 53.5 s against 102 s the day before (the two over
+//! 115 s were summaries of 3,264 and 4,165 tokens: the bound is an instruction, not a hard limit).
+//! `DREAMFERENCE_MIGHTLING_COMPACT_SUMMARY_WORDS=0` switches it off; another number moves it. A
+//! `compact_prompt` or `experimental_compact_prompt_file` the user set, on the command line or in
+//! `config.toml`, is left alone.
 
 use std::ffi::OsString;
 use std::path::Path;
 
 use crate::compaction;
 
-/// The summary's length bound in words; unset, empty or 0 is off.
+/// The summary's length bound in words; unset or empty is [`DEFAULT_WORDS`], 0 is off.
 pub const WORDS_ENV: &str = "DREAMFERENCE_MIGHTLING_COMPACT_SUMMARY_WORDS";
+
+/// About 1,000 tokens, ~35 s at the measured 25–41 tok/s (the owner's value for the v2 bench).
+pub const DEFAULT_WORDS: u32 = 800;
 
 /// Codex's compaction prompt key (`config/src/config_toml.rs`).
 pub const PROMPT_KEY: &str = "compact_prompt";
@@ -34,9 +39,17 @@ pub fn prepare(args: Vec<OsString>, codex_home: &Path) -> Vec<OsString> {
     with_summary_cap(args, &config, words)
 }
 
-/// The bound [`WORDS_ENV`] asks for, if any.
+/// The bound [`WORDS_ENV`] asks for: [`DEFAULT_WORDS`] when it is unset, empty or not a number,
+/// `None` (off) for 0.
 pub fn words(env: Option<&str>) -> Option<u32> {
-    env.and_then(|value| value.trim().parse::<u32>().ok()).filter(|words| *words > 0)
+    match env.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Some(DEFAULT_WORDS),
+        Some(value) => match value.parse::<u32>() {
+            Ok(0) => None,
+            Ok(words) => Some(words),
+            Err(_) => Some(DEFAULT_WORDS),
+        },
+    }
 }
 
 /// Codex's compaction prompt with the length bound appended.
@@ -73,12 +86,12 @@ mod tests {
     }
 
     #[test]
-    fn off_unless_a_number_of_words_is_given() {
-        assert_eq!(words(None), None);
-        assert_eq!(words(Some("")), None);
+    fn on_at_800_words_unless_switched_off_with_0() {
+        assert_eq!(words(None), Some(DEFAULT_WORDS));
+        assert_eq!(words(Some("")), Some(DEFAULT_WORDS));
         assert_eq!(words(Some("0")), None);
-        assert_eq!(words(Some("many")), None);
-        assert_eq!(words(Some(" 800 ")), Some(800));
+        assert_eq!(words(Some("many")), Some(DEFAULT_WORDS));
+        assert_eq!(words(Some(" 500 ")), Some(500));
         let given = args(&["ling", "resume"]);
         assert_eq!(with_summary_cap(given.clone(), "", None), given);
     }

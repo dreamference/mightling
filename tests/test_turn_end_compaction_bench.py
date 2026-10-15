@@ -104,9 +104,9 @@ def _session(tmp_path, build):
 
 
 def test_the_turn_end_percentage_is_the_launchers():
-    assert bench.turn_end_percent(262_144, 94_144) == 26
-    assert bench.turn_end_threshold_tokens(262_144, 26) == 64_750
-    assert bench.turn_end_percent(262_144, 10**9) == 66  # at most 70% of Codex's 90% cap
+    assert bench.turn_end_percent(262_144, 94_144) == 20
+    assert bench.turn_end_threshold_tokens(262_144, 20) == 49_808
+    assert bench.turn_end_percent(262_144, 10**9) == 50  # at most 53% of Codex's 90% cap
     assert bench.turn_end_percent(0, 94_144) is None
 
 
