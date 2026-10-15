@@ -107,6 +107,10 @@ class SweBenchCommand:
                          help="How the agent is offered Code Mode's exec tool: function (translated, which SGLang "
                               "serves) or freeform (Codex's custom tool, which only ling-engine serves and SGLang "
                               "drops); the launcher's own choice when absent: function on SGLang and vLLM (spec §23)")
+        run.add_argument("--drop-old-outputs", action="store_true",
+                         help="When a session is about to compact, first drop the output of its older tool calls "
+                              "(the calls stay, the last 10 outputs and short ones are kept) and summarise only if "
+                              "that is not enough; sets the launcher's switch in every session (compaction spec §13)")
         run.add_argument("--review-turn", action="store_true",
                          help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
                               "read its diff, run the tests of the modules it changed and fix what does not hold, "
@@ -163,7 +167,8 @@ class SweBenchCommand:
                 task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn,
                 refine_version=args.refine_version or "v1",
                 hooks=cls._ids(args.hooks), restart_after_compactions=args.restart_after_compactions,
-                apply_patch=args.apply_patch, exec_tool=args.exec_tool)
+                apply_patch=args.apply_patch, exec_tool=args.exec_tool,
+                drop_old_outputs=args.drop_old_outputs)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":

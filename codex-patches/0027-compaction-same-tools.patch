@@ -1,0 +1,9 @@
+diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
+index 6e42f4a..1346273 100644
+--- a/codex-rs/core/src/client.rs
++++ b/codex-rs/core/src/client.rs
+@@ -946,3 +946,3 @@ impl ModelClient {
+                 prompt.base_instructions.text.clone(),
+-                Some(ling_tools::for_server(create_tools_raw_json_for_responses_api(&prompt.tools)?, &mut input).into()),
++                Some(ling_tools::for_request(create_tools_raw_json_for_responses_api(&prompt.tools)?, &mut input, &responses_metadata.thread_id, matches!(responses_metadata.request_kind, Some(crate::responses_metadata::CodexResponsesRequestKind::Compaction(_)))).into()),
+             )
