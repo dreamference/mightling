@@ -316,7 +316,7 @@ The output of `VLLMServerManager().build_launch_command("qwen3.8-27b-nvfp4-dflas
 
 | Parameter / Flag | Value | Source |
 | :--- | :--- | :--- |
-| Docker image | `lmsysorg/sglang@sha256:d6e7288627be…` | `launch_overrides["docker_image"]`, pinned by digest |
+| Docker image | `lmsysorg/sglang@sha256:b1259f3ea327…` (v0.5.21) | `launch_overrides["docker_image"]`, pinned by digest |
 | Container limits | `--cpus=14.0 --memory=85g --memory-swap=85g --oom-score-adj=800`, `--restart unless-stopped` | Derived from the host, `gpu_memory_utilization` 0.5 and the recipe's `container_headroom_gb` 24 |
 | Container env | `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1`, `HF_HUB_OFFLINE=1`, `TORCHINDUCTOR_CACHE_DIR=/root/.cache/dreamference/sglang/inductor` | The launcher |
 | Entry | `python3 -m sglang.launch_server` | `SGLangLaunchBuilder` |
@@ -328,7 +328,7 @@ The output of `VLLMServerManager().build_launch_command("qwen3.8-27b-nvfp4-dflas
 | `--speculative-algorithm`, `--speculative-draft-model-path`, `--speculative-num-draft-tokens`, `--speculative-draft-model-quantization` | `DFLASH`, the drafter's snapshot directory, `16`, `modelopt_fp4` | Recipe `speculative_config` |
 | `--chat-template` | a patched copy under `~/.cache/dreamference/chat-templates/` | `ChatTemplatePatcher`, from the recipe's `chat_template_patches` |
 | `--attention-backend` / `--sampling-backend` | `flashinfer` / `pytorch` | Recipe `extra_args` |
-| `--chunked-prefill-size`, `--max-running-requests`, `--cuda-graph-max-bs`, `--torch-compile-max-bs`, `--num-continuous-decode-steps` | `8192`, `8`, `8`, `4`, `2` | Recipe `extra_args` |
+| `--chunked-prefill-size`, `--max-running-requests`, `--cuda-graph-max-bs-decode`, `--torch-compile-max-bs`, `--num-continuous-decode-steps` | `8192`, `8`, `8`, `4`, `2` | Recipe `extra_args` |
 | `--mamba-radix-cache-strategy`, `--mamba-ssm-dtype`, `--max-mamba-cache-size` | `extra_buffer`, `bfloat16`, `96` | Recipe `extra_args` |
 | `--trust-remote-code`, `--tp-size 1`, `--disable-prefill-cuda-graph`, `--disable-flashinfer-autotune`, `--enable-torch-compile`, `--sleep-on-idle`, `--enable-metrics` | flags | Builder and recipe `extra_args` |
 
