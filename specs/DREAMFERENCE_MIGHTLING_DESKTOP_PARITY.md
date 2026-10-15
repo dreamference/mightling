@@ -3,7 +3,7 @@
 > - **Status:** proposed 2026-10-14 (owner: "I want the same functionality", "the same architecture as the Codex binary", "make it look like the original Codex desktop"). Supersedes §2 and §6 of [DREAMFERENCE_MIGHTLING_DESKTOP.md](./DREAMFERENCE_MIGHTLING_DESKTOP.md) (2026-10-03) as the feature inventory; that document's §3 (what identical can mean), §8 (security) and §13 (risks) still hold, and [DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) and [DREAMFERENCE_MIGHTLING_ASK.md](./DREAMFERENCE_MIGHTLING_ASK.md) describe what is built.
 > - **What "the Codex app" is now:** by 2026-10-03 the upstream vendor's package was already named after its chat product (DESKTOP §1), and its documentation now describes one **desktop app** (macOS, Windows, and a Linux preview) with three surfaces, Chat, Work and Codex; this document covers the Codex surface. Every feature below is read from the vendor's documentation as it stood on 2026-10-14, from the three videos the owner named (§8), and from the Codex source pinned in `codex/` (`rust-v0.158.0`). Nothing below was read from the vendor's app bundle beyond what §1 of the 2026-10-03 spec recorded.
 > - **Trade dress (DESKTOP §13):** layout and interaction may follow the vendor's; name, icon, colours, sounds and copy must not. §3 stays inside that line.
-> - **Dark mode** stays light-only for now (DESKTOP §14 question 3, decided 2026-10-03). §3.6 prepares the theme tokens the Appearance settings of §2.15 need, so the decision can be reversed in one change.
+> - **Dark mode** was light-only (DESKTOP §14 question 3, decided 2026-10-03). The look of §3, built on branch `desktop/codex-look` (2026-10-15, awaiting the owner's approval from its screenshots), adds the dark block of §3.6 and follows the system theme; approving that branch reverses the decision (§7 question 2).
 
 ---
 
@@ -451,12 +451,12 @@ The vendor's product surface, read from its public design language rather than i
 
 | Role | Today (`desktop/ui/src/styles.css`) | Specified |
 |---|---|---|
-| UI font | `Roboto, "Hanken Grotesk", system-ui, sans-serif` (Roboto is rarely installed on Linux, so this is `system-ui` in practice) | `system-ui, -apple-system, "Segoe UI", Inter, Roboto, "Hanken Grotesk", sans-serif`; **Inter** (OFL) bundled as a woff2 under `desktop/ui/src/fonts/` and used when the system has no good sans (the CSP already allows `font-src 'self'`; no remote font ever) |
+| UI font | `Roboto, "Hanken Grotesk", system-ui, sans-serif` (Roboto is rarely installed on Linux, so this is `system-ui` in practice) | `-apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Inter, Roboto, "Hanken Grotesk", sans-serif`: the system's own face on macOS and Windows, as the vendor's app uses, and **Inter** (OFL) everywhere else. `system-ui` is left out, since on Linux it is whatever the desktop configured (DejaVu Sans or Ubuntu here), so Inter is what Linux shows. Bundled as variable woff2 (Latin and Latin Extended) under `desktop/ui/src/fonts/` with its licence (the CSP already allows `font-src 'self'`; no remote font ever) |
 | Code font | `"Roboto Mono", "DM Mono", ui-monospace, monospace` 12.5 px | `ui-monospace, "SF Mono", Menlo, Consolas, "JetBrains Mono", "Roboto Mono", monospace` 13 px; **JetBrains Mono** (OFL) bundled |
 | Base size and leading | 14 px, browser default leading | 14 px UI, 15 px message text, line height 1.55–1.65 for prose and 1.4 for dense UI |
 | Weights | 600 for titles | 400 body, 500 labels and navigation, 600 emphasis; never 700 |
 | Headings in messages | browser defaults | 20 / 17 / 15 px at 600, tight leading, tracking normal |
-| Labels | 12 px uppercase, 0.04 em (project headers) | kept (matches the vendor's eyebrow labels) |
+| Labels | 12 px uppercase, 0.04 em (project headers) | 12 px at 500 in sentence case with a folder icon, as the vendor's project groups show; the threads beneath indented to the name |
 | User-settable | — | Appearance settings (§2.15) override the UI and code font families and the base size (font-size shortcuts, §2.1) through the `:root` tokens of §3.6 |
 
 ### 3.2 Shape, surfaces and borders
@@ -473,7 +473,7 @@ The vendor's product surface, read from its public design language rather than i
 
 ### 3.4 Icons
 
-Lucide (ISC), bundled as inline SVG, 16 px in rows and 20 px in the bar; Mightling's own mark for the app icon and the empty state. No emoji in controls (today's 📎 becomes the paperclip icon).
+Lucide (ISC), bundled as inline SVG, 16 px in rows and 20 px in the bar; Mightling's own mark for the app icon and the empty state. No emoji in controls (today's 📎 becomes the paperclip icon). Built as `desktop/ui/src/icons.tsx`: the path data of the sixteen icons used, copied from Lucide 0.460.0 with its ISC notice in `icons.LICENSE.txt`, rather than the `lucide-react` package (no new dependency in either `package.json`). The empty state's mark is the faceted ling of `images/mightling-logo-*.svg` without its wordmark, drawn from tokens so it follows the theme; the app icon itself (`desktop/electron/icons/`) is unchanged.
 
 ### 3.5 Libraries
 
@@ -488,7 +488,7 @@ All bundled at build time, licence-compatible with AGPL-3.0, no remote script, s
 | Mermaid | `mermaid` | MIT | rendered in a sandboxed iframe with `srcdoc`, since it evaluates text |
 | Terminal | `@xterm/xterm` with `addon-fit`, `addon-web-links` (loopback links only) | MIT | over `command/exec` tty or `process/*` |
 | Long lists | `@tanstack/react-virtual` | MIT | thread lists and long transcripts |
-| Icons | `lucide-react` | ISC | |
+| Icons | Lucide (path data in `icons.tsx`; `lucide-react` if the set grows past a few dozen) | ISC | |
 | Fonts | Inter, JetBrains Mono | OFL 1.1 | woff2, latin subsets |
 | Command menu, shortcuts, tabs, find | own components | — | small, and the vendor's are not available |
 
@@ -496,16 +496,19 @@ Electron stays stock 42.x pinned (ELECTRON spec): no custom Chromium, no `--no-s
 
 ### 3.6 Theme tokens
 
-`styles.css` keeps every colour, radius and font in `:root` tokens; the Appearance settings write overrides into a `<style>` the main process stores with the window's preferences. The token set:
+`styles.css` keeps every colour, radius and font in `:root` tokens; the Appearance settings write overrides into a `<style>` the main process stores with the window's preferences. The token set (the first four lines are the minimum `styles.test.ts` checks; the rest came with the build of 2026-10-15):
 
 ```
 --font-ui, --font-code, --size-base
 --canvas, --panel, --text, --muted, --line, --accent, --accent-soft, --danger, --add, --del
 --radius-sm 8px, --radius-md 12px, --radius-lg 16px
 --motion-fast 180ms, --motion-slow 320ms
+--size-prose 15px, --raised, --code-bg, --faint, --line-strong, --hover, --selected, --on-accent,
+--focus-ring, --add-text, --del-text, --notice, --shadow, --shadow-focus, --scrim, --scrollbar,
+--mark-* (the empty state's mark), --radius-pill, --ease, --column 760px, --sidebar 260px
 ```
 
-Dark mode, when decided, is one more block over the same tokens; `html[data-theme]` is already set by `preload.ts`.
+Dark mode is one more block, `:root[data-theme="dark"]`, redefining every colour token except `--accent` (a test checks that none is missed). `html[data-theme]` follows the system: the preload sets it before the first paint, `main.tsx` follows `prefers-color-scheme`, and the main process sends each `nativeTheme` change over the bridge (Electron on Linux does not always pass one on to the page's media query) and repaints the title bar overlay's symbols to match.
 
 ### 3.7 What stays Mightling's
 
@@ -573,8 +576,8 @@ File tree and file tabs; search files and go to line; the artifacts viewer (Mark
 
 ## 7. Open questions
 
-1. **Bundle fonts or not?** Inter and JetBrains Mono add about 400 KB to the bundle and remove the system-font variance between the node, the laptop and the desktop. Recommendation: bundle.
-2. **Dark mode** (DESKTOP §14 question 3): the Appearance page of §2.15 makes light-only visible as a gap. Recommendation: reverse the decision in Phase 2 item 10, since §3.6's tokens make it one block.
+1. ~~**Bundle fonts or not?**~~ Bundled on `desktop/codex-look`: Inter and JetBrains Mono as variable woff2, Latin and Latin Extended, 185 KB together, with their OFL licences beside them.
+2. **Dark mode** (DESKTOP §14 question 3): the Appearance page of §2.15 makes light-only visible as a gap. Built on `desktop/codex-look` as the system theme's follower (screenshots in both themes); the owner's approval of that branch reverses the 2026-10-03 decision, and the Appearance page (Phase 2 item 10) adds the light/dark/system choice.
 3. **`.codex/` or `.mightling/` for local environments?** Reading `.codex/` keeps shared repositories working for Codex users; writing it from Mightling's settings pages puts a vendor-named folder in the user's project. Recommendation: read both, write `.mightling/`.
 4. **`tectonic` in the bundle** for LaTeX previews (Phase 3): about 30 MB. Recommendation: later, behind a setting.
 5. **Pets:** worth Mightling's own art at all? Recommendation: ask the owner once Phase 2 ships.

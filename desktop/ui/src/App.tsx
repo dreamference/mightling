@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Cli
 import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAskThread, turnInput, type Attached } from "./ask";
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
+import { Icon, MightlingMark } from "./icons";
 import { renderMarkdown } from "./markdown";
 import { RpcClient, type ParamsOf } from "./rpc";
 import type { ServerNotification } from "./protocol/ServerNotification";
@@ -138,6 +139,11 @@ export function App() {
     let stop: (() => void) | undefined;
     bridge.listenBridge({
       view: (next) => showView(next),
+      // The desktop app's main process says when the system theme changes (nativeTheme), which
+      // on Linux the page's own `prefers-color-scheme` does not always follow (main.tsx).
+      theme: (next) => {
+        document.documentElement.dataset.theme = next;
+      },
       message: (message) => client.receive(message),
       stderr: (line) => dispatch({ type: "stderr", line }),
       protocolError: (line) => dispatch({ type: "protocolError", line }),
@@ -370,9 +376,10 @@ export function App() {
           {snippets.get(thread.id) ? <span className="snippet">{snippets.get(thread.id)}</span> : null}
         </button>
         {state.threads[thread.id]?.activeTurnId ? <span className="running" aria-label="running" /> : null}
+        <span className="age" title={new Date(thread.updatedAt * 1000).toLocaleString()}>{age(thread.updatedAt)}</span>
         <span className="row-actions">
-          <button className="icon" title="Rename" aria-label="Rename" onClick={() => setRenaming({ id: thread.id, name: thread.name || label })}>✎</button>
-          <button className="icon" title="Archive" aria-label="Archive" onClick={() => void archive(thread.id)}>⌫</button>
+          <button className="icon" title="Rename" aria-label="Rename" onClick={() => setRenaming({ id: thread.id, name: thread.name || label })}><Icon name="pencil" size={14} /></button>
+          <button className="icon" title="Archive" aria-label="Archive" onClick={() => void archive(thread.id)}><Icon name="archive" size={14} /></button>
         </span>
       </div>
     )
@@ -398,17 +405,26 @@ export function App() {
         </nav>
         {view === "ask" ? (
           <>
-            <button className="primary new-question" onClick={newQuestion}>New question</button>
-            <input className="search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search questions" aria-label="Search questions" />
+            <button className="nav-row new-question" onClick={newQuestion}><Icon name="squarePen" />New question</button>
+            <label className="search">
+              <Icon name="search" size={14} />
+              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search questions" aria-label="Search questions" />
+            </label>
+            <h2 className="section-label">Questions</h2>
             {asks.length === 0 ? <p className="empty small">{found ? "Nothing matches." : "No questions yet."}</p> : null}
             {asks.map((thread) => threadRow(thread, askTitle(thread)))}
           </>
         ) : (
           <>
-            <div className="new-thread">
+            <button className="nav-row new-thread-button" onClick={startThread}><Icon name="squarePen" />New thread</button>
+            <label className="new-thread" title="The project folder a new thread starts in">
+              <Icon name="folder" size={14} />
               <input value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
-              <button onClick={startThread}>New thread</button>
-            </div>
+            </label>
+            <label className="search">
+              <Icon name="search" size={14} />
+              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search threads" aria-label="Search threads" />
+            </label>
             {found ? (
               <section className="project">
                 <h2>Found</h2>
@@ -416,11 +432,10 @@ export function App() {
               </section>
             ) : projects(state, askRoot).map((project) => (
               <section key={project.cwd} className="project">
-                <h2 title={project.cwd} onClick={() => setNewCwd(project.cwd)}>{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}</h2>
+                <h2 title={project.cwd} onClick={() => setNewCwd(project.cwd)}><Icon name="folder" size={14} />{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}</h2>
                 {project.threads.map((thread) => threadRow(thread, thread.name || thread.preview || "(new thread)"))}
               </section>
             ))}
-            <input className="search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search threads" aria-label="Search threads" />
           </>
         )}
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
@@ -429,7 +444,7 @@ export function App() {
 
       <main className="thread-pane">
         <header className="bar" onDoubleClick={() => HOST === "electron" && bridge.windowControl("maximize").catch(() => {})}>
-          <button className="icon menu-toggle" aria-label="Threads" onClick={() => setDrawer(!drawer)}>☰</button>
+          <button className="icon menu-toggle" aria-label="Threads" onClick={() => setDrawer(!drawer)}><Icon name="panelLeft" size={20} strokeWidth={1.75} /></button>
           <span className="title">{title}</span>
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
@@ -455,8 +470,9 @@ export function App() {
                 .then(() => openThread(selected.thread.id)).catch(notice)} />
           )) : view === "ask" ? (
             <div className="empty ask-empty">
+              <MightlingMark size={56} />
               <h1>Ask Mightling</h1>
-              <p>A question with no project: Mightling answers in a folder of its own, searching the web when it needs to{airgap?.level === "on" ? ", except that airgapped is on, so web search is off" : ""}. Attach images or files with the clip, or paste a screenshot.</p>
+              <p>A question with no project: Mightling answers in a folder of its own, searching the web when it needs to{airgap?.level === "on" ? ", except that airgapped is on, so web search is off" : ""}. Attach images or files with the paperclip, or paste a screenshot.</p>
             </div>
           ) : <p className="empty">Open a thread, or start one in a project folder.</p>}
           {threadRequests.map((request) => (
@@ -467,44 +483,48 @@ export function App() {
 
         {canCompose ? (
           <footer className="composer">
-            {pending.length > 0 ? (
-              <div className="attachments">
-                {pending.map((item) => (
-                  <span key={item.id} className="attachment">
-                    {item.preview ? <img src={item.preview} alt="" /> : null}
-                    <span className="attachment-name">{item.name}</span>
-                    <button className="icon" aria-label={`Remove ${item.name}`} onClick={() => removeFile(item.id)}>×</button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={3} onPaste={onPaste}
-              placeholder={selected?.activeTurnId ? "Steer the running turn…" : view === "ask" ? "Ask anything…" : "Ask Mightling…"}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
-                if (event.key === "Escape" && selected?.activeTurnId) stop();
-              }} />
-            <div className="composer-actions">
-              {view === "ask" ? (
-                <>
-                  <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
-                    addFiles(Array.from(event.target.files ?? []));
-                    event.target.value = "";
-                  }} />
-                  <button className="attach" onClick={() => fileInput.current?.click()} title="Attach images or files" aria-label="Attach">📎</button>
-                  <span className="spacer" />
-                </>
-              ) : (
-                <select value={profile} onChange={(event) => setProfile(event.target.value)} aria-label="Permissions">
-                  {choices.map((choice) => (
-                    <option key={choice.id} value={choice.id} disabled={choice.disabled} title={choice.reason ?? undefined}>
-                      {choice.label}{choice.disabled ? " (disabled)" : ""}
-                    </option>
+            <div className="composer-card">
+              {pending.length > 0 ? (
+                <div className="attachments">
+                  {pending.map((item) => (
+                    <span key={item.id} className="attachment">
+                      {item.preview ? <img src={item.preview} alt="" /> : null}
+                      <span className="attachment-name">{item.name}</span>
+                      <button className="icon" aria-label={`Remove ${item.name}`} onClick={() => removeFile(item.id)}><Icon name="x" size={14} /></button>
+                    </span>
                   ))}
-                </select>
-              )}
-              {selected?.activeTurnId ? <button onClick={stop}>Stop</button> : null}
-              <button className="primary" disabled={sending} onClick={() => void send()}>{selected?.activeTurnId ? "Steer" : sending ? "Sending…" : "Send"}</button>
+                </div>
+              ) : null}
+              <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={3} onPaste={onPaste}
+                placeholder={selected?.activeTurnId ? "Steer the running turn…" : view === "ask" ? "Ask anything…" : "Ask Mightling…"}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
+                  if (event.key === "Escape" && selected?.activeTurnId) stop();
+                }} />
+              <div className="composer-actions">
+                {view === "ask" ? (
+                  <>
+                    <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
+                      addFiles(Array.from(event.target.files ?? []));
+                      event.target.value = "";
+                    }} />
+                    <button className="icon attach" onClick={() => fileInput.current?.click()} title="Attach images or files" aria-label="Attach"><Icon name="paperclip" size={18} /></button>
+                  </>
+                ) : (
+                  <select value={profile} onChange={(event) => setProfile(event.target.value)} aria-label="Permissions">
+                    {choices.map((choice) => (
+                      <option key={choice.id} value={choice.id} disabled={choice.disabled} title={choice.reason ?? undefined}>
+                        {choice.label}{choice.disabled ? " (disabled)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <span className="spacer" />
+                {selected?.activeTurnId ? <button className="round stop" onClick={stop} title="Stop (Esc)" aria-label="Stop"><Icon name="square" size={14} /></button> : null}
+                {selected?.activeTurnId
+                  ? <button className="steer" disabled={sending} onClick={() => void send()}>{sending ? "Sending…" : "Steer"}</button>
+                  : <button className="round primary send" disabled={sending} onClick={() => void send()} title="Send (Enter)" aria-label={sending ? "Sending…" : "Send"}><Icon name="arrowUp" size={18} /></button>}
+              </div>
             </div>
           </footer>
         ) : null}
@@ -517,12 +537,12 @@ export function App() {
 function CopyButton({ text: value }: { text: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   return (
-    <button className="link-button copy" onClick={() => {
+    <button className="icon copy" title="Copy" aria-label={state === "copied" ? "copied" : state === "failed" ? "could not copy" : "copy"} onClick={() => {
       void copyText(value).then((copied) => {
         setState(copied ? "copied" : "failed");
         setTimeout(() => setState("idle"), 1500);
       });
-    }}>{state === "copied" ? "copied" : state === "failed" ? "could not copy" : "copy"}</button>
+    }}><Icon name={state === "copied" ? "check" : "copy"} size={14} />{state === "failed" ? "could not copy" : null}</button>
   );
 }
 
@@ -554,7 +574,7 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void }) {
         </details>
       ) : null}
       {turn.status !== "inProgress" && props.last ? (
-        <button className="link-button" onClick={props.onRevert} title="Undo this turn and what it changed">revert</button>
+        <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button>
       ) : null}
     </section>
   );
@@ -580,7 +600,7 @@ function Item({ item }: { item: ThreadItem }) {
     case "commandExecution":
       return (
         <details className={`item command status-${item.status}`} open={item.status === "inProgress"}>
-          <summary><code>{item.command}</code>{item.exitCode !== null && item.exitCode !== 0 ? <span className="exit"> exit {item.exitCode}</span> : null}</summary>
+          <summary><Icon name="terminal" size={14} /><code>{item.command}</code>{item.exitCode !== null && item.exitCode !== 0 ? <span className="exit"> exit {item.exitCode}</span> : null}</summary>
           {item.aggregatedOutput ? <pre>{item.aggregatedOutput}</pre> : null}
         </details>
       );
@@ -589,7 +609,7 @@ function Item({ item }: { item: ThreadItem }) {
         <div className={`item files status-${item.status}`}>
           {item.changes.map((change) => (
             <details key={change.path}>
-              <summary>{change.kind.type === "add" ? "added" : change.kind.type === "delete" ? "deleted" : "edited"} <code>{change.path}</code></summary>
+              <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code>{change.path}</code><DiffStat text={change.diff} /></summary>
               <Diff text={change.diff} />
             </details>
           ))}
@@ -616,6 +636,25 @@ function describeInput(input: UserInput): string {
     default:
       return `[${input.type}]`;
   }
+}
+
+/** The `+added −removed` counts of a unified diff, as the summary line shows them. */
+function DiffStat({ text: diff }: { text: string }) {
+  const lines = diff.split("\n");
+  const added = lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
+  const removed = lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length;
+  return <span className="diffstat"><span className="plus">+{added}</span> <span className="minus">−{removed}</span></span>;
+}
+
+/** How long ago a thread changed, as a sidebar row shows it: now, 5m, 3h, 2d, 4w, then the date. */
+function age(seconds: number): string {
+  const elapsed = Math.max(0, Date.now() / 1000 - seconds);
+  if (elapsed < 60) return "now";
+  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`;
+  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h`;
+  if (elapsed < 7 * 86400) return `${Math.floor(elapsed / 86400)}d`;
+  if (elapsed < 5 * 7 * 86400) return `${Math.floor(elapsed / (7 * 86400))}w`;
+  return new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function Diff({ text: diff }: { text: string }) {

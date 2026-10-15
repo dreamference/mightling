@@ -8,5 +8,7 @@ export default defineConfig({
   plugins: [react()],
   base: "./",
   build: { outDir: "dist", emptyOutDir: true, target: "es2022", sourcemap: false },
-  test: { environment: "node", include: ["src/**/*.test.ts"] },
+  // `css`: the look's test (src/styles.test.ts) reads the stylesheet as text, which Vitest
+  // otherwise empties.
+  test: { environment: "node", include: ["src/**/*.test.ts"], css: { include: [/styles\.css/] } },
 });
