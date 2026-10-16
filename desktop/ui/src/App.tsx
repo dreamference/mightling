@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAsk
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, SLASH_COMMANDS, collaborationMode, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, collaborationMode, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -37,6 +37,7 @@ import {
 } from "./store";
 import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./BottomPanel";
 import { CommandMenu } from "./CommandMenu";
+import { ExtensionsView, type ExtensionsTab } from "./ExtensionsView";
 import { ReviewPane } from "./ReviewPane";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
@@ -125,6 +126,7 @@ export function App() {
   /** Threads in Plan mode (§2.3); "" stands for the next new thread. */
   const [planning, setPlanning] = useState<Set<string>>(new Set());
   const [planAvailable, setPlanAvailable] = useState(false);
+  const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
   const updatePrefsRef = useRef<(values: Partial<Prefs>) => void>(() => {});
@@ -813,7 +815,6 @@ export function App() {
     }
   };
 
-  const SLASH_SKILLS = SLASH_COMMANDS.find((command) => command.name === "skills") as SlashCommand;
   /** What a `ling://` link names (DESKTOP_PARITY §2.20). */
   const linkRef = useRef<(target: bridge.LinkTarget) => void>(() => {});
   linkRef.current = (target) => {
@@ -827,7 +828,7 @@ export function App() {
       setSettingsPage("general");
       return setSettingsOpen(true);
     }
-    if (target.page === "skills") return void runCommand(SLASH_SKILLS);
+    if (target.page === "skills") return setExtensions("skills");
     if (target.page === "night" || target.page === "plugins") return dispatch({ type: "notice", message: `The ${target.page === "night" ? "Scheduled" : "Plugins"} view comes with a later update; the link was received.` });
     showView("work");
     if (target.cwd) setNewCwd(target.cwd);
@@ -1139,13 +1140,13 @@ export function App() {
         case "status":
           return setInfo({ title: "Status", body: <StatusInfo model={modelChoice ?? servedModel} effort={effort} profile={choices.find((choice) => choice.id === profile)?.label ?? profile} cwd={selected?.thread.cwd ?? composeRoot} airgap={airgap} usage={contextUse(selected?.usage ?? null)} threadId={threadId} followUp={prefs.followUp} /> });
         case "skills":
-          return setInfo({ title: "Skills", body: <SkillsInfo skills={rootSkills} root={composeRoot} /> });
+          return setExtensions("skills");
+        case "apps":
+          return setExtensions("apps");
         case "mention":
           return setDraft((text) => `${text}${text && !/\s$/.test(text) ? " " : ""}@`);
-        case "mcp": {
-          const answerList = (await client.request("mcpServerStatus/list", {})) as { data?: { name: string; tools: Record<string, unknown>; toolsError: string | null }[] };
-          return setInfo({ title: "MCP servers", body: <McpInfo servers={answerList.data ?? []} /> });
-        }
+        case "mcp":
+          return setExtensions("mcp");
         case "diff": {
           if (!composeRoot) return;
           const diff = (await client.request("gitDiffToRemote", { cwd: composeRoot })) as { sha?: string; diff?: string };
@@ -1273,7 +1274,8 @@ export function App() {
       event.preventDefault();
       setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu)) {
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions)) {
+      setExtensions(null);
       setPicker("closed");
       setSettingsOpen(false);
       setMenuOpen(false);
@@ -1469,6 +1471,7 @@ export function App() {
           </section>
         ) : null}
         <span className="sidebar-spacer" />
+        {!POPOUT ? <button className="nav-row skills-button" onClick={() => setExtensions("skills")} title="Skills, MCP servers and apps"><Icon name="info" size={14} />Skills and tools</button> : null}
         <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title="Settings (Ctrl+,)"><Icon name="settings" size={14} />Settings</button>
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
       </aside>
@@ -1626,6 +1629,7 @@ export function App() {
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice} /> : null}
+      {extensions ? <ExtensionsView client={client} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
       {menuOpen ? <CommandMenu entries={menuOpen === "projects" ? menuEntries().filter((entry) => entry.kind === "project") : menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
     </div>
   );
@@ -1675,29 +1679,6 @@ function StatusInfo(props: { model: string | null; effort: string | null; profil
     ["Thread", props.threadId ?? "none yet"],
   ];
   return <dl className="info-rows">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
-}
-
-function SkillsInfo(props: { skills: SkillMetadata[]; root: string | null }) {
-  if (!props.root) return <p className="empty small">Open a thread or name a folder to see its skills.</p>;
-  if (props.skills.length === 0) return <p className="empty small">No skills for {props.root}.</p>;
-  return (
-    <ul className="info-items">
-      {props.skills.map((skill) => (
-        <li key={skill.path}><code>${skill.name}</code>{skill.enabled ? "" : " (off)"} — {skill.shortDescription || skill.description}</li>
-      ))}
-    </ul>
-  );
-}
-
-function McpInfo(props: { servers: { name: string; tools: Record<string, unknown>; toolsError: string | null }[] }) {
-  if (props.servers.length === 0) return <p className="empty small">No MCP servers are configured.</p>;
-  return (
-    <ul className="info-items">
-      {props.servers.map((server) => (
-        <li key={server.name}><strong>{server.name}</strong>: {server.toolsError ? `tools unavailable (${server.toolsError})` : Object.keys(server.tools).sort().join(", ") || "no tools"}</li>
-      ))}
-    </ul>
-  );
 }
 
 /** A button that copies `text`, with the fallback a plain-HTTP page needs (clipboard.ts). */

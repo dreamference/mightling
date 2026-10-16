@@ -93,6 +93,7 @@ const skills = [
   { name: "pdf-search", description: "Search inside PDF files the user has", shortDescription: "Search inside PDFs", path: "/skills/pdf-search/SKILL.md", scope: "user", enabled: true, pluginId: null },
   { name: "release-notes", description: "Write release notes from the git log", path: "/skills/release-notes/SKILL.md", scope: "repo", enabled: true, pluginId: null },
   { name: "night-shift", description: "Queue a task for tonight", path: "/skills/night-shift/SKILL.md", scope: "user", enabled: true, pluginId: null },
+  { name: "slides", description: "Make a slide deck from notes", path: "/home/u/.mightling/skills/from-otheragent/slides/SKILL.md", scope: "user", enabled: true, pluginId: null },
 ];
 require("readline").createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(log, line + "\\n");
@@ -180,6 +181,9 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       return say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
     }
     case "turn/steer": return answer({ turnId: p.expectedTurnId });
+    case "app/list": return answer({ data: [{ id: "gmail", name: "Gmail", description: "Search and read your mail", logoUrl: null, logoUrlDark: null, iconAssets: null, iconDarkAssets: null,
+      distributionChannel: null, branding: null, appMetadata: null, labels: null, installUrl: null, isAccessible: true, isEnabled: true, pluginDisplayNames: [] }], nextCursor: null });
+    case "config/value/write": return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
     default: return answer({ data: [] });
   }
