@@ -203,6 +203,42 @@
       "message": {"id": 48, "method": "thread/goal/clear", "params": {"threadId": "t"}},
       "accept": true,
       "out": {"id": 48, "method": "thread/goal/clear", "params": {"threadId": "t"}}
+    },
+    {
+      "name": "skills/config/write passes: a skill turned off or on (DESKTOP_PARITY item 11)",
+      "message": {"id": 49, "method": "skills/config/write", "params": {"path": "/w/.mightling/skills/x/SKILL.md", "enabled": false}},
+      "accept": true,
+      "out": {"id": 49, "method": "skills/config/write", "params": {"path": "/w/.mightling/skills/x/SKILL.md", "enabled": false}}
+    },
+    {
+      "name": "plugin/list passes: the local and repository marketplaces' plugins",
+      "message": {"id": 50, "method": "plugin/list", "params": {"cwds": ["/w"]}},
+      "accept": true,
+      "out": {"id": 50, "method": "plugin/list", "params": {"cwds": ["/w"]}}
+    },
+    {
+      "name": "plugin/install passes: a plugin from a local marketplace",
+      "message": {"id": 51, "method": "plugin/install", "params": {"marketplacePath": "/w/.mightling/marketplace.json", "pluginName": "lint"}},
+      "accept": true,
+      "out": {"id": 51, "method": "plugin/install", "params": {"marketplacePath": "/w/.mightling/marketplace.json", "pluginName": "lint"}}
+    },
+    {
+      "name": "plugin/uninstall passes",
+      "message": {"id": 52, "method": "plugin/uninstall", "params": {"pluginId": "lint@local"}},
+      "accept": true,
+      "out": {"id": 52, "method": "plugin/uninstall", "params": {"pluginId": "lint@local"}}
+    },
+    {
+      "name": "config/mcpServer/reload passes: MCP servers read again after a change",
+      "message": {"id": 53, "method": "config/mcpServer/reload", "params": {}},
+      "accept": true,
+      "out": {"id": 53, "method": "config/mcpServer/reload", "params": {}}
+    },
+    {
+      "name": "hooks/list passes: the lifecycle hooks, read only",
+      "message": {"id": 54, "method": "hooks/list", "params": {"cwds": ["/w"]}},
+      "accept": true,
+      "out": {"id": 54, "method": "hooks/list", "params": {"cwds": ["/w"]}}
     }
   ]
 }
