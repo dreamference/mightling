@@ -150,6 +150,41 @@
       "name": "an object that is neither a request, a notification nor an answer is refused",
       "message": {"hello": "world"},
       "accept": false
+    },
+    {
+      "name": "review/start passes: /review runs on the server, inline or in a thread of its own (DESKTOP_PARITY item 6)",
+      "message": {"id": 40, "method": "review/start", "params": {"threadId": "t", "target": {"type": "uncommittedChanges"}, "delivery": "inline"}},
+      "accept": true,
+      "out": {"id": 40, "method": "review/start", "params": {"threadId": "t", "target": {"type": "uncommittedChanges"}, "delivery": "inline"}}
+    },
+    {
+      "name": "command/exec passes: a terminal tab is a PTY under the thread's permission profile (DESKTOP_PARITY item 8)",
+      "message": {"id": 41, "method": "command/exec", "params": {"command": ["/bin/bash", "-l"], "processId": "term-1", "tty": true, "disableTimeout": true, "disableOutputCap": true, "cwd": "/w", "size": {"rows": 24, "cols": 80}, "permissionProfile": ":workspace"}},
+      "accept": true,
+      "out": {"id": 41, "method": "command/exec", "params": {"command": ["/bin/bash", "-l"], "processId": "term-1", "tty": true, "disableTimeout": true, "disableOutputCap": true, "cwd": "/w", "size": {"rows": 24, "cols": 80}, "permissionProfile": ":workspace"}}
+    },
+    {
+      "name": "command/exec/write passes: keystrokes for a terminal tab",
+      "message": {"id": 42, "method": "command/exec/write", "params": {"processId": "term-1", "deltaBase64": "bHMK"}},
+      "accept": true,
+      "out": {"id": 42, "method": "command/exec/write", "params": {"processId": "term-1", "deltaBase64": "bHMK"}}
+    },
+    {
+      "name": "command/exec/resize passes: a terminal tab's new size",
+      "message": {"id": 43, "method": "command/exec/resize", "params": {"processId": "term-1", "size": {"rows": 40, "cols": 120}}},
+      "accept": true,
+      "out": {"id": 43, "method": "command/exec/resize", "params": {"processId": "term-1", "size": {"rows": 40, "cols": 120}}}
+    },
+    {
+      "name": "command/exec/terminate passes: a terminal tab closed",
+      "message": {"id": 44, "method": "command/exec/terminate", "params": {"processId": "term-1"}},
+      "accept": true,
+      "out": {"id": 44, "method": "command/exec/terminate", "params": {"processId": "term-1"}}
+    },
+    {
+      "name": "thread/shellCommand stays refused: it runs unsandboxed, past /airgapped on",
+      "message": {"id": 45, "method": "thread/shellCommand", "params": {"threadId": "t", "command": "curl example.com"}},
+      "accept": false
     }
   ]
 }
