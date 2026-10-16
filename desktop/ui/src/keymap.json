@@ -111,7 +111,7 @@
     "Ctrl+J"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "terminal",
@@ -663,7 +663,7 @@
     "Super+Shift+D"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "searchFiles",

@@ -319,13 +319,15 @@ export function reduce(state: WorkState, action: Action): WorkState {
  * The sidebar: threads grouped by project folder, most recently updated first (§6.1). Ask threads
  * have a list of their own (ask.ts), not one "project" per scratch folder.
  */
-export function projects(state: WorkState, askRoot: string | null = null): { cwd: string; threads: Thread[] }[] {
+export function projects(state: WorkState, askRoot: string | null = null, folderOf: (thread: Thread) => string = (thread) => thread.cwd): { cwd: string; threads: Thread[] }[] {
   const byCwd = new Map<string, Thread[]>();
   for (const view of Object.values(state.threads)) {
     if (view.thread.ephemeral || view.thread.parentThreadId || isAskThread(view.thread, askRoot)) continue;
-    const list = byCwd.get(view.thread.cwd) ?? [];
+    // A thread in a managed worktree is listed under the project it was started for (DESKTOP_PARITY §2.6).
+    const folder = folderOf(view.thread);
+    const list = byCwd.get(folder) ?? [];
     list.push(view.thread);
-    byCwd.set(view.thread.cwd, list);
+    byCwd.set(folder, list);
   }
   const recency = (thread: Thread) => thread.recencyAt ?? thread.updatedAt;
   return [...byCwd.entries()]

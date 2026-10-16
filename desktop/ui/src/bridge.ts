@@ -113,6 +113,70 @@ export const git = {
   pullRequest: (root: string, thread: string | null) => send<string>({ type: "git/pull-request", root, thread }),
 };
 
+export interface ManagedWorktree {
+  root: string;
+  cwd: string;
+  sourceRoot: string;
+  sourceCwd: string;
+  headSha: string;
+  branch: string | null;
+  included?: string[];
+  owner?: string | null;
+  modified?: number;
+}
+
+/** Managed worktrees and hand-off (desktop/electron/src/worktree.ts); `root` is the configured worktree root, null for the default. */
+export const worktrees = {
+  create: (sourceCwd: string, base: string | null, withChanges: boolean, root: string | null) => send<ManagedWorktree>({ type: "worktree/create", sourceCwd, base, withChanges, root }),
+  bind: (checkout: string, thread: string) => send<void>({ type: "worktree/bind", checkout, thread }),
+  list: (sourceCwd: string, root: string | null) => send<ManagedWorktree[]>({ type: "worktree/list", sourceCwd, root }),
+  remove: (sourceCwd: string, checkout: string, root: string | null, snapshot: string | null) => send<string | null>({ type: "worktree/remove", sourceCwd, checkout, root, snapshot }),
+  restore: (sourceCwd: string, snapshot: string, root: string | null) => send<ManagedWorktree>({ type: "worktree/restore", sourceCwd, snapshot, root }),
+  branch: (checkout: string, name: string) => send<string>({ type: "worktree/branch", checkout, name }),
+  handOff: (direction: "toLocal" | "toWorktree", worktree: string, local: string, root: string | null, thread: string) =>
+    send<{ snapshot: string | null }>({ type: "worktree/handoff", direction, worktree, local, root, thread }),
+  branches: (root: string) => send<{ current: string | null; branches: string[] }>({ type: "git/branches", root }),
+};
+
+export interface EnvironmentAction {
+  name: string;
+  icon: string;
+  script: string;
+}
+
+export interface LocalEnvironment {
+  file: string;
+  folder: string;
+  name: string;
+  setup: string;
+  actions: EnvironmentAction[];
+}
+
+/** A project's local environments, read from .codex/ and .mightling/; written to .mightling/ only. */
+export const localEnvironments = (project: string) => send<{ found: LocalEnvironment[]; problems: string[] }>({ type: "env/list", project });
+export const writeEnvironment = (project: string, environment: { name: string; setup: string; actions: EnvironmentAction[] }) =>
+  send<string>({ type: "env/write", project, environment });
+
+/**
+ * Runs a project environment's setup or action in the bottom panel, in `cwd` (the project or one of
+ * its worktrees); the main process reads the script from the project. Output arrives as task events.
+ */
+export const runTask = (project: string, file: string, action: number | "setup", cwd: string, thread: string | null) =>
+  send<string>({ type: "task/run", project, file, action, cwd, thread });
+export const stopTask = (id: string) => send<null>({ type: "task/stop", id });
+export const openTerminal = (dir: string) => send<null>({ type: "open/terminal", dir });
+export const openFolder = (dir: string) => send<null>({ type: "open/folder", dir });
+export const openEditorAt = (dir: string, editor: string | null) => send<null>({ type: "open/editor", dir, editor });
+
+export interface TaskEvent {
+  id: string;
+  kind: "started" | "output" | "exit";
+  label?: string;
+  cwd?: string;
+  data?: string;
+  code?: number | null;
+}
+
 export const listEditors = () => send<Editor[]>({ type: "editors/list" });
 /** Opens a file of `root` in `editor` (null: the system's choice), at `line` when given. */
 export const openInEditor = (root: string, path: string, line: number | null, editor: string | null) =>
@@ -169,6 +233,8 @@ export interface BridgeEvents {
   exit: (code: number | null) => void;
   /** The app asked for Ask or Work (its menu, a second instance, a link). */
   view?: (view: "ask" | "work") => void;
+  /** A bottom-panel task's progress. */
+  task?: (event: TaskEvent) => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -187,6 +253,8 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
         return events.exit(typeof data.payload === "number" ? data.payload : null);
       case "view":
         return events.view?.(data.payload === "ask" ? "ask" : "work");
+      case "task://event":
+        return events.task?.(data.payload as TaskEvent);
     }
   };
   window.addEventListener("message", onMessage);
