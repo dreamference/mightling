@@ -4,7 +4,7 @@
 // its bounds remembered between runs.
 
 import path from "node:path";
-import { BrowserWindow, app, nativeTheme, shell } from "electron";
+import { BrowserWindow, app, shell } from "electron";
 
 import appConfig from "../app.json";
 import { WORK_URL } from "./app-protocol";
@@ -19,7 +19,6 @@ export interface WorkOptions {
 
 export function openWork(options: WorkOptions): BrowserWindow {
   const { work } = appConfig;
-  const dark = nativeTheme.shouldUseDarkColors;
   const window = new BrowserWindow({
     title: work.title,
     width: work.width,
@@ -31,7 +30,7 @@ export function openWork(options: WorkOptions): BrowserWindow {
     backgroundColor: "#00000000",
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#00000000", symbolColor: dark ? "#ffffff" : "#1f1f1f", height: 36 },
+    titleBarOverlay: { color: "#00000000", symbolColor: "#1f1f1f", height: 36 },
     webPreferences: {
       preload: options.preload,
       sandbox: true,

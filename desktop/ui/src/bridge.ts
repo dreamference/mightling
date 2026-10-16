@@ -95,8 +95,6 @@ export interface BridgeEvents {
   stderr: (line: string) => void;
   protocolError: (line: string) => void;
   exit: (code: number | null) => void;
-  /** The system theme changed; the page may restyle. */
-  theme?: (theme: "light" | "dark") => void;
   /** The app asked for Ask or Work (its menu, a second instance, a link). */
   view?: (view: "ask" | "work") => void;
 }
@@ -115,8 +113,6 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
         return events.protocolError(String(data.payload));
       case "work://exit":
         return events.exit(typeof data.payload === "number" ? data.payload : null);
-      case "theme":
-        return events.theme?.(data.payload === "dark" ? "dark" : "light");
       case "view":
         return events.view?.(data.payload === "ask" ? "ask" : "work");
     }
