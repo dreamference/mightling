@@ -33,9 +33,9 @@ POLICY_TO_ADD = {
     "project/delete": 3, "project/import": 3, "project/move": 3,
     "threadSection/create": 3, "threadSection/list": 3, "threadSection/update": 3, "threadSection/delete": 3,
     "thread/section/move": 3, "thread/searchOccurrences": 3,
-    "skills/config/write": 11, "skills/extraRoots/set": 11, "plugin/skill/read": 11,
-    "plugin/list": 11, "plugin/read": 11, "plugin/search": 11, "plugin/install": 11, "plugin/uninstall": 11,
-    "plugin/installed": 11, "config/mcpServer/reload": 11, "app/read": 11, "app/installed": 11, "hooks/list": 11,
+    "skills/extraRoots/set": 11, "plugin/skill/read": 11,
+    "plugin/read": 11, "plugin/search": 11,
+    "plugin/installed": 11, "app/read": 11, "app/installed": 11,
     "thread/memoryMode/set": 13, "memory/status": 13, "memory/reset": 13,
 }
 

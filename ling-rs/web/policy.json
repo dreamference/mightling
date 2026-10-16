@@ -50,6 +50,12 @@
     "fuzzyFileSearch",
     "gitDiffToRemote",
     "skills/list",
+    "skills/config/write",
+    "plugin/list",
+    "plugin/install",
+    "plugin/uninstall",
+    "config/mcpServer/reload",
+    "hooks/list",
     "mcpServerStatus/list",
     "app/list"
   ],
