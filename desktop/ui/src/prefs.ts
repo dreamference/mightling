@@ -19,6 +19,24 @@ export interface Prefs {
   editor: string | null;
   /** The review pane's diffs: one column, or old and new side by side. */
   diffLayout: "unified" | "split";
+  /** Threads that work in a managed worktree, by thread id (worktrees.ts). */
+  worktreeThreads: Record<string, WorktreeLink>;
+  /** Worktrees made permanent: projects of their own, never cleaned up. */
+  permanentWorktrees: string[];
+  /** Whether the bottom panel is open (Ctrl+J). */
+  bottomPanel: boolean;
+}
+
+/** A thread's worktree, where its work is now, and the snapshot kept when the worktree was removed. */
+export interface WorktreeLink {
+  checkout: string;
+  /** The thread's folder inside the worktree. */
+  cwd: string;
+  /** The local checkout's root, and the folder the thread was started for. */
+  source: string;
+  sourceCwd: string;
+  location: "worktree" | "local";
+  snapshot: string | null;
 }
 
 type Spec = { default: unknown; enum?: string[]; type?: string; nullable?: boolean };
