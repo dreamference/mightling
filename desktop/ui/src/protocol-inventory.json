@@ -1,0 +1,372 @@
+{
+ "comment": "The app-server protocol of the pinned Codex (rust-v0.158.0), method by method, grouped by DESKTOP_PARITY \u00a71.4's domains. tests/test_desktop_parity.py checks it against the generated types in this folder (and against the submodule's schema when it is there): a Codex bump that adds, removes or renames a method fails until this file, the spec's \u00a71.4 and ling-rs/web/policy.json have been reviewed.",
+ "kinds": {
+  "ClientRequest": {
+   "Session": [
+    "experimentalFeature/enablement/set",
+    "experimentalFeature/list",
+    "initialize",
+    "server/diagnostics"
+   ],
+   "Account (vendor)": [
+    "account/bedrock/discover",
+    "account/bedrock/setup",
+    "account/gatewayOAuth/cancel",
+    "account/gatewayOAuth/login",
+    "account/gatewayOAuth/read",
+    "account/login/cancel",
+    "account/login/start",
+    "account/logout",
+    "account/rateLimitResetCredit/consume",
+    "account/rateLimits/read",
+    "account/read",
+    "account/sendAddCreditsNudgeEmail",
+    "account/usage/read",
+    "account/workspaceMessages/read",
+    "getAuthStatus"
+   ],
+   "Models and modes": [
+    "collaborationMode/list",
+    "configRequirements/read",
+    "model/list",
+    "modelProvider/capabilities/read",
+    "permissionProfile/list"
+   ],
+   "Config": [
+    "config/batchWrite",
+    "config/mcpServer/reload",
+    "config/read",
+    "config/value/write"
+   ],
+   "Projects": [
+    "project/create",
+    "project/delete",
+    "project/import",
+    "project/list",
+    "project/move",
+    "project/read",
+    "project/update"
+   ],
+   "Thread sections": [
+    "thread/section/move",
+    "threadSection/create",
+    "threadSection/delete",
+    "threadSection/list",
+    "threadSection/update"
+   ],
+   "Goal": [
+    "thread/goal/clear",
+    "thread/goal/get",
+    "thread/goal/set"
+   ],
+   "Queue": [
+    "thread/queue/add",
+    "thread/queue/delete",
+    "thread/queue/list",
+    "thread/queue/reorder",
+    "thread/queue/start",
+    "thread/queue/update"
+   ],
+   "Realtime (vendor)": [
+    "thread/realtime/appendAudio",
+    "thread/realtime/appendSpeech",
+    "thread/realtime/appendText",
+    "thread/realtime/listVoices",
+    "thread/realtime/start",
+    "thread/realtime/stop"
+   ],
+   "Threads": [
+    "getConversationSummary",
+    "thread/approveGuardianDeniedAction",
+    "thread/archive",
+    "thread/attachment/add",
+    "thread/attachment/list",
+    "thread/attachment/remove",
+    "thread/backgroundTerminals/clean",
+    "thread/backgroundTerminals/list",
+    "thread/backgroundTerminals/terminate",
+    "thread/compact/start",
+    "thread/decrement_elicitation",
+    "thread/delete",
+    "thread/fork",
+    "thread/increment_elicitation",
+    "thread/inject_items",
+    "thread/items/list",
+    "thread/list",
+    "thread/loaded/list",
+    "thread/memoryMode/set",
+    "thread/metadata/update",
+    "thread/name/set",
+    "thread/read",
+    "thread/resume",
+    "thread/revert",
+    "thread/search",
+    "thread/searchOccurrences",
+    "thread/settings/update",
+    "thread/shellCommand",
+    "thread/start",
+    "thread/timeline/list",
+    "thread/turns/list",
+    "thread/unarchive",
+    "thread/unsubscribe"
+   ],
+   "Turns": [
+    "turn/interrupt",
+    "turn/settings/update",
+    "turn/start",
+    "turn/steer"
+   ],
+   "Review": [
+    "review/start"
+   ],
+   "Execution": [
+    "command/exec",
+    "command/exec/resize",
+    "command/exec/terminate",
+    "command/exec/write",
+    "process/kill",
+    "process/resizePty",
+    "process/spawn",
+    "process/writeStdin",
+    "rollout/compress"
+   ],
+   "Files": [
+    "fs/copy",
+    "fs/createDirectory",
+    "fs/getMetadata",
+    "fs/readDirectory",
+    "fs/readFile",
+    "fs/remove",
+    "fs/unwatch",
+    "fs/watch",
+    "fs/writeFile",
+    "fuzzyFileSearch",
+    "fuzzyFileSearch/sessionStart",
+    "fuzzyFileSearch/sessionStop",
+    "fuzzyFileSearch/sessionUpdate"
+   ],
+   "Skills, plugins, apps": [
+    "app/installed",
+    "app/list",
+    "app/read",
+    "hooks/list",
+    "marketplace/add",
+    "marketplace/remove",
+    "marketplace/upgrade",
+    "plugin/install",
+    "plugin/installed",
+    "plugin/list",
+    "plugin/read",
+    "plugin/reconcile",
+    "plugin/search",
+    "plugin/share/checkout",
+    "plugin/share/delete",
+    "plugin/share/list",
+    "plugin/share/save",
+    "plugin/share/updateTargets",
+    "plugin/skill/read",
+    "plugin/uninstall",
+    "skills/config/write",
+    "skills/extraRoots/set",
+    "skills/list"
+   ],
+   "MCP": [
+    "mcpServer/event/stream/start",
+    "mcpServer/event/stream/stop",
+    "mcpServer/oauth/login",
+    "mcpServer/resource/read",
+    "mcpServer/tool/call",
+    "mcpServerStatus/list"
+   ],
+   "Memory": [
+    "memory/reset",
+    "memory/status"
+   ],
+   "Environments": [
+    "environment/add",
+    "environment/info",
+    "environment/status"
+   ],
+   "Git": [
+    "gitDiffToRemote"
+   ],
+   "External agents": [
+    "externalAgentConfig/detect",
+    "externalAgentConfig/import",
+    "externalAgentConfig/import/readHistories",
+    "externalAgentConfig/import/recordHistory"
+   ],
+   "Remote control (vendor)": [
+    "remoteControl/client/list",
+    "remoteControl/client/revoke",
+    "remoteControl/disable",
+    "remoteControl/enable",
+    "remoteControl/pairing/start",
+    "remoteControl/pairing/status",
+    "remoteControl/status/read"
+   ],
+   "Platform": [
+    "feedback/upload",
+    "userVerification/cancel",
+    "userVerification/delete",
+    "userVerification/enroll",
+    "userVerification/status",
+    "userVerification/verify",
+    "windowsSandbox/readiness",
+    "windowsSandbox/setupStart"
+   ],
+   "Testing": [
+    "mock/experimentalMethod"
+   ]
+  },
+  "ServerRequest": {
+   "Session": [
+    "currentTime/read"
+   ],
+   "Account (vendor)": [
+    "account/chatgptAuthTokens/refresh"
+   ],
+   "Items": [
+    "applyPatchApproval",
+    "execCommandApproval",
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+    "item/tool/call",
+    "item/tool/requestUserInput"
+   ],
+   "MCP": [
+    "mcpServer/elicitation/request"
+   ],
+   "Platform": [
+    "attestation/generate"
+   ]
+  },
+  "ServerNotification": {
+   "Session": [
+    "configWarning",
+    "deprecationNotice",
+    "error",
+    "guardianWarning",
+    "serverRequest/resolved",
+    "warning"
+   ],
+   "Account (vendor)": [
+    "account/gatewayOAuth/changed",
+    "account/login/completed",
+    "account/rateLimits/updated",
+    "account/updated"
+   ],
+   "Models and modes": [
+    "model/rerouted",
+    "model/safetyBuffering/updated",
+    "model/verification",
+    "modelProvider/authRecoveryCompleted",
+    "modelProvider/authRecoveryStarted"
+   ],
+   "Projects": [
+    "project/changed",
+    "thread/project/updated"
+   ],
+   "Goal": [
+    "thread/goal/cleared",
+    "thread/goal/updated"
+   ],
+   "Queue": [
+    "thread/queue/changed"
+   ],
+   "Realtime (vendor)": [
+    "thread/realtime/closed",
+    "thread/realtime/error",
+    "thread/realtime/item/completed",
+    "thread/realtime/item/started",
+    "thread/realtime/item/transcript/delta",
+    "thread/realtime/itemAdded",
+    "thread/realtime/outputAudio/delta",
+    "thread/realtime/sdp",
+    "thread/realtime/started",
+    "thread/realtime/transcript/delta",
+    "thread/realtime/transcript/done"
+   ],
+   "Threads": [
+    "thread/archived",
+    "thread/attachment/updated",
+    "thread/closed",
+    "thread/compacted",
+    "thread/deleted",
+    "thread/environment/connected",
+    "thread/environment/disconnected",
+    "thread/name/updated",
+    "thread/reverted",
+    "thread/settings/updated",
+    "thread/started",
+    "thread/status/changed",
+    "thread/tokenUsage/updated",
+    "thread/unarchived"
+   ],
+   "Turns": [
+    "turn/completed",
+    "turn/diff/updated",
+    "turn/moderationMetadata",
+    "turn/plan/updated",
+    "turn/started"
+   ],
+   "Items": [
+    "autoApprovalReview/strictReviewRequired",
+    "item/agentMessage/delta",
+    "item/autoApprovalReview/completed",
+    "item/autoApprovalReview/started",
+    "item/commandExecution/outputDelta",
+    "item/commandExecution/terminalInteraction",
+    "item/completed",
+    "item/fileChange/outputDelta",
+    "item/fileChange/patchUpdated",
+    "item/mcpToolCall/progress",
+    "item/plan/delta",
+    "item/reasoning/summaryPartAdded",
+    "item/reasoning/summaryTextDelta",
+    "item/reasoning/textDelta",
+    "item/started",
+    "rawResponse/completed",
+    "rawResponseItem/completed"
+   ],
+   "Execution": [
+    "command/exec/outputDelta",
+    "process/exited",
+    "process/outputDelta"
+   ],
+   "Files": [
+    "fs/changed",
+    "fuzzyFileSearch/sessionCompleted",
+    "fuzzyFileSearch/sessionUpdated"
+   ],
+   "Skills, plugins, apps": [
+    "app/list/updated",
+    "hook/completed",
+    "hook/started",
+    "skills/changed"
+   ],
+   "MCP": [
+    "mcpServer/event/stream/notification",
+    "mcpServer/oauthLogin/completed",
+    "mcpServer/startupStatus/updated"
+   ],
+   "External agents": [
+    "externalAgentConfig/import/completed",
+    "externalAgentConfig/import/progress"
+   ],
+   "Remote control (vendor)": [
+    "remoteControl/status/changed"
+   ],
+   "Platform": [
+    "windows/worldWritableWarning",
+    "windowsSandbox/setupCompleted"
+   ]
+  },
+  "ClientNotification": {
+   "Session": [
+    "initialized"
+   ]
+  }
+ }
+}

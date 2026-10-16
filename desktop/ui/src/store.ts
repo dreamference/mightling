@@ -6,6 +6,7 @@ import type { RequestId } from "./protocol/RequestId";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { ServerRequest } from "./protocol/ServerRequest";
 import type { PermissionProfileSummary } from "./protocol/v2/PermissionProfileSummary";
+import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { Thread } from "./protocol/v2/Thread";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { ThreadTokenUsage } from "./protocol/v2/ThreadTokenUsage";
@@ -51,6 +52,8 @@ export interface WorkState {
   selected: string | null;
   requests: PendingRequest[];
   notices: string[];
+  /** Each thread's queued follow-ups (`thread/queue/list`), refreshed on `thread/queue/changed`. */
+  queues: Record<string, QueuedSubmission[]>;
 }
 
 export const initialState: WorkState = {
@@ -61,6 +64,7 @@ export const initialState: WorkState = {
   selected: null,
   requests: [],
   notices: [],
+  queues: {},
 };
 
 export type Action =
@@ -75,6 +79,7 @@ export type Action =
   | { type: "answered"; id: RequestId }
   | { type: "archived"; threadId: string }
   | { type: "notice"; message: string }
+  | { type: "queue"; threadId: string; items: QueuedSubmission[] }
   | { type: "dismissNotice"; index: number };
 
 const STDERR_KEPT = 200;
@@ -305,6 +310,8 @@ export function reduce(state: WorkState, action: Action): WorkState {
       return { ...state, notices: [...state.notices, action.message].slice(-5) };
     case "dismissNotice":
       return { ...state, notices: state.notices.filter((_, index) => index !== action.index) };
+    case "queue":
+      return { ...state, queues: { ...state.queues, [action.threadId]: action.items } };
   }
 }
 

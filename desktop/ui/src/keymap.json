@@ -1,0 +1,839 @@
+{
+ "comment": "The keyboard shortcuts of DESKTOP_PARITY \u00a72.19 (the Linux bindings), as data: keymap.test.ts checks that no two actions share a binding in one context and that every action marked built has a handler in the UI (keyAction(\"<id>\")) and none marked planned does. Contexts: global (anywhere in the window), composer (the composer has focus), approval (an approval is open for the shown thread), terminal, file, preview. A binding of two keys separated by a space is a sequence (Escape Escape). Rebinding (Settings, item 10) stores overrides in the window's preferences, never here.",
+ "actions": [
+  {
+   "id": "commandMenu",
+   "group": "General",
+   "label": "Command menu",
+   "keys": [
+    "Ctrl+Shift+P",
+    "Ctrl+K"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "settings",
+   "group": "General",
+   "label": "Settings",
+   "keys": [
+    "Ctrl+,"
+   ],
+   "context": "global",
+   "status": "built"
+  },
+  {
+   "id": "shortcuts",
+   "group": "General",
+   "label": "Keyboard shortcuts",
+   "keys": [
+    "Ctrl+/"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "openFolder",
+   "group": "General",
+   "label": "Open folder",
+   "keys": [
+    "Ctrl+O"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "back",
+   "group": "General",
+   "label": "Back",
+   "keys": [
+    "Ctrl+["
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "forward",
+   "group": "General",
+   "label": "Forward",
+   "keys": [
+    "Ctrl+]"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "fontBigger",
+   "group": "General",
+   "label": "Font size bigger",
+   "keys": [
+    "Ctrl+="
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "fontSmaller",
+   "group": "General",
+   "label": "Font size smaller",
+   "keys": [
+    "Ctrl+-"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "fontReset",
+   "group": "General",
+   "label": "Font size reset",
+   "keys": [
+    "Ctrl+0"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "toggleSidebar",
+   "group": "General",
+   "label": "Toggle sidebar",
+   "keys": [
+    "Ctrl+B",
+    "Ctrl+Shift+S"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "bottomPanel",
+   "group": "General",
+   "label": "Toggle bottom panel",
+   "keys": [
+    "Ctrl+J"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "terminal",
+   "group": "General",
+   "label": "Toggle terminal",
+   "keys": [
+    "Ctrl+`"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "clearTerminal",
+   "group": "General",
+   "label": "Clear terminal",
+   "keys": [
+    "Ctrl+L"
+   ],
+   "context": "terminal",
+   "status": "planned"
+  },
+  {
+   "id": "clearUnread",
+   "group": "General",
+   "label": "Clear unread indicators",
+   "keys": [
+    "Shift+Escape"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "undoAction",
+   "group": "General",
+   "label": "Undo the last app action",
+   "keys": [
+    "Ctrl+Z"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "redoAction",
+   "group": "General",
+   "label": "Redo the last app action",
+   "keys": [
+    "Ctrl+Shift+Z"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "closeTab",
+   "group": "General",
+   "label": "Close tab",
+   "keys": [
+    "Ctrl+W"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "reopenTab",
+   "group": "General",
+   "label": "Reopen closed tab",
+   "keys": [
+    "Ctrl+Shift+T"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "closeOtherTabs",
+   "group": "General",
+   "label": "Close other tabs",
+   "keys": [
+    "Ctrl+Alt+W"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "fullScreen",
+   "group": "General",
+   "label": "Full screen",
+   "keys": [
+    "F11"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "quit",
+   "group": "General",
+   "label": "Quit",
+   "keys": [
+    "Ctrl+Q"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "newChat",
+   "group": "Chats",
+   "label": "New thread",
+   "keys": [
+    "Ctrl+N"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "standaloneChat",
+   "group": "Chats",
+   "label": "Thread with no project",
+   "keys": [
+    "Ctrl+Alt+O"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "quickChat",
+   "group": "Chats",
+   "label": "New question (Ask)",
+   "keys": [
+    "Ctrl+Alt+N"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "archiveChat",
+   "group": "Chats",
+   "label": "Archive thread",
+   "keys": [
+    "Ctrl+Shift+A"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "markUnread",
+   "group": "Chats",
+   "label": "Mark unread",
+   "keys": [
+    "Ctrl+Shift+U"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "pinChat",
+   "group": "Chats",
+   "label": "Pin thread",
+   "keys": [
+    "Ctrl+Alt+P"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "renameChat",
+   "group": "Chats",
+   "label": "Rename thread",
+   "keys": [
+    "Ctrl+Alt+R"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "sideChat",
+   "group": "Chats",
+   "label": "Side chat",
+   "keys": [
+    "Ctrl+Alt+S"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "findInChat",
+   "group": "Chats",
+   "label": "Find in thread",
+   "keys": [
+    "Ctrl+F"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "findNext",
+   "group": "Chats",
+   "label": "Find next",
+   "keys": [
+    "Ctrl+G"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "findPrevious",
+   "group": "Chats",
+   "label": "Find previous",
+   "keys": [
+    "Shift+F3"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "previousChat",
+   "group": "Chats",
+   "label": "Previous thread or tab",
+   "keys": [
+    "Ctrl+Shift+Tab",
+    "Ctrl+PageUp"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "nextChat",
+   "group": "Chats",
+   "label": "Next thread or tab",
+   "keys": [
+    "Ctrl+Tab",
+    "Ctrl+PageDown"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "nextAttention",
+   "group": "Chats",
+   "label": "Next thread waiting for you",
+   "keys": [
+    "Ctrl+Alt+A"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "recentChat1",
+   "group": "Chats",
+   "label": "Recent thread 1",
+   "keys": [
+    "Ctrl+Alt+1"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "recentChat2",
+   "group": "Chats",
+   "label": "Recent thread 2",
+   "keys": [
+    "Ctrl+Alt+2"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "recentChat3",
+   "group": "Chats",
+   "label": "Recent thread 3",
+   "keys": [
+    "Ctrl+Alt+3"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "recentChat4",
+   "group": "Chats",
+   "label": "Recent thread 4",
+   "keys": [
+    "Ctrl+Alt+4"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "recentChat5",
+   "group": "Chats",
+   "label": "Recent thread 5",
+   "keys": [
+    "Ctrl+Alt+5"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "recentChat6",
+   "group": "Chats",
+   "label": "Recent thread 6",
+   "keys": [
+    "Ctrl+Alt+6"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat1",
+   "group": "Chats",
+   "label": "Go to thread 1",
+   "keys": [
+    "Ctrl+1"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat2",
+   "group": "Chats",
+   "label": "Go to thread 2",
+   "keys": [
+    "Ctrl+2"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat3",
+   "group": "Chats",
+   "label": "Go to thread 3",
+   "keys": [
+    "Ctrl+3"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat4",
+   "group": "Chats",
+   "label": "Go to thread 4",
+   "keys": [
+    "Ctrl+4"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat5",
+   "group": "Chats",
+   "label": "Go to thread 5",
+   "keys": [
+    "Ctrl+5"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat6",
+   "group": "Chats",
+   "label": "Go to thread 6",
+   "keys": [
+    "Ctrl+6"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat7",
+   "group": "Chats",
+   "label": "Go to thread 7",
+   "keys": [
+    "Ctrl+7"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat8",
+   "group": "Chats",
+   "label": "Go to thread 8",
+   "keys": [
+    "Ctrl+8"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToChat9",
+   "group": "Chats",
+   "label": "Go to thread 9",
+   "keys": [
+    "Ctrl+9"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "modelPicker",
+   "group": "Input",
+   "label": "Model and effort picker",
+   "keys": [
+    "Ctrl+Shift+M"
+   ],
+   "context": "global",
+   "status": "built"
+  },
+  {
+   "id": "recentModels",
+   "group": "Input",
+   "label": "Recent models",
+   "keys": [
+    "Alt+M"
+   ],
+   "context": "global",
+   "status": "built"
+  },
+  {
+   "id": "projectPicker",
+   "group": "Input",
+   "label": "Project picker",
+   "keys": [
+    "Ctrl+Alt+Shift+O"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "send",
+   "group": "Input",
+   "label": "Send",
+   "keys": [
+    "Enter"
+   ],
+   "context": "composer",
+   "status": "built"
+  },
+  {
+   "id": "newLine",
+   "group": "Input",
+   "label": "New line",
+   "keys": [
+    "Shift+Enter"
+   ],
+   "context": "composer",
+   "status": "built"
+  },
+  {
+   "id": "restorePrompt",
+   "group": "Input",
+   "label": "Restore the previous prompt",
+   "keys": [
+    "ArrowUp"
+   ],
+   "context": "composer",
+   "status": "built"
+  },
+  {
+   "id": "nextPrompt",
+   "group": "Input",
+   "label": "Back toward the newest prompt",
+   "keys": [
+    "ArrowDown"
+   ],
+   "context": "composer",
+   "status": "built"
+  },
+  {
+   "id": "stopTurn",
+   "group": "Input",
+   "label": "Stop the running turn",
+   "keys": [
+    "Escape"
+   ],
+   "context": "composer",
+   "status": "built"
+  },
+  {
+   "id": "editPrevious",
+   "group": "Input",
+   "label": "Edit the previous message",
+   "keys": [
+    "Escape Escape"
+   ],
+   "context": "composer",
+   "status": "built"
+  },
+  {
+   "id": "approve",
+   "group": "Input",
+   "label": "Approve",
+   "keys": [
+    "Enter"
+   ],
+   "context": "approval",
+   "status": "built"
+  },
+  {
+   "id": "decline",
+   "group": "Input",
+   "label": "Decline",
+   "keys": [
+    "Escape"
+   ],
+   "context": "approval",
+   "status": "built"
+  },
+  {
+   "id": "voice",
+   "group": "Input",
+   "label": "Dictate",
+   "keys": [
+    "Ctrl+Shift+V"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "viewAsk",
+   "group": "Input",
+   "label": "Switch to Ask",
+   "keys": [
+    "Alt+1"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "viewWork",
+   "group": "Input",
+   "label": "Switch to Work",
+   "keys": [
+    "Alt+2"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "activityView",
+   "group": "Input",
+   "label": "Activity view",
+   "keys": [
+    "Ctrl+Alt+U"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "environmentAction1",
+   "group": "Workspace",
+   "label": "Environment action 1",
+   "keys": [
+    "Super+Shift+D"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "searchFiles",
+   "group": "Workspace",
+   "label": "Search files",
+   "keys": [
+    "Ctrl+P"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "fileTree",
+   "group": "Workspace",
+   "label": "File tree",
+   "keys": [
+    "Ctrl+Shift+E"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "reviewTab",
+   "group": "Workspace",
+   "label": "Review",
+   "keys": [
+    "Ctrl+Shift+G"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "chatTabsToggle",
+   "group": "Workspace",
+   "label": "Thread or tabs",
+   "keys": [
+    "Ctrl+Alt+B"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "cycleLayout",
+   "group": "Workspace",
+   "label": "Cycle layout",
+   "keys": [
+    "Ctrl+Shift+B"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "fullView",
+   "group": "Workspace",
+   "label": "Full view",
+   "keys": [
+    "Ctrl+Shift+F"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "goToLine",
+   "group": "Workspace",
+   "label": "Go to line",
+   "keys": [
+    "Ctrl+L"
+   ],
+   "context": "file",
+   "status": "planned"
+  },
+  {
+   "id": "addressBar",
+   "group": "Workspace",
+   "label": "Address bar",
+   "keys": [
+    "Ctrl+L"
+   ],
+   "context": "preview",
+   "status": "planned"
+  },
+  {
+   "id": "previewOpen",
+   "group": "Workspace",
+   "label": "Open a preview tab",
+   "keys": [
+    "Ctrl+T"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "previewBack",
+   "group": "Workspace",
+   "label": "Preview back",
+   "keys": [
+    "Alt+ArrowLeft"
+   ],
+   "context": "preview",
+   "status": "planned"
+  },
+  {
+   "id": "previewForward",
+   "group": "Workspace",
+   "label": "Preview forward",
+   "keys": [
+    "Alt+ArrowRight"
+   ],
+   "context": "preview",
+   "status": "planned"
+  },
+  {
+   "id": "previewReload",
+   "group": "Workspace",
+   "label": "Preview reload",
+   "keys": [
+    "Ctrl+R"
+   ],
+   "context": "preview",
+   "status": "planned"
+  },
+  {
+   "id": "copyUrl",
+   "group": "Workspace",
+   "label": "Copy the preview's address",
+   "keys": [
+    "Ctrl+Shift+C"
+   ],
+   "context": "preview",
+   "status": "planned"
+  },
+  {
+   "id": "commentMode",
+   "group": "Workspace",
+   "label": "Comment mode",
+   "keys": [
+    "Ctrl+Shift+."
+   ],
+   "context": "preview",
+   "status": "planned"
+  },
+  {
+   "id": "copyConversationPath",
+   "group": "Workspace",
+   "label": "Copy the conversation's path",
+   "keys": [
+    "Ctrl+Alt+Shift+C"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "copyDeepLink",
+   "group": "Workspace",
+   "label": "Copy a link to this thread",
+   "keys": [
+    "Ctrl+Alt+L"
+   ],
+   "context": "global",
+   "status": "planned"
+  },
+  {
+   "id": "copyWorkingDirectory",
+   "group": "Workspace",
+   "label": "Copy the working directory",
+   "keys": [
+    "Ctrl+Shift+C"
+   ],
+   "context": "global",
+   "status": "planned"
+  }
+ ]
+}

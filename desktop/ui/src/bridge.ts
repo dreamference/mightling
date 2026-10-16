@@ -32,6 +32,8 @@ export interface Airgapped {
 /** What the preload exposes (desktop/electron/src/preload.ts). */
 interface ElectronBridge {
   sendMessageFromView(message: unknown): Promise<unknown>;
+  /** Where a dropped file lives on disk; "" when it has no path (older preloads lack it). */
+  pathForFile?(file: File): string;
 }
 
 declare global {
@@ -55,8 +57,21 @@ export const startServer = () => send<Started>({ type: "work/start" });
 export const stopServer = () => send<void>({ type: "work/stop" });
 export const workTarget = () => send<WorkTarget>({ type: "work/target" });
 export const airgapped = (thread: string | null) => send<Airgapped>({ type: "work/airgapped", thread });
+/** `ling airgapped default <level>`: the level new threads start at; resolves with what it printed. */
+export const airgappedDefault = (level: "off" | "on") => send<string>({ type: "work/airgapped-default", level });
 export const contextMenu = (x: number, y: number, editable: boolean, selection: string) =>
   send<void>({ type: "context-menu", x, y, editable, selection });
+/** The window's own preferences (desktop/electron/src/prefs.ts), whole. */
+export const readPrefs = () => send<Record<string, unknown>>({ type: "prefs/read" });
+/** Writes some preferences; resolves with all of them. */
+export const writePrefs = (values: Record<string, unknown>) => send<Record<string, unknown>>({ type: "prefs/write", values });
+
+/** A dropped file's path on disk, in the app; null in a browser, which never learns one. */
+export function pathForFile(file: File): string | null {
+  const path = window.electronBridge?.pathForFile?.(file) ?? "";
+  return path ? path : null;
+}
+
 export const windowControl = (action: "minimize" | "maximize" | "close") => send<void>({ type: `window/${action}` });
 
 export interface Uploaded {
