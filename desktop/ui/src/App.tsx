@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAsk
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, SLASH_COMMANDS, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, SLASH_COMMANDS, collaborationMode, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -122,6 +122,9 @@ export function App() {
   const [findAt, setFindAt] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const [onTop, setOnTop] = useState(false);
+  /** Threads in Plan mode (§2.3); "" stands for the next new thread. */
+  const [planning, setPlanning] = useState<Set<string>>(new Set());
+  const [planAvailable, setPlanAvailable] = useState(false);
   const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
   const updatePrefsRef = useRef<(values: Partial<Prefs>) => void>(() => {});
@@ -195,6 +198,8 @@ export function App() {
       setPrefs(stored);
       // The worktree settings the codex-worktree crate reads too ([desktop] in config.toml).
       client.request("config/read", {}).then((answer) => setWtSettings(worktreeSettings((answer as { config?: { desktop?: Record<string, unknown> | null } }).config?.desktop))).catch(() => {});
+      // Plan mode, when the server offers it (`collaborationMode/list`).
+      client.request("collaborationMode/list", {}).then((answer) => setPlanAvailable(((answer as { data?: { mode: string | null }[] }).data ?? []).some((mask) => mask.mode === "plan"))).catch(() => setPlanAvailable(false));
       // The catalog the launcher wrote: one served model, with the efforts it allows.
       client.request("model/list", {}).then((answer) => setModels((answer as { data?: Model[] }).data ?? [])).catch(() => setModels([]));
       // A browser has no launch target: `ling web` answers null.
@@ -455,6 +460,20 @@ export function App() {
     return effortFor(model, prefs.effort);
   })();
 
+  /** The thread's collaboration mode for its next turn: Plan when it (or, for a new thread, the composer) is in Plan mode. */
+  const planFor = (threadId: string) => {
+    const inPlan = planning.has(threadId) || (planning.has("") && !selected);
+    if (inPlan && !planning.has(threadId)) setPlanning((set) => new Set([...[...set].filter((id) => id !== ""), threadId]));
+    return collaborationMode(inPlan ? "plan" : "default", modelChoice ?? servedModel ?? models[0]?.id ?? null, effort);
+  };
+  const planKey = selected?.thread.id ?? "";
+  const togglePlan = () => setPlanning((set) => {
+    const next = new Set(set);
+    if (next.has(planKey)) next.delete(planKey);
+    else next.add(planKey);
+    return next;
+  });
+
   const sendWork = async (message: string, mode: "default" | "steer" | "queue") => {
     const target = selected?.thread ?? (await startThread());
     if (!target) return;
@@ -475,6 +494,7 @@ export function App() {
         effort,
         model: modelChoice,
         cwd: turnCwd(prefsRef.current.worktreeThreads[target.id]),
+        collaborationMode: planFor(target.id),
       });
       promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
@@ -498,7 +518,7 @@ export function App() {
       );
       const input = turnInput(message, attached);
       const active = selected?.thread.id === thread.id ? selected.activeTurnId : null;
-      await sendMessage(client, { threadId: thread.id, activeTurnId: active, input, followUp: mode === "default" ? prefs.followUp : mode, effort, model: modelChoice });
+      await sendMessage(client, { threadId: thread.id, activeTurnId: active, input, followUp: mode === "default" ? prefs.followUp : mode, effort, model: modelChoice, collaborationMode: planFor(thread.id) });
       promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
     } catch (error) {
@@ -1070,6 +1090,14 @@ export function App() {
           return;
         case "model":
           return setPicker("open");
+        case "plan":
+          if (!planAvailable) return notice("The server offers no Plan mode.");
+          if (args) {
+            setPlanning((set) => new Set([...set, planKey]));
+            setDraft(args);
+            return;
+          }
+          return togglePlan();
         case "permissions":
           return setInfo({ title: "Permissions", body: <PermissionsInfo choices={choices} profile={profile} onChoose={(id) => { setProfile(id); setInfo(null); }} /> });
         case "status":
@@ -1523,6 +1551,7 @@ export function App() {
             )}
             models={models} model={modelChoice ?? servedModel} effort={effort} recentModels={prefs.recentModels}
             picker={picker} setPicker={setPicker} onPick={pickModel}
+            plan={planAvailable ? planning.has(planKey) : null} onTogglePlan={togglePlan}
           />
         ) : null}
         {prefs.bottomPanel && view === "work" && bridge.git.available() ? (
