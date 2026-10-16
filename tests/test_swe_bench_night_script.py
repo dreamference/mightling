@@ -312,3 +312,53 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_drop_switch(tmp_
     if reads_it:
         assert "ling-code is missing" in result.stdout
     assert not (tmp_path / "night7").exists()
+
+
+def best_of_night(tmp_path, arms="default", best_of="3"):
+    """The night's `run` step with BEST_OF set; returns (exit status, recorded calls, D)."""
+    calls = tmp_path / "calls.txt"
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    task_list = tmp_path / "list.txt"
+    task_list.write_text("# two tasks\nacme__widget-1\nacme__widget-2\n")
+    folder = tmp_path / "night11"
+    folder.mkdir()
+    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder),
+           "NIGHT": "11", "PREFIX": "n11", "ARMS": arms, "REFINE": "0", "BEST_OF": best_of,
+           "CHOOSER_SERVER": "http://localhost:8000", "CHOOSER_SEED": "20261013"}
+    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    recorded = calls.read_text().splitlines() if calls.exists() else []
+    return result.returncode, recorded, folder
+
+
+def test_best_of_three_runs_the_arm_three_times_then_chooser_v1_and_the_report(tmp_path):
+    status, recorded, folder = best_of_night(tmp_path)
+    assert status == 0 and (folder / "done").exists() and not (folder / "failed").exists()
+    rounds = runs(recorded)
+    assert [r.split("--name ")[1].split()[0] for r in rounds] == ["n11-default-1", "n11-default-2", "n11-default-3"]
+    assert all("--eval --remove-images" in r and "--task-rules" not in r for r in rounds)
+    assert 'attempt 2 of 3' in rounds[1]
+    # No drop-test-hunks regrade: the chooser reads the plain gradings.
+    assert not any("--drop-test-hunks" in line for line in recorded)
+    assert "swe-bench report n11-default-3 --against n11-default-1" in recorded
+    # The chooser comes after every round, over the three, with v1's measured seed.
+    chooser = next(i for i, line in enumerate(recorded) if "--runs n11-default-1,n11-default-2,n11-default-3 --seed" in line)
+    assert chooser > max(recorded.index(r) for r in rounds)
+    assert recorded[chooser].startswith("http://localhost:8000 --runs ") and "--seed 20261013" in recorded[chooser]
+    assert f"--out {folder}/chooser-v1" in recorded[chooser]
+    report = next(line for line in recorded if f"--chooser {folder}/chooser-v1/summary.json" in line)
+    assert report.startswith("n11-default-1,n11-default-2,n11-default-3 ")
+
+
+def test_best_of_takes_exactly_one_arm(tmp_path):
+    status, recorded, folder = best_of_night(tmp_path, arms="default tests-v2")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+def test_without_best_of_the_night_is_the_two_arm_night(tmp_path):
+    status, recorded, _ = best_of_night(tmp_path, arms="default apply-patch-function", best_of="1")
+    assert status == 0
+    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n11-default", "n11-apply-patch-function"]
+    assert not any("--seed 20261013" in line for line in recorded)
