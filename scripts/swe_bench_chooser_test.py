@@ -94,7 +94,6 @@ import argparse
 import hashlib
 import json
 import random
-import re
 import sys
 import urllib.error
 import urllib.request
@@ -106,58 +105,25 @@ DEFAULT_RUNS_DIR: Final[Path] = Path.home() / ".local" / "share" / "dreamference
 DEFAULT_DATASET: Final[Path] = Path.home() / ".cache" / "dreamference" / "swe-bench" / "datasets" / "SWE-bench_Verified.jsonl"
 DEFAULT_RUNS: Final[str] = "n2-default,n3-default,n4-default"
 HARNESS_LOG_DIR: Final[str] = "logs/run_evaluation"
-# A patch longer than this is cut, with a note, so two patches and the issue fit the context.
-MAX_PATCH_CHARS: Final[int] = 40_000
-MAX_ISSUE_CHARS: Final[int] = 20_000
 
-# V1's tournament (arXiv 2603.04304): every candidate compared at least twice, then Swiss
-# rounds among neighbours in score; the weight floor of a decided comparison.
-MIN_COMPARISONS: Final[int] = 2
-SWISS_WINDOW: Final[int] = 8
-WEIGHT_FLOOR: Final[float] = 0.1
-RATING: Final[re.Pattern] = re.compile(r"RATING_([AB]):\s*\**\s*(\d+(?:\.\d+)?)")
+# Chooser v1 itself (the candidate, the filter, the judge's prompt and V1's tournament) lives in the
+# package, where Night Shift's best-of-N runs the same code (backlog item 6): what a night measures
+# here is what Night Shift chooses with. The names below keep this script's interface.
+SCRIPTS: Final[Path] = Path(__file__).resolve().parent
+if str(SCRIPTS.parent) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS.parent))
 
-SYSTEM_PROMPT: Final[str] = (
-    "You are an expert code reviewer. Compare two solutions to a programming problem and rate their "
-    "correctness. The problem is a GitHub issue in a Python repository; each solution is a patch "
-    "(a diff) written to fix it. Neither patch has been run. A correct patch fixes the behaviour the "
-    "issue describes and breaks no existing behaviour. If both look correct, prefer the more robust "
-    "and fault-tolerant one. Ignore style, comments and the tests a patch adds."
+from dreamference.night_shift.chooser_candidate import ChooserCandidate as Candidate  # noqa: E402
+from dreamference.night_shift.night_shift_chooser import (  # noqa: E402
+    MAX_ISSUE_CHARS, MAX_PATCH_CHARS, MIN_COMPARISONS, RATING, SWISS_WINDOW, SYSTEM_PROMPT, USER_TEMPLATE,
+    WEIGHT_FLOOR, NightShiftChooser,
 )
 
-USER_TEMPLATE: Final[str] = """<issue>
-{issue}
-</issue>
-
-<solution_A>
-{a}
-</solution_A>
-
-<solution_B>
-{b}
-</solution_B>
-
-Rate the correctness of each solution from 1 (wrong) to 10 (certainly correct). End your answer with exactly these two lines:
-RATING_A: <1-10>
-RATING_B: <1-10>"""
-
-
-@dataclass
-class Candidate:
-    """One distinct patch for a task, as the chooser sees it: no verdict on the issue."""
-
-    id: str
-    patch: str
-    runs: List[str]
-    # The regression filter's input: the patch applied, and how many PASS_TO_PASS tests it broke
-    # (None when no test results are on disk). Never FAIL_TO_PASS, never `resolved`.
-    applied: bool = True
-    p2p_failed: Optional[int] = None
-
-    @property
-    def breaks(self) -> bool:
-        """True when the regression filter drops it."""
-        return not self.applied or bool(self.p2p_failed)
+clip = NightShiftChooser.clip
+ratings = NightShiftChooser.ratings
+pairings = NightShiftChooser.pairings
+tournament = NightShiftChooser.tournament
+choose = NightShiftChooser.choose
 
 
 @dataclass
@@ -378,132 +344,7 @@ class Client:
         return str(message.get("content") or message.get("reasoning_content") or "")
 
 
-def clip(text: str, limit: int) -> str:
-    """Cuts a text at `limit` characters, saying so."""
-    if len(text) <= limit:
-        return text
-    return text[:limit] + f"\n[... cut: {len(text) - limit} more characters]"
-
-
-def ratings(answer: str) -> Optional[Tuple[float, float]]:
-    """The last `RATING_A` and `RATING_B` of an answer, clamped to 1-10; None when either is missing."""
-    found: Dict[str, float] = {}
-    for side, value in RATING.findall(answer):
-        found[side] = min(10.0, max(1.0, float(value)))
-    return (found["A"], found["B"]) if "A" in found and "B" in found else None
-
-
 # --------------------------------------------------------------------------- the chooser
-
-
-def pairings(ids: List[str], scores: Dict[str, float], played: set, counts: Dict[str, int],
-             rng: random.Random) -> List[Tuple[str, str]]:
-    """
-    The next round of V1's tournament: random disjoint pairs while some candidate has fewer
-    than two comparisons, then a Swiss round (neighbours in score, within a window of 8). A pair
-    is never played twice.
-
-    Returns:
-        List[Tuple[str, str]]: The round's pairs; empty when the tournament is over.
-    """
-    def unplayed(a: str, b: str) -> bool:
-        return frozenset((a, b)) not in played
-
-    if any(counts[i] < MIN_COMPARISONS for i in ids):
-        order = sorted(ids, key=lambda i: (counts[i], rng.random()))
-        round_pairs, used = [], set()
-        for a in order:
-            if a in used or counts[a] >= MIN_COMPARISONS:
-                continue
-            partner = next((b for b in order if b != a and b not in used and unplayed(a, b)), None)
-            if partner is not None:
-                round_pairs.append((a, partner))
-                used.update((a, partner))
-        if round_pairs:
-            return round_pairs
-    ranked = sorted(ids, key=lambda i: -scores[i])
-    round_pairs, used = [], set()
-    for position, a in enumerate(ranked):
-        if a in used:
-            continue
-        partner = next((b for b in ranked[position + 1:position + 1 + SWISS_WINDOW]
-                        if b not in used and unplayed(a, b)), None)
-        if partner is not None:
-            round_pairs.append((a, partner))
-            used.update((a, partner))
-    return round_pairs
-
-
-def tournament(candidates: List[Candidate], compare: Callable[[Candidate, Candidate], Optional[Tuple[float, float]]],
-               rng: random.Random, swiss_rounds: int = 1) -> Dict[str, float]:
-    """
-    V1's pairwise tournament over the candidates.
-
-    Args:
-        candidates: The survivors of the regression filter.
-        compare: One judge call: (A, B) -> (rating of A, rating of B), or None when unreadable.
-        rng: The pairing's randomness.
-        swiss_rounds: Swiss rounds after every candidate has its two comparisons.
-
-    Returns:
-        Dict[str, float]: Candidate id to points: per comparison, 1 / 0.5 / 0 for a win, tie or
-        loss, times max(|rating gap| / 9, 0.1); an unreadable answer scores 0.5 each at the floor.
-    """
-    by_id = {c.id: c for c in candidates}
-    ids = sorted(by_id)
-    scores = {i: 0.0 for i in ids}
-    counts = {i: 0 for i in ids}
-    played: set = set()
-    swiss = 0
-    while len(ids) > 1:
-        before_swiss = any(counts[i] < MIN_COMPARISONS for i in ids)
-        if not before_swiss:
-            if swiss >= swiss_rounds:
-                break
-            swiss += 1
-        round_pairs = pairings(ids, scores, played, counts, rng)
-        if not round_pairs:
-            break
-        for a, b in round_pairs:
-            played.add(frozenset((a, b)))
-            counts[a] += 1
-            counts[b] += 1
-            rated = compare(by_id[a], by_id[b])
-            if rated is None:
-                scores[a] += 0.5 * WEIGHT_FLOOR
-                scores[b] += 0.5 * WEIGHT_FLOOR
-                continue
-            weight = max(abs(rated[0] - rated[1]) / 9, WEIGHT_FLOOR)
-            outcome = 1.0 if rated[0] > rated[1] else 0.0 if rated[0] < rated[1] else 0.5
-            scores[a] += weight * outcome
-            scores[b] += weight * (1 - outcome)
-    return scores
-
-
-def choose(candidates: List[Candidate], compare: Callable[[Candidate, Candidate], Optional[Tuple[float, float]]],
-           rng: random.Random, swiss_rounds: int = 1) -> Dict[str, Any]:
-    """
-    The chooser: the regression filter, then the pairwise judge over the survivors. It is given
-    no verdict on the issue.
-
-    Returns:
-        Dict[str, Any]: `stage` (`none`, `only candidate`, `regression filter`, `judge`, or
-        `judge, all broke`), `survivors`, `points`, and `chosen` (the top candidate ids).
-    """
-    if not candidates:
-        return {"stage": "none", "survivors": [], "points": {}, "chosen": []}
-    if len(candidates) == 1:
-        return {"stage": "only candidate", "survivors": [candidates[0].id], "points": {}, "chosen": [candidates[0].id]}
-    survivors = [c for c in candidates if not c.breaks]
-    if len(survivors) == 1:
-        return {"stage": "regression filter", "survivors": [survivors[0].id], "points": {},
-                "chosen": [survivors[0].id]}
-    stage = "judge" if survivors else "judge, all broke"
-    pool = survivors or candidates
-    points = tournament(pool, compare, rng, swiss_rounds)
-    top = max(points.values())
-    return {"stage": stage, "survivors": [c.id for c in survivors], "points": points,
-            "chosen": sorted(i for i, p in points.items() if p == top)}
 
 
 def score(task: Task, choice: Dict[str, Any]) -> Dict[str, float]:
@@ -611,10 +452,7 @@ def run_test(args: argparse.Namespace, client_factory: Callable[[str, float], Cl
                 return done[key]
             payload = {"model": model, "max_tokens": args.max_tokens, "temperature": args.temperature,
                        "top_p": args.top_p,
-                       "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                                    {"role": "user", "content": USER_TEMPLATE.format(
-                                        issue=clip(issues[instance_id], MAX_ISSUE_CHARS),
-                                        a=clip(a.patch, MAX_PATCH_CHARS), b=clip(b.patch, MAX_PATCH_CHARS))}]}
+                       "messages": NightShiftChooser.messages(issues[instance_id], a.patch, b.patch)}
             if args.seed is not None:
                 payload["seed"] = args.seed
             answer = client.chat(payload)
