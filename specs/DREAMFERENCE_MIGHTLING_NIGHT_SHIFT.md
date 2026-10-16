@@ -245,6 +245,7 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `test_timeout` | `20m` | Per test run. |
 | `task_memory` | `8G` | `MemoryMax` of each task's scope. |
 | `nudges` | `2` | Nudges before `stalled`. |
+| `best_of` | `3` | Attempts per task, chosen among by chooser v1 (§11.9). `1` is the single attempt of before. A task's own `best_of` key outranks it. |
 | `test` | *(detected)* | Default test command for the repository. |
 | `test_sandbox` | `true` | Run the test command in the agent's sandbox (§6, §11.1). `false` runs it with the user's rights, for a test command that must reach Docker or write outside the worktree; at `/airgapped on` the tests are then not run at all, because nothing would keep them off the network. Read from the user's configuration, never from the worktree. |
 | `airgapped` | *(none)* | A stricter `/airgapped` level for night runs alone ([MIGHTLING_AIRGAPPED §7](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)); a looser one than the configured level is ignored (§11.1). |
@@ -403,3 +404,17 @@ An app server is not an interactive session by its command line, so an idle desk
 ### 11.8 `night pause` and `resume` (2026-10-09)
 
 The two commands belong to SWE-bench, not to the night queue: while a SWE-bench run holds the model gate it refuses every request that is not the run's, and `ling-admin night pause [--for DURATION]` (default one hour) lets them through until it ends or `night resume` (MIGHTLING_SWE_BENCH §18). They live under `night` because they are about the overnight use of the model. A Night Shift run holds no gate and is unchanged: it gives way to interactive use as §5.5 says. `night status` also says what the gate is doing.
+
+### 11.9 Best-of-N (2026-10-16)
+
+Backlog item 6, built on branch `night-shift/best-of-n` for 1.7.0; `best_of = 3` by default (the owner's decision of 2026-10-14), chosen by chooser v1 (v2 measured 32.33 of 44 against v1's 33.0 on the same trio on 2026-10-15 and was not adopted). Code: `NightShiftBestOfN` (`night_shift_best_of_n.py`), chooser v1 in `NightShiftChooser` and `ChooserCandidate`, which `scripts/swe_bench_chooser_test.py` imports, so the chooser a SWE-bench night measures is the one Night Shift runs.
+
+- **Attempts run one after another in the task's one slot.** The scheduler counts a task as one scope and one model user; concurrent attempts would break its memory and request accounting. Each attempt is a whole `NightShiftTaskRun` (`attempt=k`) in `worktrees/<id>-a<k>` on `night/<id>-a<k>`, with a session of its own, its own nudges, its own test run and `task_timeout` (never past the window). With refine mode on, each attempt studies the task first.
+- **The choice.** Candidates are the attempts that left a change. The regression filter drops those whose test run failed or timed out, or that ran out of time before testing, unless every one did; untested ones are kept. More than one survivor goes to the pairwise judge (the task's text as the issue, the two staged diffs, the model server the night was admitted against, no proxy, seed from the task id); the judge counts as the task's model request while it runs. A judge call that fails or cannot be read is a tie at the floor, so a judge fault never stops the night; a tie at the top goes to the attempt whose tests passed, then the earliest.
+- **Only the chosen attempt is committed**, then renamed `night/<id>`; every worktree is removed, the other attempts' branches are deleted and their diffs kept as `logs/<id>-a<k>.diff`, the judge's answers as `logs/<id>.judge.jsonl`. Nothing is merged, pushed or rebased.
+- **The window.** No attempt starts after it closes; the attempts that finished are chosen among and the report says how many ran ("2 of 3 attempts ran"). With none finished the task is `interrupted` and starts over the next night: attempts are never resumed.
+- **One attempt, exactly as before,** for `best_of = 1`, a task resumed from an earlier night (a recorded session or a kept worktree) and a task from another machine (`remote`).
+- **The report** adds a `Best of N` line (what ran, the chosen attempt, the stage that chose it, the points) and one line per attempt (status, changes, tests, time, and the diff file of each alternative).
+- **Not yet:** `/night add --best-of N` (the launcher, Rust) does not write the task's `best_of` key; the key is read when present.
+- **Tests:** `tests/test_night_shift_best_of_n.py` (a per-attempt stand-in for `ling`, a stand-in judge, `server_judge` against a fake on a free loopback port); `tests/test_night_shift.py`'s fixture lowers the default to 1, since those tests are about one attempt.
+- **Measured:** SWE-bench night 11 (best-of-3 against a single run, the harness's equivalent: three default rounds on one list, then the same chooser over them).

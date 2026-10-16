@@ -28,7 +28,7 @@ from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE
 from dreamference.night_shift.night_shift_remote import NightShiftRemote
 from dreamference.night_shift.night_shift_report import NightShiftReport
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
-from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
+from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
 
 # Free memory a night run never eats into: room above earlyoom's 5% line (~6.2 GiB here).
 MEMORY_RESERVE: Final[int] = 8 * GIB
@@ -325,10 +325,11 @@ class NightShiftRunner:
                 if lane is not None:
                     task = queue.pop(0)
                     deadline = min(end_ts, time.time() + settings.task_timeout_s)
-                    run = NightShiftTaskRun(night_dir, task, settings, mightling_bin, deadline, model_host=lane["host"],
-                                            context_budget=lane["budget"],
-                                            model_node=lane["name"] if lane.get("node") else None,
-                                            window_end=end_ts)
+                    # One attempt, or best-of-N (`[night] best_of`): the same slot either way.
+                    run = NightShiftBestOfN.task_run(night_dir, task, settings, mightling_bin, deadline,
+                                                     model_host=lane["host"], context_budget=lane["budget"],
+                                                     model_node=lane["name"] if lane.get("node") else None,
+                                                     window_end=end_ts)
                     run.lane_host = lane["host"]
                     thread = threading.Thread(target=run.run, name=f"night-{task['id']}", daemon=True)
                     thread.start()
