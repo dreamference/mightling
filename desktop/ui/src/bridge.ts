@@ -194,6 +194,16 @@ export function pathForFile(file: File): string | null {
 }
 
 export const windowControl = (action: "minimize" | "maximize" | "close") => send<void>({ type: `window/${action}` });
+/** F11: the app's window full screen; in a browser, the page. */
+export async function toggleFullScreen(): Promise<void> {
+  if (host() === "electron") return send<void>({ type: "window/fullscreen" });
+  if (document.fullscreenElement) await document.exitFullscreen();
+  else await document.documentElement.requestFullscreen();
+}
+/** Ctrl+Q: quits the app (a browser tab is the browser's to close). */
+export const quitApp = () => (host() === "electron" ? send<void>({ type: "app/quit" }) : Promise.resolve());
+/** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
+export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
 
 export interface Uploaded {
   path: string;

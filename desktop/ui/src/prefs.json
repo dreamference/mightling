@@ -47,6 +47,18 @@
     "bottomPanel": {
       "default": false,
       "type": "boolean"
+    },
+    "fontScale": {
+      "default": 1,
+      "type": "number"
+    },
+    "keyOverrides": {
+      "default": {},
+      "type": "object"
+    },
+    "sidebarHidden": {
+      "default": false,
+      "type": "boolean"
     }
   }
 }

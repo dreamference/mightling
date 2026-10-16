@@ -23,6 +23,12 @@ export interface Prefs {
   worktreeThreads: Record<string, WorktreeLink>;
   /** Worktrees made permanent: projects of their own, never cleaned up. */
   permanentWorktrees: string[];
+  /** The text size, as a factor of the base (Ctrl+= / Ctrl+- / Ctrl+0). */
+  fontScale: number;
+  /** Keyboard shortcuts the user rebound: action id to its bindings (Settings › Keyboard shortcuts). */
+  keyOverrides: Record<string, string[]>;
+  /** Whether the sidebar is folded away (Ctrl+B). */
+  sidebarHidden: boolean;
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }

@@ -9,7 +9,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { BrowserWindow, app, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
@@ -265,6 +265,17 @@ export async function main(options: MainOptions): Promise<void> {
       case "window/close":
         window?.close();
         return null;
+      case "window/fullscreen":
+        window?.setFullScreen(!window.isFullScreen());
+        return null;
+      case "app/quit":
+        app.quit();
+        return null;
+      case "dialog/open-folder": {
+        if (!window) return null;
+        const chosen = await dialog.showOpenDialog(window, { title: "Open a project folder", properties: ["openDirectory"] });
+        return chosen.canceled ? null : chosen.filePaths[0] ?? null;
+      }
       default:
         throw new Error(`the app window does not send ${(message as { type: string }).type}`);
     }

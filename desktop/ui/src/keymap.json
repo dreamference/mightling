@@ -10,7 +10,7 @@
     "Ctrl+K"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "settings",
@@ -30,7 +30,7 @@
     "Ctrl+/"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "openFolder",
@@ -40,7 +40,7 @@
     "Ctrl+O"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "back",
@@ -50,7 +50,7 @@
     "Ctrl+["
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "forward",
@@ -60,7 +60,7 @@
     "Ctrl+]"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "fontBigger",
@@ -70,7 +70,7 @@
     "Ctrl+="
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "fontSmaller",
@@ -80,7 +80,7 @@
     "Ctrl+-"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "fontReset",
@@ -90,7 +90,7 @@
     "Ctrl+0"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "toggleSidebar",
@@ -101,7 +101,7 @@
     "Ctrl+Shift+S"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "bottomPanel",
@@ -151,7 +151,7 @@
     "Ctrl+Z"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "redoAction",
@@ -161,7 +161,7 @@
     "Ctrl+Shift+Z"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "closeTab",
@@ -171,7 +171,7 @@
     "Ctrl+W"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "reopenTab",
@@ -181,7 +181,7 @@
     "Ctrl+Shift+T"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "closeOtherTabs",
@@ -191,7 +191,7 @@
     "Ctrl+Alt+W"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "fullScreen",
@@ -201,7 +201,7 @@
     "F11"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "quit",
@@ -211,7 +211,7 @@
     "Ctrl+Q"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "newChat",
@@ -633,7 +633,7 @@
     "Alt+1"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "viewWork",
@@ -643,7 +643,7 @@
     "Alt+2"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "activityView",

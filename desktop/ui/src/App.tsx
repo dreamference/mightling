@@ -17,7 +17,7 @@ import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
 import { PromptHistory, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
-import { keyAction, matches } from "./keymap";
+import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
 import { DEFAULT_PREFS, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
 import { RpcClient, type ParamsOf } from "./rpc";
@@ -36,7 +36,10 @@ import {
   type PendingRequest, type ThreadView, type TurnView,
 } from "./store";
 import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./BottomPanel";
+import { CommandMenu } from "./CommandMenu";
 import { ReviewPane } from "./ReviewPane";
+import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
+import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { carry, cleanupVictims, projectFolder, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
@@ -106,6 +109,13 @@ export function App() {
   const [skills, setSkills] = useState<Record<string, SkillMetadata[]>>({});
   const [info, setInfo] = useState<Info | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>("general");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const places = useMemo(() => new History(), []);
+  const undoStack = useMemo(() => new UndoStack(), []);
+  const closedSurfaces = useMemo(() => new ClosedSurfaces(), []);
+  /** Set while back/forward moves the window, so the move is not recorded as a new place. */
+  const travelling = useRef(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [wtSettings, setWtSettings] = useState<WorktreeSettings>(worktreeSettings(null));
@@ -494,14 +504,21 @@ export function App() {
     client.request("turn/interrupt", { threadId: selected.thread.id, turnId: selected.activeTurnId }).catch(notice);
   };
 
+  const setName = async (threadId: string, name: string) => {
+    await client.request("thread/name/set", { threadId, name });
+    const updated = { method: "thread/name/updated", params: { threadId, threadName: name } } as ServerNotification;
+    dispatch({ type: "notification", notification: updated });
+  };
+
+  /** Renames a thread; Ctrl+Z puts the old name back. */
   const rename = async (threadId: string, name: string) => {
     setRenaming(null);
     const trimmed = name.trim();
     if (!trimmed) return;
+    const before = state.threads[threadId]?.thread.name ?? null;
     try {
-      await client.request("thread/name/set", { threadId, name: trimmed });
-      const updated = { method: "thread/name/updated", params: { threadId, threadName: trimmed } } as ServerNotification;
-      dispatch({ type: "notification", notification: updated });
+      await setName(threadId, trimmed);
+      undoStack.push({ label: "Rename", undo: () => setName(threadId, before ?? ""), redo: () => setName(threadId, trimmed) });
     } catch (error) {
       notice(error);
     }
@@ -518,9 +535,149 @@ export function App() {
       }
       dispatch({ type: "archived", threadId });
       setFound((list) => list?.filter((result) => result.thread.id !== threadId) ?? null);
+      undoStack.push({
+        label: "Archive",
+        undo: async () => {
+          const answer = (await client.request("thread/unarchive", { threadId })) as { thread?: Thread };
+          if (answer.thread) dispatch({ type: "threads", list: [answer.thread] });
+        },
+        redo: async () => {
+          await client.request("thread/archive", { threadId });
+          dispatch({ type: "archived", threadId });
+        },
+      });
     } catch (error) {
       notice(error);
     }
+  };
+
+  // The user's shortcuts (applied as the page renders, so a handler never sees stale keys), the text
+  // size and back/forward follow the window's state.
+  setOverrides(prefs.keyOverrides);
+  useEffect(() => {
+    const root = document.getElementById("root");
+    if (root) root.style.zoom = prefs.fontScale === 1 ? "" : String(prefs.fontScale);
+  }, [prefs.fontScale]);
+  useEffect(() => {
+    if (travelling.current) {
+      travelling.current = false;
+      return;
+    }
+    places.visit({ view, thread: state.selected });
+  }, [view, state.selected, places]);
+
+  /** Back or forward: the view and the thread the window showed. */
+  const travel = (place: Place | null) => {
+    if (!place) return;
+    travelling.current = true;
+    setView(place.view);
+    if (typeof window !== "undefined") window.history.replaceState(null, "", place.view === "work" ? "#work" : "#");
+    if (place.thread && state.threads[place.thread]) void openThread(place.thread);
+    else dispatch({ type: "select", threadId: null });
+  };
+  useEffect(() => {
+    const onMouse = (event: MouseEvent) => {
+      if (event.button === 3) travel(places.back());
+      else if (event.button === 4) travel(places.forward());
+    };
+    window.addEventListener("mouseup", onMouse);
+    return () => window.removeEventListener("mouseup", onMouse);
+  });
+
+  const undoAction = async (redo: boolean) => {
+    try {
+      const label = redo ? await undoStack.redo() : await undoStack.undo();
+      if (label) dispatch({ type: "notice", message: `${redo ? "Redone" : "Undone"}: ${label.toLowerCase()}.` });
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** Ctrl+W: the frontmost surface beside the thread closes (never the window); Ctrl+Shift+T opens it again. */
+  const closeSurface = () => {
+    if (reviewOpen) {
+      setReviewOpen(false);
+      closedSurfaces.close("review");
+    } else if (prefsRef.current.bottomPanel) {
+      updatePrefs({ bottomPanel: false });
+      closedSurfaces.close("bottomPanel");
+    }
+  };
+  const reopenSurface = () => {
+    const surface = closedSurfaces.reopen();
+    if (surface === "review") setReviewOpen(true);
+    else if (surface === "bottomPanel") updatePrefs({ bottomPanel: true });
+  };
+
+  const openFolderDialog = async () => {
+    try {
+      const folder = await bridge.chooseFolder();
+      if (!folder) return;
+      showView("work");
+      setNewCwd(folder);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** What the shortcuts and the command menu run, by keymap action. */
+  const commands: Record<string, () => void> = {
+    commandMenu: () => setMenuOpen((open) => !open),
+    settings: () => { setSettingsPage("general"); setSettingsOpen((open) => !open); },
+    shortcuts: () => { setSettingsPage("shortcuts"); setSettingsOpen(true); },
+    openFolder: () => void openFolderDialog(),
+    back: () => travel(places.back()),
+    forward: () => travel(places.forward()),
+    fontBigger: () => updatePrefs({ fontScale: nextScale(prefsRef.current.fontScale, 1) }),
+    fontSmaller: () => updatePrefs({ fontScale: nextScale(prefsRef.current.fontScale, -1) }),
+    fontReset: () => updatePrefs({ fontScale: 1 }),
+    toggleSidebar: () => updatePrefs({ sidebarHidden: !prefsRef.current.sidebarHidden }),
+    undoAction: () => void undoAction(false),
+    redoAction: () => void undoAction(true),
+    closeTab: closeSurface,
+    reopenTab: reopenSurface,
+    closeOtherTabs: () => { if (reviewOpen) closedSurfaces.close("review"); setReviewOpen(false); if (prefsRef.current.bottomPanel) closedSurfaces.close("bottomPanel"); updatePrefs({ bottomPanel: false }); },
+    fullScreen: () => void bridge.toggleFullScreen().catch(notice),
+    quit: () => void bridge.quitApp(),
+    viewAsk: () => showView("ask"),
+    viewWork: () => showView("work"),
+    modelPicker: () => setPicker((open) => (open === "closed" ? "open" : "closed")),
+    recentModels: () => setPicker("recent"),
+    reviewTab: () => setReviewOpen((open) => !open),
+    bottomPanel: () => updatePrefs({ bottomPanel: !prefsRef.current.bottomPanel }),
+  };
+
+  /** The command menu's entries: the commands above, the threads, the project folders, the settings pages. */
+  const menuEntries = (): MenuEntry[] => {
+    const entries: MenuEntry[] = effectiveKeymap().filter((action) => commands[action.id] && action.id !== "commandMenu")
+      .map((action) => ({ id: action.id, kind: "command", label: action.label, detail: action.group, shortcut: action.keys[0] ?? null }));
+    for (const entry of Object.values(state.threads)) {
+      const thread = entry.thread;
+      if (thread.ephemeral || thread.parentThreadId) continue;
+      entries.push({ id: thread.id, kind: "thread", label: thread.name || thread.preview || "(new thread)", detail: isAskThread(thread, askRoot) ? "Ask" : thread.cwd, shortcut: null });
+    }
+    for (const project of projects(state, askRoot, (thread) => projectFolder(thread, links))) {
+      entries.push({ id: project.cwd, kind: "project", label: project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd, detail: project.cwd, shortcut: null });
+    }
+    entries.push({ id: "general", kind: "settings", label: "General", detail: "Settings", shortcut: shortcutLabel("settings") });
+    entries.push({ id: "shortcuts", kind: "settings", label: "Keyboard shortcuts", detail: "Settings", shortcut: shortcutLabel("shortcuts") });
+    if (bridge.git.available()) entries.push({ id: "worktrees", kind: "settings", label: "Worktrees", detail: "Settings", shortcut: null });
+    return entries;
+  };
+
+  const runEntry = (entry: MenuEntry) => {
+    if (entry.kind === "command") return commands[entry.id]?.();
+    if (entry.kind === "thread") {
+      const thread = state.threads[entry.id]?.thread;
+      if (thread) setView(isAskThread(thread, askRoot) ? "ask" : "work");
+      return void openThread(entry.id);
+    }
+    if (entry.kind === "project") {
+      showView("work");
+      return setNewCwd(entry.id);
+    }
+    setSettingsPage(entry.id as SettingsPage);
+    setSettingsOpen(true);
   };
 
   // Where the shown thread's work is now (its worktree, or the local checkout after a hand-off), and
@@ -807,6 +964,39 @@ export function App() {
   keys.current = (event: KeyboardEvent) => {
     // A field that already acted on the key (the composer's menus, its approval keys) has the last word.
     if (event.defaultPrevented) return;
+    // Shell commands from the keymap; Ctrl+Z and Ctrl+Shift+Z belong to a text field when one has focus.
+    const typing = (() => {
+      const element = document.activeElement as HTMLElement | null;
+      return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || Boolean(element?.isContentEditable);
+    })();
+    const shellKeys: [ReturnType<typeof keyAction>, string][] = [
+      [keyAction("commandMenu"), "commandMenu"],
+      [keyAction("shortcuts"), "shortcuts"],
+      [keyAction("openFolder"), "openFolder"],
+      [keyAction("back"), "back"],
+      [keyAction("forward"), "forward"],
+      [keyAction("fontBigger"), "fontBigger"],
+      [keyAction("fontSmaller"), "fontSmaller"],
+      [keyAction("fontReset"), "fontReset"],
+      [keyAction("toggleSidebar"), "toggleSidebar"],
+      [keyAction("undoAction"), "undoAction"],
+      [keyAction("redoAction"), "redoAction"],
+      [keyAction("closeTab"), "closeTab"],
+      [keyAction("reopenTab"), "reopenTab"],
+      [keyAction("closeOtherTabs"), "closeOtherTabs"],
+      [keyAction("fullScreen"), "fullScreen"],
+      [keyAction("quit"), "quit"],
+      [keyAction("viewAsk"), "viewAsk"],
+      [keyAction("viewWork"), "viewWork"],
+    ];
+    for (const [action, id] of shellKeys) {
+      if ((id === "undoAction" || id === "redoAction") && typing) continue;
+      if (matches(event, action)) {
+        event.preventDefault();
+        commands[id]();
+        return;
+      }
+    }
     if (matches(event, keyAction("modelPicker"))) {
       event.preventDefault();
       setPicker((open) => (open === "closed" ? "open" : "closed"));
@@ -824,10 +1014,12 @@ export function App() {
       setReviewOpen((open) => !open);
     } else if (matches(event, keyAction("settings"))) {
       event.preventDefault();
+      setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info)) {
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen)) {
       setPicker("closed");
       setSettingsOpen(false);
+      setMenuOpen(false);
       setInfo(null);
     } else if (!editableFocus() && threadRequests.length > 0) {
       if (matches(event, keyAction("approve")) && answerByKey("approve")) event.preventDefault();
@@ -884,7 +1076,7 @@ export function App() {
     : view === "ask" ? "Ask anything… ($ for a skill, / for commands)" : "Ask Mightling… (@ for a file, $ for a skill, / for commands)";
 
   return (
-    <div className={`work view-${view}${drawer ? " drawer-open" : ""}${reviewOpen && view === "work" ? " review-open" : ""}`} onContextMenu={(event) => {
+    <div className={`work view-${view}${drawer ? " drawer-open" : ""}${reviewOpen && view === "work" ? " review-open" : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
       // (desktop/electron/src/shell.ts); a browser keeps its own, which a phone needs to copy.
       if (HOST !== "electron") return;
@@ -956,6 +1148,9 @@ export function App() {
       <main className="thread-pane">
         <header className="bar" onDoubleClick={() => HOST === "electron" && bridge.windowControl("maximize").catch(() => {})}>
           <button className="icon menu-toggle" aria-label="Threads" onClick={() => setDrawer(!drawer)}><Icon name="panelLeft" size={20} strokeWidth={1.75} /></button>
+          <button className="icon sidebar-toggle" aria-label={prefs.sidebarHidden ? "Show the sidebar" : "Hide the sidebar"} title={`${prefs.sidebarHidden ? "Show" : "Hide"} the sidebar (${shortcutLabel("toggleSidebar")})`} onClick={commands.toggleSidebar}><Icon name="panelLeft" size={18} strokeWidth={1.75} /></button>
+          <button className="icon nav-button" aria-label="Back" title={`Back (${shortcutLabel("back")})`} disabled={!places.canGoBack} onClick={commands.back}><Icon name="chevronLeft" size={16} /></button>
+          <button className="icon nav-button" aria-label="Forward" title={`Forward (${shortcutLabel("forward")})`} disabled={!places.canGoForward} onClick={commands.forward}><Icon name="chevronRight" size={16} /></button>
           <span className="title">{title}</span>
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
@@ -1081,7 +1276,8 @@ export function App() {
           onClose={() => setReviewOpen(false)}
         />
       ) : null}
-      {settingsOpen ? <Settings prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)} /> : null}
+      {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)} /> : null}
+      {menuOpen ? <CommandMenu entries={menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
     </div>
   );
 }
@@ -1104,52 +1300,6 @@ function editableFocus(): boolean {
   if (!element) return false;
   if (element instanceof HTMLTextAreaElement) return element.value.trim() !== "";
   return element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element.isContentEditable;
-}
-
-/** The window's settings (DESKTOP_PARITY §2.15); General for now: what Enter does and what a follow-up does. */
-function Settings(props: {
-  prefs: Prefs;
-  onChange: (values: Partial<Prefs>) => void;
-  onClose: () => void;
-  worktrees: WorktreeSettings;
-  onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => void;
-}) {
-  const { prefs, onChange } = props;
-  const [root, setRoot] = useState(props.worktrees.root ?? "");
-  return (
-    <div className="dialog-backdrop" onClick={props.onClose}>
-      <section className="dialog settings" role="dialog" aria-label="Settings" onClick={(event) => event.stopPropagation()}>
-        <header><h2>Settings</h2><button className="icon" aria-label="Close" onClick={props.onClose}><Icon name="x" size={16} /></button></header>
-        <h3>General</h3>
-        <fieldset>
-          <legend>Enter in the composer</legend>
-          <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "enter"} onChange={() => onChange({ enterBehaviour: "enter" })} /> Enter sends; Shift+Enter starts a new line</label>
-          <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "ctrlEnter"} onChange={() => onChange({ enterBehaviour: "ctrlEnter" })} /> Enter starts a new line; Ctrl+Enter sends</label>
-        </fieldset>
-        <fieldset>
-          <legend>A message sent while the agent is working</legend>
-          <label><input type="radio" name="follow" checked={prefs.followUp === "steer"} onChange={() => onChange({ followUp: "steer" })} /> Steer: the running turn takes it in now</label>
-          <label><input type="radio" name="follow" checked={prefs.followUp === "queue"} onChange={() => onChange({ followUp: "queue" })} /> Queue: it waits, and starts the next turn when this one ends</label>
-        </fieldset>
-        {bridge.git.available() ? (
-          <>
-            <h3>Worktrees</h3>
-            <fieldset>
-              <legend>Kept in config.toml, shared with ling's /worktree</legend>
-              <label className="field">Worktree root
-                <input value={root} placeholder="~/.mightling/worktrees" aria-label="Worktree root" onChange={(event) => setRoot(event.target.value)}
-                  onBlur={() => root.trim() !== (props.worktrees.root ?? "") && props.onWorktree("git-worktree-root", root.trim() || null)} />
-              </label>
-              <label><input type="checkbox" checked={props.worktrees.autoCleanup} onChange={(event) => props.onWorktree("worktree-auto-cleanup-enabled", event.target.checked)} /> Delete the oldest worktrees automatically (never a pinned, running or permanent one; a snapshot is kept)</label>
-              <label className="field">Keep the most recent
-                <input type="number" min={1} max={200} value={props.worktrees.keep} aria-label="Worktrees kept" onChange={(event) => Number(event.target.value) > 0 && props.onWorktree("worktree-keep-count", Math.floor(Number(event.target.value)))} />
-              </label>
-            </fieldset>
-          </>
-        ) : null}
-      </section>
-    </div>
-  );
 }
 
 function PermissionsInfo(props: { choices: ReturnType<typeof permissionChoices>; profile: string; onChoose: (id: string) => void }) {

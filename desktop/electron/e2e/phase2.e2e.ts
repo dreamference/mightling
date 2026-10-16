@@ -272,8 +272,78 @@ test("7 worktrees: a new thread in a worktree with setup, Create branch here, ha
     expect(fs.readFileSync(path.join(root, ".codex", "environments", "environment.toml"), "utf8")).toContain('script = "echo ran the tests"');
 
     await page.keyboard.press("Control+,");
+    await page.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: "Worktrees" }).click();
     await expect(page.getByRole("textbox", { name: "Worktree root" })).toBeVisible();
     await shoot("7-settings-worktrees.png");
+    expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
+  } finally {
+    await close();
+  }
+});
+
+test("2 shell: command menu, sidebar toggle, back and forward, font size, undo, close and reopen, view keys, a rebound shortcut", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    // Alt+2 and Alt+1 switch the view (Ctrl+1–9 are left for threads).
+    await page.keyboard.press("Alt+2");
+    await expect(page.getByRole("button", { name: "Work", exact: true })).toHaveClass(/selected/);
+    // The command menu finds a thread and opens it.
+    await page.keyboard.press("Control+k");
+    const menu = page.getByRole("dialog", { name: "Command menu" });
+    await page.getByRole("textbox", { name: "Command" }).fill("flaky");
+    await shoot("2-command-menu.png");
+    await page.keyboard.press("Enter");
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator(".bar .title")).toHaveText("Fix the flaky retry test");
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.locator(".thread", { hasText: "debug level" }).click();
+    await expect(page.locator(".bar .title")).toHaveText("Log every retry at debug level");
+    // Back and forward.
+    await page.keyboard.press("Control+[");
+    await expect(page.locator(".bar .title")).toHaveText("Fix the flaky retry test");
+    await page.keyboard.press("Control+]");
+    await expect(page.locator(".bar .title")).toHaveText("Log every retry at debug level");
+    // The sidebar folds away and comes back.
+    await page.keyboard.press("Control+b");
+    await expect(page.locator(".work")).toHaveClass(/sidebar-hidden/);
+    await shoot("2-sidebar-hidden.png");
+    await page.keyboard.press("Control+b");
+    await expect(page.locator(".work")).not.toHaveClass(/sidebar-hidden/);
+    // Font size.
+    await page.keyboard.press("Control+=");
+    await expect.poll(() => page.evaluate(() => document.getElementById("root")?.style.zoom)).toBe("1.1");
+    await page.keyboard.press("Control+0");
+    await expect.poll(() => page.evaluate(() => document.getElementById("root")?.style.zoom)).toBe("");
+    // Archive, then Ctrl+Z brings the thread back.
+    await page.locator(".thread-row", { hasText: "debug level" }).hover();
+    await page.locator(".thread-row", { hasText: "debug level" }).getByRole("button", { name: "Archive" }).click();
+    await expect(page.locator(".thread", { hasText: "debug level" })).toHaveCount(0);
+    await page.locator("body").click({ position: { x: 700, y: 400 } });
+    await page.keyboard.press("Control+z");
+    await expect(page.locator(".thread", { hasText: "debug level" })).toHaveCount(1);
+    expect(received(home).some((m) => m.method === "thread/unarchive")).toBe(true);
+    // Ctrl+W closes the review pane, never the window; Ctrl+Shift+T reopens it.
+    await page.keyboard.press("Control+Shift+G");
+    await expect(page.getByRole("complementary", { name: "Review" })).toBeVisible();
+    await page.keyboard.press("Control+w");
+    await expect(page.getByRole("complementary", { name: "Review" })).toHaveCount(0);
+    await page.keyboard.press("Control+w");
+    await page.keyboard.press("Control+Shift+T");
+    await expect(page.getByRole("complementary", { name: "Review" })).toBeVisible();
+    await page.keyboard.press("Control+w");
+    // Rebind the model picker in Settings › Keyboard shortcuts, then use the new keys.
+    await page.keyboard.press("Control+/");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("searchbox", { name: "Search shortcuts" }).fill("model");
+    await settings.locator("tr", { hasText: "Model and effort picker" }).getByRole("button", { name: "Change" }).click();
+    await page.keyboard.press("Control+Alt+m");
+    await expect(settings.locator("tr", { hasText: "Model and effort picker" }).locator("kbd")).toHaveText("Ctrl+Alt+M");
+    await shoot("2-keyboard-shortcuts.png");
+    await page.keyboard.press("Escape");
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.keyboard.press("Control+Alt+m");
+    await expect(page.getByRole("menu", { name: "Model and effort" })).toBeVisible();
     expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
   } finally {
     await close();
