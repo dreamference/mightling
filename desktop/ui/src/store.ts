@@ -147,6 +147,10 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
       if (state.threads[thread.id]) return state;
       return { ...state, threads: { ...state.threads, [thread.id]: emptyView(thread) } };
     }
+    case "thread/status/changed": {
+      const { threadId, status } = notification.params;
+      return withThread(state, threadId, (view) => ({ ...view, thread: { ...view.thread, status } }));
+    }
     case "thread/name/updated": {
       const { threadId, threadName } = notification.params;
       return withThread(state, threadId, (view) => ({ ...view, thread: { ...view.thread, name: threadName ?? null } }));
@@ -372,4 +376,21 @@ export function contextUse(usage: ThreadTokenUsage | null): { used: number; wind
   if (!usage || !usage.modelContextWindow) return null;
   const used = usage.last.totalTokens;
   return { used, window: usage.modelContextWindow, percent: Math.min(100, Math.round((used / usage.modelContextWindow) * 100)) };
+}
+
+/** A thread's subagents (threads it started), newest first. */
+export function subagents(state: WorkState, parentId: string): Thread[] {
+  return Object.values(state.threads).map((view) => view.thread).filter((thread) => thread.parentThreadId === parentId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Whether a thread is working now: a turn running, or the server says it is active. */
+export function isWorking(state: WorkState, threadId: string): boolean {
+  const view = state.threads[threadId];
+  return Boolean(view?.activeTurnId) || view?.thread.status.type === "active";
+}
+
+/** How many threads are working at once: they all share the one model server (DESKTOP_PARITY §2.13). */
+export function workingCount(state: WorkState): number {
+  return Object.keys(state.threads).filter((id) => isWorking(state, id)).length;
 }
