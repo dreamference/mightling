@@ -261,10 +261,10 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| A terminal per chat, scoped to its project or worktree; **New tab › Terminal** or Ctrl+`; clear Ctrl+L | `command/exec` with `tty`, `write`, `resize`, `terminate` (or `process/*`); xterm.js in the window | **Same**, under the thread's sandbox profile so `/airgapped on` holds for what the user types too | 2 |
-| The agent can read the terminal's output (a running dev server, a failed build) | the server ran it: `thread/backgroundTerminals/*`, `thread/shellCommand` | **Same** | 2 |
-| Default terminal choice (Settings; on Windows PowerShell / cmd / Git Bash / WSL) | window prefs | **Same** (the user's `$SHELL` by default) | 2 |
-| Where terminal tabs open by default; how much command output appears in chats (Settings › Project and terminal behaviour) | window prefs | **Same** | 2 |
+| A terminal per chat, scoped to its project or worktree; **New tab › Terminal** or Ctrl+`; clear Ctrl+L | `command/exec` with `tty`, `write`, `resize`, `terminate` (or `process/*`); xterm.js in the window | **Built** (2026-10-16, on `desktop/p2-8-terminal`, merging with `review/start` and `command/exec*` in `policy.json` once the Rust conformance run is done): tabs in the bottom panel (Ctrl+`, **+**), per thread, in the folder the thread works in; xterm.js 6 with the fit add-on, bundled; `command/exec` with `tty`, a client-chosen `processId`, no timeout or output cap and the composer's permission profile, so `/airgapped on` holds for what is typed; keystrokes `command/exec/write`, size `command/exec/resize`, Close `command/exec/terminate`; Ctrl+L clears | 2 |
+| The agent can read the terminal's output (a running dev server, a failed build) | the server ran it: `thread/backgroundTerminals/*`, `thread/shellCommand` | **Mightling's** (2026-10-16, same branch): **Send to the thread** puts the tab's recent output in the composer; `thread/shellCommand` is not allowed, since it runs unsandboxed with full access and would pass `/airgapped on` | 2 |
+| Default terminal choice (Settings; on Windows PowerShell / cmd / Git Bash / WSL) | window prefs | **Built** (2026-10-16, same branch): Settings › Project and terminal: the shell, empty for the login shell `$SHELL` | 2 |
+| Where terminal tabs open by default; how much command output appears in chats (Settings › Project and terminal behaviour) | window prefs | **Partial** (2026-10-16, same branch): how much command output the thread shows (open while running, folded, hidden) is a setting; tabs open in the bottom panel until item 9's layout gives them another place | 2 |
 
 ### 2.8 Tabs, files and previews
 
@@ -533,7 +533,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 5. **Plan and goal:** collaboration mode, the goal row (§2.3).
 6. **Review pane and git:** scopes, repository selector, stage/unstage/revert at three levels, inline comments, viewed markers, open in editor, `/review` inline or detached, commit, push, PR page (§2.5). **Review pane and git: merged 2026-10-16, 7973c5a** (`/review` Partial: it needs `review/start` in `policy.json`, held on `desktop/p2-policy` for the Rust conformance run).
 7. **Worktrees and hand-off**, local environments and actions, the bottom panel (§2.6). **Worktrees, hand-off, environments and the bottom panel: merged 2026-10-16, 9c5f31d** (window-side `git` on the `codex-worktree` contract until `ling worktree` exists; actions run as bottom-panel tasks until the terminal of item 8 lands).
-8. **Terminal** tabs (§2.7).
+8. **Terminal** tabs (§2.7). **Built 2026-10-16 on `desktop/p2-8-terminal`, not merged: it needs `command/exec`, `command/exec/write|resize|terminate` in `policy.json` (branch `desktop/p2-policy`), whose Rust conformance run waits for a window with no SWE-bench night.** Environment actions run in terminal tabs there (sandboxed by the permission profile); the setup run of a new worktree stays a bottom-panel task.
 9. **Tabs and layout:** split, full, hidden (§2.1).
 10. **Settings pages** of §2.15 except Pets, Browser, Computer Use, Suggested prompts.
 11. **Skills, plugins, MCP, apps, hooks** pages (§2.11).

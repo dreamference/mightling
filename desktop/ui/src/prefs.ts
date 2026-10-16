@@ -25,6 +25,10 @@ export interface Prefs {
   permanentWorktrees: string[];
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
+  /** The shell terminal tabs run, as a login shell; null for the user's `$SHELL`. */
+  terminalShell: string | null;
+  /** Commands in the thread: output open while running, always folded, or not shown. */
+  commandOutput: "running" | "collapsed" | "hidden";
 }
 
 /** A thread's worktree, where its work is now, and the snapshot kept when the worktree was removed. */
