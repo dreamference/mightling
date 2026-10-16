@@ -537,7 +537,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 9. **Tabs and layout:** split, full, hidden (§2.1). **Tabs and layout: merged 2026-10-17, 1064dc9** (the tab area holds the Review tab; terminal tabs stay in the bottom panel; file and preview tabs are Phase 3).
 10. **Settings pages** of §2.15 except Pets, Browser, Computer Use, Suggested prompts. **Settings pages: merged 2026-10-17, b639f9b** (Integrations and MCP with item 11, Memories with item 13, the terminal's and `/review`'s settings with their held branches).
 11. **Skills, plugins, MCP, apps, hooks** pages (§2.11). **Skills and tools: merged 2026-10-17, f0477c6** (skills, MCP servers and apps; plugins, hooks, skill switches and MCP reload need methods held in `desktop/p2-policy`).
-12. **Scheduled** view over Night Shift (§2.12). **Scheduled: merged 2026-10-17, MERGE12** (inbox, queue, report, add, drop, Run now; cadence, local mode and per-task model are not built).
+12. **Scheduled** view over Night Shift (§2.12). **Scheduled: merged 2026-10-17, 84d52b3** (inbox, queue, report, add, drop, Run now; cadence, local mode and per-task model are not built).
 13. **Subagents** panel; **memories** controls (§2.13, §2.14).
 14. **Notifications**, prevent sleep (§2.1).
 
