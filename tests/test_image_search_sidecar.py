@@ -347,3 +347,17 @@ def test_the_probe_reads_only_a_tool_list_naming_image_search(tmp_path):
     other.chmod(0o755)
     assert "does not serve the image_search tool (exit 0)" in ImageSearchMcp.probe(str(other))
     assert "did not run" in ImageSearchMcp.probe(str(tmp_path / "absent"))
+
+
+def test_the_probe_drops_pythonpath_as_codex_does(tmp_path, monkeypatch):
+    # Run from a checkout with PYTHONPATH set, the stale link answered for that checkout's code
+    # while every session (whose environment Codex filters) got main's: status said "offered".
+    seen = tmp_path / "seen"
+    admin = tmp_path / "ling-admin"
+    admin.write_text(f'#!/bin/sh\necho "${{PYTHONPATH:-unset}}" > {seen}\nexit 2\n')
+    admin.chmod(0o755)
+    monkeypatch.setenv("PYTHONPATH", "/some/checkout")
+    assert ImageSearchMcp.probe(str(admin))
+    assert seen.read_text().strip() == "unset"
+    assert ImageSearchMcp.probe(str(admin), {"PATH": os.environ["PATH"], "PYTHONPATH": "/x"})
+    assert seen.read_text().strip() == "unset"

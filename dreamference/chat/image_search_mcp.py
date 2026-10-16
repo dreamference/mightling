@@ -287,14 +287,17 @@ class ImageSearchMcp:
         Args:
             admin (str): The `ling-admin` a session would start (the launcher's
                 `~/.local/bin/ling-admin`, or the egress audit's own).
-            env (Optional[Mapping[str, str]]): Its environment; None inherits this process's.
+            env (Optional[Mapping[str, str]]): Its environment; None takes this process's. `PYTHON*`
+                variables are dropped either way, as Codex drops them: a `PYTHONPATH` naming another
+                checkout would make a broken link answer here and fail in every session.
 
         Returns:
             str: "" when it lists `image_search`; otherwise what went wrong, for a person to read.
         """
+        clean = {key: value for key, value in (os.environ if env is None else env).items() if not key.startswith("PYTHON")}
         try:
             done = subprocess.run([admin, "images", "mcp"], input=LIST_TOOLS_LINE, capture_output=True, text=True,
-                                  timeout=PROBE_TIMEOUT_SECONDS, env=None if env is None else dict(env), check=False)
+                                  timeout=PROBE_TIMEOUT_SECONDS, env=clean, check=False)
         except (OSError, subprocess.SubprocessError) as error:
             return f"`{admin} images mcp` did not run ({error})"
         for line in done.stdout.splitlines():
