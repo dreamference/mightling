@@ -13,21 +13,26 @@ export interface ShellActions {
 }
 
 export function installMenu(actions: ShellActions): void {
+  // The page handles every shortcut itself, from its keymap (desktop/ui/src/keymap.json, rebindable
+  // in Settings), so the menu shows the keys without registering them (`registerAccelerator: false`):
+  // Ctrl+W closes a tab in the page, never the window; Alt+1/Alt+2 switch the view (DESKTOP_PARITY
+  // §2.19), leaving Ctrl+1–9 for threads.
+  const shown = (accelerator: string) => ({ accelerator, registerAccelerator: false });
   const template: Electron.MenuItemConstructorOptions[] = [
     // On a Mac the first menu is the application's (About, Hide, Quit), named after it.
     ...(process.platform === "darwin" ? [{ role: "appMenu" } as const] : []),
     {
       label: "File",
       submenu: [
-        { label: "Ask", accelerator: "CmdOrCtrl+1", click: () => actions.openAsk() },
-        { label: "Work", accelerator: "CmdOrCtrl+2", click: () => actions.openWork() },
+        { label: "Ask", ...shown("Alt+1"), click: () => actions.openAsk() },
+        { label: "Work", ...shown("Alt+2"), click: () => actions.openWork() },
         { type: "separator" },
-        { role: "quit" },
+        { label: "Quit", ...shown("CmdOrCtrl+Q"), click: () => app.quit() },
       ],
     },
     { label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
-    { label: "View", submenu: [{ role: "reload" }, { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }, { type: "separator" }, { role: "togglefullscreen" }, ...(app.isPackaged ? [] : [{ role: "toggleDevTools" } as const])] },
-    { label: "Window", submenu: [{ role: "minimize" }, { role: "close" }] },
+    { label: "View", submenu: [{ label: "Full screen", ...shown("F11"), click: (_item, window) => window?.setFullScreen(!window.isFullScreen()) }, ...(app.isPackaged ? [] : [{ role: "toggleDevTools" } as const])] },
+    { label: "Window", submenu: [{ role: "minimize" }] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

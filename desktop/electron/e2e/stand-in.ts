@@ -126,6 +126,13 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       }
       return;
     }
+    case "thread/archive": return answer({});
+    case "thread/unarchive": return answer({ thread: { ...threads.find((t) => t.id === p.threadId), turns: [] } });
+    case "thread/name/set": {
+      const found = threads.find((t) => t.id === p.threadId);
+      if (found) found.name = p.name;
+      return answer({});
+    }
     case "thread/queue/list": return answer({ data: queues[p.threadId] || [], nextCursor: null });
     case "thread/queue/add": {
       const item = { id: "q" + next++, input: p.input, clientUserMessageId: p.clientUserMessageId };
