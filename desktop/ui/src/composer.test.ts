@@ -9,41 +9,13 @@ import {
   lastUserTurn, matchCommands, matchSkills, mentionPath, parseSlash, rememberModel, userTexts,
 } from "./composer";
 import { DEFAULT_PREFS, sanitize } from "./prefs";
-import { RpcClient, type Transport } from "./rpc";
+import { ScriptedServer } from "./scripted-server";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { Model } from "./protocol/v2/Model";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
 import { initialState, reduce, type ThreadView } from "./store";
 import { forkThread, listQueue, sendMessage, steerQueued, takeBack } from "./turns";
-
-type Handler = (params: Record<string, unknown>) => unknown;
-
-/** A stand-in for `ling app-server`: answers each request from a script and records what was sent. */
-class ScriptedServer implements Transport {
-  sent: { method?: string; params?: Record<string, unknown> }[] = [];
-  client: RpcClient;
-  constructor(private readonly script: Record<string, Handler>) {
-    this.client = new RpcClient(this);
-  }
-  async send(message: object): Promise<void> {
-    const m = message as { id?: number; method?: string; params?: Record<string, unknown> };
-    this.sent.push({ method: m.method, params: m.params });
-    if (m.id === undefined || !m.method) return;
-    const handler = this.script[m.method];
-    queueMicrotask(() => {
-      if (!handler) return this.client.receive({ id: m.id, error: { code: -32601, message: `not scripted: ${m.method}` } });
-      try {
-        this.client.receive({ id: m.id, result: handler(m.params ?? {}) });
-      } catch (error) {
-        this.client.receive({ id: m.id, error: { code: -32600, message: String(error) } });
-      }
-    });
-  }
-  methods(): string[] {
-    return this.sent.map((message) => message.method ?? "(answer)");
-  }
-}
 
 const text = (value: string) => ({ type: "text" as const, text: value, text_elements: [] });
 

@@ -24,6 +24,11 @@ export const DIFF = `@@ -12,9 +12,12 @@ def fetch(url, attempts=3):
 +            time.sleep(backoff(attempt))
      return None`;
 
+const TURN_DIFF = `diff --git a/fetcher/client.py b/fetcher/client.py\n--- a/fetcher/client.py\n+++ b/fetcher/client.py\n${DIFF}\n`;
+
+/** What the stand-in's model answers when the window asks it for a commit message. */
+export const COMMIT_MESSAGE = "Re-raise the last error in the retry loop\n\nThe loop swallowed it, so callers saw None.";
+
 /** The made-up projects: `fetcher` and `website` under `<home>/src`. */
 export function projectFolders(home: string): { fetcher: string; website: string } {
   return { fetcher: path.join(home, "src", "fetcher"), website: path.join(home, "src", "website") };
@@ -110,6 +115,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       const found = threads.find((t) => t.id === p.threadId);
       answer({ thread: found });
       if (found && found.id === "w1") {
+        say({ method: "turn/diff/updated", params: { threadId: "w1", turnId: "t1", diff: ${JSON.stringify(TURN_DIFF)} } });
         say({ method: "thread/tokenUsage/updated", params: { threadId: "w1", turnId: "t1", tokenUsage: { total: usage, last: usage, modelContextWindow: 131072 } } });
         if (!asked) {
           asked = true;
@@ -136,8 +142,20 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       threads.push(copy);
       return answer({ thread: copy, model: "qwen3.8-27b", modelProvider: "local", cwd: copy.cwd });
     }
+    case "thread/start": {
+      const id = (p.ephemeral ? "e" : "n") + next++;
+      const started = { id, cwd: p.cwd, name: null, preview: "", turns: [], status: { type: "idle" }, ephemeral: !!p.ephemeral, parentThreadId: null,
+        createdAt: 1, updatedAt: 1, recencyAt: null, model: "qwen3.8-27b", modelProvider: "local" };
+      if (!p.ephemeral) threads.push(started);
+      return answer({ thread: started, model: "qwen3.8-27b", modelProvider: "local", cwd: p.cwd });
+    }
     case "turn/start": {
       const id = "turn-" + next++;
+      if (String(p.threadId).startsWith("e")) {
+        answer({ turn: { id, items: [], status: "inProgress", error: null } });
+        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "agentMessage", id: "m" + id, text: ${JSON.stringify(COMMIT_MESSAGE)} } } });
+        return say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [], status: "completed", error: null } } });
+      }
       answer({ turn: { id, items: [], status: "inProgress", error: null } });
       return say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
     }

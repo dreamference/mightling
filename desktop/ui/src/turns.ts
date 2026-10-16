@@ -5,6 +5,7 @@
 // a fork copies the thread. Every method here is in ling-rs/web/policy.json.
 
 import type { RpcClient } from "./rpc";
+import type { ServerNotification } from "./protocol/ServerNotification";
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { Thread } from "./protocol/v2/Thread";
 import type { UserInput } from "./protocol/v2/UserInput";
@@ -88,4 +89,59 @@ export async function takeBack(client: RpcClient, view: ThreadView): Promise<str
 export async function forkThread(client: RpcClient, threadId: string, model: string | null): Promise<Thread> {
   const answer = (await client.request("thread/fork", { threadId, model })) as { thread: Thread };
   return answer.thread;
+}
+
+/** Subscribes to the server's notifications; returns the unsubscribe. */
+export type Listen = (listener: (notification: ServerNotification) => void) => () => void;
+
+/**
+ * One question in a throwaway thread (`ephemeral`, read-only, never asking for approval), answered
+ * by the served model, for the window's own small jobs such as a commit message. Resolves with the
+ * last thing the agent said.
+ */
+export async function askOnce(client: RpcClient, listen: Listen, options: { cwd: string; model: string | null; prompt: string; timeoutMs?: number }): Promise<string> {
+  const started = await client.request("thread/start", { cwd: options.cwd, model: options.model, ephemeral: true, sandbox: "read-only", approvalPolicy: "never" });
+  const threadId = started.thread.id;
+  let said = "";
+  let stop: () => void = () => {};
+  const answered = new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      stop();
+      reject(new Error("the model did not answer in time"));
+    }, options.timeoutMs ?? 300_000);
+    stop = listen((notification) => {
+      if (notification.method === "item/completed" && notification.params.threadId === threadId && notification.params.item.type === "agentMessage") {
+        said = notification.params.item.text;
+      } else if (notification.method === "turn/completed" && notification.params.threadId === threadId) {
+        clearTimeout(timer);
+        stop();
+        const turn = notification.params.turn;
+        if (turn.error) return reject(new Error(turn.error.message));
+        const last = [...turn.items].reverse().find((item) => item.type === "agentMessage");
+        resolve(said || (last && last.type === "agentMessage" ? last.text : ""));
+      }
+    });
+  });
+  try {
+    await client.request("turn/start", { threadId, input: [{ type: "text", text: options.prompt, text_elements: [] }] });
+    return (await answered).trim();
+  } finally {
+    stop();
+    client.request("thread/unsubscribe", { threadId }).catch(() => {});
+  }
+}
+
+/** The instruction a generated commit message starts from (Settings › Git may replace it). */
+export const COMMIT_PROMPT = "Write a git commit message for the staged changes below. The first line sums the change up in the imperative mood in at most 72 characters; if the change needs explaining, add a blank line and a short body that says why. Answer with the message alone: no quotes, no code fences, no commentary.";
+
+/** A commit message from the diff, by the served model; the diff is cut to keep the question small. */
+export async function commitMessage(client: RpcClient, listen: Listen, root: string, model: string | null, diff: string, prompt: string = COMMIT_PROMPT): Promise<string> {
+  const cut = diff.length > 40_000 ? `${diff.slice(0, 40_000)}\n… (the rest of the diff is left out)` : diff;
+  const answer = await askOnce(client, listen, { cwd: root, model, prompt: `${prompt}\n\n${cut}` });
+  return cleanMessage(answer);
+}
+
+/** A model's commit message without the fences or quotes it was asked to leave out. */
+export function cleanMessage(text: string): string {
+  return text.trim().replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").replace(/^"([\s\S]*)"$/, "$1").trim();
 }
