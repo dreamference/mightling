@@ -85,6 +85,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "diff", description: "Show how this folder differs from its remote branch", needs: "work" },
   { name: "copy", description: "Copy the last answer", needs: "thread" },
   { name: "resume", description: "Find an earlier thread", needs: "none" },
+  { name: "review", description: "Have the agent review the uncommitted changes, a branch, a commit, or what you ask", needs: "thread", args: "[base <branch> | commit <sha> | instructions]" },
   { name: "airgapped", description: "Show the air-gap level, or set the default for new threads", needs: "none", args: "[default off|on]" },
 ];
 
@@ -266,4 +267,15 @@ export function keyAnswer(method: ServerRequest["method"], key: "approve" | "dec
     default:
       return null;
   }
+}
+
+/** The target `/review <args>` names: uncommitted changes, `base <branch>`, `commit <sha>`, or instructions of its own. */
+export function reviewTarget(args: string): { type: "uncommittedChanges" } | { type: "baseBranch"; branch: string } | { type: "commit"; sha: string; title: string | null } | { type: "custom"; instructions: string } {
+  const words = args.trim();
+  if (!words) return { type: "uncommittedChanges" };
+  const base = words.match(/^base\s+(\S+)$/);
+  if (base) return { type: "baseBranch", branch: base[1] };
+  const commit = words.match(/^commit\s+([0-9a-fA-F]{4,64})$/);
+  if (commit) return { type: "commit", sha: commit[1], title: null };
+  return { type: "custom", instructions: words };
 }

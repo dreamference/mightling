@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  PromptHistory, activeTrigger, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
+  PromptHistory, reviewTarget, activeTrigger, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
   lastUserTurn, matchCommands, matchSkills, mentionPath, parseSlash, rememberModel, userTexts,
 } from "./composer";
 import { DEFAULT_PREFS, sanitize } from "./prefs";
@@ -186,5 +186,15 @@ describe("editing, forking and the picker", () => {
     expect(effortFor(null, "high")).toBeNull();
     expect(rememberModel(["a", "b", "c", "d", "e"], "c")).toEqual(["c", "a", "b", "d", "e"]);
     expect(rememberModel(["a", "b", "c", "d", "e"], "f")).toEqual(["f", "a", "b", "c", "d"]);
+  });
+});
+
+describe("/review", () => {
+  it("names uncommitted changes, a base branch, a commit, or instructions of its own", () => {
+    expect(reviewTarget("")).toEqual({ type: "uncommittedChanges" });
+    expect(reviewTarget("base main")).toEqual({ type: "baseBranch", branch: "main" });
+    expect(reviewTarget("commit 1a2b3c4")).toEqual({ type: "commit", sha: "1a2b3c4", title: null });
+    expect(reviewTarget("check the retry loop for races")).toEqual({ type: "custom", instructions: "check the retry loop for races" });
+    expect(parseSlash("/review base main")).toMatchObject({ command: { name: "review" }, args: "base main" });
   });
 });

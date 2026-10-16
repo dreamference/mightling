@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAsk
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { keyAction, matches } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -702,6 +702,17 @@ export function App() {
     }
   };
 
+  /** `/review` (§2.5): the server reviews on the served model, inline in this thread or in a review thread of its own. */
+  const startReview = async (target: ReturnType<typeof reviewTarget>) => {
+    if (!selected) return notice("Open a thread to review its folder's changes.");
+    try {
+      const answer = (await client.request("review/start", { threadId: selected.thread.id, target, delivery: prefs.reviewDelivery })) as { reviewThreadId?: string };
+      if (answer.reviewThreadId && answer.reviewThreadId !== selected.thread.id) await openThread(answer.reviewThreadId);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
   const fork = async () => {
     if (!selected) return;
     try {
@@ -783,6 +794,8 @@ export function App() {
           setDrawer(true);
           requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
           return;
+        case "review":
+          return startReview(reviewTarget(args));
         case "airgapped": {
           const words = args.split(/\s+/).filter(Boolean);
           if (words[0] === "default" && (words[1] === "on" || words[1] === "off")) {
@@ -1131,6 +1144,12 @@ function Settings(props: {
           <label><input type="radio" name="follow" checked={prefs.followUp === "steer"} onChange={() => onChange({ followUp: "steer" })} /> Steer: the running turn takes it in now</label>
           <label><input type="radio" name="follow" checked={prefs.followUp === "queue"} onChange={() => onChange({ followUp: "queue" })} /> Queue: it waits, and starts the next turn when this one ends</label>
         </fieldset>
+        <h3>Git</h3>
+        <fieldset>
+          <legend>/review delivers its findings</legend>
+          <label><input type="radio" name="review" checked={prefs.reviewDelivery === "inline"} onChange={() => onChange({ reviewDelivery: "inline" })} /> Inline, in the thread</label>
+          <label><input type="radio" name="review" checked={prefs.reviewDelivery === "detached"} onChange={() => onChange({ reviewDelivery: "detached" })} /> Detached, in a review thread of their own</label>
+        </fieldset>
         {bridge.git.available() ? (
           <>
             <h3>Worktrees</h3>
@@ -1290,6 +1309,10 @@ function Item({ item }: { item: ThreadItem }) {
       return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
     case "contextCompaction":
       return <div className="item note">Earlier turns were compacted.</div>;
+    case "enteredReviewMode":
+      return <div className="item note review-mode">Reviewing: {item.review}</div>;
+    case "exitedReviewMode":
+      return <div className="item agent review-result"><div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.review) }} /></div>;
     case "webSearch":
       return <div className="item note">Searched the web.</div>;
     default:
