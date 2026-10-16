@@ -150,6 +150,95 @@
       "name": "an object that is neither a request, a notification nor an answer is refused",
       "message": {"hello": "world"},
       "accept": false
+    },
+    {
+      "name": "review/start passes: /review runs on the server, inline or in a thread of its own (DESKTOP_PARITY item 6)",
+      "message": {"id": 40, "method": "review/start", "params": {"threadId": "t", "target": {"type": "uncommittedChanges"}, "delivery": "inline"}},
+      "accept": true,
+      "out": {"id": 40, "method": "review/start", "params": {"threadId": "t", "target": {"type": "uncommittedChanges"}, "delivery": "inline"}}
+    },
+    {
+      "name": "command/exec passes: a terminal tab is a PTY under the thread's permission profile (DESKTOP_PARITY item 8)",
+      "message": {"id": 41, "method": "command/exec", "params": {"command": ["/bin/bash", "-l"], "processId": "term-1", "tty": true, "disableTimeout": true, "disableOutputCap": true, "cwd": "/w", "size": {"rows": 24, "cols": 80}, "permissionProfile": ":workspace"}},
+      "accept": true,
+      "out": {"id": 41, "method": "command/exec", "params": {"command": ["/bin/bash", "-l"], "processId": "term-1", "tty": true, "disableTimeout": true, "disableOutputCap": true, "cwd": "/w", "size": {"rows": 24, "cols": 80}, "permissionProfile": ":workspace"}}
+    },
+    {
+      "name": "command/exec/write passes: keystrokes for a terminal tab",
+      "message": {"id": 42, "method": "command/exec/write", "params": {"processId": "term-1", "deltaBase64": "bHMK"}},
+      "accept": true,
+      "out": {"id": 42, "method": "command/exec/write", "params": {"processId": "term-1", "deltaBase64": "bHMK"}}
+    },
+    {
+      "name": "command/exec/resize passes: a terminal tab's new size",
+      "message": {"id": 43, "method": "command/exec/resize", "params": {"processId": "term-1", "size": {"rows": 40, "cols": 120}}},
+      "accept": true,
+      "out": {"id": 43, "method": "command/exec/resize", "params": {"processId": "term-1", "size": {"rows": 40, "cols": 120}}}
+    },
+    {
+      "name": "command/exec/terminate passes: a terminal tab closed",
+      "message": {"id": 44, "method": "command/exec/terminate", "params": {"processId": "term-1"}},
+      "accept": true,
+      "out": {"id": 44, "method": "command/exec/terminate", "params": {"processId": "term-1"}}
+    },
+    {
+      "name": "thread/shellCommand stays refused: it runs unsandboxed, past /airgapped on",
+      "message": {"id": 45, "method": "thread/shellCommand", "params": {"threadId": "t", "command": "curl example.com"}},
+      "accept": false
+    },
+    {
+      "name": "thread/goal/set passes: the goal row sets, pauses and resumes a thread's goal (DESKTOP_PARITY item 5)",
+      "message": {"id": 46, "method": "thread/goal/set", "params": {"threadId": "t", "objective": "Every test passes", "status": "active"}},
+      "accept": true,
+      "out": {"id": 46, "method": "thread/goal/set", "params": {"threadId": "t", "objective": "Every test passes", "status": "active"}}
+    },
+    {
+      "name": "thread/goal/get passes: the goal row reads a thread's goal",
+      "message": {"id": 47, "method": "thread/goal/get", "params": {"threadId": "t"}},
+      "accept": true,
+      "out": {"id": 47, "method": "thread/goal/get", "params": {"threadId": "t"}}
+    },
+    {
+      "name": "thread/goal/clear passes: the goal row clears it",
+      "message": {"id": 48, "method": "thread/goal/clear", "params": {"threadId": "t"}},
+      "accept": true,
+      "out": {"id": 48, "method": "thread/goal/clear", "params": {"threadId": "t"}}
+    },
+    {
+      "name": "skills/config/write passes: a skill turned off or on (DESKTOP_PARITY item 11)",
+      "message": {"id": 49, "method": "skills/config/write", "params": {"path": "/w/.mightling/skills/x/SKILL.md", "enabled": false}},
+      "accept": true,
+      "out": {"id": 49, "method": "skills/config/write", "params": {"path": "/w/.mightling/skills/x/SKILL.md", "enabled": false}}
+    },
+    {
+      "name": "plugin/list passes: the local and repository marketplaces' plugins",
+      "message": {"id": 50, "method": "plugin/list", "params": {"cwds": ["/w"]}},
+      "accept": true,
+      "out": {"id": 50, "method": "plugin/list", "params": {"cwds": ["/w"]}}
+    },
+    {
+      "name": "plugin/install passes: a plugin from a local marketplace",
+      "message": {"id": 51, "method": "plugin/install", "params": {"marketplacePath": "/w/.mightling/marketplace.json", "pluginName": "lint"}},
+      "accept": true,
+      "out": {"id": 51, "method": "plugin/install", "params": {"marketplacePath": "/w/.mightling/marketplace.json", "pluginName": "lint"}}
+    },
+    {
+      "name": "plugin/uninstall passes",
+      "message": {"id": 52, "method": "plugin/uninstall", "params": {"pluginId": "lint@local"}},
+      "accept": true,
+      "out": {"id": 52, "method": "plugin/uninstall", "params": {"pluginId": "lint@local"}}
+    },
+    {
+      "name": "config/mcpServer/reload passes: MCP servers read again after a change",
+      "message": {"id": 53, "method": "config/mcpServer/reload", "params": {}},
+      "accept": true,
+      "out": {"id": 53, "method": "config/mcpServer/reload", "params": {}}
+    },
+    {
+      "name": "hooks/list passes: the lifecycle hooks, read only",
+      "message": {"id": 54, "method": "hooks/list", "params": {"cwds": ["/w"]}},
+      "accept": true,
+      "out": {"id": 54, "method": "hooks/list", "params": {"cwds": ["/w"]}}
     }
   ]
 }

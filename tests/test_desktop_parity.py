@@ -33,14 +33,16 @@ POLICY_TO_ADD = {
     "project/delete": 3, "project/import": 3, "project/move": 3,
     "threadSection/create": 3, "threadSection/list": 3, "threadSection/update": 3, "threadSection/delete": 3,
     "thread/section/move": 3, "thread/searchOccurrences": 3,
-    "thread/goal/get": 5, "thread/goal/set": 5, "thread/goal/clear": 5,
-    "review/start": 6,
-    "command/exec": 8, "command/exec/write": 8, "command/exec/resize": 8, "command/exec/terminate": 8,
-    "thread/shellCommand": 8,
-    "skills/config/write": 11, "skills/extraRoots/set": 11, "plugin/skill/read": 11,
-    "plugin/list": 11, "plugin/read": 11, "plugin/search": 11, "plugin/install": 11, "plugin/uninstall": 11,
-    "plugin/installed": 11, "config/mcpServer/reload": 11, "app/read": 11, "app/installed": 11, "hooks/list": 11,
+    "skills/extraRoots/set": 11, "plugin/skill/read": 11,
+    "plugin/read": 11, "plugin/search": 11,
+    "plugin/installed": 11, "app/read": 11, "app/installed": 11,
     "thread/memoryMode/set": 13, "memory/status": 13, "memory/reset": 13,
+}
+
+
+# Methods a §2 row names that Mightling deliberately does not allow, with the reason.
+NOT_ADDED = {
+    "thread/shellCommand": "runs unsandboxed with full access, so a command from the window would pass /airgapped on",
 }
 
 
@@ -123,9 +125,10 @@ def test_every_phase_2_method_is_allowed_or_listed():
     allowed = set(json.loads(POLICY.read_text(encoding="utf-8"))["allowedRequests"])
     needed = phase_2_methods()
     assert needed, "no methods found in §2: the parse is broken"
-    missing = sorted(set(needed) - allowed)
+    missing = sorted(set(needed) - allowed - set(NOT_ADDED))
     print("\nPhase 2 methods still to add to policy.json:")
     for name in missing:
         print(f"  {name} (item {POLICY_TO_ADD.get(name, '?')}): {needed[name][0]}")
     assert missing == sorted(POLICY_TO_ADD), "update POLICY_TO_ADD: a method was added to the policy or a row changed"
     assert not set(POLICY_TO_ADD) & allowed
+    assert not set(NOT_ADDED) & allowed, "a method Mightling refuses is in the policy"
