@@ -407,6 +407,39 @@ html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 
 .action-row input.script { flex: 1; font-family: var(--font-code); font-size: 12.5px; }
 .dialog-buttons { display: flex; gap: 6px; margin-top: 14px; }
 
+/* The shell (DESKTOP_PARITY §2.1, §2.19): the sidebar folded away, back and forward, the command menu, settings pages, shortcuts. */
+.work.sidebar-hidden { grid-template-columns: 0 1fr; }
+.work.sidebar-hidden.review-open { grid-template-columns: 0 minmax(360px, 1fr) minmax(420px, 48%); }
+.work.sidebar-hidden .sidebar { visibility: hidden; padding: 0; border: none; }
+.sidebar-toggle, .nav-button { color: var(--muted); }
+.nav-button:disabled { opacity: 0.35; }
+kbd { display: inline-block; font-family: var(--font-code); font-size: 11.5px; padding: 1px 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--raised); color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.dialog.settings { width: min(860px, calc(100vw - 32px)); }
+.settings-body { display: grid; grid-template-columns: 180px 1fr; gap: 16px; margin-top: 12px; min-height: 360px; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; }
+.settings-nav button { border: none; background: none; text-align: left; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--muted); }
+.settings-nav button.selected { background: var(--selected); color: var(--text); font-weight: 500; }
+.settings-page h3:first-child { margin-top: 0; }
+.shortcut-search { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.shortcut-search input[type="search"] { flex: 1; }
+.shortcut-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.shortcut-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.shortcut-table tr.planned td:first-child { color: var(--muted); }
+.shortcut-group th { text-align: left; padding: 12px 6px 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.planned-note { color: var(--faint); font-size: 12px; }
+.shortcut-actions { text-align: right; white-space: nowrap; }
+button.recording { border-color: var(--accent); background: var(--accent-soft); font-size: 12px; }
+.command-backdrop { padding-top: 14vh; }
+.dialog.command-menu { padding: 8px; width: min(640px, calc(100vw - 32px)); }
+.command-menu > input { width: 100%; font-size: 15px; padding: 10px 12px; border: none; border-bottom: 1px solid var(--line); border-radius: 0; }
+.command-menu > input:focus-visible { box-shadow: none; }
+.command-menu ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 50vh; overflow: auto; }
+.command-menu li { display: flex; align-items: baseline; gap: 10px; padding: 7px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+.command-menu li.selected { background: var(--selected); }
+.command-menu .kind { width: 64px; flex: none; font-size: 11.5px; color: var(--faint); }
+.command-label { font-weight: 500; white-space: nowrap; }
+.command-detail { flex: 1; min-width: 0; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .ask-empty { max-width: 520px; margin: 14vh auto 0; text-align: center; }
 .ask-empty .mark { display: block; margin: 0 auto 18px; }
 .ask-empty h1 { color: var(--text); font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; }
@@ -428,6 +461,8 @@ html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 
   .drawer-open .sidebar { transform: none; }
   .drawer-open .backdrop { display: block; position: fixed; inset: 0; z-index: 10; background: var(--scrim); }
   .bar .menu-toggle { display: inline-flex; }
+  .bar .sidebar-toggle, .bar .nav-button { display: none; }
+  .settings-body { grid-template-columns: 1fr; }
   .bar { padding: 6px 8px; gap: 6px; }
   .bar .title { max-width: none; flex: 1; min-width: 0; }
   .bar .cwd, .bar .spacer, .chip.optional { display: none; }

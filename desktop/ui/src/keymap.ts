@@ -19,11 +19,36 @@ export const KEYMAP: KeyAction[] = (keymapFile as { actions: KeyAction[] }).acti
 
 const BY_ID = new Map(KEYMAP.map((action) => [action.id, action]));
 
-/** The action `id`, for a handler to match against; throws for an id the table does not have. */
+/** Bindings the user chose in Settings › Keyboard shortcuts (kept in the window's preferences). */
+let overrides: Record<string, string[]> = {};
+
+/** Applies the user's bindings; an id the table does not have is ignored. */
+export function setOverrides(chosen: Record<string, unknown>): void {
+  const next: Record<string, string[]> = {};
+  for (const [id, keys] of Object.entries(chosen ?? {})) {
+    if (BY_ID.has(id) && Array.isArray(keys) && keys.every((key) => typeof key === "string")) next[id] = keys as string[];
+  }
+  overrides = next;
+}
+
+/** The action `id` with the user's bindings, for a handler to match against; throws for an id the table does not have. */
 export function keyAction(id: string): KeyAction {
   const action = BY_ID.get(id);
   if (!action) throw new Error(`no keyboard action named ${id}`);
-  return action;
+  return overrides[id] ? { ...action, keys: overrides[id] } : action;
+}
+
+/** Every action with the user's bindings. */
+export function effectiveKeymap(): KeyAction[] {
+  return KEYMAP.map((action) => keyAction(action.id));
+}
+
+/** The binding a key event spells, as the table writes them (`Ctrl+Shift+K`); null for a lone modifier. */
+export function chordOf(event: KeyLike): string | null {
+  if (["Control", "Shift", "Alt", "Meta", "OS"].includes(event.key)) return null;
+  const mods = [event.ctrlKey ? "Ctrl" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", event.metaKey ? "Super" : ""].filter(Boolean);
+  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key === "Esc" ? "Escape" : event.key;
+  return [...mods, key === " " ? "Space" : key].join("+");
 }
 
 /** The fields of a keyboard event a binding is matched against. */
