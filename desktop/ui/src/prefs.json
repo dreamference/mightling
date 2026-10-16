@@ -47,6 +47,19 @@
     "bottomPanel": {
       "default": false,
       "type": "boolean"
+    },
+    "terminalShell": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
+    "commandOutput": {
+      "default": "running",
+      "enum": [
+        "running",
+        "collapsed",
+        "hidden"
+      ]
     }
   }
 }

@@ -396,6 +396,11 @@ html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 
 .panel-tab.selected { background: var(--raised); box-shadow: 0 0 0 1px var(--line); }
 .panel-tab-label { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 3px 6px; font-size: 12.5px; white-space: nowrap; }
 .panel-tab .running { position: static; }
+.panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--canvas); }
+.terminal-host { flex: 1; min-height: 0; padding: 4px 0 0 8px; }
+.terminal-host .xterm { height: 100%; }
+/* xterm.css paints its viewport and scroll area black; the terminal takes the canvas instead. */
+.terminal-host .xterm-viewport, .terminal-host .xterm-scrollable-element, .terminal-host .xterm-screen { background-color: var(--canvas) !important; }
 .panel-output { flex: 1; margin: 0; padding: 8px 12px; overflow: auto; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; background: var(--canvas); }
 .panel-empty { padding: 10px 14px; }
 .dialog-note { color: var(--muted); font-size: 13px; }
