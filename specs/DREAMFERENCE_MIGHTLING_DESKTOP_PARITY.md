@@ -231,17 +231,17 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Review pane (Ctrl+Shift+G): the repository's state, not only the agent's edits; scopes **Unstaged** (default), **Staged**, **Commit**, **Branch** (against the base), **Last turn** | window `git`; `turn/diff/updated` for Last turn | **Partial:** the turn's diff is shown; the pane to build | 2 |
-| Repository selector when a project has several repositories; **All repos** for Last turn | window `git` | **Same** | 2 |
-| Stage, unstage, revert: whole diff, per file, per hunk; split or unified | window `git` | **Same** | 2 |
-| Inline comments on diff lines (hover, **+**), sent to the composer as review guidance | window | **Same** | 2 |
-| Mark a file as viewed | window state | **Same** | 2 |
-| Click a file name: open in the chosen editor; Ctrl+click a line: open at the line; click the name's background: collapse | window; editor detection | **Same**, editors found from `.desktop` entries | 2 |
-| `/review`: against a base branch, uncommitted changes, a commit, custom instructions; findings as inline comments; **Inline** in the chat or **Detached** (Settings › Git › Review delivery); `review_model` | `review/start`; `config/value/write` | **Same**, the local model reviews | 2 |
-| Commit (with a generated message), push, create pull request (the forge's new-PR page prefilled) | window `git`; Settings › Git: branch naming, force push, commit and PR prompts | **Same**; no forge API or token: the browser opens the forge's page | 2 |
+| Review pane (Ctrl+Shift+G): the repository's state, not only the agent's edits; scopes **Unstaged** (default), **Staged**, **Commit**, **Branch** (against the base), **Last turn** | window `git`; `turn/diff/updated` for Last turn | **Built** (2026-10-16): a column beside the thread (Ctrl+Shift+G or the header's review button); Unstaged (untracked files included), Staged, Commit (HEAD or one of the last 30), Branch (against `origin/HEAD`, else main or master) from `git` in the main process (`git.ts`), Last turn from the server; in a browser on `ling web` only Last turn | 2 |
+| Repository selector when a project has several repositories; **All repos** for Last turn | window `git` | **Built** (2026-10-16): the repository the thread's folder is in, or a selector over the repositories up to two levels below a folder that is not in one; Last turn is the server's diff of every repository the turn touched | 2 |
+| Stage, unstage, revert: whole diff, per file, per hunk; split or unified | window `git` | **Built** (2026-10-16): Stage all / Revert all / Unstage all, per file, and per hunk (`git apply --cached`, `--reverse`, `--index --reverse` of a one-hunk patch); reverting asks first; unified or split, remembered in the window's preferences | 2 |
+| Inline comments on diff lines (hover, **+**), sent to the composer as review guidance | window | **Built** (2026-10-16): **+** on a hovered line, comments listed under their lines, **Send to the composer** writes them as review guidance with the path, line and code | 2 |
+| Mark a file as viewed | window state | **Built** (2026-10-16): a viewed file folds until its changes change | 2 |
+| Click a file name: open in the chosen editor; Ctrl+click a line: open at the line; click the name's background: collapse | window; editor detection | **Built** (2026-10-16): editors found from `.desktop` entries, JetBrains Toolbox scripts and PATH (`editors.ts`: VS Code, VSCodium, Cursor, Zed, Sublime Text, the JetBrains IDEs, Kate, gedit, Text Editor), each opened at the line with its own arguments, or the system's choice; the choice is a window preference | 2 |
+| `/review`: against a base branch, uncommitted changes, a commit, custom instructions; findings as inline comments; **Inline** in the chat or **Detached** (Settings › Git › Review delivery); `review_model` | `review/start`; `config/value/write` | **Partial**: built on the held branch `desktop/p2-policy` with `review/start` added to `policy.json`, which needs the Rust conformance run (cargo) before it merges; not on main yet | 2 |
+| Commit (with a generated message), push, create pull request (the forge's new-PR page prefilled) | window `git`; Settings › Git: branch naming, force push, commit and PR prompts | **Built** (2026-10-16): commit what is staged or everything; **Write a message** asks the served model in an ephemeral read-only thread that never asks for approval (`thread/start` `ephemeral`); push (`--force-with-lease` when ticked, the upstream set the first time) and the forge's new pull request page (GitHub, GitLab, else the repository's page) in the system browser, both refused at `/airgapped on`; the Settings › Git prompts come with item 10 | 2 |
 | Code Review plugin for pull requests: inbox (assigned to me / my team / authored by me), summary, changes, checks, **Fix** from a failing check, **Review with Codex**, review instructions, submit review (comment / approve / request changes), stacks | vendor plugin over GitHub/GitLab APIs | **Mightling's, later:** a local `gh`/`glab`-backed review tab, optional, off by default; the air gap refuses it at `on` | 3 |
 | Automatic cloud reviews of pull requests | vendor cloud | **No** | — |
-| Revert the thread's changes | `thread/revert` | **Same** | 2 |
+| Revert the thread's changes | `thread/revert` | **Built**: the per-turn **Revert**, and **Revert the turn** in the review pane's Last turn scope | 2 |
 
 ### 2.6 Worktrees, hand-off and environments
 
@@ -531,7 +531,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 3. **Threads:** pins, sections, Recents, unread and attention, mark unread, find in chat, deep links and `ling://`, pop-out with always-on-top, side chat, standalone chat (§2.1).
 4. **Composer:** `@` mentions, `$` skills, `/` commands, Enter behaviour, follow-up behaviour, ↑ restore, Shift+drag images, approve/decline keys, edit previous, fork, Compress, the model and effort picker (§2.3). **Composer: merged 2026-10-16, eca4a6a** (the slash commands Partial: the ones whose methods come with later items wait for them).
 5. **Plan and goal:** collaboration mode, the goal row (§2.3).
-6. **Review pane and git:** scopes, repository selector, stage/unstage/revert at three levels, inline comments, viewed markers, open in editor, `/review` inline or detached, commit, push, PR page (§2.5).
+6. **Review pane and git:** scopes, repository selector, stage/unstage/revert at three levels, inline comments, viewed markers, open in editor, `/review` inline or detached, commit, push, PR page (§2.5). **Review pane and git: merged 2026-10-16, MERGE6** (`/review` Partial: it needs `review/start` in `policy.json`, held on `desktop/p2-policy` for the Rust conformance run).
 7. **Worktrees and hand-off**, local environments and actions, the bottom panel (§2.6).
 8. **Terminal** tabs (§2.7).
 9. **Tabs and layout:** split, full, hidden (§2.1).

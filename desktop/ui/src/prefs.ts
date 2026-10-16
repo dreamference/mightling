@@ -15,6 +15,10 @@ export interface Prefs {
   effort: string | null;
   /** Models picked recently, newest first (Alt+M). */
   recentModels: string[];
+  /** The editor files open in (an id of desktop/electron/src/editors.ts); null for the system's choice. */
+  editor: string | null;
+  /** The review pane's diffs: one column, or old and new side by side. */
+  diffLayout: "unified" | "split";
 }
 
 type Spec = { default: unknown; enum?: string[]; type?: string; nullable?: boolean };

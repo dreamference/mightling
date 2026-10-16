@@ -1,0 +1,337 @@
+// Window-side git (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §1.2, §2.5): the Codex app runs
+// `git` from its main process for everything the protocol has no method for (the review pane's
+// scopes, stage and revert by file and by hunk, commit, push, the pull-request page), and so does
+// this one. Every call is `git` with an argument list (never a shell), in a repository the page
+// names and this module checks; paths stay inside it; a patch arrives on stdin; nothing here reaches
+// the network except `push`, which only a click runs and which main.ts refuses at `/airgapped on`.
+// No Electron here, so this tests against scratch repositories.
+
+import { execFile, spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+/** The most a diff or log may weigh: the pane is for reading, and this machine's memory is shared with a model. */
+export const MAX_OUTPUT = 16 * 1024 * 1024;
+
+/** git's environment: never a prompt for credentials (a click must not hang), never a pager or an editor. */
+export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...base, GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat", GIT_EDITOR: "true", LC_ALL: "C" };
+}
+
+export class GitError extends Error {}
+
+/** Runs `git args` in `cwd`; resolves with stdout, rejects with git's own message. */
+export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile("git", args, { cwd, env: gitEnv(), maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) {
+        const tooBig = (error as { code?: string }).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+        reject(new GitError(tooBig ? "the output is too large to show here" : String(stderr || error.message).trim()));
+      } else resolve(stdout);
+    });
+    if (input !== undefined) child.stdin?.end(input);
+  });
+}
+
+/** The repository `root` really is: absolute, and git's own top level for it. */
+export async function checkRoot(root: unknown): Promise<string> {
+  if (typeof root !== "string" || !path.isAbsolute(root)) throw new GitError("a repository is named by its absolute path");
+  let top: string;
+  try {
+    top = (await git(root, ["rev-parse", "--show-toplevel"])).trim();
+  } catch {
+    throw new GitError(`${root} is not a git repository`);
+  }
+  if (fs.realpathSync(top) !== fs.realpathSync(root)) throw new GitError(`${root} is not the top of its repository (${top} is)`);
+  return top;
+}
+
+/** A path inside the repository, relative to its root; anything that would leave it is refused. */
+export function insidePath(root: string, file: unknown): string {
+  if (typeof file !== "string" || !file || file.includes("\0")) throw new GitError("a path is needed");
+  const resolved = path.resolve(root, file);
+  const relative = path.relative(root, resolved);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new GitError(`${file} is outside the repository`);
+  return relative;
+}
+
+const paths = (root: string, files: unknown): string[] => {
+  if (!Array.isArray(files) || files.length === 0) throw new GitError("name at least one file");
+  return files.map((file) => insidePath(root, file));
+};
+
+/**
+ * The repositories a thread's folder belongs to: the one it is inside, or, for a folder that is not
+ * itself in one, the repositories directly below it (two levels), for the pane's selector.
+ */
+export async function repositories(cwd: unknown): Promise<string[]> {
+  if (typeof cwd !== "string" || !path.isAbsolute(cwd) || !fs.existsSync(cwd)) return [];
+  try {
+    return [(await git(cwd, ["rev-parse", "--show-toplevel"])).trim()];
+  } catch {
+    // Not inside a repository: look a little way down.
+  }
+  const found: string[] = [];
+  const look = (folder: string, depth: number) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(folder, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const child = path.join(folder, entry.name);
+      if (fs.existsSync(path.join(child, ".git"))) found.push(child);
+      else if (depth > 1) look(child, depth - 1);
+      if (found.length >= 20) return;
+    }
+  };
+  look(cwd, 2);
+  return found.sort();
+}
+
+export interface FileStatus {
+  path: string;
+  /** Index (staged) and work-tree (unstaged) states, git's letters: M, A, D, R, C, U, or "." for none; "?" for untracked. */
+  staged: string;
+  unstaged: string;
+  /** The old path of a rename. */
+  from: string | null;
+}
+
+export interface Status {
+  root: string;
+  branch: string | null;
+  head: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: FileStatus[];
+}
+
+/** `git status --porcelain=v2 --branch -z`, parsed. */
+export function parseStatus(root: string, text: string): Status {
+  const status: Status = { root, branch: null, head: null, upstream: null, ahead: 0, behind: 0, files: [] };
+  const fields = text.split("\0");
+  for (let index = 0; index < fields.length; index++) {
+    const line = fields[index];
+    if (!line) continue;
+    if (line.startsWith("# branch.oid ")) status.head = line.slice(13) === "(initial)" ? null : line.slice(13);
+    else if (line.startsWith("# branch.head ")) status.branch = line.slice(14) === "(detached)" ? null : line.slice(14);
+    else if (line.startsWith("# branch.upstream ")) status.upstream = line.slice(18);
+    else if (line.startsWith("# branch.ab ")) {
+      const match = line.match(/\+(\d+) -(\d+)/);
+      if (match) [status.ahead, status.behind] = [Number(match[1]), Number(match[2])];
+    } else if (line.startsWith("1 ")) {
+      const parts = line.split(" ");
+      status.files.push({ path: parts.slice(8).join(" "), staged: parts[1][0], unstaged: parts[1][1], from: null });
+    } else if (line.startsWith("2 ")) {
+      const parts = line.split(" ");
+      status.files.push({ path: parts.slice(9).join(" "), staged: parts[1][0], unstaged: parts[1][1], from: fields[++index] ?? null });
+    } else if (line.startsWith("u ")) {
+      const parts = line.split(" ");
+      status.files.push({ path: parts.slice(10).join(" "), staged: "U", unstaged: "U", from: null });
+    } else if (line.startsWith("? ")) {
+      status.files.push({ path: line.slice(2), staged: ".", unstaged: "?", from: null });
+    }
+  }
+  return status;
+}
+
+export async function status(root: string): Promise<Status> {
+  return parseStatus(root, await git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]));
+}
+
+export type Scope = "unstaged" | "staged" | "commit" | "branch";
+
+const DIFF_FLAGS = ["--no-color", "--no-ext-diff", "--no-renames", "-U3"];
+
+/** The branch a feature branch is compared with: the remote's default, else main or master. */
+export async function baseBranch(root: string): Promise<string | null> {
+  try {
+    const head = (await git(root, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])).trim();
+    if (head) return head.replace(/^refs\/remotes\//, "");
+  } catch {
+    // No remote default.
+  }
+  for (const name of ["main", "master", "origin/main", "origin/master"]) {
+    try {
+      await git(root, ["rev-parse", "--verify", "--quiet", `${name}^{commit}`]);
+      return name;
+    } catch {
+      // Try the next.
+    }
+  }
+  return null;
+}
+
+/** A new file too large (or too odd) to show, as a one-line stand-in diff. */
+function notShown(file: string, why: string): string {
+  return `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+(not shown: ${why})\n`;
+}
+
+/** `git diff --no-index` exits 1 on a difference; this runs it and keeps the output. */
+function diffNoIndex(root: string, file: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile("git", ["diff", ...DIFF_FLAGS, "--no-index", "--", "/dev/null", file], { cwd: root, env: gitEnv(), maxBuffer: MAX_OUTPUT, encoding: "utf8" },
+      (_error, stdout) => resolve(stdout));
+  });
+}
+
+export interface DiffAnswer {
+  scope: Scope;
+  diff: string;
+  /** What the diff is against, in words: the base branch, the commit. */
+  against: string | null;
+}
+
+/** The diff of one scope (Last turn is the server's, `turn/diff/updated`). */
+export async function diff(root: string, scope: Scope, commit?: string | null): Promise<DiffAnswer> {
+  switch (scope) {
+    case "unstaged": {
+      const tracked = await git(root, ["diff", ...DIFF_FLAGS]);
+      const untracked = (await status(root)).files.filter((file) => file.unstaged === "?").slice(0, 200);
+      const added: string[] = [];
+      for (const file of untracked) {
+        const stat = fs.statSync(path.join(root, file.path), { throwIfNoEntry: false });
+        if (!stat || !stat.isFile()) added.push(notShown(file.path, "not a regular file"));
+        else if (stat.size > 1024 * 1024) added.push(notShown(file.path, "larger than 1 MB"));
+        else added.push(await diffNoIndex(root, file.path));
+      }
+      return { scope, diff: tracked + added.join(""), against: "the index" };
+    }
+    case "staged":
+      return { scope, diff: await git(root, ["diff", "--cached", ...DIFF_FLAGS]), against: "HEAD" };
+    case "commit": {
+      const sha = typeof commit === "string" && /^[0-9a-fA-F]{4,64}$/.test(commit) ? commit : "HEAD";
+      return { scope, diff: await git(root, ["show", "--format=", ...DIFF_FLAGS, sha, "--"]), against: sha };
+    }
+    case "branch": {
+      const base = await baseBranch(root);
+      if (!base) return { scope, diff: "", against: null };
+      const mergeBase = (await git(root, ["merge-base", base, "HEAD"])).trim();
+      return { scope, diff: await git(root, ["diff", ...DIFF_FLAGS, mergeBase]), against: base };
+    }
+  }
+}
+
+export interface Commit {
+  sha: string;
+  subject: string;
+  author: string;
+  time: number;
+}
+
+export async function log(root: string, count = 30): Promise<Commit[]> {
+  let text: string;
+  try {
+    text = await git(root, ["log", `-n${Math.max(1, Math.min(200, count))}`, "--format=%H%x1f%s%x1f%an%x1f%at%x1e"]);
+  } catch {
+    return [];
+  }
+  return text.split("\x1e").map((record) => record.trim()).filter(Boolean).map((record) => {
+    const [sha, subject, author, time] = record.split("\x1f");
+    return { sha, subject, author, time: Number(time) };
+  });
+}
+
+export const stage = async (root: string, files: unknown) => void (await git(root, ["add", "--", ...paths(root, files)]));
+export const unstage = async (root: string, files: unknown) => void (await git(root, ["restore", "--staged", "--", ...paths(root, files)]));
+
+/** Throws away a file's unstaged changes; an untracked file is deleted (the page asks first). */
+export async function discard(root: string, files: unknown): Promise<void> {
+  const list = paths(root, files);
+  const untracked = new Set((await status(root)).files.filter((file) => file.unstaged === "?").map((file) => file.path));
+  const tracked = list.filter((file) => !untracked.has(file));
+  if (tracked.length) await git(root, ["restore", "--worktree", "--", ...tracked]);
+  const gone = list.filter((file) => untracked.has(file));
+  if (gone.length) await git(root, ["clean", "-f", "-q", "--", ...gone]);
+}
+
+/** The files a patch touches, from its headers; every one must stay inside the repository. */
+export function patchPaths(patch: string): string[] {
+  const found = new Set<string>();
+  for (const match of patch.matchAll(/^(?:---|\+\+\+) (?:[ab]\/)?(.+)$/gm)) {
+    if (match[1] !== "/dev/null") found.add(match[1].replace(/\t.*$/, ""));
+  }
+  return [...found];
+}
+
+/**
+ * Applies a patch the page built from one hunk: to the index (stage), reversed to the index
+ * (unstage), reversed to the work tree (revert), or reversed to both (revert a staged hunk).
+ */
+export async function apply(root: string, patch: unknown, options: { cached?: boolean; reverse?: boolean; index?: boolean }): Promise<void> {
+  if (typeof patch !== "string" || !patch.includes("@@") || patch.length > MAX_OUTPUT) throw new GitError("not a patch");
+  for (const file of patchPaths(patch)) insidePath(root, file);
+  const args = ["apply", "--whitespace=nowarn", "--recount"];
+  if (options.cached) args.push("--cached");
+  else if (options.index) args.push("--index");
+  if (options.reverse) args.push("--reverse");
+  await git(root, [...args, "-"], patch);
+}
+
+/** Commits what is staged, or everything first when `all` is set; resolves with the new commit's sha. */
+export async function commit(root: string, message: unknown, all: boolean): Promise<string> {
+  if (typeof message !== "string" || !message.trim()) throw new GitError("a commit needs a message");
+  if (all) await git(root, ["add", "-A"]);
+  await git(root, ["commit", "--quiet", "--file=-"], message.trim() + "\n");
+  return (await git(root, ["rev-parse", "HEAD"])).trim();
+}
+
+/** Pushes the current branch, setting its upstream the first time; a click runs it, never a timer. */
+export async function push(root: string, force: boolean): Promise<string> {
+  const current = await status(root);
+  if (!current.branch) throw new GitError("HEAD is detached: create a branch before pushing");
+  const args = ["push", "--porcelain"];
+  if (force) args.push("--force-with-lease");
+  if (!current.upstream) args.push("--set-upstream", "origin", current.branch);
+  return (await git(root, args, undefined, 300_000)).trim();
+}
+
+/**
+ * The forge's page for a new pull request from `branch` into `base`, prefilled, for the system's
+ * browser: GitHub's compare page, GitLab's new merge request, or the repository's page. No API, no
+ * token: the forge does the rest in the user's own browser session.
+ */
+export function pullRequestPage(remote: string, branch: string, base: string | null): string | null {
+  let host: string;
+  let repo: string;
+  const ssh = remote.match(/^(?:[^@/]+@)?([^:/]+):(?!\/)(.+?)(?:\.git)?\/?$/);
+  const url = remote.match(/^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/);
+  if (url) [host, repo] = [url[1], url[2]];
+  else if (ssh) [host, repo] = [ssh[1], ssh[2]];
+  else return null;
+  const encode = (value: string) => value.split("/").map(encodeURIComponent).join("/");
+  const target = base?.replace(/^origin\//, "") ?? null;
+  if (host === "github.com" || host.startsWith("github.")) {
+    return `https://${host}/${repo}/compare/${target ? `${encode(target)}...` : ""}${encode(branch)}?expand=1`;
+  }
+  if (host.includes("gitlab")) {
+    const query = new URLSearchParams({ "merge_request[source_branch]": branch, ...(target ? { "merge_request[target_branch]": target } : {}) });
+    return `https://${host}/${repo}/-/merge_requests/new?${query.toString()}`;
+  }
+  return `https://${host}/${repo}`;
+}
+
+export async function pullRequestUrl(root: string): Promise<string> {
+  const current = await status(root);
+  if (!current.branch) throw new GitError("HEAD is detached: create a branch first");
+  let remote: string;
+  try {
+    remote = (await git(root, ["remote", "get-url", "origin"])).trim();
+  } catch {
+    throw new GitError("this repository has no remote named origin");
+  }
+  const page = pullRequestPage(remote, current.branch, await baseBranch(root));
+  if (!page) throw new GitError(`no pull-request page is known for ${remote}`);
+  return page;
+}
+
+/** A detached child for an editor: the window does not wait for it or keep it. */
+export function launch(command: string, args: string[], cwd: string): void {
+  const child = spawn(command, args, { cwd, detached: true, stdio: "ignore", env: process.env });
+  child.on("error", () => {});
+  child.unref();
+}

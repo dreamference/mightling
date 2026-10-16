@@ -1,9 +1,40 @@
 {
-  "comment": "The window's own preferences (DESKTOP_PARITY §2.15: settings the CLI does not share). The desktop app's main process keeps them in prefs.json under its data folder (desktop/electron/src/prefs.ts) and refuses a key or a value this file does not describe; a browser keeps them in localStorage. Agent settings live in ~/.mightling/config.toml, written through config/value/write, never here.",
+  "comment": "The window's own preferences (DESKTOP_PARITY \u00a72.15: settings the CLI does not share). The desktop app's main process keeps them in prefs.json under its data folder (desktop/electron/src/prefs.ts) and refuses a key or a value this file does not describe; a browser keeps them in localStorage. Agent settings live in ~/.mightling/config.toml, written through config/value/write, never here.",
   "keys": {
-    "enterBehaviour": { "default": "enter", "enum": ["enter", "ctrlEnter"] },
-    "followUp": { "default": "steer", "enum": ["steer", "queue"] },
-    "effort": { "default": null, "type": "string", "nullable": true },
-    "recentModels": { "default": [], "type": "strings" }
+    "enterBehaviour": {
+      "default": "enter",
+      "enum": [
+        "enter",
+        "ctrlEnter"
+      ]
+    },
+    "followUp": {
+      "default": "steer",
+      "enum": [
+        "steer",
+        "queue"
+      ]
+    },
+    "effort": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
+    "recentModels": {
+      "default": [],
+      "type": "strings"
+    },
+    "editor": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
+    "diffLayout": {
+      "default": "unified",
+      "enum": [
+        "unified",
+        "split"
+      ]
+    }
   }
 }
