@@ -239,6 +239,24 @@
       "message": {"id": 54, "method": "hooks/list", "params": {"cwds": ["/w"]}},
       "accept": true,
       "out": {"id": 54, "method": "hooks/list", "params": {"cwds": ["/w"]}}
+    },
+    {
+      "name": "thread/memoryMode/set passes: /memories in a thread (DESKTOP_PARITY item 13)",
+      "message": {"id": 55, "method": "thread/memoryMode/set", "params": {"threadId": "t", "mode": "disabled"}},
+      "accept": true,
+      "out": {"id": 55, "method": "thread/memoryMode/set", "params": {"threadId": "t", "mode": "disabled"}}
+    },
+    {
+      "name": "memory/status passes: Settings > Memories shows what is kept",
+      "message": {"id": 56, "method": "memory/status", "params": {}},
+      "accept": true,
+      "out": {"id": 56, "method": "memory/status", "params": {}}
+    },
+    {
+      "name": "memory/reset passes: Settings > Memories deletes them, on the user's click",
+      "message": {"id": 57, "method": "memory/reset", "params": {}},
+      "accept": true,
+      "out": {"id": 57, "method": "memory/reset", "params": {}}
     }
   ]
 }

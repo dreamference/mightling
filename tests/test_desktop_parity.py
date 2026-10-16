@@ -36,7 +36,6 @@ POLICY_TO_ADD = {
     "skills/extraRoots/set": 11, "plugin/skill/read": 11,
     "plugin/read": 11, "plugin/search": 11,
     "plugin/installed": 11, "app/read": 11, "app/installed": 11,
-    "thread/memoryMode/set": 13, "memory/status": 13, "memory/reset": 13,
 }
 
 
