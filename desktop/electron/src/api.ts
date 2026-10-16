@@ -31,7 +31,6 @@ export type ForView =
   | { channel: "work://stderr"; payload: string }
   | { channel: "work://protocol-error"; payload: string }
   | { channel: "work://exit"; payload: number | null }
-  | { channel: "theme"; payload: "light" | "dark" }
   /** Show Ask or Work: the menu, a second instance or a link asked for one. */
   | { channel: "view"; payload: "ask" | "work" };
 

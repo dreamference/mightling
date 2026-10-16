@@ -8,7 +8,7 @@
 // (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
 import path from "node:path";
-import { BrowserWindow, app, ipcMain, nativeTheme, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, ipcMain, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped } from "./airgapped";
@@ -122,7 +122,8 @@ export async function main(options: MainOptions): Promise<void> {
     }
   }
 
-  nativeTheme.on("updated", () => deliver({ channel: "theme", payload: nativeTheme.shouldUseDarkColors ? "dark" : "light" }));
+  // Light only (DESKTOP §14 question 3; dark not approved 2026-10-16): the system theme is not
+  // followed, so no nativeTheme change reaches the page or the title bar overlay (work.ts).
 
   // A second instance, or a `mightling://` link: show what it asked for, in the one window.
   app.on("second-instance", (_event, argv, _cwd, data) => {
