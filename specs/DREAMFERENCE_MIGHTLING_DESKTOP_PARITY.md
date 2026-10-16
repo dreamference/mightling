@@ -532,7 +532,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 4. **Composer:** `@` mentions, `$` skills, `/` commands, Enter behaviour, follow-up behaviour, ↑ restore, Shift+drag images, approve/decline keys, edit previous, fork, Compress, the model and effort picker (§2.3). **Composer: merged 2026-10-16, eca4a6a** (the slash commands Partial: the ones whose methods come with later items wait for them).
 5. **Plan and goal:** collaboration mode, the goal row (§2.3).
 6. **Review pane and git:** scopes, repository selector, stage/unstage/revert at three levels, inline comments, viewed markers, open in editor, `/review` inline or detached, commit, push, PR page (§2.5). **Review pane and git: merged 2026-10-16, 7973c5a** (`/review` Partial: it needs `review/start` in `policy.json`, held on `desktop/p2-policy` for the Rust conformance run).
-7. **Worktrees and hand-off**, local environments and actions, the bottom panel (§2.6). **Worktrees, hand-off, environments and the bottom panel: merged 2026-10-16, MERGE7** (window-side `git` on the `codex-worktree` contract until `ling worktree` exists; actions run as bottom-panel tasks until the terminal of item 8 lands).
+7. **Worktrees and hand-off**, local environments and actions, the bottom panel (§2.6). **Worktrees, hand-off, environments and the bottom panel: merged 2026-10-16, 9c5f31d** (window-side `git` on the `codex-worktree` contract until `ling worktree` exists; actions run as bottom-panel tasks until the terminal of item 8 lands).
 8. **Terminal** tabs (§2.7).
 9. **Tabs and layout:** split, full, hidden (§2.1).
 10. **Settings pages** of §2.15 except Pets, Browser, Computer Use, Suggested prompts.
