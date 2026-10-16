@@ -236,7 +236,7 @@ test("7 worktrees: a new thread in a worktree with setup, Create branch here, ha
     const ownerFile = path.resolve(checkout, gitIn(checkout, "rev-parse", "--git-path", "codex-thread.json"));
     await expect.poll(() => fs.existsSync(ownerFile)).toBe(true);
     expect(JSON.parse(fs.readFileSync(ownerFile, "utf8")).ownerThreadId).toMatch(/^n\d+$/);
-    expect(received(home).find((m) => m.method === "turn/start")?.params?.cwd).toBe(checkout);
+    await expect.poll(() => received(home).find((m) => m.method === "turn/start")?.params?.cwd).toBe(checkout);
     const panel = page.getByRole("region", { name: "Bottom panel" });
     await expect(panel.locator(".panel-output")).toContainText("setting up in fetcher");
     await expect(page.locator(".chip.location")).toContainText("worktree · detached");
