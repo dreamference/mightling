@@ -297,11 +297,11 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Skills: list, enable / disable, create, `$` picker, where local skills load from | `skills/list`, `skills/config/write`, `skills/extraRoots/set`, `plugin/skill/read` | **Allowed** (`skills/list`); the UI and the `from-<agent>/` sources (SKILLS spec) to show | 2 |
-| Plugins directory: tabs vendor / workspace / personal, **Installed** row, install (+), connect on first use, pin a plugin to the sidebar; `/plugins` | `plugin/list|search|install|uninstall|read|installed`, `marketplace/*` | **Same** for local and repository marketplaces; the vendor's catalogue stays closed (patch `0015`) | 2 |
-| MCP: recommended servers, add your own, OAuth flow, status, reload, tool call, resource read; Settings › Integrations | `mcpServerStatus/list`, `config/mcpServer/reload`, `mcpServer/*` | **Allowed** (`mcpServerStatus/list`); the pages to build | 2 |
-| Apps (Gmail, Drive…) | `app/list|read|installed` | **Mightling's:** MIGHTLING_APPS, local sign-in, read-only tools | 2 |
-| Hooks (plugin hooks at lifecycle points) | `hooks/list`, `hook/started|completed` | **Same**, read-only list showing the ledger hook | 2 |
+| Skills: list, enable / disable, create, `$` picker, where local skills load from | `skills/list`, `skills/config/write`, `skills/extraRoots/set`, `plugin/skill/read` | **Partial** (2026-10-17): Skills and tools (the sidebar, `/skills`, `ling://skills`) lists `skills/list` with where each comes from (yours, the project's, another agent's linked in, built in) and whether it is on; `$` picks one (item 4). Turning one off (`skills/config/write`) and extra roots wait for `policy.json` | 2 |
+| Plugins directory: tabs vendor / workspace / personal, **Installed** row, install (+), connect on first use, pin a plugin to the sidebar; `/plugins` | `plugin/list|search|install|uninstall|read|installed`, `marketplace/*` | **Same**, not yet: needs `plugin/*` in `policy.json` (held for the Rust conformance run); the vendor's catalogue stays closed (patch `0015`) | 2 |
+| MCP: recommended servers, add your own, OAuth flow, status, reload, tool call, resource read; Settings › Integrations | `mcpServerStatus/list`, `config/mcpServer/reload`, `mcpServer/*` | **Partial** (2026-10-17): Skills and tools › MCP servers lists `mcpServerStatus/list` (tools, state, origin), adds a server (a command with arguments, or a URL) and turns one off or on through `config/value/write` (`mcp_servers.<name>`), for new threads; reload (`config/mcpServer/reload`) and OAuth wait for `policy.json` | 2 |
+| Apps (Gmail, Drive…) | `app/list|read|installed` | **Built** (2026-10-17), **Mightling's:** Skills and tools › Apps lists `app/list` (signed in or not) and turns an app off or on (`apps.<id>.enabled` through `config/value/write`); `ling apps` sets one up | 2 |
+| Hooks (plugin hooks at lifecycle points) | `hooks/list`, `hook/started|completed` | **Same**, not yet: needs `hooks/list` in `policy.json` (held) | 2 |
 | Import another agent's configuration and histories | `externalAgentConfig/*` | **Same**, beside the SKILLS links | 3 |
 | Sign in with the vendor's account at partner plugins | vendor | **No** | — |
 
@@ -536,7 +536,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 8. **Terminal** tabs (§2.7).
 9. **Tabs and layout:** split, full, hidden (§2.1). **Tabs and layout: merged 2026-10-17, 1064dc9** (the tab area holds the Review tab; terminal tabs stay in the bottom panel; file and preview tabs are Phase 3).
 10. **Settings pages** of §2.15 except Pets, Browser, Computer Use, Suggested prompts. **Settings pages: merged 2026-10-17, b639f9b** (Integrations and MCP with item 11, Memories with item 13, the terminal's and `/review`'s settings with their held branches).
-11. **Skills, plugins, MCP, apps, hooks** pages (§2.11).
+11. **Skills, plugins, MCP, apps, hooks** pages (§2.11). **Skills and tools: merged 2026-10-17, MERGE11** (skills, MCP servers and apps; plugins, hooks, skill switches and MCP reload need methods held in `desktop/p2-policy`).
 12. **Scheduled** view over Night Shift (§2.12).
 13. **Subagents** panel; **memories** controls (§2.13, §2.14).
 14. **Notifications**, prevent sleep (§2.1).
