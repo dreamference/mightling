@@ -24,6 +24,13 @@ export interface WorkTarget {
   thread: string | null;
 }
 
+/** What a link names (desktop/electron/src/args.ts). */
+export interface LinkTarget extends WorkTarget {
+  prompt?: string | null;
+  page?: "new" | "settings" | "skills" | "night" | "plugins";
+  plugin?: string;
+}
+
 export interface Airgapped {
   level: "off" | "on";
   source: string;
@@ -202,6 +209,15 @@ export async function toggleFullScreen(): Promise<void> {
 }
 /** Ctrl+Q: quits the app (a browser tab is the browser's to close). */
 export const quitApp = () => (host() === "electron" ? send<void>({ type: "app/quit" }) : Promise.resolve());
+/** A thread in a window of its own (the app only); a browser opens the thread in a new tab. */
+export async function popOut(thread: string): Promise<void> {
+  if (host() === "electron") return send<void>({ type: "window/popout", thread });
+  window.open(`${location.pathname}#work`, "_blank");
+}
+/** Keeps this window above the others; resolves with whether it now is. */
+export const alwaysOnTop = (on: boolean) => send<boolean>({ type: "window/always-on-top", on });
+/** The user's home folder, where a thread with no project works. */
+export const homeFolder = () => send<string>({ type: "app/home" });
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
 
@@ -245,6 +261,8 @@ export interface BridgeEvents {
   view?: (view: "ask" | "work") => void;
   /** A bottom-panel task's progress. */
   task?: (event: TaskEvent) => void;
+  /** A `ling://` link or a second `ling app` asked for something (DESKTOP_PARITY §2.20). */
+  link?: (target: LinkTarget) => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -263,6 +281,8 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
         return events.exit(typeof data.payload === "number" ? data.payload : null);
       case "view":
         return events.view?.(data.payload === "ask" ? "ask" : "work");
+      case "link":
+        return events.link?.(data.payload as LinkTarget);
       case "task://event":
         return events.task?.(data.payload as TaskEvent);
     }

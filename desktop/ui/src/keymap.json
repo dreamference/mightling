@@ -141,7 +141,7 @@
     "Shift+Escape"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "undoAction",
@@ -221,7 +221,7 @@
     "Ctrl+N"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "standaloneChat",
@@ -231,7 +231,7 @@
     "Ctrl+Alt+O"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "quickChat",
@@ -241,7 +241,7 @@
     "Ctrl+Alt+N"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "archiveChat",
@@ -251,7 +251,7 @@
     "Ctrl+Shift+A"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "markUnread",
@@ -261,7 +261,7 @@
     "Ctrl+Shift+U"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "pinChat",
@@ -271,7 +271,7 @@
     "Ctrl+Alt+P"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "renameChat",
@@ -281,7 +281,7 @@
     "Ctrl+Alt+R"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "sideChat",
@@ -291,7 +291,7 @@
     "Ctrl+Alt+S"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "findInChat",
@@ -301,7 +301,7 @@
     "Ctrl+F"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "findNext",
@@ -311,7 +311,7 @@
     "Ctrl+G"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "findPrevious",
@@ -321,7 +321,7 @@
     "Shift+F3"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "previousChat",
@@ -332,7 +332,7 @@
     "Ctrl+PageUp"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "nextChat",
@@ -343,7 +343,7 @@
     "Ctrl+PageDown"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "nextAttention",
@@ -353,7 +353,7 @@
     "Ctrl+Alt+A"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "recentChat1",
@@ -363,7 +363,7 @@
     "Ctrl+Alt+1"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "recentChat2",
@@ -373,7 +373,7 @@
     "Ctrl+Alt+2"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "recentChat3",
@@ -383,7 +383,7 @@
     "Ctrl+Alt+3"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "recentChat4",
@@ -393,7 +393,7 @@
     "Ctrl+Alt+4"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "recentChat5",
@@ -403,7 +403,7 @@
     "Ctrl+Alt+5"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "recentChat6",
@@ -413,7 +413,7 @@
     "Ctrl+Alt+6"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat1",
@@ -423,7 +423,7 @@
     "Ctrl+1"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat2",
@@ -433,7 +433,7 @@
     "Ctrl+2"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat3",
@@ -443,7 +443,7 @@
     "Ctrl+3"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat4",
@@ -453,7 +453,7 @@
     "Ctrl+4"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat5",
@@ -463,7 +463,7 @@
     "Ctrl+5"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat6",
@@ -473,7 +473,7 @@
     "Ctrl+6"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat7",
@@ -483,7 +483,7 @@
     "Ctrl+7"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat8",
@@ -493,7 +493,7 @@
     "Ctrl+8"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToChat9",
@@ -503,7 +503,7 @@
     "Ctrl+9"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "modelPicker",
@@ -533,7 +533,7 @@
     "Ctrl+Alt+Shift+O"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "send",
@@ -813,7 +813,7 @@
     "Ctrl+Alt+Shift+C"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "copyDeepLink",
@@ -823,7 +823,7 @@
     "Ctrl+Alt+L"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "copyWorkingDirectory",
@@ -833,7 +833,7 @@
     "Ctrl+Shift+C"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   }
  ]
 }
