@@ -510,3 +510,32 @@ test("10 settings: Profile, Notifications, Appearance, Personalization, Archived
     await close();
   }
 });
+
+test("11 skills and tools: skills with their source, MCP servers (one added), apps (one turned off)", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.getByRole("button", { name: "Skills and tools" }).click();
+    const view = page.getByRole("dialog", { name: "Skills and tools" });
+    await expect(view).toContainText("$release-notes");
+    await expect(view).toContainText("from otheragent");
+    await shoot("11-skills.png");
+    await view.getByRole("button", { name: "MCP servers" }).click();
+    await expect(view).toContainText("ling-code");
+    await view.getByRole("button", { name: "Add an MCP server" }).click();
+    await view.getByRole("textbox", { name: "Server name" }).fill("docs-search");
+    await view.getByRole("textbox", { name: "Server command or URL" }).fill("ling-docs");
+    await view.getByRole("textbox", { name: "Server arguments" }).fill("mcp --stdio");
+    await shoot("11-mcp-add.png");
+    await view.getByRole("button", { name: "Add", exact: true }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "config/value/write")?.params).toEqual({ keyPath: "mcp_servers.docs-search", value: { command: "ling-docs", args: ["mcp", "--stdio"] }, mergeStrategy: "upsert" });
+    await view.getByRole("button", { name: "Apps" }).click();
+    await expect(view).toContainText("Gmail");
+    await view.getByRole("button", { name: "Turn off" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "config/value/write").pop()?.params).toMatchObject({ keyPath: "apps.gmail.enabled", value: false });
+    await shoot("11-apps.png");
+  } finally {
+    await close();
+  }
+});
