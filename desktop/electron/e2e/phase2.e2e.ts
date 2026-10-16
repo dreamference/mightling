@@ -4,6 +4,7 @@
 // pictures of each item there (the owner's screenshots), the window shown; without it the window is
 // hidden. Needs a display and the Vite build (`npm run package` first).
 //   MIGHTLING_LOOK_DIR=/tmp/p2 npm run e2e -- phase2
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -62,7 +63,7 @@ test("4 composer: @ files, $ skills, / commands, the picker, follow-ups, approva
   try {
     await page.getByRole("button", { name: "Work", exact: true }).click();
     await page.locator(".thread", { hasText: "flaky retry" }).click();
-    const composer = page.getByRole("textbox", { name: "Message" });
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
     await page.locator(".approval").waitFor();
 
     // Enter on an empty composer approves the open approval.
@@ -124,6 +125,83 @@ test("4 composer: @ files, $ skills, / commands, the picker, follow-ups, approva
     await expect.poll(() => received(home).some((m) => m.method === "thread/fork" && m.params?.threadId === "w2")).toBe(true);
 
     expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});
+
+/** A git repository in the stand-in's `fetcher` folder: one commit, then two edits and a new file. */
+function scratchRepo(home: string): string {
+  const root = projectFolders(home).fetcher;
+  fs.writeFileSync(path.join(home, ".gitconfig"), "[user]\n\tname = Test\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n");
+  const env = { ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: "1" };
+  const run = (...args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8" });
+  const lines = Array.from({ length: 40 }, (_, index) => `    step(${index + 1})`);
+  fs.mkdirSync(path.join(root, "fetcher"), { recursive: true });
+  fs.writeFileSync(path.join(root, "fetcher", "client.py"), ["def fetch(url, attempts=3):", ...lines].join("\n") + "\n");
+  run("init", "-q");
+  run("add", "-A");
+  run("commit", "-q", "-m", "First version");
+  const edited = ["def fetch(url, attempts=3):", ...lines];
+  edited[2] = "    step(2)  # retried";
+  edited[36] = "    step(36)  # logged at debug level";
+  fs.writeFileSync(path.join(root, "fetcher", "client.py"), edited.join("\n") + "\n");
+  fs.writeFileSync(path.join(root, "fetcher", "backoff.py"), "def backoff(attempt):\n    return min(2 ** attempt, 30)\n");
+  return root;
+}
+
+test("6 review pane: scopes, stage by hunk, comments, split view, a generated message, commit", async () => {
+  const { page, home, shoot, close } = await open();
+  const root = scratchRepo(home);
+  const gitIn = (...args: string[]) => execFileSync("git", args, { cwd: root, env: { ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8" });
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.keyboard.press("Control+Shift+G");
+    const pane = page.getByRole("complementary", { name: "Review" });
+    await expect(pane).toBeVisible();
+    await expect(pane.locator(".review-file")).toHaveCount(2);
+    await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py", "fetcher/backoff.py"]);
+    await shoot("6-review-unstaged.png");
+
+    // Stage the first hunk of client.py only.
+    await pane.locator(".review-file").first().getByRole("button", { name: "Stage hunk" }).first().click();
+    await expect.poll(() => gitIn("diff", "--cached")).toContain("# retried");
+    expect(gitIn("diff", "--cached")).not.toContain("debug level");
+    const scopes = pane.getByRole("navigation", { name: "Scope" });
+    await scopes.getByRole("button", { name: "Staged", exact: true }).click();
+    await expect(pane.locator(".review-hunk")).toHaveCount(1);
+
+    // A comment on a line, in the split view, sent to the composer.
+    await pane.getByRole("button", { name: "Switch the view" }).click();
+    const added = pane.locator(".diff-table.split .code.add").first();
+    await added.hover();
+    await added.getByRole("button", { name: "Comment on this line" }).click();
+    await pane.getByRole("textbox", { name: "Comment" }).fill("Say which attempt this is in the log line.");
+    await pane.getByRole("button", { name: "Add comment" }).click();
+    await shoot("6-review-staged-split-comment.png");
+    await pane.getByRole("button", { name: "Send to the composer" }).click();
+    await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(/Please address these review comments:\n- fetcher\/client\.py:3 /);
+
+    // A message written by the served model (the stand-in), then the commit.
+    await pane.getByRole("button", { name: "Write a message" }).click();
+    await expect(pane.getByRole("textbox", { name: "Commit message" })).toHaveValue(/^Re-raise the last error in the retry loop/);
+    expect(received(home).find((m) => m.method === "thread/start" && m.params?.ephemeral)?.params).toMatchObject({ cwd: root, sandbox: "read-only", approvalPolicy: "never" });
+    await shoot("6-review-commit-message.png");
+    await pane.locator(".commit-box").getByRole("button", { name: "Commit", exact: true }).click();
+    await expect.poll(() => gitIn("log", "-1", "--format=%s").trim()).toBe("Re-raise the last error in the retry loop");
+    expect(gitIn("status", "--porcelain")).toContain(" M fetcher/client.py");
+
+    // The Commit and Last turn scopes.
+    await pane.getByRole("button", { name: "Switch the view" }).click();
+    await scopes.getByRole("button", { name: "Commit", exact: true }).click();
+    await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py"]);
+    await scopes.getByRole("button", { name: "Last turn" }).click();
+    await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py"]);
+    await shoot("6-review-last-turn.png");
+    expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
   } finally {
     await close();
   }

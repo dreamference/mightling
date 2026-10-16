@@ -61,6 +61,63 @@ export const airgapped = (thread: string | null) => send<Airgapped>({ type: "wor
 export const airgappedDefault = (level: "off" | "on") => send<string>({ type: "work/airgapped-default", level });
 export const contextMenu = (x: number, y: number, editable: boolean, selection: string) =>
   send<void>({ type: "context-menu", x, y, editable, selection });
+/** One file in `git status`: index and work-tree letters ("." none, "?" untracked). */
+export interface GitFile {
+  path: string;
+  staged: string;
+  unstaged: string;
+  from: string | null;
+}
+
+export interface GitStatus {
+  root: string;
+  branch: string | null;
+  head: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
+}
+
+export type GitScope = "unstaged" | "staged" | "commit" | "branch";
+
+export interface GitCommit {
+  sha: string;
+  subject: string;
+  author: string;
+  time: number;
+}
+
+export interface Editor {
+  id: string;
+  name: string;
+  command: string;
+}
+
+/**
+ * Window-side git (desktop/electron/src/git.ts): only the desktop app has it. A browser on `ling
+ * web` shows the review pane's Last turn scope, which comes from the server.
+ */
+export const git = {
+  available: () => host() === "electron",
+  repos: (cwd: string) => send<string[]>({ type: "git/repos", cwd }),
+  status: (root: string) => send<GitStatus>({ type: "git/status", root }),
+  diff: (root: string, scope: GitScope, commit: string | null = null) => send<{ scope: GitScope; diff: string; against: string | null }>({ type: "git/diff", root, scope, commit }),
+  log: (root: string) => send<GitCommit[]>({ type: "git/log", root }),
+  stage: (root: string, paths: string[]) => send<void>({ type: "git/stage", root, paths }),
+  unstage: (root: string, paths: string[]) => send<void>({ type: "git/unstage", root, paths }),
+  discard: (root: string, paths: string[]) => send<void>({ type: "git/discard", root, paths }),
+  apply: (root: string, patch: string, options: { cached?: boolean; reverse?: boolean; index?: boolean }) => send<void>({ type: "git/apply", root, patch, ...options }),
+  commit: (root: string, message: string, all: boolean) => send<string>({ type: "git/commit", root, message, all }),
+  push: (root: string, force: boolean, thread: string | null) => send<string>({ type: "git/push", root, force, thread }),
+  pullRequest: (root: string, thread: string | null) => send<string>({ type: "git/pull-request", root, thread }),
+};
+
+export const listEditors = () => send<Editor[]>({ type: "editors/list" });
+/** Opens a file of `root` in `editor` (null: the system's choice), at `line` when given. */
+export const openInEditor = (root: string, path: string, line: number | null, editor: string | null) =>
+  send<null>({ type: "editor/open", root, path, line, editor });
+
 /** The window's own preferences (desktop/electron/src/prefs.ts), whole. */
 export const readPrefs = () => send<Record<string, unknown>>({ type: "prefs/read" });
 /** Writes some preferences; resolves with all of them. */

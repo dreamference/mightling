@@ -312,6 +312,63 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .dialog legend { padding: 0 4px; font-weight: 500; }
 .dialog label { display: flex; gap: 8px; align-items: center; }
 
+/* The review pane (DESKTOP_PARITY §2.5): a column beside the thread, Ctrl+Shift+G. */
+.work.review-open { grid-template-columns: var(--sidebar) minmax(360px, 1fr) minmax(420px, 48%); }
+.bar-action.active { color: var(--accent); background: var(--accent-soft); }
+.review-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; border-left: 1px solid var(--line); background: var(--canvas); overflow: hidden; }
+.review-bar { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px 6px 14px; user-select: none; }
+html[data-host="electron"] .review-bar { padding-right: 150px; -webkit-app-region: drag; }
+html[data-host="electron"] .review-bar button, html[data-host="electron"] .review-bar select { -webkit-app-region: no-drag; }
+.review-bar select, .commit-choice { font-size: 12.5px; padding: 3px 6px; border-radius: var(--radius-sm); }
+.commit-choice { margin: 0 14px 6px; }
+.review-scopes { display: flex; gap: 2px; padding: 0 12px 8px; flex-wrap: wrap; }
+.review-scopes button { border: none; background: none; padding: 4px 10px; border-radius: var(--radius-pill); color: var(--muted); font-size: 13px; }
+.review-scopes button.selected { background: var(--selected); color: var(--text); font-weight: 500; }
+.review-status { display: flex; gap: 10px; flex-wrap: wrap; padding: 0 16px 8px; color: var(--muted); font-size: 12.5px; }
+.review-status .against { color: var(--faint); }
+.review-status span { display: inline-flex; align-items: center; gap: 4px; }
+/* With the pane open the title bar's window buttons sit over the pane, not over the thread's bar. */
+html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 16px; }
+.bar .title { min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-all { display: flex; gap: 8px; padding: 0 12px 6px; font-size: 13px; }
+.link-button.danger { color: var(--danger); }
+.review-files { flex: 1; overflow: auto; padding: 0 12px 12px; }
+.review-file { border: 1px solid var(--line); border-radius: var(--radius-md); margin-bottom: 10px; overflow: hidden; background: var(--raised); }
+.review-file > header { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); font-size: 13px; cursor: default; position: sticky; top: 0; z-index: 1; }
+.review-file.viewed > header { opacity: 0.7; }
+.file-name { border: none; background: none; padding: 0; font-family: var(--font-code); font-size: 12.5px; color: var(--text); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.file-name:hover { text-decoration: underline; }
+.file-status { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--hover); color: var(--muted); }
+.file-status.added { background: var(--add); color: var(--add-text); }
+.file-status.deleted { background: var(--del); color: var(--del-text); }
+.viewed-mark { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+.review-hunk + .review-hunk { border-top: 1px solid var(--line); }
+.hunk-header { display: flex; align-items: center; gap: 6px; padding: 3px 8px; background: var(--code-bg); color: var(--faint); font-size: 12px; }
+.hunk-header code { font-size: 11.5px; }
+.diff-table { width: 100%; border-collapse: collapse; font-family: var(--font-code); font-size: 12.5px; line-height: 1.5; table-layout: fixed; }
+.diff-table .ln { width: 44px; padding: 0 6px; text-align: right; color: var(--faint); user-select: none; vertical-align: top; }
+.diff-table.split .ln { width: 40px; }
+.diff-table .code { position: relative; white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 8px 0 18px; }
+.diff-table .code.add { background: var(--add); }
+.diff-table .code.del { background: var(--del); }
+.diff-table .code.note { color: var(--faint); }
+.diff-table .sign { display: inline-block; width: 1ch; margin-right: 4px; color: var(--faint); user-select: none; }
+.diff-table .diff-empty { background: var(--panel); }
+.add-comment { position: absolute; left: 0; top: 0; width: 16px; height: 18px; padding: 0; border: none; border-radius: 4px; background: var(--accent); color: var(--on-accent); font-size: 12px; line-height: 18px; opacity: 0; }
+.diff-table .code:hover .add-comment, .add-comment:focus-visible { opacity: 1; }
+.comment-row td { padding: 6px 10px; background: var(--panel); font-family: var(--font-ui); font-size: 13px; }
+.review-comment { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-left: 3px solid var(--accent); background: var(--raised); border-radius: 4px; margin-bottom: 4px; }
+.review-comment span { flex: 1; }
+.comment-draft textarea { width: 100%; resize: vertical; }
+.comment-draft .buttons { display: flex; gap: 6px; margin-top: 6px; }
+.review-send { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 13px; }
+.review-send span { flex: 1; }
+.commit-box { border-top: 1px solid var(--line); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--panel); }
+.commit-box textarea { width: 100%; resize: vertical; font-size: 13px; }
+.commit-actions { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.commit-actions label, .editor-choice { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; }
+.editor-choice select { font-size: 12.5px; }
+
 .ask-empty { max-width: 520px; margin: 14vh auto 0; text-align: center; }
 .ask-empty .mark { display: block; margin: 0 auto 18px; }
 .ask-empty h1 { color: var(--text); font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; }
@@ -327,7 +384,8 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
    are 16px so mobile browsers do not zoom into them. `ling web` is text-only from other devices
    (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.4). */
 @media (max-width: 720px) {
-  .work { grid-template-columns: 1fr; }
+  .work, .work.review-open { grid-template-columns: 1fr; }
+  .review-pane { position: fixed; inset: 0; z-index: 25; }
   .sidebar { position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: min(85vw, 320px); transform: translateX(-100%); box-shadow: var(--shadow-focus); }
   .drawer-open .sidebar { transform: none; }
   .drawer-open .backdrop { display: block; position: fixed; inset: 0; z-index: 10; background: var(--scrim); }
