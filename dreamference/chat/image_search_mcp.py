@@ -14,15 +14,21 @@ starts it as a child of the session's `ling` process. Every call:
   desktop app show as images, with the instruction to copy them into the answer verbatim.
 
 `initialize` and `tools/list` touch nothing: Codex waits for them at a session's start, and the
-egress audit would count a connect to the sidecar's port as a finding.
+egress audit would count a connect to the sidecar's port as a finding. That is also what makes
+`ImageSearchMcp.probe` safe: it asks a `ling-admin` for its tools exactly as Codex will. The
+launcher declares the server whenever `~/.local/bin/ling-admin` exists, so a link to an
+installation without `images mcp` (an older checkout's environment) would otherwise drop the tool
+from every session in silence: Codex logs the failed start and the model answers without images
+(seen in Phase C's live check, 2026-10-15).
 """
 
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Dict, Final, IO, Optional, Tuple
+from typing import Any, Callable, Dict, Final, IO, Mapping, Optional, Tuple
 
 from dreamference.chat.image_search_sidecar import IMAGE_SEARCH_HOST_PORT, IMAGE_SEARCH_SECRET_FILE, IMAGE_STORE_DIR
 
@@ -36,6 +42,10 @@ AUTH_HEADER: Final[str] = "X-Mightling-Image-Token"
 CALL_TIMEOUT_SECONDS: Final[int] = 180
 MAX_COUNT: Final[int] = 10
 DEFAULT_COUNT: Final[int] = 4
+# What `probe` sends: the request Codex makes once the server is initialised. Answered without a
+# connection, so a probe costs one process start.
+LIST_TOOLS_LINE: Final[str] = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
+PROBE_TIMEOUT_SECONDS: Final[int] = 30
 # `ling-rs/airgapped` SEAL_DIR, under the user's runtime folder.
 SEAL_DIR_NAME: Final[str] = "ling-airgapped"
 
@@ -269,6 +279,36 @@ class ImageSearchMcp:
             if reply is not None:
                 sink.write(json.dumps(reply) + "\n")
                 sink.flush()
+
+    @classmethod
+    def probe(cls, admin: str, env: Optional[Mapping[str, str]] = None) -> str:
+        """Asks `<admin> images mcp` for its tools, as Codex does at a session's start.
+
+        Args:
+            admin (str): The `ling-admin` a session would start (the launcher's
+                `~/.local/bin/ling-admin`, or the egress audit's own).
+            env (Optional[Mapping[str, str]]): Its environment; None inherits this process's.
+
+        Returns:
+            str: "" when it lists `image_search`; otherwise what went wrong, for a person to read.
+        """
+        try:
+            done = subprocess.run([admin, "images", "mcp"], input=LIST_TOOLS_LINE, capture_output=True, text=True,
+                                  timeout=PROBE_TIMEOUT_SECONDS, env=None if env is None else dict(env), check=False)
+        except (OSError, subprocess.SubprocessError) as error:
+            return f"`{admin} images mcp` did not run ({error})"
+        for line in done.stdout.splitlines():
+            try:
+                reply = json.loads(line)
+            except ValueError:
+                continue
+            result = reply.get("result") if isinstance(reply, dict) else None
+            tools = result.get("tools") if isinstance(result, dict) else None
+            if isinstance(tools, list) and any(isinstance(tool, dict) and tool.get("name") == TOOL_NAME for tool in tools):
+                return ""
+        said = next((line.strip() for line in reversed(done.stderr.splitlines()) if line.strip()), "")
+        detail = f": {said[:200]}" if said else ""
+        return f"`{admin} images mcp` does not serve the {TOOL_NAME} tool (exit {done.returncode}{detail})"
 
     @classmethod
     def serve(cls) -> int:
