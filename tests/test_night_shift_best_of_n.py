@@ -179,6 +179,16 @@ def test_no_change_in_any_attempt_leaves_no_branch(bon, monkeypatch):
     assert not any((bon["night"] / "worktrees").iterdir())
 
 
+def test_attempts_out_of_time_or_unchanged_leave_no_worktree_and_no_branch(bon, monkeypatch):
+    monkeypatch.setenv("FAKE_BON_PLAN", json.dumps(["hang", "none", "hang"]))
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftBestOfN.task_run(bon["night"], record, NightShiftSettings({"best_of": 3, "task_timeout": "3s"}),
+                                     bon["ling"], time.time() + 3, model_host="http://x")
+    assert run.run() == "no-change"
+    assert not any((bon["night"] / "worktrees").iterdir())
+    assert branches(bon["repo"]) == []
+
+
 def test_the_window_closing_chooses_among_the_attempts_that_finished(bon, monkeypatch):
     status, record, _ = run_best_of(bon, monkeypatch, ["good", "hang", "good"], window_s=6)
     assert status == "done"
