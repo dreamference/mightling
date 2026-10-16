@@ -1,0 +1,37 @@
+# 30 SWE-bench Verified tasks for night 11, Night Shift best-of-3 (chooser v1) against a single run, the default arm three times, 60-minute limit
+# (scripts/swe_bench_night1.sh BEST_OF=3; backlog item 6), drawn 2026-10-16
+# from the 72 tasks validated on this machine outside sample-100.txt and verified-mismatch-exclude.txt (68), fresh-50d.txt (50), fresh-50e.txt (50), fresh-50f.txt (50), smoke-instance.txt (1), seed 20261016.
+# Reuse (the rotation rule of 2026-10-14, SWE_BENCH spec §16): the tasks of fresh-50.txt (50), fresh-50b.txt (50), fresh-50c.txt (50) stay in the pool; the excluded lists win over a task they share with one of them.
+# Stratified to sample-100.txt's mix (easy/medium/hard 59/16/25 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
+# wanted 18/5/7, drawn 18/5/7.
+# Drawn: 1 from fresh-50.txt, 3 from fresh-50b.txt, 24 from fresh-50c.txt, 2 in none of them.
+django__django-11095
+django__django-11211
+django__django-11490
+django__django-11951
+django__django-12419
+django__django-13410
+django__django-13925
+django__django-14349
+django__django-14672
+django__django-14792
+django__django-15863
+django__django-16145
+django__django-16661
+django__django-16662
+django__django-16899
+psf__requests-2931
+pylint-dev__pylint-8898
+pytest-dev__pytest-10356
+pytest-dev__pytest-5262
+pytest-dev__pytest-7205
+pytest-dev__pytest-7490
+sphinx-doc__sphinx-10435
+sphinx-doc__sphinx-9461
+sympy__sympy-11618
+sympy__sympy-13647
+sympy__sympy-15599
+sympy__sympy-16597
+sympy__sympy-17655
+sympy__sympy-20438
+sympy__sympy-24066
