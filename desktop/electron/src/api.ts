@@ -75,6 +75,12 @@ export type FromView =
   | { type: "app/home" }
   /** Settings › Profile and Personalization (insights.ts): statistics from the session files; `$CODEX_HOME/AGENTS.md`. */
   | { type: "insights" }
+  /** The Scheduled view over Night Shift (night.ts). */
+  | { type: "night/list" }
+  | { type: "night/report"; name: string }
+  | { type: "night/add"; repo: string; task: string; test: string | null }
+  | { type: "night/drop"; repo: string; id: string }
+  | { type: "night/run" }
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" };

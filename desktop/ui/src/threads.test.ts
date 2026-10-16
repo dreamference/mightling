@@ -39,3 +39,13 @@ describe("threads in the sidebar", () => {
     expect(occurrences("abc", "")).toEqual([]);
   });
 });
+
+describe("Scheduled's inbox", () => {
+  it("counts the finished tasks newer than the last look", async () => {
+    const { unseen } = await import("./ScheduledView");
+    const task = (status: string, at: string) => ({ id: at, repo: "/w", task: "t", status, branch: null, test: null, on: null, at, result: null });
+    const tasks = [task("done", "2026-10-17T03:00:00"), task("failed", "2026-10-16T03:00:00"), task("queued", "2026-10-17T09:00:00")];
+    expect(unseen(tasks, null)).toBe(2);
+    expect(unseen(tasks, "2026-10-16T12:00:00")).toBe(1);
+  });
+});

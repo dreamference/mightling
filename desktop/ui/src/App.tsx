@@ -39,6 +39,7 @@ import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./B
 import { CommandMenu } from "./CommandMenu";
 import { ExtensionsView, type ExtensionsTab } from "./ExtensionsView";
 import { ReviewPane } from "./ReviewPane";
+import { ScheduledView, unseen } from "./ScheduledView";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
@@ -127,6 +128,8 @@ export function App() {
   const [planning, setPlanning] = useState<Set<string>>(new Set());
   const [planAvailable, setPlanAvailable] = useState(false);
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
+  const [scheduledOpen, setScheduledOpen] = useState(false);
+  const [nightUnseen, setNightUnseen] = useState(0);
   const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
   const updatePrefsRef = useRef<(values: Partial<Prefs>) => void>(() => {});
@@ -202,6 +205,8 @@ export function App() {
       setPrefs(stored);
       // The worktree settings the codex-worktree crate reads too ([desktop] in config.toml).
       client.request("config/read", {}).then((answer) => setWtSettings(worktreeSettings((answer as { config?: { desktop?: Record<string, unknown> | null } }).config?.desktop))).catch(() => {});
+      // Night Shift's inbox: finished tasks since Scheduled was last opened.
+      if (bridge.host() === "electron") bridge.night.list().then((answer) => setNightUnseen(unseen(answer.tasks, stored.nightSeen))).catch(() => {});
       // Plan mode, when the server offers it (`collaborationMode/list`).
       client.request("collaborationMode/list", {}).then((answer) => setPlanAvailable(((answer as { data?: { mode: string | null }[] }).data ?? []).some((mask) => mask.mode === "plan"))).catch(() => setPlanAvailable(false));
       // The catalog the launcher wrote: one served model, with the efforts it allows.
@@ -829,7 +834,8 @@ export function App() {
       return setSettingsOpen(true);
     }
     if (target.page === "skills") return setExtensions("skills");
-    if (target.page === "night" || target.page === "plugins") return dispatch({ type: "notice", message: `The ${target.page === "night" ? "Scheduled" : "Plugins"} view comes with a later update; the link was received.` });
+    if (target.page === "night") return setScheduledOpen(true);
+    if (target.page === "plugins") return setExtensions("skills");
     showView("work");
     if (target.cwd) setNewCwd(target.cwd);
     if (target.prompt) setDraft(target.prompt);
@@ -1161,6 +1167,16 @@ export function App() {
           setDrawer(true);
           requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
           return;
+        case "night": {
+          const words = args.match(/^add\s+([\s\S]+)$/);
+          if (words) {
+            const folder = workFolder ?? composeRoot;
+            if (!folder) return notice("Open a thread in a project to queue a task for it.");
+            const said = await bridge.night.add(folder, words[1], null);
+            return setInfo({ title: "Night Shift", body: <pre className="info-pre">{said}</pre> });
+          }
+          return setScheduledOpen(true);
+        }
         case "airgapped": {
           const words = args.split(/\s+/).filter(Boolean);
           if (words[0] === "default" && (words[1] === "on" || words[1] === "off")) {
@@ -1274,7 +1290,8 @@ export function App() {
       event.preventDefault();
       setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions)) {
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen)) {
+      setScheduledOpen(false);
       setExtensions(null);
       setPicker("closed");
       setSettingsOpen(false);
@@ -1471,6 +1488,11 @@ export function App() {
           </section>
         ) : null}
         <span className="sidebar-spacer" />
+        {!POPOUT && HOST === "electron" ? (
+          <button className="nav-row scheduled-button" onClick={() => setScheduledOpen(true)} title="Night Shift's queue, inbox and report">
+            <Icon name="clock" size={14} />Scheduled{nightUnseen ? <span className="count" aria-label={`${nightUnseen} new`}>{nightUnseen}</span> : null}
+          </button>
+        ) : null}
         {!POPOUT ? <button className="nav-row skills-button" onClick={() => setExtensions("skills")} title="Skills, MCP servers and apps"><Icon name="info" size={14} />Skills and tools</button> : null}
         <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title="Settings (Ctrl+,)"><Icon name="settings" size={14} />Settings</button>
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
@@ -1629,6 +1651,10 @@ export function App() {
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice} /> : null}
+      {scheduledOpen ? (
+        <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
+          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
+      ) : null}
       {extensions ? <ExtensionsView client={client} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
       {menuOpen ? <CommandMenu entries={menuOpen === "projects" ? menuEntries().filter((entry) => entry.kind === "project") : menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
     </div>

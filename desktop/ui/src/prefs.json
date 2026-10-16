@@ -120,6 +120,11 @@
     "forcePush": {
       "default": false,
       "type": "boolean"
+    },
+    "nightSeen": {
+      "default": null,
+      "type": "string",
+      "nullable": true
     }
   }
 }
