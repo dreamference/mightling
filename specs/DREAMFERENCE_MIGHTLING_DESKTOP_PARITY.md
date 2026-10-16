@@ -527,7 +527,7 @@ One window with Ask and Work; one `ling app-server` on stdio through the vetted 
 In the order the owner's use suggests, each item with its §2 row as acceptance:
 
 1. **Look** (§3): tokens, fonts, radii, spacing, the composer card, the bubble, no turn separators, icons. One change, no behaviour. **Look: merged 2026-10-16** (light only; the app icon unchanged).
-2. **Shell:** sidebar toggle, command menu, back/forward, font size, undo/redo, close/reopen tabs, the keymap table and its settings page (§2.1, §2.19). **Shell: merged 2026-10-16, MERGE2** (close/reopen act on the review pane and the bottom panel until item 9's tabs; the settings dialog now has pages).
+2. **Shell:** sidebar toggle, command menu, back/forward, font size, undo/redo, close/reopen tabs, the keymap table and its settings page (§2.1, §2.19). **Shell: merged 2026-10-16, 4ca1962** (close/reopen act on the review pane and the bottom panel until item 9's tabs; the settings dialog now has pages).
 3. **Threads:** pins, sections, Recents, unread and attention, mark unread, find in chat, deep links and `ling://`, pop-out with always-on-top, side chat, standalone chat (§2.1).
 4. **Composer:** `@` mentions, `$` skills, `/` commands, Enter behaviour, follow-up behaviour, ↑ restore, Shift+drag images, approve/decline keys, edit previous, fork, Compress, the model and effort picker (§2.3). **Composer: merged 2026-10-16, eca4a6a** (the slash commands Partial: the ones whose methods come with later items wait for them).
 5. **Plan and goal:** collaboration mode, the goal row (§2.3).
