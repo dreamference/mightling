@@ -7,6 +7,7 @@
 // `ling web`, whose own app-server shared `~/.mightling` with this one
 // (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
+import fs from "node:fs";
 import path from "node:path";
 import { BrowserWindow, app, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 
@@ -14,11 +15,14 @@ import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, ch
 import { airgapped, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
 import type { WorkTarget } from "./args";
-import { findLing } from "./bridge";
-import { findEditors, openCommand, type Editor } from "./editors";
+import { codexHome, findLing } from "./bridge";
+import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
+import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
+import { Tasks } from "./tasks";
+import * as worktree from "./worktree";
 import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
 import { openWork } from "./work";
 
@@ -97,6 +101,19 @@ export async function main(options: MainOptions): Promise<void> {
     if (level.level === "on") throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
   };
   let editors: Editor[] | null = null;
+  const tasks = new Tasks((event) => deliver({ channel: "task://event", payload: event }));
+  /** The worktree root the page read from the agent's config, or `$CODEX_HOME/worktrees`. */
+  const worktreeRoot = (root: string | null) => {
+    if (root) return worktree.checkWorktreeRoot(root);
+    const home = codexHome();
+    if (!home) throw new Error("there is no CODEX_HOME for the worktrees");
+    return worktree.defaultRoot(home);
+  };
+  /** A folder the page names for Open: absolute and existing. */
+  const folder = (dir: unknown) => {
+    if (typeof dir !== "string" || !path.isAbsolute(dir) || !fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error("not a folder");
+    return dir;
+  };
 
   async function handle(message: FromView): Promise<unknown> {
     switch (message.type) {
@@ -153,6 +170,67 @@ export async function main(options: MainOptions): Promise<void> {
         const url = await git.pullRequestUrl(root);
         await shell.openExternal(url);
         return url;
+      }
+      case "worktree/create": {
+        const root = worktreeRoot(message.root);
+        return worktree.create({ sourceCwd: folder(message.sourceCwd), base: message.base, withChanges: Boolean(message.withChanges), worktreeRoot: root });
+      }
+      case "worktree/bind":
+        return worktree.bindThread(await git.checkRoot(message.checkout), message.thread);
+      case "worktree/list":
+        return worktree.list(folder(message.sourceCwd), worktreeRoot(message.root));
+      case "worktree/remove":
+        return worktree.remove(folder(message.sourceCwd), message.checkout, worktreeRoot(message.root), message.snapshot);
+      case "worktree/restore":
+        return worktree.restore(folder(message.sourceCwd), message.snapshot, worktreeRoot(message.root));
+      case "worktree/branch":
+        return worktree.createBranch(await git.checkRoot(message.checkout), message.name);
+      case "worktree/handoff":
+        return worktree.handOff(message.direction === "toLocal" ? "toLocal" : "toWorktree", message.worktree, message.local, worktreeRoot(message.root), message.thread);
+      case "git/branches":
+        return git.branches(await git.checkRoot(message.root));
+      case "env/list":
+        return environments(folder(message.project));
+      case "env/write":
+        return writeEnvironment(folder(message.project), message.environment);
+      case "task/run": {
+        const project = folder(message.project);
+        const cwd = folder(message.cwd);
+        const environment = environments(project).found.find((entry) => entry.file === message.file);
+        if (!environment) throw new Error(`${project} has no environment ${message.file}`);
+        const script = message.action === "setup" ? environment.setup : environment.actions[Number(message.action)]?.script;
+        if (!script?.trim()) throw new Error("that environment has no such script");
+        // The script runs in the project or in one of its worktrees, nowhere else.
+        const common = async (dir: string) => fs.realpathSync(path.resolve(dir, (await git.git(dir, ["rev-parse", "--git-common-dir"])).trim()));
+        if (fs.realpathSync(cwd) !== fs.realpathSync(project) && (await common(cwd).catch(() => "")) !== (await common(project).catch(() => "-"))) {
+          throw new Error("a project's script runs in the project or one of its worktrees");
+        }
+        await offline(message.thread, "a project's own script (nothing sandboxes it)");
+        const label = message.action === "setup" ? `Setup: ${environment.name}` : environment.actions[Number(message.action)].name;
+        return tasks.run(label, script, cwd);
+      }
+      case "task/stop":
+        tasks.stop(message.id);
+        return null;
+      case "open/terminal": {
+        const dir = folder(message.dir);
+        const terminal = terminalCommand(dir);
+        if (!terminal) throw new Error("no terminal emulator was found");
+        git.launch(terminal.command, terminal.args, dir);
+        return null;
+      }
+      case "open/editor": {
+        const dir = folder(message.dir);
+        const editor = (editors ?? (editors = findEditors())).find((entry) => entry.id === message.editor) ?? editors[0];
+        if (!editor) throw new Error("no editor was found; choose one in the review pane");
+        const { command, args } = openCommand(editor, dir, null);
+        git.launch(command, args, dir);
+        return null;
+      }
+      case "open/folder": {
+        const failed = await shell.openPath(folder(message.dir));
+        if (failed) throw new Error(failed);
+        return null;
       }
       case "editors/list":
         editors = findEditors();
@@ -211,6 +289,7 @@ export async function main(options: MainOptions): Promise<void> {
     showView("work");
   });
   app.on("window-all-closed", () => {
+    tasks.stopAll();
     server.stop();
     app.quit();
   });

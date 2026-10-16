@@ -369,6 +369,44 @@ html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 
 .commit-actions label, .editor-choice { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; }
 .editor-choice select { font-size: 12.5px; }
 
+/* Worktrees, hand-off, local environments and the bottom panel (DESKTOP_PARITY §2.6). */
+.new-thread-options { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; max-width: calc(var(--column) + 32px); width: 100%; margin: 0 auto; padding: 0 22px 2px; font-size: 13px; color: var(--muted); }
+.new-thread-options label { display: inline-flex; align-items: center; gap: 6px; }
+.new-thread-options select { font-size: 12.5px; padding: 2px 6px; border-radius: var(--radius-sm); max-width: 220px; }
+.segmented { display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--hover); }
+.segmented button { border: none; background: none; padding: 3px 12px; border-radius: var(--radius-pill); font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.segmented button.selected { background: var(--raised); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.worktree-header { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+.worktree-header .link-button, .panel-tabs .link-button { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.chip.location { gap: 4px; }
+.chip.location.worktree { background: var(--accent-soft); color: var(--text); }
+.menu-anchor { position: relative; display: inline-flex; }
+.menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 8; display: flex; flex-direction: column; min-width: 200px; padding: 4px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-focus); }
+.menu > button { border: none; background: none; text-align: left; padding: 6px 10px; border-radius: var(--radius-sm); }
+.menu > button:hover:not(:disabled) { background: var(--hover); }
+.menu.inline-form { flex-direction: row; gap: 6px; min-width: 280px; }
+.menu.inline-form input { flex: 1; }
+.project h2 .project-action { margin-left: auto; opacity: 0; padding: 2px; }
+.project h2:hover .project-action, .project-action:focus-visible { opacity: 1; }
+.project.permanent .thread-label { display: inline-flex; align-items: center; gap: 4px; }
+.restore-notice { display: flex; align-items: center; gap: 8px; }
+.bottom-panel { display: flex; flex-direction: column; height: 34vh; min-height: 160px; border-top: 1px solid var(--line); background: var(--panel); }
+.panel-tabs { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); overflow-x: auto; font-size: 12.5px; }
+.panel-tab { display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-sm); }
+.panel-tab.selected { background: var(--raised); box-shadow: 0 0 0 1px var(--line); }
+.panel-tab-label { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 3px 6px; font-size: 12.5px; white-space: nowrap; }
+.panel-tab .running { position: static; }
+.panel-output { flex: 1; margin: 0; padding: 8px 12px; overflow: auto; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; background: var(--canvas); }
+.panel-empty { padding: 10px 14px; }
+.dialog-note { color: var(--muted); font-size: 13px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-size: 13px; }
+.dialog .field { align-items: stretch; }
+.field textarea, .field input { width: 100%; }
+.action-row { display: flex; gap: 6px; margin: 6px 0; }
+.action-row input { width: 140px; }
+.action-row input.script { flex: 1; font-family: var(--font-code); font-size: 12.5px; }
+.dialog-buttons { display: flex; gap: 6px; margin-top: 14px; }
+
 .ask-empty { max-width: 520px; margin: 14vh auto 0; text-align: center; }
 .ask-empty .mark { display: block; margin: 0 auto 18px; }
 .ask-empty h1 { color: var(--text); font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; }

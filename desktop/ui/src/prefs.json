@@ -35,6 +35,18 @@
         "unified",
         "split"
       ]
+    },
+    "worktreeThreads": {
+      "default": {},
+      "type": "object"
+    },
+    "permanentWorktrees": {
+      "default": [],
+      "type": "strings"
+    },
+    "bottomPanel": {
+      "default": false,
+      "type": "boolean"
     }
   }
 }

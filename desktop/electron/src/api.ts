@@ -33,6 +33,29 @@ export type FromView =
   | { type: "git/commit"; root: string; message: string; all: boolean }
   | { type: "git/push"; root: string; force: boolean; thread: string | null }
   | { type: "git/pull-request"; root: string; thread: string | null }
+  /** Managed worktrees and hand-off (worktree.ts); `root` is the worktree root from the agent's config. */
+  | { type: "worktree/create"; sourceCwd: string; base: string | null; withChanges: boolean; root: string | null }
+  | { type: "worktree/bind"; checkout: string; thread: string }
+  | { type: "worktree/list"; sourceCwd: string; root: string | null }
+  | { type: "worktree/remove"; sourceCwd: string; checkout: string; root: string | null; snapshot: string | null }
+  | { type: "worktree/restore"; sourceCwd: string; snapshot: string; root: string | null }
+  | { type: "worktree/branch"; checkout: string; name: string }
+  | { type: "worktree/handoff"; direction: "toLocal" | "toWorktree"; worktree: string; local: string; root: string | null; thread: string }
+  | { type: "git/branches"; root: string }
+  /** Local environments (environments.ts): read from .codex/ and .mightling/, written to .mightling/ only. */
+  | { type: "env/list"; project: string }
+  | { type: "env/write"; project: string; environment: unknown }
+  /**
+   * The bottom panel's tasks (tasks.ts): a project environment's setup or one of its actions, named
+   * by the environment's file and the action's index; the script is read from the project here,
+   * never taken from the page. Refused at /airgapped on.
+   */
+  | { type: "task/run"; project: string; file: string; action: number | "setup"; cwd: string; thread: string | null }
+  | { type: "task/stop"; id: string }
+  /** The chat header's Open: a terminal or the file manager in the thread's folder. */
+  | { type: "open/terminal"; dir: string }
+  | { type: "open/folder"; dir: string }
+  | { type: "open/editor"; dir: string; editor: string | null }
   /** The editors found on this machine (editors.ts), and opening a file in one at a line. */
   | { type: "editors/list" }
   | { type: "editor/open"; root: string; path: string; line: number | null; editor: string | null }
@@ -49,6 +72,8 @@ export type ForView =
   | { channel: "work://stderr"; payload: string }
   | { channel: "work://protocol-error"; payload: string }
   | { channel: "work://exit"; payload: number | null }
+  /** A bottom-panel task started, wrote output, or ended (tasks.ts). */
+  | { channel: "task://event"; payload: { id: string; kind: "started" | "output" | "exit"; label?: string; cwd?: string; data?: string; code?: number | null } }
   /** Show Ask or Work: the menu, a second instance or a link asked for one. */
   | { channel: "view"; payload: "ask" | "work" };
 

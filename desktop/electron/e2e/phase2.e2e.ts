@@ -206,3 +206,76 @@ test("6 review pane: scopes, stage by hunk, comments, split view, a generated me
     await close();
   }
 });
+
+test("7 worktrees: a new thread in a worktree with setup, Create branch here, hand-off, actions, the environment editor", async () => {
+  const { page, home, shoot, close } = await open();
+  const root = scratchRepo(home);
+  const env = { ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: "1" };
+  const gitIn = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
+  fs.mkdirSync(path.join(root, ".codex", "environments"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".codex", "environments", "environment.toml"),
+    'name = "Fetcher"\n[setup]\nscript = "echo setting up in $(basename $(pwd))"\n[[actions]]\nname = "Tests"\nicon = "test"\nscript = "echo ran the tests"\n');
+  gitIn(root, "add", "-A");
+  gitIn(root, "commit", "-q", "-m", "Work in progress");
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("textbox", { name: "Project folder" }).fill(root);
+    const options = page.getByLabel("Where the new thread works");
+    await expect(options).toBeVisible();
+    await options.getByRole("radio", { name: "Worktree" }).click();
+    await options.getByRole("combobox", { name: "Local environment" }).selectOption({ label: "Fetcher" });
+    await shoot("7-new-thread-worktree.png");
+
+    // The first message makes the worktree, starts the thread there and runs the setup.
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("Count the retries and log the count.");
+    await composer.press("Enter");
+    await expect.poll(() => received(home).find((m) => m.method === "thread/start" && !m.params?.ephemeral)?.params?.cwd as string | undefined)
+      .toMatch(new RegExp(`/\\.mightling/worktrees/[0-9a-f]{4}/fetcher$`));
+    const checkout = received(home).find((m) => m.method === "thread/start" && !m.params?.ephemeral)!.params!.cwd as string;
+    const ownerFile = path.resolve(checkout, gitIn(checkout, "rev-parse", "--git-path", "codex-thread.json"));
+    await expect.poll(() => fs.existsSync(ownerFile)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(ownerFile, "utf8")).ownerThreadId).toMatch(/^n\d+$/);
+    expect(received(home).find((m) => m.method === "turn/start")?.params?.cwd).toBe(checkout);
+    const panel = page.getByRole("region", { name: "Bottom panel" });
+    await expect(panel.locator(".panel-output")).toContainText("setting up in fetcher");
+    await expect(page.locator(".chip.location")).toContainText("worktree · detached");
+    await expect(page.locator(".item.agent")).toContainText("Done");
+
+    // The agent's work, then Create branch here and the hand-off to the local checkout.
+    fs.appendFileSync(path.join(checkout, "fetcher", "client.py"), "# retries counted\n");
+    await page.getByRole("button", { name: "Create branch here" }).click();
+    await page.getByRole("textbox", { name: "Branch name" }).fill("agent/retry-count");
+    await page.getByRole("textbox", { name: "Branch name" }).press("Enter");
+    await expect(page.locator(".chip.location")).toContainText("worktree · agent/retry-count");
+    await shoot("7-worktree-thread.png");
+    await page.getByRole("button", { name: "Hand off" }).click();
+    await page.getByRole("menuitem", { name: "To the local checkout" }).click();
+    await expect(page.locator(".chip.location")).toContainText("local · agent/retry-count");
+    expect(gitIn(root, "symbolic-ref", "--short", "HEAD")).toBe("agent/retry-count");
+    expect(fs.readFileSync(path.join(root, "fetcher", "client.py"), "utf8")).toContain("# retries counted");
+    expect(gitIn(checkout, "status", "--porcelain")).toBe("");
+
+    // An action of the environment runs in the bottom panel, in the folder the thread now works in.
+    await panel.getByRole("button", { name: "Tests" }).click();
+    await expect(panel.locator(".panel-output")).toContainText("ran the tests");
+    await shoot("7-handed-off-local.png");
+
+    // The environment editor writes .mightling/ only.
+    await panel.getByRole("button", { name: "Environment…" }).click();
+    const editor = page.getByRole("dialog", { name: "Local environment" });
+    await editor.getByRole("textbox", { name: "Action 1 script" }).fill("npm test -- --silent");
+    await shoot("7-environment-editor.png");
+    await editor.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => fs.existsSync(path.join(root, ".mightling", "environments", "default.toml"))).toBe(true);
+    expect(fs.readFileSync(path.join(root, ".mightling", "environments", "default.toml"), "utf8")).toContain("npm test -- --silent");
+    expect(fs.readFileSync(path.join(root, ".codex", "environments", "environment.toml"), "utf8")).toContain('script = "echo ran the tests"');
+
+    await page.keyboard.press("Control+,");
+    await expect(page.getByRole("textbox", { name: "Worktree root" })).toBeVisible();
+    await shoot("7-settings-worktrees.png");
+    expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
+  } finally {
+    await close();
+  }
+});
