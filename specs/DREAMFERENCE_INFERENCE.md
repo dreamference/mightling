@@ -153,7 +153,7 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 | Setting | Value |
 | :------ | :---- |
 | `engine` | `sglang` |
-| `docker_image` | `lmsysorg/sglang@sha256:d6e7288627be…` (v0.5.19, pinned by digest) |
+| `docker_image` | `lmsysorg/sglang@sha256:b1259f3ea327…` (v0.5.21, pinned by digest; v0.5.19 `d6e7288627be…` until 1.6.1) |
 | checkpoint | `RadixArk/Qwen3.8-27B-NVFP4` @ `52d1adc`, served as its snapshot directory |
 | drafter | `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` @ `bd7a934`, 12 draft tokens (the recipe's 16 until 2026-10-09: 12 measured +7% on the replay set, 48.3 against 45.1 tok/s single stream, two runs each in one session, acceptance 5.23 against 4.99 per step, speculation still exact; 8, 10 and 14 gained nothing), `modelopt_fp4` |
 | memory | `--mem-fraction-static 0.50`, cgroup cap = fraction + 24 GB headroom |

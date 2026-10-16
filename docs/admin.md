@@ -337,6 +337,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--restart-after-compactions` | Once the fix session's N-th compaction is recorded, stop it and start one fresh session with the task and the stopped session's diff as a file it may apply or discard; the tree is reset first, the time limit is not (default 0: never) |
 | `--apply-patch` | How the agent is offered Codex's apply_patch tool: function (a function tool, which SGLang serves), freeform (a custom tool, which only ling-engine serves) or off; the launcher's own choice when absent (spec §22) One of: `off`, `function`, `freeform`. |
 | `--exec-tool` | How the agent is offered Code Mode's exec tool: function (translated, which SGLang serves) or freeform (Codex's custom tool, which only ling-engine serves and SGLang drops); the launcher's own choice when absent: function on SGLang and vLLM (spec §23) One of: `function`, `freeform`. |
+| `--drop-old-outputs` | When a session is about to compact, first drop the output of its older tool calls (the calls stay, the last 10 outputs and short ones are kept) and summarise only if that is not enough; sets the launcher's switch in every session (compaction spec §13) |
 | `--review-turn` | After the agent stops with a changed tree, resume its session once more to re-read the issue, read its diff, run the tests of the modules it changed and fix what does not hold, within the task's time limit; the patch is collected after that turn (default off) |
 
 #### `ling-admin swe-bench eval`

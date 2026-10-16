@@ -22,6 +22,10 @@
 //! `call_id` of the history segment's first tool call. A resumed session reads the same file and
 //! sends the same view; a compaction rewrites the history, which starts a new segment and file.
 //!
+//! **Drop-first compaction** ([`dropping`]) lives here too, because it needs the same reading of
+//! items and the same segment key: when Codex is about to compact, it drops old outputs from the
+//! stored history instead, and skips the summary when that is enough (patch `0026`).
+//!
 //! Items are read through serde as JSON in the Responses API's shape (`type`, `call_id`,
 //! `output`), so this crate needs none of Codex's types.
 
@@ -37,6 +41,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+
+pub mod dropping;
+
+pub use dropping::DropPolicy;
+pub use dropping::drop_first;
+pub use dropping::drop_policy;
+pub use dropping::set_drop_policy;
 
 /// The high mark, as a percentage of the compaction limit.
 pub const HIGH_PERCENT: u64 = 85;
@@ -144,11 +155,14 @@ impl State {
 
 /// Masks the history in place under the process's policy; does nothing without one. `size` is the
 /// request's size as auto-compaction measures it. `item` reaches the response item inside whatever
-/// wraps it (Codex keeps metadata beside each item).
+/// wraps it (Codex keeps metadata beside each item). Outputs that drop-first compaction dropped
+/// are shown as their placeholders first ([`dropping::show_dropped`]), which matters only in a
+/// resumed session.
 pub fn apply<E, T>(items: &mut [E], size: i64, item: impl Fn(&mut E) -> &mut T)
 where
     T: Serialize + DeserializeOwned,
 {
+    dropping::show_dropped(items, &item);
     if let Some(setup) = SETUP.get() {
         apply_with(&setup.policy, &setup.dir, items, u64::try_from(size).unwrap_or(0), item);
     }
@@ -303,6 +317,14 @@ pub fn segment_key(values: &[Value]) -> Option<String> {
 /// Deletes segment files not written for [`KEEP_DAYS`] days, with the saved outputs they name.
 /// Returns how many segments went.
 pub fn prune(codex_home: &Path, now: SystemTime) -> usize {
+    // Drop-first compaction's segments keep no copies, only their placeholders.
+    if let Ok(entries) = std::fs::read_dir(dropping::dropped_dir(codex_home)) {
+        for path in entries.flatten().map(|entry| entry.path()) {
+            if path.extension().is_some_and(|ext| ext == "json") && older_than_kept(&path, now) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
     let dir = codex_home.join("masking");
     let Ok(entries) = std::fs::read_dir(&dir) else { return 0 };
     let mut pruned = 0;
@@ -311,13 +333,7 @@ pub fn prune(codex_home: &Path, now: SystemTime) -> usize {
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        let old = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(|age| age > Duration::from_secs(KEEP_DAYS * 86_400));
-        if !old {
+        if !older_than_kept(&path, now) {
             continue;
         }
         let state: State = std::fs::read_to_string(&path)
@@ -332,6 +348,15 @@ pub fn prune(codex_home: &Path, now: SystemTime) -> usize {
         }
     }
     pruned
+}
+
+/// Whether a file was last written more than [`KEEP_DAYS`] days before `now`.
+fn older_than_kept(path: &Path, now: SystemTime) -> bool {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| now.duration_since(modified).ok())
+        .is_some_and(|age| age > Duration::from_secs(KEEP_DAYS * 86_400))
 }
 
 fn call_id(value: &Value) -> Option<&str> {

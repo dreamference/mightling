@@ -191,7 +191,9 @@ mod tests {
         let base: Vec<OsString> = vec!["ling".into(), "exec".into(), "hi".into()];
         assert_eq!(with_tools(base.clone(), ""), base, "no collection, no tools");
         let out: Vec<String> = with_tools(base.clone(), "\n\n# Your documents\n\nx").iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(out[2], format!("mcp_servers.ling_docs.command=\"{}\"", binary.display()));
+        // The path as TOML writes it, as code_index.rs's test has it: a Windows path holds
+        // backslashes and comes out as a literal string ('C:\…'), not a basic one ("…").
+        assert_eq!(out[2], format!("mcp_servers.ling_docs.command={}", toml::Value::String(binary.display().to_string())));
         assert_eq!(out[4], "mcp_servers.ling_docs.args=[\"mcp\"]");
         assert!(out[6].starts_with("mcp_servers.ling_docs.env_vars=[\"CODEX_HOME\""), "{}", out[6]);
         assert_eq!(&out[7..], ["exec", "hi"]);

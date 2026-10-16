@@ -58,6 +58,7 @@ pub mod rename;
 #[cfg(target_os = "linux")]
 pub mod signal;
 pub mod skills;
+pub mod summary_cap;
 
 pub mod update;
 pub mod usage;
@@ -467,6 +468,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let args = compaction::prepare(args, &codex_home, &host, &model).await;
     // Old tool outputs are masked in what is sent once the request nears that limit (mask.rs).
     mask::configure(masking, &args, &codex_home, model.max_model_len);
+    // Old tool outputs are dropped first when the session is about to compact, when switched on
+    // (compaction.rs; compaction spec §13).
+    compaction::prepare_drop(&args, &codex_home, model.max_model_len);
     // What was said above, shown inside the TUI too: its first frame covers stderr (notice.rs).
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.
@@ -490,6 +494,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         .and_then(|index| command.find_subcommand(&user_args[index]))
         .is_some_and(|found| matches!(found.get_name(), "exec" | "review"));
     let args = compaction::prepare_turn_end(args, &codex_home, model.max_model_len, !one_shot);
+    // A length bound on the compaction summary, 800 words unless switched off (summary_cap.rs).
+    let args = summary_cap::prepare(args, &codex_home);
     // `default` is `model_catalog.json`, already named in `config.toml`; another prompt's catalog
     // is named for this process only, so a session it resumes keeps the prompt it recorded.
     let args = match catalog {

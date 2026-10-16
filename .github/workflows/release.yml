@@ -49,9 +49,12 @@ on:
           - ubuntu-24.04-arm
           - ubuntu-24.04
       build_windows:
-        description: "Also build the Windows client (Arm64 and x86-64; preview, unsigned). Off until its CI passes"
+        # On since 1.6.4 (the owner, 2026-10-14): the Windows CI passed on 2026-10-08, and 1.6.0 and
+        # 1.6.1 shipped without the client only because this was off. The .exe files are not
+        # code-signed (a preview, WINDOWS_ARM §16.3); the release's signed SHA256SUMS covers them.
+        description: "Also build the Windows client (Arm64 and x86-64; preview: the .exe files are unsigned, the signed SHA256SUMS covers them)"
         type: boolean
-        default: false
+        default: true
       build_clients:
         description: "Also build the client for Intel/AMD Linux and macOS (build-clients.yml)"
         type: boolean
