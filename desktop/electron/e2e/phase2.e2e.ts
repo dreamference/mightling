@@ -467,3 +467,46 @@ test("9 layout: the review tab beside the thread, in full, hidden, and back", as
     await close();
   }
 });
+
+test("10 settings: Profile, Notifications, Appearance, Personalization, Archived threads, Git, Project", async () => {
+  const { page, home, shoot, close } = await open();
+  const day = path.join(home, ".mightling", "sessions", "2026", "10", "15");
+  fs.mkdirSync(day, { recursive: true });
+  fs.writeFileSync(path.join(day, "rollout-2026-10-15T09-00-00-0199aaaa.jsonl"), JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { total_tokens: 48210 } } } }) + "\n");
+  try {
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    const go = (name: string) => settings.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name, exact: true }).click();
+    await go("Profile");
+    await expect(settings.locator(".info-rows")).toContainText("48,210");
+    await shoot("10-settings-profile.png");
+    await go("Notifications");
+    await settings.getByLabel("Never").check();
+    await go("Appearance");
+    await settings.getByLabel("Accent colour").fill("#7c3aed");
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--accent"))).toBe("#7c3aed");
+    await shoot("10-settings-appearance.png");
+    await settings.getByRole("button", { name: "Back to Mightling's own" }).click();
+    await go("Personalization");
+    await settings.getByRole("textbox", { name: "Personal instructions" }).fill("Answer in British English.");
+    await settings.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => fs.existsSync(path.join(home, ".mightling", "AGENTS.md")) && fs.readFileSync(path.join(home, ".mightling", "AGENTS.md"), "utf8")).toBe("Answer in British English.");
+    await shoot("10-settings-personalization.png");
+    await go("Archived threads");
+    await expect(settings).toContainText("Try a smaller hero image");
+    await shoot("10-settings-archived.png");
+    await settings.getByRole("button", { name: "Unarchive" }).click();
+    await expect.poll(() => received(home).some((m) => m.method === "thread/unarchive" && m.params?.threadId === "old1")).toBe(true);
+    await go("Git");
+    await settings.getByRole("textbox", { name: "Branch prefix" }).fill("dgx/");
+    await settings.getByRole("textbox", { name: "Branch prefix" }).blur();
+    await shoot("10-settings-git.png");
+    const prefsFile = path.join(home, ".local", "share", "dev.dreamference.mightling", "prefs.json");
+    await expect.poll(() => JSON.parse(fs.readFileSync(prefsFile, "utf8")).branchPrefix).toBe("dgx/");
+    expect(JSON.parse(fs.readFileSync(prefsFile, "utf8")).notifyTurns).toBe("never");
+    await go("Project");
+    await expect(settings.getByRole("combobox", { name: "Editor" })).toBeVisible();
+  } finally {
+    await close();
+  }
+});

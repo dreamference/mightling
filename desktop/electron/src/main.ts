@@ -21,6 +21,7 @@ import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
+import { insights, readPersonal, writePersonal } from "./insights";
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
@@ -48,6 +49,7 @@ export async function main(options: MainOptions): Promise<void> {
   // Hidden for the audit's session and for an end-to-end test (`MIGHTLING_HIDDEN=1`).
   const show = options.audit === null && !process.env.MIGHTLING_HIDDEN;
 
+  const prefs = new Prefs(app.getPath("userData"));
   /** Pop-outs: a thread in a window of its own, on the same app-server (windows.ts). */
   const popouts = new Map<number, BrowserWindow>();
   const router = new RequestRouter();
@@ -61,6 +63,11 @@ export async function main(options: MainOptions): Promise<void> {
   };
   const deliver = (message: ForView) => {
     if (message.channel === "work://message") {
+      // An approval or a question waiting: a notification when the window is not in front.
+      const payload = message.payload as { id?: unknown; method?: unknown } | null;
+      if (payload && payload.id !== undefined && typeof payload.method === "string" && /requestApproval|requestUserInput|Approval$/.test(payload.method) && prefs.read().notifyApprovals !== false) {
+        notifyTurnDone(window, "Mightling is waiting for your answer.", false);
+      }
       const routed = router.incoming(message.payload);
       for (const target of windows()) {
         if (routed.to === "all" || String(target.webContents.id) === routed.to) send(target, { channel: "work://message", payload: routed.payload });
@@ -75,8 +82,10 @@ export async function main(options: MainOptions): Promise<void> {
   const server = new AppServer(resourcesPath(), {
     deliver,
     busyChanged: (busy) => {
-      keepAwake(busy);
-      if (!busy) notifyTurnDone(window, "The agent finished a turn.");
+      // Settings › General and Notifications (prefs.json): prevent sleep, and when a finished turn notifies.
+      const chosen = prefs.read();
+      keepAwake(busy && chosen.preventSleep !== false);
+      if (!busy && chosen.notifyTurns !== "never") notifyTurnDone(window, "The agent finished a turn.", chosen.notifyTurns === "always");
     },
   });
 
@@ -94,7 +103,6 @@ export async function main(options: MainOptions): Promise<void> {
     window = openWork({ preload: path.join(__dirname, "preload.cjs"), show, view });
     window.on("closed", () => (window = null));
   };
-  const prefs = new Prefs(app.getPath("userData"));
   const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };
 
   installMenu(actions);
@@ -158,6 +166,20 @@ export async function main(options: MainOptions): Promise<void> {
         return own.isAlwaysOnTop();
       case "app/home":
         return app.getPath("home");
+      case "insights": {
+        const home = codexHome();
+        return home ? insights(home) : null;
+      }
+      case "personal/read": {
+        const home = codexHome();
+        return home ? { path: path.join(home, "AGENTS.md"), text: readPersonal(home) } : null;
+      }
+      case "personal/write": {
+        const home = codexHome();
+        if (!home) throw new Error("there is no CODEX_HOME");
+        writePersonal(home, message.text);
+        return null;
+      }
       case "ask/upload":
         return server.upload(message);
       case "work/stop":

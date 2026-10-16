@@ -87,6 +87,39 @@
         "tabs",
         "chat"
       ]
+    },
+    "preventSleep": {
+      "default": true,
+      "type": "boolean"
+    },
+    "notifyTurns": {
+      "default": "unfocused",
+      "enum": [
+        "unfocused",
+        "always",
+        "never"
+      ]
+    },
+    "notifyApprovals": {
+      "default": true,
+      "type": "boolean"
+    },
+    "appearance": {
+      "default": {},
+      "type": "object"
+    },
+    "branchPrefix": {
+      "default": "mightling/",
+      "type": "string"
+    },
+    "commitPrompt": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
+    "forcePush": {
+      "default": false,
+      "type": "boolean"
     }
   }
 }

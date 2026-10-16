@@ -19,7 +19,7 @@ import { PromptHistory, SLASH_COMMANDS, collaborationMode, composeInput, effortF
 import { Icon, MightlingMark } from "./icons";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
-import { DEFAULT_PREFS, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
+import { APPEARANCE_TOKENS, DEFAULT_PREFS, cleanAppearance, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
 import { RpcClient, type ParamsOf } from "./rpc";
 import type { FuzzyFileSearchResult } from "./protocol/FuzzyFileSearchResult";
 import type { ServerNotification } from "./protocol/ServerNotification";
@@ -598,6 +598,24 @@ export function App() {
       notice(error);
     }
   };
+
+  /** Settings › Archived threads. */
+  const listArchived = useCallback(async (): Promise<Thread[]> => ((await client.request("thread/list", { archived: true, limit: 200 })) as { data: Thread[] }).data, [client]);
+  const unarchiveThread = useCallback(async (threadId: string) => {
+    const answer = (await client.request("thread/unarchive", { threadId })) as { thread?: Thread };
+    if (answer.thread) dispatch({ type: "threads", list: [answer.thread] });
+  }, [client]);
+
+  // Settings › Appearance: the colour and font tokens over the light base.
+  useEffect(() => {
+    const root = document.documentElement;
+    const chosen = cleanAppearance(prefs.appearance);
+    for (const [key, token] of Object.entries(APPEARANCE_TOKENS)) {
+      const value = chosen[key as keyof typeof chosen];
+      if (value) root.style.setProperty(token, value);
+      else root.style.removeProperty(token);
+    }
+  }, [prefs.appearance]);
 
   // The user's shortcuts (applied as the page renders, so a handler never sees stale keys), the text
   // size and back/forward follow the window's state.
@@ -1471,7 +1489,7 @@ export function App() {
           {selected && view === "work" && bridge.git.available() ? (
             <WorktreeHeader link={selectedLink} branch={headerGit?.branch ?? null} inGit={Boolean(headerGit?.root)}
               canHandOff={!selected.activeTurnId} environment={environment}
-              onCreateBranch={createBranch} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
+              onCreateBranch={createBranch} branchPrefix={prefs.branchPrefix} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
           ) : null}
           {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => { if (reviewOpen && prefs.layout === "chat") updatePrefs({ layout: "split" }); else setReviewOpen(!reviewOpen); }}><Icon name="fileDiff" size={16} /></button> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
@@ -1600,12 +1618,14 @@ export function App() {
             const last = selected.turns[selected.turns.length - 1];
             client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: last.id }).then(() => openThread(selected.thread.id)).catch(notice);
           } : null}
-          generateMessage={(root, diff) => commitMessage(client, listen, root, modelChoice ?? servedModel, diff)}
+          generateMessage={(root, diff) => commitMessage(client, listen, root, modelChoice ?? servedModel, diff, prefs.commitPrompt ?? undefined)}
+          forcePushDefault={prefs.forcePush}
           notice={notice}
           onClose={() => setReviewOpen(false)}
         />
       ) : null}
-      {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)} /> : null}
+      {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
+        listArchived={listArchived} unarchive={unarchiveThread} notice={notice} /> : null}
       {menuOpen ? <CommandMenu entries={menuOpen === "projects" ? menuEntries().filter((entry) => entry.kind === "project") : menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
     </div>
   );

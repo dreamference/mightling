@@ -40,6 +40,8 @@ export interface ReviewPaneProps {
   onComments: (text: string) => void;
   onRevertTurn: (() => void) | null;
   generateMessage: (root: string, diff: string) => Promise<string>;
+  /** Settings › Git: Force ticked to begin with. */
+  forcePushDefault: boolean;
   notice: (error: unknown) => void;
   onClose: () => void;
 }
@@ -69,7 +71,7 @@ export function ReviewPane(props: ReviewPaneProps) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
   const [includeUnstaged, setIncludeUnstaged] = useState(false);
-  const [forcePush, setForcePush] = useState(false);
+  const [forcePush, setForcePush] = useState(props.forcePushDefault);
   const [editors, setEditors] = useState<bridge.Editor[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { notice } = props;

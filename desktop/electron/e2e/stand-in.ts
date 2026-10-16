@@ -102,7 +102,9 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   const answer = (result) => say({ id: m.id, result });
   switch (m.method) {
     case "initialize": return answer({ userAgent: "stand-in" });
-    case "thread/list": return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null });
+    case "thread/list":
+      if (p.archived) return answer({ data: [{ ...threads[0], id: "old1", name: "Try a smaller hero image", turns: [] }], nextCursor: null });
+      return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null });
     case "permissionProfile/list": return answer({ data: [":read-only", ":workspace", ":danger-full-access"].map((id) => ({ id, allowed: true })) });
     case "model/list": return answer({ data: [model], nextCursor: null });
     case "collaborationMode/list": return answer({ data: [{ name: "Default", mode: "default", model: null, reasoning_effort: null }, { name: "Plan", mode: "plan", model: null, reasoning_effort: null }] });
@@ -128,7 +130,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       return;
     }
     case "thread/archive": return answer({});
-    case "thread/unarchive": return answer({ thread: { ...threads.find((t) => t.id === p.threadId), turns: [] } });
+    case "thread/unarchive": return answer({ thread: { ...(threads.find((t) => t.id === p.threadId) || { ...threads[0], id: p.threadId, name: "Try a smaller hero image" }), turns: [] } });
     case "thread/name/set": {
       const found = threads.find((t) => t.id === p.threadId);
       if (found) found.name = p.name;
