@@ -113,6 +113,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     }
     case "thread/resume": {
       const found = threads.find((t) => t.id === p.threadId);
+      if (!found) return say({ id: m.id, error: { code: -32600, message: "no such thread" } });
       answer({ thread: found });
       if (found && found.id === "w1") {
         say({ method: "turn/diff/updated", params: { threadId: "w1", turnId: "t1", diff: ${JSON.stringify(TURN_DIFF)} } });
@@ -145,12 +146,21 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "thread/start": {
       const id = (p.ephemeral ? "e" : "n") + next++;
       const started = { id, cwd: p.cwd, name: null, preview: "", turns: [], status: { type: "idle" }, ephemeral: !!p.ephemeral, parentThreadId: null,
-        createdAt: 1, updatedAt: 1, recencyAt: null, model: "qwen3.8-27b", modelProvider: "local" };
+        createdAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), recencyAt: null, model: "qwen3.8-27b", modelProvider: "local" };
       if (!p.ephemeral) threads.push(started);
       return answer({ thread: started, model: "qwen3.8-27b", modelProvider: "local", cwd: p.cwd });
     }
     case "turn/start": {
       const id = "turn-" + next++;
+      if (String(p.threadId).startsWith("n")) {
+        // A thread the test started: the turn runs briefly and answers.
+        answer({ turn: { id, items: [], status: "inProgress", error: null } });
+        say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
+        return setTimeout(() => {
+          say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "agentMessage", id: "m" + id, text: "Done: the retry counter is in fetcher/client.py." } } });
+          say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [], status: "completed", error: null } } });
+        }, 300);
+      }
       if (String(p.threadId).startsWith("e")) {
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
         say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "agentMessage", id: "m" + id, text: ${JSON.stringify(COMMIT_MESSAGE)} } } });

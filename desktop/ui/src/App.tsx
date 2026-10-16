@@ -19,7 +19,7 @@ import { PromptHistory, composeInput, effortFor, keyAnswer, mentionPath, parseSl
 import { Icon, MightlingMark } from "./icons";
 import { keyAction, matches } from "./keymap";
 import { renderMarkdown } from "./markdown";
-import { DEFAULT_PREFS, loadPrefs, savePrefs, type Prefs } from "./prefs";
+import { DEFAULT_PREFS, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
 import { RpcClient, type ParamsOf } from "./rpc";
 import type { FuzzyFileSearchResult } from "./protocol/FuzzyFileSearchResult";
 import type { ServerNotification } from "./protocol/ServerNotification";
@@ -35,7 +35,10 @@ import {
   contextUse, initialState, permissionChoices, projects, reduce,
   type PendingRequest, type ThreadView, type TurnView,
 } from "./store";
+import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./BottomPanel";
 import { ReviewPane } from "./ReviewPane";
+import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
+import { carry, cleanupVictims, projectFolder, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
@@ -104,6 +107,16 @@ export function App() {
   const [info, setInfo] = useState<Info | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [tasks, setTasks] = useState<TaskView[]>([]);
+  const [wtSettings, setWtSettings] = useState<WorktreeSettings>(worktreeSettings(null));
+  const [newChoice, setNewChoice] = useState<NewThreadChoice>({ mode: "local", base: null, withChanges: true, environment: null });
+  const [newBranches, setNewBranches] = useState<{ current: string | null; branches: string[] } | null>(null);
+  const [envs, setEnvs] = useState<{ project: string; found: bridge.LocalEnvironment[]; problems: string[] } | null>(null);
+  const [newEnvs, setNewEnvs] = useState<bridge.LocalEnvironment[]>([]);
+  const [editingEnv, setEditingEnv] = useState(false);
+  const [missingWorktree, setMissingWorktree] = useState<string | null>(null);
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   // Listeners besides the store, for the window's own small jobs (a generated commit message).
   const listeners = useRef(new Set<(notification: ServerNotification) => void>());
   const listen: Listen = useCallback((listener) => {
@@ -156,6 +169,8 @@ export function App() {
       setProfiles(permissions.data);
       setAirgap(level);
       setPrefs(stored);
+      // The worktree settings the codex-worktree crate reads too ([desktop] in config.toml).
+      client.request("config/read", {}).then((answer) => setWtSettings(worktreeSettings((answer as { config?: { desktop?: Record<string, unknown> | null } }).config?.desktop))).catch(() => {});
       // The catalog the launcher wrote: one served model, with the efforts it allows.
       client.request("model/list", {}).then((answer) => setModels((answer as { data?: Model[] }).data ?? [])).catch(() => setModels([]));
       // A browser has no launch target: `ling web` answers null.
@@ -184,6 +199,12 @@ export function App() {
     let stop: (() => void) | undefined;
     bridge.listenBridge({
       view: (next) => showView(next),
+      task: (event) => setTasks((list) => {
+        if (event.kind === "started") return [...list.slice(-11), { id: event.id, label: event.label ?? "Task", cwd: event.cwd ?? "", output: "", running: true, code: null }];
+        return list.map((task) => (task.id !== event.id ? task
+          : event.kind === "output" ? { ...task, output: appendOutput(task.output, event.data ?? "") }
+            : { ...task, running: false, code: event.code ?? null }));
+      }),
       message: (message) => client.receive(message),
       stderr: (line) => dispatch({ type: "stderr", line }),
       protocolError: (line) => dispatch({ type: "protocolError", line }),
@@ -279,6 +300,7 @@ export function App() {
       return null;
     }
     try {
+      if (newChoice.mode === "worktree" && bridge.git.available()) return await startInWorktree(cwd);
       const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile });
       dispatch({ type: "opened", thread: started.thread });
       setDrawer(false);
@@ -286,6 +308,50 @@ export function App() {
     } catch (error) {
       notice(error);
       return null;
+    }
+  };
+
+  const links = prefs.worktreeThreads;
+  /** Records a thread's worktree (or changes it), saved in the window's preferences. */
+  const setLink = (threadId: string, link: WorktreeLink | null) => {
+    const next = { ...prefsRef.current.worktreeThreads };
+    if (link) next[threadId] = link;
+    else delete next[threadId];
+    updatePrefs({ worktreeThreads: next });
+  };
+
+  /** A new thread in a new managed worktree (§2.6): created, bound to the thread, its setup run, the oldest cleaned up. */
+  const startInWorktree = async (cwd: string): Promise<Thread> => {
+    const created = await bridge.worktrees.create(cwd, newChoice.base, newChoice.withChanges && !newChoice.base, wtSettings.root);
+    const started = await client.request("thread/start", { cwd: created.cwd, model: servedModel, permissions: profile });
+    await bridge.worktrees.bind(created.root, started.thread.id).catch(notice);
+    setLink(started.thread.id, { checkout: created.root, cwd: created.cwd, source: created.sourceRoot, sourceCwd: cwd, location: "worktree", snapshot: null });
+    dispatch({ type: "opened", thread: started.thread });
+    setDrawer(false);
+    const environment = newEnvs.find((entry) => entry.file === newChoice.environment) ?? null;
+    if (environment?.setup.trim()) {
+      updatePrefs({ bottomPanel: true });
+      bridge.runTask(cwd, environment.file, "setup", created.cwd, started.thread.id).catch(notice);
+    }
+    void cleanUp(cwd, created.root);
+    return started.thread;
+  };
+
+  /** Keeps the most recent managed worktrees (Settings › Worktrees), snapshotting the ones it removes. */
+  const cleanUp = async (sourceCwd: string, spare: string | null) => {
+    if (!wtSettings.autoCleanup) return;
+    try {
+      const listed = await bridge.worktrees.list(sourceCwd, wtSettings.root);
+      const running = new Set(Object.values(state.threads).filter((entry) => entry.activeTurnId).map((entry) => entry.thread.id));
+      if (state.selected) running.add(state.selected);
+      const victims = cleanupVictims(listed.map((entry) => ({ root: entry.root, owner: entry.owner ?? null, modified: entry.modified ?? 0 })), wtSettings.keep, running, prefsRef.current.permanentWorktrees, spare);
+      for (const checkout of victims) {
+        const owner = listed.find((entry) => entry.root === checkout)?.owner ?? null;
+        const kept = await bridge.worktrees.remove(sourceCwd, checkout, wtSettings.root, owner ?? `cleanup-${Date.now()}`);
+        if (owner && prefsRef.current.worktreeThreads[owner]) setLink(owner, { ...prefsRef.current.worktreeThreads[owner], snapshot: kept });
+      }
+    } catch (error) {
+      notice(error);
     }
   };
 
@@ -372,6 +438,7 @@ export function App() {
         permissions: profile,
         effort,
         model: modelChoice,
+        cwd: turnCwd(prefsRef.current.worktreeThreads[target.id]),
       });
       promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
@@ -443,8 +510,164 @@ export function App() {
   const archive = async (threadId: string) => {
     try {
       await client.request("thread/archive", { threadId });
+      // Archiving deletes a managed worktree (a snapshot is kept for Restore), never a permanent one.
+      const link = links[threadId];
+      if (link && bridge.git.available() && !prefs.permanentWorktrees.includes(link.checkout)) {
+        bridge.worktrees.remove(link.sourceCwd, link.checkout, wtSettings.root, threadId)
+          .then((kept) => setLink(threadId, { ...link, snapshot: kept })).catch(notice);
+      }
       dispatch({ type: "archived", threadId });
       setFound((list) => list?.filter((result) => result.thread.id !== threadId) ?? null);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  // Where the shown thread's work is now (its worktree, or the local checkout after a hand-off), and
+  // the project its environments are read from.
+  const selectedLink = selected ? links[selected.thread.id] : undefined;
+  const workFolder = selected ? (turnCwd(selectedLink) ?? selected.thread.cwd) : (newCwd.trim() || null);
+  const envProject = view !== "work" ? null : selected ? (selectedLink?.sourceCwd ?? selected.thread.cwd) : (newCwd.trim() || null);
+  useEffect(() => {
+    if (!bridge.git.available() || !envProject || state.server !== "ready") {
+      setEnvs(null);
+      return;
+    }
+    let current = true;
+    bridge.localEnvironments(envProject).then((answer) => current && setEnvs({ project: envProject, ...answer })).catch(() => current && setEnvs(null));
+    return () => {
+      current = false;
+    };
+  }, [envProject, editingEnv, state.server]);
+  const environment = envs?.found[0] ?? null;
+
+  // A new thread's options: its repository's branches and environments.
+  const newFolder = view === "work" && !selected ? newCwd.trim() : "";
+  useEffect(() => {
+    if (!newFolder || !bridge.git.available() || state.server !== "ready") {
+      setNewBranches(null);
+      setNewEnvs([]);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      bridge.git.repos(newFolder).then(async (repos) => {
+        if (!current) return;
+        const inside = repos[0] && (newFolder === repos[0] || newFolder.startsWith(`${repos[0]}/`)) ? repos[0] : null;
+        setNewBranches(inside ? await bridge.worktrees.branches(inside) : null);
+        const found = await bridge.localEnvironments(newFolder).catch(() => ({ found: [], problems: [] }));
+        if (current) setNewEnvs(found.found);
+      }).catch(() => current && setNewBranches(null));
+    }, 300);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [newFolder, state.server]);
+
+  // A worktree thread whose worktree was removed (archived, cleaned up): offer Restore.
+  useEffect(() => {
+    setMissingWorktree(null);
+    if (!selected || !selectedLink || selectedLink.location !== "worktree" || !bridge.git.available()) return;
+    let current = true;
+    bridge.worktrees.list(selectedLink.sourceCwd, wtSettings.root)
+      .then((listed) => current && !listed.some((entry) => entry.root === selectedLink.checkout) && setMissingWorktree(selected.thread.id))
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [selected?.thread.id, selectedLink?.checkout, selectedLink?.location, wtSettings.root]);
+
+  /** Brings a removed worktree back from its snapshot (or a fresh one when no work was kept). */
+  const restoreWorktree = async () => {
+    if (!selected || !selectedLink) return;
+    try {
+      const created = selectedLink.snapshot
+        ? await bridge.worktrees.restore(selectedLink.sourceCwd, selectedLink.snapshot, wtSettings.root)
+        : await bridge.worktrees.create(selectedLink.sourceCwd, null, false, wtSettings.root);
+      await bridge.worktrees.bind(created.root, selected.thread.id).catch(() => {});
+      setLink(selected.thread.id, { ...selectedLink, checkout: created.root, cwd: carry(selectedLink.cwd, selectedLink.checkout, created.root), snapshot: null });
+      setMissingWorktree(null);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** Hand-off (§2.6): the thread and its work move between its worktree and the local checkout. */
+  const handOff = async (direction: "toLocal" | "toWorktree") => {
+    if (!selected) return;
+    if (selected.activeTurnId) return notice("Stop the turn before handing the thread off.");
+    const threadId = selected.thread.id;
+    try {
+      let link = links[threadId];
+      if (!link) {
+        if (direction === "toLocal") return;
+        const created = await bridge.worktrees.create(selected.thread.cwd, null, false, wtSettings.root);
+        await bridge.worktrees.bind(created.root, threadId).catch(() => {});
+        link = { checkout: created.root, cwd: created.cwd, source: created.sourceRoot, sourceCwd: selected.thread.cwd, location: "local", snapshot: null };
+      }
+      await bridge.worktrees.handOff(direction, link.checkout, link.source, wtSettings.root, threadId);
+      setLink(threadId, { ...link, location: direction === "toLocal" ? "local" : "worktree" });
+      setGitTick((tick) => tick + 1);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  // The header's git facts for the shown thread: whether its folder is in a repository, and the branch.
+  const [headerGit, setHeaderGit] = useState<{ folder: string; root: string | null; branch: string | null } | null>(null);
+  const [gitTick, setGitTick] = useState(0);
+  useEffect(() => {
+    if (!selected || !workFolder || !bridge.git.available() || view !== "work") {
+      setHeaderGit(null);
+      return;
+    }
+    let current = true;
+    bridge.git.repos(workFolder).then(async (repos) => {
+      const root = repos[0] && (workFolder === repos[0] || workFolder.startsWith(`${repos[0]}/`)) ? repos[0] : null;
+      const branch = root ? (await bridge.git.status(root)).branch : null;
+      if (current) setHeaderGit({ folder: workFolder, root, branch });
+    }).catch(() => current && setHeaderGit({ folder: workFolder, root: null, branch: null }));
+    return () => {
+      current = false;
+    };
+  }, [selected?.thread.id, workFolder, view, gitTick, selected?.activeTurnId]);
+
+  const createBranch = (name: string) => {
+    if (!selectedLink) return;
+    bridge.worktrees.branch(selectedLink.checkout, name).then(() => setGitTick((tick) => tick + 1)).catch(notice);
+  };
+
+  const openFolder = (where: "editor" | "terminal" | "folder") => {
+    if (!workFolder) return;
+    const opened = where === "terminal" ? bridge.openTerminal(workFolder) : where === "folder" ? bridge.openFolder(workFolder) : bridge.openEditorAt(workFolder, prefs.editor);
+    opened.catch(notice);
+  };
+
+  /** Runs an action of the project's environment in the bottom panel, in the folder the thread works in. */
+  const runAction = (action: bridge.EnvironmentAction) => {
+    if (!workFolder || !environment || !envProject) return notice("Open a thread in a project with a local environment first.");
+    updatePrefs({ bottomPanel: true });
+    bridge.runTask(envProject, environment.file, environment.actions.indexOf(action), workFolder, selected?.thread.id ?? null).catch(notice);
+  };
+
+  /** A permanent worktree of the project: a project of its own, never cleaned up. */
+  const permanentWorktree = async (project: string) => {
+    try {
+      const created = await bridge.worktrees.create(project, null, false, wtSettings.root);
+      updatePrefs({ permanentWorktrees: [...prefsRef.current.permanentWorktrees, created.root] });
+      setNewCwd(created.cwd);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** Writes a worktree setting into `[desktop]` of config.toml, where the codex-worktree crate reads it. */
+  const writeWorktreeSetting = async (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => {
+    try {
+      await client.request("config/value/write", { keyPath: `desktop.${key}`, value, mergeStrategy: "upsert" });
+      const answer = (await client.request("config/read", {})) as { config?: { desktop?: Record<string, unknown> | null } };
+      setWtSettings(worktreeSettings(answer.config?.desktop));
     } catch (error) {
       notice(error);
     }
@@ -496,11 +719,17 @@ export function App() {
     updatePrefs({ effort: chosenEffort, recentModels: rememberModel(prefs.recentModels, model) });
   };
 
-  /** Shown at once, then saved; a refused write puts the stored values back. */
+  /**
+   * Shown at once, then saved; a refused write puts the stored values back. Reads the latest values
+   * through prefsRef, so calls made after an await (a new worktree thread) do not undo each other.
+   */
   const updatePrefs = (values: Partial<Prefs>) => {
-    const before = prefs;
-    setPrefs({ ...prefs, ...values });
-    savePrefs(before, values).then(setPrefs).catch((error) => {
+    const before = prefsRef.current;
+    const next = { ...before, ...values };
+    prefsRef.current = next;
+    setPrefs(next);
+    savePrefs(before, values).catch((error) => {
+      prefsRef.current = before;
       setPrefs(before);
       notice(error);
     });
@@ -584,6 +813,12 @@ export function App() {
     } else if (matches(event, keyAction("recentModels"))) {
       event.preventDefault();
       setPicker("recent");
+    } else if (matches(event, keyAction("bottomPanel"))) {
+      event.preventDefault();
+      updatePrefs({ bottomPanel: !prefsRef.current.bottomPanel });
+    } else if (matches(event, keyAction("environmentAction1"))) {
+      event.preventDefault();
+      if (environment?.actions[0]) runAction(environment.actions[0]);
     } else if (matches(event, keyAction("reviewTab"))) {
       event.preventDefault();
       setReviewOpen((open) => !open);
@@ -690,14 +925,28 @@ export function App() {
                 <h2>Found</h2>
                 {found.map((result) => threadRow(result.thread, result.thread.name || result.thread.preview || "(new thread)"))}
               </section>
-            ) : projects(state, askRoot).map((project) => (
+            ) : projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => (
               <section key={project.cwd} className="project">
-                <h2 title={project.cwd} onClick={() => setNewCwd(project.cwd)}><Icon name="folder" size={14} />{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}</h2>
+                <h2 title={project.cwd} onClick={() => setNewCwd(project.cwd)}>
+                  <Icon name="folder" size={14} />{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}
+                  {bridge.git.available() ? <button className="icon project-action" title="New permanent worktree: a project of its own, never cleaned up" aria-label="New permanent worktree"
+                    onClick={(event) => { event.stopPropagation(); void permanentWorktree(project.cwd); }}><Icon name="gitFork" size={12} /></button> : null}
+                </h2>
                 {project.threads.map((thread) => threadRow(thread, thread.name || thread.preview || "(new thread)"))}
               </section>
             ))}
           </>
         )}
+        {view === "work" && prefs.permanentWorktrees.length > 0 && !found ? (
+          <section className="project permanent">
+            <h2>Permanent worktrees</h2>
+            {prefs.permanentWorktrees.map((checkout) => (
+              <button key={checkout} className="thread" title={checkout} onClick={() => setNewCwd(checkout)}>
+                <span className="thread-label"><Icon name="gitFork" size={12} /> {checkout.split(/[\\/]/).slice(-2).join("/")}</span>
+              </button>
+            ))}
+          </section>
+        ) : null}
         <span className="sidebar-spacer" />
         <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title="Settings (Ctrl+,)"><Icon name="settings" size={14} />Settings</button>
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
@@ -711,6 +960,11 @@ export function App() {
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
           {selected ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
+          {selected && view === "work" && bridge.git.available() ? (
+            <WorktreeHeader link={selectedLink} branch={headerGit?.branch ?? null} inGit={Boolean(headerGit?.root)}
+              canHandOff={!selected.activeTurnId} environment={environment}
+              onCreateBranch={createBranch} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
+          ) : null}
           {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => setReviewOpen(!reviewOpen)}><Icon name="fileDiff" size={16} /></button> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
           {usage ? (
@@ -726,6 +980,12 @@ export function App() {
         ))}
         {state.protocolErrors.length > 0 ? <div className="notice">The agent's server wrote something that is not a protocol message: {state.protocolErrors[state.protocolErrors.length - 1]}</div> : null}
 
+        {missingWorktree && missingWorktree === selected?.thread.id ? (
+          <div className="notice restore-notice">
+            This thread's worktree was removed{selectedLink?.snapshot ? "; a snapshot of its work was kept" : ""}.
+            <button className="link-button" onClick={() => void restoreWorktree()}>Restore</button>
+          </div>
+        ) : null}
         <div className="turns">
           {info ? (
             <section className="info-panel" aria-label={info.title}>
@@ -751,6 +1011,9 @@ export function App() {
           {otherRequests > 0 ? <div className="notice">{otherRequests} other thread(s) are waiting for an answer.</div> : null}
         </div>
 
+        {view === "work" && !selected && newBranches && bridge.git.available() ? (
+          <NewThreadOptions choice={newChoice} onChange={setNewChoice} branches={newBranches} environments={newEnvs} />
+        ) : null}
         {canCompose ? (
           <Composer
             draft={draft} setDraft={setDraft} placeholder={placeholder}
@@ -789,7 +1052,17 @@ export function App() {
             picker={picker} setPicker={setPicker} onPick={pickModel}
           />
         ) : null}
+        {prefs.bottomPanel && view === "work" && bridge.git.available() ? (
+          <BottomPanel tasks={tasks} environment={environment} problems={envs?.problems ?? []} project={envProject}
+            onRun={runAction} onStop={(id) => void bridge.stopTask(id).catch(notice)}
+            onClose={(id) => setTasks((list) => list.filter((task) => task.id !== id))}
+            onEdit={() => setEditingEnv(true)} onHide={() => updatePrefs({ bottomPanel: false })} />
+        ) : null}
       </main>
+      {editingEnv && envProject ? (
+        <EnvironmentEditor project={envProject} initial={environment} onClose={() => setEditingEnv(false)}
+          onSave={(edited) => bridge.writeEnvironment(envProject, edited).then(() => setEditingEnv(false)).catch(notice)} />
+      ) : null}
       {reviewOpen && view === "work" ? (
         <ReviewPane
           cwd={composeRoot} threadId={selected?.thread.id ?? null}
@@ -808,7 +1081,7 @@ export function App() {
           onClose={() => setReviewOpen(false)}
         />
       ) : null}
-      {settingsOpen ? <Settings prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? <Settings prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)} /> : null}
     </div>
   );
 }
@@ -834,8 +1107,15 @@ function editableFocus(): boolean {
 }
 
 /** The window's settings (DESKTOP_PARITY §2.15); General for now: what Enter does and what a follow-up does. */
-function Settings(props: { prefs: Prefs; onChange: (values: Partial<Prefs>) => void; onClose: () => void }) {
+function Settings(props: {
+  prefs: Prefs;
+  onChange: (values: Partial<Prefs>) => void;
+  onClose: () => void;
+  worktrees: WorktreeSettings;
+  onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => void;
+}) {
   const { prefs, onChange } = props;
+  const [root, setRoot] = useState(props.worktrees.root ?? "");
   return (
     <div className="dialog-backdrop" onClick={props.onClose}>
       <section className="dialog settings" role="dialog" aria-label="Settings" onClick={(event) => event.stopPropagation()}>
@@ -851,6 +1131,22 @@ function Settings(props: { prefs: Prefs; onChange: (values: Partial<Prefs>) => v
           <label><input type="radio" name="follow" checked={prefs.followUp === "steer"} onChange={() => onChange({ followUp: "steer" })} /> Steer: the running turn takes it in now</label>
           <label><input type="radio" name="follow" checked={prefs.followUp === "queue"} onChange={() => onChange({ followUp: "queue" })} /> Queue: it waits, and starts the next turn when this one ends</label>
         </fieldset>
+        {bridge.git.available() ? (
+          <>
+            <h3>Worktrees</h3>
+            <fieldset>
+              <legend>Kept in config.toml, shared with ling's /worktree</legend>
+              <label className="field">Worktree root
+                <input value={root} placeholder="~/.mightling/worktrees" aria-label="Worktree root" onChange={(event) => setRoot(event.target.value)}
+                  onBlur={() => root.trim() !== (props.worktrees.root ?? "") && props.onWorktree("git-worktree-root", root.trim() || null)} />
+              </label>
+              <label><input type="checkbox" checked={props.worktrees.autoCleanup} onChange={(event) => props.onWorktree("worktree-auto-cleanup-enabled", event.target.checked)} /> Delete the oldest worktrees automatically (never a pinned, running or permanent one; a snapshot is kept)</label>
+              <label className="field">Keep the most recent
+                <input type="number" min={1} max={200} value={props.worktrees.keep} aria-label="Worktrees kept" onChange={(event) => Number(event.target.value) > 0 && props.onWorktree("worktree-keep-count", Math.floor(Number(event.target.value)))} />
+              </label>
+            </fieldset>
+          </>
+        ) : null}
       </section>
     </div>
   );

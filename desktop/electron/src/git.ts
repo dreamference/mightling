@@ -21,9 +21,9 @@ export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv
 export class GitError extends Error {}
 
 /** Runs `git args` in `cwd`; resolves with stdout, rejects with git's own message. */
-export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_000): Promise<string> {
+export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_000, extraEnv: Record<string, string> = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile("git", args, { cwd, env: gitEnv(), maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
+    const child = execFile("git", args, { cwd, env: { ...gitEnv(), ...extraEnv }, maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
       if (error) {
         const tooBig = (error as { code?: string }).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
         reject(new GitError(tooBig ? "the output is too large to show here" : String(stderr || error.message).trim()));
@@ -334,4 +334,12 @@ export function launch(command: string, args: string[], cwd: string): void {
   const child = spawn(command, args, { cwd, detached: true, stdio: "ignore", env: process.env });
   child.on("error", () => {});
   child.unref();
+}
+
+/** The local branches, the current one first, for a worktree's base. */
+export async function branches(root: string): Promise<{ current: string | null; branches: string[] }> {
+  const text = await git(root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads/"]);
+  const current = (await status(root)).branch;
+  const list = text.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 100);
+  return { current, branches: current ? [current, ...list.filter((name) => name !== current)] : list };
 }

@@ -123,3 +123,28 @@ export function openCommand(editor: Editor, file: string, line: number | null): 
   const at = line !== null && Number.isInteger(line) && line > 0 ? line : null;
   return { command: editor.command, args: kind.at(file, at) };
 }
+
+/** Terminal emulators and how each is told where to start; the first found is used. */
+export const TERMINALS: { bin: string; args: (dir: string) => string[] }[] = [
+  { bin: "ptyxis", args: (dir) => ["--new-window", "--working-directory", dir] },
+  { bin: "gnome-terminal", args: (dir) => [`--working-directory=${dir}`] },
+  { bin: "kgx", args: (dir) => [`--working-directory=${dir}`] },
+  { bin: "konsole", args: (dir) => ["--workdir", dir] },
+  { bin: "xfce4-terminal", args: (dir) => [`--working-directory=${dir}`] },
+  { bin: "tilix", args: (dir) => ["-w", dir] },
+  { bin: "alacritty", args: (dir) => ["--working-directory", dir] },
+  { bin: "kitty", args: (dir) => ["--directory", dir] },
+  { bin: "wezterm", args: (dir) => ["start", "--cwd", dir] },
+  { bin: "foot", args: (dir) => ["-D", dir] },
+  { bin: "x-terminal-emulator", args: () => [] },
+  { bin: "xterm", args: () => [] },
+];
+
+/** The command that opens a terminal in `dir`, or null when none is installed. */
+export function terminalCommand(dir: string): { command: string; args: string[] } | null {
+  for (const terminal of TERMINALS) {
+    const command = onPath(terminal.bin);
+    if (command) return { command, args: terminal.args(dir) };
+  }
+  return null;
+}
