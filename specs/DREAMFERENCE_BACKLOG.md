@@ -17,7 +17,7 @@ The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The sur
 | 3 | `docs_ask` over long documents | `ling-docs` | Not scheduled |
 | 4 | A local deep-research skill | Skills | Not scheduled |
 | 5 | Cost saved per session | Launcher, desktop | Not scheduled |
-| 6 | Best-of-N in Night Shift | Night Shift | Not scheduled; waits on item 1 |
+| 6 | Best-of-N in Night Shift | Night Shift | **Built 2026-10-16** on `night-shift/best-of-n` (N = 3, chooser v1); night 11 measures it |
 | 7 | Drop old tool outputs first, then summarise | Compaction | **First night arm after the pause** |
 | 8 | Delayed tail trim (AgentDiet) | Compaction | Not scheduled; after item 7 |
 | 9 | Long tool outputs offloaded to a file | Launcher, compaction | Not scheduled |
@@ -166,7 +166,7 @@ The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The sur
   - Night Shift's worktrees, scopes and report ([MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md) §5.3, §5.6).
   - The night's time budget: N attempts must fit the window, or the report says how many ran.
 - **Acceptance:** on a SWE-bench list run as Night Shift tasks with `attempts = 3`, the chosen attempts resolve more than a single attempt, by a margin a paired test can see. The report names every attempt.
-- **Status:** approved by the owner 2026-10-13, not scheduled.
+- **Status:** approved by the owner 2026-10-13; N = 3 by default, configurable (owner, 2026-10-14); chooser v1 (v2 not adopted, 2026-10-15). **Built 2026-10-16** on branch `night-shift/best-of-n` ([MIGHTLING_NIGHT_SHIFT §11.9](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md)); SWE-bench night 11 is the acceptance run (three default rounds on one list, chooser v1 over them, against the first round).
 
 ## Compaction
 
