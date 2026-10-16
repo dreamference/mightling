@@ -575,3 +575,27 @@ test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task 
     await close();
   }
 });
+
+test("13 subagents and memories: the panel of a thread's subagents with Stop, the working count, Settings › Memories", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    const panel = page.getByLabel("Subagents", { exact: true });
+    await expect(panel).toContainText("Ada");
+    await expect(panel).toContainText("Brin");
+    await expect(panel).toContainText("1 of 2 working");
+    await page.getByRole("button", { name: "Decline" }).click();
+    await shoot("13-subagents.png");
+    await panel.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "turn/interrupt")?.params).toEqual({ threadId: "s1", turnId: "ts1" });
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: "Memories" }).click();
+    await settings.getByRole("checkbox", { name: "Memories", exact: true }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "config/value/write")?.params).toEqual({ keyPath: "features.memories", value: true, mergeStrategy: "upsert" });
+    await shoot("13-settings-memories.png");
+  } finally {
+    await close();
+  }
+});

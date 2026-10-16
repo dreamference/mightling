@@ -87,6 +87,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "diff", description: "Show how this folder differs from its remote branch", needs: "work" },
   { name: "copy", description: "Copy the last answer", needs: "thread" },
   { name: "resume", description: "Find an earlier thread", needs: "none" },
+  { name: "agents", description: "Show this thread's subagents, to open or stop them", needs: "thread" },
   { name: "night", description: "Night Shift: queue a task for tonight, or open Scheduled", needs: "none", args: "[add <task>]" },
   { name: "airgapped", description: "Show the air-gap level, or set the default for new threads", needs: "none", args: "[default off|on]" },
 ];

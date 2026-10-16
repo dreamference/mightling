@@ -223,8 +223,8 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 | Inline approvals: command, patch, permissions; strict review required | `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/permissions/requestApproval`, `autoApprovalReview/strictReviewRequired` | **Built** for the first three; the air-gap rule holds in the server | — |
 | Automatic approval reviews (a separate reviewer judges eligible requests) | `item/autoApprovalReview/*` | **Same**, rendered as an item; configured in `config.toml` | 2 |
 | Guardian-denied action override | `thread/approveGuardianDeniedAction` | **Same** if a guardian is configured | 3 |
-| Subagent threads: a panel above the composer with each subagent's status, stop all, open a subagent's thread | `thread/started` with a parent id (agent-graph-store), `thread/status/changed`, `turn/interrupt` | **Same**; one GB10 serves every subagent, so the KV headroom chip (DESKTOP §7) counts them | 2 |
-| Memories per chat (`/memories`: use existing, contribute to future) | `thread/memoryMode/set`, `memory/status|reset` | **Same**, after Phase 0's check that memory generation calls no vendor service (it runs on the configured model: `memories.extract_model`, `memories.consolidation_model`) | 2 |
+| Subagent threads: a panel above the composer with each subagent's status, stop all, open a subagent's thread | `thread/started` with a parent id (agent-graph-store), `thread/status/changed`, `turn/interrupt` | **Built** (2026-10-17): above the composer, the shown thread's subagents (threads with it as parent) by nickname and role, working or not (`thread/status/changed`, their turns), Open, Stop (`turn/interrupt`), Stop all, `/agents`; the header counts every working thread, subagents included, since they share the one model server | 2 |
+| Memories per chat (`/memories`: use existing, contribute to future) | `thread/memoryMode/set`, `memory/status|reset` | **Partial** (2026-10-17): Settings › Memories turns them on and says what they use (item 13); `/memories` per thread (`thread/memoryMode/set`), the status and Delete (`memory/status|reset`) wait for `policy.json` | 2 |
 | Activity view (Ctrl+Alt+U): what the agent did, across threads | window over items | **Same** | 3 |
 
 ### 2.5 Review and git
@@ -320,15 +320,15 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Spawn subagents on request or when `AGENTS.md` / a skill asks; agent threads visible; main thread collects results; `/agents` to inspect and switch | `ext/agent`, `agent-graph-store`; threads with a parent | **Same**; the server already has it (the TUI's `/agents`). Cost note: every subagent shares one GB10 | 2 |
-| Custom agents with their own model and reasoning (`[agents]` in `config.toml`, custom agent files) | `config/*` | **Same**, one served model: custom agents differ by instructions and effort | 2 |
+| Spawn subagents on request or when `AGENTS.md` / a skill asks; agent threads visible; main thread collects results; `/agents` to inspect and switch | `ext/agent`, `agent-graph-store`; threads with a parent | **Built** (2026-10-17): the server spawns them (`ext/agent`); the app shows them above the composer and in the stream (`collabAgentToolCall`, `subAgentActivity` items), `/agents` shows the panel | 2 |
+| Custom agents with their own model and reasoning (`[agents]` in `config.toml`, custom agent files) | `config/*` | **Same**, not yet: custom agents are written in `config.toml` by hand for now; one served model, so they would differ by instructions and effort | 2 |
 | Agent message board (shared discussions between agents) | `ext/agent-message-board` | **Later**, local backend only | 3 |
 
 ### 2.14 Memories
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Settings › Personalization: **Enable Codex memories**, **Allow memories from tool-assisted chats**, **Delete memories**; `/memories` per chat; files under `~/.codex/memories/`; `memories.*` keys | `thread/memoryMode/set`, `memory/status|reset`, `config/value/write` | **Same**, under `~/.mightling/memories/`; the rate-limit gate is moot here. Phase 0 check: the extraction and consolidation passes call only the served model | 2 |
+| Settings › Personalization: **Enable Codex memories**, **Allow memories from tool-assisted chats**, **Delete memories**; `/memories` per chat; files under `~/.codex/memories/`; `memories.*` keys | `thread/memoryMode/set`, `memory/status|reset`, `config/value/write` | **Partial** (2026-10-17): Settings › Memories writes `features.memories`, `memories.use_memories`, `memories.generate_memories` and `memories.disable_on_external_context` through `config/value/write` (under `~/.mightling/memories/`); Delete, the status and `/memories` per thread wait for `memory/*` and `thread/memoryMode/set` in `policy.json` | 2 |
 
 ### 2.15 Settings
 
@@ -346,7 +346,7 @@ The vendor's settings panel (Ctrl+,) has these pages. Mightling's reads and writ
 | Computer Use | Access review, always-allowed apps | **No** |
 | Personalization | Edit personal `AGENTS.md` for this machine; repository instructions | **Built** (2026-10-17): `~/.mightling/AGENTS.md` edited in place; a project's own `AGENTS.md` stays the project's |
 | Suggested prompts | Context-aware follow-ups on start or return | **Later (3)**, generated by the served model between turns |
-| Memories | Enable, tool-assisted chats, delete | **Same** |
+| Memories | Enable, tool-assisted chats, delete | **Partial** (item 13): the switches; Delete waits for `memory/reset` in `policy.json` |
 | Archived chats | List with dates and project; **Unarchive** | **Built** (2026-10-17): `thread/list` with `archived`, `thread/unarchive` |
 | Git | Branch naming; force push; commit-message and PR-description prompts; review delivery | **Built** (2026-10-17) apart from two: the prefix Create branch here starts with, Force ticked by default, the commit-message instruction; the PR description is the forge page's own (no forge API), review delivery comes with `/review` |
 | Project and terminal behaviour | Where files open; command output shown in chats; where terminal tabs open | **Partial** (2026-10-17): where files open (the editor) on main; command output in threads and the terminal's shell come with item 8's branch |
@@ -538,7 +538,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 10. **Settings pages** of §2.15 except Pets, Browser, Computer Use, Suggested prompts. **Settings pages: merged 2026-10-17, b639f9b** (Integrations and MCP with item 11, Memories with item 13, the terminal's and `/review`'s settings with their held branches).
 11. **Skills, plugins, MCP, apps, hooks** pages (§2.11). **Skills and tools: merged 2026-10-17, f0477c6** (skills, MCP servers and apps; plugins, hooks, skill switches and MCP reload need methods held in `desktop/p2-policy`).
 12. **Scheduled** view over Night Shift (§2.12). **Scheduled: merged 2026-10-17, 84d52b3** (inbox, queue, report, add, drop, Run now; cadence, local mode and per-task model are not built).
-13. **Subagents** panel; **memories** controls (§2.13, §2.14).
+13. **Subagents** panel; **memories** controls (§2.13, §2.14). **Subagents and memory switches: merged 2026-10-17, MERGE13** (per-thread memory mode, status and Delete need methods held in `desktop/p2-policy`).
 14. **Notifications**, prevent sleep (§2.1).
 
 ### 4.3 Phase 3 — the workstation extras

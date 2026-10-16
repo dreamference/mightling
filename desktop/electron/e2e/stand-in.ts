@@ -56,6 +56,8 @@ export function threads(home: string, askRoot: string) {
       ],
     }]),
     thread("w3", website, "Compress the hero image", "", ago(26 * 60)),
+    { ...thread("s1", fetcher, null, "Read the retry tests", ago(10)), parentThreadId: "w1", agentNickname: "Ada", agentRole: "explorer", status: { type: "active", activeFlags: [] } },
+    { ...thread("s2", fetcher, null, "Check the docs", ago(11)), parentThreadId: "w1", agentNickname: "Brin", agentRole: "reviewer" },
     thread("q1", path.join(askRoot, "q-1a2b3c"), "Why does the GB10 share memory with the GPU?", "", ago(40), [{
       id: "tq", status: "completed", error: null, items: [
         { type: "userMessage", id: "uq", content: text("Why does the GB10 share memory with the GPU?") },
@@ -121,6 +123,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       if (!found) return say({ id: m.id, error: { code: -32600, message: "no such thread" } });
       answer({ thread: found });
       if (found && found.id === "w1") {
+        say({ method: "turn/started", params: { threadId: "s1", turn: { id: "ts1", status: "inProgress", items: [], error: null } } });
         say({ method: "turn/diff/updated", params: { threadId: "w1", turnId: "t1", diff: ${JSON.stringify(TURN_DIFF)} } });
         say({ method: "thread/tokenUsage/updated", params: { threadId: "w1", turnId: "t1", tokenUsage: { total: usage, last: usage, modelContextWindow: 131072 } } });
         if (!asked) {
@@ -184,6 +187,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "turn/steer": return answer({ turnId: p.expectedTurnId });
     case "app/list": return answer({ data: [{ id: "gmail", name: "Gmail", description: "Search and read your mail", logoUrl: null, logoUrlDark: null, iconAssets: null, iconDarkAssets: null,
       distributionChannel: null, branding: null, appMetadata: null, labels: null, installUrl: null, isAccessible: true, isEnabled: true, pluginDisplayNames: [] }], nextCursor: null });
+    case "config/read": return answer({ config: { features: { memories: false }, memories: {}, desktop: null }, origins: {}, layers: null });
     case "config/value/write": return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
     default: return answer({ data: [] });

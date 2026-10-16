@@ -14,7 +14,7 @@ import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "archived" | "git" | "project" | "worktrees";
+export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -28,6 +28,9 @@ export interface SettingsProps {
   listArchived: () => Promise<Thread[]>;
   unarchive: (threadId: string) => Promise<void>;
   notice: (error: unknown) => void;
+  /** The agent's settings as `config/read` answers them, and a write of one key (`config/value/write`). */
+  readConfig: () => Promise<Record<string, unknown>>;
+  writeConfig: (keyPath: string, value: unknown) => Promise<void>;
 }
 
 const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
@@ -37,6 +40,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "notifications", label: "Notifications", desktopOnly: true },
   { id: "appearance", label: "Appearance" },
   { id: "personalization", label: "Personalization", desktopOnly: true },
+  { id: "memories", label: "Memories" },
   { id: "archived", label: "Archived threads" },
   { id: "git", label: "Git", desktopOnly: true },
   { id: "project", label: "Project", desktopOnly: true },
@@ -62,6 +66,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "notifications" ? <Notifications {...props} /> : null}
             {props.page === "appearance" ? <AppearancePage {...props} /> : null}
             {props.page === "personalization" ? <Personalization notice={props.notice} /> : null}
+            {props.page === "memories" ? <Memories {...props} /> : null}
             {props.page === "archived" ? <Archived {...props} /> : null}
             {props.page === "git" ? <Git {...props} /> : null}
             {props.page === "project" ? <Project {...props} /> : null}
@@ -376,6 +381,41 @@ function Project({ prefs, onChange }: SettingsProps) {
             {editors.map((editor) => <option key={editor.id} value={editor.id}>{editor.name}</option>)}
           </select>
         </label>
+      </fieldset>
+    </>
+  );
+}
+
+/** The memory switches in config.toml (Codex's `features.memories` and `[memories]`), and what they mean here. */
+export function memorySwitches(config: Record<string, unknown>): { enabled: boolean; use: boolean; generate: boolean; external: boolean } {
+  const features = (config.features ?? {}) as Record<string, unknown>;
+  const memories = (config.memories ?? {}) as Record<string, unknown>;
+  return {
+    enabled: features.memories === true,
+    use: memories.use_memories !== false,
+    generate: memories.generate_memories !== false,
+    external: memories.disable_on_external_context !== true,
+  };
+}
+
+function Memories({ readConfig, writeConfig, notice }: SettingsProps) {
+  const [switches, setSwitches] = useState<ReturnType<typeof memorySwitches> | null>(null);
+  const load = () => readConfig().then((config) => setSwitches(memorySwitches(config))).catch((error) => { setSwitches(null); notice(error); });
+  useEffect(() => {
+    void load();
+    // load once when the page opens
+  }, []);
+  const write = (keyPath: string, value: boolean) => writeConfig(keyPath, value).then(load).catch(notice);
+  if (!switches) return <p className="empty small">…</p>;
+  return (
+    <>
+      <h3>Memories</h3>
+      <p className="dialog-note">Memories are notes the agent keeps between threads, under ~/.mightling/memories/. Making them runs on the model this machine serves; nothing leaves it. Kept in config.toml, shared with ling.</p>
+      <fieldset>
+        <label><input type="checkbox" checked={switches.enabled} aria-label="Memories" onChange={(event) => void write("features.memories", event.target.checked)} /> Memories on</label>
+        <label><input type="checkbox" checked={switches.use} disabled={!switches.enabled} onChange={(event) => void write("memories.use_memories", event.target.checked)} /> New threads use what is remembered</label>
+        <label><input type="checkbox" checked={switches.generate} disabled={!switches.enabled} onChange={(event) => void write("memories.generate_memories", event.target.checked)} /> Threads add to the memories</label>
+        <label><input type="checkbox" checked={switches.external} disabled={!switches.enabled} onChange={(event) => void write("memories.disable_on_external_context", !event.target.checked)} /> Including threads that used the web or an MCP server</label>
       </fieldset>
     </>
   );

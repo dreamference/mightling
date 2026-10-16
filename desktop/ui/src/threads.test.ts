@@ -49,3 +49,20 @@ describe("Scheduled's inbox", () => {
     expect(unseen(tasks, "2026-10-16T12:00:00")).toBe(1);
   });
 });
+
+describe("subagents and memories", () => {
+  it("list a thread's subagents, tell which are working, and count every working thread", async () => {
+    const { initialState: start, reduce: step, subagents, isWorking, workingCount } = await import("./store");
+    const sub = (id: string, parent: string | null, createdAt: number, status = "idle") => ({ id, parentThreadId: parent, createdAt, updatedAt: createdAt, recencyAt: null, ephemeral: false, cwd: "/w", turns: [], status: { type: status, activeFlags: [] } } as unknown as Thread);
+    let state = step(start, { type: "threads", list: [sub("p", null, 1), sub("a", "p", 2, "active"), sub("b", "p", 3), sub("x", null, 4)] });
+    expect(subagents(state, "p").map((thread) => thread.id)).toEqual(["b", "a"]);
+    expect(isWorking(state, "a")).toBe(true);
+    state = step(state, { type: "notification", notification: { method: "thread/status/changed", params: { threadId: "a", status: { type: "idle" } } } as never });
+    expect(isWorking(state, "a")).toBe(false);
+    state = step(state, { type: "notification", notification: { method: "turn/started", params: { threadId: "b", turn: { id: "t", status: "inProgress", items: [], error: null } } } as never });
+    expect(workingCount(state)).toBe(1);
+    const { memorySwitches } = await import("./SettingsDialog");
+    expect(memorySwitches({})).toEqual({ enabled: false, use: true, generate: true, external: true });
+    expect(memorySwitches({ features: { memories: true }, memories: { use_memories: false, disable_on_external_context: true } })).toEqual({ enabled: true, use: false, generate: true, external: false });
+  });
+});
