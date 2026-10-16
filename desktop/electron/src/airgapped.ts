@@ -21,3 +21,14 @@ export function airgapped(ling: string, thread: string | null): Promise<Airgappe
     });
   });
 }
+
+/** Sets the level new threads start at (`ling airgapped default <level>`); resolves with what it printed. */
+export function setDefault(ling: string, level: "off" | "on"): Promise<string> {
+  if (level !== "off" && level !== "on") return Promise.reject(new Error("the level is off or on"));
+  return new Promise((resolve, reject) => {
+    execFile(ling, ["airgapped", "default", level], { timeout: 10_000 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(String(stderr || stdout || error.message).trim()));
+      else resolve(String(stdout).trim());
+    });
+  });
+}

@@ -18,9 +18,14 @@ export type FromView =
   | { type: "work/stop" }
   | { type: "work/target" }
   | { type: "work/airgapped"; thread: string | null }
+  /** `/airgapped default <level>` from the composer: the level new threads start at. */
+  | { type: "work/airgapped-default"; level: "off" | "on" }
   /** An attachment for an Ask thread, written into its folder (ask.ts); the bytes base64. */
   | { type: "ask/upload"; thread: string; name: string; kind: "image" | "file"; data: string }
   | { type: "context-menu"; x: number; y: number; editable: boolean; selection: string }
+  /** The window's own preferences (prefs.ts): read whole, or some keys written. */
+  | { type: "prefs/read" }
+  | { type: "prefs/write"; values: Record<string, unknown> }
   | { type: "window/minimize" }
   | { type: "window/maximize" }
   | { type: "window/close" };
