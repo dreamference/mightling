@@ -39,6 +39,8 @@ export interface Prefs {
   unreadThreads: string[];
   /** Whether the sidebar's Recent list is open. */
   recentsOpen: boolean;
+  /** The workspace layout (§2.1): the thread beside its tabs, the tabs in full, or the thread alone with the tabs hidden. */
+  layout: "split" | "tabs" | "chat";
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }
