@@ -158,18 +158,18 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| One window; three surfaces: Chat, Work, Codex (Alt+1/2/3 on Windows and Linux) | window | **Mightling's:** two views, Ask and Work, **Built** (menu accelerators Ctrl+1 / Ctrl+2 today, `desktop/electron/src/shell.ts`); Phase 2 moves them to Alt+1 / Alt+2 so Ctrl+1–9 can mean "go to chat" as in the vendor's app | 2 |
+| One window; three surfaces: Chat, Work, Codex (Alt+1/2/3 on Windows and Linux) | window | **Mightling's:** two views, Ask and Work, **Built**; since item 2 (2026-10-16) Alt+1 / Alt+2 switch them, handled by the page (the menu shows the keys without registering them), so Ctrl+1–9 are free for threads | 2 |
 | Sidebar: projects with pinned ones on top, Recents, New chat, Scheduled, Plugins (pinnable), Code Review, Search chats; toggle Ctrl+B | window; `project/list`, `thread/list`, `threadSection/*` | **Partial:** threads grouped by folder, rename, search, archive; no pins, sections, Recents, Scheduled or sidebar toggle | 2 |
 | Pin a project or a chat | `thread/metadata/update` (pin flag), window prefs for projects | **Same** | 2 |
 | Mark chat unread; unread indicators; next chat needing attention (Ctrl+Alt+A); clear all (Shift+Esc) | window state over `thread/status/changed`, `item/*/requestApproval` | **Same** | 2 |
-| Command menu (Ctrl+K / Ctrl+Shift+P): commands, threads, projects, settings | window | **Same** | 2 |
-| Navigate back / forward (Ctrl+[ / Ctrl+]) | window history | **Same** | 2 |
+| Command menu (Ctrl+K / Ctrl+Shift+P): commands, threads, projects, settings | window | **Built** (2026-10-16): commands (the keymap's built actions with their keys), threads, projects and settings pages, filtered as you type | 2 |
+| Navigate back / forward (Ctrl+[ / Ctrl+]) | window history | **Built** (2026-10-16): the view and thread the window showed, Ctrl+[ / Ctrl+], the header's arrows and the mouse's side buttons | 2 |
 | Tabs per chat: terminal, browser, file, review; close / reopen / close others; next / previous tab; go to chat 1–9; recent chat 1–6 | window | **Same** for terminal, file and review tabs; browser tab §2.9 | 2 |
 | Workspace layout: full view, split view (chat beside tabs), hidden tabs (Ctrl+Shift+B, Ctrl+Shift+F, Ctrl+Alt+B) | window | **Same** | 2 |
 | Bottom panel (Ctrl+J) | window | **Built** (2026-10-16, item 7): environment setup and action runs, each a tab with its output and Stop, and the environment editor; terminal tabs join with item 8 | 2 |
-| Font size: increase / decrease / reset (Ctrl+= / Ctrl+- / Ctrl+0) | window (`webContents.setZoomLevel` or a CSS variable) | **Same** | 2 |
-| Undo / redo the last app action (archive, rename, pin…) | window | **Same** | 2 |
-| Full screen (F11), quit (Ctrl+Q), close tab or window (Ctrl+W) | window | **Same**; Ctrl+W closes a tab, never the last window | 2 |
+| Font size: increase / decrease / reset (Ctrl+= / Ctrl+- / Ctrl+0) | window (`webContents.setZoomLevel` or a CSS variable) | **Built** (2026-10-16): CSS zoom on the page in steps, kept in the window's preferences, also a slider in Settings › General | 2 |
+| Undo / redo the last app action (archive, rename, pin…) | window | **Built** (2026-10-16): archive (undone by `thread/unarchive`) and rename; Ctrl+Z belongs to a text field when one has focus; pin joins with item 3 | 2 |
+| Full screen (F11), quit (Ctrl+Q), close tab or window (Ctrl+W) | window | **Built** (2026-10-16): F11 and Ctrl+Q from the page's keymap; Ctrl+W closes the frontmost surface (the review pane, then the bottom panel) and never the window, Ctrl+Shift+T reopens it, Ctrl+Alt+W closes both; tabs proper come with item 9 | 2 |
 | Pop-out: a chat in its own window, **Always on top** | window | **Same** (a second `BrowserWindow` on the same app-server; still one app-server) | 2 |
 | Quick chat (Ctrl+Alt+N): an ordinary chat of the vendor's chat surface beside Codex | the vendor's Chat surface | **Mightling's:** Ask is Quick chat; Ctrl+Alt+N opens a new Ask thread | 2 |
 | Side chat (Ctrl+Alt+S): a status recap without interrupting the main chat | a second thread with the main thread's context | **Same** (a thread started with a reference to the main thread's id; the server has no side-chat method, so the window forks: `thread/fork` then a turn asking for a recap) | 2 |
@@ -338,7 +338,7 @@ The vendor's settings panel (Ctrl+,) has these pages. Mightling's reads and writ
 |---|---|---|
 | General | Enter behaviour; **Prevent sleep while running**; follow-up behaviour (steer / wait); Code review delivery | **Same** |
 | Profile | Activity insights: lifetime and peak tokens, streaks, longest task; profile card | **Mightling's:** the same statistics from local session files; no sharing, no invitations |
-| Keyboard shortcuts | Review, rebind, reset; search by command name or by keystroke | **Same** |
+| Keyboard shortcuts | Review, rebind, reset; search by command name or by keystroke | **Built** (2026-10-16, item 2): the §2.19 table with each action's keys, Change (a binding that clashes in its context is refused), Reset, Reset all, search by name or by keystroke; kept in the window's preferences |
 | Notifications | When turn-completion notifications appear; permission prompt | **Same** |
 | Appearance | Base theme; accent, background and foreground colours; UI and code fonts; share a theme | **Same** in shape (§3.6 tokens); light base only until the dark-mode decision changes; theme sharing as a file |
 | Pets | Built-in or custom pet, Mini, size | **Later (3)** with Mightling's own art |
@@ -416,7 +416,7 @@ The vendor's Linux bindings (read from its commands reference, 143 rows) equal i
 | | Preview tab: open; back; forward; reload; copy URL; comment mode | Ctrl+T; Alt+←; Alt+→; Ctrl+R; Ctrl+Shift+C; Ctrl+Shift+. |
 | | Copy conversation path; deep link; working directory | Ctrl+Alt+Shift+C; Ctrl+Alt+L; Ctrl+Shift+C |
 
-A test holds this table as data and checks the window's keymap against it (§5).
+A test holds this table as data and checks the window's keymap against it (§5). Since item 2 the page handles every binding itself from `keymap.json` (the Electron menu shows them with `registerAccelerator: false`), so a rebinding in Settings › Keyboard shortcuts applies everywhere.
 
 ### 2.20 Deep links and remote connections
 
@@ -527,7 +527,7 @@ One window with Ask and Work; one `ling app-server` on stdio through the vetted 
 In the order the owner's use suggests, each item with its §2 row as acceptance:
 
 1. **Look** (§3): tokens, fonts, radii, spacing, the composer card, the bubble, no turn separators, icons. One change, no behaviour. **Look: merged 2026-10-16** (light only; the app icon unchanged).
-2. **Shell:** sidebar toggle, command menu, back/forward, font size, undo/redo, close/reopen tabs, the keymap table and its settings page (§2.1, §2.19).
+2. **Shell:** sidebar toggle, command menu, back/forward, font size, undo/redo, close/reopen tabs, the keymap table and its settings page (§2.1, §2.19). **Shell: merged 2026-10-16, MERGE2** (close/reopen act on the review pane and the bottom panel until item 9's tabs; the settings dialog now has pages).
 3. **Threads:** pins, sections, Recents, unread and attention, mark unread, find in chat, deep links and `ling://`, pop-out with always-on-top, side chat, standalone chat (§2.1).
 4. **Composer:** `@` mentions, `$` skills, `/` commands, Enter behaviour, follow-up behaviour, ↑ restore, Shift+drag images, approve/decline keys, edit previous, fork, Compress, the model and effort picker (§2.3). **Composer: merged 2026-10-16, eca4a6a** (the slash commands Partial: the ones whose methods come with later items wait for them).
 5. **Plan and goal:** collaboration mode, the goal row (§2.3).

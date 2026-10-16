@@ -64,7 +64,11 @@ export type FromView =
   | { type: "prefs/write"; values: Record<string, unknown> }
   | { type: "window/minimize" }
   | { type: "window/maximize" }
-  | { type: "window/close" };
+  | { type: "window/close" }
+  /** Shortcuts the page handles for the window (DESKTOP_PARITY §2.19): F11, Ctrl+Q, Ctrl+O. */
+  | { type: "window/fullscreen" }
+  | { type: "app/quit" }
+  | { type: "dialog/open-folder" };
 
 /** What the page hears, re-dispatched by the preload as `MessageEvent`s whose `data` is one of these. */
 export type ForView =
