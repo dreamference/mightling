@@ -305,6 +305,14 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .info-list button.selected { border-color: var(--accent); }
 .info-pre { margin: 0; }
 .sidebar-spacer { flex: 1; }
+.nav-row .count { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); font-size: 11px; text-align: center; }
+.night-add { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.night-add input { flex: 1; min-width: 160px; }
+.night-status { font-size: 12px; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--muted); }
+.night-status.done { background: var(--add); color: var(--add-text); }
+.night-status.failed, .night-status.stalled { background: var(--del); color: var(--del-text); }
+tr.unseen td:first-child { font-weight: 600; }
+.night-report { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 8px 14px; background: var(--panel); font-size: 13px; }
 .settings-button { margin-top: 8px; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 30; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 10vh; }
 .dialog { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; background: var(--raised); border-radius: var(--radius-lg); box-shadow: var(--shadow-focus); padding: 16px 20px 20px; }

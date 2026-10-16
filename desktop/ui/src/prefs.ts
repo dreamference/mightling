@@ -52,6 +52,8 @@ export interface Prefs {
   branchPrefix: string;
   commitPrompt: string | null;
   forcePush: boolean;
+  /** When the Scheduled view was last looked at (ISO time), for its unread count. */
+  nightSeen: string | null;
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }

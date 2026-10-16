@@ -233,6 +233,26 @@ export const insights = () => send<Insights | null>({ type: "insights" });
 /** Settings › Personalization: `$CODEX_HOME/AGENTS.md`, the instructions every thread on this machine reads. */
 export const readPersonal = () => send<{ path: string; text: string } | null>({ type: "personal/read" });
 export const writePersonal = (text: string) => send<null>({ type: "personal/write", text });
+export interface NightTask {
+  id: string;
+  repo: string;
+  task: string;
+  status: string;
+  branch: string | null;
+  test: string | null;
+  on: string | null;
+  at: string | null;
+  result: unknown;
+}
+
+/** The Scheduled view over Night Shift (desktop/electron/src/night.ts). */
+export const night = {
+  list: () => send<{ tasks: NightTask[]; reports: { name: string; modified: number }[] }>({ type: "night/list" }),
+  report: (name: string) => send<string>({ type: "night/report", name }),
+  add: (repo: string, task: string, test: string | null) => send<string>({ type: "night/add", repo, task, test }),
+  drop: (repo: string, id: string) => send<string>({ type: "night/drop", repo, id }),
+  runNow: () => send<null>({ type: "night/run" }),
+};
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
 

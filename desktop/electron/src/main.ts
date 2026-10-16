@@ -22,6 +22,7 @@ import * as git from "./git";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
+import { addTask, dropTask, readReport, readReports, readTasks, runNow } from "./night";
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
@@ -166,6 +167,33 @@ export async function main(options: MainOptions): Promise<void> {
         return own.isAlwaysOnTop();
       case "app/home":
         return app.getPath("home");
+      case "night/list": {
+        const home = codexHome();
+        if (!home) return { tasks: [], reports: [] };
+        const dir = path.join(home, "night");
+        return { tasks: readTasks(dir), reports: readReports(dir) };
+      }
+      case "night/report": {
+        const home = codexHome();
+        if (!home) throw new Error("there is no CODEX_HOME");
+        return readReport(path.join(home, "night"), message.name);
+      }
+      case "night/add": {
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return addTask(ling, message.repo, message.task, message.test);
+      }
+      case "night/drop": {
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return dropTask(ling, message.repo, message.id);
+      }
+      case "night/run": {
+        const admin = whichOnPath("ling-admin");
+        if (!admin) throw new Error("ling-admin is not on PATH: Night Shift runs on the node");
+        runNow(admin);
+        return null;
+      }
       case "insights": {
         const home = codexHome();
         return home ? insights(home) : null;
@@ -373,4 +401,19 @@ export async function main(options: MainOptions): Promise<void> {
     }
     setTimeout(() => app.quit(), options.audit * 1000);
   }
+}
+
+/** An executable on PATH, or null. */
+function whichOnPath(name: string): string | null {
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // Not here.
+    }
+  }
+  return null;
 }

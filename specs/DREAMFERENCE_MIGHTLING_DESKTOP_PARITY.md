@@ -309,10 +309,10 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| **Scheduled** in the sidebar: an inbox of runs with findings and an unread indicator; active / paused / completed tasks | the app's scheduler | **Mightling's: Night Shift.** The queue, the timer and the morning report already exist (`ling-admin night`); the Scheduled view shows them | 2 |
-| Standalone task (a new chat per run) or a task inside an existing chat (returns to the same context) | app | **Same** for standalone; in-chat tasks map to `/night add` from the thread | 2 |
-| Custom cadence, RFC 5545 RRULE | app | **Same** (Night Shift's timer takes a calendar expression; RRULE parsed into one) | 2 |
-| Run in the local project or on a dedicated background worktree; the same task on several projects; model and effort per task; skills in the prompt; **Run now** | app | **Same:** Night Shift already runs each task in its own worktree; local mode and run-now to add | 2 |
+| **Scheduled** in the sidebar: an inbox of runs with findings and an unread indicator; active / paused / completed tasks | the app's scheduler | **Built** (2026-10-17), **Mightling's: Night Shift.** The sidebar's Scheduled (with the count of tasks finished since last looked at), `/night`, `ling://night`: the inbox of finished tasks, the queue, the latest morning report, read from `~/.mightling/night/` (`night.ts`) | 2 |
+| Standalone task (a new chat per run) or a task inside an existing chat (returns to the same context) | app | **Partial** (2026-10-17): a task queued for a project from Scheduled or `/night add <task>` in a thread (through `ling night add`); a task returning to an existing thread is not offered | 2 |
+| Custom cadence, RFC 5545 RRULE | app | **Same**, not yet: Night Shift runs on its nightly timer (`ling-admin night enable`); a cadence per task is not built | 2 |
+| Run in the local project or on a dedicated background worktree; the same task on several projects; model and effort per task; skills in the prompt; **Run now** | app | **Partial** (2026-10-17): every task runs in its own worktree on `night/<id>` (Night Shift's rule); **Run now** starts the runner (`ling-admin night run`), which gives way to a busy machine; local mode, a task on several projects and model and effort per task are not built | 2 |
 | Worktree cleanup for scheduled tasks | app | **Same** (§2.6) | 2 |
 | Event triggers (Gmail, Slack, GitHub), Team Tasks | vendor cloud | **No** | — |
 
@@ -537,7 +537,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 9. **Tabs and layout:** split, full, hidden (§2.1). **Tabs and layout: merged 2026-10-17, 1064dc9** (the tab area holds the Review tab; terminal tabs stay in the bottom panel; file and preview tabs are Phase 3).
 10. **Settings pages** of §2.15 except Pets, Browser, Computer Use, Suggested prompts. **Settings pages: merged 2026-10-17, b639f9b** (Integrations and MCP with item 11, Memories with item 13, the terminal's and `/review`'s settings with their held branches).
 11. **Skills, plugins, MCP, apps, hooks** pages (§2.11). **Skills and tools: merged 2026-10-17, f0477c6** (skills, MCP servers and apps; plugins, hooks, skill switches and MCP reload need methods held in `desktop/p2-policy`).
-12. **Scheduled** view over Night Shift (§2.12).
+12. **Scheduled** view over Night Shift (§2.12). **Scheduled: merged 2026-10-17, MERGE12** (inbox, queue, report, add, drop, Run now; cadence, local mode and per-task model are not built).
 13. **Subagents** panel; **memories** controls (§2.13, §2.14).
 14. **Notifications**, prevent sleep (§2.1).
 
