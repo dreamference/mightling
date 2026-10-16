@@ -8,7 +8,7 @@ import {
   PromptHistory, activeTrigger, collaborationMode, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
   lastUserTurn, matchCommands, matchSkills, mentionPath, parseSlash, rememberModel, userTexts,
 } from "./composer";
-import { DEFAULT_PREFS, sanitize } from "./prefs";
+import { DEFAULT_PREFS, cleanAppearance, sanitize } from "./prefs";
 import { ScriptedServer } from "./scripted-server";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { Model } from "./protocol/v2/Model";
@@ -199,5 +199,13 @@ describe("Plan mode", () => {
     await sendMessage(server.client, { threadId: "t", activeTurnId: null, input: [text("plan the migration")], followUp: "steer", collaborationMode: mode });
     expect(server.sent[0].params).toMatchObject({ collaborationMode: { mode: "plan" } });
     expect(parseSlash("/plan move the cache")).toMatchObject({ command: { name: "plan" }, args: "move the cache" });
+  });
+});
+
+describe("Settings › Appearance", () => {
+  it("lets only colours and plain font lists reach the stylesheet", () => {
+    expect(cleanAppearance({ accent: "#0abab5", canvas: "red", text: "#123", fontUi: "Inter, sans-serif", fontCode: "x; } body { display: none" }))
+      .toEqual({ accent: "#0abab5", text: "#123", fontUi: "Inter, sans-serif" });
+    expect(cleanAppearance(null)).toEqual({});
   });
 });

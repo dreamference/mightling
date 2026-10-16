@@ -65,6 +65,8 @@ export function WorktreeHeader(props: {
   inGit: boolean;
   environment: bridge.LocalEnvironment | null;
   onCreateBranch: (name: string) => void;
+  /** Settings › Git: what a new branch's name starts with. */
+  branchPrefix: string;
   onHandOff: (direction: "toLocal" | "toWorktree") => void;
   onOpen: (where: "editor" | "terminal" | "folder") => void;
   onAction: (action: bridge.EnvironmentAction) => void;
@@ -88,7 +90,7 @@ export function WorktreeHeader(props: {
       ) : null}
       {inWorktree && !props.branch ? (
         <span className="menu-anchor">
-          <button className="link-button" onClick={() => setMenu(menu === "branch" ? null : "branch")}>Create branch here</button>
+          <button className="link-button" onClick={() => { if (menu !== "branch") setName(props.branchPrefix); setMenu(menu === "branch" ? null : "branch"); }}>Create branch here</button>
           {menu === "branch" ? (
             <span className="menu inline-form" role="dialog" aria-label="Create branch here">
               <input autoFocus value={name} placeholder="feature/name" aria-label="Branch name" onChange={(event) => setName(event.target.value)}

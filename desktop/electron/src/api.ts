@@ -73,6 +73,10 @@ export type FromView =
   | { type: "window/always-on-top"; on: boolean }
   /** The user's home folder: where a thread with no project works (Ctrl+Alt+O). */
   | { type: "app/home" }
+  /** Settings › Profile and Personalization (insights.ts): statistics from the session files; `$CODEX_HOME/AGENTS.md`. */
+  | { type: "insights" }
+  | { type: "personal/read" }
+  | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" };
 
 /** What the page hears, re-dispatched by the preload as `MessageEvent`s whose `data` is one of these. */

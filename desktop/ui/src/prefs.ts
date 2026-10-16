@@ -41,6 +41,17 @@ export interface Prefs {
   recentsOpen: boolean;
   /** The workspace layout (§2.1): the thread beside its tabs, the tabs in full, or the thread alone with the tabs hidden. */
   layout: "split" | "tabs" | "chat";
+  /** Keep the machine awake while a turn runs (Settings › General). */
+  preventSleep: boolean;
+  /** When a finished turn shows a desktop notification, and whether a waiting approval does (Settings › Notifications). */
+  notifyTurns: "unfocused" | "always" | "never";
+  notifyApprovals: boolean;
+  /** Colour and font overrides of the §3.6 tokens (Settings › Appearance). */
+  appearance: Appearance;
+  /** Settings › Git: the prefix Create branch here offers, the instruction a commit message starts from, Force ticked by default. */
+  branchPrefix: string;
+  commitPrompt: string | null;
+  forcePush: boolean;
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }
@@ -112,4 +123,37 @@ export async function savePrefs(current: Prefs, values: Partial<Prefs>): Promise
     // A private window or blocked storage: the choice holds for this page only.
   }
   return next;
+}
+
+/** The tokens Appearance may set: the accent, the canvas, the text, and the UI and code fonts. */
+export interface Appearance {
+  accent?: string;
+  canvas?: string;
+  text?: string;
+  fontUi?: string;
+  fontCode?: string;
+}
+
+export const APPEARANCE_TOKENS: Record<keyof Appearance, string> = {
+  accent: "--accent",
+  canvas: "--canvas",
+  text: "--text",
+  fontUi: "--font-ui",
+  fontCode: "--font-code",
+};
+
+/** Only colours (#rgb, #rrggbb) and font lists of plain names reach the stylesheet. */
+export function cleanAppearance(value: unknown): Appearance {
+  const result: Appearance = {};
+  if (typeof value !== "object" || value === null) return result;
+  const entries = value as Record<string, unknown>;
+  for (const key of ["accent", "canvas", "text"] as const) {
+    const colour = entries[key];
+    if (typeof colour === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(colour)) result[key] = colour;
+  }
+  for (const key of ["fontUi", "fontCode"] as const) {
+    const font = entries[key];
+    if (typeof font === "string" && font.length <= 200 && /^[\w\s"',.-]+$/.test(font)) result[key] = font;
+  }
+  return result;
 }

@@ -415,7 +415,11 @@ html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 
 .action-row { display: flex; gap: 6px; margin: 6px 0; }
 .action-row input { width: 140px; }
 .action-row input.script { flex: 1; font-family: var(--font-code); font-size: 12.5px; }
-.dialog-buttons { display: flex; gap: 6px; margin-top: 14px; }
+.dialog-buttons { display: flex; gap: 6px; margin-top: 14px; align-items: center; }
+.dialog label.colour { gap: 10px; }
+.dialog input[type="color"] { width: 36px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: 6px; background: none; }
+.file-button { display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+textarea.personal { width: 100%; font-family: var(--font-code); font-size: 12.5px; }
 
 /* The shell (DESKTOP_PARITY §2.1, §2.19): the sidebar folded away, back and forward, the command menu, settings pages, shortcuts. */
 .work.sidebar-hidden { grid-template-columns: 0 1fr; }
