@@ -183,6 +183,17 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "turn/steer": return answer({ turnId: p.expectedTurnId });
     case "app/list": return answer({ data: [{ id: "gmail", name: "Gmail", description: "Search and read your mail", logoUrl: null, logoUrlDark: null, iconAssets: null, iconDarkAssets: null,
       distributionChannel: null, branding: null, appMetadata: null, labels: null, installUrl: null, isAccessible: true, isEnabled: true, pluginDisplayNames: [] }], nextCursor: null });
+    case "plugin/list": return answer({ marketplaces: [{ name: "Team tools", path: "/srv/team/marketplace.json", interface: null, plugins: [
+      { id: "lint@team", remotePluginId: null, version: "1.2.0", localVersion: null, name: "lint", shareContext: null, source: { type: "local", path: "/srv/team/lint" }, installed: false, installedAt: null, enabled: false,
+        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: [] }] }],
+      marketplaceLoadErrors: [], featuredPluginIds: [] });
+    case "plugin/install": return answer({ authPolicy: "ON_INSTALL", appsNeedingAuth: [] });
+    case "plugin/uninstall": return answer({});
+    case "skills/config/write": return answer({ effectiveEnabled: p.enabled });
+    case "config/mcpServer/reload": return answer({});
+    case "hooks/list": return answer({ data: [{ cwd: (p.cwds || ["/"])[0], warnings: [], errors: [], hooks: [{ key: "ledger", eventName: "Stop", matcher: null, timeoutSec: 30, statusMessage: null,
+      additionalContextLimit: null, sourcePath: "/home/u/.mightling/hooks.json", source: "user", pluginId: null, displayOrder: 0, enabled: true, isManaged: false, currentHash: "x", trustStatus: "trusted",
+      handlerType: "command", command: "ling ledger", async: false }] }] });
     case "config/value/write": return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
     default: return answer({ data: [] });
