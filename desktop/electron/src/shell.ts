@@ -77,9 +77,9 @@ export function keepAwake(busy: boolean): void {
   }
 }
 
-/** Tells the user a turn finished when Work's window is not the one in front. */
-export function notifyTurnDone(window: BrowserWindow | null, body: string): void {
-  if (window?.isFocused() || !Notification.isSupported()) return;
+/** Tells the user a turn finished (or an answer is awaited) when the window is not in front, or always when asked. */
+export function notifyTurnDone(window: BrowserWindow | null, body: string, always = false): void {
+  if ((!always && window?.isFocused()) || !Notification.isSupported()) return;
   const notification = new Notification({ title: "Mightling", body, silent: true });
   notification.on("click", () => window?.show());
   notification.show();
