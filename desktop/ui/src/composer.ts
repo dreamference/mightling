@@ -77,6 +77,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "rename", description: "Give this thread a name", needs: "thread", args: "<name>" },
   { name: "archive", description: "Archive this thread", needs: "thread" },
   { name: "model", description: "Choose the model and how hard it thinks", needs: "none" },
+  { name: "plan", description: "Plan mode: the agent plans with you before it changes anything", needs: "none", args: "[what to plan]" },
   { name: "permissions", description: "Choose what the agent may do without asking", needs: "work" },
   { name: "status", description: "Show the model, permissions, folder and context use", needs: "none" },
   { name: "skills", description: "List the skills this folder can use ($ to insert one)", needs: "none" },
@@ -266,4 +267,10 @@ export function keyAnswer(method: ServerRequest["method"], key: "approve" | "dec
     default:
       return null;
   }
+}
+
+/** The collaboration mode a turn carries (`turn/start` `collaborationMode`): Plan mode, or none for the default. */
+export function collaborationMode(mode: "default" | "plan", model: string | null, effort: string | null): { mode: "plan" | "default"; settings: { model: string; reasoning_effort: string | null; developer_instructions: null } } | null {
+  if (mode !== "plan" || !model) return null;
+  return { mode: "plan", settings: { model, reasoning_effort: effort, developer_instructions: null } };
 }

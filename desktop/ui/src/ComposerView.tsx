@@ -70,6 +70,9 @@ export interface ComposerProps {
   picker: "closed" | "open" | "recent";
   setPicker: (state: "closed" | "open" | "recent") => void;
   onPick: (model: string, effort: string | null) => void;
+  /** Plan mode for the next turn; null when the server offers none. */
+  plan: boolean | null;
+  onTogglePlan: () => void;
 }
 
 const DOUBLE_ESCAPE_MS = 600;
@@ -127,7 +130,8 @@ export function Composer(props: ComposerProps) {
 
   const choose = (entry: MenuEntry) => {
     if (!trigger) return;
-    if (entry.command && !entry.command.args) {
+    // A command with no words to take, or typed out in full, runs; otherwise its name is completed.
+    if (entry.command && (!entry.command.args || trigger.query === entry.command.name)) {
       setTrigger(null);
       setDraft("");
       props.onCommand(entry.command);
@@ -275,6 +279,11 @@ export function Composer(props: ComposerProps) {
         <div className="composer-actions">
           {props.leading}
           <ModelPicker {...props} />
+          {props.plan !== null ? (
+            <button className={`chip plan-chip${props.plan ? " on" : ""}`} aria-pressed={props.plan} title="Plan mode: the agent plans with you before it changes anything (/plan)" onClick={props.onTogglePlan}>
+              <Icon name="clock" size={12} /> Plan
+            </button>
+          ) : null}
           <span className="spacer" />
           {props.running ? <button className="round stop" onClick={props.onStop} title="Stop (Esc)" aria-label="Stop"><Icon name="square" size={14} /></button> : null}
           {props.running ? (

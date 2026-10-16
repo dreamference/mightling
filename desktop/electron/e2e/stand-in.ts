@@ -105,6 +105,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "thread/list": return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null });
     case "permissionProfile/list": return answer({ data: [":read-only", ":workspace", ":danger-full-access"].map((id) => ({ id, allowed: true })) });
     case "model/list": return answer({ data: [model], nextCursor: null });
+    case "collaborationMode/list": return answer({ data: [{ name: "Default", mode: "default", model: null, reasoning_effort: null }, { name: "Plan", mode: "plan", model: null, reasoning_effort: null }] });
     case "skills/list": return answer({ data: (p.cwds || []).map((cwd) => ({ cwd, skills, errors: [] })) });
     case "fuzzyFileSearch": {
       const q = String(p.query || "").toLowerCase();
