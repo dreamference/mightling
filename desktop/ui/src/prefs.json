@@ -59,6 +59,26 @@
     "sidebarHidden": {
       "default": false,
       "type": "boolean"
+    },
+    "pinnedThreads": {
+      "default": [],
+      "type": "strings"
+    },
+    "pinnedProjects": {
+      "default": [],
+      "type": "strings"
+    },
+    "sections": {
+      "default": [],
+      "type": "list"
+    },
+    "unreadThreads": {
+      "default": [],
+      "type": "strings"
+    },
+    "recentsOpen": {
+      "default": false,
+      "type": "boolean"
     }
   }
 }

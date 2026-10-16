@@ -65,7 +65,7 @@ module.exports = {
     // macOS only (the packager ignores these elsewhere). The scheme, so `mightling://` links reach
     // `open-url`; the category; and the Local Network entries macOS 15 asks about before the app
     // (or the bundled `ling` it starts) may browse for a node or connect to one on the LAN.
-    protocols: [{ name: app.productName, schemes: [app.scheme] }],
+    protocols: [{ name: app.productName, schemes: [app.scheme, ...app.legacySchemes] }],
     appCategoryType: "public.app-category.developer-tools",
     extendInfo: {
       NSLocalNetworkUsageDescription:
@@ -93,7 +93,7 @@ module.exports = {
         bin: app.executable,
         icon: path.join(__dirname, "icons", "icon.png"),
         categories: ["Utility", "Development"],
-        mimeType: [`x-scheme-handler/${app.scheme}`],
+        mimeType: [app.scheme, ...app.legacySchemes].map((scheme) => `x-scheme-handler/${scheme}`),
         section: "devel",
         priority: "optional",
         homepage: "https://github.com/dreamference/mightling",

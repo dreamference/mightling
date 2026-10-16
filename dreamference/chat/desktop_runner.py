@@ -350,7 +350,9 @@ class DesktopRunner:
 
         OnyxBrandAssets.render_app_icon(icon, 256)
 
-        scheme = cls._app_config().get("scheme", "mightling")
+        config = cls._app_config()
+        # `ling://` links (DESKTOP_PARITY §2.20), and `mightling://` ones made before.
+        schemes = [config.get("scheme", "ling"), *config.get("legacySchemes", [])]
         entry = (
             "[Desktop Entry]\n"
             "Type=Application\n"
@@ -361,7 +363,7 @@ class DesktopRunner:
             "Terminal=false\n"
             "StartupNotify=true\n"
             "Categories=Utility;Development;\n"
-            f"MimeType=x-scheme-handler/{scheme};\n"
+            f"MimeType={''.join(f'x-scheme-handler/{scheme};' for scheme in schemes)}\n"
             f"StartupWMClass={WINDOW_CLASS}\n"
         )
         try:

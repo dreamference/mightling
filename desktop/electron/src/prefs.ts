@@ -15,7 +15,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface PrefSpec {
   default: Json;
   enum?: string[];
-  type?: "string" | "number" | "boolean" | "strings" | "object";
+  type?: "string" | "number" | "boolean" | "strings" | "object" | "list";
   nullable?: boolean;
 }
 
@@ -46,6 +46,8 @@ export function invalid(key: string, value: unknown, schema: Record<string, Pref
         : `${key} must be a list of strings`;
     case "object":
       return isPlainObject(value) ? null : `${key} must be an object`;
+    case "list":
+      return Array.isArray(value) && value.length <= 500 ? null : `${key} must be a list`;
     default:
       return `${key} has no type in the schema`;
   }
