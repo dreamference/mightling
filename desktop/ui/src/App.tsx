@@ -134,6 +134,8 @@ export function App() {
   /** Set while back/forward moves the window, so the move is not recorded as a new place. */
   const travelling = useRef(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** The tab area shows when a tab (the review) is open and the layout does not hide it (§2.1). */
+  const tabsShown = reviewOpen && view === "work" && prefs.layout !== "chat";
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [wtSettings, setWtSettings] = useState<WorktreeSettings>(worktreeSettings(null));
   const [newChoice, setNewChoice] = useState<NewThreadChoice>({ mode: "local", base: null, withChanges: true, environment: null });
@@ -689,7 +691,23 @@ export function App() {
     viewWork: () => showView("work"),
     modelPicker: () => setPicker((open) => (open === "closed" ? "open" : "closed")),
     recentModels: () => setPicker("recent"),
-    reviewTab: () => setReviewOpen((open) => !open),
+    reviewTab: () => {
+      if (reviewOpen && prefsRef.current.layout === "chat") updatePrefs({ layout: "split" });
+      else setReviewOpen((open) => !open);
+    },
+    cycleLayout: () => {
+      if (!reviewOpen) setReviewOpen(true);
+      const order = ["split", "tabs", "chat"] as const;
+      updatePrefs({ layout: order[(order.indexOf(prefsRef.current.layout) + 1) % order.length] });
+    },
+    fullView: () => {
+      if (!reviewOpen) setReviewOpen(true);
+      updatePrefs({ layout: prefsRef.current.layout === "tabs" ? "split" : "tabs" });
+    },
+    chatTabsToggle: () => {
+      if (!reviewOpen) setReviewOpen(true);
+      updatePrefs({ layout: prefsRef.current.layout === "tabs" ? "chat" : "tabs" });
+    },
     bottomPanel: () => updatePrefs({ bottomPanel: !prefsRef.current.bottomPanel }),
   };
 
@@ -1172,6 +1190,9 @@ export function App() {
       [keyAction("quit"), "quit"],
       [keyAction("viewAsk"), "viewAsk"],
       [keyAction("viewWork"), "viewWork"],
+      [keyAction("cycleLayout"), "cycleLayout"],
+      [keyAction("fullView"), "fullView"],
+      [keyAction("chatTabsToggle"), "chatTabsToggle"],
       [keyAction("newChat"), "newChat"],
       [keyAction("standaloneChat"), "standaloneChat"],
       [keyAction("quickChat"), "quickChat"],
@@ -1323,7 +1344,7 @@ export function App() {
     : view === "ask" ? "Ask anything… ($ for a skill, / for commands)" : "Ask Mightling… (@ for a file, $ for a skill, / for commands)";
 
   return (
-    <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${reviewOpen && view === "work" ? " review-open" : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
+    <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${tabsShown ? (prefs.layout === "tabs" ? " review-open tabs-full" : " review-open") : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
       // (desktop/electron/src/shell.ts); a browser keeps its own, which a phone needs to copy.
       if (HOST !== "electron") return;
@@ -1452,7 +1473,7 @@ export function App() {
               canHandOff={!selected.activeTurnId} environment={environment}
               onCreateBranch={createBranch} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
           ) : null}
-          {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => setReviewOpen(!reviewOpen)}><Icon name="fileDiff" size={16} /></button> : null}
+          {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => { if (reviewOpen && prefs.layout === "chat") updatePrefs({ layout: "split" }); else setReviewOpen(!reviewOpen); }}><Icon name="fileDiff" size={16} /></button> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
           {usage ? (
             <span className="chip optional" title={`${usage.used.toLocaleString()} of ${usage.window.toLocaleString()} tokens`}>
@@ -1565,8 +1586,9 @@ export function App() {
         <EnvironmentEditor project={envProject} initial={environment} onClose={() => setEditingEnv(false)}
           onSave={(edited) => bridge.writeEnvironment(envProject, edited).then(() => setEditingEnv(false)).catch(notice)} />
       ) : null}
-      {reviewOpen && view === "work" ? (
+      {tabsShown ? (
         <ReviewPane
+          workspaceLayout={prefs.layout} setWorkspaceLayout={(layout) => updatePrefs({ layout })}
           cwd={composeRoot} threadId={selected?.thread.id ?? null}
           turnDiff={lastTurnDiff(selected)}
           airgapOn={airgap?.level === "on"}
