@@ -8,13 +8,15 @@
 // (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
 import path from "node:path";
-import { BrowserWindow, app, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
 import type { WorkTarget } from "./args";
 import { findLing } from "./bridge";
+import { findEditors, openCommand, type Editor } from "./editors";
+import * as git from "./git";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
@@ -88,6 +90,14 @@ export async function main(options: MainOptions): Promise<void> {
   });
   ipcMain.on(CHANNEL_CHUNK_ACK, () => {});
 
+  /** Refuses what would reach the network for a thread at `/airgapped on` (push, the forge's page). */
+  const offline = async (thread: string | null, what: string) => {
+    const ling = findLing(resourcesPath());
+    const level = ling ? await airgapped(ling, thread) : { level: "off", source: "" };
+    if (level.level === "on") throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
+  };
+  let editors: Editor[] | null = null;
+
   async function handle(message: FromView): Promise<unknown> {
     switch (message.type) {
       case "work/start":
@@ -114,6 +124,55 @@ export async function main(options: MainOptions): Promise<void> {
       case "context-menu":
         if (window) showContextMenu(window, message);
         return null;
+      case "git/repos":
+        return git.repositories(message.cwd);
+      case "git/status":
+        return git.status(await git.checkRoot(message.root));
+      case "git/diff":
+        return git.diff(await git.checkRoot(message.root), message.scope, message.commit ?? null);
+      case "git/log":
+        return git.log(await git.checkRoot(message.root));
+      case "git/stage":
+        return git.stage(await git.checkRoot(message.root), message.paths);
+      case "git/unstage":
+        return git.unstage(await git.checkRoot(message.root), message.paths);
+      case "git/discard":
+        return git.discard(await git.checkRoot(message.root), message.paths);
+      case "git/apply":
+        return git.apply(await git.checkRoot(message.root), message.patch, { cached: message.cached, reverse: message.reverse, index: message.index });
+      case "git/commit":
+        return git.commit(await git.checkRoot(message.root), message.message, Boolean(message.all));
+      case "git/push": {
+        const root = await git.checkRoot(message.root);
+        await offline(message.thread, "a push");
+        return git.push(root, Boolean(message.force));
+      }
+      case "git/pull-request": {
+        const root = await git.checkRoot(message.root);
+        await offline(message.thread, "the forge's pull-request page");
+        const url = await git.pullRequestUrl(root);
+        await shell.openExternal(url);
+        return url;
+      }
+      case "editors/list":
+        editors = findEditors();
+        return editors;
+      case "editor/open": {
+        const root = await git.checkRoot(message.root).catch(() => null);
+        const base = root ?? (typeof message.root === "string" && path.isAbsolute(message.root) ? message.root : null);
+        if (!base) throw new Error("open a file inside a project");
+        const file = path.join(base, git.insidePath(base, message.path));
+        const editor = (editors ?? (editors = findEditors())).find((entry) => entry.id === message.editor);
+        if (!editor) {
+          // The system's choice for the file's type.
+          const failed = await shell.openPath(file);
+          if (failed) throw new Error(failed);
+          return null;
+        }
+        const { command, args } = openCommand(editor, file, message.line);
+        git.launch(command, args, base);
+        return null;
+      }
       case "prefs/read":
         return prefs.read();
       case "prefs/write":

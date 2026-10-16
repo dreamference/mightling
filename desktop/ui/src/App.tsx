@@ -35,7 +35,8 @@ import {
   contextUse, initialState, permissionChoices, projects, reduce,
   type PendingRequest, type ThreadView, type TurnView,
 } from "./store";
-import { dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack } from "./turns";
+import { ReviewPane } from "./ReviewPane";
+import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
 
@@ -102,6 +103,13 @@ export function App() {
   const [skills, setSkills] = useState<Record<string, SkillMetadata[]>>({});
   const [info, setInfo] = useState<Info | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  // Listeners besides the store, for the window's own small jobs (a generated commit message).
+  const listeners = useRef(new Set<(notification: ServerNotification) => void>());
+  const listen: Listen = useCallback((listener) => {
+    listeners.current.add(listener);
+    return () => listeners.current.delete(listener);
+  }, []);
   const promptHistory = useMemo(() => new PromptHistory(), []);
   const fileInput = useRef<HTMLInputElement>(null);
   const notice = useCallback((error: unknown) => dispatch({ type: "notice", message: error instanceof Error ? error.message : String(error) }), []);
@@ -167,6 +175,7 @@ export function App() {
     client.onNotification = (notification) => {
       dispatch({ type: "notification", notification });
       if (notification.method === "thread/queue/changed") refreshQueue(notification.params.threadId);
+      for (const listener of listeners.current) listener(notification);
     };
     client.onServerRequest = (request) => {
       if (ASKED.has(request.method)) dispatch({ type: "serverRequest", request });
@@ -575,6 +584,9 @@ export function App() {
     } else if (matches(event, keyAction("recentModels"))) {
       event.preventDefault();
       setPicker("recent");
+    } else if (matches(event, keyAction("reviewTab"))) {
+      event.preventDefault();
+      setReviewOpen((open) => !open);
     } else if (matches(event, keyAction("settings"))) {
       event.preventDefault();
       setSettingsOpen((open) => !open);
@@ -637,7 +649,7 @@ export function App() {
     : view === "ask" ? "Ask anything… ($ for a skill, / for commands)" : "Ask Mightling… (@ for a file, $ for a skill, / for commands)";
 
   return (
-    <div className={`work view-${view}${drawer ? " drawer-open" : ""}`} onContextMenu={(event) => {
+    <div className={`work view-${view}${drawer ? " drawer-open" : ""}${reviewOpen && view === "work" ? " review-open" : ""}`} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
       // (desktop/electron/src/shell.ts); a browser keeps its own, which a phone needs to copy.
       if (HOST !== "electron") return;
@@ -699,6 +711,7 @@ export function App() {
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
           {selected ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
+          {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => setReviewOpen(!reviewOpen)}><Icon name="fileDiff" size={16} /></button> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
           {usage ? (
             <span className="chip optional" title={`${usage.used.toLocaleString()} of ${usage.window.toLocaleString()} tokens`}>
@@ -777,9 +790,39 @@ export function App() {
           />
         ) : null}
       </main>
+      {reviewOpen && view === "work" ? (
+        <ReviewPane
+          cwd={composeRoot} threadId={selected?.thread.id ?? null}
+          turnDiff={lastTurnDiff(selected)}
+          airgapOn={airgap?.level === "on"}
+          layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
+          editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
+          refreshKey={turnsDone(selected)}
+          onComments={(comments) => setDraft((text) => (text.trim() ? `${text.trimEnd()}\n\n${comments}` : comments))}
+          onRevertTurn={selected && selected.turns.length > 0 && !selected.activeTurnId ? () => {
+            const last = selected.turns[selected.turns.length - 1];
+            client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: last.id }).then(() => openThread(selected.thread.id)).catch(notice);
+          } : null}
+          generateMessage={(root, diff) => commitMessage(client, listen, root, modelChoice ?? servedModel, diff)}
+          notice={notice}
+          onClose={() => setReviewOpen(false)}
+        />
+      ) : null}
       {settingsOpen ? <Settings prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} /> : null}
     </div>
   );
+}
+
+/** The diff of the shown thread's last turn that changed files, for the review pane's Last turn scope. */
+function lastTurnDiff(view: ThreadView | null): string | null {
+  if (!view) return null;
+  for (let index = view.turns.length - 1; index >= 0; index--) if (view.turns[index].diff) return view.turns[index].diff;
+  return null;
+}
+
+/** How many of the shown thread's turns have ended: the review pane reads the repository again when it grows. */
+function turnsDone(view: ThreadView | null): number {
+  return view ? view.turns.filter((turn) => turn.status !== "inProgress").length : 0;
 }
 
 /** Whether the keyboard is in a text field, where Enter and Esc belong to the field. */

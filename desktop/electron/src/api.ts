@@ -23,6 +23,19 @@ export type FromView =
   /** An attachment for an Ask thread, written into its folder (ask.ts); the bytes base64. */
   | { type: "ask/upload"; thread: string; name: string; kind: "image" | "file"; data: string }
   | { type: "context-menu"; x: number; y: number; editable: boolean; selection: string }
+  /** Window-side git (git.ts): the review pane, commit, push and the pull-request page. */
+  | { type: "git/repos"; cwd: string }
+  | { type: "git/status"; root: string }
+  | { type: "git/diff"; root: string; scope: "unstaged" | "staged" | "commit" | "branch"; commit?: string | null }
+  | { type: "git/log"; root: string }
+  | { type: "git/stage" | "git/unstage" | "git/discard"; root: string; paths: string[] }
+  | { type: "git/apply"; root: string; patch: string; cached?: boolean; reverse?: boolean; index?: boolean }
+  | { type: "git/commit"; root: string; message: string; all: boolean }
+  | { type: "git/push"; root: string; force: boolean; thread: string | null }
+  | { type: "git/pull-request"; root: string; thread: string | null }
+  /** The editors found on this machine (editors.ts), and opening a file in one at a line. */
+  | { type: "editors/list" }
+  | { type: "editor/open"; root: string; path: string; line: number | null; editor: string | null }
   /** The window's own preferences (prefs.ts): read whole, or some keys written. */
   | { type: "prefs/read" }
   | { type: "prefs/write"; values: Record<string, unknown> }
