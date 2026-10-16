@@ -77,6 +77,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "rename", description: "Give this thread a name", needs: "thread", args: "<name>" },
   { name: "archive", description: "Archive this thread", needs: "thread" },
   { name: "model", description: "Choose the model and how hard it thinks", needs: "none" },
+  { name: "goal", description: "Set the thread's goal (the agent works until it is met), or show it", needs: "thread", args: "[objective]" },
   { name: "plan", description: "Plan mode: the agent plans with you before it changes anything", needs: "none", args: "[what to plan]" },
   { name: "permissions", description: "Choose what the agent may do without asking", needs: "work" },
   { name: "status", description: "Show the model, permissions, folder and context use", needs: "none" },
