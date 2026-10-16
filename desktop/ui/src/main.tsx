@@ -8,16 +8,9 @@ import "./styles.css";
 // Styles that belong to one host (the desktop app's frameless title bar) key on this.
 document.documentElement.dataset.host = host();
 
-// The theme follows the system's, live: styles.css keys its dark tokens on html[data-theme].
-// In a browser (`ling web`) this query is the system theme. In the desktop app the preload sets it
-// before the first paint and the main process also sends each change over the bridge (App.tsx),
-// since Electron on Linux does not always pass a nativeTheme change on to the query.
-const dark = window.matchMedia?.("(prefers-color-scheme: dark)");
-const applyTheme = () => {
-  document.documentElement.dataset.theme = dark?.matches ? "dark" : "light";
-};
-applyTheme();
-dark?.addEventListener?.("change", applyTheme);
+// Light only (DESKTOP §14 question 3, 2026-10-03; dark not approved 2026-10-16): the system theme
+// is not followed. html[data-theme] stays the hook a dark block over styles.css's tokens would use.
+document.documentElement.dataset.theme = "light";
 
 const root = document.getElementById("root");
 if (root) {

@@ -139,11 +139,6 @@ export function App() {
     let stop: (() => void) | undefined;
     bridge.listenBridge({
       view: (next) => showView(next),
-      // The desktop app's main process says when the system theme changes (nativeTheme), which
-      // on Linux the page's own `prefers-color-scheme` does not always follow (main.tsx).
-      theme: (next) => {
-        document.documentElement.dataset.theme = next;
-      },
       message: (message) => client.receive(message),
       stderr: (line) => dispatch({ type: "stderr", line }),
       protocolError: (line) => dispatch({ type: "protocolError", line }),
