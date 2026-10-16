@@ -318,6 +318,13 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 /* The review pane (DESKTOP_PARITY §2.5): a column beside the thread, Ctrl+Shift+G. */
 .work.review-open { grid-template-columns: var(--sidebar) minmax(360px, 1fr) minmax(420px, 48%); }
 .bar-action.active { color: var(--accent); background: var(--accent-soft); }
+.work.tabs-full { grid-template-columns: var(--sidebar) 0 1fr; }
+.work.tabs-full.sidebar-hidden { grid-template-columns: 0 0 1fr; }
+.work.tabs-full .thread-pane { visibility: hidden; overflow: hidden; }
+.tab-strip { display: inline-flex; gap: 2px; }
+.tab { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: var(--radius-sm); font-size: 13px; color: var(--muted); }
+.tab.selected { background: var(--selected); color: var(--text); font-weight: 500; }
+.layout-switch button { font-size: 12px; padding: 2px 9px; }
 .review-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; border-left: 1px solid var(--line); background: var(--canvas); overflow: hidden; }
 .review-bar { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px 6px 14px; user-select: none; }
 html[data-host="electron"] .review-bar { padding-right: 150px; -webkit-app-region: drag; }

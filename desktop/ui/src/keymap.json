@@ -703,7 +703,7 @@
     "Ctrl+Alt+B"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "cycleLayout",
@@ -713,7 +713,7 @@
     "Ctrl+Shift+B"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "fullView",
@@ -723,7 +723,7 @@
     "Ctrl+Shift+F"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "goToLine",

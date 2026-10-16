@@ -441,3 +441,29 @@ test("5 plan mode: the Plan chip and /plan send the turn in Plan mode", async ()
     await close();
   }
 });
+
+test("9 layout: the review tab beside the thread, in full, hidden, and back", async () => {
+  const { page, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    await page.keyboard.press("Control+Shift+G");
+    const pane = page.getByRole("complementary", { name: "Review" });
+    await expect(pane.getByRole("tab", { name: /Review/ })).toBeVisible();
+    await shoot("9-layout-split.png");
+    await page.keyboard.press("Control+Shift+F");
+    await expect(page.locator(".work")).toHaveClass(/tabs-full/);
+    await expect(page.locator(".thread-pane")).toBeHidden();
+    await shoot("9-layout-full.png");
+    await page.keyboard.press("Control+Alt+b");
+    await expect(pane).toHaveCount(0);
+    await expect(page.locator(".thread-pane")).toBeVisible();
+    await page.keyboard.press("Control+Shift+B");
+    await expect(pane).toBeVisible();
+    await expect(page.locator(".work")).not.toHaveClass(/tabs-full/);
+    await pane.getByRole("button", { name: "Close the Review tab" }).click();
+    await expect(pane).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});

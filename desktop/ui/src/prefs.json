@@ -79,6 +79,14 @@
     "recentsOpen": {
       "default": false,
       "type": "boolean"
+    },
+    "layout": {
+      "default": "split",
+      "enum": [
+        "split",
+        "tabs",
+        "chat"
+      ]
     }
   }
 }
