@@ -1,9 +1,11 @@
 /* The Mightling UI, in Mightling's own colours with the shape of the Codex app
    (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §3): a quiet sans at weights up to 600, 8/12/16 px
    radii, hairlines used rarely and whitespace between turns, a centred thread column, the composer
-   as a card, one accent. Light and dark follow the system (html[data-theme], set by main.tsx and,
-   in the desktop app, first by the preload). Every colour, radius, font and duration is a token on
-   :root (§3.6) so the Appearance settings can override them. The fonts are bundled (fonts/, OFL
+   as a card, one accent. Light only (DESKTOP §14 question 3, 2026-10-03; dark not approved
+   2026-10-16), whatever the system's theme. Every colour, radius, font and duration is a token on
+   :root (§3.6) so the Appearance settings can override them, and a dark theme, if it is ever
+   approved, is one `:root[data-theme="dark"]` block over the same tokens (html[data-theme] is set
+   to "light" by main.tsx and, in the desktop app, first by the preload). The fonts are bundled (fonts/, OFL
    1.1): nothing is fetched at run time. The same page runs in the desktop app
    (html[data-host="electron"]: a frameless window whose header is the title bar) and in a browser
    on `ling web`, phones included (the @media rules at the end). */
@@ -101,40 +103,6 @@
   background: var(--canvas);
   -webkit-font-smoothing: antialiased;
 }
-:root[data-theme="dark"] {
-  --canvas: #181818;
-  --panel: #141414;
-  --raised: #212121;
-  --code-bg: #232323;
-  --text: #ececec;
-  --muted: #a3a3a3;
-  --faint: #727272;
-  --line: #2c2c2c;
-  --line-strong: #3a3a3a;
-  --hover: rgba(255, 255, 255, 0.055);
-  --selected: rgba(255, 255, 255, 0.09);
-  --accent-soft: #1b3433;
-  --on-accent: #ffffff;
-  --focus-ring: rgba(10, 186, 181, 0.35);
-  --danger: #ff7b72;
-  --add: rgba(46, 160, 67, 0.18);
-  --add-text: #56d364;
-  --del: rgba(248, 81, 73, 0.18);
-  --del-text: #ff7b72;
-  --notice: #3a2e1a;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
-  --shadow-focus: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);
-  --scrim: rgba(0, 0, 0, 0.5);
-  --scrollbar: rgba(255, 255, 255, 0.18);
-  --mark-body: #33445b;
-  --mark-facet-1: #3c4e66;
-  --mark-facet-2: #3a4c64;
-  --mark-facet-3: #374860;
-  --mark-light: #f4f7fb;
-  --mark-eye: #141b26;
-  --mark-beak-1: #ff7a47;
-  color-scheme: dark;
-}
 
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
 html, body, #root { margin: 0; height: 100%; }
@@ -168,7 +136,6 @@ html[data-host="electron"] .sidebar { padding-top: 8px; }
 .views button { flex: 1; border: none; background: none; padding: 4px 10px; border-radius: 6px; color: var(--muted); font-size: 13px; }
 .views button:hover:not(:disabled) { background: none; color: var(--text); }
 .views button.selected { background: var(--raised); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
-:root[data-theme="dark"] .views button.selected { background: var(--selected); box-shadow: none; }
 .nav-row { display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: none; text-align: left; padding: 7px 10px; border-radius: var(--radius-sm); font-weight: 500; }
 .nav-row .icon-svg { color: var(--muted); }
 .search, .new-thread { display: flex; align-items: center; gap: 8px; margin: 2px 0; padding: 0 10px; border-radius: var(--radius-sm); color: var(--faint); transition: background-color var(--motion-fast) var(--ease); }

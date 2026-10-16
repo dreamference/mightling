@@ -1,7 +1,7 @@
 // The look's rules that a stylesheet can break without any test of behaviour noticing
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §3, §5 "Look"): every token of §3.6 is on :root,
-// the dark theme redefines every colour, and nothing is fetched from outside the bundle (the app
-// is air-gapped; the CSP allows only `'self'` fonts).
+// the app is light only (DESKTOP §14 question 3; dark not approved 2026-10-16), and nothing is
+// fetched from outside the bundle (the app is air-gapped; the CSP allows only `'self'` fonts).
 
 import { describe, expect, it } from "vitest";
 
@@ -29,7 +29,8 @@ const SPEC_TOKENS = [
   "--motion-fast", "--motion-slow",
 ];
 
-const COLOUR = /^(#|rgba?\()/;
+/** The stylesheet without its comments, which may name a selector no rule uses. */
+const rules = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
 describe("the look", () => {
   it("keeps every token of §3.6 on :root, with the specified radii and durations", () => {
@@ -49,13 +50,11 @@ describe("the look", () => {
     expect(root.get("--font-code")).toContain('"JetBrains Mono"');
   });
 
-  it("redefines every colour token in the dark theme, and keeps the accent", () => {
-    const light = block(":root");
-    const dark = block(':root[data-theme="dark"]');
-    const colours = [...light].filter(([name, value]) => COLOUR.test(value) && name !== "--accent").map(([name]) => name);
-    expect(colours.length).toBeGreaterThan(10);
-    for (const name of colours) expect(dark.has(name), `${name} in the dark theme`).toBe(true);
-    expect(dark.has("--accent")).toBe(false);
+  it("is light only: one colour set on :root, no dark theme, no system-theme query", () => {
+    expect(rules).toMatch(/:root \{[^}]*color-scheme: light;/);
+    expect(rules).not.toMatch(/data-theme="dark"/);
+    expect(rules).not.toMatch(/prefers-color-scheme/);
+    expect(rules).not.toMatch(/color-scheme: dark/);
   });
 
   it("loads nothing from outside the bundle, and every font it names is a bundled file", () => {
@@ -75,8 +74,8 @@ describe("the look", () => {
     expect(iconsLicence).toContain("ISC License");
   });
 
-  it("paints the page's own background in both themes, since the window's is transparent", () => {
+  it("paints the page's own background, since the window's is transparent", () => {
     expect(css).toContain("body { background: var(--canvas); }");
-    expect(block(':root[data-theme="dark"]').has("--canvas")).toBe(true);
+    expect(block(":root").get("--canvas")).toBe("#ffffff");
   });
 });

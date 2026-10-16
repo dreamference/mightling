@@ -38,7 +38,7 @@ export function Icon({ name, size = 16, strokeWidth = 2 }: { name: IconName; siz
 
 /**
  * Mightling's own mark, the faceted ling of images/mightling-logo-*.svg without the wordmark, for
- * the empty state (§3.7). Its colours are tokens (styles.css `--mark-*`), so it follows the theme.
+ * the empty state (§3.7). Its colours are tokens (styles.css `--mark-*`).
  */
 export function MightlingMark({ size = 64 }: { size?: number }) {
   return (

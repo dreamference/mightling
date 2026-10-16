@@ -8,7 +8,7 @@
 // (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
 import path from "node:path";
-import { BrowserWindow, app, ipcMain, nativeTheme, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, ipcMain, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped } from "./airgapped";
@@ -122,18 +122,8 @@ export async function main(options: MainOptions): Promise<void> {
     }
   }
 
-  nativeTheme.on("updated", () => {
-    const dark = nativeTheme.shouldUseDarkColors;
-    // The minimise/maximise/close symbols the overlay paints follow the page's theme (work.ts).
-    if (window && !window.isDestroyed()) {
-      try {
-        window.setTitleBarOverlay({ color: "#00000000", symbolColor: dark ? "#ffffff" : "#1f1f1f", height: 36 });
-      } catch {
-        // No overlay to restyle (macOS draws its own traffic lights).
-      }
-    }
-    deliver({ channel: "theme", payload: dark ? "dark" : "light" });
-  });
+  // Light only (DESKTOP §14 question 3; dark not approved 2026-10-16): the system theme is not
+  // followed, so no nativeTheme change reaches the page or the title bar overlay (work.ts).
 
   // A second instance, or a `mightling://` link: show what it asked for, in the one window.
   app.on("second-instance", (_event, argv, _cwd, data) => {

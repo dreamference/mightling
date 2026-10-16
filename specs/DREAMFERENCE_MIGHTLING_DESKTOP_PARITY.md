@@ -3,7 +3,7 @@
 > - **Status:** proposed 2026-10-14 (owner: "I want the same functionality", "the same architecture as the Codex binary", "make it look like the original Codex desktop"). Supersedes §2 and §6 of [DREAMFERENCE_MIGHTLING_DESKTOP.md](./DREAMFERENCE_MIGHTLING_DESKTOP.md) (2026-10-03) as the feature inventory; that document's §3 (what identical can mean), §8 (security) and §13 (risks) still hold, and [DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) and [DREAMFERENCE_MIGHTLING_ASK.md](./DREAMFERENCE_MIGHTLING_ASK.md) describe what is built.
 > - **What "the Codex app" is now:** by 2026-10-03 the upstream vendor's package was already named after its chat product (DESKTOP §1), and its documentation now describes one **desktop app** (macOS, Windows, and a Linux preview) with three surfaces, Chat, Work and Codex; this document covers the Codex surface. Every feature below is read from the vendor's documentation as it stood on 2026-10-14, from the three videos the owner named (§8), and from the Codex source pinned in `codex/` (`rust-v0.158.0`). Nothing below was read from the vendor's app bundle beyond what §1 of the 2026-10-03 spec recorded.
 > - **Trade dress (DESKTOP §13):** layout and interaction may follow the vendor's; name, icon, colours, sounds and copy must not. §3 stays inside that line.
-> - **Dark mode** was light-only (DESKTOP §14 question 3, decided 2026-10-03). The look of §3, built on branch `desktop/codex-look` (2026-10-15, awaiting the owner's approval from its screenshots), adds the dark block of §3.6 and follows the system theme; approving that branch reverses the decision (§7 question 2).
+> - **Dark mode** is not approved (2026-10-16): the app stays light only (DESKTOP §14 question 3, decided 2026-10-03). The look of §3 (branch `desktop/codex-look`) was merged on 2026-10-16 light only, without the dark block and the system-theme following it was built with; §3.6's tokens keep a dark theme one block away (§7 question 2).
 
 ---
 
@@ -473,7 +473,7 @@ The vendor's product surface, read from its public design language rather than i
 
 ### 3.4 Icons
 
-Lucide (ISC), bundled as inline SVG, 16 px in rows and 20 px in the bar; Mightling's own mark for the app icon and the empty state. No emoji in controls (today's 📎 becomes the paperclip icon). Built as `desktop/ui/src/icons.tsx`: the path data of the sixteen icons used, copied from Lucide 0.460.0 with its ISC notice in `icons.LICENSE.txt`, rather than the `lucide-react` package (no new dependency in either `package.json`). The empty state's mark is the faceted ling of `images/mightling-logo-*.svg` without its wordmark, drawn from tokens so it follows the theme; the app icon itself (`desktop/electron/icons/`) is unchanged.
+Lucide (ISC), bundled as inline SVG, 16 px in rows and 20 px in the bar; Mightling's own mark for the app icon and the empty state. No emoji in controls (today's 📎 becomes the paperclip icon). Built as `desktop/ui/src/icons.tsx`: the path data of the sixteen icons used, copied from Lucide 0.460.0 with its ISC notice in `icons.LICENSE.txt`, rather than the `lucide-react` package (no new dependency in either `package.json`). The empty state's mark is the faceted ling of `images/mightling-logo-*.svg` without its wordmark, drawn from tokens; the app icon itself (`desktop/electron/icons/`) is unchanged (not replaced, the owner, 2026-10-16).
 
 ### 3.5 Libraries
 
@@ -508,7 +508,7 @@ Electron stays stock 42.x pinned (ELECTRON spec): no custom Chromium, no `--no-s
 --mark-* (the empty state's mark), --radius-pill, --ease, --column 760px, --sidebar 260px
 ```
 
-Dark mode is one more block, `:root[data-theme="dark"]`, redefining every colour token except `--accent` (a test checks that none is missed). `html[data-theme]` follows the system: the preload sets it before the first paint, `main.tsx` follows `prefers-color-scheme`, and the main process sends each `nativeTheme` change over the bridge (Electron on Linux does not always pass one on to the page's media query) and repaints the title bar overlay's symbols to match.
+Light only (dark not approved 2026-10-16): there is one colour set, on `:root`, with `color-scheme: light`, and nothing follows the system theme. `html[data-theme]` is set to `light` by the preload before the first paint and by `main.tsx`; the title bar overlay's symbols are fixed dark; no `nativeTheme` change crosses the bridge. `styles.test.ts` checks that no dark block and no `prefers-color-scheme` query is in the stylesheet. Should dark mode be approved, it is one more block, `:root[data-theme="dark"]`, redefining every colour token except `--accent` (built and shown on `desktop/codex-look` at 99bf80a, then removed before the merge), plus the theme's follower in the preload, `main.tsx` and the main process.
 
 ### 3.7 What stays Mightling's
 
@@ -526,7 +526,7 @@ One window with Ask and Work; one `ling app-server` on stdio through the vetted 
 
 In the order the owner's use suggests, each item with its §2 row as acceptance:
 
-1. **Look** (§3): tokens, fonts, radii, spacing, the composer card, the bubble, no turn separators, icons. One change, no behaviour.
+1. **Look** (§3): tokens, fonts, radii, spacing, the composer card, the bubble, no turn separators, icons. One change, no behaviour. **Look: merged 2026-10-16** (light only; the app icon unchanged).
 2. **Shell:** sidebar toggle, command menu, back/forward, font size, undo/redo, close/reopen tabs, the keymap table and its settings page (§2.1, §2.19).
 3. **Threads:** pins, sections, Recents, unread and attention, mark unread, find in chat, deep links and `ling://`, pop-out with always-on-top, side chat, standalone chat (§2.1).
 4. **Composer:** `@` mentions, `$` skills, `/` commands, Enter behaviour, follow-up behaviour, ↑ restore, Shift+drag images, approve/decline keys, edit previous, fork, Compress, the model and effort picker (§2.3).
@@ -543,7 +543,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 
 ### 4.3 Phase 3 — the workstation extras
 
-File tree and file tabs; search files and go to line; the artifacts viewer (Markdown, images, PDF, HTML; LaTeX if `tectonic` is bundled); the preview tab with comments and per-site permissions; Activity view; pets with Mightling's art; suggested prompts; external agent import; the `gh`-backed pull-request tab; agent message board; dark mode if decided; macOS and Windows app builds (RELEASE, WINDOWS_ARM).
+File tree and file tabs; search files and go to line; the artifacts viewer (Markdown, images, PDF, HTML; LaTeX if `tectonic` is bundled); the preview tab with comments and per-site permissions; Activity view; pets with Mightling's art; suggested prompts; external agent import; the `gh`-backed pull-request tab; agent message board; dark mode and the Appearance page's light/dark/system choice, if dark is ever approved; macOS and Windows app builds (RELEASE, WINDOWS_ARM).
 
 ### 4.4 Not proposed
 
@@ -577,7 +577,7 @@ File tree and file tabs; search files and go to line; the artifacts viewer (Mark
 ## 7. Open questions
 
 1. ~~**Bundle fonts or not?**~~ Bundled on `desktop/codex-look`: Inter and JetBrains Mono as variable woff2, Latin and Latin Extended, 185 KB together, with their OFL licences beside them.
-2. **Dark mode** (DESKTOP §14 question 3): the Appearance page of §2.15 makes light-only visible as a gap. Built on `desktop/codex-look` as the system theme's follower (screenshots in both themes); the owner's approval of that branch reverses the 2026-10-03 decision, and the Appearance page (Phase 2 item 10) adds the light/dark/system choice.
+2. ~~**Dark mode**~~ (DESKTOP §14 question 3): **dark mode not approved 2026-10-16, light only; the Appearance page's choice is Phase 3.** It was built on `desktop/codex-look` as the system theme's follower (screenshots in both themes, 2026-10-15); the owner kept the 2026-10-03 light-only decision, so the merge removed the dark block and the follower and kept the tokens (§3.6).
 3. **`.codex/` or `.mightling/` for local environments?** Reading `.codex/` keeps shared repositories working for Codex users; writing it from Mightling's settings pages puts a vendor-named folder in the user's project. Recommendation: read both, write `.mightling/`.
 4. **`tectonic` in the bundle** for LaTeX previews (Phase 3): about 30 MB. Recommendation: later, behind a setting.
 5. **Pets:** worth Mightling's own art at all? Recommendation: ask the owner once Phase 2 ships.

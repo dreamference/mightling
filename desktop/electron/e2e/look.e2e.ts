@@ -1,6 +1,6 @@
 // The look, as pictures: Ask (empty and with a question) and Work (a thread with a command, a diff
-// and an approval) in the light and the dark theme, against a scripted stand-in for `ling
-// app-server` whose threads are made up for the purpose. Not a check: it runs only when
+// and an approval) in the app's one theme, light (dark not approved 2026-10-16), against a scripted
+// stand-in for `ling app-server` whose threads are made up for the purpose. Not a check: it runs only when
 // MIGHTLING_LOOK_DIR names a folder for the PNGs (a person compares them; DESKTOP_PARITY §3), and
 // needs a display and the Vite build like the other end-to-end tests.
 //   MIGHTLING_LOOK_DIR=/tmp/look npm run e2e -- look
@@ -116,7 +116,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   return ling;
 }
 
-test("the look, light and dark", async () => {
+test("the look", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-look-"));
   const codexHome = path.join(home, ".mightling");
   const askRoot = path.join(codexHome, "ask");
@@ -142,9 +142,11 @@ test("the look, light and dark", async () => {
       await page.waitForTimeout(300);
       await page.screenshot({ path: path.join(out!, name) });
     };
-    for (const theme of ["light", "dark"] as const) {
-      await app.evaluate(({ nativeTheme }, theme) => { nativeTheme.themeSource = theme; }, theme);
-      await page.waitForTimeout(400);
+    // The system's theme is set dark on purpose: the app is light only, so the pictures are light
+    // whatever the system says.
+    await app.evaluate(({ nativeTheme }) => { nativeTheme.themeSource = "dark"; });
+    await page.waitForTimeout(400);
+    for (const theme of ["light"] as const) {
       await page.getByRole("button", { name: "Ask", exact: true }).click();
       await page.getByRole("button", { name: "New question" }).click();
       await shoot(`ask-empty-${theme}.png`);
@@ -160,7 +162,7 @@ test("the look, light and dark", async () => {
       window.setMinimumSize(360, 600);
       window.setSize(400, 860);
     });
-    await shoot("work-narrow-dark.png");
+    await shoot("work-narrow-light.png");
   } finally {
     await app.close();
     fs.rmSync(home, { recursive: true, force: true });
