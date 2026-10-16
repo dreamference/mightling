@@ -218,6 +218,21 @@ export async function popOut(thread: string): Promise<void> {
 export const alwaysOnTop = (on: boolean) => send<boolean>({ type: "window/always-on-top", on });
 /** The user's home folder, where a thread with no project works. */
 export const homeFolder = () => send<string>({ type: "app/home" });
+export interface Insights {
+  sessions: number;
+  days: number;
+  lifetimeTokens: number;
+  peakDay: { day: string; tokens: number } | null;
+  currentStreak: number;
+  longestStreak: number;
+  longestSession: { file: string; minutes: number } | null;
+}
+
+/** Settings › Profile: statistics from this machine's session files (desktop/electron/src/insights.ts). */
+export const insights = () => send<Insights | null>({ type: "insights" });
+/** Settings › Personalization: `$CODEX_HOME/AGENTS.md`, the instructions every thread on this machine reads. */
+export const readPersonal = () => send<{ path: string; text: string } | null>({ type: "personal/read" });
+export const writePersonal = (text: string) => send<null>({ type: "personal/write", text });
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
 

@@ -1,17 +1,20 @@
 // The settings (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §2.15; Ctrl+,): pages in a dialog,
 // window settings in the window's preferences and agent settings in config.toml through the
-// server. General (what Enter and a follow-up do), Keyboard shortcuts (§2.19: review, rebind,
-// reset, search by name or by keystroke), Worktrees. Item 10 adds the other pages.
+// server. General, Profile (statistics from the local session files), Keyboard shortcuts (§2.19),
+// Notifications, Appearance (the §3.6 tokens, light base only, a theme shared as a file),
+// Personalization (`~/.mightling/AGENTS.md`), Archived threads, Git, Project, Worktrees. Pets,
+// Browser, Computer Use and Suggested prompts are not offered here (Phase 3 or not at all).
 
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import * as bridge from "./bridge";
 import { Icon } from "./icons";
 import { KEYMAP, chordOf, conflicts, type KeyAction } from "./keymap";
-import type { Prefs } from "./prefs";
+import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
+import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "shortcuts" | "worktrees";
+export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "archived" | "git" | "project" | "worktrees";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -21,11 +24,22 @@ export interface SettingsProps {
   onClose: () => void;
   worktrees: WorktreeSettings;
   onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => void;
+  /** Archived threads (`thread/list` with `archived`), and bringing one back (`thread/unarchive`). */
+  listArchived: () => Promise<Thread[]>;
+  unarchive: (threadId: string) => Promise<void>;
+  notice: (error: unknown) => void;
 }
 
 const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "general", label: "General" },
+  { id: "profile", label: "Profile", desktopOnly: true },
   { id: "shortcuts", label: "Keyboard shortcuts" },
+  { id: "notifications", label: "Notifications", desktopOnly: true },
+  { id: "appearance", label: "Appearance" },
+  { id: "personalization", label: "Personalization", desktopOnly: true },
+  { id: "archived", label: "Archived threads" },
+  { id: "git", label: "Git", desktopOnly: true },
+  { id: "project", label: "Project", desktopOnly: true },
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
 ];
 
@@ -43,7 +57,14 @@ export function SettingsDialog(props: SettingsProps) {
           </nav>
           <div className="settings-page">
             {props.page === "general" ? <General {...props} /> : null}
+            {props.page === "profile" ? <Profile /> : null}
             {props.page === "shortcuts" ? <Shortcuts {...props} /> : null}
+            {props.page === "notifications" ? <Notifications {...props} /> : null}
+            {props.page === "appearance" ? <AppearancePage {...props} /> : null}
+            {props.page === "personalization" ? <Personalization notice={props.notice} /> : null}
+            {props.page === "archived" ? <Archived {...props} /> : null}
+            {props.page === "git" ? <Git {...props} /> : null}
+            {props.page === "project" ? <Project {...props} /> : null}
             {props.page === "worktrees" && bridge.git.available() ? <Worktrees {...props} /> : null}
           </div>
         </div>
@@ -65,6 +86,10 @@ function General({ prefs, onChange }: SettingsProps) {
         <legend>A message sent while the agent is working</legend>
         <label><input type="radio" name="follow" checked={prefs.followUp === "steer"} onChange={() => onChange({ followUp: "steer" })} /> Steer: the running turn takes it in now</label>
         <label><input type="radio" name="follow" checked={prefs.followUp === "queue"} onChange={() => onChange({ followUp: "queue" })} /> Queue: it waits, and starts the next turn when this one ends</label>
+      </fieldset>
+      <fieldset>
+        <legend>While the agent works</legend>
+        <label><input type="checkbox" checked={prefs.preventSleep} onChange={(event) => onChange({ preventSleep: event.target.checked })} /> Keep the machine from sleeping while a turn runs</label>
       </fieldset>
       <fieldset>
         <legend>Text size</legend>
@@ -172,6 +197,184 @@ function Worktrees(props: SettingsProps) {
         <label><input type="checkbox" checked={props.worktrees.autoCleanup} onChange={(event) => props.onWorktree("worktree-auto-cleanup-enabled", event.target.checked)} /> Delete the oldest worktrees automatically (never a pinned, running or permanent one; a snapshot is kept)</label>
         <label className="field">Keep the most recent
           <input type="number" min={1} max={200} value={props.worktrees.keep} aria-label="Worktrees kept" onChange={(event) => Number(event.target.value) > 0 && props.onWorktree("worktree-keep-count", Math.floor(Number(event.target.value)))} />
+        </label>
+      </fieldset>
+    </>
+  );
+}
+
+function Profile() {
+  const [data, setData] = useState<bridge.Insights | null | "loading">("loading");
+  useEffect(() => {
+    bridge.insights().then(setData).catch(() => setData(null));
+  }, []);
+  if (data === "loading") return <p className="empty small">Reading the session files…</p>;
+  if (!data) return <p className="empty small">No session files were found.</p>;
+  const rows: [string, string][] = [
+    ["Sessions", `${data.sessions.toLocaleString()} on ${data.days.toLocaleString()} days`],
+    ["Tokens, all time", data.lifetimeTokens.toLocaleString()],
+    ["The busiest day", data.peakDay ? `${data.peakDay.day}: ${data.peakDay.tokens.toLocaleString()} tokens` : "none yet"],
+    ["Streak", `${data.currentStreak} day${data.currentStreak === 1 ? "" : "s"} now, ${data.longestStreak} at the longest`],
+    ["The longest session", data.longestSession ? `${data.longestSession.minutes} minutes` : "none yet"],
+  ];
+  return (
+    <>
+      <h3>Profile</h3>
+      <p className="dialog-note">Read from this machine's session files (~/.mightling/sessions); nothing is sent anywhere.</p>
+      <dl className="info-rows">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+    </>
+  );
+}
+
+function Notifications({ prefs, onChange }: SettingsProps) {
+  return (
+    <>
+      <h3>Notifications</h3>
+      <fieldset>
+        <legend>When a turn ends</legend>
+        <label><input type="radio" name="turns" checked={prefs.notifyTurns === "unfocused"} onChange={() => onChange({ notifyTurns: "unfocused" })} /> Notify when the window is not in front</label>
+        <label><input type="radio" name="turns" checked={prefs.notifyTurns === "always"} onChange={() => onChange({ notifyTurns: "always" })} /> Always notify</label>
+        <label><input type="radio" name="turns" checked={prefs.notifyTurns === "never"} onChange={() => onChange({ notifyTurns: "never" })} /> Never</label>
+      </fieldset>
+      <fieldset>
+        <legend>Approvals and questions</legend>
+        <label><input type="checkbox" checked={prefs.notifyApprovals} onChange={(event) => onChange({ notifyApprovals: event.target.checked })} /> Notify when the agent waits for an answer and the window is not in front</label>
+      </fieldset>
+      <p className="dialog-note">Notifications are silent: Mightling has no sounds of its own.</p>
+    </>
+  );
+}
+
+/** Appearance: the accent, canvas and text colours and the fonts over the light base; a theme is a small JSON file. */
+function AppearancePage({ prefs, onChange, notice }: SettingsProps) {
+  const set = (values: Appearance) => onChange({ appearance: cleanAppearance({ ...prefs.appearance, ...values }) });
+  const current = getComputedStyle(document.documentElement);
+  const colour = (key: "accent" | "canvas" | "text", token: string) => prefs.appearance[key] ?? (current.getPropertyValue(token).trim() || "#000000");
+  const exportTheme = () => {
+    const blob = new Blob([JSON.stringify({ mightlingTheme: 1, ...prefs.appearance }, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "mightling-theme.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  };
+  const importTheme = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      onChange({ appearance: cleanAppearance(JSON.parse(await file.text())) });
+    } catch (error) {
+      notice(error);
+    }
+  };
+  return (
+    <>
+      <h3>Appearance</h3>
+      <p className="dialog-note">The base is light (a dark base is not offered); these colours and fonts go over it.</p>
+      <fieldset>
+        <legend>Colours</legend>
+        <label className="colour"><input type="color" value={colour("accent", "--accent")} aria-label="Accent colour" onChange={(event) => set({ accent: event.target.value })} /> Accent</label>
+        <label className="colour"><input type="color" value={colour("canvas", "--canvas")} aria-label="Background colour" onChange={(event) => set({ canvas: event.target.value })} /> Background</label>
+        <label className="colour"><input type="color" value={colour("text", "--text")} aria-label="Text colour" onChange={(event) => set({ text: event.target.value })} /> Text</label>
+      </fieldset>
+      <fieldset>
+        <legend>Fonts</legend>
+        <label className="field">Interface font <input defaultValue={prefs.appearance.fontUi ?? ""} placeholder="Inter, sans-serif" aria-label="Interface font" onBlur={(event) => set({ fontUi: event.target.value.trim() || undefined })} /></label>
+        <label className="field">Code font <input defaultValue={prefs.appearance.fontCode ?? ""} placeholder='"JetBrains Mono", monospace' aria-label="Code font" onBlur={(event) => set({ fontCode: event.target.value.trim() || undefined })} /></label>
+      </fieldset>
+      <div className="buttons dialog-buttons">
+        <button onClick={exportTheme}>Save the theme to a file</button>
+        <label className="file-button">Use a theme file<input type="file" accept="application/json,.json" hidden onChange={(event) => void importTheme(event.target.files?.[0])} /></label>
+        <button onClick={() => onChange({ appearance: {} })}>Back to Mightling's own</button>
+      </div>
+    </>
+  );
+}
+
+function Personalization({ notice }: { notice: (error: unknown) => void }) {
+  const [file, setFile] = useState<{ path: string; text: string } | null>(null);
+  const [text, setText] = useState("");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    bridge.readPersonal().then((answer) => {
+      setFile(answer);
+      setText(answer?.text ?? "");
+    }).catch(notice);
+  }, [notice]);
+  return (
+    <>
+      <h3>Personalization</h3>
+      <p className="dialog-note">Instructions every thread on this machine reads, before a project's own AGENTS.md{file ? ` (${file.path})` : ""}.</p>
+      <textarea className="personal" rows={14} value={text} aria-label="Personal instructions" onChange={(event) => { setText(event.target.value); setSaved(false); }}
+        placeholder="For example: answer in British English; prefer small commits." />
+      <div className="buttons dialog-buttons">
+        <button className="primary" onClick={() => bridge.writePersonal(text).then(() => setSaved(true)).catch(notice)}>Save</button>
+        {saved ? <span className="dialog-note">Saved. New threads read it.</span> : null}
+      </div>
+    </>
+  );
+}
+
+function Archived({ listArchived, unarchive, notice }: SettingsProps) {
+  const [threads, setThreads] = useState<Thread[] | null>(null);
+  useEffect(() => {
+    listArchived().then(setThreads).catch((error) => { setThreads([]); notice(error); });
+  }, [listArchived, notice]);
+  return (
+    <>
+      <h3>Archived threads</h3>
+      {threads === null ? <p className="empty small">…</p> : threads.length === 0 ? <p className="empty small">No archived threads.</p> : (
+        <table className="shortcut-table archived">
+          <tbody>
+            {threads.map((thread) => (
+              <tr key={thread.id}>
+                <td>{thread.name || thread.preview || "(new thread)"}</td>
+                <td className="planned-note">{thread.cwd.split(/[\\/]/).filter(Boolean).pop()} · {new Date(thread.updatedAt * 1000).toLocaleDateString()}</td>
+                <td className="shortcut-actions"><button className="link-button" onClick={() => unarchive(thread.id).then(() => setThreads((list) => list?.filter((entry) => entry.id !== thread.id) ?? null)).catch(notice)}>Unarchive</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+function Git({ prefs, onChange }: SettingsProps) {
+  return (
+    <>
+      <h3>Git</h3>
+      <fieldset>
+        <legend>Branches</legend>
+        <label className="field">Create branch here starts the name with
+          <input defaultValue={prefs.branchPrefix} aria-label="Branch prefix" onBlur={(event) => onChange({ branchPrefix: event.target.value.trim() })} />
+        </label>
+        <label><input type="checkbox" checked={prefs.forcePush} onChange={(event) => onChange({ forcePush: event.target.checked })} /> Push with --force-with-lease by default</label>
+      </fieldset>
+      <fieldset>
+        <legend>The instruction a written commit message starts from</legend>
+        <textarea rows={4} defaultValue={prefs.commitPrompt ?? ""} aria-label="Commit message instruction" placeholder="Empty: Mightling's own (a summary line in the imperative, then why)"
+          onBlur={(event) => onChange({ commitPrompt: event.target.value.trim() || null })} />
+      </fieldset>
+      <p className="dialog-note">A pull request opens the forge's own page in your browser, which writes its description.</p>
+    </>
+  );
+}
+
+function Project({ prefs, onChange }: SettingsProps) {
+  const [editors, setEditors] = useState<bridge.Editor[]>([]);
+  useEffect(() => {
+    bridge.listEditors().then(setEditors).catch(() => setEditors([]));
+  }, []);
+  return (
+    <>
+      <h3>Project</h3>
+      <fieldset>
+        <legend>Where files open</legend>
+        <label className="field">From the review pane and the header's Open
+          <select value={prefs.editor ?? ""} aria-label="Editor" onChange={(event) => onChange({ editor: event.target.value || null })}>
+            <option value="">The system's choice</option>
+            {editors.map((editor) => <option key={editor.id} value={editor.id}>{editor.name}</option>)}
+          </select>
         </label>
       </fieldset>
     </>
