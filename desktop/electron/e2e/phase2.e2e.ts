@@ -539,3 +539,39 @@ test("11 skills and tools: skills with their source, MCP servers (one added), ap
     await close();
   }
 });
+
+test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task queued and one dropped, the report", async () => {
+  const { page, home, shoot, close } = await open();
+  const night = path.join(home, ".mightling", "night");
+  const { fetcher } = projectFolders(home);
+  fs.mkdirSync(path.join(night, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(night, "reports"), { recursive: true });
+  const task = (id: string, text: string, status: string, at: string) => JSON.stringify({ id, repo: fetcher, task: text, status, branch: `night/${id}`, test: null, on: null,
+    history: [{ at: "2026-10-16T22:00:00+01:00", status: "queued" }, { at, status }], result: null });
+  fs.writeFileSync(path.join(night, "tasks", "20261016-2200.json"), task("20261016-2200", "Add type hints to fetcher/client.py", "done", "2026-10-17T03:12:00+01:00"));
+  fs.writeFileSync(path.join(night, "tasks", "20261016-2215.json"), task("20261016-2215", "Make the retry test table-driven", "queued", "2026-10-16T22:15:00+01:00"));
+  fs.writeFileSync(path.join(night, "reports", "2026-10-17.md"), `# Night Shift, 17 October\n\n## ${fetcher}\n\n- **Add type hints to fetcher/client.py**: done on night/20261016-2200, tests pass (12 passed).\n`);
+  try {
+    // The app was started before the files: reopen Work so the count is read (the inbox is read on start).
+    await page.reload();
+    await page.locator(".thread", { hasText: "GB10" }).waitFor();
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await expect(page.locator(".scheduled-button .count")).toHaveText("1");
+    await page.getByRole("button", { name: /Scheduled/ }).click();
+    const view = page.getByRole("dialog", { name: "Scheduled" });
+    await expect(view).toContainText("Add type hints to fetcher/client.py");
+    await expect(view.locator(".night-report")).toContainText("tests pass");
+    await shoot("12-scheduled.png");
+    await view.getByRole("textbox", { name: "Task" }).fill("Update the changelog for 1.7");
+    await view.getByRole("button", { name: "Queue" }).click();
+    await expect(view.locator(".notice")).toContainText("Queued 20261017-0930");
+    await view.getByRole("button", { name: "Drop" }).click();
+    await expect.poll(() => runs(home).filter((args) => args[0] === "night").map((args) => args.join(" "))).toEqual([
+      "night add Update the changelog for 1.7", "night drop 20261016-2215",
+    ]);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".scheduled-button .count")).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});
