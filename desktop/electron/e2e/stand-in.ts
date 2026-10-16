@@ -170,6 +170,15 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       return say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
     }
     case "turn/steer": return answer({ turnId: p.expectedTurnId });
+    case "review/start": {
+      const id = "turn-" + next++;
+      const where = p.delivery === "detached" ? "r" + next++ : p.threadId;
+      answer({ turn: { id, items: [], status: "inProgress", error: null }, reviewThreadId: where });
+      say({ method: "turn/started", params: { threadId: where, turn: { id, items: [], status: "inProgress", error: null } } });
+      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "enteredReviewMode", id: "rv1", review: "uncommitted changes" } } });
+      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "exitedReviewMode", id: "rv2", review: "**One finding.** fetcher/client.py:15 re-raises without the attempt count in the message." } } });
+      return say({ method: "turn/completed", params: { threadId: where, turn: { id, items: [], status: "completed", error: null } } });
+    }
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
     default: return answer({ data: [] });
   }

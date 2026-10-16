@@ -127,7 +127,8 @@ export function Composer(props: ComposerProps) {
 
   const choose = (entry: MenuEntry) => {
     if (!trigger) return;
-    if (entry.command && !entry.command.args) {
+    // A command with no words to take, or typed out in full, runs; otherwise its name is completed.
+    if (entry.command && (!entry.command.args || trigger.query === entry.command.name)) {
       setTrigger(null);
       setDraft("");
       props.onCommand(entry.command);

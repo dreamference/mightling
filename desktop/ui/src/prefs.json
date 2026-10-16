@@ -47,6 +47,13 @@
     "bottomPanel": {
       "default": false,
       "type": "boolean"
+    },
+    "reviewDelivery": {
+      "default": "inline",
+      "enum": [
+        "inline",
+        "detached"
+      ]
     }
   }
 }

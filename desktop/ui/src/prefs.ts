@@ -23,6 +23,8 @@ export interface Prefs {
   worktreeThreads: Record<string, WorktreeLink>;
   /** Worktrees made permanent: projects of their own, never cleaned up. */
   permanentWorktrees: string[];
+  /** Where /review's findings go: into the thread, or a review thread of their own. */
+  reviewDelivery: "inline" | "detached";
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }
