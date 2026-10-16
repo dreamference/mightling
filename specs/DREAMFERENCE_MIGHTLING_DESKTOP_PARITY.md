@@ -534,7 +534,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 6. **Review pane and git:** scopes, repository selector, stage/unstage/revert at three levels, inline comments, viewed markers, open in editor, `/review` inline or detached, commit, push, PR page (§2.5). **Review pane and git: merged 2026-10-16, 7973c5a** (`/review` Partial: it needs `review/start` in `policy.json`, held on `desktop/p2-policy` for the Rust conformance run).
 7. **Worktrees and hand-off**, local environments and actions, the bottom panel (§2.6). **Worktrees, hand-off, environments and the bottom panel: merged 2026-10-16, 9c5f31d** (window-side `git` on the `codex-worktree` contract until `ling worktree` exists; actions run as bottom-panel tasks until the terminal of item 8 lands).
 8. **Terminal** tabs (§2.7).
-9. **Tabs and layout:** split, full, hidden (§2.1). **Tabs and layout: merged 2026-10-17, MERGE9** (the tab area holds the Review tab; terminal tabs stay in the bottom panel; file and preview tabs are Phase 3).
+9. **Tabs and layout:** split, full, hidden (§2.1). **Tabs and layout: merged 2026-10-17, 1064dc9** (the tab area holds the Review tab; terminal tabs stay in the bottom panel; file and preview tabs are Phase 3).
 10. **Settings pages** of §2.15 except Pets, Browser, Computer Use, Suggested prompts.
 11. **Skills, plugins, MCP, apps, hooks** pages (§2.11).
 12. **Scheduled** view over Night Shift (§2.12).
