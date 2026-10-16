@@ -266,6 +266,52 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; border: 1px solid var(--line); background: var(--canvas); border-radius: var(--radius-sm); padding: 3px 3px 3px 4px; font-size: 12px; }
 .attachment img { width: 28px; height: 28px; object-fit: cover; border-radius: 5px; }
 .attachment-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The composer's menus (DESKTOP_PARITY §2.3): `@` files, `$` skills, `/` commands, above the card. */
+.composer-card { position: relative; }
+.completions { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 6px); z-index: 5; list-style: none; margin: 0; padding: 4px; max-height: 280px; overflow: auto; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-focus); }
+.completions li { display: flex; gap: 10px; align-items: baseline; padding: 6px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+.completions li.selected { background: var(--selected); }
+.completion-label { font-weight: 500; white-space: nowrap; }
+.completion-detail { color: var(--muted); font-size: 12.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.queue { display: flex; flex-direction: column; gap: 4px; margin: 0 6px 6px; }
+.queued { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); font-size: 13px; color: var(--muted); }
+.queued-text { flex: 1; min-width: 0; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.other-follow-up { font-size: 12px; }
+.picker-anchor { position: relative; display: inline-flex; }
+.model-chip { cursor: pointer; border: none; background: none; color: var(--muted); font-size: 13px; gap: 4px; padding: 4px 8px; }
+.model-chip:hover { background: var(--hover); color: var(--text); }
+.picker { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 6; width: 300px; padding: 6px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-focus); display: flex; flex-direction: column; gap: 2px; }
+.picker h3 { margin: 6px 8px 2px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.picker > button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; border: none; background: none; padding: 6px 8px; border-radius: var(--radius-sm); }
+.picker > button[aria-checked="true"] { background: var(--selected); }
+.picker-detail { color: var(--muted); font-size: 12px; }
+.efforts { display: flex; gap: 4px; flex-wrap: wrap; padding: 2px 6px 4px; }
+.efforts button { border-radius: var(--radius-pill); padding: 3px 10px; font-size: 12.5px; }
+.efforts button.selected { border-color: var(--accent); background: var(--accent-soft); }
+.picker-note { margin: 6px 8px 2px; color: var(--faint); font-size: 11.5px; }
+.turn-actions { display: inline-flex; gap: 4px; font-size: 12px; margin-left: -4px; }
+.bar-action { color: var(--muted); }
+.info-panel { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 14px 12px; margin: 0 auto 16px; background: var(--panel); }
+.info-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.info-rows { margin: 0; display: grid; gap: 4px; }
+.info-rows > div { display: grid; grid-template-columns: 150px 1fr; gap: 8px; }
+.info-rows dt { color: var(--muted); }
+.info-rows dd { margin: 0; overflow-wrap: anywhere; }
+.info-items { margin: 0; padding-left: 18px; }
+.info-list { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.info-list button.selected { border-color: var(--accent); }
+.info-pre { margin: 0; }
+.sidebar-spacer { flex: 1; }
+.settings-button { margin-top: 8px; }
+.dialog-backdrop { position: fixed; inset: 0; z-index: 30; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 10vh; }
+.dialog { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; background: var(--raised); border-radius: var(--radius-lg); box-shadow: var(--shadow-focus); padding: 16px 20px 20px; }
+.dialog > header { display: flex; align-items: center; justify-content: space-between; }
+.dialog h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.dialog h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.dialog fieldset { border: 1px solid var(--line); border-radius: var(--radius-md); margin: 0 0 10px; padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.dialog legend { padding: 0 4px; font-weight: 500; }
+.dialog label { display: flex; gap: 8px; align-items: center; }
+
 .ask-empty { max-width: 520px; margin: 14vh auto 0; text-align: center; }
 .ask-empty .mark { display: block; margin: 0 auto 18px; }
 .ask-empty h1 { color: var(--text); font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; }
