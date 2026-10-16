@@ -67,7 +67,8 @@ log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
 # arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM function,
 # freeform or off: `--apply-patch FORM`, spec §22), `exec-tool-FORM` (FORM function or freeform:
-# `--exec-tool FORM`, spec §23), or several of these joined with `+`
+# `--exec-tool FORM`, spec §23), `drop-outputs` (drop-first compaction: `--drop-old-outputs`,
+# compaction spec §13), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -81,6 +82,8 @@ arm_flags() {
             apply-patch*|apply_patch*) echo "❌ Arm $1: write the apply_patch arm as apply-patch-function, -freeform or -off." >&2; return 2 ;;
             exec-tool-function|exec-tool-freeform) flags="$flags --exec-tool ${part#exec-tool-}" ;;
             exec-tool*|exec_tool*) echo "❌ Arm $1: write the Code Mode arm as exec-tool-function or exec-tool-freeform." >&2; return 2 ;;
+            drop-outputs) flags="$flags --drop-old-outputs" ;;
+            drop-*|drop_*) echo "❌ Arm $1: write the drop-first compaction arm as drop-outputs." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
@@ -175,6 +178,18 @@ start() {
         ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
         if ! grep -q -a DREAMFERENCE_MIGHTLING_EXEC_TOOL "$ling"; then
             echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_EXEC_TOOL: rebuild it (\`ling-admin codex build\`) from a commit that has the Code Mode translation."; exit 1
+        fi ;;
+    esac
+    case "$ARMS" in *drop-outputs*)
+        if ! grep -q -- '"--drop-old-outputs"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
+            echo "❌ $WT does not have --drop-old-outputs: pin REF to a commit that has it."; exit 1
+        fi
+        # The arm only sets the launcher's switch (DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS); a `ling`
+        # built without patch 0026 ignores it and summarises in both arms: the night would measure
+        # the record arm twice.
+        ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
+        if ! grep -q -a DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS "$ling"; then
+            echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS: rebuild it (\`ling-admin codex build\`) from a commit that has drop-first compaction."; exit 1
         fi ;;
     esac
     # The universal code index needs codebase-memory-mcp beside ling-code in Mightling's install

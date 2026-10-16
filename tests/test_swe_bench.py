@@ -35,7 +35,8 @@ from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLL
                                                           SCRUB_SCRIPT, TASK_RULES)
 from dreamference.swe_bench.swe_bench_instance_run import RESTART_DIFF, RESTART_PREAMBLE, REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
-from dreamference.swe_bench.swe_bench_runner import APPLY_PATCH_ENV, BUILT_IN_PROMPTS, EXEC_TOOL_ENV, RUN_NAME
+from dreamference.swe_bench.swe_bench_runner import (APPLY_PATCH_ENV, BUILT_IN_PROMPTS, DROP_OLD_OUTPUTS_ENV,
+                                                      EXEC_TOOL_ENV, RUN_NAME)
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -249,6 +250,20 @@ class FakeDocker:
             process = FakeProcess(0, hang=True)
             self.processes.append(process)
             return process
+        if box["env"].get(DROP_OLD_OUTPUTS_ENV) == "1":
+            # What the leaf crate and Codex write with the drop arm on: a drop that replaced a
+            # summary, one declined, and the compaction after it, 98 s after the last line more
+            # than 2 s before it.
+            log = box["scratch"] / "codex-home" / "masking" / "dropped" / "log.jsonl"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(json.dumps({"accepted": True, "outputs": 42}) + "\n"
+                           + json.dumps({"accepted": False, "outputs": 3}) + "\nnot json\n")
+            rollout = box["scratch"] / "codex-home" / "sessions" / "2026" / "10" / "13" / "rollout-2026-10-13T00-00-00-fake.jsonl"
+            rollout.parent.mkdir(parents=True, exist_ok=True)
+            rollout.write_text("".join(json.dumps(record) + "\n" for record in (
+                {"timestamp": "2026-10-13T01:00:00.000Z", "type": "response_item", "payload": {"type": "message"}},
+                {"timestamp": "2026-10-13T01:01:37.000Z", "type": "event_msg", "payload": {"type": "token_count"}},
+                {"timestamp": "2026-10-13T01:01:38.000Z", "type": "compacted", "payload": {"message": "summary"}})))
         form = box["env"].get(APPLY_PATCH_ENV)
         if form in ("function", "freeform") and mode == "change":
             rollout = box["scratch"] / "codex-home" / "sessions" / "2026" / "10" / "02" / "rollout-2026-10-02T00-00-00-fake.jsonl"
@@ -3241,3 +3256,63 @@ def test_the_exec_tool_arm_is_kept_on_resume_told_apart_by_against_and_parsed(be
     for form in ("off", "auto", "custom"):
         with pytest.raises(SystemExit):
             parser.parse_args(["swe-bench", "run", "--exec-tool", form, "--name", "z"])
+
+
+# -- the drop-first compaction arm (`--drop-old-outputs`, compaction spec §13) ---------------------
+
+def test_the_drop_arm_sets_the_launchers_switch_and_the_report_counts_compactions_and_drops(bench, monkeypatch):
+    monkeypatch.delenv(DROP_OLD_OUTPUTS_ENV, raising=False)
+    assert run(bench, name="drop", instances=["acme__widget-1"], drop_old_outputs=True) == 0
+    env, _ = container_env(bench)
+    assert env[DROP_OLD_OUTPUTS_ENV] == "1"
+    store = SweBenchRunStore("drop")
+    assert store.manifest()["drop_old_outputs"] is True
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done"
+    assert state["compaction"] == {"compactions": 1, "seconds": 98.0, "drops": 1, "declined": 1, "dropped_outputs": 42}
+    assert ("Compaction          drop old outputs on: 1 compaction(s) in 1 of 1 finished instance(s), 1 min 38 s "
+            "compacting; 1 drop(s) instead of a summary (42 output(s)), 1 declined") in SweBenchReport.render(store)
+    # Without the flag the variable is not set, and the compactions are still counted.
+    bench["docker"].calls.clear()
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert DROP_OLD_OUTPUTS_ENV not in env
+    plain = SweBenchRunStore("plain")
+    assert plain.manifest()["drop_old_outputs"] is False
+    assert plain.state("acme__widget-1")["compaction"] == {"compactions": 0, "seconds": 0.0, "drops": 0,
+                                                           "declined": 0, "dropped_outputs": 0}
+    assert ("Compaction          drop old outputs off: 0 compaction(s) in 0 of 1 finished instance(s), 0 s compacting"
+            in SweBenchReport.render(plain))
+
+
+def test_untimed_compactions_are_counted_without_seconds(bench):
+    bench["docker"].default_mode = "compacting"
+    assert run(bench, instances=["acme__widget-1"], restart_after_compactions=3) == 0
+    record = SweBenchRunStore("r1").state("acme__widget-1")["compaction"]
+    # The fake writes `compacted` records with no timestamp: counted, but no time measured.
+    assert record["compactions"] >= 3 and record["seconds"] == 0.0 and record["drops"] == 0
+
+
+def test_the_drop_arm_is_told_apart_by_against_and_parsed(bench, monkeypatch):
+    monkeypatch.delenv(DROP_OLD_OUTPUTS_ENV, raising=False)
+    run(bench, name="plain", instances=["acme__widget-1"])
+    assert run(bench, name="drop", instances=["acme__widget-1"], drop_old_outputs=True) == 0
+    for name in ("plain", "drop"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    assert "differs: drop_old_outputs: True | False" in SweBenchReport.against(SweBenchRunStore("drop"), SweBenchRunStore("plain"))
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["drop_old_outputs"]
+    manifest_path.write_text(json.dumps(manifest))
+    # A run made before the option existed ran without it.
+    assert "drop_old_outputs" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    assert "differs: drop_old_outputs: True | False" in SweBenchReport.against(SweBenchRunStore("drop"), SweBenchRunStore("plain"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--drop-old-outputs", "--name", "x"])) == 0
+    assert seen["drop_old_outputs"] is True
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["drop_old_outputs"] is False

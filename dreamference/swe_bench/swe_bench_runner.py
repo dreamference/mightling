@@ -53,6 +53,9 @@ AUTO_APPLY_PATCH: Final[str] = "auto"
 # (ling-rs/src/exec_tool.rs, `ENV`), and the manifest value for a run that left the launcher's choice alone.
 EXEC_TOOL_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_EXEC_TOOL"
 AUTO_EXEC_TOOL: Final[str] = "auto"
+# The drop-first compaction arm (compaction spec §13): the launcher's switch (ling-rs/src/compaction.rs,
+# `DROP_ENV`), set to this value only when the run asks.
+DROP_OLD_OUTPUTS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
 
@@ -204,7 +207,8 @@ class SweBenchRunner:
                        task_rules: Optional[List[str]] = None, review_turn: bool = False,
                        refine_version: str = "v1",
                        hooks: Optional[List[str]] = None, restart_after_compactions: int = 0,
-                       apply_patch: Optional[str] = None, exec_tool: Optional[str] = None) -> Dict[str, Any]:
+                       apply_patch: Optional[str] = None, exec_tool: Optional[str] = None,
+                       drop_old_outputs: bool = False) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -269,6 +273,7 @@ class SweBenchRunner:
             "hooks": sorted(set(hooks or [])),
             "apply_patch": apply_patch or AUTO_APPLY_PATCH,
             "exec_tool": exec_tool or AUTO_EXEC_TOOL,
+            "drop_old_outputs": bool(drop_old_outputs),
             **({"hooks_gate_sha256": SweBenchHooks.gate_digest()} if hooks else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
@@ -340,7 +345,8 @@ class SweBenchRunner:
             hooks: Optional[List[str]] = None,
             restart_after_compactions: int = 0,
             apply_patch: Optional[str] = None,
-            exec_tool: Optional[str] = None) -> int:
+            exec_tool: Optional[str] = None,
+            drop_old_outputs: bool = False) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -393,6 +399,10 @@ class SweBenchRunner:
                 through `DREAMFERENCE_MIGHTLING_EXEC_TOOL`: `function` (translated) or `freeform`
                 (Codex's custom tool, which SGLang drops); None leaves the launcher's choice,
                 `function` on SGLang and vLLM (spec §23). A new run only, like `code_index`.
+            drop_old_outputs: Drop-first compaction in every session, through
+                `DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS`: when a session is about to compact, its
+                older tool outputs are dropped first and the summary runs only if that is not
+                enough (compaction spec §13). Off by default. A new run only, like `code_index`.
             hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
                 holds the first edit once until the files and functions the issue names have
                 been read, and the first stop once until its example has been run; spec §20).
@@ -498,7 +508,8 @@ class SweBenchRunner:
                                                   prompt, mask, strip_names, refine, task_rules,
                                                   review_turn, refine_version, hooks,
                                                   restart_after_compactions=restart_after_compactions,
-                                                  apply_patch=apply_patch, exec_tool=exec_tool)
+                                                  apply_patch=apply_patch, exec_tool=exec_tool,
+                                                  drop_old_outputs=drop_old_outputs)
                     store.write_manifest(manifest)
                 elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                     print(f"❌ Run {store.name} was started with another ling build or model "
@@ -529,6 +540,10 @@ class SweBenchRunner:
                 run_exec_tool = str(manifest.get("exec_tool") or AUTO_EXEC_TOOL)
                 if run_exec_tool != AUTO_EXEC_TOOL:
                     extra_env[EXEC_TOOL_ENV] = run_exec_tool
+                # The drop-first compaction arm (compaction spec §13): the launcher's switch, only
+                # when the run asks. A run made before the option existed has no key and ran without.
+                if manifest.get("drop_old_outputs"):
+                    extra_env[DROP_OLD_OUTPUTS_ENV] = "1"
                 # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
                 # the text a later session of the same instance would start from.
                 custom_prompt = cls.prompt_file(run_prompt)
