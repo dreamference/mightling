@@ -62,6 +62,14 @@ ARMS=${ARMS:-"default tests-v2"}
 # Night 10 (spec §16): `turn-end-compaction-off` against `turn-end-compaction-on`, both named, since
 # in `exec` Codex's turn-end key is off unless an arm pins it (`--turn-end-compaction`): `default`
 # would be a second off arm, so `start` refuses a night where only one arm names it.
+# Best-of-N (night 11, backlog item 6): BEST_OF=N runs the one arm in ARMS N times on the same list
+# (`<PREFIX>-<arm>-1` .. `-N`, each graded), then chooser v1 (scripts/swe_bench_chooser_test.py,
+# whose chooser is Night Shift's NightShiftChooser) over the N runs against CHOOSER_SERVER with
+# CHOOSER_SEED (v1's measured seed), and reports best-of-N against the first run
+# (scripts/swe_bench_best_of.py). 1, the default, is the two-arm night.
+BEST_OF=${BEST_OF:-1}
+CHOOSER_SERVER=${CHOOSER_SERVER:-http://localhost:8000}
+CHOOSER_SEED=${CHOOSER_SEED:-20261013}
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
@@ -133,6 +141,28 @@ smoke() {
     done
 }
 
+# The chooser's smoke (BEST_OF > 1): one judge call through Night Shift's chooser against
+# CHOOSER_SERVER, which must come back with both ratings read. Without it a judge that cannot be
+# read would score every disputed task as a tie, and the night would say nothing about the chooser.
+judge_smoke() {
+    echo "🔥 Smoke check of chooser v1's judge against $CHOOSER_SERVER..."
+    ( cd "$WT" && PYTHONPATH="$WT" timeout 20m "$PY" -c '
+import sys
+from dreamference.night_shift.chooser_candidate import ChooserCandidate
+from dreamference.night_shift.night_shift_chooser import NightShiftChooser
+log = []
+compare = NightShiftChooser.server_judge(sys.argv[1], "`add(2, 3)` returns -1 instead of 5.", seed=int(sys.argv[2]), log=log)
+right = ChooserCandidate("a1", "--- a/calc.py\n+++ b/calc.py\n@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n", ["a1"])
+wrong = ChooserCandidate("a2", "--- a/calc.py\n+++ b/calc.py\n@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return abs(a - b)\n", ["a2"])
+rated = compare(right, wrong)
+print("   ratings", rated, "/", log[-1].get("error") or "answer read")
+sys.exit(0 if rated is not None else 1)' "$CHOOSER_SERVER" "$CHOOSER_SEED" )
+    if [ $? -ne 0 ]; then
+        echo "❌ Night $NIGHT not started: chooser v1's judge got no readable answer from $CHOOSER_SERVER."
+        return 1
+    fi
+}
+
 start() {
     if systemctl --user is-active --quiet "$LIVE_UNIT"; then
         echo "❌ $LIVE_UNIT is still running; start night 1 once it has finished."; exit 1
@@ -156,6 +186,11 @@ start() {
     for arm in $ARMS; do
         arm_flags "$arm" > /dev/null || exit 2
     done
+    if [ "$BEST_OF" -gt 1 ]; then
+        [ "$(echo $ARMS | wc -w)" -eq 1 ] || { echo "❌ BEST_OF=$BEST_OF runs one arm N times: ARMS names one arm, not \"$ARMS\"."; exit 2; }
+        [ -f "$WT/scripts/swe_bench_best_of.py" ] && grep -q 'night_shift_chooser import' "$WT/scripts/swe_bench_chooser_test.py" \
+            || { echo "❌ $WT does not run chooser v1 from Night Shift's package: pin REF to a commit that has it."; exit 1; }
+    fi
     case "$ARMS" in *turn-end-compaction-*)
         if ! grep -q -- '"--turn-end-compaction"' "$WT/dreamference/swe_bench/swe_bench_command.py"; then
             echo "❌ $WT does not have --turn-end-compaction: pin REF to a commit that has it."; exit 1
@@ -234,6 +269,7 @@ start() {
     fi
     # Every arm runs one real task first; nothing below happens unless each one ran.
     smoke || exit 1
+    if [ "$BEST_OF" -gt 1 ]; then judge_smoke || exit 1; fi
     # A finished or failed night keeps its folder; this one starts clean.
     if [ -e "$D/done" ] || [ -e "$D/failed" ]; then
         aside="$D.$(date +%Y%m%d-%H%M%S)"
@@ -243,9 +279,15 @@ start() {
     { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\nnodes = "none"\n' "$RESERVE_GB"
       [ -n "$TASK_TIMEOUT" ] && printf 'task_timeout = "%s"\n' "$TASK_TIMEOUT"; } \
         > "$D/dreamference.toml"
+    if [ "$BEST_OF" -gt 1 ]; then
+        what="best-of-$BEST_OF (chooser v1) against a single run, $ARMS arm"
+    else
+        what=$(echo $ARMS | sed 's/ / against /')
+    fi
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
-        --description="SWE-bench night $NIGHT: $(echo $ARMS | sed 's/ / against /')" \
+        --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
+        --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
 }
@@ -261,12 +303,61 @@ fail() {
     exit "$rc"
 }
 
+# BEST_OF > 1: the one arm N times, then chooser v1 over the N runs and the report against run 1.
+best_of_run() {
+    local arm name extra k round names=""
+    set -- $ARMS
+    [ $# -eq 1 ] || fail "BEST_OF=$BEST_OF with arms [$ARMS] (one arm)" 2
+    arm=$1
+    arm_flags "$arm" > /dev/null || fail "arm $arm" 2
+    name=$(arm_name "$arm")
+    extra=$(arm_flags "$arm")
+    [ "$REFINE" = 1 ] && extra="$extra --refine"
+    for k in $(seq 1 "$BEST_OF"); do
+        round="$PREFIX-$name-$k"
+        log "round $round (attempt $k of $BEST_OF)"
+        admin swe-bench run --subset "$LIST" --name "$round" --code-index universal --mask off \
+            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
+        rc=$?
+        log "$round finished ($rc)"
+        df -h / | tail -1
+        [ "$rc" -eq 0 ] || fail "round $round" "$rc"
+        if admin swe-bench report "$round" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet'; then
+            admin swe-bench report "$round" | grep '^INCOMPLETE'
+            fail "round $round (instances not run)" 1
+        fi
+        admin swe-bench report "$round" > "$D/report-$name-$k.txt"
+        [ "$k" -gt 1 ] && admin swe-bench report "$round" --against "$PREFIX-$name-1" > "$D/$name-$k-against-$name-1.txt"
+        names="$names,$round"
+    done
+    names=${names#,}
+    # The rounds' gate holds have ended with them, so the judge reaches the server like anyone.
+    log "chooser v1 over $names (server $CHOOSER_SERVER, seed $CHOOSER_SEED)"
+    "$PY" "$WT/scripts/swe_bench_chooser_test.py" --server "$CHOOSER_SERVER" --runs "$names" \
+        --seed "$CHOOSER_SEED" --out "$D/chooser-v1" > "$D/chooser-v1.txt" 2>&1
+    rc=$?
+    cat "$D/chooser-v1.txt"
+    log "chooser v1 finished ($rc)"
+    [ "$rc" -eq 0 ] || fail "chooser v1" "$rc"
+    "$PY" "$WT/scripts/swe_bench_best_of.py" --runs "$names" --chooser "$D/chooser-v1/summary.json" \
+        --json "$D/best-of-$BEST_OF.json" > "$D/best-of-$BEST_OF-against-single.txt"
+    rc=$?
+    [ "$rc" -eq 0 ] || fail "best-of report" "$rc"
+    cat "$D/best-of-$BEST_OF-against-single.txt"
+    touch "$D/done"
+    log "all done; reports in $D"
+}
+
 run() {
     export PYTHONPATH="$WT"
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
+    if [ "$BEST_OF" -gt 1 ]; then
+        best_of_run
+        return
+    fi
     # ARMS names the two arms: the record arm first, then the candidate (spelling: `arm_flags`).
     set -- $ARMS
     record=$1; candidate=$2
