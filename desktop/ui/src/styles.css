@@ -278,6 +278,9 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .queued-text { flex: 1; min-width: 0; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .other-follow-up { font-size: 12px; }
 .picker-anchor { position: relative; display: inline-flex; }
+.plan-chip { cursor: pointer; border: 1px solid transparent; background: none; color: var(--muted); font-size: 13px; gap: 4px; padding: 3px 10px; }
+.plan-chip:hover { background: var(--hover); color: var(--text); }
+.plan-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .model-chip { cursor: pointer; border: none; background: none; color: var(--muted); font-size: 13px; gap: 4px; padding: 4px 8px; }
 .model-chip:hover { background: var(--hover); color: var(--text); }
 .picker { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 6; width: 300px; padding: 6px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-focus); display: flex; flex-direction: column; gap: 2px; }

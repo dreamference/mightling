@@ -420,3 +420,24 @@ test("3 threads: pins, attention and unread, sections, find, a ling:// link, a p
     await close();
   }
 });
+
+test("5 plan mode: the Plan chip and /plan send the turn in Plan mode", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await page.getByRole("button", { name: "Plan" }).click();
+    await expect(page.getByRole("button", { name: "Plan" })).toHaveAttribute("aria-pressed", "true");
+    await composer.fill("Plan how to serve the hero image in three sizes.");
+    await shoot("5-plan-mode.png");
+    await composer.press("Enter");
+    await expect.poll(() => (received(home).find((m) => m.method === "turn/start")?.params?.collaborationMode as { mode?: string } | undefined)?.mode).toBe("plan");
+    // /plan switches it off again for the next turn.
+    await composer.fill("/plan");
+    await composer.press("Enter");
+    await expect(page.getByRole("button", { name: "Plan" })).toHaveAttribute("aria-pressed", "false");
+  } finally {
+    await close();
+  }
+});

@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  PromptHistory, activeTrigger, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
+  PromptHistory, activeTrigger, collaborationMode, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
   lastUserTurn, matchCommands, matchSkills, mentionPath, parseSlash, rememberModel, userTexts,
 } from "./composer";
 import { DEFAULT_PREFS, sanitize } from "./prefs";
@@ -186,5 +186,18 @@ describe("editing, forking and the picker", () => {
     expect(effortFor(null, "high")).toBeNull();
     expect(rememberModel(["a", "b", "c", "d", "e"], "c")).toEqual(["c", "a", "b", "d", "e"]);
     expect(rememberModel(["a", "b", "c", "d", "e"], "f")).toEqual(["f", "a", "b", "c", "d"]);
+  });
+});
+
+describe("Plan mode", () => {
+  it("rides on turn/start as the plan collaboration mode with the served model and effort", async () => {
+    expect(collaborationMode("default", "qwen", "high")).toBeNull();
+    expect(collaborationMode("plan", null, null)).toBeNull();
+    const mode = collaborationMode("plan", "qwen", "high");
+    expect(mode).toEqual({ mode: "plan", settings: { model: "qwen", reasoning_effort: "high", developer_instructions: null } });
+    const server = new ScriptedServer({ "turn/start": () => ({ turn: { id: "x" } }) });
+    await sendMessage(server.client, { threadId: "t", activeTurnId: null, input: [text("plan the migration")], followUp: "steer", collaborationMode: mode });
+    expect(server.sent[0].params).toMatchObject({ collaborationMode: { mode: "plan" } });
+    expect(parseSlash("/plan move the cache")).toMatchObject({ command: { name: "plan" }, args: "move the cache" });
   });
 });

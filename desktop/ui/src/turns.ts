@@ -5,6 +5,7 @@
 // a fork copies the thread. Every method here is in ling-rs/web/policy.json.
 
 import type { RpcClient } from "./rpc";
+import type { CollaborationMode } from "./protocol/CollaborationMode";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { Thread } from "./protocol/v2/Thread";
@@ -24,6 +25,8 @@ export interface SendOptions {
   model?: string | null;
   /** The folder the turn runs in, when it is not the thread's own (a hand-off, DESKTOP_PARITY §2.6). */
   cwd?: string | null;
+  /** Plan mode (§2.3), from composer.ts `collaborationMode`. */
+  collaborationMode?: CollaborationMode | null;
 }
 
 export type Sent = "started" | "steered" | "queued";
@@ -51,6 +54,7 @@ export async function sendMessage(client: RpcClient, options: SendOptions): Prom
     ...(options.effort ? { effort: options.effort } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.collaborationMode ? { collaborationMode: options.collaborationMode } : {}),
   });
   return "started";
 }
