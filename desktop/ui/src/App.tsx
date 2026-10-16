@@ -32,13 +32,14 @@ import type { Thread } from "./protocol/v2/Thread";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
 import {
-  contextUse, initialState, permissionChoices, projects, reduce,
+  contextUse, initialState, isWorking, permissionChoices, projects, reduce, subagents, workingCount,
   type PendingRequest, type ThreadView, type TurnView,
 } from "./store";
 import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./BottomPanel";
 import { CommandMenu } from "./CommandMenu";
 import { ExtensionsView, type ExtensionsTab } from "./ExtensionsView";
 import { ReviewPane } from "./ReviewPane";
+import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
@@ -129,6 +130,7 @@ export function App() {
   const [planAvailable, setPlanAvailable] = useState(false);
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
+  const [agentsHidden, setAgentsHidden] = useState(false);
   const [nightUnseen, setNightUnseen] = useState(0);
   const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
@@ -605,6 +607,12 @@ export function App() {
       notice(error);
     }
   };
+
+  /** The agent's settings, read and written through the server (Settings › Memories). */
+  const readConfig = useCallback(async () => ((await client.request("config/read", {})) as { config: Record<string, unknown> }).config, [client]);
+  const writeConfig = useCallback(async (keyPath: string, value: unknown) => {
+    await client.request("config/value/write", { keyPath, value: value as never, mergeStrategy: "upsert" });
+  }, [client]);
 
   /** Settings › Archived threads. */
   const listArchived = useCallback(async (): Promise<Thread[]> => ((await client.request("thread/list", { archived: true, limit: 200 })) as { data: Thread[] }).data, [client]);
@@ -1167,6 +1175,10 @@ export function App() {
           setDrawer(true);
           requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
           return;
+        case "agents":
+          setAgentsHidden(false);
+          if (selected && subagents(state, selected.thread.id).length === 0) setInfo({ title: "Subagents", body: <p className="empty small">This thread has started no subagents.</p> });
+          return;
         case "night": {
           const words = args.match(/^add\s+([\s\S]+)$/);
           if (words) {
@@ -1517,6 +1529,7 @@ export function App() {
               onCreateBranch={createBranch} branchPrefix={prefs.branchPrefix} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
           ) : null}
           {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => { if (reviewOpen && prefs.layout === "chat") updatePrefs({ layout: "split" }); else setReviewOpen(!reviewOpen); }}><Icon name="fileDiff" size={16} /></button> : null}
+          {workingCount(state) > 1 ? <span className="chip optional" title="Threads and subagents working at once share the one model server">{workingCount(state)} working</span> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
           {usage ? (
             <span className="chip optional" title={`${usage.used.toLocaleString()} of ${usage.window.toLocaleString()} tokens`}>
@@ -1578,6 +1591,14 @@ export function App() {
 
         {view === "work" && !selected && newBranches && bridge.git.available() ? (
           <NewThreadOptions choice={newChoice} onChange={setNewChoice} branches={newBranches} environments={newEnvs} />
+        ) : null}
+        {selected && !agentsHidden ? (
+          <SubagentsPanel agents={subagents(state, selected.thread.id)} working={(id) => isWorking(state, id)}
+            onOpen={(id) => void openThread(id)} onStop={(id) => {
+              const active = state.threads[id]?.activeTurnId;
+              if (active) client.request("turn/interrupt", { threadId: id, turnId: active }).catch(notice);
+              else notice("Open the subagent to stop it: this window has not seen its turn start.");
+            }} onClose={() => setAgentsHidden(true)} />
         ) : null}
         {canCompose ? (
           <Composer
@@ -1650,7 +1671,8 @@ export function App() {
         />
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
-        listArchived={listArchived} unarchive={unarchiveThread} notice={notice} /> : null}
+        listArchived={listArchived} unarchive={unarchiveThread} notice={notice}
+        readConfig={readConfig} writeConfig={writeConfig} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
           seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
@@ -1796,6 +1818,10 @@ function Item({ item }: { item: ThreadItem }) {
       return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
     case "contextCompaction":
       return <div className="item note">Earlier turns were compacted.</div>;
+    case "collabAgentToolCall":
+      return <div className="item note">Subagents: {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
+    case "subAgentActivity":
+      return <div className="item note">Subagent {item.agentPath}: {item.kind}</div>;
     case "webSearch":
       return <div className="item note">Searched the web.</div>;
     default:
