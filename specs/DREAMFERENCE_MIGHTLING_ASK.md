@@ -606,9 +606,9 @@ No container, live service, model server or real home was touched.
   - A failure, or an exception from Docker, is a warning naming the command to retry (`ling-admin images start`, `ling-admin voice start`). It never blocks the model start; a test runs `server start` with both failing and checks that the load still runs.
   - conftest stubs both starts, as it stubs the Google service's (`REAL_IMAGE_SEARCH_START`, `REAL_SPEECH_START`).
 - **`audit egress --web` has an image search turn** (§9):
-  - Where image search is set up (its secret file exists and a `ling-admin` is found), the scratch home is laid out as a node, with a copy of the secret and a `ling-admin` link, so the traced session is offered the tool.
+  - Where image search is set up (its secret file exists and a `ling-admin` is found), the scratch home is laid out as a node, with a copy of the secret and a `ling-admin` that runs the code under audit (fixed 2026-10-16: a link to `~/.local/bin/ling-admin` ran main's environment, which has no `images mcp`), so the traced session is offered the tool; that server is first asked for its tools, and one that cannot start is reported as `not asked: …`.
   - A second question asks for one picture, and its MCP server is traced with the app-server.
-  - Port 8768 is on the allowlist of every session, and the report and the JSON say `Image search turn: answered with an image | answered, without an image | no answer | skipped: …`.
+  - Port 8768 is on the allowlist of every session, and the report and the JSON say `Image search turn: answered with an image from the image search service (<id>.jpg) | answered with an image line, but … not in the image search store | answered, without an image | not asked: … | no answer | skipped: …`; an image counts only when the store holds it. `ling-admin images status` asks the sessions' `~/.local/bin/ling-admin` the same way and says `offered but broken` when it cannot serve the tool.
   - The turn is reported, not judged: the verdict stays the egress one.
   - Not run against the real sidecar here (§19.5).
 - **The old docs URL:** `docs/web-chat.md` is a stub that sends the browser to `web/` (a meta refresh and a link, out of the nav and the search), because the docs workflow installs no redirect plugin. `mkdocs build --strict` with the workflow's pins passes.

@@ -318,3 +318,32 @@ def test_server_start_warns_and_still_loads_the_model_when_a_sidecar_fails(monke
     out = capsys.readouterr().out
     assert "ImageSearchSidecar could not start. The model starts anyway; retry with `ling-admin images start`." in out
     assert "SpeechSidecar could not start. The model starts anyway; retry with `ling-admin voice start`." in out
+
+
+def test_images_status_names_a_session_ling_admin_that_cannot_serve_the_tool(tmp_path, monkeypatch):
+    # The launcher declares `~/.local/bin/ling-admin images mcp` whenever the link exists; one to an
+    # installation without `images mcp` dropped the tool from every session in silence (2026-10-15).
+    from dreamference.audit import EgressAudit
+
+    secret = tmp_path / "secret"
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_SECRET_FILE", str(secret))
+    link = tmp_path / "bin" / "ling-admin"
+    monkeypatch.setattr(image_search_sidecar, "SESSION_ADMIN_LINK", str(link))
+    assert "not set up" in ImageSearchSidecar.tool_line()
+    secret.write_text("s3cret")
+    assert "is missing" in ImageSearchSidecar.tool_line()
+    link.parent.mkdir()
+    link.write_text("#!/bin/sh\necho \"ling-admin: error: argument command: invalid choice: 'images'\" >&2\nexit 2\n")
+    link.chmod(0o755)
+    line = ImageSearchSidecar.tool_line()
+    assert line.startswith("Tool: offered but broken:") and "invalid choice: 'images'" in line and "codex build" in line
+    EgressAudit.write_admin(str(link))
+    assert ImageSearchSidecar.tool_line() == "Tool: image_search is offered to ling sessions on this machine"
+
+
+def test_the_probe_reads_only_a_tool_list_naming_image_search(tmp_path):
+    other = tmp_path / "other"
+    other.write_text('#!/bin/sh\nread line\necho \'{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"gmail_search"}]}}\'\n')
+    other.chmod(0o755)
+    assert "does not serve the image_search tool (exit 0)" in ImageSearchMcp.probe(str(other))
+    assert "did not run" in ImageSearchMcp.probe(str(tmp_path / "absent"))

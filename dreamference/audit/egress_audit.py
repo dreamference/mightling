@@ -301,6 +301,11 @@ class EgressAudit:
         env.update({"HOME": user_home, "XDG_RUNTIME_DIR": run_dir})
         image_search = cls.prepare_image_search(user_home)
         cls.image_turn = "skipped: image search is not set up on this machine (`ling-admin images start`)"
+        if image_search:
+            problem = cls.image_tool_problem(user_home, env)
+            if problem:
+                image_search = False
+                cls.image_turn = f"not asked: the image_search tool's server would not start: {problem}"
         port = cls.free_port()
         server_file = os.path.join(home, "web", "server.json")
         try:
@@ -336,26 +341,38 @@ class EgressAudit:
         return replied
 
     @classmethod
-    def admin_executable(cls) -> Optional[str]:
+    def write_admin(cls, path: str) -> None:
         """
-        Returns:
-            Optional[str]: The `ling-admin` that serves the `image_search` tool: the link `codex
-            build` makes, else the one beside this interpreter, else the one on PATH.
+        Writes the `ling-admin` the traced session starts as the `image_search` tool's server: this
+        interpreter running this `dreamference`, the code under audit. Not a link to
+        `~/.local/bin/ling-admin`: that runs whichever installation `codex build` last linked, and
+        on 2026-10-15 it was main's environment, which has no `images mcp`, so the tool never
+        started, the model answered without an image and the sidecar was never asked.
+
+        Args:
+            path (str): Where the launcher looks for it: `.local/bin/ling-admin` in the scratch home.
         """
-        for candidate in (os.path.expanduser("~/.local/bin/ling-admin"),
-                          os.path.join(os.path.dirname(sys.executable), "ling-admin"),
-                          shutil.which("ling-admin")):
-            if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return os.path.realpath(candidate)
-        return None
+        import shlex
+
+        import dreamference
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(dreamference.__file__)))
+        # `-I`: no PYTHONPATH, no user site and not the working directory, so nothing but `root`
+        # decides which `dreamference` runs.
+        code = (f"import sys; sys.path.insert(0, {root!r}); sys.argv[0] = 'ling-admin'; "
+                "from dreamference.cli import main; main()")
+        with open(path, "w") as handle:
+            handle.write(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -I -c {shlex.quote(code)} "$@"\n')
+        os.chmod(path, 0o755)
 
     @classmethod
     def prepare_image_search(cls, user_home: str) -> bool:
         """
         Lays out the scratch home so the traced session is offered `image_search`, as the launcher
         offers it on a node (`ling-rs/src/images.rs`): a node id, a copy of this machine's image
-        search secret (so the tool reaches the real sidecar) and a `ling-admin` link. Nothing is
-        laid out, and the turn is skipped, where image search was never set up.
+        search secret (so the tool reaches the real sidecar) and the `ling-admin` of the code under
+        audit (`write_admin`). Nothing is laid out, and the turn is skipped, where image search was
+        never set up.
 
         Args:
             user_home (str): The session's scratch `HOME`.
@@ -366,8 +383,7 @@ class EgressAudit:
         import uuid
 
         from dreamference.chat.image_search_sidecar import IMAGE_SEARCH_SECRET_FILE
-        admin = cls.admin_executable()
-        if not admin or not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
+        if not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
             return False
         config = os.path.join(user_home, ".config", "dreamference")
         secret = os.path.join(config, "image-search", "secret")
@@ -379,10 +395,40 @@ class EgressAudit:
             with open(os.path.join(config, "node-id"), "w") as handle:
                 handle.write(f"{uuid.uuid4()}\n")
             os.makedirs(bin_dir, exist_ok=True)
-            os.symlink(admin, os.path.join(bin_dir, "ling-admin"))
+            cls.write_admin(os.path.join(bin_dir, "ling-admin"))
         except OSError:
             return False
         return True
+
+    @classmethod
+    def image_tool_problem(cls, user_home: str, env: Dict[str, str]) -> str:
+        """
+        Starts the scratch home's `ling-admin images mcp` as Codex will and asks for its tools, so
+        a server that cannot start is named instead of showing up as an answer without an image.
+        `tools/list` makes no connection, so the trace is not touched.
+
+        Args:
+            user_home (str): The session's scratch `HOME`, laid out by `prepare_image_search`.
+            env (Dict[str, str]): The session's environment.
+
+        Returns:
+            str: "" when the server lists `image_search`, else why not.
+        """
+        from dreamference.chat.image_search_mcp import ImageSearchMcp
+        return ImageSearchMcp.probe(os.path.join(user_home, ".local", "bin", "ling-admin"), env)
+
+    @classmethod
+    def stored_images(cls) -> set:
+        """
+        Returns:
+            set: The image ids in this machine's image search store. Only the service writes there
+            (the service logs no request), so a new one, or one an answer names, shows it was asked.
+        """
+        from dreamference.chat.image_search_sidecar import IMAGE_STORE_DIR
+        try:
+            return {name[:-4] for name in os.listdir(IMAGE_STORE_DIR) if name.endswith(".jpg")}
+        except OSError:
+            return set()
 
     @classmethod
     def _image_turn(cls, mightling_bin: str, port: int, repo: str, env: Dict[str, str]) -> str:
@@ -390,8 +436,12 @@ class EgressAudit:
         Asks the traced server the image search question, untraced, as the first one was asked.
 
         Returns:
-            str: What came of it, for the report.
+            str: What came of it, for the report. "answered with an image" only when the answer
+            names an image the image search service holds: the model cannot make one up.
         """
+        import re
+
+        before = cls.stored_images()
         try:
             ask = subprocess.run([mightling_bin, "web", "ask", "--port", str(port), IMAGE_PROMPT], cwd=repo, env=env,
                                  stdin=subprocess.DEVNULL, capture_output=True, text=True,
@@ -400,7 +450,16 @@ class EgressAudit:
             return "no answer"
         if ask.returncode != 0 or not ask.stdout.strip():
             return "no answer"
-        return "answered with an image" if "](/images/" in ask.stdout else "answered, without an image"
+        after = cls.stored_images()
+        new = len(after - before)
+        stored = f"; the image search service stored {new} new image{'s' if new != 1 else ''}" if new else ""
+        named = re.findall(r"\]\(/images/([0-9a-f]{16})\.jpg\)", ask.stdout)
+        if not named:
+            return f"answered, without an image{stored}"
+        if any(image in after for image in named):
+            return f"answered with an image from the image search service ({named[0]}.jpg){stored}"
+        return (f"answered with an image line, but {named[0]}.jpg is not in the image search store: "
+                f"the service did not answer it{stored}")
 
     @classmethod
     def free_port(cls) -> int:

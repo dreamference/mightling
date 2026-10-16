@@ -38,6 +38,8 @@ IMAGE_SEARCH_DATA_DIR: Final[str] = os.path.expanduser("~/.config/dreamference/i
 IMAGE_SEARCH_SECRET_FILE: Final[str] = os.path.join(IMAGE_SEARCH_DATA_DIR, "secret")
 IMAGE_STORE_DIR: Final[str] = os.path.join(IMAGE_SEARCH_DATA_DIR, "data", "images")
 STAGED_SERVICE: Final[str] = "service.py"
+# The `ling-admin` the launcher declares as the tool's server (`ling-rs/src/images.rs` ADMIN_LINK).
+SESSION_ADMIN_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-admin")
 
 # SearXNG as the sidecar network names it; it publishes only on loopback, so the network is the way.
 SEARXNG_CONTAINER_URL: Final[str] = f"http://{SEARXNG_CONTAINER_NAME}:8080"
@@ -349,7 +351,27 @@ class ImageSearchSidecar:
         except OSError:
             count = 0
         lines.append(f"Store: {IMAGE_STORE_DIR} ({count} images)")
-        set_up = os.path.isfile(IMAGE_SEARCH_SECRET_FILE)
-        lines.append("Tool: image_search is offered to ling sessions on this machine"
-                     if set_up else "Tool: not set up (run `ling-admin images start`)")
+        lines.append(cls.tool_line())
         return lines
+
+    @classmethod
+    def tool_line(cls) -> str:
+        """Says whether sessions get the `image_search` tool. Where it is set up, the `ling-admin`
+        sessions start is asked for its tools (`ImageSearchMcp.probe`, no connection made): the
+        launcher declares it whenever the link exists, and a link to an installation without
+        `images mcp` drops the tool from every session without a word.
+
+        Returns:
+            str: One line for `ling-admin images status`.
+        """
+        if not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
+            return "Tool: not set up (run `ling-admin images start`)"
+        if not os.path.isfile(SESSION_ADMIN_LINK):
+            return f"Tool: not offered: {SESSION_ADMIN_LINK} is missing (run `ling-admin codex build`)"
+        from dreamference.chat.image_search_mcp import ImageSearchMcp
+
+        problem = ImageSearchMcp.probe(SESSION_ADMIN_LINK)
+        if problem:
+            return (f"Tool: offered but broken: {problem}; {SESSION_ADMIN_LINK} points at "
+                    f"{os.path.realpath(SESSION_ADMIN_LINK)} (run `ling-admin codex build` from this installation)")
+        return "Tool: image_search is offered to ling sessions on this machine"
