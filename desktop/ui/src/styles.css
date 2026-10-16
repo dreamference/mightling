@@ -440,6 +440,22 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .command-label { font-weight: 500; white-space: nowrap; }
 .command-detail { flex: 1; min-width: 0; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Threads (DESKTOP_PARITY §2.1): pins, unread and attention, Recent, sections, find, pop-outs. */
+.thread-row.unread .thread-label { font-weight: 600; color: var(--text); }
+.thread-label .icon-svg { display: inline-block; margin-right: 4px; color: var(--faint); vertical-align: -1px; }
+.unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text); flex: none; margin: 0 6px; }
+.attention { flex: none; min-width: 16px; height: 16px; border-radius: var(--radius-pill); background: var(--danger); color: var(--on-accent); font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; margin: 0 4px; }
+.project.recents h2 { cursor: pointer; }
+.project-action.on { opacity: 1; color: var(--accent); }
+.row-actions .menu { right: 0; top: calc(100% + 2px); }
+.find-bar { display: flex; align-items: center; gap: 6px; margin: 4px auto 0; padding: 4px 8px; width: min(var(--column), calc(100% - 32px)); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--raised); box-shadow: var(--shadow); }
+.find-bar input { flex: 1; border: none; background: none; }
+.find-bar input:focus-visible { box-shadow: none; }
+.find-count { color: var(--muted); font-size: 12px; min-width: 56px; text-align: right; }
+::highlight(find) { background-color: var(--accent-soft); }
+::highlight(find-current) { background-color: var(--accent); color: var(--on-accent); }
+.work.popout .bar .sidebar-toggle, .work.popout .bar .nav-button { display: none; }
+
 .ask-empty { max-width: 520px; margin: 14vh auto 0; text-align: center; }
 .ask-empty .mark { display: block; margin: 0 auto 18px; }
 .ask-empty h1 { color: var(--text); font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; }

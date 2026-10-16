@@ -349,3 +349,74 @@ test("2 shell: command menu, sidebar toggle, back and forward, font size, undo, 
     await close();
   }
 });
+
+test("3 threads: pins, attention and unread, sections, find, a ling:// link, a pop-out kept on top, keys", async () => {
+  const { app, page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    // w1 has an approval waiting once it is opened: the attention mark shows in its row.
+    await page.locator(".thread", { hasText: "flaky retry" }).first().click();
+    await page.locator(".approval").waitFor();
+    await page.locator(".thread", { hasText: "debug level" }).first().click();
+    await expect(page.locator(".thread-row", { hasText: "flaky retry" }).first().locator(".attention")).toBeVisible();
+    // Ctrl+Alt+A goes to the thread that needs the user.
+    await page.keyboard.press("Control+Alt+a");
+    await expect(page.locator(".bar .title")).toHaveText("Fix the flaky retry test");
+    await page.getByRole("button", { name: "Decline" }).click();
+
+    // Pin a thread: it leads the sidebar; Ctrl+Z unpins it.
+    const row = page.locator(".thread-row", { hasText: "Compress the hero" }).first();
+    await row.hover();
+    await row.getByRole("button", { name: "Pin" }).click();
+    await expect(page.locator(".project.pinned .thread-row")).toHaveCount(1);
+    // Mark another unread and put it in a new section.
+    const other = page.locator(".thread-row", { hasText: "debug level" }).first();
+    await other.hover();
+    await other.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Mark unread" }).click();
+    await expect(page.locator(".thread-row.unread", { hasText: "debug level" }).first()).toBeVisible();
+    await other.hover();
+    await other.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Move to a new section…" }).click();
+    await page.getByRole("textbox", { name: "Section name" }).fill("Logging");
+    await page.getByRole("textbox", { name: "Section name" }).press("Enter");
+    await expect(page.locator(".user-section", { hasText: "Logging" }).locator(".thread-row")).toHaveCount(1);
+    await page.locator(".project.recents h2").click();
+    await expect(page.locator(".project.recents .thread-row")).toHaveCount(3);
+    await shoot("3-sidebar-pins-sections-unread.png");
+    await page.locator(".project.recents h2").click();
+    await page.locator("body").click({ position: { x: 900, y: 500 } });
+    await page.keyboard.press("Control+z");
+    await expect(page.locator(".project.pinned")).toHaveCount(0);
+
+    // Find in the thread.
+    await page.keyboard.press("Control+f");
+    await page.getByRole("textbox", { name: "Find in this thread" }).fill("retry");
+    await expect(page.locator(".find-count")).toContainText(/1 of \d+/);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".find-count")).toContainText(/2 of \d+/);
+    await shoot("3-find-in-thread.png");
+    await page.keyboard.press("Escape");
+
+    // A ling:// link from a second instance opens what it names.
+    await app.evaluate(({ app: electronApp }) => {
+      electronApp.emit("second-instance", {}, ["ling-app", "ling://threads/w3"], "/", { argv: ["ling://threads/w3"] });
+    });
+    await expect(page.locator(".bar .title")).toHaveText("Compress the hero image");
+
+    // A pop-out: the thread in a window of its own, kept on top, on the same app-server.
+    const opened = app.waitForEvent("window");
+    await page.getByRole("button", { name: "Pop out" }).click();
+    const popout = await opened;
+    await popout.waitForLoadState("domcontentloaded");
+    await expect(popout.locator(".bar .title")).toHaveText("Compress the hero image");
+    await expect(popout.locator(".work")).toHaveClass(/popout/);
+    await popout.getByRole("button", { name: "Always on top" }).click();
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((window) => window.isAlwaysOnTop()))).toBe(true);
+    if (process.env.MIGHTLING_LOOK_DIR) await popout.screenshot({ path: path.join(process.env.MIGHTLING_LOOK_DIR, "3-popout.png") });
+    expect(received(home).filter((m) => m.method === "initialize")).toHaveLength(1);
+    expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
+  } finally {
+    await close();
+  }
+});

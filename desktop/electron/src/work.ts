@@ -15,14 +15,16 @@ export interface WorkOptions {
   show: boolean;
   /** The view the page opens on: Ask, or Work (`#work`), as `ling web`'s page does. */
   view?: "ask" | "work";
+  /** A pop-out: one thread in a window of its own (`#popout=<id>`, DESKTOP_PARITY §2.1). */
+  popout?: string;
 }
 
 export function openWork(options: WorkOptions): BrowserWindow {
   const { work } = appConfig;
   const window = new BrowserWindow({
     title: work.title,
-    width: work.width,
-    height: work.height,
+    width: options.popout ? 720 : work.width,
+    height: options.popout ? 820 : work.height,
     minWidth: work.minWidth,
     minHeight: work.minHeight,
     show: options.show,
@@ -40,7 +42,7 @@ export function openWork(options: WorkOptions): BrowserWindow {
       devTools: !app.isPackaged,
     },
   });
-  track(window, path.join(app.getPath("userData"), "window-state-work.json"), { width: work.minWidth, height: work.minHeight });
+  track(window, path.join(app.getPath("userData"), options.popout ? "window-state-popout.json" : "window-state-work.json"), { width: work.minWidth, height: work.minHeight });
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -49,6 +51,6 @@ export function openWork(options: WorkOptions): BrowserWindow {
   window.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(WORK_URL)) event.preventDefault();
   });
-  void window.loadURL(options.view === "ask" ? WORK_URL : `${WORK_URL}#work`);
+  void window.loadURL(options.popout ? `${WORK_URL}#popout=${encodeURIComponent(options.popout)}` : options.view === "ask" ? WORK_URL : `${WORK_URL}#work`);
   return window;
 }

@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAsk
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, SLASH_COMMANDS, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -40,6 +40,8 @@ import { CommandMenu } from "./CommandMenu";
 import { ReviewPane } from "./ReviewPane";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
+import { findRanges, mark } from "./find";
+import { moveToSection, nextAttention, pinnedFirst, recentThreads, stepThread, threadLink, toggled, type Section } from "./threads";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { carry, cleanupVictims, projectFolder, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
@@ -61,8 +63,11 @@ type View = "ask" | "work";
 const HOST = bridge.host();
 
 function initialView(): View {
-  return typeof location !== "undefined" && location.hash === "#work" ? "work" : "ask";
+  return typeof location !== "undefined" && (location.hash === "#work" || location.hash.startsWith("#popout=")) ? "work" : "ask";
 }
+
+/** A pop-out window's thread (`#popout=<id>`, DESKTOP_PARITY §2.1): that thread alone, no sidebar. */
+const POPOUT: string | null = typeof location !== "undefined" && location.hash.startsWith("#popout=") ? decodeURIComponent(location.hash.slice(8)) : null;
 
 /** A file picked, pasted or dropped for the next message, not yet sent. */
 interface PendingFile {
@@ -110,7 +115,16 @@ export function App() {
   const [info, setInfo] = useState<Info | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>("general");
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState<false | "all" | "projects">(false);
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findAt, setFindAt] = useState(0);
+  const [findCount, setFindCount] = useState(0);
+  const [onTop, setOnTop] = useState(false);
+  const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
+  const selectedRef = useRef<string | null>(null);
+  const updatePrefsRef = useRef<(values: Partial<Prefs>) => void>(() => {});
   const places = useMemo(() => new History(), []);
   const undoStack = useMemo(() => new UndoStack(), []);
   const closedSurfaces = useMemo(() => new ClosedSurfaces(), []);
@@ -185,9 +199,11 @@ export function App() {
       client.request("model/list", {}).then((answer) => setModels((answer as { data?: Model[] }).data ?? [])).catch(() => setModels([]));
       // A browser has no launch target: `ling web` answers null.
       if (target?.cwd) setNewCwd(target.cwd);
-      if (target?.thread) {
-        const resumed = await client.request("thread/resume", { threadId: target.thread, model: started.served_model });
+      const first = POPOUT ?? target?.thread ?? null;
+      if (first) {
+        const resumed = await client.request("thread/resume", { threadId: first, model: started.served_model });
         dispatch({ type: "opened", thread: resumed.thread });
+        if (POPOUT) setView(isAskThread(resumed.thread, started.ask_root ?? null) ? "ask" : "work");
       }
     } catch (error) {
       notice(error);
@@ -200,6 +216,12 @@ export function App() {
     client.onNotification = (notification) => {
       dispatch({ type: "notification", notification });
       if (notification.method === "thread/queue/changed") refreshQueue(notification.params.threadId);
+      // A turn that ends while its thread is not in front leaves the thread unread.
+      if (notification.method === "turn/completed") {
+        const threadId = notification.params.threadId;
+        const current = prefsRef.current.unreadThreads;
+        if ((threadId !== selectedRef.current || !document.hasFocus()) && !current.includes(threadId)) updatePrefsRef.current({ unreadThreads: [...current, threadId] });
+      }
       for (const listener of listeners.current) listener(notification);
     };
     client.onServerRequest = (request) => {
@@ -209,6 +231,7 @@ export function App() {
     let stop: (() => void) | undefined;
     bridge.listenBridge({
       view: (next) => showView(next),
+      link: (target) => linkRef.current(target),
       task: (event) => setTasks((list) => {
         if (event.kind === "started") return [...list.slice(-11), { id: event.id, label: event.label ?? "Task", cwd: event.cwd ?? "", output: "", running: true, code: null }];
         return list.map((task) => (task.id !== event.id ? task
@@ -290,6 +313,7 @@ export function App() {
 
   const openThread = async (threadId: string) => {
     dispatch({ type: "select", threadId });
+    if (prefsRef.current.unreadThreads.includes(threadId)) updatePrefs({ unreadThreads: prefsRef.current.unreadThreads.filter((id) => id !== threadId) });
     setDrawer(false);
     setInfo(null);
     try {
@@ -322,6 +346,8 @@ export function App() {
   };
 
   const links = prefs.worktreeThreads;
+  selectedRef.current = state.selected;
+
   /** Records a thread's worktree (or changes it), saved in the window's preferences. */
   const setLink = (threadId: string, link: WorktreeLink | null) => {
     const next = { ...prefsRef.current.worktreeThreads };
@@ -622,7 +648,7 @@ export function App() {
 
   /** What the shortcuts and the command menu run, by keymap action. */
   const commands: Record<string, () => void> = {
-    commandMenu: () => setMenuOpen((open) => !open),
+    commandMenu: () => setMenuOpen((open) => (open ? false : "all")),
     settings: () => { setSettingsPage("general"); setSettingsOpen((open) => !open); },
     shortcuts: () => { setSettingsPage("shortcuts"); setSettingsOpen(true); },
     openFolder: () => void openFolderDialog(),
@@ -679,6 +705,135 @@ export function App() {
     setSettingsPage(entry.id as SettingsPage);
     setSettingsOpen(true);
   };
+
+  // Threads (item 3): pins, sections, unread, the sidebar's order, links, pop-outs, side chats.
+  const pin = (threadId: string) => {
+    const before = prefsRef.current.pinnedThreads;
+    const after = toggled(before, threadId);
+    updatePrefs({ pinnedThreads: after });
+    undoStack.push({ label: before.includes(threadId) ? "Unpin" : "Pin", undo: () => updatePrefsRef.current({ pinnedThreads: before }), redo: () => updatePrefsRef.current({ pinnedThreads: after }) });
+  };
+  const pinProject = (cwd: string) => updatePrefs({ pinnedProjects: toggled(prefsRef.current.pinnedProjects, cwd) });
+  const markUnread = (threadId: string) => {
+    if (!prefsRef.current.unreadThreads.includes(threadId)) updatePrefs({ unreadThreads: [...prefsRef.current.unreadThreads, threadId] });
+    if (state.selected === threadId) dispatch({ type: "select", threadId: null });
+  };
+  /** Moves a thread into a section, a new one (named in the sidebar first), or out of its section. */
+  const toSection = (threadId: string, sectionId: string | "new" | null, name?: string) => {
+    if (sectionId === "new" && !name) return setNaming({ thread: threadId, name: "" });
+    let sections: Section[] = prefsRef.current.sections;
+    let target = sectionId;
+    if (sectionId === "new" && name) {
+      const id = `s${Date.now().toString(36)}`;
+      sections = [...sections, { id, name: name.slice(0, 60), threads: [] }];
+      target = id;
+    }
+    updatePrefs({ sections: moveToSection(sections, threadId, target).filter((section) => section.threads.length > 0) });
+  };
+  const copyLink = (threadId: string) => void copyText(threadLink(threadId)).then((done) => done && dispatch({ type: "notice", message: "Copied a link to the thread." }));
+
+  /** Side chat (Ctrl+Alt+S): a copy of the thread asked for a short recap, beside the running one, never interrupting it. */
+  const sideChat = async () => {
+    if (!selected) return;
+    try {
+      const thread = await forkThread(client, selected.thread.id, servedModel);
+      await client.request("thread/name/set", { threadId: thread.id, name: `Side chat: ${selected.thread.name || selected.thread.preview || "thread"}`.slice(0, 120) });
+      await client.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "In a few lines: where does this work stand, what was done, and what is left? Do not change anything.", text_elements: [] }] });
+      if (bridge.host() === "electron") await bridge.popOut(thread.id);
+      else await openThread(thread.id);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** A thread with no project (Ctrl+Alt+O): it works in the home folder. */
+  const standaloneThread = async () => {
+    try {
+      const home = await bridge.homeFolder();
+      showView("work");
+      setNewCwd(home);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  const SLASH_SKILLS = SLASH_COMMANDS.find((command) => command.name === "skills") as SlashCommand;
+  /** What a `ling://` link names (DESKTOP_PARITY §2.20). */
+  const linkRef = useRef<(target: bridge.LinkTarget) => void>(() => {});
+  linkRef.current = (target) => {
+    if (target.thread) {
+      const known = state.threads[target.thread]?.thread;
+      if (known) setView(isAskThread(known, askRoot) ? "ask" : "work");
+      void openThread(target.thread);
+      return;
+    }
+    if (target.page === "settings") {
+      setSettingsPage("general");
+      return setSettingsOpen(true);
+    }
+    if (target.page === "skills") return void runCommand(SLASH_SKILLS);
+    if (target.page === "night" || target.page === "plugins") return dispatch({ type: "notice", message: `The ${target.page === "night" ? "Scheduled" : "Plugins"} view comes with a later update; the link was received.` });
+    showView("work");
+    if (target.cwd) setNewCwd(target.cwd);
+    if (target.prompt) setDraft(target.prompt);
+  };
+
+  // The sidebar's order, which Ctrl+Tab and Ctrl+1–9 walk.
+  const sidebarThreads = (): Thread[] => {
+    const all = Object.values(state.threads).map((entry) => entry.thread).filter((thread) => !thread.ephemeral && !thread.parentThreadId);
+    const mine = all.filter((thread) => isAskThread(thread, askRoot) === (view === "ask"));
+    const pinned = prefs.pinnedThreads.map((id) => mine.find((thread) => thread.id === id)).filter((thread): thread is Thread => Boolean(thread));
+    const sectioned = new Set(prefs.sections.flatMap((section) => section.threads));
+    const rest = view === "ask"
+      ? askThreads(mine, askRoot)
+      : [
+        ...prefs.sections.flatMap((section) => section.threads.map((id) => mine.find((thread) => thread.id === id)).filter((thread): thread is Thread => Boolean(thread))),
+        ...pinnedFirst(projects(state, askRoot, (thread) => projectFolder(thread, links)), prefs.pinnedProjects, (project) => project.cwd).flatMap((project) => project.threads.filter((thread) => !sectioned.has(thread.id))),
+      ];
+    return [...pinned, ...rest.filter((thread) => !prefs.pinnedThreads.includes(thread.id))];
+  };
+  const goTo = (threadId: string | null) => {
+    if (threadId) void openThread(threadId);
+  };
+
+  const threadCommands: Record<string, () => void> = {
+    newChat: () => (view === "ask" ? newQuestion() : dispatch({ type: "select", threadId: null })),
+    standaloneChat: () => void standaloneThread(),
+    quickChat: () => { showView("ask"); newQuestion(); },
+    archiveChat: () => { if (selected) void archive(selected.thread.id); },
+    markUnread: () => { if (selected) markUnread(selected.thread.id); },
+    pinChat: () => { if (selected) pin(selected.thread.id); },
+    renameChat: () => { if (selected) setRenaming({ id: selected.thread.id, name: selected.thread.name ?? "" }); },
+    sideChat: () => void sideChat(),
+    findInChat: () => { setFindOpen(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".find-bar input")?.select()); },
+    findNext: () => setFindAt((at) => (findCount ? (at + 1) % findCount : 0)),
+    findPrevious: () => setFindAt((at) => (findCount ? (at - 1 + findCount) % findCount : 0)),
+    previousChat: () => goTo(stepThread(sidebarThreads().map((thread) => thread.id), state.selected, -1)),
+    nextChat: () => goTo(stepThread(sidebarThreads().map((thread) => thread.id), state.selected, 1)),
+    nextAttention: () => goTo(nextAttention(sidebarThreads().map((thread) => thread.id), state.selected, new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id))), new Set(prefs.unreadThreads))),
+    clearUnread: () => updatePrefs({ unreadThreads: [] }),
+    projectPicker: () => setMenuOpen("projects"),
+    copyDeepLink: () => { if (selected) copyLink(selected.thread.id); },
+    copyConversationPath: () => { if (selected?.thread.path) void copyText(selected.thread.path); },
+    copyWorkingDirectory: () => { const folder = workFolder ?? selected?.thread.cwd; if (folder) void copyText(folder); },
+  };
+  for (let n = 1; n <= 9; n++) threadCommands[`goToChat${n}`] = () => goTo(sidebarThreads()[n - 1]?.id ?? null);
+  for (let n = 1; n <= 6; n++) threadCommands[`recentChat${n}`] = () => goTo(recentThreads(Object.values(state.threads).map((entry) => entry.thread).filter((thread) => !thread.ephemeral && !thread.parentThreadId))[n - 1]?.id ?? null);
+  Object.assign(commands, threadCommands);
+
+  // Find in the shown thread: the matches are marked as the query or the turns change.
+  useEffect(() => {
+    const root = document.querySelector(".turns");
+    if (!findOpen || !root) {
+      mark([], 0);
+      setFindCount(0);
+      return;
+    }
+    const ranges = findRanges(root, findQuery);
+    setFindCount(ranges.length);
+    mark(ranges, ranges.length ? Math.min(findAt, ranges.length - 1) : 0);
+  }, [findOpen, findQuery, findAt, selected?.turns, state.selected]);
+  useEffect(() => setFindAt(0), [findQuery, state.selected]);
 
   // Where the shown thread's work is now (its worktree, or the local checkout after a hand-off), and
   // the project its environments are read from.
@@ -890,7 +1045,8 @@ export function App() {
       setPrefs(before);
       notice(error);
     });
-  };
+  };  updatePrefsRef.current = updatePrefs;
+
 
   const runCommand = async (command: SlashCommand, args = ""): Promise<void> => {
     const threadId = selected?.thread.id ?? null;
@@ -988,6 +1144,40 @@ export function App() {
       [keyAction("quit"), "quit"],
       [keyAction("viewAsk"), "viewAsk"],
       [keyAction("viewWork"), "viewWork"],
+      [keyAction("newChat"), "newChat"],
+      [keyAction("standaloneChat"), "standaloneChat"],
+      [keyAction("quickChat"), "quickChat"],
+      [keyAction("archiveChat"), "archiveChat"],
+      [keyAction("markUnread"), "markUnread"],
+      [keyAction("pinChat"), "pinChat"],
+      [keyAction("renameChat"), "renameChat"],
+      [keyAction("sideChat"), "sideChat"],
+      [keyAction("findInChat"), "findInChat"],
+      [keyAction("findNext"), "findNext"],
+      [keyAction("findPrevious"), "findPrevious"],
+      [keyAction("previousChat"), "previousChat"],
+      [keyAction("nextChat"), "nextChat"],
+      [keyAction("nextAttention"), "nextAttention"],
+      [keyAction("clearUnread"), "clearUnread"],
+      [keyAction("projectPicker"), "projectPicker"],
+      [keyAction("copyDeepLink"), "copyDeepLink"],
+      [keyAction("copyConversationPath"), "copyConversationPath"],
+      [keyAction("copyWorkingDirectory"), "copyWorkingDirectory"],
+      [keyAction("goToChat1"), "goToChat1"],
+      [keyAction("goToChat2"), "goToChat2"],
+      [keyAction("goToChat3"), "goToChat3"],
+      [keyAction("goToChat4"), "goToChat4"],
+      [keyAction("goToChat5"), "goToChat5"],
+      [keyAction("goToChat6"), "goToChat6"],
+      [keyAction("goToChat7"), "goToChat7"],
+      [keyAction("goToChat8"), "goToChat8"],
+      [keyAction("goToChat9"), "goToChat9"],
+      [keyAction("recentChat1"), "recentChat1"],
+      [keyAction("recentChat2"), "recentChat2"],
+      [keyAction("recentChat3"), "recentChat3"],
+      [keyAction("recentChat4"), "recentChat4"],
+      [keyAction("recentChat5"), "recentChat5"],
+      [keyAction("recentChat6"), "recentChat6"],
     ];
     for (const [action, id] of shellKeys) {
       if ((id === "undoAction" || id === "redoAction") && typing) continue;
@@ -1016,10 +1206,12 @@ export function App() {
       event.preventDefault();
       setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen)) {
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu)) {
       setPicker("closed");
       setSettingsOpen(false);
       setMenuOpen(false);
+      setFindOpen(false);
+      setRowMenu(null);
       setInfo(null);
     } else if (!editableFocus() && threadRequests.length > 0) {
       if (matches(event, keyAction("approve")) && answerByKey("approve")) event.preventDefault();
@@ -1044,6 +1236,13 @@ export function App() {
   const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
   const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.name, preview: item.preview }));
 
+  const unread = new Set(prefs.unreadThreads);
+  const waiting = new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id)));
+  const workThreads = Object.values(state.threads).map((entry) => entry.thread).filter((thread) => !thread.ephemeral && !thread.parentThreadId && !isAskThread(thread, askRoot));
+  const pinnedHere = prefs.pinnedThreads.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread) && !thread!.ephemeral && isAskThread(thread!, askRoot) === (view === "ask"));
+  const sectioned = new Set(prefs.sections.flatMap((section) => section.threads));
+  const workLabel = (thread: Thread) => thread.name || thread.preview || "(new thread)";
+
   const threadRow = (thread: Thread, label: string) => (
     renaming?.id === thread.id ? (
       <input key={thread.id} className="rename" autoFocus value={renaming.name} aria-label="Thread name"
@@ -1054,16 +1253,36 @@ export function App() {
           if (event.key === "Escape") setRenaming(null);
         }} />
     ) : (
-      <div key={thread.id} className={thread.id === state.selected ? "thread-row selected" : "thread-row"}>
+      <div key={thread.id} className={`thread-row${thread.id === state.selected ? " selected" : ""}${unread.has(thread.id) ? " unread" : ""}`}>
         <button className="thread" onClick={() => openThread(thread.id)} title={label}>
-          <span className="thread-label">{label}</span>
+          <span className="thread-label">{prefs.pinnedThreads.includes(thread.id) ? <Icon name="pin" size={12} /> : null}{label}</span>
           {snippets.get(thread.id) ? <span className="snippet">{snippets.get(thread.id)}</span> : null}
         </button>
+        {waiting.has(thread.id) ? <span className="attention" aria-label="waiting for you" title="An approval or a question is waiting">!</span> : null}
+        {unread.has(thread.id) && !waiting.has(thread.id) ? <span className="unread-dot" aria-label="unread" /> : null}
         {state.threads[thread.id]?.activeTurnId ? <span className="running" aria-label="running" /> : null}
         <span className="age" title={new Date(thread.updatedAt * 1000).toLocaleString()}>{age(thread.updatedAt)}</span>
         <span className="row-actions">
-          <button className="icon" title="Rename" aria-label="Rename" onClick={() => setRenaming({ id: thread.id, name: thread.name || label })}><Icon name="pencil" size={14} /></button>
+          <button className="icon" title={prefs.pinnedThreads.includes(thread.id) ? "Unpin" : "Pin"} aria-label={prefs.pinnedThreads.includes(thread.id) ? "Unpin" : "Pin"} onClick={() => pin(thread.id)}><Icon name="pin" size={14} /></button>
           <button className="icon" title="Archive" aria-label="Archive" onClick={() => void archive(thread.id)}><Icon name="archive" size={14} /></button>
+          <span className="menu-anchor">
+            <button className="icon" title="More" aria-label="More" aria-haspopup="menu" onClick={() => setRowMenu(rowMenu === thread.id ? null : thread.id)}><Icon name="more" size={14} /></button>
+            {rowMenu === thread.id ? (
+              <span className="menu" role="menu" aria-label="Thread" onClick={() => setRowMenu(null)}>
+                <button role="menuitem" onClick={() => setRenaming({ id: thread.id, name: thread.name || label })}>Rename</button>
+                <button role="menuitem" onClick={() => markUnread(thread.id)}>Mark unread</button>
+                {HOST === "electron" ? <button role="menuitem" onClick={() => void bridge.popOut(thread.id).catch(notice)}>Open in a window of its own</button> : null}
+                <button role="menuitem" onClick={() => copyLink(thread.id)}>Copy link</button>
+                {view === "work" ? (
+                  <>
+                    {prefs.sections.map((section) => <button key={section.id} role="menuitem" onClick={() => toSection(thread.id, section.id)}>Move to {section.name}</button>)}
+                    <button role="menuitem" onClick={() => toSection(thread.id, "new")}>Move to a new section…</button>
+                    {prefs.sections.some((section) => section.threads.includes(thread.id)) ? <button role="menuitem" onClick={() => toSection(thread.id, null)}>Out of its section</button> : null}
+                  </>
+                ) : null}
+              </span>
+            ) : null}
+          </span>
         </span>
       </div>
     )
@@ -1076,7 +1295,7 @@ export function App() {
     : view === "ask" ? "Ask anything… ($ for a skill, / for commands)" : "Ask Mightling… (@ for a file, $ for a skill, / for commands)";
 
   return (
-    <div className={`work view-${view}${drawer ? " drawer-open" : ""}${reviewOpen && view === "work" ? " review-open" : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
+    <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${reviewOpen && view === "work" ? " review-open" : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
       // (desktop/electron/src/shell.ts); a browser keeps its own, which a phone needs to copy.
       if (HOST !== "electron") return;
@@ -1097,9 +1316,15 @@ export function App() {
               <Icon name="search" size={14} />
               <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search questions" aria-label="Search questions" />
             </label>
+            {!found && pinnedHere.length ? (
+              <>
+                <h2 className="section-label">Pinned</h2>
+                {pinnedHere.map((thread) => threadRow(thread, askTitle(thread)))}
+              </>
+            ) : null}
             <h2 className="section-label">Questions</h2>
             {asks.length === 0 ? <p className="empty small">{found ? "Nothing matches." : "No questions yet."}</p> : null}
-            {asks.map((thread) => threadRow(thread, askTitle(thread)))}
+            {asks.filter((thread) => found || !prefs.pinnedThreads.includes(thread.id)).map((thread) => threadRow(thread, askTitle(thread)))}
           </>
         ) : (
           <>
@@ -1117,14 +1342,51 @@ export function App() {
                 <h2>Found</h2>
                 {found.map((result) => threadRow(result.thread, result.thread.name || result.thread.preview || "(new thread)"))}
               </section>
-            ) : projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => (
+            ) : (
+              <>
+                {pinnedHere.length ? (
+                  <section className="project pinned">
+                    <h2>Pinned</h2>
+                    {pinnedHere.map((thread) => threadRow(thread, workLabel(thread)))}
+                  </section>
+                ) : null}
+                <section className="project recents">
+                  <h2 onClick={() => updatePrefs({ recentsOpen: !prefs.recentsOpen })} title="The most recent threads of every project">
+                    <Icon name={prefs.recentsOpen ? "chevronDown" : "chevronRight"} size={12} />Recent
+                  </h2>
+                  {prefs.recentsOpen ? recentThreads(workThreads, 5).map((thread) => threadRow(thread, workLabel(thread))) : null}
+                </section>
+                {naming ? (
+                  <input className="rename section-name" autoFocus value={naming.name} placeholder="The new section's name" aria-label="Section name"
+                    onChange={(event) => setNaming({ ...naming, name: event.target.value })}
+                    onBlur={() => setNaming(null)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && naming.name.trim()) {
+                        toSection(naming.thread, "new", naming.name.trim());
+                        setNaming(null);
+                      }
+                      if (event.key === "Escape") setNaming(null);
+                    }} />
+                ) : null}
+                {prefs.sections.map((section) => (
+                  <section key={section.id} className="project user-section">
+                    <h2>{section.name}</h2>
+                    {section.threads.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread) && !prefs.pinnedThreads.includes(thread!.id)).map((thread) => threadRow(thread, workLabel(thread)))}
+                  </section>
+                ))}
+              </>
+            )}
+            {found ? null : pinnedFirst(projects(state, askRoot, (thread) => projectFolder(thread, links)), prefs.pinnedProjects, (project) => project.cwd)
+              .filter((project) => project.threads.some((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)) || prefs.pinnedProjects.includes(project.cwd)).map((project) => (
               <section key={project.cwd} className="project">
                 <h2 title={project.cwd} onClick={() => setNewCwd(project.cwd)}>
                   <Icon name="folder" size={14} />{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}
+                  <button className={`icon project-action${prefs.pinnedProjects.includes(project.cwd) ? " on" : ""}`} title={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"} aria-label={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"}
+                    onClick={(event) => { event.stopPropagation(); pinProject(project.cwd); }}><Icon name="pin" size={12} /></button>
                   {bridge.git.available() ? <button className="icon project-action" title="New permanent worktree: a project of its own, never cleaned up" aria-label="New permanent worktree"
                     onClick={(event) => { event.stopPropagation(); void permanentWorktree(project.cwd); }}><Icon name="gitFork" size={12} /></button> : null}
                 </h2>
-                {project.threads.map((thread) => threadRow(thread, thread.name || thread.preview || "(new thread)"))}
+                {project.threads.filter((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)).map((thread) => threadRow(thread, workLabel(thread)))}
               </section>
             ))}
           </>
@@ -1155,6 +1417,8 @@ export function App() {
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
           {selected ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
+          {selected && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
+          {POPOUT ? <button className={`icon bar-action${onTop ? " active" : ""}`} aria-pressed={onTop} title="Keep this window above the others" aria-label="Always on top" onClick={() => void bridge.alwaysOnTop(!onTop).then(setOnTop).catch(notice)}><Icon name="pin" size={16} /></button> : null}
           {selected && view === "work" && bridge.git.available() ? (
             <WorktreeHeader link={selectedLink} branch={headerGit?.branch ?? null} inGit={Boolean(headerGit?.root)}
               canHandOff={!selected.activeTurnId} environment={environment}
@@ -1179,6 +1443,20 @@ export function App() {
           <div className="notice restore-notice">
             This thread's worktree was removed{selectedLink?.snapshot ? "; a snapshot of its work was kept" : ""}.
             <button className="link-button" onClick={() => void restoreWorktree()}>Restore</button>
+          </div>
+        ) : null}
+        {findOpen ? (
+          <div className="find-bar" role="search">
+            <Icon name="search" size={14} />
+            <input autoFocus value={findQuery} placeholder="Find in this thread" aria-label="Find in this thread" onChange={(event) => setFindQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); (event.shiftKey ? commands.findPrevious : commands.findNext)(); }
+                if (event.key === "Escape") { event.preventDefault(); setFindOpen(false); }
+              }} />
+            <span className="find-count">{findQuery ? (findCount ? `${Math.min(findAt, findCount - 1) + 1} of ${findCount}` : "none") : ""}</span>
+            <button className="icon" aria-label="Previous match" onClick={commands.findPrevious}><Icon name="chevronLeft" size={14} /></button>
+            <button className="icon" aria-label="Next match" onClick={commands.findNext}><Icon name="chevronRight" size={14} /></button>
+            <button className="icon" aria-label="Close find" onClick={() => setFindOpen(false)}><Icon name="x" size={14} /></button>
           </div>
         ) : null}
         <div className="turns">
@@ -1277,7 +1555,7 @@ export function App() {
         />
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)} /> : null}
-      {menuOpen ? <CommandMenu entries={menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
+      {menuOpen ? <CommandMenu entries={menuOpen === "projects" ? menuEntries().filter((entry) => entry.kind === "project") : menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
     </div>
   );
 }

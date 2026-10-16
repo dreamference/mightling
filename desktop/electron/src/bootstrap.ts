@@ -14,7 +14,7 @@ export async function bootstrap(): Promise<void> {
     app.quit();
     return;
   }
-  app.setAsDefaultProtocolClient(appConfig.scheme);
+  for (const scheme of [appConfig.scheme, ...appConfig.legacySchemes]) app.setAsDefaultProtocolClient(scheme);
   applySessionRules();
 
   await main({ work: workTarget(process.argv.slice(1)), audit: auditSeconds() });

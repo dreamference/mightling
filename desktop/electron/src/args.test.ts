@@ -25,6 +25,16 @@ describe("what ling app asks for", () => {
     expect(workTarget(["mightling://thread/t1"])).toEqual({ cwd: null, thread: "t1" });
   });
 
+  it("reads the ling:// links of DESKTOP_PARITY §2.20", () => {
+    expect(linkTarget("ling://threads/019a-thread")).toEqual({ cwd: null, thread: "019a-thread" });
+    expect(linkTarget("ling://threads/new")).toEqual({ cwd: null, thread: null, page: "new" });
+    expect(linkTarget("ling://new?prompt=Fix%20the%20build&path=%2Fhome%2Fu%2Fapp")).toEqual({ cwd: "/home/u/app", thread: null, prompt: "Fix the build", page: "new" });
+    expect(linkTarget("ling://settings")).toEqual({ cwd: null, thread: null, page: "settings" });
+    expect(linkTarget("ling://night")).toEqual({ cwd: null, thread: null, page: "night" });
+    expect(linkTarget("ling://plugins/acme.lint")).toEqual({ cwd: null, thread: null, page: "plugins", plugin: "acme.lint" });
+    expect(workTarget(["ling://threads/t2"])).toEqual({ cwd: null, thread: "t2" });
+  });
+
   it("knows the audit's session", () => {
     expect(auditSeconds({})).toBeNull();
     expect(auditSeconds({ MIGHTLING_APP_AUDIT: "x" })).toBeNull();

@@ -1,7 +1,10 @@
 {
   "productName": "Mightling",
   "identifier": "dev.dreamference.mightling",
-  "scheme": "mightling",
+  "scheme": "ling",
+  "legacySchemes": [
+    "mightling"
+  ],
   "executable": "Mightling",
   "command": "ling-app",
   "packageName": "mightling",
