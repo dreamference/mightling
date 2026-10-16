@@ -185,6 +185,24 @@
       "name": "thread/shellCommand stays refused: it runs unsandboxed, past /airgapped on",
       "message": {"id": 45, "method": "thread/shellCommand", "params": {"threadId": "t", "command": "curl example.com"}},
       "accept": false
+    },
+    {
+      "name": "thread/goal/set passes: the goal row sets, pauses and resumes a thread's goal (DESKTOP_PARITY item 5)",
+      "message": {"id": 46, "method": "thread/goal/set", "params": {"threadId": "t", "objective": "Every test passes", "status": "active"}},
+      "accept": true,
+      "out": {"id": 46, "method": "thread/goal/set", "params": {"threadId": "t", "objective": "Every test passes", "status": "active"}}
+    },
+    {
+      "name": "thread/goal/get passes: the goal row reads a thread's goal",
+      "message": {"id": 47, "method": "thread/goal/get", "params": {"threadId": "t"}},
+      "accept": true,
+      "out": {"id": 47, "method": "thread/goal/get", "params": {"threadId": "t"}}
+    },
+    {
+      "name": "thread/goal/clear passes: the goal row clears it",
+      "message": {"id": 48, "method": "thread/goal/clear", "params": {"threadId": "t"}},
+      "accept": true,
+      "out": {"id": 48, "method": "thread/goal/clear", "params": {"threadId": "t"}}
     }
   ]
 }
