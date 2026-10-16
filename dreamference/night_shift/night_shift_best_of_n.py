@@ -220,6 +220,8 @@ class NightShiftBestOfN:
 
     def _no_candidate(self, outcomes: List[Dict[str, Any]]) -> str:
         """No attempt left a change: the task ends as the attempts did, or `interrupted` by the window."""
+        # An attempt that ran out of time or failed on its own may have left its worktree and branch.
+        self._discard(outcomes)
         result = self._timing(outcomes)
         last = next((o["result"].get("last_message") for o in reversed(outcomes)
                      if o["result"].get("last_message")), None)
