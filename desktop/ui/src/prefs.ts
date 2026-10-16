@@ -5,6 +5,7 @@
 
 import * as bridge from "./bridge";
 import schemaFile from "./prefs.json";
+import type { Section } from "./threads";
 
 export interface Prefs {
   /** What Enter does in the composer: send (Shift+Enter for a new line), or a new line (Ctrl+Enter sends). */
@@ -29,6 +30,15 @@ export interface Prefs {
   keyOverrides: Record<string, string[]>;
   /** Whether the sidebar is folded away (Ctrl+B). */
   sidebarHidden: boolean;
+  /** Pinned threads and projects, first in the sidebar, in pin order. */
+  pinnedThreads: string[];
+  pinnedProjects: string[];
+  /** The user's sections of the sidebar (threads.ts; window-side until threadSection/* is allowed). */
+  sections: Section[];
+  /** Threads that finished a turn while not shown, or were marked unread. */
+  unreadThreads: string[];
+  /** Whether the sidebar's Recent list is open. */
+  recentsOpen: boolean;
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }
@@ -67,6 +77,8 @@ export function sanitize(stored: unknown): Prefs {
           ? Array.isArray(value) && value.every((item) => typeof item === "string")
           : spec.type === "object"
             ? typeof value === "object" && !Array.isArray(value)
+            : spec.type === "list"
+              ? Array.isArray(value)
             : typeof value === spec.type;
     if (ok) result[key] = value;
   }

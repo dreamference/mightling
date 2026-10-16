@@ -56,12 +56,16 @@ def test_ask_is_a_view_of_the_one_app_window_not_a_window_on_ling_web():
 
 
 def test_the_app_window_alone_has_ipc_and_only_for_itself():
-    # The one channel is answered only for the app window's own webContents (§4.2, §8.1), and the
-    # window's renderer gets no Node.
+    # The one channel is answered only for the app's own windows' webContents (§4.2, §8.1), and their
+    # renderers get no Node.
     work = (SRC / "work.ts").read_text(encoding="utf-8")
     assert re.search(r"sandbox: true,\s*contextIsolation: true,\s*nodeIntegration: false", work)
     main = (SRC / "main.ts").read_text(encoding="utf-8")
-    assert 'if (!window || event.sender.id !== window.webContents.id) throw new Error("only the app window talks to the agent");' in main
+    # Since pop-outs (DESKTOP_PARITY §2.1) the app's windows are the main one and its pop-outs, all
+    # on the one app-server; anything else is refused.
+    assert 'const own = windowFor(event.sender.id);' in main
+    assert 'if (!own) throw new Error("only the app\'s windows talk to the agent");' in main
+    assert "windows().find((entry) => entry.webContents.id === senderId)" in main
     preload = (SRC / "preload.ts").read_text(encoding="utf-8")
     assert "contextBridge.exposeInMainWorld" in preload and "require(" not in preload.replace('require("electron")', "")
 

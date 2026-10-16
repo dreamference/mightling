@@ -68,6 +68,11 @@ export type FromView =
   /** Shortcuts the page handles for the window (DESKTOP_PARITY §2.19): F11, Ctrl+Q, Ctrl+O. */
   | { type: "window/fullscreen" }
   | { type: "app/quit" }
+  /** A thread in a window of its own, and a window kept above the others (DESKTOP_PARITY §2.1). */
+  | { type: "window/popout"; thread: string }
+  | { type: "window/always-on-top"; on: boolean }
+  /** The user's home folder: where a thread with no project works (Ctrl+Alt+O). */
+  | { type: "app/home" }
   | { type: "dialog/open-folder" };
 
 /** What the page hears, re-dispatched by the preload as `MessageEvent`s whose `data` is one of these. */
@@ -76,6 +81,8 @@ export type ForView =
   | { channel: "work://stderr"; payload: string }
   | { channel: "work://protocol-error"; payload: string }
   | { channel: "work://exit"; payload: number | null }
+  /** A link (`ling://…`) or a second `ling app` asked for something: the app window shows it. */
+  | { channel: "link"; payload: { cwd: string | null; thread: string | null; prompt?: string | null; page?: string; plugin?: string } }
   /** A bottom-panel task started, wrote output, or ended (tasks.ts). */
   | { channel: "task://event"; payload: { id: string; kind: "started" | "output" | "exit"; label?: string; cwd?: string; data?: string; code?: number | null } }
   /** Show Ask or Work: the menu, a second instance or a link asked for one. */

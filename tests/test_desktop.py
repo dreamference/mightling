@@ -29,7 +29,7 @@ def test_the_app_names_one_window_and_no_web_page():
     assert "chat" not in config and "work" in config and "csp" in config
     assert config["productName"] == "Mightling"
     assert config["identifier"] == "dev.dreamference.mightling"
-    assert config["command"] == "ling-app" and config["scheme"] == "mightling"
+    assert config["command"] == "ling-app" and config["scheme"] == "ling" and config["legacySchemes"] == ["mightling"]
 
 
 def test_bundle_icons_exist_at_the_sizes_the_package_names():
@@ -275,7 +275,7 @@ def test_registration_removes_launchers_left_by_earlier_binary_names(tmp_path):
     assert sorted(p.name for p in entries.iterdir()) == ["ling-app.desktop"]
     assert list(icons.iterdir()) == []
     entry = (entries / "ling-app.desktop").read_text()
-    assert "Exec=/opt/Mightling %U\n" in entry and "MimeType=x-scheme-handler/mightling;" in entry
+    assert "Exec=/opt/Mightling %U\n" in entry and "MimeType=x-scheme-handler/ling;x-scheme-handler/mightling;" in entry
 
 
 def test_desktop_entry_is_not_written_before_anything_is_built():

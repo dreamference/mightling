@@ -22,6 +22,7 @@ import * as git from "./git";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { Tasks } from "./tasks";
+import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
 import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
 import { openWork } from "./work";
@@ -47,10 +48,29 @@ export async function main(options: MainOptions): Promise<void> {
   // Hidden for the audit's session and for an end-to-end test (`MIGHTLING_HIDDEN=1`).
   const show = options.audit === null && !process.env.MIGHTLING_HIDDEN;
 
-  const deliver = (message: ForView) => {
-    const contents = window?.webContents;
-    if (!contents || contents.isDestroyed()) return;
+  /** Pop-outs: a thread in a window of its own, on the same app-server (windows.ts). */
+  const popouts = new Map<number, BrowserWindow>();
+  const router = new RequestRouter();
+  const windows = () => [window, ...popouts.values()].filter((entry): entry is BrowserWindow => entry !== null && !entry.isDestroyed());
+  /** The app window or a pop-out the sender is, or null for anything else. */
+  const windowFor = (senderId: number) => windows().find((entry) => entry.webContents.id === senderId) ?? null;
+  const send = (target: BrowserWindow, message: ForView) => {
+    const contents = target.webContents;
+    if (contents.isDestroyed()) return;
     for (const piece of chunked(message)) contents.send(CHANNEL_FOR_VIEW, piece);
+  };
+  const deliver = (message: ForView) => {
+    if (message.channel === "work://message") {
+      const routed = router.incoming(message.payload);
+      for (const target of windows()) {
+        if (routed.to === "all" || String(target.webContents.id) === routed.to) send(target, { channel: "work://message", payload: routed.payload });
+      }
+      return;
+    }
+    if (message.channel === "work://exit") router.reset();
+    // The menu's view and a link are for the app window; the rest for every window.
+    const targets = message.channel === "view" || message.channel === "link" ? [window].filter((entry): entry is BrowserWindow => entry !== null && !entry.isDestroyed()) : windows();
+    for (const target of targets) send(target, message);
   };
   const server = new AppServer(resourcesPath(), {
     deliver,
@@ -84,13 +104,14 @@ export async function main(options: MainOptions): Promise<void> {
   // The one channel from the page.
   const fromView = new Reassembler();
   ipcMain.handle(CHANNEL_FROM_VIEW, async (event: IpcMainInvokeEvent, data: unknown) => {
-    if (!window || event.sender.id !== window.webContents.id) throw new Error("only the app window talks to the agent");
+    const own = windowFor(event.sender.id);
+    if (!own) throw new Error("only the app's windows talk to the agent");
     let message = data;
     if (isChunk(data)) {
       message = fromView.take(data);
       if (message === undefined) return null;
     }
-    return handle(message as FromView);
+    return handle(message as FromView, own);
   });
   ipcMain.on(CHANNEL_CHUNK_ACK, () => {});
 
@@ -115,13 +136,28 @@ export async function main(options: MainOptions): Promise<void> {
     return dir;
   };
 
-  async function handle(message: FromView): Promise<unknown> {
+  async function handle(message: FromView, own: BrowserWindow): Promise<unknown> {
     switch (message.type) {
       case "work/start":
         return server.start();
-      case "work/send":
-        await server.send(message.message);
+      case "work/send": {
+        const routed = router.outgoing(String(own.webContents.id), message.message);
+        if (routed.reply) send(own, { channel: "work://message", payload: routed.reply });
+        if (routed.send !== null) await server.send(routed.send);
         return null;
+      }
+      case "window/popout": {
+        const popout = openWork({ preload: path.join(__dirname, "preload.cjs"), show, popout: message.thread });
+        const id = popout.webContents.id;
+        popouts.set(id, popout);
+        popout.on("closed", () => popouts.delete(id));
+        return null;
+      }
+      case "window/always-on-top":
+        own.setAlwaysOnTop(Boolean(message.on));
+        return own.isAlwaysOnTop();
+      case "app/home":
+        return app.getPath("home");
       case "ask/upload":
         return server.upload(message);
       case "work/stop":
@@ -139,7 +175,7 @@ export async function main(options: MainOptions): Promise<void> {
         return setDefault(ling, message.level);
       }
       case "context-menu":
-        if (window) showContextMenu(window, message);
+        showContextMenu(own, message);
         return null;
       case "git/repos":
         return git.repositories(message.cwd);
@@ -256,24 +292,23 @@ export async function main(options: MainOptions): Promise<void> {
       case "prefs/write":
         return prefs.write(message.values);
       case "window/minimize":
-        window?.minimize();
+        own.minimize();
         return null;
       case "window/maximize":
-        if (window?.isMaximized()) window.unmaximize();
-        else window?.maximize();
+        if (own.isMaximized()) own.unmaximize();
+        else own.maximize();
         return null;
       case "window/close":
-        window?.close();
+        own.close();
         return null;
       case "window/fullscreen":
-        window?.setFullScreen(!window.isFullScreen());
+        own.setFullScreen(!own.isFullScreen());
         return null;
       case "app/quit":
         app.quit();
         return null;
       case "dialog/open-folder": {
-        if (!window) return null;
-        const chosen = await dialog.showOpenDialog(window, { title: "Open a project folder", properties: ["openDirectory"] });
+        const chosen = await dialog.showOpenDialog(own, { title: "Open a project folder", properties: ["openDirectory"] });
         return chosen.canceled ? null : chosen.filePaths[0] ?? null;
       }
       default:
@@ -291,13 +326,14 @@ export async function main(options: MainOptions): Promise<void> {
     if (asked) {
       target = asked;
       showView("work");
-      deliver({ channel: "work://message", payload: { method: "mightling/target", params: target } });
+      deliver({ channel: "link", payload: target });
     } else showView("ask");
   });
   app.on("open-url", (event, url) => {
     event.preventDefault();
     target = require("./args").linkTarget(url) as WorkTarget;
     showView("work");
+    deliver({ channel: "link", payload: target });
   });
   app.on("window-all-closed", () => {
     tasks.stopAll();
