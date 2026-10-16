@@ -4,7 +4,7 @@
 // window `MessageEvent`s, so the same page could also run in a browser. Nothing else of Electron
 // or Node reaches the page: `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`.
 
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk } from "./api";
 
@@ -26,6 +26,14 @@ contextBridge.exposeInMainWorld("electronBridge", {
     let answer: unknown;
     for (const piece of chunked(message)) answer = await ipcRenderer.invoke(CHANNEL_FROM_VIEW, piece);
     return answer;
+  },
+  /** Where a file dropped on the page lives (a Shift+drag image is sent by its path, DESKTOP_PARITY §2.3); "" when it has none. */
+  pathForFile(file: File): string {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
   },
 });
 contextBridge.exposeInMainWorld("mightlingWindowType", "electron");

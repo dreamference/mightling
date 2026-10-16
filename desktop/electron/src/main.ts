@@ -11,10 +11,11 @@ import path from "node:path";
 import { BrowserWindow, app, ipcMain, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
-import { airgapped } from "./airgapped";
+import { airgapped, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
 import type { WorkTarget } from "./args";
 import { findLing } from "./bridge";
+import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
 import { openWork } from "./work";
@@ -67,6 +68,7 @@ export async function main(options: MainOptions): Promise<void> {
     window = openWork({ preload: path.join(__dirname, "preload.cjs"), show, view });
     window.on("closed", () => (window = null));
   };
+  const prefs = new Prefs(app.getPath("userData"));
   const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };
 
   installMenu(actions);
@@ -104,9 +106,18 @@ export async function main(options: MainOptions): Promise<void> {
         const ling = findLing(resourcesPath());
         return ling ? airgapped(ling, message.thread) : { level: "off", source: "ling is not installed" };
       }
+      case "work/airgapped-default": {
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return setDefault(ling, message.level);
+      }
       case "context-menu":
         if (window) showContextMenu(window, message);
         return null;
+      case "prefs/read":
+        return prefs.read();
+      case "prefs/write":
+        return prefs.write(message.values);
       case "window/minimize":
         window?.minimize();
         return null;

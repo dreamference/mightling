@@ -9,7 +9,7 @@
 
 ## 0. Summary
 
-The Codex app is a window over an open protocol served by an open binary. Mightling already has the same shape: `ling` is that binary, built from the same source with Mightling's patches, and the desktop app is a stock Electron window that spawns `ling app-server` and speaks the same JSON-RPC over stdio. What differs is **how much of the protocol the window uses** (43 of the 107 client request methods the pinned binary's generated schema lists, plus 10 server requests and 85 notifications, §4.1) and **how many of the window-side features exist** (tabs, terminal, review pane, worktrees, settings, shortcuts: none yet).
+The Codex app is a window over an open protocol served by an open binary. Mightling already has the same shape: `ling` is that binary, built from the same source with Mightling's patches, and the desktop app is a stock Electron window that spawns `ling app-server` and speaks the same JSON-RPC over stdio. What differs is **how much of the protocol the window uses** (43 of the 170 client request methods the pinned binary's generated schema lists, plus 11 server requests and 85 notifications, §4.1) and **how many of the window-side features exist** (tabs, terminal, review pane, worktrees, settings, shortcuts: none yet).
 
 This document does three things:
 
@@ -84,7 +84,7 @@ Three properties of this layering matter for Mightling:
 
 ### 1.4 The protocol, by domain
 
-The methods, read from the generated schema `app-server-protocol/schema/typescript/{ClientRequest,ServerRequest,ServerNotification,ClientNotification}.ts` (0.158.0: 107 client requests, 10 server requests, 85 server notifications, 1 client notification; the same files `desktop/ui/src/protocol/` carries), grouped here by domain. Names are what a client sends or receives; the v1 methods `initialize`, `fuzzyFileSearch`, `gitDiffToRemote`, `getAuthStatus` and `getConversationSummary` have no slash:
+The methods, read from the generated schema `app-server-protocol/schema/typescript/{ClientRequest,ServerRequest,ServerNotification,ClientNotification}.ts` (0.158.0: 170 client requests, 11 server requests, 85 server notifications, 1 client notification, recounted 2026-10-16 from the committed types by `tests/test_desktop_parity.py`, which holds them as `desktop/ui/src/protocol-inventory.json` grouped by the domains below; the 2026-10-14 count of 107 and 10 left out v1 and test methods; the same files `desktop/ui/src/protocol/` carries), grouped here by domain. Names are what a client sends or receives; the v1 methods `initialize`, `fuzzyFileSearch`, `gitDiffToRemote`, `getAuthStatus` and `getConversationSummary` have no slash:
 
 | Domain | Methods (client → server unless noted) |
 |---|---|
@@ -197,22 +197,22 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| Text; `@` file mentions; `$` skill picker; `/` commands | `turn/start`, `fuzzyFileSearch`, `skills/list` | **Partial:** text and send Built; `fuzzyFileSearch` and `skills/list` Allowed; `@`, `$` and `/` to build | 2 |
-| Enter sends, or Ctrl+Enter for multiline or always (Settings › General) | window | **Same** | 2 |
-| Follow-up behaviour: a message sent while running **steers** the run or **waits** for the next run (Settings › General) | `turn/steer` vs `thread/queue/add` | **Partial:** Steer is Built; the queue is Allowed (no UI); the setting to build | 2 |
-| Restore previous composer prompt (↑ when empty) | window | **Same** | 2 |
-| Images: paste, attach, Shift+drag | `thread/attachment/*`, input items | **Built** in Ask (attachments shown when the served model has vision); Shift+drag to build | 2 |
-| Model picker (Ctrl+Shift+M), recent models (Alt+M), intelligence level / reasoning effort | `model/list`, `turn/start` `model` / `effort` | **Mightling's:** the served model is shown as a chip; one model is served at a time (`model_key_for_served_id`), so the picker lists it and the effort levels the catalog allows | 2 |
+| Text; `@` file mentions; `$` skill picker; `/` commands | `turn/start`, `fuzzyFileSearch`, `skills/list` | **Built** (2026-10-16): `@` searches the thread's folder through `fuzzyFileSearch` and writes the path; `$` lists `skills/list` and sends a `skill` input item beside the text; `/` opens the commands at the start of a message | 2 |
+| Enter sends, or Ctrl+Enter for multiline or always (Settings › General) | window | **Built** (2026-10-16): Settings › General, kept in the window's preferences (`prefs.json`) | 2 |
+| Follow-up behaviour: a message sent while running **steers** the run or **waits** for the next run (Settings › General) | `turn/steer` vs `thread/queue/add` | **Built** (2026-10-16): Settings › General; steer sends `turn/steer`, queue sends `thread/queue/add` and the server starts the next queued message when the turn ends; queued messages show above the composer with **steer now** and remove; the other behaviour is one click beside the send button | 2 |
+| Restore previous composer prompt (↑ when empty) | window | **Built** (2026-10-16): ↑ walks back through this window's prompts and the thread's earlier messages, ↓ returns to the draft | 2 |
+| Images: paste, attach, Shift+drag | `thread/attachment/*`, input items | **Built** (2026-10-16): Ask attaches pasted, picked and dropped files as before; in Work, Shift+drag attaches an image by its path on disk (a `localImage` item, nothing copied) and a plain drop writes the file's path as an `@` mention | 2 |
+| Model picker (Ctrl+Shift+M), recent models (Alt+M), intelligence level / reasoning effort | `model/list`, `turn/start` `model` / `effort` | **Built** (2026-10-16), **Mightling's:** a chip in the composer opens the picker (Ctrl+Shift+M; Alt+M with recent models first) listing `model/list` (one served model) and the efforts its catalog entry allows; the effort goes with each `turn/start` | 2 |
 | Plan mode (`/plan`), interview-then-goal | `turn/start` `collaborationMode` | **Allowed** (`collaborationMode/list`); the picker to build | 2 |
 | Goal mode (`/goal`): the goal is prompt and completion criteria; a progress row above the composer with pause, resume, edit, clear | `thread/goal/set|get|clear`, `thread/goal/updated` | **Same** | 2 |
 | Composer predictions (suggested completions while typing) | vendor | **Later:** needs a fast local completion path (the engine's or the sidecar's); COMPACTION §4.6's fast slot | 3 |
 | Voice chat (Ctrl+Shift+V) | `thread/realtime/*`, vendor realtime | **Mightling's:** the speech-to-text sidecar (`dream-stt`) for dictation; `thread/realtime/*` never sent | 2 |
-| Approve (Enter) / decline (Esc) an open approval | `item/*/requestApproval` answers | **Built**; keys to add | 2 |
+| Approve (Enter) / decline (Esc) an open approval | `item/*/requestApproval` answers | **Built** (2026-10-16): with nothing typed, Enter approves and Esc declines the first open approval of the shown thread | 2 |
 | Steer while running; queued follow-ups; stop (Esc) | `turn/steer`, `thread/queue/*`, `turn/interrupt` | **Built** | — |
-| Edit the previous message (Esc Esc) | `thread/revert` then `turn/start` | **Partial:** a per-turn **revert** link is Built; Esc Esc and re-editing the text to build | 2 |
-| Fork a thread | `thread/fork` | **Allowed** | 2 |
-| Context indicator and **Compress** | `thread/tokenUsage/updated`, `thread/compact/start` | **Built** (usage chip and a compact link) | — |
-| Slash commands of the TUI available in the app (`/model`, `/permissions`, `/review`, `/plan`, `/goal`, `/memories`, `/skills`, `/mcp`, `/plugins`, `/agents`, `/side`, `/btw`, `/compact`, `/recap`, `/diff`, `/status`, `/new`, `/resume`, `/fork`, `/worktree`, `/rename`, `/archive`, `/pet` …; the pinned TUI's list is in `tui/src/slash_command.rs`) | window parses `/`; each maps to a method or a window action | **Same** for every command whose method the server has, plus Mightling's `/airgapped`, `/cavemode`, `/night`, `/prompt`, `/apps` (each a launcher command) | 2 |
+| Edit the previous message (Esc Esc) | `thread/revert` then `turn/start` | **Built** (2026-10-16): Esc Esc on an empty composer, `/edit` or the **Edit** link on the last turn reverts it (`thread/revert`) and puts its text back in the composer | 2 |
+| Fork a thread | `thread/fork` | **Built** (2026-10-16): the fork button in the header and `/fork` | 2 |
+| Context indicator and **Compress** | `thread/tokenUsage/updated`, `thread/compact/start` | **Built** (usage chip, its compress link, and `/compact`) | — |
+| Slash commands of the TUI available in the app (`/model`, `/permissions`, `/review`, `/plan`, `/goal`, `/memories`, `/skills`, `/mcp`, `/plugins`, `/agents`, `/side`, `/btw`, `/compact`, `/recap`, `/diff`, `/status`, `/new`, `/resume`, `/fork`, `/worktree`, `/rename`, `/archive`, `/pet` …; the pinned TUI's list is in `tui/src/slash_command.rs`) | window parses `/`; each maps to a method or a window action | **Partial** (2026-10-16): `/new`, `/fork`, `/compact`, `/edit`, `/rename`, `/archive`, `/model`, `/permissions`, `/status`, `/skills`, `/mention`, `/mcp`, `/diff` (`gitDiffToRemote`), `/copy`, `/resume` and Mightling's `/airgapped` (status, and `default off|on` through `ling airgapped default`; a thread's own level is set inside a `ling` session, since the launcher has no `--thread` setter) are Built, each described in Mightling's words; `/review`, `/plan`, `/goal`, `/memories`, `/agents`, `/plugins`, `/side`, `/worktree` come with their items (5, 6, 7, 11, 13; side chat with 3); `/cavemode`, `/night`, `/prompt`, `/apps` with 10 and 12 | 2 |
 
 ### 2.4 The stream
 
@@ -473,7 +473,7 @@ The vendor's product surface, read from its public design language rather than i
 
 ### 3.4 Icons
 
-Lucide (ISC), bundled as inline SVG, 16 px in rows and 20 px in the bar; Mightling's own mark for the app icon and the empty state. No emoji in controls (today's 📎 becomes the paperclip icon). Built as `desktop/ui/src/icons.tsx`: the path data of the sixteen icons used, copied from Lucide 0.460.0 with its ISC notice in `icons.LICENSE.txt`, rather than the `lucide-react` package (no new dependency in either `package.json`). The empty state's mark is the faceted ling of `images/mightling-logo-*.svg` without its wordmark, drawn from tokens; the app icon itself (`desktop/electron/icons/`) is unchanged (not replaced, the owner, 2026-10-16).
+Lucide (ISC), bundled as inline SVG, 16 px in rows and 20 px in the bar; Mightling's own mark for the app icon and the empty state. No emoji in controls (today's 📎 becomes the paperclip icon). Built as `desktop/ui/src/icons.tsx`: the path data of the icons used, copied from Lucide 0.460.0 with its ISC notice in `icons.LICENSE.txt`, rather than the `lucide-react` package (no new dependency in either `package.json`). The empty state's mark is the faceted ling of `images/mightling-logo-*.svg` without its wordmark, drawn from tokens; the app icon itself (`desktop/electron/icons/`) is unchanged (not replaced, the owner, 2026-10-16).
 
 ### 3.5 Libraries
 
@@ -520,7 +520,7 @@ The name and wordmark; TIFFANY_BLUE as the accent and the air-gap chip's colour;
 
 ### 4.1 Built today (1.6.1)
 
-One window with Ask and Work; one `ling app-server` on stdio through the vetted IPC channel. **Allowed** (43 of the 107 client requests: initialize, account/read, config read/write, model/list, permission profiles, collaboration modes, project list/read/create/update, thread start/resume/fork/list/read/loaded/turns/items/search/name/metadata/archive/unarchive/unsubscribe/compact/revert, queue add/list/update/delete/reorder/start, turn start/steer/interrupt, fuzzyFileSearch, gitDiffToRemote, skills/list, mcpServerStatus/list, app/list). **Built** (a UI exists): threads grouped by folder with rename, search, archive, running markers and a per-turn revert link; streaming items (messages, reasoning, commands, file changes, plan, the turn's diff); inline approvals; the permissions picker with the air-gap courtesy; Steer and Stop; a compact link; attachments in Ask; the served-model, usage and air-gap chips; the devices link for `ling web`; the start-up screen; narrow-window drawer; `ling web` serving the same UI to browsers with the same policy; the egress audit's `--app` mode; Night Shift's busy marker. **Allowed without a UI:** project create/update, fork, the queue, `fuzzyFileSearch`, `collaborationMode/list`, `skills/list`, `mcpServerStatus/list`, `app/list`.
+One window with Ask and Work; one `ling app-server` on stdio through the vetted IPC channel. **Allowed** (43 of the 170 client requests: initialize, account/read, config read/write, model/list, permission profiles, collaboration modes, project list/read/create/update, thread start/resume/fork/list/read/loaded/turns/items/search/name/metadata/archive/unarchive/unsubscribe/compact/revert, queue add/list/update/delete/reorder/start, turn start/steer/interrupt, fuzzyFileSearch, gitDiffToRemote, skills/list, mcpServerStatus/list, app/list). **Built** (a UI exists): threads grouped by folder with rename, search, archive, running markers and a per-turn revert link; streaming items (messages, reasoning, commands, file changes, plan, the turn's diff); inline approvals; the permissions picker with the air-gap courtesy; Steer and Stop; a compact link; attachments in Ask; the served-model, usage and air-gap chips; the devices link for `ling web`; the start-up screen; narrow-window drawer; `ling web` serving the same UI to browsers with the same policy; the egress audit's `--app` mode; Night Shift's busy marker. **Allowed without a UI:** project create/update, fork, the queue, `fuzzyFileSearch`, `collaborationMode/list`, `skills/list`, `mcpServerStatus/list`, `app/list`.
 
 ### 4.2 Phase 2 — the Codex surface (this spec's main body)
 
@@ -529,7 +529,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 1. **Look** (§3): tokens, fonts, radii, spacing, the composer card, the bubble, no turn separators, icons. One change, no behaviour. **Look: merged 2026-10-16** (light only; the app icon unchanged).
 2. **Shell:** sidebar toggle, command menu, back/forward, font size, undo/redo, close/reopen tabs, the keymap table and its settings page (§2.1, §2.19).
 3. **Threads:** pins, sections, Recents, unread and attention, mark unread, find in chat, deep links and `ling://`, pop-out with always-on-top, side chat, standalone chat (§2.1).
-4. **Composer:** `@` mentions, `$` skills, `/` commands, Enter behaviour, follow-up behaviour, ↑ restore, Shift+drag images, approve/decline keys, edit previous, fork, Compress, the model and effort picker (§2.3).
+4. **Composer:** `@` mentions, `$` skills, `/` commands, Enter behaviour, follow-up behaviour, ↑ restore, Shift+drag images, approve/decline keys, edit previous, fork, Compress, the model and effort picker (§2.3). **Composer: merged 2026-10-16, MERGE4** (the slash commands Partial: the ones whose methods come with later items wait for them).
 5. **Plan and goal:** collaboration mode, the goal row (§2.3).
 6. **Review pane and git:** scopes, repository selector, stage/unstage/revert at three levels, inline comments, viewed markers, open in editor, `/review` inline or detached, commit, push, PR page (§2.5).
 7. **Worktrees and hand-off**, local environments and actions, the bottom panel (§2.6).
@@ -553,9 +553,9 @@ File tree and file tabs; search files and go to line; the artifacts viewer (Mark
 
 ## 5. Tests and acceptance
 
-- **Protocol inventory drift:** a test reads the method names of the four generated schema files (`app-server-protocol/schema/typescript/ClientRequest.ts`, `ServerRequest.ts`, `ServerNotification.ts`, `ClientNotification.ts`), compares them with the copy under `desktop/ui/src/protocol/` and with a checked-in list grouped as §1.4; a Codex bump that changes it fails until this spec and `policy.json` are reviewed.
-- **Policy coverage:** every §2 row marked Built or Same with a method names a method present in `policy.json` or in a list of methods still to add; the test prints the methods a phase still lacks.
-- **Keymap:** §2.19 as JSON under `desktop/ui/src/keymap.json`; a test checks it against the UI's registered bindings and that no two actions share a binding in the same context.
+- **Protocol inventory drift:** a test reads the method names of the four generated schema files (`app-server-protocol/schema/typescript/ClientRequest.ts`, `ServerRequest.ts`, `ServerNotification.ts`, `ClientNotification.ts`), compares them with the copy under `desktop/ui/src/protocol/` and with a checked-in list grouped as §1.4; a Codex bump that changes it fails until this spec and `policy.json` are reviewed. Built with item 4 (`tests/test_desktop_parity.py`; the submodule's schema is compared when the checkout has it).
+- **Policy coverage:** every §2 row marked Built or Same with a method names a method present in `policy.json` or in a list of methods still to add; the test prints the methods a phase still lacks. Built with item 4 (`tests/test_desktop_parity.py`, with the inventory drift test): `POLICY_TO_ADD` names each missing method's item, and must equal what the parse of §2 finds missing.
+- **Keymap:** §2.19 as JSON under `desktop/ui/src/keymap.json`; a test checks it against the UI's registered bindings and that no two actions share a binding in the same context. Built with item 4 (`keymap.test.ts`): each action carries `built` or `planned`, and a handler names its action with `keyAction("<id>")`, which the test finds in the sources.
 - **Look:** a snapshot test of the rendered tokens (`getComputedStyle` of `:root` in the test renderer) against §3.6; a grep test that no stylesheet references a remote URL and that the only font sources are bundled files.
 - **Per feature:** the scripted app-server stand-in (as today's `ask.test.ts` and `work.test.ts`) gains one scenario per §2 row as it ships: a worktree created and handed off against a scratch repository, a review-pane stage per hunk, a terminal tab echoing a command, a goal row paused and resumed, a queued follow-up started, a pinned thread sorted first.
 - **Egress:** `ling-admin audit egress --app` passes with every Phase 2 feature on; the preview tab (Phase 3) adds its own allow-list cases.
@@ -578,7 +578,7 @@ File tree and file tabs; search files and go to line; the artifacts viewer (Mark
 
 1. ~~**Bundle fonts or not?**~~ Bundled on `desktop/codex-look`: Inter and JetBrains Mono as variable woff2, Latin and Latin Extended, 185 KB together, with their OFL licences beside them.
 2. ~~**Dark mode**~~ (DESKTOP §14 question 3): **dark mode not approved 2026-10-16, light only; the Appearance page's choice is Phase 3.** It was built on `desktop/codex-look` as the system theme's follower (screenshots in both themes, 2026-10-15); the owner kept the 2026-10-03 light-only decision, so the merge removed the dark block and the follower and kept the tokens (§3.6).
-3. **`.codex/` or `.mightling/` for local environments?** Reading `.codex/` keeps shared repositories working for Codex users; writing it from Mightling's settings pages puts a vendor-named folder in the user's project. Recommendation: read both, write `.mightling/`.
+3. ~~**`.codex/` or `.mightling/` for local environments?**~~ **Decided 2026-10-16 (the owner): read both `.codex/` and `.mightling/` in a project, write only `.mightling/`.** Reading `.codex/` keeps shared repositories working for Codex users; Mightling's settings pages never put a vendor-named folder in the user's project.
 4. **`tectonic` in the bundle** for LaTeX previews (Phase 3): about 30 MB. Recommendation: later, behind a setting.
 5. **Pets:** worth Mightling's own art at all? Recommendation: ask the owner once Phase 2 ships.
 

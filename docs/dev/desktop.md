@@ -35,10 +35,19 @@ Until 2026-10-07 it was a Tauri shell on the system's WebKitGTK, and typing into
 - `DesktopInstaller`'s rustup helpers stay because the Codex build drives them.
 - `DesktopRunner.has_source()` tells a checkout from a release install ([install-modes.md](install-modes.md)).
 
+## Phase 2 (DESKTOP_PARITY §4.2)
+
+- **The window's preferences** (`desktop/electron/src/prefs.ts`): one `prefs.json` under the data folder, mode 0600, every key and value checked against `desktop/ui/src/prefs.json`, the schema the page is built with (`prefs/read`, `prefs/write` over the one channel); a browser on `ling web` keeps the same keys in `localStorage`. Window settings only: agent settings stay in `~/.mightling/config.toml`, written by the server.
+- **The keymap** is data (`desktop/ui/src/keymap.json`, §2.19 with a `built` or `planned` status per action); handlers name their action with `keyAction("<id>")` and `keymap.test.ts` holds the table and the code together.
+- **The composer** (item 4): `composer.ts` (completion triggers, slash commands, prompt history, the approval keys), `turns.ts` (steer, queue, take back, fork over the RPC client), `ComposerView.tsx`. A Shift+dragged image is sent by its path, which the preload reads with `webUtils.getPathForFile` (`electronBridge.pathForFile`); `/airgapped default <level>` runs `ling airgapped default` in the main process (`work/airgapped-default`).
+- **Methods still to add** to `policy.json` are listed, with their item, in `tests/test_desktop_parity.py` (`POLICY_TO_ADD`); adding one needs the Rust conformance run, so it never lands while a SWE-bench night owns the machine.
+
 ## Tests
 
 - `npm test` in `desktop/electron` (vitest, the main-process modules; `policy.test.ts` runs `ling web`'s conformance cases; `ask.test.ts` runs an Ask thread through `AppServer` against a scripted `ling`) and in `desktop/ui`.
 - `npm run e2e` (Playwright-Electron, needs a display and `npm run package` first): no argument opens the one window on Ask, the menu's Work and Ask switch it without opening another, and only one app-server and no `ling web` is ever started; Work on `app://`; and an Ask question with an image through the real main process against a scripted `ling`.
 - `desktop/ui/src/styles.test.ts` guards the look (DESKTOP_PARITY §3): the `:root` tokens, light only (no dark block, no `prefers-color-scheme`; dark not approved 2026-10-16), no remote URL in the stylesheet and every `url()` a bundled font, and the licences beside the fonts (OFL) and the icons (ISC). Vitest empties CSS unless asked, hence `css.include` in `desktop/ui/vite.config.ts`.
 - `MIGHTLING_LOOK_DIR=<folder> npm run e2e -- look` (after `npm run package`) saves Ask (empty and with a question) and Work (a command, a diff, an approval) as PNGs, against a stand-in with made-up threads; without the variable the test is skipped. It sets the system theme dark through `nativeTheme.themeSource`, so the pictures show the app stays light, turns transitions off (a window the compositor thinks is covered can freeze one at its first frame) and parks the pointer before each picture.
+- `npm run e2e -- phase2` (after `npm run package`) runs one test per Phase 2 item against `e2e/stand-in.ts`, a scripted `ling app-server` with made-up threads under a scratch HOME; with `MIGHTLING_LOOK_DIR=<folder>` the window is shown and each item's pictures are saved there.
+- `tests/test_desktop_parity.py`: the protocol inventory (`desktop/ui/src/protocol-inventory.json` against the committed types and, with the submodule, the pinned schema) and the policy coverage of §2's Phase 2 rows.
 - The Python tests read `app.json`, `forge.config.js`, `linux/postinst` and the TypeScript sources as text.

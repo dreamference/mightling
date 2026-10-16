@@ -9,17 +9,25 @@
 // (ling-rs/web/src/policy.rs) and the desktop app's main process (desktop/electron/src/policy.ts).
 // So both show Ask by default and Work one click away (`#work`).
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 
 import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAskThread, turnInput, type Attached } from "./ask";
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
+import { Composer, type ComposerAttachment } from "./ComposerView";
+import { PromptHistory, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
+import { keyAction, matches } from "./keymap";
 import { renderMarkdown } from "./markdown";
+import { DEFAULT_PREFS, loadPrefs, savePrefs, type Prefs } from "./prefs";
 import { RpcClient, type ParamsOf } from "./rpc";
+import type { FuzzyFileSearchResult } from "./protocol/FuzzyFileSearchResult";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { ServerRequest } from "./protocol/ServerRequest";
+import type { Model } from "./protocol/v2/Model";
 import type { PermissionProfileSummary } from "./protocol/v2/PermissionProfileSummary";
+import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
+import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
@@ -27,6 +35,7 @@ import {
   contextUse, initialState, permissionChoices, projects, reduce,
   type PendingRequest, type ThreadView, type TurnView,
 } from "./store";
+import { dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
 
@@ -40,8 +49,6 @@ const ASKED = new Set<ServerRequest["method"]>([
   "applyPatchApproval",
 ]);
 
-const text = (value: string): UserInput => ({ type: "text", text: value, text_elements: [] });
-
 type View = "ask" | "work";
 
 const HOST = bridge.host();
@@ -50,16 +57,26 @@ function initialView(): View {
   return typeof location !== "undefined" && location.hash === "#work" ? "work" : "ask";
 }
 
-/** A file picked or pasted for the next question, not yet in the thread's folder. */
+/** A file picked, pasted or dropped for the next message, not yet sent. */
 interface PendingFile {
   id: number;
   file: File;
   name: string;
   kind: "image" | "file";
   preview: string | null;
+  /** Where it already is on disk (a Work image dropped in the app): sent by path, never uploaded. */
+  path: string | null;
+}
+
+/** What a slash command printed, shown above the turns until dismissed. */
+interface Info {
+  title: string;
+  body: ReactNode;
 }
 
 let nextPendingId = 1;
+
+const IMAGE_TYPES = /^image\/(png|jpe?g|gif|webp)$/i;
 
 export function App() {
   const [state, dispatch] = useReducer(reduce, initialState);
@@ -78,6 +95,14 @@ export function App() {
   const [pending, setPending] = useState<PendingFile[]>([]);
   const [sending, setSending] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
+  const [models, setModels] = useState<Model[]>([]);
+  const [modelChoice, setModelChoice] = useState<string | null>(null);
+  const [picker, setPicker] = useState<"closed" | "open" | "recent">("closed");
+  const [skills, setSkills] = useState<Record<string, SkillMetadata[]>>({});
+  const [info, setInfo] = useState<Info | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const promptHistory = useMemo(() => new PromptHistory(), []);
   const fileInput = useRef<HTMLInputElement>(null);
   const notice = useCallback((error: unknown) => dispatch({ type: "notice", message: error instanceof Error ? error.message : String(error) }), []);
   /** Shows Ask or Work: the view buttons, and in the app its menu. */
@@ -85,7 +110,7 @@ export function App() {
     setView(next);
     setSearch("");
     dispatch({ type: "select", threadId: null });
-    if (typeof history !== "undefined") history.replaceState(null, "", next === "work" ? "#work" : "#");
+    if (typeof window !== "undefined") window.history.replaceState(null, "", next === "work" ? "#work" : "#");
   }, []);
 
   const answerUnasked = useCallback((request: ServerRequest) => {
@@ -99,6 +124,10 @@ export function App() {
     }
   }, [client]);
 
+  const refreshQueue = useCallback((threadId: string) => {
+    listQueue(client, threadId).then((items) => dispatch({ type: "queue", threadId, items })).catch(() => {});
+  }, [client]);
+
   const connect = useCallback(async () => {
     dispatch({ type: "server", status: "starting" });
     try {
@@ -108,15 +137,19 @@ export function App() {
       await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: true, requestAttestation: false } });
       await client.initialized();
       dispatch({ type: "server", status: "ready" });
-      const [list, permissions, level, target] = await Promise.all([
+      const [list, permissions, level, target, stored] = await Promise.all([
         client.request("thread/list", { limit: 200 }),
         client.request("permissionProfile/list", {}),
         bridge.airgapped(null),
         bridge.workTarget(),
+        loadPrefs(),
       ]);
       dispatch({ type: "threads", list: list.data });
       setProfiles(permissions.data);
       setAirgap(level);
+      setPrefs(stored);
+      // The catalog the launcher wrote: one served model, with the efforts it allows.
+      client.request("model/list", {}).then((answer) => setModels((answer as { data?: Model[] }).data ?? [])).catch(() => setModels([]));
       // A browser has no launch target: `ling web` answers null.
       if (target?.cwd) setNewCwd(target.cwd);
       if (target?.thread) {
@@ -131,7 +164,10 @@ export function App() {
   // The bridge's events, then the server; once, for the life of the window.
   const connected = useRef(false);
   useEffect(() => {
-    client.onNotification = (notification) => dispatch({ type: "notification", notification });
+    client.onNotification = (notification) => {
+      dispatch({ type: "notification", notification });
+      if (notification.method === "thread/queue/changed") refreshQueue(notification.params.threadId);
+    };
     client.onServerRequest = (request) => {
       if (ASKED.has(request.method)) dispatch({ type: "serverRequest", request });
       else answerUnasked(request).catch(notice);
@@ -154,7 +190,7 @@ export function App() {
       }
     }).catch(notice);
     return () => stop?.();
-  }, [client, connect, answerUnasked, notice, showView]);
+  }, [client, connect, answerUnasked, notice, showView, refreshQueue]);
 
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
@@ -191,6 +227,22 @@ export function App() {
     };
   }, [search, view, askRoot, state.server, client, notice]);
 
+  // The folder the composer's `@` and `$` look in: the shown thread's, or the new thread's.
+  const composeRoot = view === "work" ? (selected?.thread.cwd ?? (newCwd.trim() || null)) : (selected?.thread.cwd ?? null);
+  useEffect(() => {
+    if (state.server !== "ready" || !composeRoot || skills[composeRoot]) return;
+    client.request("skills/list", { cwds: [composeRoot] })
+      .then((answer) => setSkills((known) => ({ ...known, [composeRoot]: (answer as { data?: { skills: SkillMetadata[] }[] }).data?.flatMap((entry) => entry.skills) ?? [] })))
+      .catch(() => setSkills((known) => ({ ...known, [composeRoot]: [] })));
+  }, [composeRoot, state.server, client, skills]);
+  const rootSkills = composeRoot ? skills[composeRoot] ?? [] : [];
+
+  const searchFiles = useCallback(async (query: string): Promise<FuzzyFileSearchResult[]> => {
+    if (!composeRoot) return [];
+    const answer = (await client.request("fuzzyFileSearch", { query, roots: [composeRoot], cancellationToken: "composer" })) as { files?: FuzzyFileSearchResult[] };
+    return answer.files ?? [];
+  }, [client, composeRoot]);
+
   // Pasted or picked images show a preview until they are sent or removed.
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -199,9 +251,11 @@ export function App() {
   const openThread = async (threadId: string) => {
     dispatch({ type: "select", threadId });
     setDrawer(false);
+    setInfo(null);
     try {
       const resumed = await client.request("thread/resume", { threadId, model: servedModel });
       dispatch({ type: "opened", thread: resumed.thread });
+      refreshQueue(threadId);
     } catch (error) {
       notice(error);
     }
@@ -209,15 +263,20 @@ export function App() {
 
   const switchView = showView;
 
-  const startThread = async () => {
+  const startThread = async (): Promise<Thread | null> => {
     const cwd = newCwd.trim();
-    if (!cwd) return notice("Name the project folder for the new thread.");
+    if (!cwd) {
+      notice("Name the project folder for the new thread.");
+      return null;
+    }
     try {
       const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile });
       dispatch({ type: "opened", thread: started.thread });
       setDrawer(false);
+      return started.thread;
     } catch (error) {
       notice(error);
+      return null;
     }
   };
 
@@ -234,13 +293,14 @@ export function App() {
     setDrawer(false);
   };
 
-  const addFiles = (files: Iterable<File>) => {
+  const addFiles = (files: Iterable<File>, paths: (string | null)[] = []) => {
     const added: PendingFile[] = [];
     let index = 0;
     for (const file of files) {
-      const name = attachmentName(file.name, file.type, index++);
+      const name = attachmentName(file.name, file.type, index);
       const kind = attachmentKind(file.type, name);
-      added.push({ id: nextPendingId++, file, name, kind, preview: kind === "image" ? URL.createObjectURL(file) : null });
+      added.push({ id: nextPendingId++, file, name, kind, preview: kind === "image" ? URL.createObjectURL(file) : null, path: paths[index] ?? null });
+      index++;
     }
     if (added.length) setPending((list) => [...list, ...added]);
   };
@@ -254,30 +314,66 @@ export function App() {
   };
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (view !== "ask") return;
     const files = Array.from(event.clipboardData?.files ?? []);
     if (files.length === 0) return;
+    // Work sends images by their path, which only a dropped file has: a pasted one goes to Ask.
+    if (view !== "ask") return;
     event.preventDefault();
     addFiles(files);
   };
 
-  const sendWork = async (message: string) => {
-    if (!selected) return;
+  /**
+   * Files dropped on the composer. Ask attaches them as it attaches picked files. In Work, Shift+drag
+   * attaches images (sent by their path); a plain drop writes each file's path into the text as an
+   * `@` mention, for the agent to read.
+   */
+  const onFiles = (files: File[], asImages: boolean) => {
+    if (view === "ask") return addFiles(files);
+    const paths = files.map((file) => bridge.pathForFile(file));
+    if (asImages) {
+      const images = files.map((file, index) => ({ file, path: paths[index] })).filter((entry) => entry.path && (IMAGE_TYPES.test(entry.file.type) || attachmentKind(entry.file.type, entry.file.name) === "image"));
+      if (images.length === 0) return notice("Shift+drag attaches images that are files on this machine.");
+      return addFiles(images.map((entry) => entry.file), images.map((entry) => entry.path));
+    }
+    const mentions = paths.filter((path): path is string => Boolean(path)).map((path) => `@${composeRoot ? mentionPath(composeRoot, path) : path}`);
+    if (mentions.length) setDraft((text) => `${text}${text && !/\s$/.test(text) ? " " : ""}${mentions.join(" ")} `);
+  };
+
+  const effort = (() => {
+    const model = models.find((entry) => entry.id === (modelChoice ?? servedModel)) ?? models[0] ?? null;
+    return effortFor(model, prefs.effort);
+  })();
+
+  const sendWork = async (message: string, mode: "default" | "steer" | "queue") => {
+    const target = selected?.thread ?? (await startThread());
+    if (!target) return;
+    const images = pending.filter((item) => item.kind === "image" && item.path).map((item) => item.path as string);
+    const input = composeInput(message, rootSkills, images);
+    if (input.length === 0) return;
     setDraft("");
-    const threadId = selected.thread.id;
+    const files = pending;
+    setPending([]);
+    const shown = selected?.thread.id === target.id ? selected : null;
     try {
-      if (selected.activeTurnId) {
-        await client.request("turn/steer", { threadId, input: [text(message)], expectedTurnId: selected.activeTurnId });
-      } else {
-        await client.request("turn/start", { threadId, input: [text(message)], permissions: profile });
-      }
+      await sendMessage(client, {
+        threadId: target.id,
+        activeTurnId: shown?.activeTurnId ?? null,
+        input,
+        followUp: mode === "default" ? prefs.followUp : mode,
+        permissions: profile,
+        effort,
+        model: modelChoice,
+      });
+      promptHistory.push(message);
+      files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
     } catch (error) {
       setDraft(message);
+      setPending(files);
       notice(error);
     }
   };
 
-  const sendAsk = async (message: string) => {
+  const sendAsk = async (message: string, mode: "default" | "steer" | "queue") => {
     const files = pending;
     setSending(true);
     setDraft("");
@@ -290,8 +386,8 @@ export function App() {
       );
       const input = turnInput(message, attached);
       const active = selected?.thread.id === thread.id ? selected.activeTurnId : null;
-      if (active) await client.request("turn/steer", { threadId: thread.id, input, expectedTurnId: active });
-      else await client.request("turn/start", { threadId: thread.id, input });
+      await sendMessage(client, { threadId: thread.id, activeTurnId: active, input, followUp: mode === "default" ? prefs.followUp : mode, effort, model: modelChoice });
+      promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
     } catch (error) {
       setDraft(message);
@@ -302,13 +398,18 @@ export function App() {
     }
   };
 
-  const send = async () => {
-    const message = draft.trim();
+  const send = async (text: string, mode: "default" | "steer" | "queue") => {
+    const message = text.trim();
     if (sending) return;
+    const slash = parseSlash(message);
+    if (slash) {
+      setDraft("");
+      return runCommand(slash.command, slash.args);
+    }
     if (view === "ask") {
-      if (message || pending.length) await sendAsk(message);
-    } else if (message) {
-      await sendWork(message);
+      if (message || pending.length) await sendAsk(message, mode);
+    } else if (message || pending.length) {
+      await sendWork(message, mode);
     }
   };
 
@@ -344,16 +445,165 @@ export function App() {
     client.respond(request.id, result).then(() => dispatch({ type: "answered", id: request.id })).catch(notice);
   };
 
+  const threadRequests = state.requests.filter((request) => request.threadId === null || request.threadId === selected?.thread.id);
+
+  /** Enter or Esc on the first open approval of the shown thread. */
+  const answerByKey = (key: "approve" | "decline") => {
+    const request = threadRequests[0];
+    if (!request) return false;
+    const result = keyAnswer(request.method, key, request.params as Record<string, unknown>);
+    if (!result) return false;
+    answer(request, result);
+    return true;
+  };
+
+  /** Esc Esc or /edit: the last message comes back into the composer, and its turn is undone. */
+  const editPrevious = async () => {
+    if (!selected) return;
+    try {
+      const text = await takeBack(client, selected);
+      if (text === null) return;
+      await openThread(selected.thread.id);
+      setDraft(text);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  const fork = async () => {
+    if (!selected) return;
+    try {
+      const thread = await forkThread(client, selected.thread.id, servedModel);
+      dispatch({ type: "opened", thread });
+      refreshQueue(thread.id);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  const pickModel = (model: string, chosenEffort: string | null) => {
+    setModelChoice(model === servedModel ? null : model);
+    setPicker("closed");
+    updatePrefs({ effort: chosenEffort, recentModels: rememberModel(prefs.recentModels, model) });
+  };
+
+  /** Shown at once, then saved; a refused write puts the stored values back. */
+  const updatePrefs = (values: Partial<Prefs>) => {
+    const before = prefs;
+    setPrefs({ ...prefs, ...values });
+    savePrefs(before, values).then(setPrefs).catch((error) => {
+      setPrefs(before);
+      notice(error);
+    });
+  };
+
+  const runCommand = async (command: SlashCommand, args = ""): Promise<void> => {
+    const threadId = selected?.thread.id ?? null;
+    try {
+      switch (command.name) {
+        case "new":
+          return view === "ask" ? newQuestion() : void dispatch({ type: "select", threadId: null });
+        case "fork":
+          return fork();
+        case "compact":
+          if (threadId) await client.request("thread/compact/start", { threadId });
+          return;
+        case "edit":
+          return editPrevious();
+        case "rename":
+          if (threadId && args) return rename(threadId, args);
+          if (threadId) setRenaming({ id: threadId, name: selected?.thread.name ?? "" });
+          return;
+        case "archive":
+          if (threadId) return archive(threadId);
+          return;
+        case "model":
+          return setPicker("open");
+        case "permissions":
+          return setInfo({ title: "Permissions", body: <PermissionsInfo choices={choices} profile={profile} onChoose={(id) => { setProfile(id); setInfo(null); }} /> });
+        case "status":
+          return setInfo({ title: "Status", body: <StatusInfo model={modelChoice ?? servedModel} effort={effort} profile={choices.find((choice) => choice.id === profile)?.label ?? profile} cwd={selected?.thread.cwd ?? composeRoot} airgap={airgap} usage={contextUse(selected?.usage ?? null)} threadId={threadId} followUp={prefs.followUp} /> });
+        case "skills":
+          return setInfo({ title: "Skills", body: <SkillsInfo skills={rootSkills} root={composeRoot} /> });
+        case "mention":
+          return setDraft((text) => `${text}${text && !/\s$/.test(text) ? " " : ""}@`);
+        case "mcp": {
+          const answerList = (await client.request("mcpServerStatus/list", {})) as { data?: { name: string; tools: Record<string, unknown>; toolsError: string | null }[] };
+          return setInfo({ title: "MCP servers", body: <McpInfo servers={answerList.data ?? []} /> });
+        }
+        case "diff": {
+          if (!composeRoot) return;
+          const diff = (await client.request("gitDiffToRemote", { cwd: composeRoot })) as { sha?: string; diff?: string };
+          return setInfo({ title: `Against ${diff.sha?.slice(0, 10) ?? "the remote"}`, body: diff.diff ? <Diff text={diff.diff} /> : <p className="empty small">No differences.</p> });
+        }
+        case "copy": {
+          const last = [...(selected?.turns ?? [])].reverse().flatMap((turn) => [...turn.items].reverse()).find((item) => item.type === "agentMessage");
+          if (last && last.type === "agentMessage") await copyText(last.text);
+          return;
+        }
+        case "resume":
+          setDrawer(true);
+          requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
+          return;
+        case "airgapped": {
+          const words = args.split(/\s+/).filter(Boolean);
+          if (words[0] === "default" && (words[1] === "on" || words[1] === "off")) {
+            const lines = await bridge.airgappedDefault(words[1]);
+            setAirgap(await bridge.airgapped(threadId));
+            return setInfo({ title: "Airgapped", body: <pre className="info-pre">{lines}</pre> });
+          }
+          if (words.length) return setInfo({ title: "Airgapped", body: <p>In the app a thread's level follows the default; set it with <code>/airgapped default on</code> or <code>off</code>, or inside a <code>ling</code> session.</p> });
+          const level = await bridge.airgapped(threadId);
+          setAirgap(level);
+          return setInfo({ title: "Airgapped", body: <p>Airgapped is <strong>{level.level}</strong> ({level.source}).</p> });
+        }
+      }
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  // Shortcuts that work anywhere in the window: the model picker, recent models, settings, and Enter
+  // and Esc on an open approval when no text field has focus.
+  const keys = useRef<(event: KeyboardEvent) => void>(() => {});
+  keys.current = (event: KeyboardEvent) => {
+    // A field that already acted on the key (the composer's menus, its approval keys) has the last word.
+    if (event.defaultPrevented) return;
+    if (matches(event, keyAction("modelPicker"))) {
+      event.preventDefault();
+      setPicker((open) => (open === "closed" ? "open" : "closed"));
+    } else if (matches(event, keyAction("recentModels"))) {
+      event.preventDefault();
+      setPicker("recent");
+    } else if (matches(event, keyAction("settings"))) {
+      event.preventDefault();
+      setSettingsOpen((open) => !open);
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info)) {
+      setPicker("closed");
+      setSettingsOpen(false);
+      setInfo(null);
+    } else if (!editableFocus() && threadRequests.length > 0) {
+      if (matches(event, keyAction("approve")) && answerByKey("approve")) event.preventDefault();
+      else if (matches(event, keyAction("decline")) && answerByKey("decline")) event.preventDefault();
+    }
+  };
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => keys.current(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
   if (state.server !== "ready") {
     return <StartupScreen state={state.server} stderr={state.stderr} protocolErrors={state.protocolErrors} notices={state.notices} onRetry={connect} />;
   }
 
   const usage = contextUse(selected?.usage ?? null);
-  const threadRequests = state.requests.filter((request) => request.threadId === null || request.threadId === selected?.thread.id);
   const otherRequests = state.requests.length - threadRequests.length;
   const allThreads = Object.values(state.threads).map((entry) => entry.thread);
   const asks = found ? found.map((result) => result.thread) : askThreads(allThreads, askRoot);
   const snippets = new Map((found ?? []).map((result) => [result.thread.id, result.snippet]));
+  const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
+  const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.name, preview: item.preview }));
 
   const threadRow = (thread: Thread, label: string) => (
     renaming?.id === thread.id ? (
@@ -381,7 +631,10 @@ export function App() {
   );
 
   const title = selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? "New question" : "Mightling";
-  const canCompose = view === "ask" || selected !== null;
+  const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
+  const placeholder = selected?.activeTurnId
+    ? prefs.followUp === "queue" ? "Queue a follow-up for the next turn…" : "Steer the running turn…"
+    : view === "ask" ? "Ask anything… ($ for a skill, / for commands)" : "Ask Mightling… (@ for a file, $ for a skill, / for commands)";
 
   return (
     <div className={`work view-${view}${drawer ? " drawer-open" : ""}`} onContextMenu={(event) => {
@@ -411,7 +664,7 @@ export function App() {
           </>
         ) : (
           <>
-            <button className="nav-row new-thread-button" onClick={startThread}><Icon name="squarePen" />New thread</button>
+            <button className="nav-row new-thread-button" onClick={() => void startThread()}><Icon name="squarePen" />New thread</button>
             <label className="new-thread" title="The project folder a new thread starts in">
               <Icon name="folder" size={14} />
               <input value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
@@ -433,6 +686,8 @@ export function App() {
             ))}
           </>
         )}
+        <span className="sidebar-spacer" />
+        <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title="Settings (Ctrl+,)"><Icon name="settings" size={14} />Settings</button>
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
       </aside>
       <div className="backdrop" onClick={() => setDrawer(false)} />
@@ -443,7 +698,7 @@ export function App() {
           <span className="title">{title}</span>
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
-          {servedModel ? <span className="chip optional" title="The model the launcher serves">{servedModel}</span> : null}
+          {selected ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
           {usage ? (
             <span className="chip optional" title={`${usage.used.toLocaleString()} of ${usage.window.toLocaleString()} tokens`}>
@@ -459,17 +714,24 @@ export function App() {
         {state.protocolErrors.length > 0 ? <div className="notice">The agent's server wrote something that is not a protocol message: {state.protocolErrors[state.protocolErrors.length - 1]}</div> : null}
 
         <div className="turns">
+          {info ? (
+            <section className="info-panel" aria-label={info.title}>
+              <header><strong>{info.title}</strong><button className="icon" aria-label="Close" onClick={() => setInfo(null)}><Icon name="x" size={14} /></button></header>
+              {info.body}
+            </section>
+          ) : null}
           {selected ? selected.turns.map((turn, index) => (
             <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1}
               onRevert={() => client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: turn.id })
-                .then(() => openThread(selected.thread.id)).catch(notice)} />
+                .then(() => openThread(selected.thread.id)).catch(notice)}
+              onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
           )) : view === "ask" ? (
             <div className="empty ask-empty">
               <MightlingMark size={56} />
               <h1>Ask Mightling</h1>
               <p>A question with no project: Mightling answers in a folder of its own, searching the web when it needs to{airgap?.level === "on" ? ", except that airgapped is on, so web search is off" : ""}. Attach images or files with the paperclip, or paste a screenshot.</p>
             </div>
-          ) : <p className="empty">Open a thread, or start one in a project folder.</p>}
+          ) : <p className="empty">{newCwd.trim() ? `A new thread in ${newCwd.trim()}: write the first message below.` : "Open a thread, or name a project folder for a new one."}</p>}
           {threadRequests.map((request) => (
             <Approval key={JSON.stringify(request.id)} request={request} airgappedOn={airgap?.level === "on"} onAnswer={(result) => answer(request, result)} />
           ))}
@@ -477,54 +739,126 @@ export function App() {
         </div>
 
         {canCompose ? (
-          <footer className="composer">
-            <div className="composer-card">
-              {pending.length > 0 ? (
-                <div className="attachments">
-                  {pending.map((item) => (
-                    <span key={item.id} className="attachment">
-                      {item.preview ? <img src={item.preview} alt="" /> : null}
-                      <span className="attachment-name">{item.name}</span>
-                      <button className="icon" aria-label={`Remove ${item.name}`} onClick={() => removeFile(item.id)}><Icon name="x" size={14} /></button>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={3} onPaste={onPaste}
-                placeholder={selected?.activeTurnId ? "Steer the running turn…" : view === "ask" ? "Ask anything…" : "Ask Mightling…"}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
-                  if (event.key === "Escape" && selected?.activeTurnId) stop();
+          <Composer
+            draft={draft} setDraft={setDraft} placeholder={placeholder}
+            running={Boolean(selected?.activeTurnId)} sending={sending}
+            enterBehaviour={prefs.enterBehaviour} followUp={prefs.followUp}
+            root={view === "work" ? composeRoot : null}
+            context={{ view, hasThread: selected !== null }}
+            history={promptHistory} threadTexts={userTexts(selected)}
+            attachments={attachments} onRemoveAttachment={removeFile}
+            queue={queue}
+            onSteerQueued={(item) => selected && steerQueued(client, selected.thread.id, selected.activeTurnId, item).then(() => refreshQueue(selected.thread.id)).catch(notice)}
+            onDropQueued={(item) => selected && dropQueued(client, selected.thread.id, item).then(() => refreshQueue(selected.thread.id)).catch(notice)}
+            approvalOpen={threadRequests.length > 0} onApprovalKey={(key) => void answerByKey(key)}
+            onSend={(text, mode) => void send(text, mode)} onStop={stop} onEditPrevious={() => void editPrevious()}
+            onCommand={(command) => void runCommand(command)}
+            onFiles={onFiles} onPaste={onPaste}
+            searchFiles={searchFiles} skills={rootSkills}
+            leading={view === "ask" ? (
+              <>
+                <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
+                  addFiles(Array.from(event.target.files ?? []));
+                  event.target.value = "";
                 }} />
-              <div className="composer-actions">
-                {view === "ask" ? (
-                  <>
-                    <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
-                      addFiles(Array.from(event.target.files ?? []));
-                      event.target.value = "";
-                    }} />
-                    <button className="icon attach" onClick={() => fileInput.current?.click()} title="Attach images or files" aria-label="Attach"><Icon name="paperclip" size={18} /></button>
-                  </>
-                ) : (
-                  <select value={profile} onChange={(event) => setProfile(event.target.value)} aria-label="Permissions">
-                    {choices.map((choice) => (
-                      <option key={choice.id} value={choice.id} disabled={choice.disabled} title={choice.reason ?? undefined}>
-                        {choice.label}{choice.disabled ? " (disabled)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <span className="spacer" />
-                {selected?.activeTurnId ? <button className="round stop" onClick={stop} title="Stop (Esc)" aria-label="Stop"><Icon name="square" size={14} /></button> : null}
-                {selected?.activeTurnId
-                  ? <button className="steer" disabled={sending} onClick={() => void send()}>{sending ? "Sending…" : "Steer"}</button>
-                  : <button className="round primary send" disabled={sending} onClick={() => void send()} title="Send (Enter)" aria-label={sending ? "Sending…" : "Send"}><Icon name="arrowUp" size={18} /></button>}
-              </div>
-            </div>
-          </footer>
+                <button className="icon attach" onClick={() => fileInput.current?.click()} title="Attach images or files" aria-label="Attach"><Icon name="paperclip" size={18} /></button>
+              </>
+            ) : (
+              <select value={profile} onChange={(event) => setProfile(event.target.value)} aria-label="Permissions">
+                {choices.map((choice) => (
+                  <option key={choice.id} value={choice.id} disabled={choice.disabled} title={choice.reason ?? undefined}>
+                    {choice.label}{choice.disabled ? " (disabled)" : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            models={models} model={modelChoice ?? servedModel} effort={effort} recentModels={prefs.recentModels}
+            picker={picker} setPicker={setPicker} onPick={pickModel}
+          />
         ) : null}
       </main>
+      {settingsOpen ? <Settings prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} /> : null}
     </div>
+  );
+}
+
+/** Whether the keyboard is in a text field, where Enter and Esc belong to the field. */
+function editableFocus(): boolean {
+  const element = document.activeElement as HTMLElement | null;
+  if (!element) return false;
+  if (element instanceof HTMLTextAreaElement) return element.value.trim() !== "";
+  return element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element.isContentEditable;
+}
+
+/** The window's settings (DESKTOP_PARITY §2.15); General for now: what Enter does and what a follow-up does. */
+function Settings(props: { prefs: Prefs; onChange: (values: Partial<Prefs>) => void; onClose: () => void }) {
+  const { prefs, onChange } = props;
+  return (
+    <div className="dialog-backdrop" onClick={props.onClose}>
+      <section className="dialog settings" role="dialog" aria-label="Settings" onClick={(event) => event.stopPropagation()}>
+        <header><h2>Settings</h2><button className="icon" aria-label="Close" onClick={props.onClose}><Icon name="x" size={16} /></button></header>
+        <h3>General</h3>
+        <fieldset>
+          <legend>Enter in the composer</legend>
+          <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "enter"} onChange={() => onChange({ enterBehaviour: "enter" })} /> Enter sends; Shift+Enter starts a new line</label>
+          <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "ctrlEnter"} onChange={() => onChange({ enterBehaviour: "ctrlEnter" })} /> Enter starts a new line; Ctrl+Enter sends</label>
+        </fieldset>
+        <fieldset>
+          <legend>A message sent while the agent is working</legend>
+          <label><input type="radio" name="follow" checked={prefs.followUp === "steer"} onChange={() => onChange({ followUp: "steer" })} /> Steer: the running turn takes it in now</label>
+          <label><input type="radio" name="follow" checked={prefs.followUp === "queue"} onChange={() => onChange({ followUp: "queue" })} /> Queue: it waits, and starts the next turn when this one ends</label>
+        </fieldset>
+      </section>
+    </div>
+  );
+}
+
+function PermissionsInfo(props: { choices: ReturnType<typeof permissionChoices>; profile: string; onChoose: (id: string) => void }) {
+  return (
+    <div className="info-list">
+      {props.choices.map((choice) => (
+        <button key={choice.id} disabled={choice.disabled} className={choice.id === props.profile ? "selected" : ""} title={choice.reason ?? undefined} onClick={() => props.onChoose(choice.id)}>
+          {choice.label}{choice.id === props.profile ? " (in use)" : ""}{choice.reason ? ` — ${choice.reason}` : ""}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function StatusInfo(props: { model: string | null; effort: string | null; profile: string; cwd: string | null; airgap: bridge.Airgapped | null; usage: ReturnType<typeof contextUse>; threadId: string | null; followUp: string }) {
+  const rows: [string, string][] = [
+    ["Model", props.model ?? "unknown"],
+    ["Reasoning effort", props.effort ?? "the model's default"],
+    ["Permissions", props.profile],
+    ["Folder", props.cwd ?? "none yet"],
+    ["Airgapped", props.airgap ? `${props.airgap.level} (${props.airgap.source})` : "unknown"],
+    ["Context", props.usage ? `${props.usage.percent}% (${props.usage.used.toLocaleString()} of ${props.usage.window.toLocaleString()} tokens)` : "no turn yet"],
+    ["Follow-ups", props.followUp === "queue" ? "queue for the next turn" : "steer the running turn"],
+    ["Thread", props.threadId ?? "none yet"],
+  ];
+  return <dl className="info-rows">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+}
+
+function SkillsInfo(props: { skills: SkillMetadata[]; root: string | null }) {
+  if (!props.root) return <p className="empty small">Open a thread or name a folder to see its skills.</p>;
+  if (props.skills.length === 0) return <p className="empty small">No skills for {props.root}.</p>;
+  return (
+    <ul className="info-items">
+      {props.skills.map((skill) => (
+        <li key={skill.path}><code>${skill.name}</code>{skill.enabled ? "" : " (off)"} — {skill.shortDescription || skill.description}</li>
+      ))}
+    </ul>
+  );
+}
+
+function McpInfo(props: { servers: { name: string; tools: Record<string, unknown>; toolsError: string | null }[] }) {
+  if (props.servers.length === 0) return <p className="empty small">No MCP servers are configured.</p>;
+  return (
+    <ul className="info-items">
+      {props.servers.map((server) => (
+        <li key={server.name}><strong>{server.name}</strong>: {server.toolsError ? `tools unavailable (${server.toolsError})` : Object.keys(server.tools).sort().join(", ") || "no tools"}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -555,7 +889,7 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
   );
 }
 
-function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void }) {
+function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null }) {
   const { turn } = props;
   return (
     <section className={`turn turn-${turn.status}`}>
@@ -569,7 +903,10 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void }) {
         </details>
       ) : null}
       {turn.status !== "inProgress" && props.last ? (
-        <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button>
+        <span className="turn-actions">
+          <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button>
+          {props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Take this message back to edit it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
+        </span>
       ) : null}
     </section>
   );
@@ -578,7 +915,7 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void }) {
 function Item({ item }: { item: ThreadItem }) {
   switch (item.type) {
     case "userMessage":
-      return <div className="item user">{item.content.map(describeInput).join("\n")}</div>;
+      return <div className="item user">{item.content.map(describeInput).filter(Boolean).join("\n")}</div>;
     case "agentMessage":
       return (
         <div className="item agent">
@@ -628,6 +965,10 @@ function describeInput(input: UserInput): string {
       return input.text;
     case "localImage":
       return `[image: ${input.path.split(/[\\/]/).pop()}]`;
+    case "skill":
+    case "mention":
+      // The text already names it (`$name`, `@path`).
+      return "";
     default:
       return `[${input.type}]`;
   }
