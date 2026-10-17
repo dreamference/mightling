@@ -599,3 +599,26 @@ test("13 subagents and memories: the panel of a thread's subagents with Stop, th
     await close();
   }
 });
+
+test("13 memories held half: /memories per thread, the status, Delete", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("/memories off");
+    await page.keyboard.press("Escape");
+    await composer.press("Enter");
+    await expect.poll(() => received(home).find((m) => m.method === "thread/memoryMode/set")?.params).toEqual({ threadId: "w3", mode: "disabled" });
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: "Memories" }).click();
+    await expect(settings).toContainText("7 threads remembered");
+    await shoot("13-memories-status.png");
+    page.once("dialog", (dialog) => void dialog.accept());
+    await settings.getByRole("button", { name: "Delete the memories" }).click();
+    await expect.poll(() => received(home).some((m) => m.method === "memory/reset")).toBe(true);
+  } finally {
+    await close();
+  }
+});

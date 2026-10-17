@@ -31,6 +31,9 @@ export interface SettingsProps {
   /** The agent's settings as `config/read` answers them, and a write of one key (`config/value/write`). */
   readConfig: () => Promise<Record<string, unknown>>;
   writeConfig: (keyPath: string, value: unknown) => Promise<void>;
+  /** What the memories hold (`memory/status`), and deleting them (`memory/reset`). */
+  memoryStatus: () => Promise<{ v2ConsolidatedThreads: number; v2Ready: boolean } | null>;
+  resetMemories: () => Promise<void>;
 }
 
 const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
@@ -398,8 +401,12 @@ export function memorySwitches(config: Record<string, unknown>): { enabled: bool
   };
 }
 
-function Memories({ readConfig, writeConfig, notice }: SettingsProps) {
+function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories }: SettingsProps) {
   const [switches, setSwitches] = useState<ReturnType<typeof memorySwitches> | null>(null);
+  const [status, setStatus] = useState<{ v2ConsolidatedThreads: number; v2Ready: boolean } | null>(null);
+  useEffect(() => {
+    memoryStatus().then(setStatus).catch(() => setStatus(null));
+  }, [memoryStatus]);
   const load = () => readConfig().then((config) => setSwitches(memorySwitches(config))).catch((error) => { setSwitches(null); notice(error); });
   useEffect(() => {
     void load();
@@ -417,6 +424,10 @@ function Memories({ readConfig, writeConfig, notice }: SettingsProps) {
         <label><input type="checkbox" checked={switches.generate} disabled={!switches.enabled} onChange={(event) => void write("memories.generate_memories", event.target.checked)} /> Threads add to the memories</label>
         <label><input type="checkbox" checked={switches.external} disabled={!switches.enabled} onChange={(event) => void write("memories.disable_on_external_context", !event.target.checked)} /> Including threads that used the web or an MCP server</label>
       </fieldset>
+      <p className="dialog-note">{status ? `${status.v2ConsolidatedThreads} thread${status.v2ConsolidatedThreads === 1 ? "" : "s"} remembered${status.v2Ready ? "" : "; the memories are still being made"}.` : ""} /memories in a thread turns them off or on for that thread.</p>
+      <div className="buttons dialog-buttons">
+        <button className="danger-button" onClick={() => window.confirm("Delete everything the agent remembers? This cannot be undone.") && resetMemories().then(() => memoryStatus().then(setStatus)).catch(notice)}>Delete the memories</button>
+      </div>
     </>
   );
 }
