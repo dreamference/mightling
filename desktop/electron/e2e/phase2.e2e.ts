@@ -577,6 +577,7 @@ test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task 
 });
 
 test("13 subagents and memories: the panel of a thread's subagents with Stop, the working count, Settings › Memories", async () => {
+test("11 plugins and hooks: a skill turned off, a plugin installed from a local marketplace, MCP servers read again, the hooks", async () => {
   const { page, home, shoot, close } = await open();
   try {
     await page.getByRole("button", { name: "Work", exact: true }).click();
@@ -657,6 +658,20 @@ test("13 memories held half: /memories per thread, the status, Delete", async ()
     page.once("dialog", (dialog) => void dialog.accept());
     await settings.getByRole("button", { name: "Delete the memories" }).click();
     await expect.poll(() => received(home).some((m) => m.method === "memory/reset")).toBe(true);
+    await page.getByRole("button", { name: "Skills and tools" }).click();
+    const view = page.getByRole("dialog", { name: "Skills and tools" });
+    await view.locator("tr", { hasText: "$pdf-search" }).getByRole("button", { name: "Turn off" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "skills/config/write")?.params).toEqual({ path: "/skills/pdf-search/SKILL.md", enabled: false });
+    await view.getByRole("button", { name: "Plugins" }).click();
+    await view.getByRole("button", { name: "Install" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "plugin/install")?.params).toEqual({ marketplacePath: "/srv/team/marketplace.json", pluginName: "lint" });
+    await shoot("11-plugins.png");
+    await view.getByRole("button", { name: "MCP servers" }).click();
+    await view.getByRole("button", { name: "Read the servers again" }).click();
+    await expect.poll(() => received(home).some((m) => m.method === "config/mcpServer/reload")).toBe(true);
+    await view.getByRole("button", { name: "Hooks" }).click();
+    await expect(view).toContainText("ling ledger");
+    await shoot("11-hooks.png");
   } finally {
     await close();
   }
