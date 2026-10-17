@@ -125,6 +125,13 @@
       "default": null,
       "type": "string",
       "nullable": true
+    },
+    "reviewDelivery": {
+      "default": "inline",
+      "enum": [
+        "inline",
+        "detached"
+      ]
     }
   }
 }

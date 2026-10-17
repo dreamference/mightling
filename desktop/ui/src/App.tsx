@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAsk
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, collaborationMode, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -1112,6 +1112,17 @@ export function App() {
     }
   };
 
+  /** `/review` (§2.5): the server reviews on the served model, inline in this thread or in a review thread of its own. */
+  const startReview = async (target: ReturnType<typeof reviewTarget>) => {
+    if (!selected) return notice("Open a thread to review its folder's changes.");
+    try {
+      const answer = (await client.request("review/start", { threadId: selected.thread.id, target, delivery: prefs.reviewDelivery })) as { reviewThreadId?: string };
+      if (answer.reviewThreadId && answer.reviewThreadId !== selected.thread.id) await openThread(answer.reviewThreadId);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
   const fork = async () => {
     if (!selected) return;
     try {
@@ -1216,6 +1227,8 @@ export function App() {
           setAgentsHidden(false);
           if (selected && subagents(state, selected.thread.id).length === 0) setInfo({ title: "Subagents", body: <p className="empty small">This thread has started no subagents.</p> });
           return;
+        case "review":
+          return startReview(reviewTarget(args));
         case "night": {
           const words = args.match(/^add\s+([\s\S]+)$/);
           if (words) {
@@ -1860,6 +1873,10 @@ function Item({ item }: { item: ThreadItem }) {
       return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
     case "contextCompaction":
       return <div className="item note">Earlier turns were compacted.</div>;
+    case "enteredReviewMode":
+      return <div className="item note review-mode">Reviewing: {item.review}</div>;
+    case "exitedReviewMode":
+      return <div className="item agent review-result"><div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.review) }} /></div>;
     case "collabAgentToolCall":
       return <div className="item note">Subagents: {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
     case "subAgentActivity":
