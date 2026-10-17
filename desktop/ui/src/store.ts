@@ -7,6 +7,7 @@ import type { ServerNotification } from "./protocol/ServerNotification";
 import type { ServerRequest } from "./protocol/ServerRequest";
 import type { PermissionProfileSummary } from "./protocol/v2/PermissionProfileSummary";
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
+import type { ThreadGoal } from "./protocol/v2/ThreadGoal";
 import type { Thread } from "./protocol/v2/Thread";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { ThreadTokenUsage } from "./protocol/v2/ThreadTokenUsage";
@@ -54,6 +55,8 @@ export interface WorkState {
   notices: string[];
   /** Each thread's queued follow-ups (`thread/queue/list`), refreshed on `thread/queue/changed`. */
   queues: Record<string, QueuedSubmission[]>;
+  /** Each thread's goal (`thread/goal/get`, `thread/goal/updated`, `thread/goal/cleared`). */
+  goals: Record<string, ThreadGoal | null>;
 }
 
 export const initialState: WorkState = {
@@ -65,6 +68,7 @@ export const initialState: WorkState = {
   requests: [],
   notices: [],
   queues: {},
+  goals: {},
 };
 
 export type Action =
@@ -80,6 +84,7 @@ export type Action =
   | { type: "archived"; threadId: string }
   | { type: "notice"; message: string }
   | { type: "queue"; threadId: string; items: QueuedSubmission[] }
+  | { type: "goal"; threadId: string; goal: ThreadGoal | null }
   | { type: "dismissNotice"; index: number };
 
 const STDERR_KEPT = 200;
@@ -230,6 +235,12 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
       const { threadId, turnId, diff } = notification.params;
       return withThread(state, threadId, (view) => withTurn(view, turnId, (turn) => ({ ...turn, diff })));
     }
+    case "thread/goal/updated": {
+      const { threadId, goal } = notification.params;
+      return { ...state, goals: { ...state.goals, [threadId]: goal } };
+    }
+    case "thread/goal/cleared":
+      return { ...state, goals: { ...state.goals, [notification.params.threadId]: null } };
     case "thread/tokenUsage/updated": {
       const { threadId, tokenUsage } = notification.params;
       return withThread(state, threadId, (view) => ({ ...view, usage: tokenUsage }));
@@ -316,6 +327,8 @@ export function reduce(state: WorkState, action: Action): WorkState {
       return { ...state, notices: state.notices.filter((_, index) => index !== action.index) };
     case "queue":
       return { ...state, queues: { ...state.queues, [action.threadId]: action.items } };
+    case "goal":
+      return { ...state, goals: { ...state.goals, [action.threadId]: action.goal } };
   }
 }
 

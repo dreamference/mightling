@@ -676,3 +676,28 @@ test("13 memories held half: /memories per thread, the status, Delete", async ()
     await close();
   }
 });
+
+test("5 goal: /goal sets the thread's goal, the row pauses, resumes and clears it", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("/goal The hero image is served in three sizes and the page test passes");
+    await page.keyboard.press("Escape");
+    await composer.press("Enter");
+    const row = page.getByLabel("Goal", { exact: true });
+    await expect(row).toContainText("The hero image is served in three sizes");
+    await expect(row).toContainText("working on it");
+    await row.getByRole("button", { name: "Pause" }).click();
+    await expect(row).toContainText("paused");
+    await shoot("5-goal-row.png");
+    expect(received(home).filter((m) => m.method === "thread/goal/set").map((m) => m.params?.status)).toEqual(["active", "paused"]);
+    await row.getByRole("button", { name: "Resume" }).click();
+    await expect(row).toContainText("working on it");
+    await row.getByRole("button", { name: "Clear the goal" }).click();
+    await expect(page.getByLabel("Goal", { exact: true })).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});

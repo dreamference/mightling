@@ -29,6 +29,7 @@ import type { PermissionProfileSummary } from "./protocol/v2/PermissionProfileSu
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
+import type { ThreadGoal } from "./protocol/v2/ThreadGoal";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
 import {
@@ -38,6 +39,7 @@ import {
 import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./BottomPanel";
 import { CommandMenu } from "./CommandMenu";
 import { ExtensionsView, type ExtensionsTab } from "./ExtensionsView";
+import { GoalRow } from "./GoalRow";
 import { ReviewPane } from "./ReviewPane";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
@@ -133,6 +135,7 @@ export function App() {
   const [agentsHidden, setAgentsHidden] = useState(false);
   const [memoryModes, setMemoryModes] = useState<Record<string, "enabled" | "disabled">>({});
   const [nightUnseen, setNightUnseen] = useState(0);
+  const [goalEditing, setGoalEditing] = useState(false);
   const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
   const updatePrefsRef = useRef<(values: Partial<Prefs>) => void>(() => {});
@@ -337,9 +340,27 @@ export function App() {
       const resumed = await client.request("thread/resume", { threadId, model: servedModel });
       dispatch({ type: "opened", thread: resumed.thread });
       refreshQueue(threadId);
+      client.request("thread/goal/get", { threadId }).then((answer) => dispatch({ type: "goal", threadId, goal: (answer as { goal: ThreadGoal | null }).goal })).catch(() => {});
     } catch (error) {
       notice(error);
     }
+  };
+
+  /** The goal row's requests (`thread/goal/*`); the server's notifications update the row. */
+  const setGoal = (values: { objective?: string; status?: "active" | "paused" }) => {
+    if (!selected) return;
+    const threadId = selected.thread.id;
+    client.request("thread/goal/set", { threadId, ...values })
+      .then((answer) => {
+        const goal = (answer as { goal?: ThreadGoal }).goal;
+        if (goal) dispatch({ type: "goal", threadId, goal });
+        setGoalEditing(false);
+      }).catch(notice);
+  };
+  const clearGoal = () => {
+    if (!selected) return;
+    const threadId = selected.thread.id;
+    client.request("thread/goal/clear", { threadId }).then(() => dispatch({ type: "goal", threadId, goal: null })).catch(notice);
   };
 
   const switchView = showView;
@@ -1147,6 +1168,9 @@ export function App() {
           return;
         case "model":
           return setPicker("open");
+        case "goal":
+          if (args) return setGoal({ objective: args, status: "active" });
+          return setGoalEditing(true);
         case "plan":
           if (!planAvailable) return notice("The server offers no Plan mode.");
           if (args) {
@@ -1612,6 +1636,10 @@ export function App() {
               if (active) client.request("turn/interrupt", { threadId: id, turnId: active }).catch(notice);
               else notice("Open the subagent to stop it: this window has not seen its turn start.");
             }} onClose={() => setAgentsHidden(true)} />
+        ) : null}
+        {selected ? (
+          <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
+            onSet={(objective) => setGoal({ objective, status: "active" })} onStatus={(status) => setGoal({ status })} onClear={clearGoal} />
         ) : null}
         {canCompose ? (
           <Composer
