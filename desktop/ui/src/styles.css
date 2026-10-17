@@ -283,6 +283,12 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .subagent { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 .subagent .running { margin: 0 2px; }
 .subagent-name { font-weight: 500; }
+.goal-row { display: flex; align-items: center; gap: 8px; max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 0 auto 6px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--accent-soft); font-size: 13px; }
+.goal-row.status-paused, .goal-row.status-blocked { background: var(--notice); }
+.goal-row.status-complete { background: var(--add); }
+.goal-row input { flex: 1; }
+.goal-objective { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .plan-chip { cursor: pointer; border: 1px solid transparent; background: none; color: var(--muted); font-size: 13px; gap: 4px; padding: 3px 10px; }
 .plan-chip:hover { background: var(--hover); color: var(--text); }
 .plan-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }

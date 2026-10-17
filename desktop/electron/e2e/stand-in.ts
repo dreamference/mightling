@@ -86,6 +86,7 @@ const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
 const say = (message) => console.log(JSON.stringify(message));
 const usage = { totalTokens: 41210, inputTokens: 39000, cachedInputTokens: 30000, cacheWriteInputTokens: 0, outputTokens: 2210, reasoningOutputTokens: 800 };
 const queues = {};
+const goals = {};
 let asked = false;
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
@@ -134,6 +135,19 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       }
       return;
     }
+    case "thread/goal/get": return answer({ goal: goals[p.threadId] || null });
+    case "thread/goal/set": {
+      const now = Math.floor(Date.now() / 1000);
+      const before = goals[p.threadId] || { threadId: p.threadId, objective: "", status: "active", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: now, updatedAt: now };
+      const goal = { ...before, ...(p.objective ? { objective: p.objective } : {}), ...(p.status ? { status: p.status } : {}), tokensUsed: before.tokensUsed + 1800, timeUsedSeconds: before.timeUsedSeconds + 95, updatedAt: now };
+      goals[p.threadId] = goal;
+      answer({ goal });
+      return say({ method: "thread/goal/updated", params: { threadId: p.threadId, turnId: null, goal } });
+    }
+    case "thread/goal/clear":
+      delete goals[p.threadId];
+      answer({ cleared: true });
+      return say({ method: "thread/goal/cleared", params: { threadId: p.threadId } });
     case "thread/archive": return answer({});
     case "thread/unarchive": return answer({ thread: { ...(threads.find((t) => t.id === p.threadId) || { ...threads[0], id: p.threadId, name: "Try a smaller hero image" }), turns: [] } });
     case "thread/name/set": {

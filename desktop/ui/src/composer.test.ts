@@ -15,6 +15,7 @@ import type { Model } from "./protocol/v2/Model";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
 import { initialState, reduce, type ThreadView } from "./store";
+import { goalTime } from "./GoalRow";
 import { forkThread, listQueue, sendMessage, steerQueued, takeBack } from "./turns";
 
 const text = (value: string) => ({ type: "text" as const, text: value, text_elements: [] });
@@ -207,5 +208,17 @@ describe("Settings › Appearance", () => {
     expect(cleanAppearance({ accent: "#0abab5", canvas: "red", text: "#123", fontUi: "Inter, sans-serif", fontCode: "x; } body { display: none" }))
       .toEqual({ accent: "#0abab5", text: "#123", fontUi: "Inter, sans-serif" });
     expect(cleanAppearance(null)).toEqual({});
+  });
+});
+
+describe("the goal row", () => {
+  it("follows the server's goal notifications, and reads its time", () => {
+    const goal = { threadId: "t", objective: "Every test passes", status: "active", tokenBudget: null, tokensUsed: 1200, timeUsedSeconds: 75, createdAt: 1, updatedAt: 2 };
+    let state = reduce(initialState, { type: "notification", notification: { method: "thread/goal/updated", params: { threadId: "t", turnId: null, goal } } as unknown as ServerNotification });
+    expect(state.goals.t?.objective).toBe("Every test passes");
+    state = reduce(state, { type: "notification", notification: { method: "thread/goal/cleared", params: { threadId: "t" } } as unknown as ServerNotification });
+    expect(state.goals.t).toBeNull();
+    expect([goalTime(42), goalTime(75), goalTime(3725)]).toEqual(["42s", "1m", "1h 2m"]);
+    expect(parseSlash("/goal every test passes")).toMatchObject({ command: { name: "goal" }, args: "every test passes" });
   });
 });
