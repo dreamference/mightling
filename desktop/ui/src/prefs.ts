@@ -54,6 +54,8 @@ export interface Prefs {
   forcePush: boolean;
   /** When the Scheduled view was last looked at (ISO time), for its unread count. */
   nightSeen: string | null;
+  /** Where /review's findings go: into the thread, or a review thread of their own. */
+  reviewDelivery: "inline" | "detached";
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }

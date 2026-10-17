@@ -701,3 +701,21 @@ test("5 goal: /goal sets the thread's goal, the row pauses, resumes and clears i
     await close();
   }
 });
+
+test("6 /review: the server reviews the uncommitted changes and the findings show in the thread", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("/review");
+    await composer.press("Enter");
+    await expect.poll(() => received(home).find((m) => m.method === "review/start")?.params).toEqual({ threadId: "w1", target: { type: "uncommittedChanges" }, delivery: "inline" });
+    await expect(page.locator(".review-result")).toContainText("One finding.");
+    await shoot("6-review-command.png");
+  } finally {
+    await close();
+  }
+});

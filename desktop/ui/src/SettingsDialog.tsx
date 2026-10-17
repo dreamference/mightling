@@ -365,6 +365,11 @@ function Git({ prefs, onChange }: SettingsProps) {
         <textarea rows={4} defaultValue={prefs.commitPrompt ?? ""} aria-label="Commit message instruction" placeholder="Empty: Mightling's own (a summary line in the imperative, then why)"
           onBlur={(event) => onChange({ commitPrompt: event.target.value.trim() || null })} />
       </fieldset>
+      <fieldset>
+        <legend>/review delivers its findings</legend>
+        <label><input type="radio" name="review" checked={prefs.reviewDelivery === "inline"} onChange={() => onChange({ reviewDelivery: "inline" })} /> Inline, in the thread</label>
+        <label><input type="radio" name="review" checked={prefs.reviewDelivery === "detached"} onChange={() => onChange({ reviewDelivery: "detached" })} /> Detached, in a review thread of their own</label>
+      </fieldset>
       <p className="dialog-note">A pull request opens the forge's own page in your browser, which writes its description.</p>
     </>
   );
