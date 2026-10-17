@@ -228,6 +228,8 @@ export interface Insights {
   longestSession: { file: string; minutes: number } | null;
 }
 
+/** Settings › Notifications: one notification now. */
+export const testNotification = () => send<null>({ type: "notify/test" });
 /** Settings › Profile: statistics from this machine's session files (desktop/electron/src/insights.ts). */
 export const insights = () => send<Insights | null>({ type: "insights" });
 /** Settings › Personalization: `$CODEX_HOME/AGENTS.md`, the instructions every thread on this machine reads. */

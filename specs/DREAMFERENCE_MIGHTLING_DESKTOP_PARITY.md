@@ -176,8 +176,8 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 | Standalone chat (Ctrl+Alt+O): a chat with no project | `thread/start` with `cwd` = home | **Built** (2026-10-16): a new thread in the home folder | 2 |
 | Search chats (unassigned shortcut); Find in chat (Ctrl+F, Ctrl+G, Shift+F3) | `thread/search`, `thread/searchOccurrences`; window find | **Built** (2026-10-16): the sidebar search, and find in the shown thread (Ctrl+F, Ctrl+G and Enter, Shift+F3 and Shift+Enter) marked with the CSS Custom Highlight API, so nothing in a streaming turn is changed; `thread/searchOccurrences` is not needed for it | 2 |
 | Copy chat deep link (Ctrl+Alt+L), copy conversation path, copy working directory | window; `ling://threads/<id>` (§2.20) | **Built** (2026-10-16): `ling://threads/<id>`, the conversation's file (`thread.path`), the working directory | 2 |
-| Notifications when a turn completes or needs approval; prompt for permission | window (`Notification`) | **Same**, no bundled sounds | 2 |
-| Prevent sleep while running | window (`powerSaveBlocker`) | **Same** | 2 |
+| Notifications when a turn completes or needs approval; prompt for permission | window (`Notification`) | **Built** (2026-10-17): each thread's finished (or stopped) turn and each waiting approval or question, never a throwaway thread's or a subagent's turn (`notices.ts`), silent, as Settings › Notifications says (window not in front, always, never), a click shows the thread; a test notification there. Linux asks no permission for them | 2 |
+| Prevent sleep while running | window (`powerSaveBlocker`) | **Built**: `powerSaveBlocker` while any turn runs, switchable in Settings › General (item 10) | 2 |
 | Appshots (screenshot of another app as context, Cmd+Cmd) | macOS/Windows runtime | **No:** Linux first; a screenshot attachment is §2.3's image input | — |
 | Pets: a floating animated companion with chat controls (Option+Space / Win+Alt+P), status, custom pets | window overlay | **Later (3), with Mightling's own art**; the vendor's pets are its trade dress | 3 |
 
@@ -539,7 +539,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 11. **Skills, plugins, MCP, apps, hooks** pages (§2.11). **Skills and tools: merged 2026-10-17, f0477c6** (skills, MCP servers and apps; plugins, hooks, skill switches and MCP reload need methods held in `desktop/p2-policy`).
 12. **Scheduled** view over Night Shift (§2.12). **Scheduled: merged 2026-10-17, 84d52b3** (inbox, queue, report, add, drop, Run now; cadence, local mode and per-task model are not built).
 13. **Subagents** panel; **memories** controls (§2.13, §2.14). **Subagents and memory switches: merged 2026-10-17, b10e1f0** (per-thread memory mode, status and Delete need methods held in `desktop/p2-policy`).
-14. **Notifications**, prevent sleep (§2.1).
+14. **Notifications**, prevent sleep (§2.1). **Notifications and sleep: merged 2026-10-17, MERGE14**.
 
 ### 4.3 Phase 3 — the workstation extras
 

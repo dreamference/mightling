@@ -599,3 +599,47 @@ test("13 subagents and memories: the panel of a thread's subagents with Stop, th
     await close();
   }
 });
+
+test("14 notifications and sleep: a finished turn notifies as Settings say, a click shows its thread; sleep is held while it runs", async () => {
+  const { app, page, home, shoot, close } = await open();
+  try {
+    // Record notifications and sleep blocks in the main process instead of showing them.
+    await app.evaluate(({ Notification, powerSaveBlocker }) => {
+      const g = globalThis as unknown as { shown: string[]; blocks: number; notes: Map<string, Electron.Notification> };
+      g.shown = [];
+      g.blocks = 0;
+      Notification.prototype.show = function show(this: Electron.Notification) {
+        g.shown.push(this.body);
+        (globalThis as unknown as { last: Electron.Notification }).last = this;
+      };
+      const start = powerSaveBlocker.start.bind(powerSaveBlocker);
+      powerSaveBlocker.start = (type) => {
+        g.blocks++;
+        return start(type);
+      };
+    });
+    const shown = () => app.evaluate(() => (globalThis as unknown as { shown: string[] }).shown);
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: "Notifications" }).click();
+    await settings.getByLabel("Always notify").check();
+    await settings.getByRole("button", { name: "Send a test notification" }).click();
+    await expect.poll(shown).toContain("Notifications reach you like this.");
+    await shoot("14-settings-notifications.png");
+    await page.keyboard.press("Escape");
+    // A new thread's turn runs and finishes: sleep was held, and a notification names it.
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("textbox", { name: "Project folder" }).fill(projectFolders(home).website);
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("Shrink the hero image.");
+    await composer.press("Enter");
+    await expect.poll(shown).toContain("A turn finished.");
+    expect(await app.evaluate(() => (globalThis as unknown as { blocks: number }).blocks)).toBeGreaterThan(0);
+    // A click on it shows the thread.
+    await page.locator(".thread", { hasText: "debug level" }).click();
+    await app.evaluate(() => (globalThis as unknown as { last: Electron.Notification }).last.emit("click"));
+    await expect.poll(() => received(home).filter((m) => m.method === "thread/resume").map((m) => m.params?.threadId).pop()).toMatch(/^n\d+$/);
+  } finally {
+    await close();
+  }
+});

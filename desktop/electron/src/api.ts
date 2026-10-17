@@ -75,6 +75,8 @@ export type FromView =
   | { type: "app/home" }
   /** Settings › Profile and Personalization (insights.ts): statistics from the session files; `$CODEX_HOME/AGENTS.md`. */
   | { type: "insights" }
+  /** Settings › Notifications: one notification now, to see that they arrive. */
+  | { type: "notify/test" }
   /** The Scheduled view over Night Shift (night.ts). */
   | { type: "night/list" }
   | { type: "night/report"; name: string }
