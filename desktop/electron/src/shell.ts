@@ -77,10 +77,10 @@ export function keepAwake(busy: boolean): void {
   }
 }
 
-/** Tells the user a turn finished (or an answer is awaited) when the window is not in front, or always when asked. */
-export function notifyTurnDone(window: BrowserWindow | null, body: string, always = false): void {
-  if ((!always && window?.isFocused()) || !Notification.isSupported()) return;
-  const notification = new Notification({ title: "Mightling", body, silent: true });
-  notification.on("click", () => window?.show());
+/** A desktop notification, silent, when the window is not in front (or always when asked); a click runs `onClick`. */
+export function notify(window: BrowserWindow | null, notice: { title: string; body: string; always: boolean }, onClick: () => void): void {
+  if ((!notice.always && window?.isFocused()) || !Notification.isSupported()) return;
+  const notification = new Notification({ title: notice.title, body: notice.body, silent: true });
+  notification.on("click", onClick);
   notification.show();
 }
