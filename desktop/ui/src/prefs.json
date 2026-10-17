@@ -132,6 +132,19 @@
         "inline",
         "detached"
       ]
+    },
+    "terminalShell": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
+    "commandOutput": {
+      "default": "running",
+      "enum": [
+        "running",
+        "collapsed",
+        "hidden"
+      ]
     }
   }
 }

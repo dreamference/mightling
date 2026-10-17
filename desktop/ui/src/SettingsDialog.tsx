@@ -46,7 +46,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "memories", label: "Memories" },
   { id: "archived", label: "Archived threads" },
   { id: "git", label: "Git", desktopOnly: true },
-  { id: "project", label: "Project", desktopOnly: true },
+  { id: "project", label: "Project and terminal", desktopOnly: true },
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
 ];
 
@@ -382,7 +382,20 @@ function Project({ prefs, onChange }: SettingsProps) {
   }, []);
   return (
     <>
-      <h3>Project</h3>
+      <h3>Project and terminal</h3>
+      <fieldset>
+        <legend>Commands the agent runs, in the thread</legend>
+        <label><input type="radio" name="commands" checked={prefs.commandOutput === "running"} onChange={() => onChange({ commandOutput: "running" })} /> Show the output while a command runs</label>
+        <label><input type="radio" name="commands" checked={prefs.commandOutput === "collapsed"} onChange={() => onChange({ commandOutput: "collapsed" })} /> Fold every command (click to open)</label>
+        <label><input type="radio" name="commands" checked={prefs.commandOutput === "hidden"} onChange={() => onChange({ commandOutput: "hidden" })} /> Hide commands</label>
+      </fieldset>
+      <fieldset>
+        <legend>Terminal tabs</legend>
+        <label className="field">Shell (empty for your login shell, $SHELL)
+          <input defaultValue={prefs.terminalShell ?? ""} placeholder="/bin/bash" aria-label="Terminal shell" onBlur={(event) => onChange({ terminalShell: event.target.value.trim() || null })} />
+        </label>
+        <p className="dialog-note">Terminal tabs open in the bottom panel (Ctrl+`), in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
+      </fieldset>
       <fieldset>
         <legend>Where files open</legend>
         <label className="field">From the review pane and the header's Open
