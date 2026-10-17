@@ -131,6 +131,7 @@ export function App() {
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const [agentsHidden, setAgentsHidden] = useState(false);
+  const [memoryModes, setMemoryModes] = useState<Record<string, "enabled" | "disabled">>({});
   const [nightUnseen, setNightUnseen] = useState(0);
   const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
@@ -612,6 +613,11 @@ export function App() {
   const readConfig = useCallback(async () => ((await client.request("config/read", {})) as { config: Record<string, unknown> }).config, [client]);
   const writeConfig = useCallback(async (keyPath: string, value: unknown) => {
     await client.request("config/value/write", { keyPath, value: value as never, mergeStrategy: "upsert" });
+  }, [client]);
+
+  const memoryStatus = useCallback(async () => (await client.request("memory/status", {})) as { v2ConsolidatedThreads: number; v2Ready: boolean }, [client]);
+  const resetMemories = useCallback(async () => {
+    await client.request("memory/reset", undefined);
   }, [client]);
 
   /** Settings › Archived threads. */
@@ -1175,6 +1181,13 @@ export function App() {
           setDrawer(true);
           requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
           return;
+        case "memories": {
+          if (!threadId) return;
+          const mode = args === "on" ? "enabled" : args === "off" ? "disabled" : (memoryModes[threadId] ?? "enabled") === "enabled" ? "disabled" : "enabled";
+          await client.request("thread/memoryMode/set", { threadId, mode });
+          setMemoryModes((modes) => ({ ...modes, [threadId]: mode }));
+          return setInfo({ title: "Memories", body: <p>Memories are {mode === "enabled" ? "on" : "off"} for this thread: it {mode === "enabled" ? "uses and adds to" : "neither uses nor adds to"} them.</p> });
+        }
         case "agents":
           setAgentsHidden(false);
           if (selected && subagents(state, selected.thread.id).length === 0) setInfo({ title: "Subagents", body: <p className="empty small">This thread has started no subagents.</p> });
@@ -1672,7 +1685,8 @@ export function App() {
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice}
-        readConfig={readConfig} writeConfig={writeConfig} /> : null}
+        readConfig={readConfig} writeConfig={writeConfig}
+        memoryStatus={memoryStatus} resetMemories={resetMemories} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
           seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />

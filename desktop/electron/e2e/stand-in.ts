@@ -187,6 +187,9 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "turn/steer": return answer({ turnId: p.expectedTurnId });
     case "app/list": return answer({ data: [{ id: "gmail", name: "Gmail", description: "Search and read your mail", logoUrl: null, logoUrlDark: null, iconAssets: null, iconDarkAssets: null,
       distributionChannel: null, branding: null, appMetadata: null, labels: null, installUrl: null, isAccessible: true, isEnabled: true, pluginDisplayNames: [] }], nextCursor: null });
+    case "memory/status": return answer({ v2ConsolidatedThreads: 7, v2Ready: true });
+    case "memory/reset": return answer({});
+    case "thread/memoryMode/set": return answer({});
     case "config/read": return answer({ config: { features: { memories: false }, memories: {}, desktop: null }, origins: {}, layers: null });
     case "config/value/write": return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
