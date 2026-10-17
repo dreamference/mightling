@@ -232,6 +232,7 @@ function Profile() {
 }
 
 function Notifications({ prefs, onChange }: SettingsProps) {
+  // The desktop decides whether notifications show at all (its own settings); the button shows one now.
   return (
     <>
       <h3>Notifications</h3>
@@ -245,7 +246,8 @@ function Notifications({ prefs, onChange }: SettingsProps) {
         <legend>Approvals and questions</legend>
         <label><input type="checkbox" checked={prefs.notifyApprovals} onChange={(event) => onChange({ notifyApprovals: event.target.checked })} /> Notify when the agent waits for an answer and the window is not in front</label>
       </fieldset>
-      <p className="dialog-note">Notifications are silent: Mightling has no sounds of its own.</p>
+      <p className="dialog-note">Notifications are silent: Mightling has no sounds of its own. A click on one shows its thread.</p>
+      <div className="buttons dialog-buttons"><button onClick={() => void bridge.testNotification()}>Send a test notification</button></div>
     </>
   );
 }

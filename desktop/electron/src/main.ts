@@ -26,7 +26,8 @@ import { addTask, dropTask, readReport, readReports, readTasks, runNow } from ".
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
-import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
+import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./shell";
+import { Notices } from "./notices";
 import { openWork } from "./work";
 
 export interface MainOptions {
@@ -51,6 +52,7 @@ export async function main(options: MainOptions): Promise<void> {
   const show = options.audit === null && !process.env.MIGHTLING_HIDDEN;
 
   const prefs = new Prefs(app.getPath("userData"));
+  const notices = new Notices();
   /** Pop-outs: a thread in a window of its own, on the same app-server (windows.ts). */
   const popouts = new Map<number, BrowserWindow>();
   const router = new RequestRouter();
@@ -64,10 +66,14 @@ export async function main(options: MainOptions): Promise<void> {
   };
   const deliver = (message: ForView) => {
     if (message.channel === "work://message") {
-      // An approval or a question waiting: a notification when the window is not in front.
-      const payload = message.payload as { id?: unknown; method?: unknown } | null;
-      if (payload && payload.id !== undefined && typeof payload.method === "string" && /requestApproval|requestUserInput|Approval$/.test(payload.method) && prefs.read().notifyApprovals !== false) {
-        notifyTurnDone(window, "Mightling is waiting for your answer.", false);
+      // A finished turn, an approval or a question waiting: a notification, as Settings › Notifications says;
+      // a click shows the thread.
+      const notice = notices.take(message.payload, prefs.read());
+      if (notice) {
+        notify(window, notice, () => {
+          showView("work");
+          if (notice.threadId) deliver({ channel: "link", payload: { cwd: null, thread: notice.threadId } });
+        });
       }
       const routed = router.incoming(message.payload);
       for (const target of windows()) {
@@ -84,9 +90,7 @@ export async function main(options: MainOptions): Promise<void> {
     deliver,
     busyChanged: (busy) => {
       // Settings › General and Notifications (prefs.json): prevent sleep, and when a finished turn notifies.
-      const chosen = prefs.read();
-      keepAwake(busy && chosen.preventSleep !== false);
-      if (!busy && chosen.notifyTurns !== "never") notifyTurnDone(window, "The agent finished a turn.", chosen.notifyTurns === "always");
+      keepAwake(busy && prefs.read().preventSleep !== false);
     },
   });
 
@@ -194,6 +198,9 @@ export async function main(options: MainOptions): Promise<void> {
         runNow(admin);
         return null;
       }
+      case "notify/test":
+        notify(own, { title: "Mightling", body: "Notifications reach you like this.", always: true }, () => own.show());
+        return null;
       case "insights": {
         const home = codexHome();
         return home ? insights(home) : null;
