@@ -23,8 +23,11 @@ export class Notices {
   /** Throwaway threads (`ephemeral`) and subagents, seen as they open: never notified. */
   private readonly ephemeral = new Set<string>();
 
-  /** Reads one message from the server; returns the notification it calls for, if any. */
-  take(message: unknown, prefs: NoticePrefs): Notice | null {
+  /**
+   * Reads one message from the server; returns the notification it calls for, if any. `prefs` is
+   * read only for a message that may notify, since this runs for every streamed delta.
+   */
+  take(message: unknown, readPrefs: () => NoticePrefs): Notice | null {
     if (!isObject(message)) return null;
     const result = isObject(message.result) ? message.result : null;
     const opened = result && isObject(result.thread) ? result.thread : null;
@@ -38,13 +41,14 @@ export class Notices {
     const params = isObject(message.params) ? message.params : {};
     const threadId = typeof params.threadId === "string" ? params.threadId : null;
     if (method === "turn/completed" && threadId && !this.ephemeral.has(threadId)) {
+      const prefs = readPrefs();
       if (prefs.notifyTurns === "never") return null;
       const turn = isObject(params.turn) ? params.turn : {};
       const status = turn.status === "failed" ? "stopped with an error" : turn.status === "interrupted" ? "was stopped" : "finished";
       return { title: "Mightling", body: `A turn ${status}.`, threadId, always: prefs.notifyTurns === "always" };
     }
     if (method && "id" in message && /requestApproval$|requestUserInput$|^execCommandApproval$|^applyPatchApproval$/.test(method)) {
-      if (prefs.notifyApprovals === false) return null;
+      if (readPrefs().notifyApprovals === false) return null;
       const what = method.includes("UserInput") ? "a question" : "an approval";
       return { title: "Mightling", body: `The agent is waiting for ${what}.`, threadId, always: false };
     }

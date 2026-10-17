@@ -68,7 +68,7 @@ export async function main(options: MainOptions): Promise<void> {
     if (message.channel === "work://message") {
       // A finished turn, an approval or a question waiting: a notification, as Settings › Notifications says;
       // a click shows the thread.
-      const notice = notices.take(message.payload, prefs.read());
+      const notice = notices.take(message.payload, () => prefs.read());
       if (notice) {
         notify(window, notice, () => {
           showView("work");
