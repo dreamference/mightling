@@ -86,6 +86,7 @@ const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
 const say = (message) => console.log(JSON.stringify(message));
 const usage = { totalTokens: 41210, inputTokens: 39000, cachedInputTokens: 30000, cacheWriteInputTokens: 0, outputTokens: 2210, reasoningOutputTokens: 800 };
 const queues = {};
+const terminals = {};
 const goals = {};
 let asked = false;
 let next = 1;
@@ -225,6 +226,43 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "enteredReviewMode", id: "rv1", review: "uncommitted changes" } } });
       say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "exitedReviewMode", id: "rv2", review: "**One finding.** fetcher/client.py:15 re-raises without the attempt count in the message." } } });
       return say({ method: "turn/completed", params: { threadId: where, turn: { id, items: [], status: "completed", error: null } } });
+    }
+    // A stand-in PTY: a fake shell that echoes what is typed and runs echo, enough to show the
+    // window's plumbing (command/exec, write, resize, terminate, outputDelta).
+    case "command/exec": {
+      const id = p.processId;
+      const out = (text) => say({ method: "command/exec/outputDelta", params: { processId: id, stream: "stdout", deltaBase64: Buffer.from(text).toString("base64"), capReached: false } });
+      // [sh, -c, exec $SHELL -l -c "$0", script] or [shell, -l, -c, script]: a script; anything shorter is a shell.
+      const script = p.command.length === 4 ? p.command[3] : null;
+      if (script) {
+        out("$ " + script + "\\r\\n" + (String(script).startsWith("echo ") ? String(script).slice(5) + "\\r\\n" : ""));
+        return setTimeout(() => answer({ exitCode: 0, stdout: "", stderr: "" }), 50);
+      }
+      terminals[id] = { line: "", answer };
+      return out("stand-in shell in " + p.cwd + "\\r\\n$ ");
+    }
+    case "command/exec/write": {
+      const term = terminals[p.processId];
+      const out = (text) => say({ method: "command/exec/outputDelta", params: { processId: p.processId, stream: "stdout", deltaBase64: Buffer.from(text).toString("base64"), capReached: false } });
+      for (const ch of Buffer.from(p.deltaBase64, "base64").toString()) {
+        if (ch === "\\r") {
+          const line = term.line;
+          term.line = "";
+          out("\\r\\n" + (line.startsWith("echo ") ? line.slice(5) + "\\r\\n" : line ? line.split(" ")[0] + ": not in the stand-in\\r\\n" : "") + "$ ");
+        } else {
+          term.line += ch;
+          out(ch);
+        }
+      }
+      return answer({});
+    }
+    case "command/exec/resize": return answer({});
+    case "command/exec/terminate": {
+      const term = terminals[p.processId];
+      answer({});
+      if (term) term.answer({ exitCode: 130, stdout: "", stderr: "" });
+      delete terminals[p.processId];
+      return;
     }
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
     default: return answer({ data: [] });
