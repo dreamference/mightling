@@ -135,10 +135,12 @@ These are recorded here because the spec used to promise otherwise.
 | `test_mightling_slash_commands.py` | Every `ling` slash command and subcommand on a pseudo-terminal (live cases skip without vLLM) |
 | `test_cli_entry_points.py` | `ling-admin` entry point, no Python `ling`, strict parsing |
 | `test_mcp_server.py` | MCP tools and IDE state |
-| `test_onyx_runner.py` | Onyx deployment, configure, branding, UI patches, Gmail service |
-| `test_onyx_ui_scripts.py` | Injected UI JavaScript, run under node against a stub DOM |
+| `test_retired_web_chat.py` | `ling-admin chat remove`/`status` and the one-time offer: what an install with the retired Onyx web chat sees |
+| `test_docker_bridge.py` | The loopback-to-bridge rewrite for containers (OpenHands) |
+| `test_google_service_origin.py` | The Google service accepts posts from its own origin only |
 | `test_gmail_client.py` | `ling-admin gmail` client |
 | `test_image_search_service.py` | Image search sidecar |
+| `test_image_search_sidecar.py` | `ling-admin images` and `voice`: the sidecars on `dreamference-sidecars`, and the `image_search` MCP server |
 | `test_desktop.py` | Desktop window (`ling-app`) install and launch |
 | `test_codex_test_runner.py` | `ling-admin codex test`: Codex's own tests on the patched export, the skip list |
 | `test_mightling_privacy.py` | No usage analytics or the upstream vendor channels from `ling` |
@@ -153,7 +155,6 @@ These are recorded here because the spec used to promise otherwise.
 | `test_sidecar_network.py` | Sidecars are created on a user-defined network, never Docker's default bridge |
 | `test_cache_clearing.py` | `ling-admin clear` removes weights only |
 | `test_admin_reference.py` | `docs/admin.md` is generated from the CLI and in step with it |
-| `test_chat_admin_credentials.py` | The web chat's per-install admin password, and moving an install off the published default |
 | `test_desktop_work.py` | The desktop app's Work window on Electron |
 | `test_diffusion_switched_off.py` | Diffusion switched off: never started, downloaded or shown; and everything back when the switch is on |
 | `test_docs_index.py` | `ling-admin docs setup`'s pinned files and the document index's egress verdict (fetches stubbed) |

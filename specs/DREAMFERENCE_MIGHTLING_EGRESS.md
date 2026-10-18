@@ -26,7 +26,7 @@ Make "your code stays on your machine" something a user can check, not a promise
 **Non-goals:**
 - **Calling it air-gapped.** Web search and `ling-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them. The command `/airgapped` keeps to this: only its `on` level, which allows neither, carries the word ([MIGHTLING_AIRGAPPED §1](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)).
 - **Inbound exposure.** The model server listening on `0.0.0.0:8000` is accepted by design: Mightling assumes the local network is trusted ([README](./README.md), "Accepted by design").
-- **Containers.** The web chat's own egress (Onyx, SearXNG, the sidecars) is out of scope. Onyx's telemetry is handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md)).
+- **Containers.** The containers' own egress (SearXNG, the sidecars; Onyx until its retirement in 1.7.0) is out of scope. Onyx's telemetry was handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md), history).
 
 ---
 

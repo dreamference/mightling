@@ -125,7 +125,7 @@ The prompt is unused.
 - **Package:** `dreamference/runner/openhands_runner.py`, `openhands_installer.py`
 - **Runtime:** Docker image `ghcr.io/all-hands-ai/openhands:main`, web UI at `http://localhost:3001` (`OPENHANDS_HOST_PORT`)
 
-Port 3001, not 3000, because the Onyx web chat owns 3000 (`ling web` is on 3100); published on `127.0.0.1` only, because the container mounts the Docker socket and a UI on the network would hand root on the host to anyone who can reach it.
+Port 3001, not 3000, because the Onyx web chat owned 3000 until its retirement in 1.7.0, and an older install may still run it (`ling web` is on 3100); published on `127.0.0.1` only, because the container mounts the Docker socket and a UI on the network would hand root on the host to anyone who can reach it.
 
 ### 5.2. Container Launch
 
@@ -133,7 +133,7 @@ Port 3001, not 3000, because the Onyx web chat owns 3000 (`ling web` is on 3100)
 docker rm -f dreamference-openhands
 docker run --rm -it --name dreamference-openhands \
   -e LLM_MODEL=openai/{hf_repo} \
-  -e LLM_BASE_URL={OnyxRunner.resolve_container_vllm_url(vllm_host)} \
+  -e LLM_BASE_URL={DockerBridge.container_vllm_url(vllm_host)} \
   -e LLM_API_KEY=gb10-local-token \
   -e WORKSPACE_BASE={cwd} \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -142,7 +142,7 @@ docker run --rm -it --name dreamference-openhands \
   ghcr.io/all-hands-ai/openhands:main
 ```
 
-`LLM_BASE_URL` goes through the same rewrite as Onyx's provider: a loopback vLLM host becomes the Docker bridge gateway, because inside the container `localhost` is the container itself.
+`LLM_BASE_URL` goes through the rewrite Onyx's provider used (`DockerBridge`, `chat/docker_bridge.py`, since Onyx's retirement): a loopback vLLM host becomes the Docker bridge gateway, because inside the container `localhost` is the container itself.
 
 ### 5.3. Session Behaviour
 

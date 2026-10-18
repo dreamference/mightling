@@ -59,8 +59,9 @@ ling-admin model download --model <alias>             # fetch weights ahead of t
 ling-admin server stop && ling-admin server start   # restart with the new choice
 ```
 
-`main-model set` also points a running web chat at the new model (`--no-onyx` skips that). The
-terminal agent needs no change: it asks the server which model it serves each time it starts.
+The terminal agent needs no change: it asks the server which model it serves each time it starts.
+Image search names the served model when it starts, so `ling-admin images start` again after a
+change (`main-model set` reminds you when it runs).
 
 `ling-admin main-model inspect` runs sample prompts against the running model and reports how it
 was launched.

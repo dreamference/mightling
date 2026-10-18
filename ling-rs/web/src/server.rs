@@ -44,6 +44,7 @@ use crate::auth::Addresses;
 use crate::devices;
 use crate::policy::BusyTracker;
 use crate::policy::Policy;
+use crate::sidecars;
 
 /// The port `ling web` listens on: clear of Onyx's 3000 and 80, and kept so bookmarks never move.
 pub const DEFAULT_PORT: u16 = 3100;
@@ -75,6 +76,10 @@ pub struct Config {
     pub socket: PathBuf,
     /// How to start the app-server, and how `--composed` prompts are read.
     pub launch: Launch,
+    /// The image search service's store, served at `/images/` (sidecars.rs).
+    pub images_dir: PathBuf,
+    /// The speech-to-text service `/api/transcribe` passes recordings to (sidecars.rs).
+    pub speech_addr: String,
 }
 
 pub struct Server {
@@ -205,9 +210,9 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/bridge.js", get(bridge_js))
         .route("/ws", get(websocket))
         .route("/api/upload", post(upload).layer(DefaultBodyLimit::disable()))
-        .route("/api/transcribe", post(not_built))
+        .route("/api/transcribe", post(transcribe).layer(DefaultBodyLimit::disable()))
         .route("/api/apps", get(not_built))
-        .route("/images/{*path}", get(not_built))
+        .route("/images/{*path}", get(image))
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
         .route("/login", get(login))
@@ -299,6 +304,57 @@ async fn not_found() -> Response {
 /// Routes the spec names whose services are not built yet in this release.
 async fn not_built() -> Response {
     json_response(StatusCode::NOT_IMPLEMENTED, json!({ "error": "not available in this release of ling web" }))
+}
+
+/// A picture the image search service kept (specs/DREAMFERENCE_MIGHTLING_ASK.md §6): read-only,
+/// from its store, by the only names it writes.
+async fn image(State(server): State<Arc<Server>>, axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    match sidecars::read_image(&server.config.images_dir, &path).await {
+        Some(bytes) => {
+            let mut response = (StatusCode::OK, [(header::CONTENT_TYPE, "image/jpeg")], bytes).into_response();
+            // A stored image never changes under its name.
+            response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=604800, immutable"));
+            response
+        }
+        None => not_found().await,
+    }
+}
+
+/// The microphone's recording, turned into text by the speech-to-text service on this machine
+/// (§7). The text goes back to the page, which puts it in the composer; nothing is sent to the model.
+async fn transcribe(State(server): State<Arc<Server>>, request: Request) -> Response {
+    let Some(media) = sidecars::audio_type(header_str(request.headers(), header::CONTENT_TYPE)) else {
+        return json_response(StatusCode::UNSUPPORTED_MEDIA_TYPE, json!({ "error": "send the recording as audio/*" }));
+    };
+    let too_large = || json_response(StatusCode::PAYLOAD_TOO_LARGE, json!({ "error": format!("The limit is {} MB.", sidecars::AUDIO_CAP >> 20) }));
+    let declared = header_str(request.headers(), header::CONTENT_LENGTH).and_then(|value| value.parse::<u64>().ok());
+    if declared.is_some_and(|length| length > sidecars::AUDIO_CAP) {
+        return too_large();
+    }
+    let mut audio = Vec::new();
+    let mut stream = request.into_body().into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else {
+            return json_response(StatusCode::BAD_REQUEST, json!({ "error": "the recording did not arrive whole" }));
+        };
+        if (audio.len() + chunk.len()) as u64 > sidecars::AUDIO_CAP {
+            return too_large();
+        }
+        audio.extend_from_slice(&chunk);
+    }
+    if audio.is_empty() {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "the recording is empty" }));
+    }
+    match sidecars::transcribe(&server.config.speech_addr, &audio, &media).await {
+        Ok(text) => json_response(StatusCode::OK, json!({ "text": text })),
+        Err(sidecars::SpeechError::Unavailable) => json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({ "error": "Speech-to-text is not running on this machine: start it with `ling-admin voice start`." }),
+        ),
+        Err(sidecars::SpeechError::Failed(reason)) => {
+            json_response(StatusCode::BAD_GATEWAY, json!({ "error": format!("Speech-to-text failed: {reason}") }))
+        }
+    }
 }
 
 async fn healthz(State(server): State<Arc<Server>>) -> Response {

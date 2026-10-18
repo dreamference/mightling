@@ -1,5 +1,5 @@
 """
-The SearXNG container behind `ling-search`, the MCP server's web search and Onyx's web search:
+The SearXNG container behind `ling-search`, the MCP server's web search and image search:
 `ling-admin searxng start`.
 
 Until 2026-10-01 it was started by hand, from a `docker run` line in an error message, which put
@@ -14,9 +14,9 @@ from typing import Final, List
 
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
-# The name Onyx's containers resolve SearXNG by once it joins their network. SearXNG publishes
-# only on 127.0.0.1, so the bridge gateway that reaches vLLM does not reach it -- attaching the
-# container to Onyx's network is what makes it addressable, and exposes no new host port.
+# The name other sidecars (image search) resolve SearXNG by on the sidecar network. SearXNG publishes
+# only on 127.0.0.1, so the bridge gateway that reaches vLLM does not reach it -- the shared
+# network is what makes it addressable, and exposes no new host port.
 SEARXNG_CONTAINER_NAME: Final[str] = "dreamference-searxng"
 SEARXNG_IMAGE: Final[str] = "docker.io/searxng/searxng:latest"
 SEARXNG_HOST_PORT: Final[int] = 8888
@@ -55,8 +55,8 @@ class SearxngSidecar:
     @classmethod
     def extra_networks(cls) -> List[str]:
         """
-        Lists the user-defined networks the existing container is attached to (Onyx's, once
-        `configure` has joined it), so a replacement can rejoin them.
+        Lists the user-defined networks the existing container is attached to (the retired Onyx
+        web chat's, on an older install), so a replacement can rejoin them.
 
         Returns:
             List[str]: Network names, without the default bridge and the sidecar network.

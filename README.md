@@ -148,8 +148,8 @@ nothing to pay per token, ever.
 | 🔎 **Web search and fetch** | Through a private SearXNG on your own machine: no search account, no API key. |
 | 🧭 **A code index** | Definitions, callers and impact across your repository, so the agent finds code instead of grepping for it. |
 | 🧩 **Your existing skills** | Skills you already wrote for Claude Code, Gemini CLI, OpenClaw or Hermes work in Mightling unchanged. |
-| 💬 **Web chat** | A browser assistant with web search, voice input and image understanding, on the same local model. [More →](docs/web-chat.md) |
-| 🪟 **Desktop app** | The chat in a window of its own, plus a Work window (preview) for agent sessions with approvals, diffs and undo. [More →](docs/desktop.md) |
+| 💬 **Ask, in a browser** | `ling web`: questions with web search, image search and dictation, and your agent sessions, from this machine or a paired phone. [More →](docs/web.md) |
+| 🪟 **Desktop app** | Ask and Work in a window of its own, with approvals, diffs and undo for agent sessions. [More →](docs/desktop.md) |
 | 📬 **Gmail, Drive, Calendar** (preview) | Read-only, through a sign-in that stays on your machine. Switched off entirely at `/airgapped on`. |
 
 ## Runs on every GB10
@@ -233,7 +233,7 @@ mightling_gmail = false        # never offer Gmail to the agent
 ```
 
 The same model server also drives Cline, Continue and OpenHands:
-`ling-admin run --agent cline "add type hints to utils.py"`. The web chat and the desktop app are
+`ling-admin run --agent cline "add type hints to utils.py"`. The web UI and the desktop app are
 set up in [Get started](docs/getting-started.md).
 
 </details>
@@ -253,7 +253,7 @@ ling-admin codex build             # compiles ling and links it into ~/.local/bi
 cd ~/my-project && ling
 ```
 
-`ling-admin` is the Python package that runs the model server, the web chat and the builds
+`ling-admin` is the Python package that runs the model server, the sidecars and the builds
 ([command reference](docs/admin.md)); `ling` and its web and code-index tools are Rust. Tests need
 no GPU or Docker: `.venv/bin/python -m pytest tests/`. Design specs are in [`specs/`](specs/README.md),
 and [How it works](docs/architecture.md) explains the pieces.
@@ -279,7 +279,7 @@ Issues and pull requests are welcome, especially anything the egress audit turns
 Mightling began as a fork of the open-source Codex CLI (Apache 2.0) and is growing into the world's
 leading confidential local AI software. It also stands on
 [SGLang](https://github.com/sgl-project/sglang), [vLLM](https://github.com/vllm-project/vllm),
-[Onyx](https://github.com/onyx-dot-app/onyx), [SearXNG](https://github.com/searxng/searxng) and the
+[SearXNG](https://github.com/searxng/searxng) and the
 [Qwen](https://github.com/QwenLM) models. Thank you to all of them.
 
 ## License
@@ -291,8 +291,7 @@ is in [`LICENSE`](LICENSE). Section 13 is the clause that matters for a fork: if
 Mightling and let people use it **over a network**, you must offer them its source.
 
 This covers Mightling's own code. The components it deploys keep their own licences: Codex (Apache
-2.0), SGLang and vLLM (Apache 2.0), Onyx (its own terms, including an `ee/` directory that is not
-free software and that Mightling leaves switched off), and the model under its own weights licence.
+2.0), SGLang and vLLM (Apache 2.0), and the model under its own weights licence.
 
 NVIDIA, GB10, DGX and DGX Spark are trademarks of NVIDIA Corporation. Qwen is a trademark of
 Alibaba Cloud. Other names are trademarks of their owners. Mightling and Dreamference are not

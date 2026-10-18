@@ -110,7 +110,7 @@ def test_read_frames_the_body_as_untrusted(capsys):
 
 def test_service_errors_exit_non_zero_with_the_hint(capsys):
     code, out = _gmail(["search", "x"], dict(NOT_RUNNING_ERROR), capsys)
-    assert code == 1 and "❌ Gmail service is not running." in out and "ling-admin chat start" in out
+    assert code == 1 and "❌ Gmail service is not running." in out and "ling-admin google start" in out
 
 
 def test_the_service_reports_a_failing_account_next_to_the_others_results():

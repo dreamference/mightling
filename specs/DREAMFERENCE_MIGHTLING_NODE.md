@@ -5,7 +5,7 @@
 **Builds on:**
 - the launcher in `ling-rs/` and its `vllm_host()` tiers ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md));
 - the web commands in `ling-web-rs/` and the code index in `ling-code-rs/` ([MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md));
-- the web UI and its desktop window ([ONYX](./DREAMFERENCE_ONYX.md));
+- the web UI and its desktop window ([ONYX](./DREAMFERENCE_ONYX.md) when this was written; since 1.7.0 Onyx is retired and the web UI is `ling web`, [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §19);
 - the model server and its host-safety layer ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
 - the trusted-LAN decision of 2026-09-30 ([README](./README.md), "Accepted by design");
 - `/airgapped` and the egress audit ([MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md), [MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md)).
@@ -80,7 +80,7 @@ Not checked, and so the first work of Part 1 (Phase 0 in §14):
 | `ling web` (the Mightling UI, Ask and Work) | Rust, in `ling` | ✔ | ✔ |
 | Model server (SGLang or vLLM), diffusion sidecar (switched off since 2026-10-03) | Docker | | ✔ |
 | SearXNG, speech-to-text, image search, Gmail service | Docker sidecars | | ✔ |
-| Web UI (Onyx Lite stack) | Docker | | ✔ |
+| Web UI (Onyx Lite stack), retired in 1.7.0 (MIGHTLING_ASK §19) | Docker | | until 1.7.0 |
 | `ling-admin` (Python): `server`, `model`, `ling`, `night`, `swe-bench`, `audit`, `mcp`, … | Python package | | ✔ |
 | Host safety, PSI watchdog | Python | | ✔ |
 
@@ -92,18 +92,17 @@ Not checked, and so the first work of Part 1 (Phase 0 in §14):
 
 ## 4. What leaves loopback on the node
 
-A node that is not advertised keeps today's binds. `ling-admin node enable` (§5.2) is what changes them, and `node disable` puts them back; `--no-web` keeps both web UIs on loopback. Since 2026-10-08 the advertisement's `web` key names `ling web`'s port 3100, not Onyx's 3000.
+A node that is not advertised keeps today's binds. `ling-admin node enable` (§5.2) is what changes them, and `node disable` puts them back; `--no-web` keeps the web UI on loopback. Since 2026-10-08 the advertisement's `web` key names `ling web`'s port 3100, not Onyx's 3000; since Onyx's retirement (1.7.0, MIGHTLING_ASK §19.1) `node enable` no longer reads Onyx's `.env` or rebinds its nginx.
 
 | Service | Bind today | After `node enable` | Who needs it |
 |---|---|---|---|
 | Model server, 8000 | `0.0.0.0` | unchanged | `ling` on every client |
 | `ling web`, 3100 (since 2026-10-08) | `127.0.0.1` | every interface (`ling web start --lan`, a user unit `mightling-web.service`); a device is served only once paired (`ling web pair`) | a phone or another computer's browser; the messengers' bridges |
-| Onyx web UI (nginx), 3000 | `127.0.0.1` | `0.0.0.0`, until Onyx is retired | a plain browser on clients (`ling-app` used it until 2026-10-08) |
-| Onyx web UI (nginx), 80 | `127.0.0.1` | unchanged | nobody remote |
+| Onyx web UI (nginx), 3000 and 80, until 1.7.0 | `127.0.0.1` | 3000 on `0.0.0.0` until Onyx's retirement; untouched since (`ling-admin chat remove` takes an old install's containers away) | nobody since 1.7.0 (`ling-app` used it until 2026-10-08) |
 | SearXNG, 8888 | `127.0.0.1` | `0.0.0.0` | `ling-search` on clients |
 | Google service (Gmail, Drive, Calendar), 8767 | `127.0.0.1` | unchanged | node only (§10) |
 | Diffusion sidecar, 8001 (switched off since 2026-10-03) | `127.0.0.1` | unchanged | node only |
-| Speech-to-text 8100, image search 8768 | `127.0.0.1` | unchanged | the web UI's own containers |
+| Speech-to-text 8100, image search 8768 | `127.0.0.1` | unchanged | `ling web`, the app and the `image_search` tool on the node (on `dreamference-sidecars` since 1.7.0) |
 
 **This reverses two fixes of 2026-09-29**, deliberately:
 - nginx had been published on every interface, which put the web UI's default admin account on the LAN; `configure()` bound it to loopback.
@@ -111,7 +110,7 @@ A node that is not advertised keeps today's binds. `ling-admin node enable` (§5
 
 Under the trusted-LAN decision both become "accepted by design" on an advertised node. When this is implemented the two rows move to that table in [README](./README.md) with the date and this reason; they are not silently reopened. Mechanically: `HOST_PORT=0.0.0.0:3000` in the web UI's `.env` (the variable `bind_to_loopback()` already writes) and the SearXNG sidecar's publish address, both keyed on one config value, `node_advertise`.
 
-**What that exposes, stated plainly** (§11 has the rest):
+**What that exposed while Onyx was the web UI, stated plainly** (§11 has the rest; since 1.7.0 the web UI is `ling web`, which serves a device only once paired, MIGHTLING_ASK §4.3):
 - **The web UI has one account**, `admin@dreamference.dev`, with a password generated per install since 2026-10-07 (before that, a published default; ONYX §2 step 2). Every person on the LAN given that password shares one chat history and the admin panel; `ling-admin chat password` on the node prints it for a client's login page.
 - **The web UI's Gmail tool reads the node owner's mail.** Anyone on the LAN using the web UI can ask it to search that mail. `ling-admin node enable --no-web` leaves the web UI on loopback for an owner who wants remote `ling` but not a shared web UI (question 2).
 
