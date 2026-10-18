@@ -10,11 +10,12 @@ import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent 
 import * as bridge from "./bridge";
 import { Icon } from "./icons";
 import { KEYMAP, chordOf, conflicts, type KeyAction } from "./keymap";
+import { boardOn } from "./board";
 import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions";
+export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -51,6 +52,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "browser", label: "Browser", desktopOnly: true },
   { id: "pets", label: "Pets", desktopOnly: true },
   { id: "suggestions", label: "Suggested prompts" },
+  { id: "agents", label: "Agents" },
 ];
 
 export function SettingsDialog(props: SettingsProps) {
@@ -80,6 +82,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "browser" && bridge.preview.available() ? <Browser {...props} /> : null}
             {props.page === "pets" && bridge.git.available() ? <Pets {...props} /> : null}
             {props.page === "suggestions" ? <Suggestions {...props} /> : null}
+            {props.page === "agents" ? <Agents {...props} /> : null}
           </div>
         </div>
       </section>
@@ -555,6 +558,35 @@ function Suggestions({ prefs, onChange }: SettingsProps) {
         <legend>Follow-ups</legend>
         <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Suggest follow-ups when a turn ends</label>
       </fieldset>
+    </>
+  );
+}
+
+/** Settings › Agents (DESKTOP_PARITY §2.13, Phase 3 item 10): the message board subagents post to each other on. */
+function Agents({ readConfig, writeConfig, notice }: SettingsProps) {
+  const [on, setOn] = useState<boolean | null>(null);
+  const load = () => readConfig().then((config) => setOn(boardOn(config))).catch((error) => { setOn(null); notice(error); });
+  useEffect(() => {
+    void load();
+    // read once when the page opens
+  }, []);
+  const set = async (value: boolean) => {
+    try {
+      await writeConfig("features.multi_agent_v2", value);
+      await writeConfig("features.agent_message_board", value);
+      await load();
+    } catch (error) {
+      notice(error);
+    }
+  };
+  return (
+    <>
+      <h3>Agents</h3>
+      <p className="dialog-note">Subagents can keep discussions with each other on a message board: channels and threads of posts, stored on this machine (agent_message_board_1.sqlite beside the sessions). It uses the second version of the multi-agent tools, and the board is still marked as under development in Codex. Kept in config.toml, shared with ling; new threads use it.</p>
+      <fieldset>
+        <label><input type="checkbox" checked={on === true} disabled={on === null} onChange={(event) => void set(event.target.checked)} /> A message board for subagents (multi_agent_v2 and agent_message_board)</label>
+      </fieldset>
+      <p className="dialog-note">With it on, Message board in the sidebar shows what they posted, read only.</p>
     </>
   );
 }

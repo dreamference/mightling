@@ -20,6 +20,7 @@ import { findEditors, openCommand, terminalCommand, type Editor } from "./editor
 import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
 import * as prs from "./prs";
+import { boardFile, readBoards } from "./board";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
@@ -508,6 +509,11 @@ export async function main(options: MainOptions): Promise<void> {
         if (message.type === "pr/view") return prs.view(root, message.number);
         if (message.type === "pr/diff") return prs.diff(root, message.number);
         return prs.review(root, message.number, message.verdict, message.body);
+      }
+      case "board/read": {
+        const home = codexHome();
+        if (!home) return [];
+        return readBoards(boardFile(home, typeof message.sqliteHome === "string" ? message.sqliteHome : null));
       }
       case "pr/status": {
         if (prefs.read().pullRequests !== true) return "The pull-request tab is off.";
