@@ -1,0 +1,58 @@
+# 50 SWE-bench Verified tasks for night 13, Night Shift best-of-3 (chooser v1) against a single run, the default arm three times, 60-minute limit
+# (scripts/swe_bench_night1.sh BEST_OF=3; backlog item 6), drawn 2026-10-18, seed 20261019.
+# None of nights 8-12's lists (fresh-50d.txt, fresh-50e.txt, fresh-50f.txt, fresh-30g.txt, fresh-50h.txt), the mismatch list or the smoke task. Only 22 validated tasks lie
+# outside sample-100.txt and those lists (nothing is left to validate: `swe_bench_fresh.py candidates` finds 0), so all 22 are
+# taken and 28 are drawn from sample-100.txt (its 89 validated tasks outside the mismatch list), stratified so the 50
+# match sample-100.txt's mix (easy/medium/hard 59/16/25 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
+# wanted 30/8/12, drawn 30/8/12.
+# Seen before: 28 in sample-100.txt; 4 in fresh-50.txt, 11 in fresh-50c.txt, 5 in fresh-50b.txt.
+astropy__astropy-13579
+astropy__astropy-14096
+astropy__astropy-14539
+django__django-11133
+django__django-11138
+django__django-11206
+django__django-11292
+django__django-11790
+django__django-11885
+django__django-12039
+django__django-12143
+django__django-12193
+django__django-12325
+django__django-12774
+django__django-13212
+django__django-13658
+django__django-14053
+django__django-14351
+django__django-14376
+django__django-14434
+django__django-14500
+django__django-14534
+django__django-14787
+django__django-14915
+django__django-15104
+django__django-15252
+django__django-15375
+django__django-15380
+django__django-15561
+django__django-15957
+django__django-16429
+django__django-16642
+django__django-16877
+django__django-16901
+mwaskom__seaborn-3069
+psf__requests-1142
+pytest-dev__pytest-5631
+scikit-learn__scikit-learn-25931
+sphinx-doc__sphinx-10449
+sphinx-doc__sphinx-9673
+sympy__sympy-12096
+sympy__sympy-13615
+sympy__sympy-13877
+sympy__sympy-13878
+sympy__sympy-13974
+sympy__sympy-17318
+sympy__sympy-21612
+sympy__sympy-23413
+sympy__sympy-24213
+sympy__sympy-24562
