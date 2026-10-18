@@ -77,9 +77,12 @@ serve)
     echo "ready $own"
     ;;
 restore)
-    exec 9> "$HOME/gpu.lock"; flock -w 1800 9
-    stop_arms
-    docker start m0-prod8000 > /dev/null 2>&1
+    # The stop and the start run detached from this ssh session, so production comes back even when the caller
+    # is stopped or its connection drops halfway (a stopped night unit has 90 s before systemd kills it).
+    export AB_DIR SG_NAME
+    export -f log engine_pids stop_arms
+    setsid nohup bash -c 'exec 9> "$HOME/gpu.lock"; flock -w 1800 9; stop_arms; docker start m0-prod8000 > /dev/null 2>&1' \
+        >> "$AB_DIR/remote.log" 2>&1 < /dev/null &
     own=$(wait_ready 8000 900) && log "m0-prod8000 back ($own)" || { log "m0-prod8000 did not answer within 15 min"; exit 1; }
     echo "restored"
     ;;
