@@ -1,11 +1,14 @@
-// The bottom panel (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §2.1, §2.6; Ctrl+J): the local
-// environment's setup and actions, each run a tab of its own with its output, Stop, and the editor
-// for the project's environment. The terminal tabs of item 8 join it here.
+// The bottom panel (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §2.1, §2.6, §2.7; Ctrl+J): the
+// shown thread's terminal tabs (Ctrl+`), each a PTY on the server (terminal.ts), the environment's
+// actions run in a terminal of their own, the setup run of a new worktree with its output, Stop,
+// and the editor for the project's environment.
 
 import { useEffect, useRef, useState } from "react";
 
 import type * as bridge from "./bridge";
 import { Icon } from "./icons";
+import type { TerminalHub, TerminalSession } from "./terminal";
+import { TerminalView } from "./TerminalView";
 
 export interface TaskView {
   id: string;
@@ -27,6 +30,13 @@ export function appendOutput(output: string, data: string): string {
 
 export interface BottomPanelProps {
   tasks: TaskView[];
+  terminals: TerminalSession[];
+  hub: TerminalHub;
+  /** The tab to bring forward (a terminal's process id or a task's id), with a counter so asking again focuses it again. */
+  front: { id: string; tick: number } | null;
+  onNewTerminal: () => void;
+  onCloseTerminal: (processId: string) => void;
+  onSendToThread: (processId: string) => void;
   environment: bridge.LocalEnvironment | null;
   problems: string[];
   project: string | null;
@@ -40,30 +50,45 @@ export interface BottomPanelProps {
 export function BottomPanel(props: BottomPanelProps) {
   const [shown, setShown] = useState<string | null>(null);
   const output = useRef<HTMLPreElement>(null);
-  const current = props.tasks.find((task) => task.id === shown) ?? props.tasks[props.tasks.length - 1] ?? null;
+  const ids = [...props.terminals.map((terminal) => terminal.processId), ...props.tasks.map((task) => task.id)];
+  const current = shown && ids.includes(shown) ? shown : props.terminals[props.terminals.length - 1]?.processId ?? props.tasks[props.tasks.length - 1]?.id ?? null;
+  const task = props.tasks.find((entry) => entry.id === current) ?? null;
+  const terminal = props.terminals.find((entry) => entry.processId === current) ?? null;
 
-  // A new task comes to the front.
-  const newest = props.tasks[props.tasks.length - 1]?.id ?? null;
-  useEffect(() => setShown(newest), [newest]);
+  // A tab asked for (a new terminal, an action, a setup run) comes to the front.
+  useEffect(() => {
+    if (props.front) setShown(props.front.id);
+  }, [props.front]);
   useEffect(() => {
     if (output.current) output.current.scrollTop = output.current.scrollHeight;
-  }, [current?.output]);
+  }, [task?.output]);
 
   return (
     <section className="bottom-panel" aria-label="Bottom panel">
-      <header className="panel-tabs">
-        {props.tasks.map((task) => (
-          <span key={task.id} className={`panel-tab${task.id === current?.id ? " selected" : ""}`}>
-            <button className="panel-tab-label" onClick={() => setShown(task.id)} title={task.cwd}>
-              {task.running ? <span className="running" aria-label="running" /> : <Icon name={task.code === 0 ? "check" : "x"} size={12} />}
-              {task.label}
+      <header className="panel-tabs" role="tablist">
+        {props.terminals.map((entry) => (
+          <span key={entry.processId} className={`panel-tab${entry.processId === current ? " selected" : ""}`}>
+            <button role="tab" aria-selected={entry.processId === current} className="panel-tab-label" onClick={() => setShown(entry.processId)} title={entry.cwd}>
+              {entry.exitCode === null ? <Icon name="terminal" size={12} /> : <Icon name={entry.exitCode === 0 ? "check" : "x"} size={12} />}
+              {entry.title}
             </button>
-            {task.running
-              ? <button className="icon" aria-label={`Stop ${task.label}`} onClick={() => props.onStop(task.id)}><Icon name="square" size={12} /></button>
-              : <button className="icon" aria-label={`Close ${task.label}`} onClick={() => props.onClose(task.id)}><Icon name="x" size={12} /></button>}
+            <button className="icon" aria-label={`Close ${entry.title}`} onClick={() => props.onCloseTerminal(entry.processId)}><Icon name="x" size={12} /></button>
           </span>
         ))}
+        {props.tasks.map((entry) => (
+          <span key={entry.id} className={`panel-tab${entry.id === current ? " selected" : ""}`}>
+            <button role="tab" aria-selected={entry.id === current} className="panel-tab-label" onClick={() => setShown(entry.id)} title={entry.cwd}>
+              {entry.running ? <span className="running" aria-label="running" /> : <Icon name={entry.code === 0 ? "check" : "x"} size={12} />}
+              {entry.label}
+            </button>
+            {entry.running
+              ? <button className="icon" aria-label={`Stop ${entry.label}`} onClick={() => props.onStop(entry.id)}><Icon name="square" size={12} /></button>
+              : <button className="icon" aria-label={`Close ${entry.label}`} onClick={() => props.onClose(entry.id)}><Icon name="x" size={12} /></button>}
+          </span>
+        ))}
+        <button className="icon" aria-label="New terminal" title="New terminal (Ctrl+`)" onClick={props.onNewTerminal}><Icon name="plus" size={14} /></button>
         <span className="spacer" />
+        {terminal ? <button className="link-button" title="Put this terminal's recent output in the composer, for the agent to read" onClick={() => props.onSendToThread(terminal.processId)}>Send to the thread</button> : null}
         {props.environment?.actions.map((action) => (
           <button key={action.name} className="link-button" title={action.script} onClick={() => props.onRun(action)}><Icon name={actionIcon(action.icon)} size={12} /> {action.name}</button>
         ))}
@@ -71,13 +96,20 @@ export function BottomPanel(props: BottomPanelProps) {
         <button className="icon" aria-label="Hide the bottom panel" title="Hide (Ctrl+J)" onClick={props.onHide}><Icon name="x" size={14} /></button>
       </header>
       {props.problems.map((problem) => <div key={problem} className="notice">{problem}</div>)}
-      {current ? (
-        <pre ref={output} className="panel-output" aria-label={`${current.label} output`}>{current.output || (current.running ? "…" : "(no output)")}{!current.running ? `\n[exited with ${current.code ?? "a signal"}]` : ""}</pre>
-      ) : (
-        <p className="empty small panel-empty">{props.environment
-          ? `${props.environment.name}: its actions run here (Super+Shift+D runs the first).`
-          : props.project ? "This project has no local environment yet: Environment… makes one in .mightling/." : "Open a thread in a project to run its environment's actions here."}</p>
-      )}
+      <div className="panel-body">
+        {props.terminals.map((entry) => (
+          <TerminalView key={entry.processId} hub={props.hub} processId={entry.processId} visible={entry.processId === current} focus={props.front?.id === entry.processId ? props.front.tick : 0} />
+        ))}
+        {terminal?.error ? <div className="notice">{terminal.error}</div> : null}
+        {task ? (
+          <pre ref={output} className="panel-output" aria-label={`${task.label} output`}>{task.output || (task.running ? "…" : "(no output)")}{!task.running ? `\n[exited with ${task.code ?? "a signal"}]` : ""}</pre>
+        ) : null}
+        {!task && !terminal ? (
+          <p className="empty small panel-empty">{props.environment
+            ? `${props.environment.name}: its actions run here (Super+Shift+D runs the first); + opens a terminal.`
+            : props.project ? "+ opens a terminal in this thread's folder. This project has no local environment yet: Environment… makes one in .mightling/." : "Open a thread in a project to run a terminal here."}</p>
+        ) : null}
+      </div>
     </section>
   );
 }

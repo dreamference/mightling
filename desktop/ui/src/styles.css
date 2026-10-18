@@ -285,6 +285,12 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .subagent { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 .subagent .running { margin: 0 2px; }
 .subagent-name { font-weight: 500; }
+.goal-row { display: flex; align-items: center; gap: 8px; max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 0 auto 6px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--accent-soft); font-size: 13px; }
+.goal-row.status-paused, .goal-row.status-blocked { background: var(--notice); }
+.goal-row.status-complete { background: var(--add); }
+.goal-row input { flex: 1; }
+.goal-objective { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .plan-chip { cursor: pointer; border: 1px solid transparent; background: none; color: var(--muted); font-size: 13px; gap: 4px; padding: 3px 10px; }
 .plan-chip:hover { background: var(--hover); color: var(--text); }
 .plan-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
@@ -421,6 +427,11 @@ html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 
 .panel-tab.selected { background: var(--raised); box-shadow: 0 0 0 1px var(--line); }
 .panel-tab-label { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 3px 6px; font-size: 12.5px; white-space: nowrap; }
 .panel-tab .running { position: static; }
+.panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--canvas); }
+.terminal-host { flex: 1; min-height: 0; padding: 4px 0 0 8px; }
+.terminal-host .xterm { height: 100%; }
+/* xterm.css paints its viewport and scroll area black; the terminal takes the canvas instead. */
+.terminal-host .xterm-viewport, .terminal-host .xterm-scrollable-element, .terminal-host .xterm-screen { background-color: var(--canvas) !important; }
 .panel-output { flex: 1; margin: 0; padding: 8px 12px; overflow: auto; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; background: var(--canvas); }
 .panel-empty { padding: 10px 14px; }
 .dialog-note { color: var(--muted); font-size: 13px; }
@@ -433,6 +444,7 @@ html[data-host="electron"] .work.review-open .thread-pane .bar { padding-right: 
 .dialog-buttons { display: flex; gap: 6px; margin-top: 14px; align-items: center; }
 .dialog label.colour { gap: 10px; }
 .dialog input[type="color"] { width: 36px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: 6px; background: none; }
+.danger-button { color: var(--danger); border-color: var(--danger); }
 .file-button { display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
 textarea.personal { width: 100%; font-family: var(--font-code); font-size: 12.5px; }
 

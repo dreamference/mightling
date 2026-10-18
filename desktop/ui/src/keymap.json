@@ -121,7 +121,7 @@
     "Ctrl+`"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "clearTerminal",
@@ -131,7 +131,7 @@
     "Ctrl+L"
    ],
    "context": "terminal",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "clearUnread",

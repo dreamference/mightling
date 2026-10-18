@@ -86,6 +86,8 @@ const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
 const say = (message) => console.log(JSON.stringify(message));
 const usage = { totalTokens: 41210, inputTokens: 39000, cachedInputTokens: 30000, cacheWriteInputTokens: 0, outputTokens: 2210, reasoningOutputTokens: 800 };
 const queues = {};
+const terminals = {};
+const goals = {};
 let asked = false;
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
@@ -134,6 +136,19 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       }
       return;
     }
+    case "thread/goal/get": return answer({ goal: goals[p.threadId] || null });
+    case "thread/goal/set": {
+      const now = Math.floor(Date.now() / 1000);
+      const before = goals[p.threadId] || { threadId: p.threadId, objective: "", status: "active", tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: now, updatedAt: now };
+      const goal = { ...before, ...(p.objective ? { objective: p.objective } : {}), ...(p.status ? { status: p.status } : {}), tokensUsed: before.tokensUsed + 1800, timeUsedSeconds: before.timeUsedSeconds + 95, updatedAt: now };
+      goals[p.threadId] = goal;
+      answer({ goal });
+      return say({ method: "thread/goal/updated", params: { threadId: p.threadId, turnId: null, goal } });
+    }
+    case "thread/goal/clear":
+      delete goals[p.threadId];
+      answer({ cleared: true });
+      return say({ method: "thread/goal/cleared", params: { threadId: p.threadId } });
     case "thread/archive": return answer({});
     case "thread/unarchive": return answer({ thread: { ...(threads.find((t) => t.id === p.threadId) || { ...threads[0], id: p.threadId, name: "Try a smaller hero image" }), turns: [] } });
     case "thread/name/set": {
@@ -187,8 +202,68 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "turn/steer": return answer({ turnId: p.expectedTurnId });
     case "app/list": return answer({ data: [{ id: "gmail", name: "Gmail", description: "Search and read your mail", logoUrl: null, logoUrlDark: null, iconAssets: null, iconDarkAssets: null,
       distributionChannel: null, branding: null, appMetadata: null, labels: null, installUrl: null, isAccessible: true, isEnabled: true, pluginDisplayNames: [] }], nextCursor: null });
+    case "memory/status": return answer({ v2ConsolidatedThreads: 7, v2Ready: true });
+    case "memory/reset": return answer({});
+    case "thread/memoryMode/set": return answer({});
     case "config/read": return answer({ config: { features: { memories: false }, memories: {}, desktop: null }, origins: {}, layers: null });
+    case "plugin/list": return answer({ marketplaces: [{ name: "Team tools", path: "/srv/team/marketplace.json", interface: null, plugins: [
+      { id: "lint@team", remotePluginId: null, version: "1.2.0", localVersion: null, name: "lint", shareContext: null, source: { type: "local", path: "/srv/team/lint" }, installed: false, installedAt: null, enabled: false,
+        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: [] }] }],
+      marketplaceLoadErrors: [], featuredPluginIds: [] });
+    case "plugin/install": return answer({ authPolicy: "ON_INSTALL", appsNeedingAuth: [] });
+    case "plugin/uninstall": return answer({});
+    case "skills/config/write": return answer({ effectiveEnabled: p.enabled });
+    case "config/mcpServer/reload": return answer({});
+    case "hooks/list": return answer({ data: [{ cwd: (p.cwds || ["/"])[0], warnings: [], errors: [], hooks: [{ key: "ledger", eventName: "Stop", matcher: null, timeoutSec: 30, statusMessage: null,
+      additionalContextLimit: null, sourcePath: "/home/u/.mightling/hooks.json", source: "user", pluginId: null, displayOrder: 0, enabled: true, isManaged: false, currentHash: "x", trustStatus: "trusted",
+      handlerType: "command", command: "ling ledger", async: false }] }] });
     case "config/value/write": return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
+    case "review/start": {
+      const id = "turn-" + next++;
+      const where = p.delivery === "detached" ? "r" + next++ : p.threadId;
+      answer({ turn: { id, items: [], status: "inProgress", error: null }, reviewThreadId: where });
+      say({ method: "turn/started", params: { threadId: where, turn: { id, items: [], status: "inProgress", error: null } } });
+      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "enteredReviewMode", id: "rv1", review: "uncommitted changes" } } });
+      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "exitedReviewMode", id: "rv2", review: "**One finding.** fetcher/client.py:15 re-raises without the attempt count in the message." } } });
+      return say({ method: "turn/completed", params: { threadId: where, turn: { id, items: [], status: "completed", error: null } } });
+    }
+    // A stand-in PTY: a fake shell that echoes what is typed and runs echo, enough to show the
+    // window's plumbing (command/exec, write, resize, terminate, outputDelta).
+    case "command/exec": {
+      const id = p.processId;
+      const out = (text) => say({ method: "command/exec/outputDelta", params: { processId: id, stream: "stdout", deltaBase64: Buffer.from(text).toString("base64"), capReached: false } });
+      // [sh, -c, exec $SHELL -l -c "$0", script] or [shell, -l, -c, script]: a script; anything shorter is a shell.
+      const script = p.command.length === 4 ? p.command[3] : null;
+      if (script) {
+        out("$ " + script + "\\r\\n" + (String(script).startsWith("echo ") ? String(script).slice(5) + "\\r\\n" : ""));
+        return setTimeout(() => answer({ exitCode: 0, stdout: "", stderr: "" }), 50);
+      }
+      terminals[id] = { line: "", answer };
+      return out("stand-in shell in " + p.cwd + "\\r\\n$ ");
+    }
+    case "command/exec/write": {
+      const term = terminals[p.processId];
+      const out = (text) => say({ method: "command/exec/outputDelta", params: { processId: p.processId, stream: "stdout", deltaBase64: Buffer.from(text).toString("base64"), capReached: false } });
+      for (const ch of Buffer.from(p.deltaBase64, "base64").toString()) {
+        if (ch === "\\r") {
+          const line = term.line;
+          term.line = "";
+          out("\\r\\n" + (line.startsWith("echo ") ? line.slice(5) + "\\r\\n" : line ? line.split(" ")[0] + ": not in the stand-in\\r\\n" : "") + "$ ");
+        } else {
+          term.line += ch;
+          out(ch);
+        }
+      }
+      return answer({});
+    }
+    case "command/exec/resize": return answer({});
+    case "command/exec/terminate": {
+      const term = terminals[p.processId];
+      answer({});
+      if (term) term.answer({ exitCode: 130, stdout: "", stderr: "" });
+      delete terminals[p.processId];
+      return;
+    }
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
     default: return answer({ data: [] });
   }

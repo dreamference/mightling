@@ -77,6 +77,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "rename", description: "Give this thread a name", needs: "thread", args: "<name>" },
   { name: "archive", description: "Archive this thread", needs: "thread" },
   { name: "model", description: "Choose the model and how hard it thinks", needs: "none" },
+  { name: "goal", description: "Set the thread's goal (the agent works until it is met), or show it", needs: "thread", args: "[objective]" },
   { name: "plan", description: "Plan mode: the agent plans with you before it changes anything", needs: "none", args: "[what to plan]" },
   { name: "permissions", description: "Choose what the agent may do without asking", needs: "work" },
   { name: "status", description: "Show the model, permissions, folder and context use", needs: "none" },
@@ -87,8 +88,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "diff", description: "Show how this folder differs from its remote branch", needs: "work" },
   { name: "copy", description: "Copy the last answer", needs: "thread" },
   { name: "resume", description: "Find an earlier thread", needs: "none" },
+  { name: "memories", description: "Turn memories off or on for this thread", needs: "thread", args: "[on|off]" },
   { name: "agents", description: "Show this thread's subagents, to open or stop them", needs: "thread" },
   { name: "night", description: "Night Shift: queue a task for tonight, or open Scheduled", needs: "none", args: "[add <task>]" },
+  { name: "review", description: "Have the agent review the uncommitted changes, a branch, a commit, or what you ask", needs: "thread", args: "[base <branch> | commit <sha> | instructions]" },
   { name: "airgapped", description: "Show the air-gap level, or set the default for new threads", needs: "none", args: "[default off|on]" },
 ];
 
@@ -276,4 +279,15 @@ export function keyAnswer(method: ServerRequest["method"], key: "approve" | "dec
 export function collaborationMode(mode: "default" | "plan", model: string | null, effort: string | null): { mode: "plan" | "default"; settings: { model: string; reasoning_effort: string | null; developer_instructions: null } } | null {
   if (mode !== "plan" || !model) return null;
   return { mode: "plan", settings: { model, reasoning_effort: effort, developer_instructions: null } };
+}
+
+/** The target `/review <args>` names: uncommitted changes, `base <branch>`, `commit <sha>`, or instructions of its own. */
+export function reviewTarget(args: string): { type: "uncommittedChanges" } | { type: "baseBranch"; branch: string } | { type: "commit"; sha: string; title: string | null } | { type: "custom"; instructions: string } {
+  const words = args.trim();
+  if (!words) return { type: "uncommittedChanges" };
+  const base = words.match(/^base\s+(\S+)$/);
+  if (base) return { type: "baseBranch", branch: base[1] };
+  const commit = words.match(/^commit\s+([0-9a-fA-F]{4,64})$/);
+  if (commit) return { type: "commit", sha: commit[1], title: null };
+  return { type: "custom", instructions: words };
 }
