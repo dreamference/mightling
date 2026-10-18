@@ -42,6 +42,7 @@ You queue coding tasks during the day with `/night add …`, from inside a `ling
 |---|---|
 | `/night add <task>` | Queues `<task>` for the repository of the current session, at its current `HEAD`. Prints the task id and branch name (`night/<id>`). |
 | `/night add --test "<cmd>" <task>` | As above, with the command that decides pass or fail. Without it, the command is detected (§5.4). |
+| `/night add --best-of N <task>` | As above, attempted `N` times and one attempt chosen (§11.9); the task's own `best_of`, which outranks `[night] best_of`. `N` is a whole number from 1 (`--best-of 1` pins one attempt where the table asks for more). Refused together with `--on <node>`, since a node works a task sent to it once. Options come in any order before the task; `ling night add` takes the same. |
 | `/night` or `/night list` | Lists this repository's queue: id, status, age, first line of the task. The last line is the next window. |
 | `/night show <id>` | The full task, its status history, and for finished tasks the branch, diff stat, test result and stall notes. |
 | `/night drop <id>` | Cancels a queued or interrupted task. A running task is marked `cancel-requested` and stopped at its next check (§5.3). A unique suffix of the id is enough (`/night drop a3f`). |
@@ -115,6 +116,8 @@ It has no network code and no knowledge of vLLM. Its unit tests run with the oth
   "branch": "night/20260929-2141-a3f",
   "task": "Add type hints to dreamference/hardware/model_spec.py",
   "test": null,
+  "on": null,
+  "best_of": null,
   "model_at_add": "Intel/Qwen3.5-122B-A10B-int4-AutoRound",
   "status": "queued",
   "history": [{"at": "2026-09-29T21:41:07+01:00", "status": "queued"}],
@@ -415,6 +418,6 @@ Backlog item 6, built on branch `night-shift/best-of-n` for 1.7.0; `best_of = 1`
 - **The window.** No attempt starts after it closes; the attempts that finished are chosen among and the report says how many ran ("2 of 3 attempts ran"). With none finished the task is `interrupted` and starts over the next night: attempts are never resumed.
 - **One attempt, exactly as before,** for `best_of = 1`, a task resumed from an earlier night (a recorded session or a kept worktree) and a task from another machine (`remote`).
 - **The report** adds a `Best of N` line (what ran, the chosen attempt, the stage that chose it, the points) and one line per attempt (status, changes, tests, time, and the diff file of each alternative).
-- **Not yet:** `/night add --best-of N` (the launcher, Rust) does not write the task's `best_of` key; the key is read when present.
-- **Tests:** `tests/test_night_shift_best_of_n.py` (a per-attempt stand-in for `ling`, a stand-in judge, `server_judge` against a fake on a free loopback port); `tests/test_night_shift.py`'s fixture pins the default at 1, since those tests are about one attempt.
+- **`/night add --best-of N`** (the launcher, `ling-rs/src/night.rs`, added 2026-10-18 for 1.7.0) writes the task's `best_of` key; without the option the key is `null` and `[night] best_of` applies. A count of 0 or a non-number is refused, and so is `--best-of` with `--on <node>`: the node records a handed-over task as `remote` and runs it once, so the count would be dropped without a word. `/night show` prints the task's own count.
+- **Tests:** the launcher's `night` unit tests (both forms of `--best-of`, the refusals, the key written and `null` without the option); `tests/test_night_shift_best_of_n.py` (a per-attempt stand-in for `ling`, a stand-in judge, `server_judge` against a fake on a free loopback port); `tests/test_night_shift.py`'s fixture pins the default at 1, since those tests are about one attempt.
 - **Measured:** SWE-bench night 11 (best-of-3 against a single run, the harness's equivalent: three default rounds on one list, then the same chooser over them): best-of-3 resolved 18/30 against the single run's 15/30 (4 tasks only best-of-3, 1 only the single run; exact paired test p = 0.375, not significant), so the default stays 1 (owner, 2026-10-18).

@@ -25,7 +25,7 @@ use std::process::Stdio;
 use serde_json::Value;
 use serde_json::json;
 
-const USAGE: &str = "Usage: /night [list] | /night add [--test \"<cmd>\"] [--on <node>] <task> | /night show <id> | /night drop <id> | /night report";
+const USAGE: &str = "Usage: /night [list] | /night add [--test \"<cmd>\"] [--on <node>] [--best-of N] <task> | /night show <id> | /night drop <id> | /night report";
 
 /// Statuses after which a task is finished for the night: the startup line counts them.
 const FINISHED: &[&str] = &["done", "no-change", "stalled", "failed", "interrupted"];
@@ -38,7 +38,9 @@ const DEFAULT_WINDOW: &str = "01:00-07:00";
 pub enum Request {
     List,
     /// `on`: a paired node whose own runner works the task (specs/DREAMFERENCE_MIGHTLING_NODE.md §13.3).
-    Add { test: Option<String>, on: Option<String>, task: String },
+    /// `best_of`: the task's own attempt count, which outranks `[night] best_of`
+    /// (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.9); None leaves it to the table.
+    Add { test: Option<String>, on: Option<String>, best_of: Option<u32>, task: String },
     Show(String),
     Drop(String),
     Report,
@@ -63,12 +65,7 @@ impl Request {
                 _ => Request::Usage(USAGE.to_string()),
             },
             "add" => match take_add_options(rest) {
-                Ok((test, on, task)) if !task.trim().is_empty() => Request::Add {
-                    test,
-                    on,
-                    task: task.trim().to_string(),
-                },
-                Ok(_) => Request::Usage("Nothing to queue: /night add <task>".to_string()),
+                Ok((test, on, best_of, task)) => add_request(test, on, best_of, task, "/night add <task>"),
                 Err(error) => Request::Usage(error),
             },
             _ => Request::Usage(USAGE.to_string()),
@@ -82,12 +79,13 @@ impl Request {
                 let mut rest = &args[1..];
                 let mut test = None;
                 let mut on = None;
+                let mut best_of = None;
                 while let Some(first) = rest.first() {
                     let (option, inline) = match first.split_once('=') {
                         Some((option, value)) => (option, Some(value.to_string())),
                         None => (first.as_str(), None),
                     };
-                    if option != "--test" && option != "--on" {
+                    if !matches!(option, "--test" | "--on" | "--best-of") {
                         break;
                     }
                     let (value, used) = match inline {
@@ -99,6 +97,11 @@ impl Request {
                     };
                     if option == "--test" {
                         test = Some(value);
+                    } else if option == "--best-of" {
+                        match attempt_count(&value) {
+                            Ok(count) => best_of = Some(count),
+                            Err(error) => return Request::Usage(error),
+                        }
                     } else {
                         match node_name(&value) {
                             Ok(name) => on = Some(name),
@@ -107,22 +110,35 @@ impl Request {
                     }
                     rest = &rest[used..];
                 }
-                let task = rest.join(" ");
-                if task.trim().is_empty() {
-                    Request::Usage("Nothing to queue: ling night add <task>".to_string())
-                } else {
-                    Request::Add { test, on, task: task.trim().to_string() }
-                }
+                add_request(test, on, best_of, &rest.join(" "), "ling night add <task>")
             }
             _ => Request::from_line(&args.join(" ")),
         }
     }
 }
 
-/// Splits the leading `--test` and `--on` options, in either order, off `rest`.
-fn take_add_options(mut rest: &str) -> Result<(Option<String>, Option<String>, &str), String> {
+/// The `Add` request for parsed options and task text, or why there is none: an empty task, or
+/// `--best-of` with `--on`, since the node that works a handed-over task runs it once
+/// (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.9) and the count would be silently dropped.
+fn add_request(test: Option<String>, on: Option<String>, best_of: Option<u32>, task: &str, form: &str) -> Request {
+    let task = task.trim();
+    if task.is_empty() {
+        return Request::Usage(format!("Nothing to queue: {form}"));
+    }
+    if let (Some(node), Some(_)) = (&on, best_of) {
+        return Request::Usage(format!(
+            "--best-of applies to a task run here: {node} works a task sent to it once. \
+             Queue it on {node} itself to ask for more attempts."
+        ));
+    }
+    Request::Add { test, on, best_of, task: task.to_string() }
+}
+
+/// Splits the leading `--test`, `--on` and `--best-of` options, in any order, off `rest`.
+fn take_add_options(mut rest: &str) -> Result<(Option<String>, Option<String>, Option<u32>, &str), String> {
     let mut test = None;
     let mut on = None;
+    let mut best_of = None;
     loop {
         rest = rest.trim_start();
         let (found, after) = take_test_option(rest)?;
@@ -137,7 +153,37 @@ fn take_add_options(mut rest: &str) -> Result<(Option<String>, Option<String>, &
             rest = after;
             continue;
         }
-        return Ok((test, on, rest));
+        let (found, after) = take_best_of_option(rest)?;
+        if found.is_some() {
+            best_of = found;
+            rest = after;
+            continue;
+        }
+        return Ok((test, on, best_of, rest));
+    }
+}
+
+/// Splits a leading `--best-of N` (or `--best-of=N`) off `rest`.
+fn take_best_of_option(rest: &str) -> Result<(Option<u32>, &str), String> {
+    let Some(after) = rest.strip_prefix("--best-of") else {
+        return Ok((None, rest));
+    };
+    // A task may begin with a word such as `--best-offer`: only the option proper is taken.
+    if !after.is_empty() && !after.starts_with(|next: char| next == '=' || next.is_whitespace()) {
+        return Ok((None, rest));
+    }
+    let after = after.strip_prefix('=').unwrap_or(after).trim_start();
+    let end = after.find(char::is_whitespace).unwrap_or(after.len());
+    Ok((Some(attempt_count(&after[..end])?), &after[end..]))
+}
+
+/// The attempt count `--best-of` was given: a whole number from 1. `1` is meaningful, a single
+/// attempt even where `[night] best_of` asks for more.
+fn attempt_count(value: &str) -> Result<u32, String> {
+    match value.parse::<u32>() {
+        Ok(count) if count >= 1 => Ok(count),
+        _ if value.is_empty() => Err("--best-of needs a number of attempts".to_string()),
+        _ => Err(format!("--best-of: {value:?} is not a number of attempts (1 or more)")),
     }
 }
 
@@ -258,14 +304,22 @@ pub fn run(dir: &Path, request: Request, cwd: &Path) -> Vec<String> {
     match request {
         Request::Usage(text) => vec![text],
         Request::List => list(dir, &repo),
-        Request::Add { test, on, task } => add(dir, &repo, cwd, test, on, &task),
+        Request::Add { test, on, best_of, task } => add(dir, &repo, cwd, test, on, best_of, &task),
         Request::Show(id) => show(dir, &repo, &id),
         Request::Drop(id) => drop_task(dir, &repo, &id),
         Request::Report => report(dir, &repo),
     }
 }
 
-fn add(dir: &Path, repo: &Path, cwd: &Path, test: Option<String>, on: Option<String>, task: &str) -> Vec<String> {
+fn add(
+    dir: &Path,
+    repo: &Path,
+    cwd: &Path,
+    test: Option<String>,
+    on: Option<String>,
+    best_of: Option<u32>,
+    task: &str,
+) -> Vec<String> {
     let Some(base) = git(cwd, &["rev-parse", "HEAD"]) else {
         return vec!["Night Shift: this repository has no commit yet, so there is nothing to start from.".to_string()];
     };
@@ -279,6 +333,8 @@ fn add(dir: &Path, repo: &Path, cwd: &Path, test: Option<String>, on: Option<Str
             "task": task,
             "test": test,
             "on": on,
+            // Null leaves the count to `[night] best_of`; a number outranks it (§11.9).
+            "best_of": best_of,
             "model_at_add": served_model_id(),
             "status": "queued",
             "history": [{"at": now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false), "status": "queued"}],
@@ -299,6 +355,13 @@ fn add(dir: &Path, repo: &Path, cwd: &Path, test: Option<String>, on: Option<Str
             None => "Test command: detected in the worktree when the task runs.".to_string(),
         },
     ];
+    match best_of {
+        Some(1) => lines.push("Attempts: 1, whatever [night] best_of says.".to_string()),
+        Some(count) => lines.push(format!(
+            "Attempts: {count}, one after another; the one chosen is committed on night/{id} and the report lists every one."
+        )),
+        None => {}
+    }
     if let Some(node) = &on {
         lines.push(format!(
             "Runs on {node}: tonight's run here hands it over, {node}'s own runner works it with its own model, \
@@ -372,6 +435,9 @@ fn show(dir: &Path, repo: &Path, id: &str) -> Vec<String> {
     ];
     if let Some(node) = task["on"].as_str() {
         lines.push(format!("Node: {node} (its own runner works the task)"));
+    }
+    if let Some(count) = task["best_of"].as_u64() {
+        lines.push(format!("Attempts: {count} (the task's own best_of)"));
     }
     lines.push("Task:".to_string());
     lines.extend(text(&task, "task").lines().map(|line| format!("  {line}")));
@@ -722,32 +788,52 @@ mod tests {
         assert_eq!(Request::from_line("drop abc"), Request::Drop("abc".into()));
         assert_eq!(
             Request::from_line("add Fix the flaky test.\nThen run it twice."),
-            Request::Add { test: None, on: None, task: "Fix the flaky test.\nThen run it twice.".into() }
+            Request::Add { test: None, on: None, best_of: None, task: "Fix the flaky test.\nThen run it twice.".into() }
         );
         assert_eq!(
             Request::from_line("add --test \"pytest -q tests/x.py\" Add type hints"),
-            Request::Add { test: Some("pytest -q tests/x.py".into()), on: None, task: "Add type hints".into() }
+            Request::Add { test: Some("pytest -q tests/x.py".into()), on: None, best_of: None, task: "Add type hints".into() }
         );
         assert_eq!(
             Request::from_line("add --test=make Build it"),
-            Request::Add { test: Some("make".into()), on: None, task: "Build it".into() }
+            Request::Add { test: Some("make".into()), on: None, best_of: None, task: "Build it".into() }
         );
         assert_eq!(
             Request::from_line("add --tests are slow, speed them up"),
-            Request::Add { test: None, on: None, task: "--tests are slow, speed them up".into() }
+            Request::Add { test: None, on: None, best_of: None, task: "--tests are slow, speed them up".into() }
         );
         assert_eq!(
             Request::from_line("add --on spark-2 --test \"pytest -q\" Fix the flaky test"),
-            Request::Add { test: Some("pytest -q".into()), on: Some("spark-2".into()), task: "Fix the flaky test".into() }
+            Request::Add { test: Some("pytest -q".into()), on: Some("spark-2".into()), best_of: None, task: "Fix the flaky test".into() }
         );
         assert_eq!(
             Request::from_line("add --test=make --on=spark-2.local Build it"),
-            Request::Add { test: Some("make".into()), on: Some("spark-2.local".into()), task: "Build it".into() }
+            Request::Add { test: Some("make".into()), on: Some("spark-2.local".into()), best_of: None, task: "Build it".into() }
         );
         assert_eq!(
             Request::from_line("add --only the docs need it"),
-            Request::Add { test: None, on: None, task: "--only the docs need it".into() }
+            Request::Add { test: None, on: None, best_of: None, task: "--only the docs need it".into() }
         );
+        assert_eq!(
+            Request::from_line("add --best-of 3 --test=make Build it"),
+            Request::Add { test: Some("make".into()), on: None, best_of: Some(3), task: "Build it".into() }
+        );
+        assert_eq!(
+            Request::from_line("add --test \"pytest -q\" --best-of=1 Fix the flaky test"),
+            Request::Add { test: Some("pytest -q".into()), on: None, best_of: Some(1), task: "Fix the flaky test".into() }
+        );
+        assert_eq!(
+            Request::from_line("add --best-offer wins, say so in the README"),
+            Request::Add { test: None, on: None, best_of: None, task: "--best-offer wins, say so in the README".into() }
+        );
+        for bad in ["add --best-of 0 Fix", "add --best-of three Fix", "add --best-of=-2 Fix", "add --best-of", "add --best-of 3"] {
+            assert!(matches!(Request::from_line(bad), Request::Usage(_)), "{bad}");
+        }
+        // A node works a task sent to it once: the count is refused, not dropped.
+        assert!(matches!(
+            Request::from_line("add --on spark-2 --best-of 3 Fix"),
+            Request::Usage(text) if text.contains("spark-2 works a task sent to it once")
+        ));
         assert!(matches!(Request::from_line("add --on"), Request::Usage(_)));
         assert!(matches!(Request::from_line("add --on /etc Fix"), Request::Usage(_)));
         assert!(matches!(Request::from_line("add"), Request::Usage(_)));
@@ -771,12 +857,24 @@ mod tests {
         assert_eq!(Request::from_args(&[]), Request::List);
         assert_eq!(
             Request::from_args(&args(&["add", "--test", "cargo test -p x", "Fix", "it"])),
-            Request::Add { test: Some("cargo test -p x".into()), on: None, task: "Fix it".into() }
+            Request::Add { test: Some("cargo test -p x".into()), on: None, best_of: None, task: "Fix it".into() }
         );
         assert_eq!(
             Request::from_args(&args(&["add", "--on", "spark-2", "--test=make", "Fix", "it"])),
-            Request::Add { test: Some("make".into()), on: Some("spark-2".into()), task: "Fix it".into() }
+            Request::Add { test: Some("make".into()), on: Some("spark-2".into()), best_of: None, task: "Fix it".into() }
         );
+        assert_eq!(
+            Request::from_args(&args(&["add", "--best-of", "3", "--test=make", "Fix", "it"])),
+            Request::Add { test: Some("make".into()), on: None, best_of: Some(3), task: "Fix it".into() }
+        );
+        assert_eq!(
+            Request::from_args(&args(&["add", "--best-of=2", "Fix", "it"])),
+            Request::Add { test: None, on: None, best_of: Some(2), task: "Fix it".into() }
+        );
+        assert!(matches!(Request::from_args(&args(&["add", "--best-of", "0", "Fix"])), Request::Usage(_)));
+        assert!(matches!(Request::from_args(&args(&["add", "--best-of", "x", "Fix"])), Request::Usage(_)));
+        assert!(matches!(Request::from_args(&args(&["add", "--best-of"])), Request::Usage(_)));
+        assert!(matches!(Request::from_args(&args(&["add", "--best-of", "3", "--on", "spark-2", "Fix"])), Request::Usage(_)));
         assert!(matches!(Request::from_args(&args(&["add", "--on", "../x", "Fix"])), Request::Usage(_)));
         assert!(matches!(Request::from_args(&args(&["add", "--on"])), Request::Usage(_)));
         assert_eq!(Request::from_args(&args(&["drop", "abc"])), Request::Drop("abc".into()));
@@ -805,6 +903,30 @@ mod tests {
         assert!(drop_task(&dir, &repo, &id)[0].contains("nothing to cancel"));
         // No staging or lock files are mistaken for tasks.
         assert_eq!(tasks_for(&dir, &repo).len(), 1);
+    }
+
+    #[test]
+    fn best_of_is_the_tasks_own_key_and_null_without_the_option() {
+        let (repo, dir) = repo("best-of");
+        let added = run(&dir, Request::from_line("add --best-of 3 Speed up the parser"), &repo);
+        assert!(added.iter().any(|line| line.starts_with("Attempts: 3, one after another")), "{added:?}");
+        let task = tasks_for(&dir, &repo)
+            .into_iter()
+            .find(|task| text(task, "task") == "Speed up the parser")
+            .unwrap_or_default();
+        assert_eq!(task["best_of"], json!(3), "{added:?}");
+        assert!(show(&dir, &repo, &text(&task, "id")).iter().any(|line| line == "Attempts: 3 (the task's own best_of)"));
+        // `--best-of 1` is kept: it pins one attempt where `[night] best_of` asks for more.
+        let added = run(&dir, Request::from_line("add --best-of 1 Once only"), &repo);
+        assert!(added.iter().any(|line| line.starts_with("Attempts: 1, whatever [night] best_of says")), "{added:?}");
+        // Without the option the key is there and null: the runner reads `[night] best_of`.
+        let added = run(&dir, Request::from_line("add Plain"), &repo);
+        assert!(!added.iter().any(|line| line.starts_with("Attempts:")), "{added:?}");
+        let by_task = |name: &str| tasks_for(&dir, &repo).into_iter().find(|task| text(task, "task") == name);
+        assert_eq!(by_task("Once only").map(|task| task["best_of"].clone()), Some(json!(1)));
+        let plain = by_task("Plain");
+        assert!(plain.as_ref().is_some_and(|task| task.as_object().is_some_and(|map| map.contains_key("best_of"))));
+        assert!(plain.is_some_and(|task| task["best_of"].is_null()));
     }
 
     #[test]
