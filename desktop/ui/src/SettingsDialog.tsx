@@ -14,7 +14,7 @@ import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets";
+export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -50,6 +50,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
   { id: "browser", label: "Browser", desktopOnly: true },
   { id: "pets", label: "Pets", desktopOnly: true },
+  { id: "suggestions", label: "Suggested prompts" },
 ];
 
 export function SettingsDialog(props: SettingsProps) {
@@ -78,6 +79,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "worktrees" && bridge.git.available() ? <Worktrees {...props} /> : null}
             {props.page === "browser" && bridge.preview.available() ? <Browser {...props} /> : null}
             {props.page === "pets" && bridge.git.available() ? <Pets {...props} /> : null}
+            {props.page === "suggestions" ? <Suggestions {...props} /> : null}
           </div>
         </div>
       </section>
@@ -533,6 +535,20 @@ function Pets({ prefs, onChange, notice }: SettingsProps) {
         <label><input type="radio" name="pet-look" checked={!prefs.petImage} onChange={() => onChange({ petImage: null })} /> Mightling's ling</label>
         <label><input type="radio" name="pet-look" checked={Boolean(prefs.petImage)} onChange={() => bridge.chooseImage().then((file) => file && onChange({ petImage: file })).catch(notice)} /> A picture of your own{prefs.petImage ? `: ${prefs.petImage.split("/").pop()}` : " (PNG, GIF, WebP, SVG or JPEG, 2 MB at most)"}</label>
         {prefs.petImage ? <button className="link-button" onClick={() => bridge.chooseImage().then((file) => file && onChange({ petImage: file })).catch(notice)}>Choose another picture</button> : null}
+      </fieldset>
+    </>
+  );
+}
+
+/** Settings › Suggested prompts (DESKTOP_PARITY §2.15, Phase 3 item 7). */
+function Suggestions({ prefs, onChange }: SettingsProps) {
+  return (
+    <>
+      <h3>Suggested prompts</h3>
+      <p className="dialog-note">When a turn ends, the served model suggests three follow-ups for the thread; a click puts one in the composer, it is never sent by itself. Each suggestion is one short extra turn on this machine's model, in a read-only thread that is not kept, and only when nothing else is running.</p>
+      <fieldset>
+        <legend>Follow-ups</legend>
+        <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Suggest follow-ups when a turn ends</label>
       </fieldset>
     </>
   );

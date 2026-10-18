@@ -53,6 +53,8 @@ export interface Prefs {
   petShown: boolean;
   petSize: "small" | "medium" | "large";
   petImage: string | null;
+  /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */
+  suggestPrompts: boolean;
   /** When a finished turn shows a desktop notification, and whether a waiting approval does (Settings › Notifications). */
   notifyTurns: "unfocused" | "always" | "never";
   notifyApprovals: boolean;

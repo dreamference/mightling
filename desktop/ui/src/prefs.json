@@ -117,6 +117,10 @@
       "nullable": true,
       "type": "string"
     },
+    "suggestPrompts": {
+      "default": false,
+      "type": "boolean"
+    },
     "notifyTurns": {
       "default": "unfocused",
       "enum": [
