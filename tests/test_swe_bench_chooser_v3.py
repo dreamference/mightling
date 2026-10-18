@@ -333,5 +333,8 @@ def test_scripts_and_outputs_are_read(v3):
     assert v3.parse_script("no code here") == ("", None)
     assert v3.normalised("<obj at 0x7f00ab>  /tmp/tmpa1b2/x 0.25 s") == v3.normalised("<obj at 0x1234> /tmp/tmpzz/x 1.50 s")
     assert v3.outcome({"applied": None}) == (None, "(the patch did not apply)")
+    long = "head\n" + "x" * 5000 + "\nValueError: the reason"
+    assert v3.ends(long).startswith("head") and v3.ends(long).endswith("ValueError: the reason")
+    assert len(v3.ends(long)) < 1000 and v3.ends("short") == "short"
     assert v3.met({"applied": "git apply", "tests": [{"exit": 0, "output": ""}]})
     assert not v3.met({"applied": "git apply", "error": "docker run failed", "tests": [{"exit": 0}]})
