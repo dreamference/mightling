@@ -2,7 +2,8 @@
 
 **Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft). Constants re-checked against `image_search_service.py` on 2026-09-28.
 **Target:** Mightling (sidecar ecosystem)
-**Source:** `dreamference/chat/image_search_service.py` (the sidecar), `OnyxRunner.enable_image_search` and siblings in `dreamference/chat/onyx_runner.py` (provisioning, registration, nginx), `GALLERY_SCRIPT`/`GALLERY_CSS` and `IMAGE_TOOL_STEP_SCRIPT` in the UI patch modules (presentation). Tests: `tests/test_image_search_service.py`, plus registration and nginx tests in `tests/test_onyx_runner.py`.
+**Source:** `dreamference/chat/image_search_service.py` (the sidecar), `image_search_sidecar.py` (`ling-admin images start|stop|status`), `image_search_mcp.py` (the `image_search` tool, `ling-admin images mcp`), `ling-rs/src/images.rs` (the launcher's declaration), `ling-rs/web/src/sidecars.rs` and the app's `app-protocol.ts` (serving `/images/`). Tests: `tests/test_image_search_service.py`, `tests/test_image_search_sidecar.py`.
+**Since Onyx's retirement (2026-10-09, MIGHTLING_ASK §19.2):** provisioning, the Onyx custom tool, the nginx route `/puffin-images/` and the gallery described below are gone. The tool is an MCP tool, the images are served at `/images/<id>.jpg` by `ling web` and the app and shown inline, and the sidecar runs on `dreamference-sidecars`. The funnel (§2 on) is unchanged.
 
 ---
 

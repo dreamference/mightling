@@ -11,10 +11,9 @@ off.
 | Installing or starting services | Downloads of container images, Python packages and the speech-to-text model | Docker registries, PyPI, Hugging Face |
 | Downloading a model | Requests for the model's files | Hugging Face |
 | Building `ling` for the first time | Downloads of the Rust toolchain, build dependencies and a prebuilt V8 engine (checked against pinned checksums) | rustup, crates.io, GitHub |
-| The agent or web chat searches the web | The search query | Public search engines, through the SearXNG instance on your machine |
+| The agent searches the web | The search query | Public search engines, through the SearXNG instance on your machine |
 | The agent fetches a page | A request for that URL | The website |
 | Gmail, Drive or Calendar, if you connect an account | Read-only requests for your mail, files or events | Google |
-| Signing in to the web chat with Google, if you enable it | The sign-in exchange | Google |
 | Image search, if you use it | The image query, then downloads of the matching images | Public search engines through SearXNG, then the sites hosting the images |
 | `ling update` | A check for, and download of, the latest Mightling release | GitHub |
 | Signal, only after `ling signal setup` | Your Note to Self messages and Mightling's replies, end-to-end encrypted; setup itself downloads signal-cli and a Java runtime, pinned | Signal's servers; GitHub for the downloads |
@@ -32,7 +31,6 @@ a URL, a mailbox read.
 
 ## What Mightling switches off
 
-- **Web chat telemetry.** Onyx's anonymous usage reporting is disabled when you run `configure`.
 - **Cloud services in the agent.**
   - `login`/`logout` are refused: there is no account.
   - `cloud` and `remote-control`, which run or relay sessions on a vendor's servers, are hidden or
@@ -42,12 +40,12 @@ a URL, a mailbox read.
   - The only update check is Mightling's own, `ling update`.
   - Usage analytics are disabled in the code (patch `0013`), and `ling` never reads `~/.codex`,
     where another tool may keep a cloud sign-in.
-- **Network exposure.** The web chat is published on `127.0.0.1` only (ports 80 and 3000), so its
-  admin account is not reachable from other machines on your network; `configure` applies this.
-  OpenHands, if you use it, is published on `127.0.0.1:3001`.
+- **Network exposure.** `ling web` serves this machine only, and other devices only once paired on
+  an advertised node; the sidecars (search, Google, images, voice) are published on `127.0.0.1`
+  only. OpenHands, if you use it, is published on `127.0.0.1:3001`.
   **The main model server is the exception, by design:** Mightling assumes your local network is
-  trusted. The model server listens on every interface at port 8000, with no API key, because the
-  web chat and OpenHands run in Docker containers and reach it through the Docker bridge, which a
+  trusted. The model server listens on every interface at port 8000, with no API key, because
+  image search and OpenHands run in Docker containers and reach it through the Docker bridge, which a
   loopback-only server would not answer. Another machine on your network can therefore send it
   prompts (it reads nothing of yours, but it can use the model). If you run Mightling on a network
   you do not trust, block the port for everything but the bridge, for example
@@ -85,7 +83,7 @@ other untrusted input.
 
 ## Accounts
 
-The web chat's accounts live in its local database. The administrator account's password is
-generated for each install and kept in `~/.config/dreamference/chat-admin.json`, readable by you only;
-pass your own with `--email` and `--password` if you prefer (see
-[Get started](getting-started.md#5-optional-the-web-chat-and-desktop-app)).
+Mightling has no accounts: one person owns each machine. `ling web` signs in this machine's browser
+with a link that works once (`ling web open`) and other devices by pairing (see [Web UI](web.md)).
+The retired Onyx web chat's accounts and saved chats stay in its Docker volumes until you delete
+them with `ling-admin chat remove`.

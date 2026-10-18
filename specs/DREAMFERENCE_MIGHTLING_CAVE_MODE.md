@@ -158,7 +158,7 @@ More room: /cavemode full (this session) or /cavemode default full (new sessions
 - **The level belongs to the session.** `ling resume` keeps it; a new session, a fork, a side conversation and a subagent start at the default. (A subagent's text goes to the parent model, not to the user, and §4 already keeps text another model reads in normal prose.)
 - **The model cannot change it.** "Explain in detail" gets a full answer to that question (every level says so) but leaves the level alone. Only `/cavemode` and configuration change it.
 - **`ling exec` and scripts** take the default, or `DREAMFERENCE_MIGHTLING_CAVE_MODE=off ling exec …` for one run.
-- **Only the terminal agent.** The web chat (Onyx) has its own assistant prompt (`MIGHTLING_ASSISTANT_INSTRUCTIONS`) and is not covered here.
+- **Only the terminal agent.** The web chat (Onyx, retired in 1.7.0) had its own assistant prompt (`MIGHTLING_ASSISTANT_INSTRUCTIONS`) and was not covered here; Ask threads use the `ask` prompt.
 
 ---
 

@@ -27,18 +27,18 @@ before anything risky. Its model is the one on your machine.
 [Terminal agent →](ling.md)
 </div>
 <div markdown>
-### Web chat
+### Web UI
 
-A browser chat assistant with web search, voice input and image understanding, all answered by the
-same local model.
+Ask and Work in a browser (`ling web`): questions with web search, image search and dictation, and
+agent sessions on your projects, all answered by the same local model.
 
-[Web chat →](web-chat.md)
+[Web UI →](web.md)
 </div>
 <div markdown>
 ### Desktop app
 
-`ling-app` puts the web chat in a window of its own, with a Work window (preview) that drives
-agent sessions with approvals, diffs and undo.
+`ling-app` shows the same Ask and Work in a window of its own, with approvals, diffs and undo for
+agent sessions.
 
 [Desktop app →](desktop.md)
 </div>

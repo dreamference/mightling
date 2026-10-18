@@ -2,8 +2,8 @@
 Whether this node is advertised, and what it shares (specs/DREAMFERENCE_MIGHTLING_NODE.md §4).
 
 Kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`: that file is
-resolved from the working directory first, and the address a container publishes on must not
-depend on the folder `ling-admin chat configure` happened to be run from.
+resolved from the working directory first, and the address a service publishes on must not
+depend on the folder a command happened to be run from.
 """
 
 import json
@@ -77,7 +77,7 @@ class NodeSettings:
     def web_bind_address(cls) -> str:
         """
         Returns:
-            str: The host address the web UI's port 3000 publishes on: every interface on an
-            advertised node that shares its web UI, loopback otherwise.
+            str: The address the web UI (`ling web`, port 3100) is served on: every interface on
+            an advertised node that shares its web UI, loopback otherwise.
         """
         return EVERY_INTERFACE if cls.load()["web"] else LOOPBACK

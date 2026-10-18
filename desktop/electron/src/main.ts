@@ -28,6 +28,7 @@ import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
 import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./shell";
 import { Notices } from "./notices";
+import { transcribe } from "./voice";
 import { openWork } from "./work";
 
 export interface MainOptions {
@@ -217,6 +218,8 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "ask/upload":
         return server.upload(message);
+      case "voice/transcribe":
+        return transcribe(message);
       case "work/stop":
         server.stop();
         return null;

@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { base64, host, listenBridge, upload } from "./bridge";
+import { base64, canRecord, host, listenBridge, transcribe, upload } from "./bridge";
 
 type Listener = (event: { data: unknown }) => void;
 
@@ -16,6 +16,7 @@ function stubWindow(type: string | undefined) {
     electronBridge: {
       sendMessageFromView: async (message: unknown) => {
         sent.push(message);
+        if ((message as { type?: string }).type === "voice/transcribe") return { text: "Hello Ask" };
         return { path: "/home/u/.mightling/ask/q-0123456789abcdef/shot.png", bytes: 3 };
       },
     },
@@ -59,5 +60,46 @@ describe("the app's host", () => {
   it("is a browser everywhere else", () => {
     stubWindow(undefined);
     expect(host()).toBe("web");
+  });
+});
+
+describe("dictation", () => {
+  it("goes to the app's main process as base64, and to /api/transcribe in a browser", async () => {
+    const { sent } = stubWindow("electron");
+    const recording = new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm;codecs=opus" });
+    expect(await transcribe(recording)).toBe("Hello Ask");
+    expect(sent).toEqual([{ type: "voice/transcribe", mime: "audio/webm;codecs=opus", data: "AQID" }]);
+
+    stubWindow(undefined);
+    const posted: { url: string; init: RequestInit }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      posted.push({ url, init });
+      return new Response(JSON.stringify({ text: "From the web" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      expect(await transcribe(recording)).toBe("From the web");
+      expect(posted[0].url).toBe("/api/transcribe");
+      expect((posted[0].init.headers as Record<string, string>)["Content-Type"]).toBe("audio/webm;codecs=opus");
+      globalThis.fetch = (async () => new Response(JSON.stringify({ error: "Speech-to-text is not running" }), { status: 503 })) as unknown as typeof fetch;
+      await expect(transcribe(recording)).rejects.toThrow("not running");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("is offered only in a secure context with a microphone API", () => {
+    stubWindow(undefined);
+    expect(canRecord()).toBe(false);
+    (globalThis as { window?: { isSecureContext?: boolean } }).window!.isSecureContext = true;
+    const media = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", { value: { mediaDevices: { getUserMedia: () => {} } }, configurable: true });
+    (globalThis as { MediaRecorder?: unknown }).MediaRecorder = class {};
+    try {
+      expect(canRecord()).toBe(true);
+    } finally {
+      delete (globalThis as { MediaRecorder?: unknown }).MediaRecorder;
+      if (media) Object.defineProperty(globalThis, "navigator", media);
+    }
   });
 });

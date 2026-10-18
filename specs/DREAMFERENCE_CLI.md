@@ -41,8 +41,8 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 - **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run,pause,resume}`
 - **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch,provision,prepare}` (plus `authorize`, `serve-job`, `job-exec` and `askpass`, which a person does not type, §4.25)
-- **Web UI, desktop and messengers:** `chat {start,configure,google-auth,gmail,status,password,logs,stop,uninstall}` (Onyx Lite; alias `onyx`), `desktop {install,run,build,status}`, `matrix {start,stop,status,add-user,push,remove}`; `ling web` itself is the launcher's
-- **Agent tools:** `gmail {search,read,status}`, `google {start,stop,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `ling-search` and `ling-fetch` (§4.16), and so is the code index, `ling-code` (§4.22)
+- **Web UI, desktop and messengers:** `chat {remove,status}` (the retired Onyx web chat's leftovers; alias `onyx`), `desktop {install,run,build,status}`, `matrix {start,stop,status,add-user,push,remove}`; `ling web` itself is the launcher's
+- **Agent tools:** `gmail {search,read,status}`, `google {start,stop,status}`, `images {start,stop,status,mcp}`, `voice {start,stop,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `ling-search` and `ling-fetch` (§4.16), and so is the code index, `ling-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
 
 ---
@@ -73,7 +73,7 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | **`web`** | Web Canvas status page | `[--port 8501]` |
 | **`model list`** | List the model matrix | — |
 | **`model download`** | Pre-download weights to the HF cache | `[--model] [--all] [--tensorize/--no-tensorize]` |
-| **`main-model set`** | Pin the main model in the config | `MODEL [--no-onyx]` |
+| **`main-model set`** | Pin the main model in the config | `MODEL` |
 | **`main-model inspect`** | Probe the running main model | `[--deep]` |
 | **`diffusion-model set`** | Pin the diffusion model served beside the main one | `MODEL` |
 | **`clear model-cache`** | Delete the HF and `~/.cache/dreamference` model caches (see §4.17) | — |
@@ -93,7 +93,9 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | **`audit egress`** | Trace one real `ling` session (or the TUI, the desktop app, `ling web`, the document index) and list every network destination and process, with a verdict | `[--tui \| --app \| --web \| --docs] [--prompt P] [--json]`; see §4.24 |
 | **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them, copy a model to them and run jobs on them | `enable [--no-web]`, `disable`, `status [NAME]`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`, `sync-model NAME MODEL`, `run NAME … -- CMD`, `jobs`, `logs`, `cancel`, `fetch`, `provision [HOST…]`, `prepare`; see §4.25 |
 | **`host …`** | The host settings a model load is refused without: report them, or apply them with sudo | `check`, `setup [--yes]`; see §4.26 |
-| **`chat …`** (`onyx …`) | Onyx Lite web UI lifecycle | see §4.19 |
+| **`chat …`** (`onyx …`) | The retired Onyx web chat: remove what an older install left | `remove [--yes] [--delete-data]`, `status`; see §4.19 |
+| **`images …`** | Image search: the sidecar and the `image_search` tool's MCP server | `start [--no-siglip]`, `stop`, `status`, `mcp`; see §4.19 |
+| **`voice …`** | Speech-to-text for the microphone in the app and `ling web` | `start`, `stop`, `status`; see §4.19 |
 | **`desktop …`** | The Electron desktop app (`ling-app`) | `install`, `run`, `build`, `status` |
 | **`docs setup`** | Fetch what `ling-docs` loads: PDFium, ONNX Runtime and the embedding model, pinned | — |
 | **`google …`** | The Google service (Gmail, Drive, Calendar for `/apps`) without the web UI, on `127.0.0.1:8767` | `start`, `stop`, `status`; see §4.27 |
@@ -125,12 +127,12 @@ ling-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [
 > **The diffusion model is switched off since 2026-10-03** (`DIFFUSION_ENABLED` in `hardware/model_matrix_registry.py`). While it is off, `diffusion-model` is not a command, `server start` starts no sidecar and removes a leftover one without a word, `server stop`/`remove` remove a leftover too, `endpoints` prints no diffusion URL, and `model list`/`model download` leave the diffusion model out. The `--diffusion-*` flags are accepted with their help suppressed. Everything about the sidecar in this document describes it switched on.
 
 ```bash
-ling-admin main-model set MODEL [--no-onyx]
+ling-admin main-model set MODEL
 ling-admin main-model inspect [--deep]
 ling-admin diffusion-model set MODEL
 ```
 
-- **`main-model set`:** writes the model to `dreamference.toml`, which pins it. Unless `--no-onyx` is given, it also re-registers the model with a running Onyx deployment. It refuses a diffusion checkpoint.
+- **`main-model set`:** writes the model to `dreamference.toml`, which pins it, and reminds you to run `ling-admin images start` again when image search runs (it names the served model). It refuses a diffusion checkpoint. `--no-onyx` went with Onyx (MIGHTLING_ASK §10).
 - **`diffusion-model set`:** the counterpart for the diffusion sidecar. It refuses a model vLLM can serve.
 - **`main-model inspect`:** probes the running model: tool calling, JSON mode, reasoning tags, streaming TTFT, latency. `--deep` also reports the quantization map, KV geometry, sampling provenance, graph coverage and per-workload speculative acceptance. That sends extra requests.
 
@@ -350,7 +352,7 @@ ling-admin gmail read MESSAGE_ID [--max-chars 8000] [--json]
 ling-admin gmail status [--json]
 ```
 
-`gmail` talks to the Google service `dreamference-gmail` (started by `ling-admin google start`, §4.27, or by the web UI's `configure`), and is read-only. See `DREAMFERENCE_MIGHTLING_GMAIL.md`.
+`gmail` talks to the Google service `dreamference-gmail` (started by `ling-admin google start`, §4.27), and is read-only. See `DREAMFERENCE_MIGHTLING_GMAIL.md`.
 
 Search and fetch are programs of their own rather than `ling-admin` subcommands: they are the agent's most frequent commands, and `ling-admin` administers the machine. Both are Rust binaries from `ling-web-rs/` (`DREAMFERENCE_MIGHTLING_CODEX.md` §4.1), not console scripts, so they work from a shell with no virtualenv; `ling-admin codex build` installs them beside `ling` and links them into `~/.local/bin`. They were `ling-admin search` and `ling-admin fetch` until 2026-09-30; both subcommands are gone rather than aliased.
 
@@ -368,23 +370,18 @@ Containers write parts of these caches as root, which `rmtree` cannot remove as 
 
 ---
 
-### 4.19. `ling-admin chat` (alias `onyx`)
+### 4.19. `ling-admin chat` (alias `onyx`), `images` and `voice`
 
 ```bash
-ling-admin chat start [--no-wait]
-ling-admin chat configure [--email E] [--password P] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]
-ling-admin chat google-auth [--client-id ID] [--client-secret S]
-ling-admin chat gmail                 # (re-)register the Gmail tool; accounts are connected in the UI
-ling-admin chat password              # the admin account's e-mail and its per-install password
-ling-admin chat status | logs [-f|--follow] | stop | uninstall
+ling-admin chat status                         # what the retired Onyx web chat left
+ling-admin chat remove [--yes] [--delete-data] # its containers, then (asked again) its data
+ling-admin images start [--no-siglip] | stop | status | mcp
+ling-admin voice start | stop | status
 ```
 
-This manages the Onyx Lite deployment (web chat UI) in front of the same vLLM model. `configure`:
-- registers the vLLM provider;
-- applies Mightling branding, fonts and UI patches;
-- sets up SearXNG web search, Whisper voice, the Gmail tool and the image-search tool.
+The Onyx web chat is retired (MIGHTLING_ASK §10, Phase C; built as §19 there). `chat` now only handles what an older install left: `remove` runs `docker compose -p onyx … down` (never `-v`) on a first yes or `--yes`, and only on a second, separate yes or `--delete-data` removes the compose project's volumes (saved chats, accounts), Onyx's own images (`onyxdotapp/*`), its networks and the image search, SigLIP and speech sidecars still on its network. The deployment folder `~/.config/onyx/deployment` is left alone. Every former subcommand (`start`, `configure`, `password`, …) prints where its job went and exits 2. An interactive `ling-admin` run on a machine with Onyx's containers makes the same offer once and remembers a no (`~/.config/dreamference/web-chat-retired.json`).
 
-Each piece has its own opt-out. Since 2026-10-07 the admin account gets a random password per install, kept in one private file (`ChatAdminCredentials`), instead of a published default. Onyx is retired once `ling web` matches it (MIGHTLING_ASK §10). See `DREAMFERENCE_ONYX.md`.
+`images` runs the image search sidecar (and the SigLIP pre-filter, best-effort) on `dreamference-sidecars`, replacing containers found on another network; `images mcp` is the `image_search` tool over stdio, which the launcher declares for a session (ASK §6). `voice` runs speech-to-text (speaches on the CPU, `127.0.0.1:8100`) for `ling web`'s `/api/transcribe` and the app (ASK §7). See `DREAMFERENCE_ONYX.md` for what Onyx did, kept as history.
 
 ### 4.20. `ling-admin desktop`
 
