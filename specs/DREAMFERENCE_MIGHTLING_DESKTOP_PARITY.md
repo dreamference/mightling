@@ -554,7 +554,7 @@ In this order (the owner, 2026-10-18), each item with its §2 row as acceptance:
 6. **Pets** with Mightling's art (§2.1, §2.15, §7 question 5). **Pets (Mightling's ling, off by default): merged 2026-10-18, 0096587.**
 7. **Suggested prompts** (§2.15). **Suggested prompts (off by default): merged 2026-10-18, fa07a02.**
 8. **External agent import** (§2.11): `externalAgentConfig/detect|import|import/readHistories`. **External agent import: merged 2026-10-18, f48e550.**
-9. **The `gh`-backed pull-request tab** (§2.5).
+9. **The `gh`-backed pull-request tab** (§2.5). **Pull-request tab through gh (off by default): merged 2026-10-18, d4d199a.**
 10. **Agent message board** (§2.13).
 11. **Dark mode** and the Appearance page's light/dark/system choice, if dark is ever approved: **not built** (dark mode not approved, the owner, 2026-10-18).
 12. **macOS and Windows app builds** (§2.17; RELEASE, WINDOWS_ARM).
