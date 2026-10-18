@@ -557,7 +557,7 @@ In this order (the owner, 2026-10-18), each item with its §2 row as acceptance:
 9. **The `gh`-backed pull-request tab** (§2.5). **Pull-request tab through gh (off by default): merged 2026-10-18, d4d199a.**
 10. **Agent message board** (§2.13). **Agent message board (read only): merged 2026-10-18, a94401f.**
 11. **Dark mode** and the Appearance page's light/dark/system choice, if dark is ever approved: **not built** (dark mode not approved, the owner, 2026-10-18).
-12. **macOS and Windows app builds** (§2.17; RELEASE, WINDOWS_ARM).
+12. **macOS and Windows app builds** (§2.17; RELEASE, WINDOWS_ARM). **Windows desktop app in CI (unsigned zip; macOS preview unchanged): merged 2026-10-18, 54a4578.**
 
 The methods Phase 3 adds to `ling-rs/web/policy.json` (items 1 to 3 and 8, one conformance case each, plus two keeping `fs/writeFile` and `fs/remove` refused) are on `desktop/p3-policy`, on top of `desktop/p2-held`, so they share its Rust conformance run.
 
