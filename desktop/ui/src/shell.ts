@@ -96,7 +96,7 @@ export function nextScale(current: number, direction: 1 | -1 | 0): number {
 }
 
 /** The surfaces beside the thread that Ctrl+W closes, frontmost first, and Ctrl+Shift+T reopens. */
-export type Surface = "review" | "bottomPanel";
+export type Surface = "review" | "bottomPanel" | `file:${string}`;
 
 export class ClosedSurfaces {
   private closed: Surface[] = [];
