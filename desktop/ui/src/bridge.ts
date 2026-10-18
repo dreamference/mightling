@@ -189,6 +189,12 @@ export const listEditors = () => send<Editor[]>({ type: "editors/list" });
 export const openInEditor = (root: string, path: string, line: number | null, editor: string | null) =>
   send<null>({ type: "editor/open", root, path, line, editor });
 
+/** A file's size in bytes, asked of the app before a file tab reads it whole; null in a browser or for no such file. */
+export async function fileSize(path: string): Promise<number | null> {
+  if (host() !== "electron") return null;
+  return send<number | null>({ type: "file/size", path });
+}
+
 /** The window's own preferences (desktop/electron/src/prefs.ts), whole. */
 export const readPrefs = () => send<Record<string, unknown>>({ type: "prefs/read" });
 /** Writes some preferences; resolves with all of them. */
