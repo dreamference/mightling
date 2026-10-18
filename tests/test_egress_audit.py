@@ -487,8 +487,13 @@ def test_the_desktop_app_is_traced_hidden_as_ling_app_opens_it(tmp_path, monkeyp
 import json, os, shutil, sys
 args = sys.argv[1:]
 json.dump({{"args": args, "HOME": os.environ.get("HOME"), "audit": os.environ.get("MIGHTLING_APP_AUDIT"),
-           "bin": os.environ.get("MIGHTLING_BIN"), "CODEX_HOME": os.environ.get("CODEX_HOME")}}, open({str(calls)!r}, "w"))
+           "bin": os.environ.get("MIGHTLING_BIN"), "CODEX_HOME": os.environ.get("CODEX_HOME"),
+           "preview": os.environ.get("MIGHTLING_APP_AUDIT_PREVIEW")}}, open({str(calls)!r}, "w"))
 shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
+# The app's preview tab loads the audit's page and runs its script (unless told not to).
+if not os.environ.get("NO_PREVIEW"):
+    import urllib.request
+    urllib.request.urlopen(os.environ["MIGHTLING_APP_AUDIT_PREVIEW"] + "seen", timeout=5).read()
 """)
     strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
@@ -509,6 +514,13 @@ shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o"
     assert 3100 not in EgressAudit.allowed_ports("http://localhost:8000", "app")
     assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000", "app")
     assert EgressAudit.allowed_ports("http://localhost:8000", "app") == EgressAudit.allowed_ports("http://localhost:8000")
+    # The preview tab under audit (DESKTOP_PARITY §5): the audit's own loopback page, reported.
+    assert call["preview"].startswith("http://127.0.0.1:")
+    assert "Preview tab: the audit's page loaded and ran" in out
+    # A preview that never loaded the page proves nothing: the trace failed.
+    monkeypatch.setenv("NO_PREVIEW", "1")
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", app=True, app_bin="/opt/Mightling") == 2
+    assert "the preview tab never loaded the audit's page" in capsys.readouterr().out
 
 
 def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
@@ -798,3 +810,24 @@ def test_without_image_search_the_turn_is_skipped_and_says_so(tmp_path, monkeypa
     monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_SECRET_FILE", str(tmp_path / "absent"))
     assert EgressAudit.prepare_image_search(str(tmp_path / "home")) is False
     assert not (tmp_path / "home").exists()
+
+
+def test_the_preview_page_reaches_for_the_internet_every_way_and_records_its_own_load():
+    # DESKTOP_PARITY §5, Phase 3 item 4: the page `--app` opens in a preview tab must try each way
+    # a page reaches out, so a pass means the preview's rules turned each away; it is on loopback
+    # and says when its script ran.
+    import urllib.request
+
+    from dreamference.audit import PreviewPage
+    from dreamference.audit.preview_page import PAGE
+
+    for way in ('rel="dns-prefetch"', 'rel="preconnect"', 'rel="stylesheet" href="https://', '<script src="https://',
+                '<img src="https://', 'fetch("https://', '.click()'):
+        assert way in PAGE, way
+    with PreviewPage() as page:
+        assert page.url.startswith("http://127.0.0.1:")
+        assert not page.loaded()
+        with urllib.request.urlopen(page.url, timeout=5) as answer:
+            assert b"egress audit's preview page" in answer.read()
+        urllib.request.urlopen(page.url + "seen", timeout=5).read()
+        assert page.loaded()
