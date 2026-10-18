@@ -2011,7 +2011,7 @@ export function App() {
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
           seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
       ) : null}
-      {extensions ? <ExtensionsView client={client} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
+      {extensions ? <ExtensionsView client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
       {fileSearch !== null && composeRoot ? (
         <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
           front={(() => { const tab = tabs.find((entry) => entry.key === activeTab); return tab?.kind === "file" && tabsShown ? tab.path : null; })()}
