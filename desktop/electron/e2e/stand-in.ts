@@ -269,6 +269,10 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       delete terminals[p.processId];
       return;
     }
+    case "thread/turns/list": {
+      const found = threads.find((t) => t.id === p.threadId);
+      return answer({ data: found ? [...(found.turns || [])].reverse() : [], nextCursor: null, backwardsCursor: null });
+    }
     case "fs/readDirectory":
       try {
         return answer({ entries: fs.readdirSync(p.path, { withFileTypes: true }).map((d) => ({ fileName: d.name, isDirectory: d.isDirectory(), isFile: d.isFile() })) });
