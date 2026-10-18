@@ -546,7 +546,7 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .code-gutter span { cursor: pointer; }
 .code-gutter span.marked { color: var(--accent); font-weight: 600; }
 .code-text { position: relative; flex: 1; min-width: 0; }
-.code-text pre { margin: 0; padding: 8px 16px 24px 4px; white-space: pre; background: none; border: none; font: inherit; line-height: 20px; }
+.code-text pre { position: relative; margin: 0; padding: 8px 16px 24px 4px; white-space: pre; background: none; border: none; font: inherit; line-height: 20px; }
 .line-mark { position: absolute; left: 0; right: 0; height: 20px; margin-top: 8px; background: var(--accent-soft); pointer-events: none; }
 .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-type, .hljs-literal { color: var(--syn-keyword); }
 .hljs-string, .hljs-regexp, .hljs-addition, .hljs-template-string { color: var(--syn-string); }
