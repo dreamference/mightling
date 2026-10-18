@@ -30,6 +30,7 @@ answers() {  # port -> owned_by of /v1/models, empty when nothing answers
 }
 engine_pids() { pgrep -f "^$AB_DIR/ling-serve " ; }
 stop_arms() {
+    [ -n "$(docker ps -aq -f name=^$SG_NAME$)" ] && docker logs "$SG_NAME" > "$AB_DIR/sglang-last.log" 2>&1
     docker rm -f "$SG_NAME" > /dev/null 2>&1
     for p in $(engine_pids); do kill "$p" 2>/dev/null; done
     for _ in $(seq 30); do [ -z "$(engine_pids)" ] && break; sleep 2; done
@@ -38,14 +39,29 @@ stop_arms() {
 stop_prod() {
     if [ -n "$(docker ps -q -f name=^m0-prod8000$)" ]; then docker stop m0-prod8000 > /dev/null && log "m0-prod8000 stopped"; fi
 }
-wait_ready() {  # port, seconds -> owned_by
+wait_ready() {  # port, seconds[, container[, pid]] -> owned_by; gives up early when the arm has exited
     local own
     for _ in $(seq $(( $2 / 5 ))); do
         own=$(answers "$1")
         [ -n "$own" ] && { echo "$own"; return 0; }
+        if [ -n "${3:-}" ] && [ "$(docker inspect -f '{{.State.Running}}' "$3" 2>/dev/null)" != true ]; then
+            log "$3 exited ($(docker inspect -f '{{.State.ExitCode}}' "$3" 2>/dev/null)) before answering"; return 1
+        fi
+        if [ -n "${4:-}" ] && ! kill -0 "$4" 2>/dev/null; then log "ling-serve exited before answering"; return 1; fi
         sleep 5
     done
     return 1
+}
+port_free() {  # port, seconds: waits until nothing listens on it; names the holder when something stays
+    for _ in $(seq $(( $2 / 5 ))); do
+        ss -ltnH "sport = :$1" 2>/dev/null | grep -q . || return 0
+        sleep 5
+    done
+    log "port $1 is still taken: $(ss -ltnpH "sport = :$1" 2>/dev/null | head -1)"
+    return 1
+}
+keep_logs() {  # the SGLang arm's container log, kept before the container goes
+    docker logs "$SG_NAME" > "$AB_DIR/sglang-$(date +%Y%m%d-%H%M%S).log" 2>&1
 }
 
 mkdir -p "$AB_DIR"
@@ -57,22 +73,37 @@ serve)
     exec 9> "$HOME/gpu.lock"; flock -w 1800 9 || { log "the GPU lock was not free within 30 min"; exit 1; }
     stop_prod
     stop_arms
-    case "$arm" in
-    sglang)
-        python3 "$AB_DIR/serve.py" "$SG_NAME" --image "$SG_IMAGE" --port "$SG_PORT" \
-            --set speculative-num-draft-tokens 12 \
-            --set speculative-draft-model-path /root/.cache/dreamference/drafters/dflash2-nvfp4-scalesearch \
-            --drop cuda-graph-max-bs --set cuda-graph-max-bs-decode 8 > "$AB_DIR/sglang.cmd" 9>&- || { log "serve.py failed"; exit 1; }
-        port=$SG_PORT ;;
-    engine)
-        [ "$(sha256sum "$AB_DIR/ling-serve" | cut -d' ' -f1)" = "$(cat "$AB_DIR/ling-serve.sha256")" ] || { log "ling-serve is not the pinned binary"; exit 1; }
-        setsid "$AB_DIR/ling-serve" --model "$MODEL" --draft "$DRAFT" --host 0.0.0.0 --port "$ENGINE_PORT" \
-            --served-model-name RadixArk/Qwen3.8-27B-NVFP4 --max-context 65536 --draft-block 12 --graphs --pdl \
-            >> "$AB_DIR/engine.log" 2>&1 < /dev/null 9>&- &
-        port=$ENGINE_PORT ;;
-    *) log "serve: no arm $arm (sglang or engine)"; exit 2 ;;
-    esac
-    own=$(wait_ready "$port" 1200) || { log "arm $arm did not answer on $port within 20 min"; stop_arms; exit 1; }
+    # The night of 2026-10-18 lost its SGLang arm: the container exited (status 0) at about the time it binds its
+    # port, 6.5 min into the start, and its log went with it. So: production gets a moment to let go of the GPU,
+    # the arm's port must be free, the log is kept, and an arm that exits before it answers is started once more.
+    sleep 20
+    case "$arm" in sglang) port=$SG_PORT; container=$SG_NAME ;; engine) port=$ENGINE_PORT; container= ;;
+        *) log "serve: no arm $arm (sglang or engine)"; exit 2 ;; esac
+    port_free "$port" 120 || { stop_arms; exit 1; }
+    [ "$arm" = engine ] && { [ "$(sha256sum "$AB_DIR/ling-serve" | cut -d' ' -f1)" = "$(cat "$AB_DIR/ling-serve.sha256")" ] || { log "ling-serve is not the pinned binary"; exit 1; }; }
+    own=
+    for attempt in 1 2; do
+        case "$arm" in
+        sglang)
+            python3 "$AB_DIR/serve.py" "$SG_NAME" --image "$SG_IMAGE" --port "$SG_PORT" \
+                --set speculative-num-draft-tokens 12 \
+                --set speculative-draft-model-path /root/.cache/dreamference/drafters/dflash2-nvfp4-scalesearch \
+                --drop cuda-graph-max-bs --set cuda-graph-max-bs-decode 8 > "$AB_DIR/sglang.cmd" 9>&- || { log "serve.py failed"; exit 1; } ;;
+        engine)
+            setsid "$AB_DIR/ling-serve" --model "$MODEL" --draft "$DRAFT" --host 0.0.0.0 --port "$ENGINE_PORT" \
+                --served-model-name RadixArk/Qwen3.8-27B-NVFP4 --max-context 65536 --draft-block 12 --graphs --pdl \
+                >> "$AB_DIR/engine.log" 2>&1 < /dev/null 9>&- &
+            engine_pid=$! ;;
+        esac
+        if own=$(wait_ready "$port" 1200 "$container" "${engine_pid:-}"); then break; fi
+        log "arm $arm did not answer on $port (attempt $attempt)"
+        [ -n "$container" ] && keep_logs
+        stop_arms
+        own=
+        [ "$attempt" = 1 ] && { sleep 20; port_free "$port" 120 || exit 1; }
+    done
+    [ -n "$own" ] || exit 1
+    [ -n "$container" ] && keep_logs
     log "arm $arm ready on $port ($own)"
     echo "ready $own"
     ;;
