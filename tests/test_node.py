@@ -1137,6 +1137,10 @@ def test_ask_in_the_app_reaches_no_server_and_reads_no_password():
         if source.name == "credentials.test.ts":  # the test that names what must be absent
             continue
         text = source.read_text()
+        # The preview tab's comment mode (DESKTOP_PARITY Phase 3 item 4) runs its element picker in an
+        # isolated world of a previewed page: a page of the user's, never a sign-in.
+        if source.name == "preview.ts":
+            text = text.replace("executeJavaScriptInIsolatedWorld(PICK_WORLD, [{ code: PICK_SCRIPT }], true)", "")
         assert "executeJavaScript" not in text and "--print-url" not in text, source.name
         assert "admin@dreamference.dev" not in text and "chat-admin.json" not in text, source.name
 
