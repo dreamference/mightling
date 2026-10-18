@@ -366,3 +366,27 @@ test("4 preview tab: a local page, comment mode to the composer, a site out on t
     await site.stop();
   }
 });
+
+test("5 activity: what the agent did across threads, by kind and project, a row opening its thread", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.keyboard.press("Control+Alt+u");
+    const activity = page.getByRole("dialog", { name: "Activity" });
+    const rows = activity.getByRole("listitem");
+    await expect(rows.filter({ hasText: "Ran pytest tests/test_fetch.py -q -k retry (exit 1)" })).toHaveCount(1);
+    await expect(rows.filter({ hasText: "Edited client.py" })).toHaveCount(1);
+    await expect(rows.filter({ hasText: "Ran pytest tests/test_fetch.py" })).toHaveClass(/failed/);
+    await shoot("5-activity.png");
+    await activity.getByRole("button", { name: "Commands" }).click();
+    await expect(rows.filter({ hasText: "Ran " })).toHaveCount(0);
+    await expect(rows.filter({ hasText: "Edited client.py" })).toHaveCount(1);
+    await rows.filter({ hasText: "Edited client.py" }).click();
+    await expect(activity).toHaveCount(0);
+    await expect(page.locator(".bar .title")).toHaveText("Fix the flaky retry test");
+    expect(received(home).filter((message) => message.method === "thread/turns/list").length).toBeGreaterThan(0);
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});

@@ -593,6 +593,21 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .settings-page table.sites td { padding: 2px 8px 2px 0; }
 .add-site { display: flex; gap: 6px; margin-top: 6px; }
 
+/* The Activity view (Phase 3 item 5). */
+.dialog.activity { width: min(760px, 92vw); max-height: 84vh; display: flex; flex-direction: column; }
+.activity-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.chip-toggle { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); background: var(--canvas); border-radius: var(--radius-pill); padding: 3px 10px; font-size: 12.5px; color: var(--muted); }
+.chip-toggle.on { background: var(--accent-soft); border-color: transparent; color: var(--text); }
+.activity-filters select { margin-left: auto; font-size: 12.5px; padding: 3px 6px; border-radius: var(--radius-sm); }
+.activity-list { overflow: auto; min-height: 120px; }
+.activity-day { position: sticky; top: 0; background: var(--raised); margin: 10px 0 2px; padding: 2px 0; }
+.activity-row { display: grid; grid-template-columns: 64px 18px 1fr minmax(80px, 30%); gap: 8px; align-items: center; width: 100%; text-align: left; border: none; background: none; padding: 5px 6px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text); }
+.activity-row:hover { background: var(--hover); }
+.activity-row.failed .activity-summary { color: var(--del-text); }
+.activity-time { white-space: nowrap; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.activity-summary { font-family: var(--font-code); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-thread { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs
