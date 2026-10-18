@@ -14,7 +14,7 @@ import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees";
+export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -48,6 +48,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "git", label: "Git", desktopOnly: true },
   { id: "project", label: "Project and terminal", desktopOnly: true },
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
+  { id: "browser", label: "Browser", desktopOnly: true },
 ];
 
 export function SettingsDialog(props: SettingsProps) {
@@ -74,6 +75,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "git" ? <Git {...props} /> : null}
             {props.page === "project" ? <Project {...props} /> : null}
             {props.page === "worktrees" && bridge.git.available() ? <Worktrees {...props} /> : null}
+            {props.page === "browser" && bridge.preview.available() ? <Browser {...props} /> : null}
           </div>
         </div>
       </section>
@@ -449,6 +451,61 @@ function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories
       <div className="buttons dialog-buttons">
         <button className="danger-button" onClick={() => window.confirm("Delete everything the agent remembers? This cannot be undone.") && resetMemories().then(() => memoryStatus().then(setStatus)).catch(notice)}>Delete the memories</button>
       </div>
+    </>
+  );
+}
+
+/** Settings › Browser (DESKTOP_PARITY §2.9, §2.15): the preview tab's sites, developer mode, its data. */
+function Browser({ prefs, onChange, notice }: SettingsProps) {
+  const [site, setSite] = useState("");
+  const sites = Object.entries(prefs.previewSites).sort(([a], [b]) => a.localeCompare(b));
+  const set = (host: string, choice: "allow" | "block" | null) => {
+    const next = { ...prefs.previewSites };
+    if (choice) next[host] = choice;
+    else delete next[host];
+    onChange({ previewSites: next });
+  };
+  return (
+    <>
+      <h3>Browser</h3>
+      <p className="dialog-note">The preview tab (Ctrl+T) opens pages on this machine, on the local network and files without asking. A site on the internet asks first; what you chose is kept here. With airgapped on, only this machine is reachable, whatever is allowed. A download always asks where to save it.</p>
+      <fieldset>
+        <legend>Sites on the internet</legend>
+        {sites.length === 0 ? <p className="empty small">None yet: every site asks.</p> : null}
+        <table className="sites">
+          <tbody>
+            {sites.map(([host, choice]) => (
+              <tr key={host}>
+                <td>{host}</td>
+                <td>
+                  <select aria-label={`${host}: allow or block`} value={choice} onChange={(event) => set(host, event.target.value as "allow" | "block")}>
+                    <option value="allow">Allow</option>
+                    <option value="block">Block</option>
+                  </select>
+                </td>
+                <td><button className="link-button" onClick={() => set(host, null)}>Ask again</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <form className="add-site" onSubmit={(event) => {
+          event.preventDefault();
+          const host = site.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").split(/[/:?#]/)[0];
+          if (host) set(host, "block");
+          setSite("");
+        }}>
+          <input value={site} placeholder="example.com" aria-label="A site to block" onChange={(event) => setSite(event.target.value)} />
+          <button type="submit">Block</button>
+        </form>
+      </fieldset>
+      <fieldset>
+        <legend>Developer mode</legend>
+        <label><input type="checkbox" checked={prefs.previewDevTools} onChange={(event) => onChange({ previewDevTools: event.target.checked })} /> Developer tools for the preview tab (preview tabs opened from now on)</label>
+      </fieldset>
+      <fieldset>
+        <legend>Data</legend>
+        <button onClick={() => bridge.preview.clear().then(() => notice("The preview's cookies, storage and cache are cleared.")).catch(notice)}>Clear the preview's cookies, storage and cache</button>
+      </fieldset>
     </>
   );
 }

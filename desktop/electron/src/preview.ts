@@ -1,0 +1,255 @@
+// The preview tab (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §2.9, Phase 3 item 4): a page shown
+// in a `WebContentsView` laid over the tab's body, on a session of its own (`persist:mightling-
+// preview`, its own cookies and history), with the rules of preview-rules.ts applied to every
+// request and every navigation before anything connects. Nothing of the app reaches the page: no
+// preload, `sandbox`, `contextIsolation`, no Node, no permission granted (camera, microphone,
+// location, notifications, clipboard), no pop-up window. A download asks where to save every time
+// and is refused from a blocked site or at `/airgapped on`. Comment mode runs a picker in an
+// isolated world of the page and hands the clicked element back. Developer tools only with
+// Settings › Browser › Developer mode.
+
+import { BrowserWindow, WebContentsView, session, type Session, type WebContents } from "electron";
+
+import { PICK_SCRIPT, decide, type Decision, type SiteChoice } from "./preview-rules";
+
+export const PREVIEW_PARTITION = "persist:mightling-preview";
+
+/** The isolated world comment mode's picker runs in (anything but 0, the page's own). */
+const PICK_WORLD = 1307;
+
+export interface PreviewEvent {
+  id: string;
+  kind: "state" | "ask" | "blocked" | "download" | "key";
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  site?: string;
+  reason?: string;
+  error?: string | null;
+  key?: string;
+}
+
+/** Shortcuts the window's tab area answers even while the previewed page has the focus (§2.19's preview keys). */
+const FORWARDED: Record<string, string> = {
+  "Ctrl+W": "closeTab", "Ctrl+T": "previewOpen", "Ctrl+L": "addressBar", "Ctrl+R": "previewReload",
+  "Alt+ArrowLeft": "previewBack", "Alt+ArrowRight": "previewForward", "Ctrl+Shift+>": "commentMode", "Ctrl+Shift+.": "commentMode",
+  "Ctrl+Shift+C": "copyUrl",
+};
+
+export interface PreviewSettings {
+  sites: Record<string, SiteChoice>;
+  devTools: boolean;
+}
+
+interface Preview {
+  view: WebContentsView;
+  window: BrowserWindow;
+  thread: string | null;
+  airgapOn: boolean;
+}
+
+export class Previews {
+  private readonly previews = new Map<string, Preview>();
+  /** Sites allowed for this run of the app only (Allow once). */
+  private readonly once = new Set<string>();
+  /** The last site a tab asked about, so one blocked page asks once, not once per image. */
+  private readonly asked = new Map<string, string>();
+  private configured: Session | null = null;
+
+  constructor(
+    private readonly emit: (window: BrowserWindow, event: PreviewEvent) => void,
+    private readonly settings: () => PreviewSettings,
+    private readonly airgapOn: (thread: string | null) => Promise<boolean>,
+  ) {}
+
+  /** The preview session's own rules, set once: every request is decided before it connects. */
+  private session(): Session {
+    if (this.configured) return this.configured;
+    const ses = session.fromPartition(PREVIEW_PARTITION);
+    ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    ses.setPermissionCheckHandler(() => false);
+    ses.setSpellCheckerEnabled(false);
+    ses.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
+      const found = this.byContents(details.webContentsId ?? -1);
+      // A request from no preview of ours (a service worker, a stray) has nothing to answer to: refused.
+      if (!found) return callback({ cancel: !details.url.startsWith("devtools:") });
+      const decision = this.decision(found[1], details.url);
+      if (decision.verdict !== "allow") this.refused(found[0], found[1], decision);
+      callback({ cancel: decision.verdict !== "allow" });
+    });
+    // Chromium resolves names a page hints at (`<link rel="dns-prefetch">`, links) without a request
+    // the rules above would see: every page of the preview says not to (DESKTOP_PARITY §5's audit found it).
+    ses.webRequest.onHeadersReceived({ urls: ["<all_urls>"] }, (details, callback) => {
+      callback({ responseHeaders: { ...details.responseHeaders, "X-DNS-Prefetch-Control": ["off"] } });
+    });
+    ses.on("will-download", (event, item, contents) => {
+      const found = this.byContents(contents.id);
+      const decision = found ? this.decision(found[1], item.getURL()) : null;
+      if (!found || !decision || decision.verdict !== "allow") {
+        event.preventDefault();
+        if (found && decision) this.emit(found[1].window, { id: found[0], kind: "blocked", site: decision.site, reason: `A download was refused: ${decision.reason}` });
+        return;
+      }
+      // No save path set: Electron asks where to save it, which is the user's approval of this download.
+      item.setSaveDialogOptions({ title: "Save the download from the preview" });
+      this.emit(found[1].window, { id: found[0], kind: "download", url: item.getURL(), site: decision.site });
+    });
+    this.configured = ses;
+    return ses;
+  }
+
+  private byContents(id: number): [string, Preview] | null {
+    for (const entry of this.previews) if (!entry[1].view.webContents.isDestroyed() && entry[1].view.webContents.id === id) return entry;
+    return null;
+  }
+
+  private decision(preview: Preview, url: string): Decision {
+    return decide(url, this.settings().sites, this.once, preview.airgapOn);
+  }
+
+  private refused(id: string, preview: Preview, decision: Decision): void {
+    if (this.asked.get(id) === `${decision.verdict}:${decision.site}`) return;
+    this.asked.set(id, `${decision.verdict}:${decision.site}`);
+    this.emit(preview.window, { id, kind: decision.verdict === "ask" ? "ask" : "blocked", site: decision.site, reason: decision.reason });
+  }
+
+  private state(id: string, preview: Preview, error: string | null = null): void {
+    const contents = preview.view.webContents;
+    if (contents.isDestroyed()) return;
+    this.emit(preview.window, {
+      id, kind: "state", url: contents.getURL(), title: contents.getTitle(), loading: contents.isLoading(),
+      canGoBack: contents.navigationHistory.canGoBack(), canGoForward: contents.navigationHistory.canGoForward(), error,
+    });
+  }
+
+  /** A preview tab: a view over the window's tab body, hidden until the page says where. */
+  async open(window: BrowserWindow, id: string, url: string, thread: string | null): Promise<void> {
+    if (this.previews.has(id)) return this.navigate(id, url, thread);
+    const view = new WebContentsView({
+      webPreferences: {
+        partition: PREVIEW_PARTITION,
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+        spellcheck: false,
+        devTools: this.settings().devTools,
+      },
+    });
+    this.session();
+    const preview: Preview = { view, window, thread, airgapOn: await this.airgapOn(thread) };
+    this.previews.set(id, preview);
+    view.setVisible(false);
+    window.contentView.addChildView(view);
+    const contents = view.webContents;
+    // A page's new window opens in the same tab, if the rules let it.
+    contents.setWindowOpenHandler(({ url: target }) => {
+      if (this.decision(preview, target).verdict === "allow") void contents.loadURL(target);
+      else this.refused(id, preview, this.decision(preview, target));
+      return { action: "deny" };
+    });
+    const guard = (event: { preventDefault: () => void }, target: string) => {
+      const decision = this.decision(preview, target);
+      if (decision.verdict === "allow") return;
+      event.preventDefault();
+      this.refused(id, preview, decision);
+    };
+    contents.on("will-navigate", (event) => guard(event, event.url));
+    contents.on("will-redirect", (event) => guard(event, event.url));
+    contents.on("will-frame-navigate", (event) => guard(event, event.url));
+    for (const name of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-start-loading", "did-stop-loading"] as const) {
+      contents.on(name as "did-stop-loading", () => this.state(id, preview));
+    }
+    contents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown") return;
+      const key = input.key.length === 1 ? input.key.toUpperCase() : input.key;
+      const chord = [input.control ? "Ctrl" : "", input.alt ? "Alt" : "", input.shift ? "Shift" : "", key].filter(Boolean).join("+");
+      const action = FORWARDED[chord];
+      if (!action) return;
+      event.preventDefault();
+      this.emit(window, { id, kind: "key", key: action });
+    });
+    contents.on("did-fail-load", (_event, code, description, failed, isMainFrame) => {
+      // -3 is an aborted load (a navigation replaced it, or the rules cancelled it and said why).
+      if (isMainFrame && code !== -3) this.state(id, preview, `${description} (${failed})`);
+    });
+    window.on("closed", () => {
+      this.previews.delete(id);
+      if (!contents.isDestroyed()) contents.close();
+    });
+    await this.navigate(id, url, thread);
+  }
+
+  async navigate(id: string, url: string, thread: string | null): Promise<void> {
+    const preview = this.previews.get(id);
+    if (!preview) return;
+    preview.thread = thread;
+    preview.airgapOn = await this.airgapOn(thread);
+    this.asked.delete(id);
+    const decision = this.decision(preview, url);
+    if (decision.verdict !== "allow") {
+      this.refused(id, preview, decision);
+      return;
+    }
+    await preview.view.webContents.loadURL(url).catch(() => {});
+  }
+
+  /** Allow once (this run of the app) or after Settings › Browser changed: load the page again. */
+  allowOnce(id: string, site: string): void {
+    this.once.add(site);
+    this.reload(id);
+  }
+
+  reload(id: string): void {
+    const preview = this.previews.get(id);
+    if (!preview) return;
+    this.asked.delete(id);
+    preview.view.webContents.reload();
+  }
+
+  go(id: string, step: "back" | "forward"): void {
+    const history = this.previews.get(id)?.view.webContents.navigationHistory;
+    if (step === "back" && history?.canGoBack()) history.goBack();
+    if (step === "forward" && history?.canGoForward()) history.goForward();
+  }
+
+  /** Where the tab's body is in the window, in the page's pixels; hidden when another tab, a dialog or the layout covers it. */
+  place(id: string, bounds: { x: number; y: number; width: number; height: number }, visible: boolean): void {
+    const preview = this.previews.get(id);
+    if (!preview) return;
+    preview.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.max(0, Math.round(bounds.width)), height: Math.max(0, Math.round(bounds.height)) });
+    preview.view.setVisible(visible);
+  }
+
+  /** Comment mode: resolves with the element the user clicks in the page, or null (Escape). */
+  async pick(id: string): Promise<unknown> {
+    const preview = this.previews.get(id);
+    if (!preview) return null;
+    preview.view.webContents.focus();
+    return preview.view.webContents.executeJavaScriptInIsolatedWorld(PICK_WORLD, [{ code: PICK_SCRIPT }], true);
+  }
+
+  devTools(id: string): void {
+    const contents: WebContents | undefined = this.previews.get(id)?.view.webContents;
+    if (!contents || !this.settings().devTools) throw new Error("turn on Developer mode in Settings › Browser first, then open a new preview tab");
+    contents.openDevTools({ mode: "detach" });
+  }
+
+  close(id: string): void {
+    const preview = this.previews.get(id);
+    if (!preview) return;
+    this.previews.delete(id);
+    this.asked.delete(id);
+    if (!preview.window.isDestroyed()) preview.window.contentView.removeChildView(preview.view);
+    if (!preview.view.webContents.isDestroyed()) preview.view.webContents.close();
+  }
+
+  /** Settings › Browser › Clear: cookies, storage and cache of every preview. */
+  async clear(): Promise<void> {
+    const ses = this.session();
+    await ses.clearStorageData();
+    await ses.clearCache();
+  }
+}

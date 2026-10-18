@@ -40,9 +40,9 @@ export function TabArea(props: TabAreaProps) {
             const label = tabLabel(tab);
             const selected = tab.key === front?.key;
             return (
-              <span key={tab.key} className={`tab${selected ? " selected" : ""}`} role="tab" aria-selected={selected} title={tab.kind === "file" ? tab.path : label}
+              <span key={tab.key} className={`tab${selected ? " selected" : ""}`} role="tab" aria-selected={selected} title={tab.kind === "file" ? tab.path : tab.kind === "preview" ? tab.url : label}
                 onClick={() => props.onSelect(tab.key)} onAuxClick={(event) => { if (event.button === 1) props.onClose(tab.key); }}>
-                <Icon name={tab.kind === "review" ? "fileDiff" : "file"} size={13} /> <span className="tab-label">{label}</span>
+                <Icon name={tab.kind === "review" ? "fileDiff" : tab.kind === "preview" ? "globe" : "file"} size={13} /> <span className="tab-label">{label}</span>
                 <button className="icon" aria-label={`Close the ${label} tab`} title="Close (Ctrl+W)" onClick={(event) => { event.stopPropagation(); props.onClose(tab.key); }}><Icon name="x" size={12} /></button>
               </span>
             );

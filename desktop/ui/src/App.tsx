@@ -47,7 +47,8 @@ import { ArtifactView } from "./ArtifactView";
 import { artifactKind, createdArtifacts } from "./artifacts";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
-import { REVIEW_TAB, fileTab, withTab, withoutTab, type WorkspaceTab } from "./tabs";
+import { REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type WorkspaceTab } from "./tabs";
+import { PreviewTab } from "./PreviewTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
@@ -180,6 +181,14 @@ export function App() {
   };
   const openFileRef = useRef<(path: string) => void>(() => {});
   openFileRef.current = (path: string) => openFile(path);
+  /** A preview tab (Ctrl+T), in front; an empty address waits for the user to type one. */
+  const openPreview = (url = "") => {
+    const tab = previewTab(url);
+    setTabs((list) => withTab(list, tab));
+    setActiveTab(tab.key);
+    if (view !== "work") showView("work");
+    if (prefsRef.current.layout === "chat") updatePrefsRef.current({ layout: "split" });
+  };
   /** The tab area shows when a tab is open or the file tree is, and the layout does not hide it (§2.1). */
   const tabsShown = (tabs.length > 0 || treeShown) && view === "work" && prefs.layout !== "chat";
   const [tasks, setTasks] = useState<TaskView[]>([]);
@@ -806,7 +815,7 @@ export function App() {
     const front = tabs.find((tab) => tab.key === activeTab) ?? tabs[tabs.length - 1];
     if (front) {
       closeTabKey(front.key);
-      closedSurfaces.close(front.kind === "review" ? "review" : `file:${front.path}`);
+      closedSurfaces.close(surfaceOf(front));
     } else if (prefsRef.current.bottomPanel) {
       updatePrefs({ bottomPanel: false });
       closedSurfaces.close("bottomPanel");
@@ -817,6 +826,7 @@ export function App() {
     if (surface === "review") setReviewOpen(true);
     else if (surface === "bottomPanel") updatePrefs({ bottomPanel: true });
     else if (surface?.startsWith("file:")) openFile(surface.slice(5));
+    else if (surface?.startsWith("preview:")) openPreview(surface.slice(8));
   };
 
   const openFolderDialog = async () => {
@@ -849,10 +859,14 @@ export function App() {
     closeOtherTabs: () => {
       // The tab in front stays; the others close (and reopen one by one with Ctrl+Shift+T).
       const keep = tabs.find((tab) => tab.key === activeTab) ?? null;
-      for (const tab of tabs) if (tab !== keep) closedSurfaces.close(tab.kind === "review" ? "review" : `file:${tab.path}`);
+      for (const tab of tabs) if (tab !== keep) closedSurfaces.close(surfaceOf(tab));
       setTabs(keep ? [keep] : []);
       if (prefsRef.current.bottomPanel) closedSurfaces.close("bottomPanel");
       updatePrefs({ bottomPanel: false });
+    },
+    previewOpen: () => {
+      if (!bridge.preview.available()) return notice("The preview tab is the desktop app's: open the page in your browser.");
+      openPreview("");
     },
     searchFiles: () => {
       if (view !== "work" || !composeRoot) return notice("Search files looks in a thread's folder: open a thread in Work, or name a project folder.");
@@ -1470,9 +1484,13 @@ export function App() {
       [keyAction("recentChat6"), "recentChat6"],
       [keyAction("fileTree"), "fileTree"],
       [keyAction("searchFiles"), "searchFiles"],
+      [keyAction("previewOpen"), "previewOpen"],
     ];
+    // With a preview tab in front, Ctrl+Shift+C copies the page's address (the preview's own key, PreviewTab.tsx).
+    const previewInFront = tabsShown && tabs.find((tab) => tab.key === activeTab)?.kind === "preview";
     for (const [action, id] of shellKeys) {
       if ((id === "undoAction" || id === "redoAction") && typing) continue;
+      if (id === "copyWorkingDirectory" && previewInFront) continue;
       if (matches(event, action)) {
         event.preventDefault();
         commands[id]();
@@ -1598,6 +1616,8 @@ export function App() {
     )
   );
 
+  /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv;
   const title = selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? "New question" : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
@@ -1881,7 +1901,7 @@ export function App() {
       {tabsShown ? (
         <TabArea tabs={tabs} active={activeTab} onSelect={setActiveTab} onClose={(key) => {
           const tab = tabs.find((entry) => entry.key === key);
-          if (tab) closedSurfaces.close(tab.kind === "review" ? "review" : `file:${tab.path}`);
+          if (tab) closedSurfaces.close(surfaceOf(tab));
           closeTabKey(key);
         }}
           workspaceLayout={prefs.layout} setWorkspaceLayout={(layout) => updatePrefs({ layout })}
@@ -1890,7 +1910,16 @@ export function App() {
             <FileTree root={composeRoot} client={client} listen={listen} selected={tabs.find((tab) => tab.key === activeTab && tab.kind === "file")?.key.slice(5) ?? null}
               onOpen={(path) => openFile(path)} onClose={() => setTreeShown(false)} />
           ) : null}
-          render={(tab) => tab.kind === "review" ? (
+          render={(tab) => tab.kind === "preview" ? (
+            <PreviewTab id={tab.id} url={tab.url} thread={selected?.thread.id ?? null} devTools={prefs.previewDevTools}
+              visible={tabsShown && tab.key === (tabs.find((entry) => entry.key === activeTab) ?? tabs[0])?.key && !overlayOpen}
+              layoutKey={`${prefs.layout}|${prefs.sidebarHidden}|${prefs.fontScale}|${treeShown}|${prefs.bottomPanel}|${tabs.length}`}
+              onTitle={(title, url) => setTabs((list) => list.map((entry) => (entry.key === tab.key && entry.kind === "preview" ? { ...entry, title, url: url || entry.url } : entry)))}
+              onAlways={(site, choice) => updatePrefs({ previewSites: { ...prefsRef.current.previewSites, [site]: choice } })}
+              onComment={(text) => setDraft((draft) => (draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text))}
+              onShortcut={(action) => commands[action === "closeTab" ? "closeTab" : action === "previewOpen" ? "previewOpen" : ""]?.()}
+              notice={notice} />
+          ) : tab.kind === "review" ? (
             <ReviewPane
               cwd={composeRoot} threadId={selected?.thread.id ?? null}
               turnDiff={lastTurnDiff(selected)}
