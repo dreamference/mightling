@@ -96,6 +96,14 @@
       "default": true,
       "type": "boolean"
     },
+    "previewSites": {
+      "default": {},
+      "type": "object"
+    },
+    "previewDevTools": {
+      "default": false,
+      "type": "boolean"
+    },
     "notifyTurns": {
       "default": "unfocused",
       "enum": [

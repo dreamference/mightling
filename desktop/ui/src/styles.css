@@ -575,6 +575,24 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .pdf-pages { flex: 1; overflow: auto; background: var(--panel); display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; }
 .pdf-page { background: #fff; box-shadow: var(--shadow); }
 
+/* The preview tab (Phase 3 item 4): the app lays the page's own view over .preview-surface. */
+.preview-tab { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.preview-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px 6px; }
+.preview-tools .address { flex: 1; min-width: 0; }
+.preview-tools .address input { width: 100%; font: 12.5px var(--font-code); padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--panel); }
+.preview-tools button.active { color: var(--accent); background: var(--accent-soft); }
+.preview-note { margin: 0 12px 6px; font-size: 12.5px; color: var(--accent); }
+.preview-ask, .preview-blocked { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 12px 6px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--notice); font-size: 13px; }
+.preview-ask button { font-size: 12.5px; padding: 3px 10px; }
+.preview-ask button.danger { color: var(--danger); }
+.preview-comment { margin: 0 12px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--raised); display: flex; flex-direction: column; gap: 6px; }
+.preview-comment .picked { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-comment textarea { width: 100%; box-sizing: border-box; font: inherit; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; }
+.preview-comment .buttons { display: flex; gap: 6px; }
+.preview-surface { flex: 1; min-height: 0; border-top: 1px solid var(--line); background: var(--canvas); }
+.settings-page table.sites td { padding: 2px 8px 2px 0; }
+.add-site { display: flex; gap: 6px; margin-top: 6px; }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs

@@ -29,6 +29,8 @@ import * as worktree from "./worktree";
 import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./shell";
 import { Notices } from "./notices";
 import { transcribe } from "./voice";
+import { Previews } from "./preview";
+import type { SiteChoice } from "./preview-rules";
 import { openWork } from "./work";
 
 export interface MainOptions {
@@ -135,6 +137,19 @@ export async function main(options: MainOptions): Promise<void> {
     const level = ling ? await airgapped(ling, thread) : { level: "off", source: "" };
     if (level.level === "on") throw new Error(`airgapped is on (${level.source}): ${what} would reach the network`);
   };
+  /** Preview tabs (preview.ts): their rules read Settings › Browser and the thread's air-gap level. */
+  const previews = new Previews(
+    (target, event) => send(target, { channel: "preview://event", payload: event }),
+    () => {
+      const stored = prefs.read();
+      const sites = (typeof stored.previewSites === "object" && stored.previewSites !== null && !Array.isArray(stored.previewSites) ? stored.previewSites : {}) as Record<string, SiteChoice>;
+      return { sites, devTools: stored.previewDevTools === true };
+    },
+    async (thread) => {
+      const ling = findLing(resourcesPath());
+      return ling ? (await airgapped(ling, thread)).level === "on" : false;
+    },
+  );
   let editors: Editor[] | null = null;
   const tasks = new Tasks((event) => deliver({ channel: "task://event", payload: event }));
   /** The worktree root the page read from the agent's config, or `$CODEX_HOME/worktrees`. */
@@ -347,6 +362,35 @@ export async function main(options: MainOptions): Promise<void> {
         git.launch(command, args, base);
         return null;
       }
+      case "preview/open":
+        await previews.open(own, String(message.id), String(message.url), message.thread ?? null);
+        return null;
+      case "preview/navigate":
+        await previews.navigate(String(message.id), String(message.url), message.thread ?? null);
+        return null;
+      case "preview/go":
+        previews.go(String(message.id), message.step === "forward" ? "forward" : "back");
+        return null;
+      case "preview/reload":
+        previews.reload(String(message.id));
+        return null;
+      case "preview/place":
+        previews.place(String(message.id), message.bounds, Boolean(message.visible));
+        return null;
+      case "preview/pick":
+        return previews.pick(String(message.id));
+      case "preview/allow-once":
+        previews.allowOnce(String(message.id), String(message.site));
+        return null;
+      case "preview/devtools":
+        previews.devTools(String(message.id));
+        return null;
+      case "preview/close":
+        previews.close(String(message.id));
+        return null;
+      case "preview/clear":
+        await previews.clear();
+        return null;
       case "file/size": {
         if (typeof message.path !== "string" || !path.isAbsolute(message.path)) throw new Error("not an absolute path");
         const stat = await fs.promises.stat(message.path).catch(() => null);

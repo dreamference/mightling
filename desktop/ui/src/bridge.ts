@@ -357,3 +357,51 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
   window.addEventListener("message", onMessage);
   return () => window.removeEventListener("message", onMessage);
 }
+
+/** A preview tab's news from the app (desktop/electron/src/preview.ts). */
+export interface PreviewEvent {
+  id: string;
+  kind: "state" | "ask" | "blocked" | "download" | "key";
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  site?: string;
+  reason?: string;
+  error?: string | null;
+  /** For `key`: a shortcut pressed while the previewed page had the focus. */
+  key?: string;
+}
+
+/** What comment mode picked in a previewed page. */
+export interface PickedElement {
+  selector: string;
+  tag: string;
+  text: string;
+  url: string;
+}
+
+/** The preview tab (DESKTOP_PARITY §2.9): the desktop app's only; a browser on `ling web` has none. */
+export const preview = {
+  available: () => host() === "electron",
+  open: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/open", id, url, thread }),
+  navigate: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/navigate", id, url, thread }),
+  go: (id: string, step: "back" | "forward") => send<null>({ type: "preview/go", id, step }),
+  reload: (id: string) => send<null>({ type: "preview/reload", id }),
+  place: (id: string, bounds: { x: number; y: number; width: number; height: number }, visible: boolean) => send<null>({ type: "preview/place", id, bounds, visible }),
+  pick: (id: string) => send<PickedElement | null>({ type: "preview/pick", id }),
+  allowOnce: (id: string, site: string) => send<null>({ type: "preview/allow-once", id, site }),
+  devTools: (id: string) => send<null>({ type: "preview/devtools", id }),
+  close: (id: string) => send<null>({ type: "preview/close", id }),
+  clear: () => send<null>({ type: "preview/clear" }),
+  /** Every preview tab's events; returns the unsubscribe. */
+  listen(handler: (event: PreviewEvent) => void): () => void {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { channel?: string; payload?: PreviewEvent } | null;
+      if (data && data.channel === "preview://event" && data.payload) handler(data.payload);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  },
+};

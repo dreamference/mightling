@@ -45,6 +45,10 @@ export interface Prefs {
   preventSleep: boolean;
   /** Open a document or an image the agent created in a tab when its turn ends (the artifacts viewer, Settings › General). */
   openArtifacts: boolean;
+  /** The preview tab's sites outside this machine and the LAN (Settings › Browser): host to allow or block; others ask. */
+  previewSites: Record<string, "allow" | "block">;
+  /** Developer tools for preview tabs (Settings › Browser › Developer mode); off by default. */
+  previewDevTools: boolean;
   /** When a finished turn shows a desktop notification, and whether a waiting approval does (Settings › Notifications). */
   notifyTurns: "unfocused" | "always" | "never";
   notifyApprovals: boolean;
