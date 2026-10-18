@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import * as bridge from "./bridge";
-import { LARGEST_SHOWN, decodeFile, highlighted, languageOf, lineCount, parentOf, relativeTo, sizeLabel } from "./files";
+import { LARGEST_SHOWN, decodeFile, highlighted, languageOf, lineCount, lineWithin, parentOf, relativeTo, sizeLabel } from "./files";
 import { Icon } from "./icons";
 import type { RpcClient } from "./rpc";
 import type { Listen } from "./turns";
@@ -77,18 +77,20 @@ export function FileView(props: FileViewProps) {
     };
   }, [path, client, listen, load]);
 
-  useEffect(() => setMarked(props.line), [props.line]);
+  // A line past the end (go to line 500 in a short file) marks the last one.
+  const lines = loaded.status === "text" ? lineCount(loaded.text) : 0;
+  useEffect(() => setMarked(props.line && lines ? lineWithin(String(props.line), lines) : props.line), [props.line, lines]);
 
   // Bring the asked-for line into view, a third of the way down.
   useLayoutEffect(() => {
     const element = body.current;
     if (!element || loaded.status !== "text" || !props.line) return;
-    element.scrollTop = Math.max(0, (props.line - 1) * LINE_HEIGHT - element.clientHeight / 3);
-  }, [props.line, loaded.status]);
+    const line = lineWithin(String(props.line), lines) ?? props.line;
+    element.scrollTop = Math.max(0, (line - 1) * LINE_HEIGHT - element.clientHeight / 3);
+  }, [props.line, loaded.status, lines]);
 
   const language = languageOf(path);
   const html = useMemo(() => (loaded.status === "text" ? highlighted(loaded.text, language) : ""), [loaded, language]);
-  const lines = loaded.status === "text" ? lineCount(loaded.text) : 0;
   const numbers = useMemo(() => Array.from({ length: lines }, (_, index) => index + 1), [lines]);
   const shown = relativeTo(props.root, path);
 
