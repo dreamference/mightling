@@ -34,3 +34,30 @@ const marked = new Marked({
 export function renderMarkdown(text: string): string {
   return marked.parse(text, { async: false }) as string;
 }
+
+/**
+ * Markdown as a document in the artifacts viewer (Phase 3 item 3): the same rules as a message,
+ * except that an image keeps its reference (`data-ref`) for the viewer to show a local file from
+ * the server's bytes, and a link keeps its target (`data-href`) so a local one opens in a tab.
+ * Nothing loads or navigates by itself; raw HTML stays text.
+ */
+const documentMarked = new Marked({
+  gfm: true,
+  breaks: false,
+  async: false,
+  renderer: {
+    html({ text }) {
+      return escape(text);
+    },
+    link({ href, tokens }) {
+      return `<span class="link" data-href="${escape(href)}" title="${escape(href)}">${this.parser.parseInline(tokens)}</span>`;
+    },
+    image({ href, text }) {
+      return `<img data-ref="${escape(href)}" alt="${escape(text)}">`;
+    },
+  },
+});
+
+export function renderDocument(text: string): string {
+  return documentMarked.parse(text, { async: false }) as string;
+}

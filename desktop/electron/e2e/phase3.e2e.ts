@@ -170,3 +170,91 @@ test("2 search files and go to line: Ctrl+P by name, name:line, and Ctrl+L in a 
     await close();
   }
 });
+
+const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+const PDF = [
+  "%PDF-1.4",
+  "1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj",
+  "2 0 obj <</Type/Pages/Kids[3 0 R]/Count 1>> endobj",
+  "3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>> endobj",
+  "4 0 obj <</Length 44>> stream",
+  "BT /F1 24 Tf 40 100 Td (Hello PDF) Tj ET",
+  "endstream endobj",
+  "5 0 obj <</Type/Font/Subtype/Type1/BaseFont/Helvetica>> endobj",
+  "trailer <</Root 1 0 R>>",
+  "%%EOF",
+  "",
+].join("\n");
+
+/** The website project with documents: a readme with a picture and a link, a page with a script, a PDF. */
+function documents(home: string): void {
+  const root = website(home);
+  fs.mkdirSync(path.join(root, "docs", "img"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs", "img", "pixel.png"), Buffer.from(PIXEL, "base64"));
+  fs.writeFileSync(path.join(root, "docs", "guide.md"), [
+    "# The image guide", "", "Every hero image is **WebP**, at three widths.", "",
+    "![one pixel](img/pixel.png)", "", "| Width | Use |", "|---|---|", "| 640 | phones |", "| 1920 | desktops |", "",
+    "See the [stylesheet](../src/site.css) and [the vendor's page](https://example.com/images).", "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "docs", "page.html"), [
+    "<!doctype html><html><head><title>Hero</title><style>h1 { color: rgb(10, 186, 181); }</style></head><body>",
+    "<h1>The hero page</h1><p>Compressed images load first.</p>",
+    "<img src='img/pixel.png' alt='pixel' onerror='window.ran = 1'>",
+    "<script>window.ran = 1; document.title = 'ran';</script>",
+    "<form action='https://example.com'><input name='q'></form>",
+    "<a href='guide.md'>The guide</a> <a href='javascript:window.ran=1'>a trap</a>",
+    "</body></html>",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "docs", "report.pdf"), PDF);
+}
+
+test("3 artifacts viewer: Markdown with its picture, HTML without scripts, a PDF, an image, Source", async () => {
+  const { page, home, shoot, close } = await open(documents);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    await page.keyboard.press("Control+Shift+E");
+    const tree = page.getByRole("navigation", { name: "Files" });
+    await tree.getByRole("button", { name: "docs" }).click();
+    await tree.getByRole("button", { name: "guide.md" }).click();
+    const guide = page.getByRole("tabpanel", { name: "guide.md" });
+    await expect(guide.getByRole("heading", { name: "The image guide" })).toBeVisible();
+    await expect(guide.locator("img")).toHaveAttribute("src", /^blob:/);
+    await expect(guide.locator("table")).toContainText("desktops");
+    await shoot("3-artifact-markdown.png");
+    // Source shows the text; a local link opens its file, a remote one goes nowhere.
+    await guide.getByRole("radio", { name: "Source" }).click();
+    await expect(guide.locator(".code-text")).toContainText("![one pixel](img/pixel.png)");
+    await guide.getByRole("radio", { name: "Rendered" }).click();
+    await guide.locator("[data-href='https://example.com/images']").click();
+    await guide.locator("[data-href='../src/site.css']").click();
+    await expect(page.getByRole("tabpanel", { name: "site.css" })).toContainText(".hero");
+
+    await tree.getByRole("button", { name: "page.html" }).click();
+    const html = page.getByRole("tabpanel", { name: "page.html" });
+    await expect(html.getByRole("heading", { name: "The hero page" })).toHaveCSS("color", "rgb(10, 186, 181)");
+    await expect(html.locator("img")).toHaveAttribute("src", /^blob:/);
+    await expect(html.locator("form, input, script")).toHaveCount(0);
+    await expect(html.locator(".artifact-note")).toContainText("left out");
+    await html.getByText("a trap").click();
+    await html.getByText("The guide").click();
+    expect(await page.evaluate(() => (window as unknown as { ran?: number }).ran)).toBeUndefined();
+    expect(await page.title()).not.toBe("ran");
+    await page.getByRole("tab", { name: /page\.html/ }).click();
+    await shoot("3-artifact-html.png");
+
+    await tree.getByRole("button", { name: "report.pdf" }).click();
+    const pdf = page.getByRole("tabpanel", { name: "report.pdf" });
+    await expect(pdf.locator(".pdf-tools")).toContainText("1 page");
+    await expect(pdf.locator("canvas[aria-label='Page 1']")).toBeVisible();
+    await shoot("3-artifact-pdf.png");
+
+    await tree.getByRole("button", { name: "img" }).click();
+    await tree.getByRole("button", { name: "pixel.png" }).click();
+    const image = page.getByRole("tabpanel", { name: "pixel.png" });
+    await expect(image.locator(".image-size")).toHaveText("1 × 1");
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});
