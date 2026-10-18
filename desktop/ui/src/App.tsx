@@ -54,6 +54,8 @@ import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { ActivityView } from "./ActivityView";
 import { suggest } from "./suggestions";
+import { MessageBoardView } from "./MessageBoardView";
+import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
@@ -145,6 +147,9 @@ export function App() {
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  /** The agent message board (Phase 3 item 10): whether config.toml has it on, and its view. */
+  const [board, setBoard] = useState<{ on: boolean; sqliteHome: string | null }>({ on: false, sqliteHome: null });
+  const [boardOpen, setBoardOpen] = useState(false);
   /** Suggested follow-ups (Phase 3 item 7), by thread, until a new turn starts there. */
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({});
   const [agentsHidden, setAgentsHidden] = useState(false);
@@ -288,7 +293,11 @@ export function App() {
       setAirgap(level);
       setPrefs(stored);
       // The worktree settings the codex-worktree crate reads too ([desktop] in config.toml).
-      client.request("config/read", {}).then((answer) => setWtSettings(worktreeSettings((answer as { config?: { desktop?: Record<string, unknown> | null } }).config?.desktop))).catch(() => {});
+      client.request("config/read", {}).then((answer) => {
+        const config = (answer as { config?: Record<string, unknown> }).config ?? null;
+        setWtSettings(worktreeSettings((config as { desktop?: Record<string, unknown> | null } | null)?.desktop));
+        setBoard({ on: boardOn(config), sqliteHome: sqliteHome(config) });
+      }).catch(() => {});
       // Night Shift's inbox: finished tasks since Scheduled was last opened.
       if (bridge.host() === "electron") bridge.night.list().then((answer) => setNightUnseen(unseen(answer.tasks, stored.nightSeen))).catch(() => {});
       // Plan mode, when the server offers it (`collaborationMode/list`).
@@ -1584,8 +1593,9 @@ export function App() {
       event.preventDefault();
       setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen || fileSearch !== null || activityOpen)) {
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen || fileSearch !== null || activityOpen || boardOpen)) {
       setFileSearch(null);
+      setBoardOpen(false);
       setActivityOpen(false);
       setScheduledOpen(false);
       setExtensions(null);
@@ -1671,7 +1681,7 @@ export function App() {
   );
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
-  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen;
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen;
   const title = selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? "New question" : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
@@ -1791,6 +1801,7 @@ export function App() {
             <Icon name="clock" size={14} />Scheduled{nightUnseen ? <span className="count" aria-label={`${nightUnseen} new`}>{nightUnseen}</span> : null}
           </button>
         ) : null}
+        {!POPOUT && board.on && HOST === "electron" ? <button className="nav-row board-button" onClick={() => setBoardOpen(true)} title="What subagents posted for each other"><Icon name="messageSquare" size={14} />Message board</button> : null}
         {!POPOUT ? <button className="nav-row activity-button" onClick={() => setActivityOpen(true)} title={`What the agent did, across threads (${shortcutLabel("activityView")})`}><Icon name="activity" size={14} />Activity</button> : null}
         {!POPOUT ? <button className="nav-row skills-button" onClick={() => setExtensions("skills")} title="Skills, MCP servers and apps"><Icon name="info" size={14} />Skills and tools</button> : null}
         <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title="Settings (Ctrl+,)"><Icon name="settings" size={14} />Settings</button>
@@ -2017,7 +2028,10 @@ export function App() {
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice}
-        readConfig={readConfig} writeConfig={writeConfig}
+        readConfig={readConfig} writeConfig={async (keyPath, value) => {
+          await writeConfig(keyPath, value);
+          if (keyPath === "features.agent_message_board" || keyPath === "features.multi_agent_v2") readConfig().then((config) => setBoard({ on: boardOn(config), sqliteHome: sqliteHome(config) })).catch(() => {});
+        }}
         memoryStatus={memoryStatus} resetMemories={resetMemories} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
@@ -2028,6 +2042,10 @@ export function App() {
         <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
           front={(() => { const tab = tabs.find((entry) => entry.key === activeTab); return tab?.kind === "file" && tabsShown ? tab.path : null; })()}
           onOpen={(path, line) => openFile(path, line)} onClose={() => setFileSearch(null)} />
+      ) : null}
+      {boardOpen ? (
+        <MessageBoardView sqliteHome={board.sqliteHome} threads={Object.fromEntries(Object.entries(state.threads).map(([id, entry]) => [id, entry.thread]))} notice={notice}
+          onOpen={(threadId) => void openThread(threadId)} onClose={() => setBoardOpen(false)} />
       ) : null}
       {activityOpen ? (
         <ActivityView client={client} threads={Object.values(state.threads).map((entry) => entry.thread)}

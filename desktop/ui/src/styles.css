@@ -670,6 +670,21 @@ html.pet-page body { margin: 0; }
 .check-passed .check-state { color: var(--add-text); }
 .pr-file summary { padding: 6px 10px; cursor: pointer; }
 
+/* The agent message board (Phase 3 item 10). */
+.dialog.board { width: min(860px, 94vw); max-height: 84vh; display: flex; flex-direction: column; }
+.board-columns { display: grid; grid-template-columns: 220px 1fr; gap: 12px; min-height: 0; overflow: hidden; }
+.board-nav { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.board-name, .board-channel { text-align: left; border: none; background: none; border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text); font-size: 13px; }
+.board-name.selected { background: var(--selected); font-weight: 500; }
+.board-channel { padding-left: 20px; color: var(--muted); }
+.board-channel.selected { color: var(--text); background: var(--hover); }
+.board-channel .count { font-size: 11.5px; color: var(--faint); }
+.board-posts { overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.board-discussion { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 8px 12px; background: var(--raised); }
+.board-post.reply { margin-left: 18px; padding-left: 10px; border-left: 2px solid var(--line); margin-top: 6px; }
+.board-meta { font-size: 12px; color: var(--muted); }
+.board-nav > .link-button, .board-posts > .link-button { align-self: flex-start; }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs

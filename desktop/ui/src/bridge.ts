@@ -437,3 +437,23 @@ export const prs = {
     send<string>({ type: "pr/review", root, number, verdict, body, thread }),
   status: (root: string) => send<string>({ type: "pr/status", root }),
 };
+
+/** The agent message board as the app reads it (desktop/electron/src/board.ts). */
+export interface BoardPost {
+  id: string;
+  channel: string;
+  root: string;
+  author: string;
+  at: number;
+  text: string;
+}
+export interface Board {
+  board: string;
+  channels: { name: string; author: string; posts: number }[];
+  posts: BoardPost[];
+}
+/** The boards subagents post to, read only; empty in a browser (the file is the app's to read). */
+export async function readBoards(sqliteHome: string | null): Promise<Board[]> {
+  if (host() !== "electron") return [];
+  return send<Board[]>({ type: "board/read", sqliteHome });
+}
