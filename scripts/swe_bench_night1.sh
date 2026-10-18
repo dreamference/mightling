@@ -62,6 +62,13 @@ ARMS=${ARMS:-"default tests-v2"}
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
+# The engine A/B (the production bar's night, engine MILESTONES §14): an arm part `on-sglang` or `on-engine` runs
+# the arm against that model server on the engine's development machine instead of this machine's, served there
+# by scripts/engine_ab_remote.sh over ssh, one at a time; production there (m0-prod8000) comes back at the end,
+# on a failure and on a stop. REMOTE is its ssh name, REMOTE_HOST the name the run reaches it by (resolved at
+# use time, never stored as an address).
+REMOTE=${REMOTE:-second-puffin}
+REMOTE_HOST=${REMOTE_HOST:-second-puffin.local}
 
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
@@ -84,12 +91,33 @@ arm_flags() {
             exec-tool*|exec_tool*) echo "❌ Arm $1: write the Code Mode arm as exec-tool-function or exec-tool-freeform." >&2; return 2 ;;
             drop-outputs) flags="$flags --drop-old-outputs" ;;
             drop-*|drop_*) echo "❌ Arm $1: write the drop-first compaction arm as drop-outputs." >&2; return 2 ;;
+            on-sglang|on-engine) ;;  # the model server, not an option of the run (arm_server)
+            on-*) echo "❌ Arm $1: write the model server as on-sglang or on-engine." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
     echo "${flags# }"
 }
 arm_name() { echo "$1" | tr ,+ --; }
+# The arm's model server on REMOTE (`sglang` or `engine`), or nothing: this machine's server.
+arm_server() { echo "$1" | tr + '\n' | sed -n 's/^on-//p' | head -1; }
+uses_remote() { case "$ARMS" in *on-sglang*|*on-engine*) return 0 ;; esac; return 1; }
+# Serves the arm's model server on REMOTE (stopping production and the other arm there) and points the run at it.
+remote_serve() {
+    local server=$1 port out
+    case "$server" in sglang) port=30000 ;; engine) port=8300 ;; *) return 2 ;; esac
+    out=$(timeout 40m ssh -o BatchMode=yes "$REMOTE" bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
+    local rc=$?
+    echo "$out" | tail -3 | sed 's/^/   /'
+    [ "$rc" -eq 0 ] && echo "$out" | grep -q '^ready ' || return 1
+    export DREAMFERENCE_VLLM_HOST="http://$REMOTE_HOST:$port"
+    log "$server on $REMOTE serving at $DREAMFERENCE_VLLM_HOST ($(echo "$out" | sed -n 's/^ready //p'))"
+}
+# Production back on REMOTE, both arms stopped.
+remote_restore() {
+    timeout 30m ssh -o BatchMode=yes "$REMOTE" bash -s -- restore < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
+    unset DREAMFERENCE_VLLM_HOST
+}
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
 
 # The smoke check: one real task per arm (SMOKE_INSTANCE), with the night's settings and the arm's
@@ -112,6 +140,11 @@ smoke() {
         extra=$(arm_flags "$arm") || return 2
         [ "$REFINE" = 1 ] && extra="$extra --refine"
         run="$PREFIX-smoke-$name-$stamp"
+        server=$(arm_server "$arm")
+        if [ -n "$server" ] && ! remote_serve "$server"; then
+            echo "❌ Night $NIGHT not started: arm $arm's model server ($server on $REMOTE) did not come up."
+            return 1
+        fi
         echo "🔥 Smoke check of arm $arm: $SMOKE_INSTANCE as run $run (limit $SMOKE_TIMEOUT)..."
         ( cd "$WT" && export PYTHONPATH="$WT" DREAMFERENCE_CONFIG_PATH="$SMOKE_DIR/dreamference.toml" &&
           timeout -s INT -k 2m 25m "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" \
@@ -215,8 +248,12 @@ start() {
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
     fi
-    # Every arm runs one real task first; nothing below happens unless each one ran.
-    smoke || exit 1
+    # Every arm runs one real task first; nothing below happens unless each one ran. Production on REMOTE comes
+    # back after the smoke whatever it found; the night serves each arm again.
+    smoke
+    rc=$?
+    uses_remote && remote_restore
+    [ "$rc" -eq 0 ] || exit 1
     # A finished or failed night keeps its folder; this one starts clean.
     if [ -e "$D/done" ] || [ -e "$D/failed" ]; then
         aside="$D.$(date +%Y%m%d-%H%M%S)"
@@ -258,10 +295,20 @@ run() {
     for arm in $record $candidate; do
         arm_flags "$arm" > /dev/null || fail "arm $arm" 2
     done
+    # The engine A/B: production on REMOTE comes back however the night ends (a stopped unit gets TERM, and the
+    # EXIT trap runs on the way out); once both rounds have run it comes back at once, before the regrades.
+    if uses_remote; then
+        trap 'remote_restore' EXIT
+        trap 'exit 143' TERM INT
+    fi
     for arm in $record $candidate; do
         name=$(arm_name "$arm")
         extra=$(arm_flags "$arm")
         [ "$REFINE" = 1 ] && extra="$extra --refine"
+        server=$(arm_server "$arm")
+        if [ -n "$server" ]; then
+            remote_serve "$server" || fail "serving $server on $REMOTE for $PREFIX-$name" 1
+        fi
         log "round $PREFIX-$name"
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
@@ -276,6 +323,7 @@ run() {
             fail "round $PREFIX-$name (instances not run)" 1
         fi
     done
+    uses_remote && remote_restore
     for name in $rname $cname; do
         log "regrade $PREFIX-$name with the test files dropped"
         admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images

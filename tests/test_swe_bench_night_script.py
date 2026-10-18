@@ -272,3 +272,45 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_drop_switch(tmp_
     if reads_it:
         assert "ling-code is missing" in result.stdout
     assert not (tmp_path / "night7").exists()
+
+
+def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_production(tmp_path):
+    # A stand-in `ssh` on PATH records what the remote helper was asked and answers as it does; the stand-in
+    # Python records each ling-admin call with the model server the round was pointed at.
+    calls, remote = tmp_path / "calls.txt", tmp_path / "remote.txt"
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\nshift 2\necho "${{DREAMFERENCE_VLLM_HOST:-local}} $*" >> "{calls}"\n')
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    ssh = bindir / "ssh"
+    ssh.write_text(f'#!/bin/bash\ncat > /dev/null\nargs="$*"\necho "$args" >> "{remote}"\n'
+                   'case "$args" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;;'
+                   ' *restore*) echo restored ;; esac\n')
+    for path in (fake, ssh):
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    task_list = tmp_path / "list.txt"
+    task_list.write_text("acme__widget-1\n")
+    folder = tmp_path / "night12"
+    folder.mkdir()
+    arms = "exec-tool-function+apply-patch-off+on-sglang exec-tool-function+apply-patch-off+on-engine"
+    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder), "NIGHT": "12",
+           "PREFIX": "n12", "ARMS": arms, "REFINE": "0", "PATH": f"{bindir}:{os.environ['PATH']}"}
+    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    recorded = calls.read_text().splitlines()
+    rounds = [line for line in recorded if " swe-bench run " in line]
+    assert rounds[0].startswith("http://second-puffin.local:30000 swe-bench run ")
+    assert "--name n12-exec-tool-function-apply-patch-off-on-sglang " in rounds[0]
+    assert rounds[1].startswith("http://second-puffin.local:8300 swe-bench run ")
+    assert all("--exec-tool function" in r and "--apply-patch off" in r and "on-" not in r.split("--name")[0] for r in rounds)
+    asked = remote.read_text().splitlines()
+    assert [line.split("serve ")[-1] if "serve" in line else "restore" for line in asked] == ["sglang", "engine", "restore", "restore"]
+    assert all(line.startswith("-o BatchMode=yes second-puffin bash -s -- ") for line in asked)
+    # The regrades need no model server and run after production is back.
+    assert all(line.startswith("local ") for line in recorded if " swe-bench eval " in line)
+
+
+@pytest.mark.parametrize("arm", ["on-vllm", "default+on-"])
+def test_a_misspelt_model_server_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"default {arm}")
+    assert status == 2 and not runs(recorded) and (folder / "failed").exists()
