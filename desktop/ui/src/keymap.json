@@ -673,7 +673,7 @@
     "Ctrl+P"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "fileTree",
@@ -733,7 +733,7 @@
     "Ctrl+L"
    ],
    "context": "file",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "addressBar",

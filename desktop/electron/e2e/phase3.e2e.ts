@@ -134,3 +134,39 @@ test("1 file tree and file tabs: the folder read and followed, files highlighted
     await close();
   }
 });
+
+test("2 search files and go to line: Ctrl+P by name, name:line, and Ctrl+L in a file tab", async () => {
+  const { page, home, shoot, close } = await open(website);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    await page.keyboard.press("Control+p");
+    const search = page.getByRole("dialog", { name: "Search files" });
+    await search.getByRole("textbox", { name: "File name" }).fill("site");
+    await expect(search.getByRole("option")).toHaveCount(1);
+    await expect(search.getByRole("option")).toContainText("src/site.css");
+    await shoot("2-search-files.png");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("tabpanel", { name: "site.css" })).toContainText(".hero");
+    // name:line opens the file at that line, marked.
+    await page.keyboard.press("Control+p");
+    await search.getByRole("textbox", { name: "File name" }).fill("hero.ts:40");
+    await expect(search.getByRole("option").first()).toContainText("hero.ts");
+    await page.keyboard.press("Enter");
+    const hero = page.getByRole("tabpanel", { name: "hero.ts" });
+    await expect(hero.locator(".code-gutter .marked")).toHaveText("40");
+    // Ctrl+L in the file tab: go to line.
+    await hero.locator(".code-view").click();
+    await page.keyboard.press("Control+l");
+    await expect(search.getByRole("textbox", { name: "File name" })).toHaveValue(":");
+    await page.keyboard.type("5");
+    await expect(search.getByRole("option")).toHaveText("Go to line 5");
+    await page.keyboard.press("Enter");
+    await expect(hero.locator(".code-gutter .marked")).toHaveText("5");
+    await shoot("2-go-to-line.png");
+    expect(received(home).filter((message) => message.method === "fuzzyFileSearch").length).toBeGreaterThan(0);
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});

@@ -51,7 +51,7 @@ Until 2026-10-07 it was a Tauri shell on the system's WebKitGTK, and typing into
 
 ## Phase 3 (DESKTOP_PARITY §4.3)
 
-- **The tab area** (`TabArea.tsx`, `tabs.ts`): Review and file tabs in one strip, every tab kept mounted (the ones behind hidden); Ctrl+W closes the tab in front and Ctrl+Shift+T reopens it. **File tabs and the file tree** (item 1, `FileTree.tsx`, `FileView.tsx`, `files.ts`): read only, through the server's `fs/readDirectory|readFile|watch|unwatch` (the policy refuses `fs/writeFile` and `fs/remove`); open folders and open files are followed with `fs/watch`; highlight.js core with twenty bundled languages; a file over 4 MB asks before it is read (`file/size`, a stat in the main process; a browser on `ling web` has no such guard).
+- **The tab area** (`TabArea.tsx`, `tabs.ts`): Review and file tabs in one strip, every tab kept mounted (the ones behind hidden); Ctrl+W closes the tab in front and Ctrl+Shift+T reopens it. **File tabs and the file tree** (item 1, `FileTree.tsx`, `FileView.tsx`, `files.ts`): read only, through the server's `fs/readDirectory|readFile|watch|unwatch` (the policy refuses `fs/writeFile` and `fs/remove`); open folders and open files are followed with `fs/watch`; highlight.js core with twenty bundled languages; a file over 4 MB asks before it is read (`file/size`, a stat in the main process; a browser on `ling web` has no such guard). **Search files and go to line** (item 2, `FileSearch.tsx`): Ctrl+P over the allowed v1 `fuzzyFileSearch` in the thread's folder, `name:line` opens at a line; Ctrl+L with a file tab in front is the same dialog started at `:`.
 
 ## Tests
 
