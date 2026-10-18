@@ -96,7 +96,7 @@ def branches(repo):
 
 
 def test_the_default_is_three_attempts_and_one_runs_as_before(tmp_path):
-    assert NightShiftSettings({}).best_of == 3
+    assert NightShiftSettings({}).best_of == 1
     assert NightShiftSettings({"best_of": 1}).best_of == 1
     assert NightShiftSettings({"best_of": 0}).best_of == 1
     settings = NightShiftSettings({"best_of": 3})

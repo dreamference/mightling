@@ -91,7 +91,7 @@ def git(cwd, *args):
 def setup(tmp_path, monkeypatch):
     """A repository with one commit, a queue directory and the fake `ling`."""
     monkeypatch.setattr(NightShiftTaskRun, "USE_SCOPE", False)
-    # These tests are about one attempt; best-of-N (3 by default) has its own, in
+    # These tests are about one attempt (the default, pinned here); best-of-N has its own, in
     # test_night_shift_best_of_n.py, with a stand-in judge.
     monkeypatch.setattr(night_shift_settings, "DEFAULT_BEST_OF", 1)
     repo = tmp_path / "repo"
