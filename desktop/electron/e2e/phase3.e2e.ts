@@ -4,7 +4,9 @@
 // pictures of each item there, the window shown; without it the window is hidden. Needs a display
 // and the Vite build (`npm run package` first).
 //   MIGHTLING_LOOK_DIR=~/.local/share/dreamference/desktop-phase3 npm run e2e -- phase3
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
@@ -45,7 +47,29 @@ async function open(prepare?: (home: string) => void): Promise<Session> {
     fs.mkdirSync(out, { recursive: true });
     await page.mouse.move(40, 840);
     await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(out, name) });
+    const file = path.join(out, name);
+    await page.screenshot({ path: file });
+    // A preview tab's page is a view of its own, which the page's screenshot does not hold: drawn in over it.
+    const views = await app.evaluate(async ({ BrowserWindow }) => {
+      const found: { x: number; y: number; png: string }[] = [];
+      for (const window of BrowserWindow.getAllWindows()) {
+        for (const child of window.contentView.children) {
+          const view = child as unknown as { getVisible(): boolean; getBounds(): { x: number; y: number }; webContents?: { capturePage(): Promise<{ toPNG(): Buffer }> } };
+          if (!view.webContents || !view.getVisible()) continue;
+          const image = await view.webContents.capturePage();
+          found.push({ ...view.getBounds(), png: image.toPNG().toString("base64") });
+        }
+      }
+      return found;
+    });
+    // The screenshot is in device pixels, the views' bounds in the window's (DIP).
+    const scale = await page.evaluate(() => devicePixelRatio);
+    views.forEach((view, index) => {
+      const part = `${file}.view${index}.png`;
+      fs.writeFileSync(part, Buffer.from(view.png, "base64"));
+      execFileSync("python3", ["-c", "import sys\nfrom PIL import Image\nbase=Image.open(sys.argv[1]); part=Image.open(sys.argv[2]); base.paste(part,(int(sys.argv[3]),int(sys.argv[4]))); base.save(sys.argv[1])", file, part, String(Math.round(view.x * scale)), String(Math.round(view.y * scale))]);
+      fs.rmSync(part);
+    });
   };
   return {
     app, page, home, shoot,
@@ -257,5 +281,88 @@ test("3 artifacts viewer: Markdown with its picture, HTML without scripts, a PDF
     expect(appServers(home)).toBe(1);
   } finally {
     await close();
+  }
+});
+
+/** A dev server on this machine: a page with a hero, a picture from the internet, a link out. */
+async function devServer(): Promise<{ url: string; hits: string[]; stop: () => Promise<void> }> {
+  const hits: string[] = [];
+  const server = http.createServer((request, response) => {
+    hits.push(request.url ?? "");
+    response.setHeader("content-type", "text/html");
+    response.end(`<!doctype html><title>Hero preview</title><body style="font:16px sans-serif;margin:24px">
+      <h1 id="hero" style="color:#0abab5">The hero, compressed</h1><p class="lede">Loads in 180 ms on a phone.</p>
+      <img src="https://example.com/remote.png" alt="remote"><a id="out" href="https://example.com/">Read more</a></body>`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  return { url: `127.0.0.1:${port}/`, hits, stop: () => new Promise((resolve) => server.close(() => resolve())) };
+}
+
+test("4 preview tab: a local page, comment mode to the composer, a site out on the internet asked and blocked", async () => {
+  const site = await devServer();
+  const { app, page, home, shoot, close } = await open(website);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    await page.keyboard.press("Control+t");
+    const address = page.getByRole("textbox", { name: "Address" });
+    await expect(address).toBeFocused();
+    await address.fill(site.url);
+    await address.press("Enter");
+    await expect(page.getByRole("tab", { name: /Hero preview/ })).toBeVisible({ timeout: 20_000 });
+    expect(site.hits).toContain("/");
+    // The page is a view of its own, not the app's page.
+    const previewed = await expect.poll(() => app.windows().find((entry) => entry.url().startsWith("http://127.0.0.1"))?.url() ?? "", { timeout: 10_000 }).toContain("127.0.0.1");
+    void previewed;
+    const view = app.windows().find((entry) => entry.url().startsWith("http://127.0.0.1"))!;
+    expect(await view.evaluate(() => typeof (window as unknown as { electronBridge?: unknown }).electronBridge)).toBe("undefined");
+    // The picture from the internet asked rather than loaded.
+    await expect(page.locator(".preview-ask")).toContainText("example.com");
+    await shoot("4-preview-ask.png");
+    await page.locator(".preview-ask").getByRole("button", { name: "Block" }).click();
+
+    // Comment mode: an element of the page, a comment, to the composer.
+    await page.getByRole("button", { name: "Comment on the page" }).click();
+    await expect(page.locator(".preview-note")).toBeVisible();
+    await view.locator("#hero").click();
+    const box = page.getByRole("textbox", { name: "Comment on the element" });
+    await expect(box).toBeVisible();
+    await expect(page.locator(".preview-comment .picked")).toContainText("h1#hero");
+    await box.fill("Make the heading one line on phones.");
+    await shoot("4-preview-comment.png");
+    await page.getByRole("button", { name: "Send to the composer" }).click();
+    await expect(page.locator(".composer textarea")).toHaveValue(/On the page http:\/\/127\.0\.0\.1:\d+\/, the element `h1#hero` \("The hero, compressed"\): Make the heading one line on phones\./);
+
+    // The link out is blocked now (the user's choice), and Settings › Browser shows the choice.
+    await view.locator("#out").click({ noWaitAfter: true });
+    await expect(page.locator(".preview-blocked")).toContainText("blocked in Settings");
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("button", { name: "Browser" }).click();
+    await expect(settings.getByRole("combobox", { name: "example.com: allow or block" })).toHaveValue("block");
+    await shoot("4-preview-settings.png");
+    await page.keyboard.press("Escape");
+
+    // Bigger text: the view still sits on the tab's body.
+    await page.locator(".preview-tools").click({ position: { x: 2, y: 2 } });
+    await page.keyboard.press("Control+=");
+    await page.waitForTimeout(500);
+    // The view sits exactly on the tab's body, in the window's pixels, at 110% text too.
+    const surface = await page.locator(".preview-surface").evaluate((element) => {
+      const zoom = (element as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom ?? 1;
+      const r = element.getBoundingClientRect();
+      return { zoom, x: Math.round(r.x * zoom), y: Math.round(r.y * zoom), width: Math.round(r.width * zoom) };
+    });
+    expect(surface.zoom).toBeCloseTo(1.1);
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().flatMap((w) => w.contentView.children.map((c) => (c as unknown as { getBounds(): { x: number; y: number; width: number } }).getBounds()))[0]))
+      .toMatchObject({ x: surface.x, y: surface.y, width: surface.width });
+    await shoot("4-preview-zoomed.png");
+    await page.keyboard.press("Control+0");
+    expect(site.hits.some((hit) => hit.includes("remote"))).toBe(false);
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+    await site.stop();
   }
 });

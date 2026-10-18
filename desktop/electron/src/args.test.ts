@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { auditSeconds, linkTarget, workTarget } from "./args";
+import { auditPreview, auditSeconds, linkTarget, workTarget } from "./args";
 
 const args = (text: string) => text.split(/\s+/).filter(Boolean);
 
@@ -39,5 +39,9 @@ describe("what ling app asks for", () => {
     expect(auditSeconds({})).toBeNull();
     expect(auditSeconds({ MIGHTLING_APP_AUDIT: "x" })).toBeNull();
     expect(auditSeconds({ MIGHTLING_APP_AUDIT: "45" })).toBe(45);
+    expect(auditPreview({ MIGHTLING_APP_AUDIT_PREVIEW: "http://127.0.0.1:4100/page" })).toBe("http://127.0.0.1:4100/page");
+    expect(auditPreview({ MIGHTLING_APP_AUDIT_PREVIEW: "https://example.com/" })).toBeNull();
+    expect(auditPreview({ MIGHTLING_APP_AUDIT_PREVIEW: "http://192.168.1.2/" })).toBeNull();
+    expect(auditPreview({})).toBeNull();
   });
 });

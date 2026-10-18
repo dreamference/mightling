@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 
 from dreamference.audit.egress_trace import EgressTrace
 from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED, EgressVerdict
+from dreamference.audit.preview_page import PreviewPage
 from dreamference.audit.strace_parser import StraceParser
 from dreamference.audit.tui_session import TuiSession
 
@@ -102,6 +103,8 @@ class EgressAudit:
     tui_stage: str = ""
     # What became of the last `web` session's image search turn, for the report.
     image_turn: str = ""
+    # The page an `app` session opens in a preview tab (preview_page.py), while it runs.
+    preview_url: Optional[str] = None
 
     @classmethod
     def allowed_ports(cls, vllm_host: str, session: str = EXEC) -> Dict[int, str]:
@@ -232,6 +235,9 @@ class EgressAudit:
             scratch_home = os.path.join(work_dir, "home-dir")
             os.makedirs(scratch_home)
             env.update({"HOME": scratch_home, "MIGHTLING_APP_AUDIT": str(APP_SESSION_S), "MIGHTLING_BIN": mightling_bin})
+            # The preview tab under audit (DESKTOP_PARITY §5): the audit's page, which reaches for the internet.
+            if cls.preview_url:
+                env["MIGHTLING_APP_AUDIT_PREVIEW"] = cls.preview_url
             command = strace[:-1] + [str(app_bin)]
         else:
             command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]
@@ -675,9 +681,20 @@ class EgressAudit:
         allowed = cls.allowed_ports(vllm_host, session)
         print(f"🚀 Tracing one {SESSION_NAMES[session]} against {vllm_host} (throwaway repository and CODEX_HOME)...")
         work_dir = tempfile.mkdtemp(prefix="mightling-audit-")
+        page = PreviewPage() if app else None
         try:
+            if page:
+                # The app session also opens the audit's page in a preview tab; only that page's port is added.
+                page.start()
+                cls.preview_url = page.url
+                allowed = {**allowed, page.port: "the audit's preview page"}
             trace, replied, _ = cls.trace_session(mightling_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session, app_bin)
             verdict = cls.judge(trace, allowed, replied)
+            if page and verdict.status == PASS and not page.loaded():
+                verdict = EgressVerdict(TRACE_FAILED, ["the preview tab never loaded the audit's page, so its rules were not exercised"])
+            if page:
+                print(f"ℹ️  Preview tab: the audit's page {'loaded and ran' if page.loaded() else 'did not load'}; "
+                      "it reached for example.com, .org and .net by picture, script, stylesheet, fetch, prefetch hints and a link")
             for line in cls.render(trace, verdict, allowed):
                 print(line)
             for exception in cls.declared_exceptions():
@@ -693,6 +710,9 @@ class EgressAudit:
             if write_json:
                 print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(mightling_bin), session)}")
         finally:
+            if page:
+                page.stop()
+                cls.preview_url = None
             shutil.rmtree(work_dir, ignore_errors=True)
         return verdict.exit_code
 

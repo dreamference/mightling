@@ -60,6 +60,22 @@ export function linkTarget(link: string): WorkTarget {
   }
 }
 
+/**
+ * The page the audit's session opens in a preview tab (`MIGHTLING_APP_AUDIT_PREVIEW`, DESKTOP_PARITY
+ * §5): an http URL on loopback only, the audit's own page, which reaches for the internet so the
+ * trace shows the preview's rules hold. Null otherwise.
+ */
+export function auditPreview(env: NodeJS.ProcessEnv = process.env): string | null {
+  const value = env.MIGHTLING_APP_AUDIT_PREVIEW;
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost") ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether this process was asked to run the audit's session (`MIGHTLING_APP_AUDIT=<seconds>`): hidden windows, then quit. */
 export function auditSeconds(env: NodeJS.ProcessEnv = process.env): number | null {
   const value = Number(env.MIGHTLING_APP_AUDIT);

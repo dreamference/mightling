@@ -12,6 +12,10 @@ export const SWITCHES: ReadonlyArray<[string, string?]> = [
   // AimEnabled, AutofillServerCommunication and NetworkTimeServiceQuerying are the Codex app's
   // list; MediaRouter is Chromium's Cast discovery, which sends mDNS and SSDP on its own.
   ["disable-features", "AimEnabled,AutofillServerCommunication,NetworkTimeServiceQuerying,MediaRouter"],
+  // Blink resolves the names a page hints at (`<link rel="dns-prefetch">`) straight from the
+  // renderer's hint, past every request rule; the preview tab's audit page caught it (DESKTOP_PARITY
+  // §5, Phase 3 item 4). No page of the app's needs it.
+  ["blink-settings", "dnsPrefetchingEnabled=false"],
 ];
 
 export function applySwitches(): void {

@@ -17,6 +17,7 @@ describe("the switches that keep Chromium quiet", () => {
     }
     expect(SWITCHES.map(([name]) => name)).toContain("disable-background-networking");
     expect(SWITCHES.map(([name]) => name)).toContain("disable-component-update");
+    expect(SWITCHES).toContainEqual(["blink-settings", "dnsPrefetchingEnabled=false"]);
     // No GPU switch: Electron's defaults, as the Codex app runs.
     expect(SWITCHES.some(([name]) => /gpu|angle|gl/.test(name))).toBe(false);
   });

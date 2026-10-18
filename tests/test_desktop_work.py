@@ -70,6 +70,21 @@ def test_the_app_window_alone_has_ipc_and_only_for_itself():
     assert "contextBridge.exposeInMainWorld" in preload and "require(" not in preload.replace('require("electron")', "")
 
 
+
+def test_the_preview_tab_gets_nothing_of_the_app():
+    # The preview tab (DESKTOP_PARITY §2.9, Phase 3 item 4) shows pages that are not the app's: its
+    # view has no preload, the renderer's sandbox, no Node, a session of its own that grants no
+    # permission, and every request goes through the rules of preview-rules.ts before it connects.
+    preview = (SRC / "preview.ts").read_text(encoding="utf-8")
+    assert re.search(r"sandbox: true,\s*contextIsolation: true,\s*nodeIntegration: false,\s*webSecurity: true", preview)
+    assert "preload" not in preview.split("new WebContentsView(")[1].split("});")[0]
+    assert "setPermissionRequestHandler((_contents, _permission, callback) => callback(false))" in preview
+    assert "setPermissionCheckHandler(() => false)" in preview
+    assert 'webRequest.onBeforeRequest({ urls: ["<all_urls>"] }' in preview
+    assert 'return { action: "deny" };' in preview
+    rules = (SRC / "preview-rules.ts").read_text(encoding="utf-8")
+    assert 'if (airgapOn) return { verdict: "block"' in rules
+
 def test_work_loads_nothing_from_the_network():
     csp = app_config()["csp"]
     assert csp.startswith("default-src 'none'")
