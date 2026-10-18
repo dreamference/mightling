@@ -519,7 +519,8 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .tab-body[hidden] { display: none; }
 .tab-strip { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
-.tab { cursor: default; white-space: nowrap; }
+.tab { cursor: default; white-space: nowrap; flex: none; max-width: 180px; }
+.tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
 .review-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .review-tools { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px 14px; }
 .review-tools select { font-size: 12.5px; padding: 3px 6px; border-radius: var(--radius-sm); }
@@ -556,6 +557,23 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-property, .hljs-params { color: var(--syn-attr); }
 .hljs-deletion { color: var(--del-text); }
 .item.files .open-file { margin-left: 4px; padding: 0 4px; vertical-align: middle; }
+
+/* The artifacts viewer (Phase 3 item 3). */
+.artifact-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.artifact-mode { align-self: flex-start; margin: 0 14px 6px; }
+.artifact-note { margin: 0 14px 6px; font-size: 12.5px; color: var(--muted); }
+.document-artifact { flex: 1; min-height: 0; overflow: auto; border-top: 1px solid var(--line); }
+.document-host { display: block; }
+.image-artifact { flex: 1; min-height: 0; overflow: auto; border-top: 1px solid var(--line); padding: 16px; background: var(--panel); position: relative; cursor: zoom-in; }
+.image-artifact.fit { cursor: zoom-out; display: flex; align-items: center; justify-content: center; }
+.image-artifact.fit img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.image-artifact img { image-rendering: auto; box-shadow: var(--shadow); background: var(--raised); }
+.image-size { position: absolute; right: 12px; bottom: 8px; font-size: 12px; color: var(--muted); }
+.pdf-artifact { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.pdf-tools { display: flex; align-items: center; gap: 6px; padding: 4px 14px; font-size: 12.5px; color: var(--muted); }
+.pdf-scale { min-width: 40px; text-align: center; }
+.pdf-pages { flex: 1; overflow: auto; background: var(--panel); display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; }
+.pdf-page { background: #fff; box-shadow: var(--shadow); }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 

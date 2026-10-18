@@ -3,7 +3,7 @@
 // hidden). Every open tab stays mounted, the ones not in front hidden, so a review comment being
 // written or a file's scroll survives a switch.
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { Icon } from "./icons";
 import { tabLabel, type WorkspaceTab } from "./tabs";
@@ -24,20 +24,25 @@ export interface TabAreaProps {
 
 export function TabArea(props: TabAreaProps) {
   const front = props.tabs.find((tab) => tab.key === props.active) ?? props.tabs[0] ?? null;
+  const strip = useRef<HTMLSpanElement>(null);
+  // The tab in front stays in sight when the strip scrolls.
+  useEffect(() => {
+    strip.current?.querySelector(".tab.selected")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [front?.key, props.tabs.length]);
   return (
     <aside className={`review-pane tab-area${props.tree ? " with-tree" : ""}`} aria-label={front ? tabLabel(front) : "Files"}>
       <header className="review-bar">
         {props.onToggleTree ? (
           <button className={`icon bar-action${props.treeShown ? " active" : ""}`} aria-pressed={props.treeShown} aria-label="File tree" title="The file tree (Ctrl+Shift+E)" onClick={props.onToggleTree}><Icon name="folderTree" size={14} /></button>
         ) : null}
-        <span className="tab-strip" role="tablist" aria-label="Tabs">
+        <span className="tab-strip" role="tablist" aria-label="Tabs" ref={strip}>
           {props.tabs.map((tab) => {
             const label = tabLabel(tab);
             const selected = tab.key === front?.key;
             return (
               <span key={tab.key} className={`tab${selected ? " selected" : ""}`} role="tab" aria-selected={selected} title={tab.kind === "file" ? tab.path : label}
                 onClick={() => props.onSelect(tab.key)} onAuxClick={(event) => { if (event.button === 1) props.onClose(tab.key); }}>
-                <Icon name={tab.kind === "review" ? "fileDiff" : "file"} size={13} /> {label}
+                <Icon name={tab.kind === "review" ? "fileDiff" : "file"} size={13} /> <span className="tab-label">{label}</span>
                 <button className="icon" aria-label={`Close the ${label} tab`} title="Close (Ctrl+W)" onClick={(event) => { event.stopPropagation(); props.onClose(tab.key); }}><Icon name="x" size={12} /></button>
               </span>
             );

@@ -98,6 +98,7 @@ function General({ prefs, onChange }: SettingsProps) {
       <fieldset>
         <legend>While the agent works</legend>
         <label><input type="checkbox" checked={prefs.preventSleep} onChange={(event) => onChange({ preventSleep: event.target.checked })} /> Keep the machine from sleeping while a turn runs</label>
+        <label><input type="checkbox" checked={prefs.openArtifacts} onChange={(event) => onChange({ openArtifacts: event.target.checked })} /> Open a document, PDF or image the agent creates in a tab beside the thread</label>
       </fieldset>
       <fieldset>
         <legend>Text size</legend>
