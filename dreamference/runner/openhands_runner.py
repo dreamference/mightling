@@ -16,7 +16,7 @@ from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.openhands_installer import OpenHandsInstaller, OPENHANDS_IMAGE
 from dreamference.hardware import resolve_model_hf_repo
 
-# Where the OpenHands web UI is published on the host; Onyx's web UI already owns 3000.
+# Where the OpenHands web UI is published on the host: 3001, as since the retired Onyx web UI owned 3000.
 OPENHANDS_HOST_PORT: Final[int] = 3001
 
 class OpenHandsRunner:
@@ -69,10 +69,10 @@ class OpenHandsRunner:
         subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # From inside the container `localhost` is the container itself, so a loopback vLLM URL
-        # is rewritten to the Docker bridge gateway -- the same fix Onyx's provider needs.
-        from dreamference.chat.onyx_runner import OnyxRunner
+        # is rewritten to the Docker bridge gateway.
+        from dreamference.chat.docker_bridge import DockerBridge
 
-        api_base = OnyxRunner.resolve_container_vllm_url(self.config.vllm_host)
+        api_base = DockerBridge.container_vllm_url(self.config.vllm_host)
 
         cmd: List[str] = [
             "docker", "run", "--rm", "-it",
@@ -83,7 +83,7 @@ class OpenHandsRunner:
             "-e", f"WORKSPACE_BASE={cwd}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
             "-v", f"{cwd}:/opt/workspace_base",
-            # 3001, not 3000: Onyx's web UI owns 3000. And 127.0.0.1 only: this container mounts
+            # 3001, as it has been since Onyx owned 3000. And 127.0.0.1 only: this container mounts
             # the Docker socket, so its UI on the network would hand root on this host to anyone
             # who can reach it.
             "-p", f"127.0.0.1:{OPENHANDS_HOST_PORT}:3000",

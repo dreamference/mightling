@@ -220,7 +220,6 @@ class NodeProvisioner:
             self._step_advertise,
             self._step_models,
             self._step_assign,
-            self._step_web,
             self._step_pair,
         ]
         for step in steps:
@@ -436,23 +435,6 @@ class NodeProvisioner:
         self.results[host]["model"] = self.model
         return True
 
-    def _step_web(self, host: str, session: FleetSession) -> bool:
-        if not self.options.get("web"):
-            return True
-        # The web chat is `ling-admin chat` (it was `puffin-admin puffin`); the rename once
-        # turned these into `ling-admin ling …`, a subcommand that never existed.
-        for arguments in (["chat", "start"], ["chat", "configure"]):
-            answer = session.run_admin(arguments, docker=True, timeout=60 * 60)
-            if answer.returncode != 0:
-                return self._fail(
-                    host,
-                    "the web UI",
-                    answer.stdout.strip()[-200:],
-                    f"ssh {self.user}@{host} ling-admin chat start",
-                )
-        self._done(host, "web UI installed")
-        return True
-
     def _step_pair(self, host: str, session: FleetSession) -> bool:
         node_id = self._state(host).get("node_id", "")
         record = NodePairing.find(node_id, browse=False) if node_id else None
@@ -600,7 +582,7 @@ class NodeProvisioner:
         if not FleetProbe.prepared(state):
             changes.append("sudo ling-admin node prepare")
         if self.options.get("web"):
-            changes.append("node enable, chat start, chat configure (the web UI)")
+            changes.append("node enable (ling web on the LAN)")
         elif state.get("advertised") != "1":
             changes.append("node enable --no-web")
         for folder in FleetProbe.missing_models(state, self.plan["folders"]):

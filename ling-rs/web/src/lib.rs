@@ -5,8 +5,9 @@
 //! (`policy.json`, shared with the desktop app and held to the cases in `vectors/`). Every request
 //! needs a credential, loopback included, and nothing a sandboxed command can read is one; the LAN
 //! is served only on an advertised node. It calls
-//! nothing on any network: its one outbound connection is the app-server's socket, and the only
-//! processes it starts are `ling app-server` and `ling prompt show --composed`.
+//! nothing on any network: its outbound connections are the app-server's socket and, for the
+//! microphone, the speech-to-text service on loopback (sidecars.rs); the only processes it starts
+//! are `ling app-server` and `ling prompt show --composed`.
 
 pub mod app_server;
 pub mod ask;
@@ -20,6 +21,7 @@ pub mod prompts;
 pub mod qr;
 pub mod relay;
 pub mod server;
+pub mod sidecars;
 
 pub use cli::Environment;
 pub use cli::run_cli;

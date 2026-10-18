@@ -47,7 +47,7 @@ nav:
   - Get started: getting-started.md
   - Use Mightling:
       - Terminal agent: ling.md
-      - Web chat: web-chat.md
+      - Web UI: web.md
       - Desktop app: desktop.md
       - Phone messengers: messengers.md
   - Reference:

@@ -182,7 +182,7 @@ ling-admin node provision spark-1a2b --model qwen3.5-122b-a10b-hybrid-dflash --w
 | `--from this\|release[=X.Y.Z]` | What to install (§7.2). Default: `this` |
 | `--per-host-password` | With several hosts: ask for each machine's password separately. **Default is one password**, asked once and used for every machine's login and `sudo` (§8.2; decided 2026-10-03) |
 | `--mesh` | Also pair every provisioned node with every other, so any of them can manage the fleet. Off by default: only this machine pairs with each node (§9.3; decided 2026-10-03) |
-| `--web` | Also install and configure the web UI there (`ling-admin chat start` and `configure`). Off by default |
+| `--web` | Also share the web UI there: `node enable` without `--no-web`, which puts `ling web` on the LAN (until 1.7.0 it meant installing Onyx, `chat start` and `configure`). Off by default |
 | `--no-start` | Leave the model server stopped |
 | `--restart` | Restart a running model server whose image or model has changed. Without it, the summary says a restart is pending |
 | `--os-update` | NVIDIA's documented update before everything else, with a reboot (§10.3). Off by default |

@@ -14,8 +14,8 @@
 
 - **`ling`:** the terminal coding agent, and the default. It is a Mightling-branded build of Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`ling-rs/`).
 - **`ling web`:** Mightling's own web UI (`ling-rs/web/`, the page in `desktop/ui/`), served on port 3100. **Ask** threads are `ling` sessions under a bridge policy (the `ask` prompt, a scratch folder, uploads); **Work** drives `ling app-server`. A credential is checked on every request, and phones and other devices are paired. See `DREAMFERENCE_MIGHTLING_ASK.md`.
-- **The desktop app `ling-app`:** an Electron app (`desktop/electron/`) with `ling` bundled inside: its Chat entry opens Ask on `ling web`, its Work window drives `ling app-server` over stdio. A `.deb` for Linux; a Mac `.dmg` as an unsigned preview. See `DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md`.
-- **Onyx Lite**, the earlier web chat, deployed and patched by `ling-admin chat …`, with web search, image search, voice and Gmail. It stays until `ling web` matches it, then is retired (MIGHTLING_ASK §10, Phase C).
+- **The desktop app `ling-app`:** an Electron app (`desktop/electron/`) with `ling` bundled inside: one window showing Ask and Work on its own `ling app-server` over stdio (MIGHTLING_ASK §18.6). A `.deb` for Linux; a Mac `.dmg` as an unsigned preview. See `DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md`.
+- **Onyx Lite**, the earlier web chat, is retired (MIGHTLING_ASK §10, Phase C; §19 there). Its jobs moved: web search to `ling-search --read`, Gmail, Drive and Calendar to `/apps`, image search to the `image_search` tool (`ling-admin images start`), voice to `ling web` and the app (`ling-admin voice start`). `ling-admin chat remove` removes what an older install left.
 - **Messengers, off by default:** Signal (`ling signal`, linked to the owner's account, answering in Note to Self) and Matrix or Telegram (`ling chat`, with the homeserver from `ling-admin matrix`). Each is a paired client of `ling web`, so every message becomes an Ask thread. See `DREAMFERENCE_MIGHTLING_SIGNAL.md` and `DREAMFERENCE_MIGHTLING_CHAT.md`.
 - **Other agents:** Cline, Continue and OpenHands, through `ling-admin run --agent …`.
 
@@ -29,7 +29,7 @@ Since 2026-10-02 the GB10 can also be offered to the local network as a **node**
 +------------------------------------------------------------------------------------+
 |  Front ends                                                                        |
 |   ling (Rust, Codex fork)   ling web :3100 (Ask, Work) / ling-app (Electron)       |
-|   Onyx Lite (until retired)   IDEs (MCP)   ling signal / ling chat (off by default)|
+|   IDEs (MCP)   ling signal / ling chat (off by default)   (Onyx Lite: retired 1.7.0)|
 |   ling-admin run --agent cline|continue|openhands                                  |
 +-----------------------+--------------------------------+---------------------------+
                         | Standard /v1 HTTP              | stdio MCP (ling-admin mcp)
@@ -43,7 +43,6 @@ Since 2026-10-02 the GB10 can also be offered to the local network as a **node**
 +-----------------------v------------------------------------------------------------+
 |  Containers on the GB10                                                            |
 |   dreamference-vllm-8000 (the model: SGLang)   (diffusion sidecar: switched off)   |
-|   Onyx (api_server, web_server, relational_db, nginx, code-interpreter)            |
 |   dreamference-gmail, -searxng, -image-search, -stt; dreamference-matrix (off)     |
 +------------------------------------------------------------------------------------+
 |  NVIDIA GB10 — Blackwell GPU + Arm CPU sharing 128 GB unified memory               |
@@ -102,17 +101,17 @@ Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
 
 Four runner/installer pairs (Codex, Cline, Continue, OpenHands; Goose and Aider were removed on 2026-09-30) plus `vllm_readiness_waiter.py` and `docs_index_setup.py` (`ling-admin docs setup`, the models `ling-docs` loads). For Codex, the default, `codex_branded_builder.py` builds `ling` from the submodule, patches and launcher, and `codex_test_runner.py` runs Codex's own tests on that tree (`ling-admin codex test`). See `DREAMFERENCE_AGENTS.md` and `DREAMFERENCE_MIGHTLING_CODEX.md`.
 
-### 3.5. `chat/`: the web chat, its services and the desktop app
+### 3.5. `chat/`: the sidecars, the desktop app and what the web chat left
 
-- `onyx_runner.py` / `onyx_installer.py`: the Onyx Lite lifecycle and `configure`: LLM provider, branding, web search, voice, Gmail, image search; `chat_admin_credentials.py`: its per-install administrator password.
-- `onyx_ui_overrides.py`, `onyx_ui_fonts.py`, `onyx_ui_labels.py`, `onyx_ui_scripts.py`, `onyx_brand_assets.py`: patches applied to Onyx's served CSS, JS and assets.
+- `retired_web_chat.py`: `ling-admin chat remove|status` and the one-time offer to an install that still has the retired Onyx web chat (MIGHTLING_ASK §19.4); the Onyx modules and their UI patches were deleted with it.
+- `docker_bridge.py`: the loopback-to-bridge rewrite a container needs to reach the model server (OpenHands).
 - `gmail_search_service.py`, `google_workspace_reader.py`, `gmail_credentials.py`, `gmail_client.py`: the Google service (read-only Gmail, Drive and Calendar) and the Gmail client; `google_service.py` starts that service without Onyx (`ling-admin google start|stop|status`).
-- `image_search_service.py`: the image search sidecar.
+- `image_search_service.py`, `image_search_sidecar.py`, `image_search_mcp.py`: the image search sidecar, `ling-admin images start|stop|status`, and the `image_search` MCP tool (`images mcp`); `speech_sidecar.py`: speech-to-text, `ling-admin voice`.
 - `searxng_sidecar.py`, `sidecar_network.py`: the SearXNG container (`ling-admin searxng start`) and the user-defined network the sidecars are created on.
 - `matrix_homeserver.py`: the private Matrix homeserver behind `ling chat` (`ling-admin matrix`), off by default.
 - `desktop_runner.py` / `desktop_installer.py` / `desktop_protocol_types.py`: building and running the Electron app `ling-app` (project in `desktop/electron/`, UI in `desktop/ui/`) and the app-server's TypeScript types for Work.
 
-See `DREAMFERENCE_ONYX.md`, `DREAMFERENCE_MIGHTLING_GMAIL.md`, `DREAMFERENCE_MIGHTLING_APPS.md`, `DREAMFERENCE_IMAGE_SEARCH.md` and `DREAMFERENCE_MIGHTLING_CHAT.md`.
+See `DREAMFERENCE_MIGHTLING_ASK.md` §19, `DREAMFERENCE_ONYX.md` (history), `DREAMFERENCE_MIGHTLING_GMAIL.md`, `DREAMFERENCE_MIGHTLING_APPS.md`, `DREAMFERENCE_IMAGE_SEARCH.md` and `DREAMFERENCE_MIGHTLING_CHAT.md`.
 
 ### 3.6. `context_engine/`: workspace index
 
@@ -178,7 +177,8 @@ A stdio MCP server (`ling-admin mcp`) with `ide_*` tools over an in-process `IDE
 - [x] Puffin renamed Mightling (`ling`, `ling-admin`, `~/.mightling`) with a one-time migration; signed releases (Ed25519 over `SHA256SUMS`); the desktop app rebuilt on Electron; refine mode (off by default); clients for x86-64 Linux, macOS and Windows (preview), 2026-10-07 and 2026-10-08 (release 1.5.1)
 - [x] `node provision` / `node prepare` (FLEET Phases 1–3, tested offline; not yet run against a second machine) and the unattended node install (`install.sh`: one sudo prompt at most, host setup, `node enable`, model download and server start), 1.5.1
 - [x] `ling web` with Ask threads, the bridge policy and the browser view; `ling-docs` Phase 1; Signal and Matrix/Telegram bridges, off by default (on `main` for 1.6.0)
-- [ ] Onyx retired (MIGHTLING_ASK Phase C), messengers tried against real services, the Windows client run on Windows hardware
+- [x] Onyx retired (MIGHTLING_ASK Phase C, §19): its code deleted, image search and voice moved to `ling web` and the app, `ling-admin chat remove` for existing installs (branch `chat/onyx-phase-c`, merged after 1.6.0; ships in 1.7.0)
+- [ ] Messengers tried against real services, the Windows client run on Windows hardware
 - [ ] Proposed specs are marked *Proposed* in `specs/README.md`
 
 ---
@@ -189,7 +189,7 @@ A stdio MCP server (`ling-admin mcp`) with `ide_*` tools over an in-process `IDE
 - **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM launch recipes and flags
 - **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent runtimes
 - **[DREAMFERENCE_MIGHTLING_CODEX.md](./DREAMFERENCE_MIGHTLING_CODEX.md):** the `ling` binary
-- **[DREAMFERENCE_ONYX.md](./DREAMFERENCE_ONYX.md):** the Mightling web UI
+- **[DREAMFERENCE_ONYX.md](./DREAMFERENCE_ONYX.md):** the Onyx web UI, retired in 1.7.0 (history); the web UI is `ling web` ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md))
 - **[DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md):** context engine
 - **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md):** Docker and caches
 - **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md):** CLI reference

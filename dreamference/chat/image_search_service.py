@@ -7,8 +7,8 @@ embed them inline. One ``POST /search`` call runs the whole funnel -- SearXNG's 
 with a wide candidate pool, in-memory thumbnail fetches behind a hardened SSRF guard, a SigLIP
 pre-filter over the thumbnails, perceptual-hash collapse of visual near-duplicates, a vision
 re-rank by the served multimodal model with the full downloads already prefetching
-speculatively, and finally persistence of the winners into a local store that the deployment's
-nginx serves back at ``/puffin-images/{file_id}.jpg``. Caching locally is the point: hotlinked
+speculatively, and finally persistence of the winners into a local store that ``ling web`` and the
+desktop app serve back at ``/images/{file_id}.jpg`` (specs/DREAMFERENCE_MIGHTLING_ASK.md §6). Caching locally is the point: hotlinked
 images die of CORP blocks and link rot; cached ones render forever.
 
 **Deviation from the spec, stated loudly:** the spec names FastAPI. This service is standard
@@ -509,7 +509,7 @@ class ImageStore:
 
 
 class SearxngClient:
-    """Queries the deployment's SearXNG for image results."""
+    """Queries SearXNG on the sidecar network for image results."""
 
     def __init__(self, base_url: str):
         """
@@ -718,7 +718,7 @@ class ImageSearchService:
                 ``1..MAX_RESULT_COUNT`` and satisfied unless fewer relevant images exist.
 
         Returns:
-            Dict[str, str]: The custom-tool response: markdown embeds plus instructions.
+            Dict[str, str]: The tool response (`image_search_mcp.py`): markdown embeds plus instructions.
         """
         count = max(1, min(int(count or RESULT_COUNT), MAX_RESULT_COUNT))
         candidates = self._gather(queries)
@@ -745,7 +745,7 @@ class ImageSearchService:
                 "response": "No embeddable images were found for this search.",
                 "instructions": "Tell the user the image search came up empty.",
             }
-        lines = [f"![{w['title']}](/puffin-images/{w['file_id']}.jpg)" for w in winners]
+        lines = [f"![{w['title']}](/images/{w['file_id']}.jpg)" for w in winners]
         markdown = "\n\n".join(lines)
         # The instructions restate the embeds because models given only a pointer ("embed the
         # above") have answered `Done` and shown nothing -- the images render only if the model
@@ -986,66 +986,6 @@ class ImageSearchService:
             kept.append((cand, thumb))
             hashes.append(candidate_hash)
         return kept
-
-
-def openapi_definition(base_url: str) -> Dict[str, Any]:
-    """
-    Builds the OpenAPI document Onyx's custom-tool API consumes.
-
-    One operation only: searching. Serving the images is nginx's job, not the model's.
-
-    Args:
-        base_url (str): The sidecar's base URL as Onyx's API server reaches it.
-
-    Returns:
-        Dict[str, Any]: An OpenAPI 3 document.
-    """
-    return {
-        "openapi": "3.0.0",
-        "info": {
-            "title": "Image Search",
-            "version": "1.0.0",
-            "description": "Searches the web for images and returns Markdown embeds.",
-        },
-        "servers": [{"url": base_url}],
-        "paths": {
-            "/search": {
-                "post": {
-                    "operationId": "image_search",
-                    "summary": (
-                        "Search the web for images and display them inline in the chat. Use "
-                        "whenever the user asks for a picture, photo, or image of anything. "
-                        "Returns Markdown image embeds; place them in the reply verbatim."
-                    ),
-                    "requestBody": {
-                        "required": True,
-                        "content": {"application/json": {"schema": {
-                            "type": "object",
-                            "properties": {
-                                "queries": {
-                                    "type": "array", "items": {"type": "string"},
-                                    "description": "One or more image search queries.",
-                                },
-                                "count": {
-                                    "type": "integer",
-                                    "description": (
-                                        "How many images the user asked for (e.g. 'give me "
-                                        "10 images of X' -> 10). Omit when the user named no "
-                                        "number; the default is 4, the maximum 10."
-                                    ),
-                                },
-                            },
-                            "required": ["queries"],
-                        }}},
-                    },
-                    "responses": {"200": {
-                        "description": "Markdown image embeds.",
-                        "content": {"application/json": {"schema": {"type": "object"}}},
-                    }},
-                }
-            }
-        },
-    }
 
 
 def build_service() -> ImageSearchService:
