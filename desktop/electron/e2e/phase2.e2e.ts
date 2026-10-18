@@ -256,9 +256,10 @@ test("7 worktrees: a new thread in a worktree with setup, Create branch here, ha
     expect(fs.readFileSync(path.join(root, "fetcher", "client.py"), "utf8")).toContain("# retries counted");
     expect(gitIn(checkout, "status", "--porcelain")).toBe("");
 
-    // An action of the environment runs in the bottom panel, in the folder the thread now works in.
+    // An action of the environment runs in a terminal tab (item 8), in the folder the thread now works in.
     await panel.getByRole("button", { name: "Tests" }).click();
-    await expect(panel.locator(".panel-output")).toContainText("ran the tests");
+    await expect(panel.locator(".xterm-rows").filter({ hasText: "ran the tests" })).toHaveCount(1);
+    await expect.poll(() => received(home).filter((m) => m.method === "command/exec").pop()?.params?.cwd).toBe(root);
     await shoot("7-handed-off-local.png");
 
     // The environment editor writes .mightling/ only.
@@ -504,7 +505,7 @@ test("10 settings: Profile, Notifications, Appearance, Personalization, Archived
     const prefsFile = path.join(home, ".local", "share", "dev.dreamference.mightling", "prefs.json");
     await expect.poll(() => JSON.parse(fs.readFileSync(prefsFile, "utf8")).branchPrefix).toBe("dgx/");
     expect(JSON.parse(fs.readFileSync(prefsFile, "utf8")).notifyTurns).toBe("never");
-    await go("Project");
+    await go("Project and terminal");
     await expect(settings.getByRole("combobox", { name: "Editor" })).toBeVisible();
   } finally {
     await close();
@@ -639,6 +640,137 @@ test("14 notifications and sleep: a finished turn notifies as Settings say, a cl
     await page.locator(".thread", { hasText: "debug level" }).click();
     await app.evaluate(() => (globalThis as unknown as { last: Electron.Notification }).last.emit("click"));
     await expect.poll(() => received(home).filter((m) => m.method === "thread/resume").map((m) => m.params?.threadId).pop()).toMatch(/^n\d+$/);
+  } finally {
+    await close();
+  }
+});
+
+test("11 plugins and hooks: a skill turned off, a plugin installed from a local marketplace, MCP servers read again, the hooks", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.getByRole("button", { name: "Skills and tools" }).click();
+    const view = page.getByRole("dialog", { name: "Skills and tools" });
+    await view.locator("tr", { hasText: "$pdf-search" }).getByRole("button", { name: "Turn off" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "skills/config/write")?.params).toEqual({ path: "/skills/pdf-search/SKILL.md", enabled: false });
+    await view.getByRole("button", { name: "Plugins" }).click();
+    await view.getByRole("button", { name: "Install" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "plugin/install")?.params).toEqual({ marketplacePath: "/srv/team/marketplace.json", pluginName: "lint" });
+    await shoot("11-plugins.png");
+    await view.getByRole("button", { name: "MCP servers" }).click();
+    await view.getByRole("button", { name: "Read the servers again" }).click();
+    await expect.poll(() => received(home).some((m) => m.method === "config/mcpServer/reload")).toBe(true);
+    await view.getByRole("button", { name: "Hooks" }).click();
+    await expect(view).toContainText("ling ledger");
+    await shoot("11-hooks.png");
+  } finally {
+    await close();
+  }
+});
+
+test("13 memories held half: /memories per thread, the status, Delete", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("/memories off");
+    await page.keyboard.press("Escape");
+    await composer.press("Enter");
+    await expect.poll(() => received(home).find((m) => m.method === "thread/memoryMode/set")?.params).toEqual({ threadId: "w3", mode: "disabled" });
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: "Memories" }).click();
+    await expect(settings).toContainText("7 threads remembered");
+    await shoot("13-memories-status.png");
+    page.once("dialog", (dialog) => void dialog.accept());
+    await settings.getByRole("button", { name: "Delete the memories" }).click();
+    await expect.poll(() => received(home).some((m) => m.method === "memory/reset")).toBe(true);
+  } finally {
+    await close();
+  }
+});
+
+test("5 goal: /goal sets the thread's goal, the row pauses, resumes and clears it", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("/goal The hero image is served in three sizes and the page test passes");
+    await page.keyboard.press("Escape");
+    await composer.press("Enter");
+    const row = page.getByLabel("Goal", { exact: true });
+    await expect(row).toContainText("The hero image is served in three sizes");
+    await expect(row).toContainText("working on it");
+    await row.getByRole("button", { name: "Pause" }).click();
+    await expect(row).toContainText("paused");
+    await shoot("5-goal-row.png");
+    expect(received(home).filter((m) => m.method === "thread/goal/set").map((m) => m.params?.status)).toEqual(["active", "paused"]);
+    await row.getByRole("button", { name: "Resume" }).click();
+    await expect(row).toContainText("working on it");
+    await row.getByRole("button", { name: "Clear the goal" }).click();
+    await expect(page.getByLabel("Goal", { exact: true })).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});
+
+test("6 /review: the server reviews the uncommitted changes and the findings show in the thread", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("/review");
+    await composer.press("Enter");
+    await expect.poll(() => received(home).find((m) => m.method === "review/start")?.params).toEqual({ threadId: "w1", target: { type: "uncommittedChanges" }, delivery: "inline" });
+    await expect(page.locator(".review-result")).toContainText("One finding.");
+    await shoot("6-review-command.png");
+  } finally {
+    await close();
+  }
+});
+
+test("8 terminal: a tab in the thread's folder under its permissions, typing, an action in its own tab, Send to the thread, Close", async () => {
+  const { page, home, shoot, close } = await open();
+  const root = scratchRepo(home);
+  fs.mkdirSync(path.join(root, ".mightling", "environments"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".mightling", "environments", "default.toml"), 'name = "Fetcher"\n[[actions]]\nname = "Tests"\nicon = "test"\nscript = "echo ran the tests"\n');
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.keyboard.press("Control+`");
+    const panel = page.getByRole("region", { name: "Bottom panel" });
+    await expect(panel.locator(".xterm-rows")).toContainText("stand-in shell in");
+    const exec = received(home).find((m) => m.method === "command/exec");
+    expect(exec?.params).toMatchObject({ tty: true, cwd: projectFolders(home).fetcher, permissionProfile: ":workspace", disableTimeout: true });
+    await page.keyboard.type("echo hello from the tab");
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".xterm-rows")).toContainText("hello from the tab");
+    expect(received(home).some((m) => m.method === "command/exec/write")).toBe(true);
+    await shoot("8-terminal-tab.png");
+
+    // An environment action runs in a terminal tab of its own.
+    await panel.getByRole("button", { name: "Tests" }).click();
+    await expect(panel.getByRole("tab", { name: "Tests" })).toBeVisible();
+    await expect(panel.locator(".xterm-rows").filter({ hasText: "ran the tests" })).toHaveCount(1);
+    await shoot("8-terminal-action.png");
+
+    // Send to the thread puts the first tab's output in the composer.
+    await panel.getByRole("tab", { name: "Terminal" }).click();
+    await panel.getByRole("button", { name: "Send to the thread" }).click();
+    await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(/Here is what my terminal in .* shows:[\s\S]*hello from the tab/);
+
+    // Close terminates the shell.
+    await panel.getByRole("button", { name: "Close Terminal" }).click();
+    await expect.poll(() => received(home).some((m) => m.method === "command/exec/terminate")).toBe(true);
+    expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
   } finally {
     await close();
   }

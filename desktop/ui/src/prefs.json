@@ -125,6 +125,26 @@
       "default": null,
       "type": "string",
       "nullable": true
+    },
+    "reviewDelivery": {
+      "default": "inline",
+      "enum": [
+        "inline",
+        "detached"
+      ]
+    },
+    "terminalShell": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
+    "commandOutput": {
+      "default": "running",
+      "enum": [
+        "running",
+        "collapsed",
+        "hidden"
+      ]
     }
   }
 }

@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  PromptHistory, activeTrigger, collaborationMode, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
+  PromptHistory, reviewTarget, activeTrigger, collaborationMode, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
   lastUserTurn, matchCommands, matchSkills, mentionPath, parseSlash, rememberModel, userTexts,
 } from "./composer";
 import { DEFAULT_PREFS, cleanAppearance, sanitize } from "./prefs";
@@ -15,6 +15,7 @@ import type { Model } from "./protocol/v2/Model";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
 import { initialState, reduce, type ThreadView } from "./store";
+import { goalTime } from "./GoalRow";
 import { forkThread, listQueue, sendMessage, steerQueued, takeBack } from "./turns";
 
 const text = (value: string) => ({ type: "text" as const, text: value, text_elements: [] });
@@ -207,5 +208,27 @@ describe("Settings › Appearance", () => {
     expect(cleanAppearance({ accent: "#0abab5", canvas: "red", text: "#123", fontUi: "Inter, sans-serif", fontCode: "x; } body { display: none" }))
       .toEqual({ accent: "#0abab5", text: "#123", fontUi: "Inter, sans-serif" });
     expect(cleanAppearance(null)).toEqual({});
+  });
+});
+
+describe("the goal row", () => {
+  it("follows the server's goal notifications, and reads its time", () => {
+    const goal = { threadId: "t", objective: "Every test passes", status: "active", tokenBudget: null, tokensUsed: 1200, timeUsedSeconds: 75, createdAt: 1, updatedAt: 2 };
+    let state = reduce(initialState, { type: "notification", notification: { method: "thread/goal/updated", params: { threadId: "t", turnId: null, goal } } as unknown as ServerNotification });
+    expect(state.goals.t?.objective).toBe("Every test passes");
+    state = reduce(state, { type: "notification", notification: { method: "thread/goal/cleared", params: { threadId: "t" } } as unknown as ServerNotification });
+    expect(state.goals.t).toBeNull();
+    expect([goalTime(42), goalTime(75), goalTime(3725)]).toEqual(["42s", "1m", "1h 2m"]);
+    expect(parseSlash("/goal every test passes")).toMatchObject({ command: { name: "goal" }, args: "every test passes" });
+  });
+});
+
+describe("/review", () => {
+  it("names uncommitted changes, a base branch, a commit, or instructions of its own", () => {
+    expect(reviewTarget("")).toEqual({ type: "uncommittedChanges" });
+    expect(reviewTarget("base main")).toEqual({ type: "baseBranch", branch: "main" });
+    expect(reviewTarget("commit 1a2b3c4")).toEqual({ type: "commit", sha: "1a2b3c4", title: null });
+    expect(reviewTarget("check the retry loop for races")).toEqual({ type: "custom", instructions: "check the retry loop for races" });
+    expect(parseSlash("/review base main")).toMatchObject({ command: { name: "review" }, args: "base main" });
   });
 });

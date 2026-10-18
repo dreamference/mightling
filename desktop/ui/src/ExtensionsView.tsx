@@ -1,17 +1,21 @@
-// Skills, MCP servers and apps (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §2.11): what a thread
-// can use, read from the server (`skills/list`, `mcpServerStatus/list`, `app/list`), with the changes
-// the policy already allows written to config.toml through the server (`config/value/write`): an MCP
-// server added, turned off or on, an app turned off or on. Turning a skill off, plugins, reloading MCP
-// servers and the hooks list need methods that wait for policy.json (tests/test_desktop_parity.py).
+// Skills, plugins, MCP servers, apps and hooks (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md
+// §2.11): what a thread can use, read from the server (`skills/list`, `plugin/list`,
+// `mcpServerStatus/list`, `app/list`, `hooks/list`), changed through the server: a skill turned
+// off or on (`skills/config/write`), a plugin of a local or repository marketplace installed or
+// removed (`plugin/install`, `plugin/uninstall`; the vendor's catalogue stays closed, patch 0015),
+// an MCP server added, turned off or on and the servers read again (`config/value/write`,
+// `config/mcpServer/reload`), an app turned off or on.
 
 import { useCallback, useEffect, useState } from "react";
 
 import { Icon } from "./icons";
 import type { RpcClient } from "./rpc";
 import type { AppInfo } from "./protocol/v2/AppInfo";
+import type { HooksListEntry } from "./protocol/v2/HooksListEntry";
+import type { PluginMarketplaceEntry } from "./protocol/v2/PluginMarketplaceEntry";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 
-export type ExtensionsTab = "skills" | "mcp" | "apps";
+export type ExtensionsTab = "skills" | "plugins" | "mcp" | "apps" | "hooks";
 
 interface McpServer {
   name: string;
@@ -44,6 +48,8 @@ export function ExtensionsView(props: { client: RpcClient; cwd: string | null; t
   const [skills, setSkills] = useState<SkillMetadata[] | null>(null);
   const [servers, setServers] = useState<McpServer[] | null>(null);
   const [apps, setApps] = useState<AppInfo[] | null>(null);
+  const [marketplaces, setMarketplaces] = useState<PluginMarketplaceEntry[] | null>(null);
+  const [hooks, setHooks] = useState<HooksListEntry[] | null>(null);
   const [adding, setAdding] = useState<{ name: string; kind: "command" | "url"; target: string; args: string } | null>(null);
   const [changed, setChanged] = useState(false);
 
@@ -53,8 +59,21 @@ export function ExtensionsView(props: { client: RpcClient; cwd: string | null; t
       .catch(() => setSkills([]));
     client.request("mcpServerStatus/list", {}).then((answer) => setServers((answer as { data?: McpServer[] }).data ?? [])).catch(() => setServers([]));
     client.request("app/list", {}).then((answer) => setApps((answer as { data?: AppInfo[] }).data ?? [])).catch(() => setApps([]));
+    client.request("plugin/list", cwd ? { cwds: [cwd] } : {}).then((answer) => setMarketplaces((answer as { marketplaces?: PluginMarketplaceEntry[] }).marketplaces ?? [])).catch(() => setMarketplaces([]));
+    client.request("hooks/list", cwd ? { cwds: [cwd] } : {}).then((answer) => setHooks((answer as { data?: HooksListEntry[] }).data ?? [])).catch(() => setHooks([]));
   }, [client, cwd]);
   useEffect(load, [load]);
+
+  /** A change through the server, then everything read again. */
+  const act = async (method: "skills/config/write" | "plugin/install" | "plugin/uninstall" | "config/mcpServer/reload", params: Record<string, unknown>) => {
+    try {
+      await client.request(method, params as never);
+      setChanged(true);
+      load();
+    } catch (error) {
+      notice(error);
+    }
+  };
 
   const write = async (keyPath: string, value: unknown) => {
     try {
@@ -71,9 +90,9 @@ export function ExtensionsView(props: { client: RpcClient; cwd: string | null; t
       <section className="dialog extensions" role="dialog" aria-label="Skills and tools" onClick={(event) => event.stopPropagation()}>
         <header><h2>Skills and tools</h2><button className="icon" aria-label="Close" onClick={props.onClose}><Icon name="x" size={16} /></button></header>
         <nav className="review-scopes" aria-label="Kinds">
-          {(["skills", "mcp", "apps"] as const).map((tab) => (
+          {(["skills", "plugins", "mcp", "apps", "hooks"] as const).map((tab) => (
             <button key={tab} className={props.tab === tab ? "selected" : ""} aria-pressed={props.tab === tab} onClick={() => props.setTab(tab)}>
-              {tab === "skills" ? "Skills" : tab === "mcp" ? "MCP servers" : "Apps"}
+              {{ skills: "Skills", plugins: "Plugins", mcp: "MCP servers", apps: "Apps", hooks: "Hooks" }[tab]}
             </button>
           ))}
         </nav>
@@ -89,6 +108,50 @@ export function ExtensionsView(props: { client: RpcClient; cwd: string | null; t
                       <td><code>${skill.name}</code>{skill.enabled ? "" : <span className="planned-note"> (off)</span>}</td>
                       <td>{skill.shortDescription || skill.description}</td>
                       <td className="planned-note">{skillSource(skill)}</td>
+                      <td className="shortcut-actions"><button className="link-button" onClick={() => void act("skills/config/write", { path: skill.path, enabled: !skill.enabled })}>{skill.enabled ? "Turn off" : "Turn on"}</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        ) : null}
+        {props.tab === "plugins" ? (
+          <>
+            <p className="dialog-note">Plugins from this machine's and this project's marketplaces. The vendor's own catalogue is closed in Mightling.</p>
+            {marketplaces === null ? <p className="empty small">…</p> : marketplaces.every((market) => market.plugins.length === 0) ? <p className="empty small">No marketplace offers a plugin here.</p> : marketplaces.map((market) => (
+              <section key={market.name} className="plugin-market">
+                <h3>{market.name}</h3>
+                <table className="shortcut-table">
+                  <tbody>
+                    {market.plugins.map((plugin) => (
+                      <tr key={plugin.id}>
+                        <td><strong>{plugin.name}</strong>{plugin.version ? <span className="planned-note"> {plugin.version}</span> : null}</td>
+                        <td className="planned-note">{plugin.installed ? (plugin.enabled ? "installed" : "installed, off") : "not installed"}</td>
+                        <td className="shortcut-actions">
+                          {plugin.installed
+                            ? <button className="link-button" onClick={() => void act("plugin/uninstall", { pluginId: plugin.id })}>Remove</button>
+                            : <button className="link-button" disabled={!market.path} title={market.path ? "" : "Only local and repository marketplaces install here"} onClick={() => void act("plugin/install", { marketplacePath: market.path, pluginName: plugin.name })}>Install</button>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            ))}
+          </>
+        ) : null}
+        {props.tab === "hooks" ? (
+          <>
+            <p className="dialog-note">Hooks run at points of a turn; listed here to read. Mightling's own ledger hook is among them.</p>
+            {hooks === null ? <p className="empty small">…</p> : hooks.every((entry) => entry.hooks.length === 0) ? <p className="empty small">No hooks.</p> : (
+              <table className="shortcut-table">
+                <tbody>
+                  {hooks.flatMap((entry) => entry.hooks).map((hook) => (
+                    <tr key={hook.key}>
+                      <td><code>{hook.eventName}</code>{hook.matcher ? <span className="planned-note"> {hook.matcher}</span> : null}</td>
+                      <td>{hook.handlerType === "command" ? <code>{hook.command}</code> : hook.handlerType === "mcpTool" ? `${hook.server}.${hook.tool}` : hook.handlerType}</td>
+                      <td className="planned-note">{hook.enabled ? "on" : "off"}{hook.pluginId ? ` · ${hook.pluginId}` : ""}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -130,7 +193,12 @@ export function ExtensionsView(props: { client: RpcClient; cwd: string | null; t
                   onClick={() => { void write(`mcp_servers.${adding.name}`, mcpServerValue(adding.kind, adding.target, adding.args)); setAdding(null); }}>Add</button>
                 <button onClick={() => setAdding(null)}>Cancel</button>
               </div>
-            ) : <button className="link-button" onClick={() => setAdding({ name: "", kind: "command", target: "", args: "" })}>Add an MCP server</button>}
+            ) : (
+              <div className="buttons dialog-buttons">
+                <button className="link-button" onClick={() => setAdding({ name: "", kind: "command", target: "", args: "" })}>Add an MCP server</button>
+                <button className="link-button" onClick={() => void act("config/mcpServer/reload", {})}>Read the servers again</button>
+              </div>
+            )}
           </>
         ) : null}
         {props.tab === "apps" ? (

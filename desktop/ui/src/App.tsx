@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAsk
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, collaborationMode, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -29,6 +29,7 @@ import type { PermissionProfileSummary } from "./protocol/v2/PermissionProfileSu
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
+import type { ThreadGoal } from "./protocol/v2/ThreadGoal";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
 import {
@@ -38,6 +39,7 @@ import {
 import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./BottomPanel";
 import { CommandMenu } from "./CommandMenu";
 import { ExtensionsView, type ExtensionsTab } from "./ExtensionsView";
+import { GoalRow } from "./GoalRow";
 import { ReviewPane } from "./ReviewPane";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
@@ -45,6 +47,7 @@ import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
 import { moveToSection, nextAttention, pinnedFirst, recentThreads, stepThread, threadLink, toggled, type Section } from "./threads";
+import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { carry, cleanupVictims, projectFolder, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
@@ -131,7 +134,9 @@ export function App() {
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const [agentsHidden, setAgentsHidden] = useState(false);
+  const [memoryModes, setMemoryModes] = useState<Record<string, "enabled" | "disabled">>({});
   const [nightUnseen, setNightUnseen] = useState(0);
+  const [goalEditing, setGoalEditing] = useState(false);
   const [naming, setNaming] = useState<{ thread: string; name: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
   const updatePrefsRef = useRef<(values: Partial<Prefs>) => void>(() => {});
@@ -151,6 +156,9 @@ export function App() {
   const [newEnvs, setNewEnvs] = useState<bridge.LocalEnvironment[]>([]);
   const [editingEnv, setEditingEnv] = useState(false);
   const [missingWorktree, setMissingWorktree] = useState<string | null>(null);
+  const hub = useMemo(() => new TerminalHub(client), [client]);
+  const [terminals, setTerminals] = useState<TerminalSession[]>([]);
+  const [front, setFront] = useState<{ id: string; tick: number } | null>(null);
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
   // Listeners besides the store, for the window's own small jobs (a generated commit message).
@@ -234,6 +242,8 @@ export function App() {
   const connected = useRef(false);
   useEffect(() => {
     client.onNotification = (notification) => {
+      // A terminal's output goes to its tab, not to the store.
+      if (hub.deliver(notification)) return;
       dispatch({ type: "notification", notification });
       if (notification.method === "thread/queue/changed") refreshQueue(notification.params.threadId);
       // A turn that ends while its thread is not in front leaves the thread unread.
@@ -253,7 +263,10 @@ export function App() {
       view: (next) => showView(next),
       link: (target) => linkRef.current(target),
       task: (event) => setTasks((list) => {
-        if (event.kind === "started") return [...list.slice(-11), { id: event.id, label: event.label ?? "Task", cwd: event.cwd ?? "", output: "", running: true, code: null }];
+        if (event.kind === "started") {
+          setFront({ id: event.id, tick: Date.now() });
+          return [...list.slice(-11), { id: event.id, label: event.label ?? "Task", cwd: event.cwd ?? "", output: "", running: true, code: null }];
+        }
         return list.map((task) => (task.id !== event.id ? task
           : event.kind === "output" ? { ...task, output: appendOutput(task.output, event.data ?? "") }
             : { ...task, running: false, code: event.code ?? null }));
@@ -273,7 +286,7 @@ export function App() {
       }
     }).catch(notice);
     return () => stop?.();
-  }, [client, connect, answerUnasked, notice, showView, refreshQueue]);
+  }, [client, connect, answerUnasked, notice, showView, refreshQueue, hub]);
 
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
@@ -340,9 +353,27 @@ export function App() {
       const resumed = await client.request("thread/resume", { threadId, model: servedModel });
       dispatch({ type: "opened", thread: resumed.thread });
       refreshQueue(threadId);
+      client.request("thread/goal/get", { threadId }).then((answer) => dispatch({ type: "goal", threadId, goal: (answer as { goal: ThreadGoal | null }).goal })).catch(() => {});
     } catch (error) {
       notice(error);
     }
+  };
+
+  /** The goal row's requests (`thread/goal/*`); the server's notifications update the row. */
+  const setGoal = (values: { objective?: string; status?: "active" | "paused" }) => {
+    if (!selected) return;
+    const threadId = selected.thread.id;
+    client.request("thread/goal/set", { threadId, ...values })
+      .then((answer) => {
+        const goal = (answer as { goal?: ThreadGoal }).goal;
+        if (goal) dispatch({ type: "goal", threadId, goal });
+        setGoalEditing(false);
+      }).catch(notice);
+  };
+  const clearGoal = () => {
+    if (!selected) return;
+    const threadId = selected.thread.id;
+    client.request("thread/goal/clear", { threadId }).then(() => dispatch({ type: "goal", threadId, goal: null })).catch(notice);
   };
 
   const switchView = showView;
@@ -651,6 +682,11 @@ export function App() {
   const readConfig = useCallback(async () => ((await client.request("config/read", {})) as { config: Record<string, unknown> }).config, [client]);
   const writeConfig = useCallback(async (keyPath: string, value: unknown) => {
     await client.request("config/value/write", { keyPath, value: value as never, mergeStrategy: "upsert" });
+  }, [client]);
+
+  const memoryStatus = useCallback(async () => (await client.request("memory/status", {})) as { v2ConsolidatedThreads: number; v2Ready: boolean }, [client]);
+  const resetMemories = useCallback(async () => {
+    await client.request("memory/reset", undefined);
   }, [client]);
 
   /** Settings › Archived threads. */
@@ -1069,8 +1105,34 @@ export function App() {
   /** Runs an action of the project's environment in the bottom panel, in the folder the thread works in. */
   const runAction = (action: bridge.EnvironmentAction) => {
     if (!workFolder || !environment || !envProject) return notice("Open a thread in a project with a local environment first.");
+    // An action runs in a terminal tab of its own, under the composer's permissions (§2.6, §2.7).
+    openTerminal(action.name, action.script);
+  };
+
+  /** A new terminal tab for the shown thread, in the folder it works in, under the composer's permissions. */
+  const openTerminal = (title = "Terminal", script: string | null = null) => {
+    const cwd = workFolder ?? (view === "work" ? newCwd.trim() || null : null);
+    if (!cwd) return notice("Open a thread in a project, or name a project folder, to open a terminal there.");
+    const session = hub.start({ threadId: selected?.thread.id ?? null, cwd, profile, shell: prefs.terminalShell, size: { rows: 24, cols: 100 }, title, script },
+      (processId, code, error) => setTerminals((list) => list.map((entry) => (entry.processId === processId ? { ...entry, exitCode: code, error } : entry))));
+    setTerminals((list) => [...list, session]);
     updatePrefs({ bottomPanel: true });
-    bridge.runTask(envProject, environment.file, environment.actions.indexOf(action), workFolder, selected?.thread.id ?? null).catch(notice);
+    setFront({ id: session.processId, tick: Date.now() });
+  };
+
+  const closeTerminal = (processId: string) => {
+    const session = terminals.find((entry) => entry.processId === processId);
+    if (session && session.exitCode === null) hub.terminate(processId).catch(() => {});
+    hub.forget(processId);
+    setTerminals((list) => list.filter((entry) => entry.processId !== processId));
+  };
+
+  /** The tab's recent output into the composer: what lets the agent read a dev server's or a build's output. */
+  const sendTerminal = (processId: string) => {
+    const session = terminals.find((entry) => entry.processId === processId);
+    const output = hub.tail(processId);
+    if (!session || !output) return notice("The terminal has shown nothing yet.");
+    setDraft((text) => (text.trim() ? `${text.trimEnd()}\n\n${terminalMessage(session.cwd, output)}` : terminalMessage(session.cwd, output)));
   };
 
   /** A permanent worktree of the project: a project of its own, never cleaned up. */
@@ -1119,6 +1181,17 @@ export function App() {
       if (text === null) return;
       await openThread(selected.thread.id);
       setDraft(text);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** `/review` (§2.5): the server reviews on the served model, inline in this thread or in a review thread of its own. */
+  const startReview = async (target: ReturnType<typeof reviewTarget>) => {
+    if (!selected) return notice("Open a thread to review its folder's changes.");
+    try {
+      const answer = (await client.request("review/start", { threadId: selected.thread.id, target, delivery: prefs.reviewDelivery })) as { reviewThreadId?: string };
+      if (answer.reviewThreadId && answer.reviewThreadId !== selected.thread.id) await openThread(answer.reviewThreadId);
     } catch (error) {
       notice(error);
     }
@@ -1180,6 +1253,9 @@ export function App() {
           return;
         case "model":
           return setPicker("open");
+        case "goal":
+          if (args) return setGoal({ objective: args, status: "active" });
+          return setGoalEditing(true);
         case "plan":
           if (!planAvailable) return notice("The server offers no Plan mode.");
           if (args) {
@@ -1214,10 +1290,19 @@ export function App() {
           setDrawer(true);
           requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
           return;
+        case "memories": {
+          if (!threadId) return;
+          const mode = args === "on" ? "enabled" : args === "off" ? "disabled" : (memoryModes[threadId] ?? "enabled") === "enabled" ? "disabled" : "enabled";
+          await client.request("thread/memoryMode/set", { threadId, mode });
+          setMemoryModes((modes) => ({ ...modes, [threadId]: mode }));
+          return setInfo({ title: "Memories", body: <p>Memories are {mode === "enabled" ? "on" : "off"} for this thread: it {mode === "enabled" ? "uses and adds to" : "neither uses nor adds to"} them.</p> });
+        }
         case "agents":
           setAgentsHidden(false);
           if (selected && subagents(state, selected.thread.id).length === 0) setInfo({ title: "Subagents", body: <p className="empty small">This thread has started no subagents.</p> });
           return;
+        case "review":
+          return startReview(reviewTarget(args));
         case "night": {
           const words = args.match(/^add\s+([\s\S]+)$/);
           if (words) {
@@ -1328,6 +1413,14 @@ export function App() {
     } else if (matches(event, keyAction("recentModels"))) {
       event.preventDefault();
       setPicker("recent");
+    } else if (matches(event, keyAction("terminal")) && view === "work") {
+      event.preventDefault();
+      const mine = terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null) && entry.exitCode === null);
+      if (mine.length === 0) openTerminal();
+      else if (!prefsRef.current.bottomPanel) {
+        updatePrefs({ bottomPanel: true });
+        setFront({ id: mine[mine.length - 1].processId, tick: Date.now() });
+      } else updatePrefs({ bottomPanel: false });
     } else if (matches(event, keyAction("bottomPanel"))) {
       event.preventDefault();
       updatePrefs({ bottomPanel: !prefsRef.current.bottomPanel });
@@ -1611,7 +1704,7 @@ export function App() {
             </section>
           ) : null}
           {selected ? selected.turns.map((turn, index) => (
-            <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1}
+            <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1} commandOutput={prefs.commandOutput}
               onRevert={() => client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: turn.id })
                 .then(() => openThread(selected.thread.id)).catch(notice)}
               onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
@@ -1638,6 +1731,10 @@ export function App() {
               if (active) client.request("turn/interrupt", { threadId: id, turnId: active }).catch(notice);
               else notice("Open the subagent to stop it: this window has not seen its turn start.");
             }} onClose={() => setAgentsHidden(true)} />
+        ) : null}
+        {selected ? (
+          <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
+            onSet={(objective) => setGoal({ objective, status: "active" })} onStatus={(status) => setGoal({ status })} onClear={clearGoal} />
         ) : null}
         {canCompose ? (
           <Composer
@@ -1688,6 +1785,8 @@ export function App() {
         ) : null}
         {prefs.bottomPanel && view === "work" && bridge.git.available() ? (
           <BottomPanel tasks={tasks} environment={environment} problems={envs?.problems ?? []} project={envProject}
+            terminals={terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null))} hub={hub} front={front}
+            onNewTerminal={() => openTerminal()} onCloseTerminal={closeTerminal} onSendToThread={sendTerminal}
             onRun={runAction} onStop={(id) => void bridge.stopTask(id).catch(notice)}
             onClose={(id) => setTasks((list) => list.filter((task) => task.id !== id))}
             onEdit={() => setEditingEnv(true)} onHide={() => updatePrefs({ bottomPanel: false })} />
@@ -1719,7 +1818,8 @@ export function App() {
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice}
-        readConfig={readConfig} writeConfig={writeConfig} /> : null}
+        readConfig={readConfig} writeConfig={writeConfig}
+        memoryStatus={memoryStatus} resetMemories={resetMemories} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
           seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
@@ -1803,11 +1903,11 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
   );
 }
 
-function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null }) {
+function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; commandOutput: Prefs["commandOutput"] }) {
   const { turn } = props;
   return (
     <section className={`turn turn-${turn.status}`}>
-      {turn.items.map((item) => <Item key={item.id} item={item} />)}
+      {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} />))}
       {turn.error ? <div className="turn-error">{turn.error.message}</div> : null}
       {turn.status === "interrupted" ? <div className="turn-note">Stopped.</div> : null}
       {turn.diff ? (
@@ -1826,7 +1926,7 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
   );
 }
 
-function Item({ item }: { item: ThreadItem }) {
+function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
   switch (item.type) {
     case "userMessage":
       return <div className="item user">{item.content.map(describeInput).filter(Boolean).join("\n")}</div>;
@@ -1845,7 +1945,7 @@ function Item({ item }: { item: ThreadItem }) {
       return <div className="item plan markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }} />;
     case "commandExecution":
       return (
-        <details className={`item command status-${item.status}`} open={item.status === "inProgress"}>
+        <details className={`item command status-${item.status}`} open={!folded && item.status === "inProgress"}>
           <summary><Icon name="terminal" size={14} /><code>{item.command}</code>{item.exitCode !== null && item.exitCode !== 0 ? <span className="exit"> exit {item.exitCode}</span> : null}</summary>
           {item.aggregatedOutput ? <pre>{item.aggregatedOutput}</pre> : null}
         </details>
@@ -1865,6 +1965,10 @@ function Item({ item }: { item: ThreadItem }) {
       return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
     case "contextCompaction":
       return <div className="item note">Earlier turns were compacted.</div>;
+    case "enteredReviewMode":
+      return <div className="item note review-mode">Reviewing: {item.review}</div>;
+    case "exitedReviewMode":
+      return <div className="item agent review-result"><div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.review) }} /></div>;
     case "collabAgentToolCall":
       return <div className="item note">Subagents: {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
     case "subAgentActivity":

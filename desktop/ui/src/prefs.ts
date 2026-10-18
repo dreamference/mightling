@@ -54,6 +54,12 @@ export interface Prefs {
   forcePush: boolean;
   /** When the Scheduled view was last looked at (ISO time), for its unread count. */
   nightSeen: string | null;
+  /** Where /review's findings go: into the thread, or a review thread of their own. */
+  reviewDelivery: "inline" | "detached";
+  /** The shell terminal tabs run, as a login shell; null for the user's `$SHELL`. */
+  terminalShell: string | null;
+  /** Commands in the thread: output open while running, always folded, or not shown. */
+  commandOutput: "running" | "collapsed" | "hidden";
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
 }

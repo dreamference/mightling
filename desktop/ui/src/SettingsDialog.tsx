@@ -31,6 +31,9 @@ export interface SettingsProps {
   /** The agent's settings as `config/read` answers them, and a write of one key (`config/value/write`). */
   readConfig: () => Promise<Record<string, unknown>>;
   writeConfig: (keyPath: string, value: unknown) => Promise<void>;
+  /** What the memories hold (`memory/status`), and deleting them (`memory/reset`). */
+  memoryStatus: () => Promise<{ v2ConsolidatedThreads: number; v2Ready: boolean } | null>;
+  resetMemories: () => Promise<void>;
 }
 
 const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
@@ -43,7 +46,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "memories", label: "Memories" },
   { id: "archived", label: "Archived threads" },
   { id: "git", label: "Git", desktopOnly: true },
-  { id: "project", label: "Project", desktopOnly: true },
+  { id: "project", label: "Project and terminal", desktopOnly: true },
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
 ];
 
@@ -362,6 +365,11 @@ function Git({ prefs, onChange }: SettingsProps) {
         <textarea rows={4} defaultValue={prefs.commitPrompt ?? ""} aria-label="Commit message instruction" placeholder="Empty: Mightling's own (a summary line in the imperative, then why)"
           onBlur={(event) => onChange({ commitPrompt: event.target.value.trim() || null })} />
       </fieldset>
+      <fieldset>
+        <legend>/review delivers its findings</legend>
+        <label><input type="radio" name="review" checked={prefs.reviewDelivery === "inline"} onChange={() => onChange({ reviewDelivery: "inline" })} /> Inline, in the thread</label>
+        <label><input type="radio" name="review" checked={prefs.reviewDelivery === "detached"} onChange={() => onChange({ reviewDelivery: "detached" })} /> Detached, in a review thread of their own</label>
+      </fieldset>
       <p className="dialog-note">A pull request opens the forge's own page in your browser, which writes its description.</p>
     </>
   );
@@ -374,7 +382,20 @@ function Project({ prefs, onChange }: SettingsProps) {
   }, []);
   return (
     <>
-      <h3>Project</h3>
+      <h3>Project and terminal</h3>
+      <fieldset>
+        <legend>Commands the agent runs, in the thread</legend>
+        <label><input type="radio" name="commands" checked={prefs.commandOutput === "running"} onChange={() => onChange({ commandOutput: "running" })} /> Show the output while a command runs</label>
+        <label><input type="radio" name="commands" checked={prefs.commandOutput === "collapsed"} onChange={() => onChange({ commandOutput: "collapsed" })} /> Fold every command (click to open)</label>
+        <label><input type="radio" name="commands" checked={prefs.commandOutput === "hidden"} onChange={() => onChange({ commandOutput: "hidden" })} /> Hide commands</label>
+      </fieldset>
+      <fieldset>
+        <legend>Terminal tabs</legend>
+        <label className="field">Shell (empty for your login shell, $SHELL)
+          <input defaultValue={prefs.terminalShell ?? ""} placeholder="/bin/bash" aria-label="Terminal shell" onBlur={(event) => onChange({ terminalShell: event.target.value.trim() || null })} />
+        </label>
+        <p className="dialog-note">Terminal tabs open in the bottom panel (Ctrl+`), in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
+      </fieldset>
       <fieldset>
         <legend>Where files open</legend>
         <label className="field">From the review pane and the header's Open
@@ -400,8 +421,12 @@ export function memorySwitches(config: Record<string, unknown>): { enabled: bool
   };
 }
 
-function Memories({ readConfig, writeConfig, notice }: SettingsProps) {
+function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories }: SettingsProps) {
   const [switches, setSwitches] = useState<ReturnType<typeof memorySwitches> | null>(null);
+  const [status, setStatus] = useState<{ v2ConsolidatedThreads: number; v2Ready: boolean } | null>(null);
+  useEffect(() => {
+    memoryStatus().then(setStatus).catch(() => setStatus(null));
+  }, [memoryStatus]);
   const load = () => readConfig().then((config) => setSwitches(memorySwitches(config))).catch((error) => { setSwitches(null); notice(error); });
   useEffect(() => {
     void load();
@@ -419,6 +444,10 @@ function Memories({ readConfig, writeConfig, notice }: SettingsProps) {
         <label><input type="checkbox" checked={switches.generate} disabled={!switches.enabled} onChange={(event) => void write("memories.generate_memories", event.target.checked)} /> Threads add to the memories</label>
         <label><input type="checkbox" checked={switches.external} disabled={!switches.enabled} onChange={(event) => void write("memories.disable_on_external_context", !event.target.checked)} /> Including threads that used the web or an MCP server</label>
       </fieldset>
+      <p className="dialog-note">{status ? `${status.v2ConsolidatedThreads} thread${status.v2ConsolidatedThreads === 1 ? "" : "s"} remembered${status.v2Ready ? "" : "; the memories are still being made"}.` : ""} /memories in a thread turns them off or on for that thread.</p>
+      <div className="buttons dialog-buttons">
+        <button className="danger-button" onClick={() => window.confirm("Delete everything the agent remembers? This cannot be undone.") && resetMemories().then(() => memoryStatus().then(setStatus)).catch(notice)}>Delete the memories</button>
+      </div>
     </>
   );
 }

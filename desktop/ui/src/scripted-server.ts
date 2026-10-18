@@ -24,11 +24,11 @@ export class ScriptedServer implements Transport {
     const handler = this.script[m.method];
     queueMicrotask(() => {
       if (!handler) return this.client.receive({ id: m.id, error: { code: -32601, message: `not scripted: ${m.method}` } });
-      try {
-        this.client.receive({ id: m.id, result: handler(m.params ?? {}, this) });
-      } catch (error) {
-        this.client.receive({ id: m.id, error: { code: -32600, message: String(error) } });
-      }
+      // A handler may answer later (a promise), as the server answers command/exec only at exit.
+      Promise.resolve()
+        .then(() => handler(m.params ?? {}, this))
+        .then((result) => this.client.receive({ id: m.id, result }))
+        .catch((error: unknown) => this.client.receive({ id: m.id, error: { code: -32600, message: String(error) } }));
     });
   }
 
