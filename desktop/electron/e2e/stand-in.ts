@@ -191,6 +191,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
         // A thread the test started: the turn runs briefly and answers.
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
         say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
+        // The user's message as an item, as the server reports it.
+        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "userMessage", id: "u" + id, content: p.input || [] } } });
         return setTimeout(() => {
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "agentMessage", id: "m" + id, text: "Done: the retry counter is in fetcher/client.py." } } });
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [], status: "completed", error: null } } });
@@ -198,7 +200,10 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       }
       if (String(p.threadId).startsWith("e")) {
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
-        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "agentMessage", id: "m" + id, text: ${JSON.stringify(COMMIT_MESSAGE)} } } });
+        // A read-only, unkept thread: a commit message, or (Phase 3's suggested prompts) three follow-ups.
+        const asked = String(((p.input || [])[0] || {}).text || "");
+        const reply = asked.startsWith("Below are the last request") ? "1. Add a test for the retry limit\\n2. Log the URL on every retry\\n3. Run the whole suite" : ${JSON.stringify(COMMIT_MESSAGE)};
+        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "agentMessage", id: "m" + id, text: reply } } });
         return say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [], status: "completed", error: null } } });
       }
       answer({ turn: { id, items: [], status: "inProgress", error: null } });

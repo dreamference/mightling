@@ -52,6 +52,7 @@ import { PreviewTab } from "./PreviewTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { ActivityView } from "./ActivityView";
+import { suggest } from "./suggestions";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
@@ -143,6 +144,8 @@ export function App() {
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  /** Suggested follow-ups (Phase 3 item 7), by thread, until a new turn starts there. */
+  const [suggestions, setSuggestions] = useState<Record<string, string[]>>({});
   const [agentsHidden, setAgentsHidden] = useState(false);
   const [memoryModes, setMemoryModes] = useState<Record<string, "enabled" | "disabled">>({});
   const [nightUnseen, setNightUnseen] = useState(0);
@@ -180,6 +183,21 @@ export function App() {
     setTabs((list) => withTab(list, fileTab(path, line)));
     setActiveTab(fileTab(path).key);
     if (prefsRef.current.layout === "chat") updatePrefsRef.current({ layout: "split" });
+  };
+  const suggestRef = useRef<(threadId: string) => void>(() => {});
+  suggestRef.current = (threadId: string) => {
+    const current = stateRef.current;
+    const view = current.threads[threadId];
+    // Not while a turn this window has seen start is still running: the model server is busy enough.
+    if (!view || view.thread.ephemeral || view.thread.parentThreadId || Object.values(current.threads).some((entry) => entry.activeTurnId)) return;
+    const last = view.turns[view.turns.length - 1];
+    if (!last) return;
+    const request = last.items.filter((item) => item.type === "userMessage").map((item) => (item.type === "userMessage" ? item.content.map(describeInput).join(" ") : "")).join("\n");
+    const answer = [...last.items].reverse().find((item) => item.type === "agentMessage");
+    if (!request.trim() || !answer || answer.type !== "agentMessage") return;
+    suggest(client, listen, { cwd: view.thread.cwd, model: modelChoice ?? servedModel, request, answer: answer.text })
+      .then((found) => found.length && setSuggestions((known) => ({ ...known, [threadId]: found })))
+      .catch(() => {});
   };
   const openFileRef = useRef<(path: string) => void>(() => {});
   openFileRef.current = (path: string) => openFile(path);
@@ -295,7 +313,8 @@ export function App() {
       if (notification.method === "turn/completed") {
         const threadId = notification.params.threadId;
         const current = prefsRef.current.unreadThreads;
-        if ((threadId !== selectedRef.current || !document.hasFocus()) && !current.includes(threadId)) updatePrefsRef.current({ unreadThreads: [...current, threadId] });
+        const known = stateRef.current.threads[threadId]?.thread;
+        if (known && !known.ephemeral && (threadId !== selectedRef.current || !document.hasFocus()) && !current.includes(threadId)) updatePrefsRef.current({ unreadThreads: [...current, threadId] });
       }
       for (const listener of listeners.current) listener(notification);
     };
@@ -343,7 +362,14 @@ export function App() {
         const cwd = stateRef.current.threads[notification.params.threadId]?.thread.cwd ?? null;
         const paths = createdArtifacts(notification.params.item, cwd);
         if (paths.length) made.set(notification.params.turnId, [...(made.get(notification.params.turnId) ?? []), ...paths]);
+      } else if (notification.method === "turn/started") {
+        const threadId = notification.params.threadId;
+        setSuggestions((known) => (known[threadId] ? Object.fromEntries(Object.entries(known).filter(([id]) => id !== threadId)) : known));
       } else if (notification.method === "turn/completed") {
+        // Suggested prompts, when Settings ask for them, for a finished turn of a thread of the user's,
+        // once the model server has nothing else to do (the store has taken the turn in by then).
+        const { threadId, turn } = notification.params;
+        if (prefsRef.current.suggestPrompts && turn.status === "completed") setTimeout(() => suggestRef.current(threadId), 300);
         const paths = made.get(notification.params.turn.id) ?? [];
         made.delete(notification.params.turn.id);
         if (paths.length && notification.params.threadId === selectedRef.current && prefsRef.current.openArtifacts) openFileRef.current(paths[0]);
@@ -1858,6 +1884,14 @@ export function App() {
         {selected ? (
           <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
             onSet={(objective) => setGoal({ objective, status: "active" })} onStatus={(status) => setGoal({ status })} onClear={clearGoal} />
+        ) : null}
+        {selected && !selected.activeTurnId && !draft.trim() && suggestions[selected.thread.id]?.length ? (
+          <div className="suggestions" role="group" aria-label="Suggested follow-ups">
+            {suggestions[selected.thread.id].map((text) => (
+              <button key={text} className="suggestion" onClick={() => setDraft(text)} title="Put it in the composer">{text}</button>
+            ))}
+            <button className="icon" aria-label="Dismiss the suggestions" onClick={() => setSuggestions((known) => Object.fromEntries(Object.entries(known).filter(([id]) => id !== selected.thread.id)))}><Icon name="x" size={12} /></button>
+          </div>
         ) : null}
         {canCompose ? (
           <Composer
