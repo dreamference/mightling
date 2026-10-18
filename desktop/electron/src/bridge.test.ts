@@ -110,12 +110,12 @@ describe("the bridge", () => {
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, "codex"), "");
     const env = { PATH: bin, HOME: dir };
-    expect(findLing(resources, env)).toBeNull();
+    expect(findLing(resources, env, "linux")).toBeNull();
     fs.writeFileSync(path.join(bin, "ling"), "");
-    expect(findLing(resources, env)).toBe(path.join(bin, "ling"));
+    expect(findLing(resources, env, "linux")).toBe(path.join(bin, "ling"));
     fs.writeFileSync(path.join(resources, "ling"), "");
-    expect(findLing(resources, env)).toBe(path.join(resources, "ling"));
-    expect(findLing(resources, { ...env, MIGHTLING_BIN: path.join(bin, "ling") })).toBe(path.join(bin, "ling"));
+    expect(findLing(resources, env, "linux")).toBe(path.join(resources, "ling"));
+    expect(findLing(resources, { ...env, MIGHTLING_BIN: path.join(bin, "ling") }, "linux")).toBe(path.join(bin, "ling"));
     // Windows (Phase 3 item 12): ling.exe, bundled or where install.ps1 puts it.
     fs.writeFileSync(path.join(bin, "ling.exe"), "");
     expect(findLing(null, { LOCALAPPDATA: "/nowhere", PATH: bin }, "win32")).toBe(path.join(bin, "ling.exe"));
