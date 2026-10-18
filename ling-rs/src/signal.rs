@@ -24,7 +24,7 @@ pub async fn run_cli(args: &[String]) -> i32 {
     let args = args.to_vec();
     // The commands are synchronous, and the bridge's own build their own runtime; a blocking
     // thread keeps both away from the launcher's.
-    let invocation = ling_signal::cli::Invocation { bridge, bridge_commands: false };
+    let invocation = ling_signal::cli::Invocation::new(bridge, false);
     tokio::task::spawn_blocking(move || ling_signal::cli::run(&args, &invocation)).await.unwrap_or(1)
 }
 

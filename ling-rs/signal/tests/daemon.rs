@@ -145,6 +145,8 @@ async fn the_owners_question_is_answered_through_ling_web_and_a_strangers_is_not
         signal_cli_env: vec![],
         signal_cli_version: "0.14.9".to_string(),
         vision: false,
+        instance: None,
+        user: None,
     }
     .save(&state)
     .unwrap();
@@ -198,6 +200,8 @@ async fn the_owners_question_is_answered_through_ling_web_and_a_strangers_is_not
     tokio::time::sleep(Duration::from_millis(5_200)).await;
     let status = std::fs::read_to_string(runtime.join("status.json")).unwrap();
     assert!(status.contains(r#""strangersIgnored":1"#), "{status}");
+    // A bridge.json from before §18 is the first instance, serving no recorded user.
+    assert!(status.contains(r#""instance":"default""#) && status.contains(r#""user":null"#), "{status}");
     assert!(!status.contains("stranger\"") && !status.contains("2+2"), "no ids or text in the status: {status}");
     daemon.abort();
 }
@@ -223,6 +227,8 @@ async fn at_air_gap_on_the_owner_gets_nothing_not_even_a_receipt() {
         signal_cli_env: vec![],
         signal_cli_version: "0.14.9".to_string(),
         vision: false,
+        instance: None,
+        user: None,
     }
     .save(&state)
     .unwrap();
@@ -284,6 +290,8 @@ async fn linked_to_the_owners_account_only_note_to_self_is_read_and_answered_the
         signal_cli_env: vec![],
         signal_cli_version: "0.14.9".to_string(),
         vision: false,
+        instance: None,
+        user: None,
     }
     .save(&state)
     .unwrap();
