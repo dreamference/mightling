@@ -57,6 +57,12 @@ pub struct Config {
     /// Whether the served model takes images (`ModelSpec.supports_vision`); without it images are
     /// saved in the thread's folder and named in the text instead.
     pub vision: bool,
+    /// The bridge instance this is (§18): None in a `bridge.json` written before several accounts
+    /// existed, which is the first instance, `default`.
+    pub instance: Option<String>,
+    /// The Linux user whose `ling web` this instance answers with (§18.1, decision 3), and the only
+    /// one who may set it up again, trust or remove it. None before §18: anyone with sudo may.
+    pub user: Option<String>,
 }
 
 impl Config {
@@ -77,6 +83,8 @@ impl Config {
             "signalCliEnv": self.signal_cli_env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
             "signalCliVersion": self.signal_cli_version,
             "vision": self.vision,
+            "instance": self.instance,
+            "user": self.user,
         })
     }
 
@@ -117,6 +125,8 @@ impl Config {
                 .unwrap_or_default(),
             signal_cli_version: text("signalCliVersion").unwrap_or_default(),
             vision: value.get("vision").and_then(Value::as_bool).unwrap_or(false),
+            instance: text("instance"),
+            user: text("user"),
         })
     }
 
@@ -231,6 +241,8 @@ mod tests {
             signal_cli_env: vec![("JAVA_HOME".to_string(), "/opt/mightling/jdk-25.0.4.1+1-jre".to_string())],
             signal_cli_version: "0.14.9".to_string(),
             vision: true,
+            instance: Some("work".to_string()),
+            user: Some("owner".to_string()),
         }
     }
 
@@ -247,6 +259,19 @@ mod tests {
         }
         assert!(Config::load(&dir.join("missing")).unwrap_err().contains("ling signal setup"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bridge_json_from_before_several_accounts_still_loads() {
+        // What `init` wrote before §18: no instance, no user. The live first bridge reads it after
+        // `setup --refresh` installs this binary.
+        let mut old = sample().to_json();
+        let object = old.as_object_mut().unwrap();
+        object.remove("instance");
+        object.remove("user");
+        let config = Config::from_json(&old).unwrap();
+        assert_eq!((config.instance, config.user), (None, None));
+        assert_eq!(config.account, "+15550000");
     }
 
     #[test]

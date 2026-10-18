@@ -10,6 +10,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::unit;
+use crate::unit::Instance;
 
 /// The signal-cli release this bridge was tested with, and the SHA-256 of its tarball.
 pub const SIGNAL_CLI_VERSION: &str = "0.14.9";
@@ -157,98 +158,184 @@ fn runtime_steps(bridge: &Path, work: &Path, arch: &str, java_present: bool, sig
     steps
 }
 
-/// Everything up to registering the number. `bridge` is the `ling-signal` binary being installed,
-/// `work` a scratch folder of the user's for downloads, `arch` `std::env::consts::ARCH`.
-pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool, java_present: bool, need_qrencode: bool) -> Vec<Step> {
+/// The bridge binary already installed in /usr/local/lib/mightling, against the one setup would
+/// install (§18.8).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstalledBridge {
+    /// None there (or unreadable): installed.
+    Missing,
+    /// The same file, by SHA-256: left alone, so a second setup does not rewrite the binary under
+    /// the bridges already running.
+    Same,
+    /// Another build: installed, and the plan says that it replaces the binary under them.
+    Different,
+}
+
+/// A file's SHA-256, in hex; None when it cannot be read.
+pub fn sha256_of(path: &Path) -> Option<String> {
+    use sha2::Digest;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = sha2::Sha256::new();
+    std::io::copy(&mut file, &mut hasher).ok()?;
+    Some(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Compares `installed` (the bridge's path on the node) with `bridge` (the binary setup installs).
+pub fn installed_bridge(installed: &Path, bridge: &Path) -> InstalledBridge {
+    match (sha256_of(installed), sha256_of(bridge)) {
+        (None, _) => InstalledBridge::Missing,
+        (Some(have), Some(want)) if have == want => InstalledBridge::Same,
+        _ => InstalledBridge::Different,
+    }
+}
+
+/// Everything up to registering the number, for one bridge instance (§18). `bridge` is the
+/// `ling-signal` binary being installed, `work` a scratch folder of the user's for downloads, `arch`
+/// `std::env::consts::ARCH`. The shared runtime (Java, signal-cli, libsignal) is fetched only where
+/// it is missing, so a second instance downloads nothing. The bridge binary is installed unless
+/// the one installed is the same file (`installed`, by SHA-256): a further instance needs the
+/// binary that knows instances (an older one would pair as the first instance's device), but
+/// rewriting an identical one would only touch the file the bridges already here (`others`) run
+/// from. When it differs and bridges are here, the step says that it replaces their binary. The
+/// account, the state folder and the unit are the instance's own; a further instance's unit is the
+/// shared template, written again with the same text.
+#[allow(clippy::too_many_arguments)]
+pub fn install_plan(
+    instance: &Instance,
+    bridge: &Path,
+    work: &Path,
+    arch: &str,
+    account_exists: bool,
+    java_present: bool,
+    signal_cli_present: bool,
+    need_qrencode: bool,
+    installed: InstalledBridge,
+    others: &[Instance],
+) -> Vec<Step> {
+    let account = instance.account();
+    let state_dir = instance.state_dir();
     let mut steps = Vec::new();
     if !account_exists {
         steps.push(Step::root(
             "Create the system account the bridge runs as (no login, no home folder)",
-            &["useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", unit::ACCOUNT],
+            &["useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", &account],
         ));
     }
     if need_qrencode {
         steps.push(Step::root("Install qrencode, to show the linking QR code in this terminal", &["apt-get", "install", "-y", "qrencode"]));
     }
-    steps.extend(runtime_steps(bridge, work, arch, java_present, false));
-    steps.push(Step::root("Install the bridge where the system account can run it", &["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH]));
-    steps.push(Step::root("Create its private state folder", &["install", "-d", "-m", "0700", "-o", unit::ACCOUNT, "-g", unit::ACCOUNT, unit::STATE_DIR]));
-    let mut write_unit = Step::root("Write the system unit", &["tee", &format!("/etc/systemd/system/{}", unit::UNIT_NAME)]);
-    write_unit.stdin = Some(unit::unit_text("768M", "256m"));
+    steps.extend(runtime_steps(bridge, work, arch, java_present, signal_cli_present));
+    let install_bridge = ["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH];
+    match installed {
+        InstalledBridge::Same => {}
+        InstalledBridge::Different if !others.is_empty() => {
+            let names: Vec<String> = others.iter().map(|other| format!("`{other}`")).collect();
+            let (them, runs) = if others.len() > 1 { ("bridges", "run") } else { ("bridge", "runs") };
+            let what = format!(
+                "Replace the bridge binary the {them} already here ({}) {runs} from: the installed one is another build (its SHA-256 differs). A running bridge keeps the old build until it restarts, then runs this one",
+                names.join(", "),
+            );
+            steps.push(Step::root(&what, &install_bridge));
+        }
+        InstalledBridge::Different | InstalledBridge::Missing => steps.push(Step::root("Install the bridge where the system account can run it", &install_bridge)),
+    }
+    steps.push(Step::root("Create its private state folder", &["install", "-d", "-m", "0700", "-o", &account, "-g", &account, &state_dir]));
+    let what = if instance.is_first() { "Write the system unit" } else { "Write the system unit every further bridge runs from" };
+    let mut write_unit = Step::root(what, &["tee", &instance.unit_file()]);
+    write_unit.stdin = Some(instance.unit_file_text());
     steps.push(write_unit);
     steps.push(Step::root("", &["systemctl", "daemon-reload"]));
     steps
 }
 
-/// `setup --refresh` (§3): after `ling update`, the bridge's copy in /usr/local/lib/mightling is
-/// the old one, and a new Mightling may pin a newer signal-cli or Java. This installs the bridge
-/// binary again, fetches whatever pinned runtime is not there yet (checked as in setup), points the
-/// bridge's settings at it (`retool`, as the bridge's account), rewrites the unit and restarts it.
-/// The account, its keys and the pairing are left alone.
-pub fn refresh_plan(bridge: &Path, work: &Path, arch: &str, java_present: bool, signal_cli_present: bool) -> Vec<Step> {
+/// `setup --refresh` (§3, §18.3): after `ling update`, the bridge's copy in /usr/local/lib/mightling
+/// is the old one, and a new Mightling may pin a newer signal-cli or Java. This fetches whatever
+/// pinned runtime is not there yet (checked as in setup) and installs the bridge binary, once for
+/// the node; then, for every instance, points its settings at the runtime (`retool`, as that
+/// instance's account), rewrites the unit files and restarts each instance that was running. The
+/// accounts, their keys and the pairings are left alone.
+pub fn refresh_plan(bridge: &Path, work: &Path, arch: &str, java_present: bool, signal_cli_present: bool, instances: &[Instance]) -> Vec<Step> {
     let mut steps = runtime_steps(bridge, work, arch, java_present, signal_cli_present);
     steps.push(Step::root("Install the current bridge where the system account can run it", &["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH]));
-    let mut retool = vec![
-        unit::BRIDGE_PATH.to_string(),
-        "retool".to_string(),
-        "--state".to_string(),
-        unit::STATE_DIR.to_string(),
-        "--signal-cli".to_string(),
-        signal_cli_program().to_string_lossy().into_owned(),
-        "--version".to_string(),
-        SIGNAL_CLI_VERSION.to_string(),
-    ];
-    for (key, value) in signal_cli_env(arch) {
-        retool.push("--env".to_string());
-        retool.push(format!("{key}={value}"));
+    for instance in instances {
+        let mut retool = vec![
+            unit::BRIDGE_PATH.to_string(),
+            "retool".to_string(),
+            "--state".to_string(),
+            instance.state_dir(),
+            "--signal-cli".to_string(),
+            signal_cli_program().to_string_lossy().into_owned(),
+            "--version".to_string(),
+            SIGNAL_CLI_VERSION.to_string(),
+        ];
+        for (key, value) in signal_cli_env(arch) {
+            retool.push("--env".to_string());
+            retool.push(format!("{key}={value}"));
+        }
+        let what = if instances.len() > 1 { format!("Point bridge `{instance}` at the pinned signal-cli and Java") } else { "Point the bridge at the pinned signal-cli and Java".to_string() };
+        steps.push(Step { what, command: as_bridge(instance, &retool), root: false, stdin: None });
     }
-    steps.push(Step { what: "Point the bridge at the pinned signal-cli and Java".to_string(), command: as_bridge(&retool), root: false, stdin: None });
-    let mut write_unit = Step::root("Write the system unit again", &["tee", &format!("/etc/systemd/system/{}", unit::UNIT_NAME)]);
-    write_unit.stdin = Some(unit::unit_text("768M", "256m"));
-    steps.push(write_unit);
+    let mut unit_files: Vec<(String, String)> = instances.iter().map(|i| (i.unit_file(), i.unit_file_text())).collect();
+    unit_files.dedup();
+    for (file, text) in unit_files {
+        let mut write_unit = Step::root("Write the system unit again", &["tee", &file]);
+        write_unit.stdin = Some(text);
+        steps.push(write_unit);
+    }
     steps.push(Step::root("", &["systemctl", "daemon-reload"]));
-    steps.push(Step::root("Restart the bridge if it runs", &["systemctl", "try-restart", unit::UNIT_NAME]));
+    let mut restart = vec!["systemctl".to_string(), "try-restart".to_string()];
+    restart.extend(instances.iter().map(Instance::unit_name));
+    let what = if instances.len() > 1 { "Restart each bridge that runs" } else { "Restart the bridge if it runs" };
+    steps.push(Step { what: what.to_string(), command: restart, root: true, stdin: None });
     steps
 }
 
-/// `remove` (§6): stop and disable the unit, take the number off Signal, delete the bridge's data,
-/// the unit, the installed files and the account. The Ask threads stay. `unregister` needs the
-/// network and a working account, so a failure there is reported and the rest still runs.
+/// `remove` (§6, §18.3) of one instance: stop and disable its unit, take its number off Signal,
+/// end its `ling web` pairing, delete its data, its account, and its unit file. `others` are the
+/// instances that stay: the template unit is deleted only with the last further instance, and the
+/// shared runtime and the bridge binary only with the last instance of all. The Ask threads stay.
+/// `unregister` needs the network and a working account, so a failure there is reported and the
+/// rest still runs.
 ///
 /// Linked to the owner's account (`linked`), `unregister` is never run: on that account it would
 /// act on the owner's own registration. The device is unlinked from the phone instead (Settings →
 /// Linked devices), which `ling signal remove` asks the owner to do; deleting the state deletes the
 /// keys either way.
-pub fn remove_plan(arch: &str, account: Option<&str>, linked: bool) -> Vec<Step> {
-    let mut steps = vec![Step::root("Stop and disable the bridge", &["systemctl", "disable", "--now", unit::UNIT_NAME])];
+pub fn remove_plan(instance: &Instance, arch: &str, account: Option<&str>, linked: bool, others: &[Instance]) -> Vec<Step> {
+    let mut steps = vec![Step::root("Stop and disable the bridge", &["systemctl", "disable", "--now", &instance.unit_name()])];
     if let Some(account) = account.filter(|_| !linked) {
-        let command = signal_cli_command(arch, account, &["unregister"]);
+        let command = signal_cli_command(instance, arch, account, &["unregister"]);
         // `signal_cli_command` already starts with sudo -u; run it as given.
         steps.push(Step { what: format!("Take {account} off Signal (unregister)"), command, root: false, stdin: None });
     }
-    steps.push(Step::user("End the bridge's pairing with `ling web`", &["ling", "web", "revoke", crate::agent::DEVICE_NAME]));
-    steps.push(Step::root("Delete the bridge's data: keys, state, the device cookie", &["rm", "-rf", "--one-file-system", unit::STATE_DIR]));
-    steps.push(Step::root("Delete the unit", &["rm", "-f", &format!("/etc/systemd/system/{}", unit::UNIT_NAME)]));
+    steps.push(Step::user("End the bridge's pairing with `ling web`", &["ling", "web", "revoke", &instance.device_name()]));
+    steps.push(Step::root("Delete the bridge's data: keys, state, the device cookie", &["rm", "-rf", "--one-file-system", &instance.state_dir()]));
+    if instance.is_first() || others.iter().all(Instance::is_first) {
+        let what = if instance.is_first() { "Delete the unit" } else { "Delete the unit further bridges run from (this was the last)" };
+        steps.push(Step::root(what, &["rm", "-f", &instance.unit_file()]));
+    }
     steps.push(Step::root("", &["systemctl", "daemon-reload"]));
-    steps.push(Step::root(
-        "Delete signal-cli, its Java runtime and the bridge binary",
-        &["rm", "-rf", "--one-file-system", &signal_cli_home().to_string_lossy(), &java_home().to_string_lossy(), unit::BRIDGE_PATH],
-    ));
-    steps.push(Step::root("Delete the system account", &["userdel", unit::ACCOUNT]));
+    if others.is_empty() {
+        steps.push(Step::root(
+            "Delete signal-cli, its Java runtime and the bridge binary",
+            &["rm", "-rf", "--one-file-system", &signal_cli_home().to_string_lossy(), &java_home().to_string_lossy(), unit::BRIDGE_PATH],
+        ));
+    }
+    steps.push(Step::root("Delete the system account", &["userdel", &instance.account()]));
     steps
 }
 
 /// signal-cli on the bridge's data with no account named: `link`, `listAccounts`.
-pub fn signal_cli_bare(arch: &str, args: &[&str]) -> Vec<String> {
+pub fn signal_cli_bare(instance: &Instance, arch: &str, args: &[&str]) -> Vec<String> {
     let mut command = vec!["env".to_string()];
     for (key, value) in signal_cli_env(arch) {
         command.push(format!("{key}={value}"));
     }
     command.push(signal_cli_program().to_string_lossy().into_owned());
     command.push("--config".to_string());
-    command.push(format!("{}/signal-cli", unit::STATE_DIR));
+    command.push(format!("{}/signal-cli", instance.state_dir()));
     command.extend(args.iter().map(|s| s.to_string()));
-    as_bridge(&command)
+    as_bridge(instance, &command)
 }
 
 /// The account `link` was associated with: its `Associated with: +…` line.
@@ -277,26 +364,26 @@ pub fn this_device(text: &str) -> Option<u64> {
     })
 }
 
-/// A command run as the bridge's account, e.g. signal-cli on its data.
-pub fn as_bridge(command: &[String]) -> Vec<String> {
-    let mut full = vec!["sudo".to_string(), "-u".to_string(), unit::ACCOUNT.to_string()];
+/// A command run as the instance's account, e.g. signal-cli on its data.
+pub fn as_bridge(instance: &Instance, command: &[String]) -> Vec<String> {
+    let mut full = vec!["sudo".to_string(), "-u".to_string(), instance.account()];
     full.extend(command.iter().cloned());
     full
 }
 
 /// signal-cli on the bridge's data, with its environment, as the bridge's account.
-pub fn signal_cli_command(arch: &str, account: &str, args: &[&str]) -> Vec<String> {
+pub fn signal_cli_command(instance: &Instance, arch: &str, account: &str, args: &[&str]) -> Vec<String> {
     let mut command = vec!["env".to_string()];
     for (key, value) in signal_cli_env(arch) {
         command.push(format!("{key}={value}"));
     }
     command.push(signal_cli_program().to_string_lossy().into_owned());
     command.push("--config".to_string());
-    command.push(format!("{}/signal-cli", unit::STATE_DIR));
+    command.push(format!("{}/signal-cli", instance.state_dir()));
     command.push("-a".to_string());
     command.push(account.to_string());
     command.extend(args.iter().map(|s| s.to_string()));
-    as_bridge(&command)
+    as_bridge(instance, &command)
 }
 
 /// Whether a number is written the way Signal wants it: `+`, then 7 to 15 digits.
@@ -320,13 +407,107 @@ pub fn pairing_code_in(output: &str) -> Option<String> {
     })
 }
 
+/// What `ling-signal account --state DIR` prints about an instance: its number, its mode, the
+/// Linux user it serves and its account id (§18.4). A bridge binary from before §18 prints the
+/// first two words only, so the last two are optional.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BridgeAccount {
+    pub number: String,
+    pub linked: bool,
+    pub user: Option<String>,
+    pub aci: Option<String>,
+}
+
+/// The line `account` prints for a `bridge.json`: `<number> <linked|dedicated> <user|-> <aci|->`.
+pub fn bridge_account_line(account: &BridgeAccount) -> String {
+    format!(
+        "{} {} {} {}",
+        account.number,
+        if account.linked { "linked" } else { "dedicated" },
+        account.user.as_deref().unwrap_or("-"),
+        account.aci.as_deref().unwrap_or("-")
+    )
+}
+
+/// Reads that line back; None when it names no valid number.
+pub fn parse_bridge_account(output: &str) -> Option<BridgeAccount> {
+    let mut words = output.split_whitespace();
+    let number = words.next()?.to_string();
+    if !valid_number(&number) {
+        return None;
+    }
+    let linked = words.next() == Some("linked");
+    let known = |word: Option<&str>| word.filter(|w| *w != "-").map(str::to_string);
+    let user = known(words.next());
+    let aci = known(words.next());
+    Some(BridgeAccount { number, linked, user, aci })
+}
+
+/// The instance among `others` that already holds the Signal account `number` (or, when known,
+/// `aci`), if any (§18.1, decision 6): two bridges on one account would both answer every note.
+pub fn held_by<'a>(number: &str, aci: Option<&str>, others: &'a [(Instance, BridgeAccount)]) -> Option<&'a Instance> {
+    others
+        .iter()
+        .find(|(_, held)| held.number == number || (aci.is_some() && held.aci.as_deref() == aci))
+        .map(|(instance, _)| instance)
+}
+
+/// Whether `current` may set up again, trust or remove an instance that serves `served` (§18.3):
+/// those pair or unpair a `ling web` device, so only the user it serves may. An instance set up
+/// before §18 records no user, and anyone with sudo may act on it, as before.
+pub fn may_act(instance: &Instance, served: Option<&str>, current: &str) -> Result<(), String> {
+    match served {
+        Some(user) if user != current => Err(format!(
+            "Bridge `{instance}` answers with {user}'s agent, so only {user} can change it; `ling signal stop --name {instance}` stops it."
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Several people on one node, each with bridges answering with their own agent, is §18.1's
+/// decision 3 second case, which §18.7 item 1 leaves for the owner to confirm. Until then the
+/// conservative reading is built: every bridge on a node serves one Linux user. Returns the bridge
+/// among `others` that serves somebody else than `user`, if any; one from before §18 records nobody
+/// and never counts.
+pub fn serves_someone_else<'a>(user: &str, others: &'a [(Instance, BridgeAccount)]) -> Option<(&'a Instance, &'a str)> {
+    others.iter().find_map(|(instance, held)| held.user.as_deref().filter(|served| *served != user).map(|served| (instance, served)))
+}
+
+/// The port in `ling web status`' answer (`… running on port 3100 (loopback only) …`).
+pub fn web_port_in(output: &str) -> Option<u16> {
+    let rest = output.split_once("running on port ")?.1;
+    rest.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
+/// `MemAvailable` in /proc/meminfo, in bytes.
+pub fn mem_available(meminfo: &str) -> Option<u64> {
+    let line = meminfo.lines().find(|line| line.starts_with("MemAvailable:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
+}
+
+/// The memory rule of §18.1, decision 7: a further JVM fits when `MemAvailable` is at least
+/// `HEADROOM_BYTES` above the caps of the instances already there. Applies to the first instance
+/// too (its rule is then `HEADROOM_BYTES` alone): on unified memory the model's headroom is the host's.
+pub fn memory_allows(available: u64, existing: usize) -> bool {
+    available >= unit::HEADROOM_BYTES + unit::MEMORY_MAX_BYTES * existing as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn first() -> Instance {
+        Instance::first()
+    }
+
+    fn named(name: &str) -> Instance {
+        Instance::parse(name).unwrap()
+    }
+
     #[test]
     fn the_plan_on_arm64_brings_the_jni_library_and_prints_every_root_step() {
-        let plan = install_plan(Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/tmp/w"), "aarch64", false, false, true);
+        let plan = install_plan(&first(), Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/tmp/w"), "aarch64", false, false, false, true, InstalledBridge::Missing, &[]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(shown[0].starts_with("sudo useradd --system --no-create-home"), "{shown:?}");
         // Java is fetched pinned, never from the package manager.
@@ -362,11 +543,11 @@ mod tests {
 
     #[test]
     fn an_existing_account_and_java_are_not_redone_and_x86_needs_no_library() {
-        let plan = install_plan(Path::new("/b"), Path::new("/w"), "x86_64", true, true, false);
+        let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "x86_64", true, true, false, false, InstalledBridge::Missing, &[]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(!shown.iter().any(|s| s.contains("useradd") || s.contains("apt-get") || s.contains("libsignal") || s.contains("OpenJDK25U")));
         // x86_64 gets its own pinned JRE when it has none.
-        let plan = install_plan(Path::new("/b"), Path::new("/w"), "x86_64", true, false, false);
+        let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "x86_64", true, false, false, false, InstalledBridge::Missing, &[]);
         assert!(plan.iter().any(|s| s.display().contains(JRE_X86_64_SHA256)));
         assert!(plan.iter().any(|s| s.display().contains("OpenJDK25U-jre_x64_linux_hotspot_25.0.4.1_1.tar.gz")));
         assert!(jre_archive("riscv64").is_none());
@@ -374,7 +555,7 @@ mod tests {
 
     #[test]
     fn refresh_reinstalls_the_bridge_and_fetches_only_what_is_missing() {
-        let plan = refresh_plan(Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/w"), "aarch64", true, true);
+        let plan = refresh_plan(Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/w"), "aarch64", true, true, &[first()]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(!shown.iter().any(|s| s.starts_with("curl") || s.contains("useradd") || s.contains("rm ")), "{shown:?}");
         assert!(shown.iter().any(|s| s == "sudo install -D -m 0755 /home/u/.local/share/dreamference/mightling/bin/ling-signal /usr/local/lib/mightling/ling-signal"));
@@ -383,7 +564,7 @@ mod tests {
         assert!(retool.contains("--env JAVA_HOME=/opt/mightling/jdk-25.0.4.1+1-jre"), "{retool}");
         assert_eq!(shown.last().unwrap(), "sudo systemctl try-restart mightling-signal.service");
         // A new pin is fetched and checked before it is unpacked.
-        let plan = refresh_plan(Path::new("/b"), Path::new("/w"), "aarch64", false, false);
+        let plan = refresh_plan(Path::new("/b"), Path::new("/w"), "aarch64", false, false, &[first()]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(shown.iter().any(|s| s.contains(JRE_AARCH64_SHA256)) && shown.iter().any(|s| s.contains(SIGNAL_CLI_SHA256)));
         let signature = shown.iter().position(|s| s.starts_with("/b verify-signal-cli ")).unwrap();
@@ -393,7 +574,7 @@ mod tests {
 
     #[test]
     fn signal_cli_runs_as_the_bridges_account_with_java_25() {
-        let command = signal_cli_command("aarch64", "+15550000", &["register", "--voice"]);
+        let command = signal_cli_command(&first(), "aarch64", "+15550000", &["register", "--voice"]);
         let text = command.join(" ");
         assert!(text.starts_with("sudo -u mightling-signal env JAVA_HOME=/opt/mightling/jdk-25.0.4.1+1-jre JAVA_OPTS=-Djava.library.path=/opt/mightling/signal-cli-0.14.9/lib/native "));
         assert!(text.ends_with("--config /var/lib/mightling-signal/signal-cli -a +15550000 register --voice"));
@@ -401,7 +582,7 @@ mod tests {
 
     #[test]
     fn remove_deletes_only_what_setup_made() {
-        let plan = remove_plan("aarch64", Some("+15550000"), false);
+        let plan = remove_plan(&first(), "aarch64", Some("+15550000"), false, &[]);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert_eq!(shown[0], "sudo systemctl disable --now mightling-signal.service");
         assert!(shown[1].starts_with("sudo -u mightling-signal env ") && shown[1].ends_with("-a +15550000 unregister"), "{}", shown[1]);
@@ -416,12 +597,12 @@ mod tests {
         }
         assert!(shown.contains(&"ling web revoke signal-bridge".to_string()));
         assert_eq!(shown.last().unwrap(), "sudo userdel mightling-signal");
-        assert!(!remove_plan("aarch64", None, false).iter().any(|s| s.display().contains("unregister")));
+        assert!(!remove_plan(&first(), "aarch64", None, false, &[]).iter().any(|s| s.display().contains("unregister")));
     }
 
     #[test]
     fn removing_a_linked_bridge_never_unregisters_the_owners_account() {
-        let plan = remove_plan("aarch64", Some("+15550000"), true);
+        let plan = remove_plan(&first(), "aarch64", Some("+15550000"), true, &[]);
         assert!(!plan.iter().any(|s| s.display().contains("unregister")), "unregister would act on the owner's own account");
         assert!(plan.iter().any(|s| s.display().contains("rm -rf --one-file-system /var/lib/mightling-signal")), "the keys are deleted");
     }
@@ -438,7 +619,7 @@ mod tests {
         let devices = "- Device 1:\n  Name: Pixel\n- Device 4 (this device):\n  Name: Mightling (gx10)\n";
         assert_eq!(this_device(devices), Some(4));
         assert_eq!(this_device("- Device 1:\n"), None);
-        let link = signal_cli_bare("aarch64", &["link", "-n", "Mightling (gx10)"]).join(" ");
+        let link = signal_cli_bare(&first(), "aarch64", &["link", "-n", "Mightling (gx10)"]).join(" ");
         assert!(link.starts_with("sudo -u mightling-signal env ") && link.ends_with("--config /var/lib/mightling-signal/signal-cli link -n Mightling (gx10)"));
         assert!(!link.contains(" -a "));
     }
@@ -456,5 +637,154 @@ mod tests {
         assert_eq!(pairing_code_in("no code here 12345678"), None);
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
         assert_eq!(shell_quote("plain-path/a.b"), "plain-path/a.b");
+    }
+    #[test]
+    fn a_second_instance_downloads_nothing_and_makes_only_its_own_things() {
+        let work = named("work");
+        let plan = install_plan(&work, Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Missing, &[]);
+        let shown: Vec<String> = plan.iter().map(Step::display).collect();
+        assert!(!shown.iter().any(|s| s.starts_with("curl") || s.contains("sudo tar") || s.contains("/opt/mightling")), "{shown:?}");
+        assert!(shown.iter().any(|s| s == "sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin mightling-signal-work"));
+        assert!(shown.iter().any(|s| s == "sudo install -d -m 0700 -o mightling-signal-work -g mightling-signal-work /var/lib/mightling-signal-work"));
+        assert!(shown.iter().any(|s| s == "sudo tee /etc/systemd/system/mightling-signal@.service"));
+        let unit = plan.iter().find(|s| s.stdin.is_some()).unwrap();
+        assert!(unit.stdin.as_ref().unwrap().contains("User=mightling-signal-%i"));
+        // Nothing of the first instance is touched.
+        for line in &shown {
+            assert!(!line.contains("/var/lib/mightling-signal ") && !line.ends_with("/var/lib/mightling-signal"), "{line}");
+            assert!(!line.contains("mightling-signal.service"), "{line}");
+            assert!(!line.ends_with(" mightling-signal"), "{line}");
+        }
+        // signal-cli runs as the instance's account on the instance's data.
+        let link = signal_cli_bare(&work, "aarch64", &["link", "-n", "Mightling (gx10, work)"]).join(" ");
+        assert!(link.starts_with("sudo -u mightling-signal-work env ") && link.contains("--config /var/lib/mightling-signal-work/signal-cli link"), "{link}");
+    }
+
+    #[test]
+    fn the_bridge_binary_is_compared_by_hash() {
+        let dir = std::env::temp_dir().join(format!("ling-signal-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (new, same, other) = (dir.join("new"), dir.join("same"), dir.join("other"));
+        std::fs::write(&new, b"ling-signal build 2").unwrap();
+        std::fs::write(&same, b"ling-signal build 2").unwrap();
+        std::fs::write(&other, b"ling-signal build 1").unwrap();
+        let found = (installed_bridge(&dir.join("absent"), &new), installed_bridge(&same, &new), installed_bridge(&other, &new));
+        let digest = sha256_of(&new);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found, (InstalledBridge::Missing, InstalledBridge::Same, InstalledBridge::Different));
+        // The SHA-256 of the bytes, in hex (as `sha256sum` prints it).
+        assert_eq!(digest.as_deref(), Some("c6e7b4f83cfe2169910422f47b941d2386297109ffad0f18014455cfbfed3b5f"));
+    }
+
+    #[test]
+    fn a_second_setup_leaves_an_identical_bridge_binary_alone_and_names_what_a_different_one_replaces() {
+        let work = named("work");
+        let install = |plan: &[Step]| plan.iter().filter(|s| s.command.last().map(String::as_str) == Some(unit::BRIDGE_PATH)).cloned().collect::<Vec<Step>>();
+        // The same build: not installed again under the running `default`.
+        let plan = install_plan(&work, Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Same, &[first()]);
+        assert!(install(&plan).is_empty(), "{plan:?}");
+        assert!(!plan.iter().any(|s| s.display().contains(unit::BRIDGE_PATH)));
+        // Another build: installed, and the plan says it replaces the binary under `default`.
+        let plan = install_plan(&work, Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Different, &[first()]);
+        let step = install(&plan);
+        assert_eq!(step.len(), 1);
+        assert_eq!(step[0].display(), "sudo install -D -m 0755 /b /usr/local/lib/mightling/ling-signal");
+        assert!(step[0].what.starts_with("Replace the bridge binary the bridge already here (`default`) runs from") && step[0].what.contains("SHA-256"), "{}", step[0].what);
+        let plan = install_plan(&named("home"), Path::new("/b"), Path::new("/w"), "aarch64", false, true, true, false, InstalledBridge::Different, &[first(), work.clone()]);
+        assert!(install(&plan)[0].what.contains("the bridges already here (`default`, `work`) run from"), "{:?}", install(&plan));
+        // None installed, or a different one with no bridge using it: a plain install.
+        for (installed, others) in [(InstalledBridge::Missing, vec![]), (InstalledBridge::Missing, vec![first()]), (InstalledBridge::Different, vec![])] {
+            let plan = install_plan(&first(), Path::new("/b"), Path::new("/w"), "aarch64", true, true, true, false, installed, &others);
+            let step = install(&plan);
+            assert_eq!((step.len(), step[0].what.as_str()), (1, "Install the bridge where the system account can run it"), "{installed:?}");
+        }
+    }
+
+    #[test]
+    fn removing_one_of_two_keeps_the_shared_runtime_and_the_last_one_deletes_it() {
+        let work = named("work");
+        let plan = remove_plan(&work, "aarch64", Some("+15550001"), true, &[first()]);
+        let shown: Vec<String> = plan.iter().map(Step::display).collect();
+        assert_eq!(shown[0], "sudo systemctl disable --now mightling-signal@work.service");
+        assert!(shown.contains(&"ling web revoke signal-work".to_string()), "{shown:?}");
+        assert!(!shown.iter().any(|s| s.contains("signal-bridge")), "the first instance's device stays paired");
+        assert!(!shown.iter().any(|s| s.contains("/opt/mightling") || s.contains(unit::BRIDGE_PATH)), "{shown:?}");
+        assert!(shown.iter().any(|s| s == "sudo rm -rf --one-file-system /var/lib/mightling-signal-work"));
+        // With only the first instance left, the template goes too.
+        assert!(shown.iter().any(|s| s == "sudo rm -f /etc/systemd/system/mightling-signal@.service"));
+        assert_eq!(shown.last().unwrap(), "sudo userdel mightling-signal-work");
+        // Another further instance stays: the template stays.
+        let plan = remove_plan(&work, "aarch64", None, true, &[first(), named("home")]);
+        assert!(!plan.iter().any(|s| s.display().contains("mightling-signal@.service")));
+        // The first instance removed beside a further one: its own unit only, the runtime stays.
+        let plan = remove_plan(&first(), "aarch64", None, true, &[work.clone()]);
+        let shown: Vec<String> = plan.iter().map(Step::display).collect();
+        assert!(shown.iter().any(|s| s == "sudo rm -f /etc/systemd/system/mightling-signal.service"));
+        assert!(!shown.iter().any(|s| s.contains("mightling-signal@.service") || s.contains("/opt/mightling")), "{shown:?}");
+        assert!(shown.contains(&"ling web revoke signal-bridge".to_string()));
+        // The last instance of all deletes the runtime and the bridge binary.
+        let plan = remove_plan(&work, "aarch64", None, true, &[]);
+        let shown: Vec<String> = plan.iter().map(Step::display).collect();
+        assert!(shown.iter().any(|s| s.contains("/opt/mightling/signal-cli-0.14.9") && s.contains(unit::BRIDGE_PATH)));
+        assert!(shown.iter().any(|s| s == "sudo rm -f /etc/systemd/system/mightling-signal@.service"));
+    }
+
+    #[test]
+    fn refresh_covers_every_instance_and_fetches_the_runtime_once() {
+        let plan = refresh_plan(Path::new("/b"), Path::new("/w"), "aarch64", false, false, &[first(), named("home"), named("work")]);
+        let shown: Vec<String> = plan.iter().map(Step::display).collect();
+        assert_eq!(shown.iter().filter(|s| s.starts_with("sudo tar") && s.contains("signal-cli-0.14.9")).count(), 1);
+        assert_eq!(shown.iter().filter(|s| s.starts_with("sudo install -D -m 0755 /b ")).count(), 1);
+        for (account, state) in [("mightling-signal", "/var/lib/mightling-signal"), ("mightling-signal-home", "/var/lib/mightling-signal-home"), ("mightling-signal-work", "/var/lib/mightling-signal-work")] {
+            assert!(shown.iter().any(|s| s.starts_with(&format!("sudo -u {account} /usr/local/lib/mightling/ling-signal retool --state {state} "))), "{account}");
+        }
+        assert_eq!(shown.iter().filter(|s| s.as_str() == "sudo tee /etc/systemd/system/mightling-signal.service").count(), 1);
+        assert_eq!(shown.iter().filter(|s| s.as_str() == "sudo tee /etc/systemd/system/mightling-signal@.service").count(), 1);
+        assert_eq!(shown.last().unwrap(), "sudo systemctl try-restart mightling-signal.service mightling-signal@home.service mightling-signal@work.service");
+    }
+
+    #[test]
+    fn the_account_line_and_the_refusals() {
+        let held = BridgeAccount { number: "+15550000".to_string(), linked: true, user: Some("owner".to_string()), aci: Some("aci-1".to_string()) };
+        let line = bridge_account_line(&held);
+        assert_eq!(line, "+15550000 linked owner aci-1");
+        assert_eq!(parse_bridge_account(&line), Some(held.clone()));
+        // A bridge binary from before §18 prints two words.
+        assert_eq!(parse_bridge_account("+15550000 linked\n"), Some(BridgeAccount { number: "+15550000".to_string(), linked: true, user: None, aci: None }));
+        assert_eq!(parse_bridge_account("+15550000 dedicated - -").unwrap().user, None);
+        assert_eq!(parse_bridge_account("bridge.json: No such file"), None);
+        // One account, one instance: by number, or by account id when the new one's is known.
+        let others = vec![(first(), held.clone())];
+        assert_eq!(held_by("+15550000", None, &others), Some(&first()));
+        // The id after a fresh link, read from listAccounts with signal-cli's stderr line beside it.
+        let after_link = "[{\"number\":\"+15559999\",\"aci\":\"aci-1\"}]\nINFO  AccountHelper - The Signal protocol expects that incoming messages are regularly received.\n";
+        let aci = account_aci(after_link, "+15559999");
+        assert_eq!(held_by("+15559999", aci.as_deref(), &others), Some(&first()));
+        assert_eq!(held_by("+15551111", Some("aci-2"), &others), None);
+        assert_eq!(held_by("+15551111", None, &[(first(), BridgeAccount { aci: None, ..held.clone() })]), None);
+        // Only the user an instance serves may change it; one from before §18 records nobody.
+        assert!(may_act(&named("work"), Some("owner"), "owner").is_ok());
+        let refused = may_act(&named("work"), Some("owner"), "guest").unwrap_err();
+        assert!(refused.contains("only owner can change it") && refused.contains("--name work"), "{refused}");
+        assert!(may_act(&first(), None, "anyone").is_ok());
+        // One Linux user per node until the owner confirms several (§18.7 item 1).
+        let mine = vec![(first(), BridgeAccount { user: None, ..held.clone() }), (named("work"), held.clone())];
+        assert_eq!(serves_someone_else("owner", &mine), None);
+        assert_eq!(serves_someone_else("guest", &mine), Some((&named("work"), "owner")));
+        assert_eq!(serves_someone_else("guest", &mine[..1]), None, "a bridge from before §18 records nobody");
+    }
+
+    #[test]
+    fn the_web_port_and_the_memory_rule() {
+        assert_eq!(web_port_in("Mightling web server: running on port 3101 (loopback only), pid 9; 2 paired device(s).\n"), Some(3101));
+        assert_eq!(web_port_in("Mightling web server: not running (start it with `ling web start`); 0 paired device(s)."), None);
+        let meminfo = "MemTotal:       127535892 kB\nMemFree:        11000000 kB\nMemAvailable:    3000000 kB\n";
+        assert_eq!(mem_available(meminfo), Some(3_000_000 * 1024));
+        assert_eq!(mem_available("MemTotal: 1 kB\n"), None);
+        let gib = 1024 * 1024 * 1024;
+        assert!(memory_allows(2 * gib, 0));
+        assert!(!memory_allows(2 * gib - 1, 0));
+        assert!(!memory_allows(2 * gib + 1, 1), "2 GB above one existing instance's 768 MB cap");
+        assert!(memory_allows(2 * gib + unit::MEMORY_MAX_BYTES * 3, 3));
     }
 }

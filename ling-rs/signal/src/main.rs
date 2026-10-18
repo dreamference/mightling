@@ -4,6 +4,6 @@
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let invocation = ling_signal::cli::Invocation { bridge: std::env::current_exe().ok(), bridge_commands: true };
+    let invocation = ling_signal::cli::Invocation::new(std::env::current_exe().ok(), true);
     std::process::exit(ling_signal::cli::run(&args, &invocation));
 }

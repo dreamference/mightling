@@ -81,6 +81,21 @@ replies with the run, how far it has got and roughly how long is left, and you a
 If you would rather not link your own account, `ling signal setup --number +15551234567` registers a
 separate number for Mightling instead (it needs a CAPTCHA and an SMS or voice code).
 
+**More than one Signal account.** Each Signal account gets a bridge of its own, with a name. The
+first is always `default`, set up by plain `ling signal setup` (a name given for the first one is
+refused); add another with `--name`:
+
+```bash
+ling signal setup --name work            # links a second account (or --number for its own number)
+ling signal status                       # one line per bridge
+ling signal stop --name work             # with several bridges, the commands need --name
+ling signal remove --name work           # removes that bridge only; the others keep running
+```
+
+Each bridge has its own system account and keys, so one cannot read another's. A node runs at most
+four, and setup needs 2 GB of memory to spare. A Signal account can have only one bridge. For now,
+every bridge on a node answers with the same Linux user's agent.
+
 The bridge runs only on a Linux node. See `specs/DREAMFERENCE_MIGHTLING_SIGNAL.md` in the repository
 for the design and what has been verified.
 
