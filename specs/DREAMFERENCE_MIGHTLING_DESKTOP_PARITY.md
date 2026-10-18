@@ -552,7 +552,7 @@ In this order (the owner, 2026-10-18), each item with its §2 row as acceptance:
 4. **Preview tab** with comments and per-site permissions (§2.9). **Preview tab, with its --app egress-audit case: merged 2026-10-18, a435355.**
 5. **Activity view** (§2.4, Ctrl+Alt+U). **Activity view: merged 2026-10-18, 9b227b1.**
 6. **Pets** with Mightling's art (§2.1, §2.15, §7 question 5). **Pets (Mightling's ling, off by default): merged 2026-10-18, 0096587.**
-7. **Suggested prompts** (§2.15).
+7. **Suggested prompts** (§2.15). **Suggested prompts (off by default): merged 2026-10-18, fa07a02.**
 8. **External agent import** (§2.11): `externalAgentConfig/detect|import|import/readHistories`.
 9. **The `gh`-backed pull-request tab** (§2.5).
 10. **Agent message board** (§2.13).
