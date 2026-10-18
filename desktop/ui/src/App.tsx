@@ -51,6 +51,7 @@ import { REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type W
 import { PreviewTab } from "./PreviewTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
+import { ActivityView } from "./ActivityView";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
@@ -141,6 +142,7 @@ export function App() {
   const [planAvailable, setPlanAvailable] = useState(false);
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [agentsHidden, setAgentsHidden] = useState(false);
   const [memoryModes, setMemoryModes] = useState<Record<string, "enabled" | "disabled">>({});
   const [nightUnseen, setNightUnseen] = useState(0);
@@ -864,6 +866,7 @@ export function App() {
       if (prefsRef.current.bottomPanel) closedSurfaces.close("bottomPanel");
       updatePrefs({ bottomPanel: false });
     },
+    activityView: () => setActivityOpen((open) => !open),
     previewOpen: () => {
       if (!bridge.preview.available()) return notice("The preview tab is the desktop app's: open the page in your browser.");
       openPreview("");
@@ -1485,6 +1488,7 @@ export function App() {
       [keyAction("fileTree"), "fileTree"],
       [keyAction("searchFiles"), "searchFiles"],
       [keyAction("previewOpen"), "previewOpen"],
+      [keyAction("activityView"), "activityView"],
     ];
     // With a preview tab in front, Ctrl+Shift+C copies the page's address (the preview's own key, PreviewTab.tsx).
     const previewInFront = tabsShown && tabs.find((tab) => tab.key === activeTab)?.kind === "preview";
@@ -1531,8 +1535,9 @@ export function App() {
       event.preventDefault();
       setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen || fileSearch !== null)) {
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen || fileSearch !== null || activityOpen)) {
       setFileSearch(null);
+      setActivityOpen(false);
       setScheduledOpen(false);
       setExtensions(null);
       setPicker("closed");
@@ -1617,7 +1622,7 @@ export function App() {
   );
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
-  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv;
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen;
   const title = selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? "New question" : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
@@ -1737,6 +1742,7 @@ export function App() {
             <Icon name="clock" size={14} />Scheduled{nightUnseen ? <span className="count" aria-label={`${nightUnseen} new`}>{nightUnseen}</span> : null}
           </button>
         ) : null}
+        {!POPOUT ? <button className="nav-row activity-button" onClick={() => setActivityOpen(true)} title={`What the agent did, across threads (${shortcutLabel("activityView")})`}><Icon name="activity" size={14} />Activity</button> : null}
         {!POPOUT ? <button className="nav-row skills-button" onClick={() => setExtensions("skills")} title="Skills, MCP servers and apps"><Icon name="info" size={14} />Skills and tools</button> : null}
         <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title="Settings (Ctrl+,)"><Icon name="settings" size={14} />Settings</button>
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
@@ -1961,6 +1967,15 @@ export function App() {
         <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
           front={(() => { const tab = tabs.find((entry) => entry.key === activeTab); return tab?.kind === "file" && tabsShown ? tab.path : null; })()}
           onOpen={(path, line) => openFile(path, line)} onClose={() => setFileSearch(null)} />
+      ) : null}
+      {activityOpen ? (
+        <ActivityView client={client} threads={Object.values(state.threads).map((entry) => entry.thread)}
+          projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)}
+          onOpen={(threadId) => {
+            const thread = state.threads[threadId]?.thread;
+            if (thread) setView(isAskThread(thread, askRoot) ? "ask" : "work");
+            void openThread(threadId);
+          }} onClose={() => setActivityOpen(false)} />
       ) : null}
       {menuOpen ? <CommandMenu entries={menuOpen === "projects" ? menuEntries().filter((entry) => entry.kind === "project") : menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
     </div>
