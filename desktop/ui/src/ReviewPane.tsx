@@ -23,9 +23,6 @@ const SCOPES: { id: ReviewScope; label: string }[] = [
 ];
 
 export interface ReviewPaneProps {
-  /** The workspace layout (§2.1): beside the thread, or the tabs in full. */
-  workspaceLayout: "split" | "tabs" | "chat";
-  setWorkspaceLayout: (layout: "split" | "tabs" | "chat") => void;
   cwd: string | null;
   threadId: string | null;
   /** The shown thread's last turn's diff, for the Last turn scope. */
@@ -43,7 +40,8 @@ export interface ReviewPaneProps {
   /** Settings › Git: Force ticked to begin with. */
   forcePushDefault: boolean;
   notice: (error: unknown) => void;
-  onClose: () => void;
+  /** Opens a changed file in a file tab of its own (Phase 3 item 1), at a line or the top. */
+  onOpenFile: ((path: string, line: number | null) => void) | null;
 }
 
 interface Draft {
@@ -259,6 +257,9 @@ export function ReviewPane(props: ReviewPaneProps) {
         <header onClick={(event) => event.target === event.currentTarget && toggle()}>
           <button className="icon" aria-label={isCollapsed ? "Expand" : "Collapse"} onClick={toggle}><Icon name={isCollapsed ? "chevronRight" : "chevronDown"} size={14} /></button>
           <button className="file-name" title={windowGit ? "Open in the editor" : file.path} onClick={() => open(file, null)}>{file.path}</button>
+          {props.onOpenFile && (root ?? props.cwd) && file.status !== "deleted" ? (
+            <button className="icon" title="Open in a tab" aria-label={`Open ${file.path} in a tab`} onClick={() => props.onOpenFile?.(`${(root ?? props.cwd ?? "").replace(/\/+$/, "")}/${file.path}`, null)}><Icon name="file" size={13} /></button>
+          ) : null}
           {file.status !== "modified" ? <span className={`file-status ${file.status}`}>{file.status}</span> : null}
           <span className="diffstat"><span className="plus">+{file.added}</span> <span className="minus">−{file.removed}</span></span>
           <span className="spacer" onClick={toggle} />
@@ -319,13 +320,8 @@ export function ReviewPane(props: ReviewPaneProps) {
   };
 
   return (
-    <aside className="review-pane" aria-label="Review">
-      <header className="review-bar">
-        <span className="tab-strip" role="tablist" aria-label="Tabs">
-          <span className="tab selected" role="tab" aria-selected="true"><Icon name="fileDiff" size={13} /> Review
-            <button className="icon" aria-label="Close the Review tab" title="Close (Ctrl+W)" onClick={props.onClose}><Icon name="x" size={12} /></button>
-          </span>
-        </span>
+    <div className="review-body">
+      <header className="review-tools">
         {repos.length > 1 ? (
           <select aria-label="Repository" value={root ?? ""} onChange={(event) => setRoot(event.target.value)}>
             {repos.map((repo) => <option key={repo} value={repo}>{repo.split(/[\\/]/).pop()}</option>)}
@@ -334,11 +330,6 @@ export function ReviewPane(props: ReviewPaneProps) {
         <span className="spacer" />
         <button className="icon" title={props.layout === "split" ? "Show the diff in one column" : "Show the old and the new side by side"} aria-label="Switch the view" onClick={() => props.setLayout(props.layout === "split" ? "unified" : "split")}>{props.layout === "split" ? "One column" : "Side by side"}</button>
         <button className="icon" title="Read the repository again" aria-label="Refresh" onClick={() => void load()}><Icon name="undo" size={14} /></button>
-        <span className="segmented layout-switch" role="radiogroup" aria-label="Layout">
-          <button role="radio" aria-checked={props.workspaceLayout === "split"} className={props.workspaceLayout === "split" ? "selected" : ""} title="Beside the thread (Ctrl+Shift+B cycles)" onClick={() => props.setWorkspaceLayout("split")}>Split</button>
-          <button role="radio" aria-checked={props.workspaceLayout === "tabs"} className={props.workspaceLayout === "tabs" ? "selected" : ""} title="The tabs in full (Ctrl+Shift+F)" onClick={() => props.setWorkspaceLayout("tabs")}>Full</button>
-          <button role="radio" aria-checked={false} title="Hide the tabs, keep them open (Ctrl+Alt+B)" onClick={() => props.setWorkspaceLayout("chat")}>Hide</button>
-        </span>
       </header>
       <nav className="review-scopes" aria-label="Scope">
         {SCOPES.filter((entry) => windowGit || entry.id === "turn").map((entry) => (
@@ -414,6 +405,6 @@ export function ReviewPane(props: ReviewPaneProps) {
           ) : null}
         </footer>
       ) : null}
-    </aside>
+    </div>
   );
 }

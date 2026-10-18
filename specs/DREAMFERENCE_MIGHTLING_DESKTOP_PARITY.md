@@ -545,7 +545,22 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 
 ### 4.3 Phase 3 — the workstation extras
 
-File tree and file tabs; search files and go to line; the artifacts viewer (Markdown, images, PDF, HTML; LaTeX if `tectonic` is bundled); the preview tab with comments and per-site permissions; Activity view; pets with Mightling's art; suggested prompts; external agent import; the `gh`-backed pull-request tab; agent message board; dark mode and the Appearance page's light/dark/system choice, if dark is ever approved; macOS and Windows app builds (RELEASE, WINDOWS_ARM).
+In this order (the owner, 2026-10-18), each item with its §2 row as acceptance:
+
+1. **File tree and file tabs** (§2.8): `fs/readDirectory|readFile|getMetadata|watch|unwatch`, read only.
+2. **Search files and go to line** (§2.8, §2.19: Ctrl+P, Ctrl+L).
+3. **Artifacts viewer** (§2.8): Markdown, images, PDF, HTML; LaTeX only if `tectonic` is bundled (§7 question 4).
+4. **Preview tab** with comments and per-site permissions (§2.9).
+5. **Activity view** (§2.4, Ctrl+Alt+U).
+6. **Pets** with Mightling's art (§2.1, §2.15, §7 question 5).
+7. **Suggested prompts** (§2.15).
+8. **External agent import** (§2.11): `externalAgentConfig/detect|import|import/readHistories`.
+9. **The `gh`-backed pull-request tab** (§2.5).
+10. **Agent message board** (§2.13).
+11. **Dark mode** and the Appearance page's light/dark/system choice, if dark is ever approved: **not built** (dark mode not approved, the owner, 2026-10-18).
+12. **macOS and Windows app builds** (§2.17; RELEASE, WINDOWS_ARM).
+
+The methods Phase 3 adds to `ling-rs/web/policy.json` (items 1 to 3 and 8, one conformance case each, plus two keeping `fs/writeFile` and `fs/remove` refused) are on `desktop/p3-policy`, on top of `desktop/p2-held`, so they share its Rust conformance run.
 
 ### 4.4 Not proposed
 

@@ -10,6 +10,9 @@ import type { RequestId } from "./protocol/RequestId";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { ServerRequest } from "./protocol/ServerRequest";
 import type { ConfigReadResponse } from "./protocol/v2/ConfigReadResponse";
+import type { FsGetMetadataResponse } from "./protocol/v2/FsGetMetadataResponse";
+import type { FsReadDirectoryResponse } from "./protocol/v2/FsReadDirectoryResponse";
+import type { FsReadFileResponse } from "./protocol/v2/FsReadFileResponse";
 import type { GetAccountResponse } from "./protocol/v2/GetAccountResponse";
 import type { PermissionProfileListResponse } from "./protocol/v2/PermissionProfileListResponse";
 import type { ThreadCompactStartResponse } from "./protocol/v2/ThreadCompactStartResponse";
@@ -42,6 +45,9 @@ interface Responses {
   "turn/start": TurnStartResponse;
   "turn/steer": TurnSteerResponse;
   "turn/interrupt": TurnInterruptResponse;
+  "fs/readDirectory": FsReadDirectoryResponse;
+  "fs/readFile": FsReadFileResponse;
+  "fs/getMetadata": FsGetMetadataResponse;
 }
 export type ResponseOf<M extends Method> = M extends keyof Responses ? Responses[M] : unknown;
 

@@ -257,6 +257,64 @@
       "message": {"id": 57, "method": "memory/reset", "params": {}},
       "accept": true,
       "out": {"id": 57, "method": "memory/reset", "params": {}}
+    },
+    {
+      "name": "fs/readDirectory passes: the file tree lists a folder (DESKTOP_PARITY Phase 3 item 1)",
+      "message": {"id": 58, "method": "fs/readDirectory", "params": {"path": "/w"}},
+      "accept": true,
+      "out": {"id": 58, "method": "fs/readDirectory", "params": {"path": "/w"}}
+    },
+    {
+      "name": "fs/readFile passes: a file tab or the artifacts viewer reads a file",
+      "message": {"id": 59, "method": "fs/readFile", "params": {"path": "/w/README.md"}},
+      "accept": true,
+      "out": {"id": 59, "method": "fs/readFile", "params": {"path": "/w/README.md"}}
+    },
+    {
+      "name": "fs/getMetadata passes: a file tab checks what a path is before it opens it",
+      "message": {"id": 60, "method": "fs/getMetadata", "params": {"path": "/w/src"}},
+      "accept": true,
+      "out": {"id": 60, "method": "fs/getMetadata", "params": {"path": "/w/src"}}
+    },
+    {
+      "name": "fs/watch passes: the file tree follows a folder's changes",
+      "message": {"id": 61, "method": "fs/watch", "params": {"watchId": "tree-1", "path": "/w"}},
+      "accept": true,
+      "out": {"id": 61, "method": "fs/watch", "params": {"watchId": "tree-1", "path": "/w"}}
+    },
+    {
+      "name": "fs/unwatch passes: the file tree stops following a folder",
+      "message": {"id": 62, "method": "fs/unwatch", "params": {"watchId": "tree-1"}},
+      "accept": true,
+      "out": {"id": 62, "method": "fs/unwatch", "params": {"watchId": "tree-1"}}
+    },
+    {
+      "name": "externalAgentConfig/detect passes: Settings > Import finds another agent's configuration (Phase 3 item 8)",
+      "message": {"id": 63, "method": "externalAgentConfig/detect", "params": {"includeHome": true, "cwds": ["/w"]}},
+      "accept": true,
+      "out": {"id": 63, "method": "externalAgentConfig/detect", "params": {"includeHome": true, "cwds": ["/w"]}}
+    },
+    {
+      "name": "externalAgentConfig/import passes: the items the user ticked are imported",
+      "message": {"id": 64, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "AGENTS_MD", "description": "AGENTS.md", "cwd": "/w", "details": null}]}},
+      "accept": true,
+      "out": {"id": 64, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "AGENTS_MD", "description": "AGENTS.md", "cwd": "/w", "details": null}]}}
+    },
+    {
+      "name": "externalAgentConfig/import/readHistories passes: the past imports are listed",
+      "message": {"id": 65, "method": "externalAgentConfig/import/readHistories", "params": {}},
+      "accept": true,
+      "out": {"id": 65, "method": "externalAgentConfig/import/readHistories", "params": {}}
+    },
+    {
+      "name": "fs/writeFile is refused: the window reads files through the server and never writes them",
+      "message": {"id": 66, "method": "fs/writeFile", "params": {"path": "/w/a.txt", "dataBase64": "eA=="}},
+      "accept": false
+    },
+    {
+      "name": "fs/remove is refused: the window never deletes through the server",
+      "message": {"id": 67, "method": "fs/remove", "params": {"path": "/w/a.txt"}},
+      "accept": false
     }
   ]
 }
