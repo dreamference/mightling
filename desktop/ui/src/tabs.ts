@@ -8,7 +8,11 @@ export type WorkspaceTab =
   /** A file read through `fs/readFile`; `line` is where it was asked to open (go to line), 1-based. */
   | { key: string; kind: "file"; path: string; line: number | null }
   /** A page in the preview tab (Phase 3 item 4); `url` is where it was opened, its title once known. */
-  | { key: string; kind: "preview"; id: string; url: string; title: string | null };
+  | { key: string; kind: "preview"; id: string; url: string; title: string | null }
+  /** The pull-request tab (Phase 3 item 9): one per window, on the thread's repository. */
+  | { key: "prs"; kind: "prs" };
+
+export const PR_TAB: WorkspaceTab = { key: "prs", kind: "prs" };
 
 export const REVIEW_TAB: WorkspaceTab = { key: "review", kind: "review" };
 
@@ -52,6 +56,7 @@ export function previewTab(url: string): WorkspaceTab {
 /** What a tab is called in the strip: the file's name, the page's title (or host), or Review. */
 export function tabLabel(tab: WorkspaceTab): string {
   if (tab.kind === "review") return "Review";
+  if (tab.kind === "prs") return "Pull requests";
   if (tab.kind === "preview") {
     if (tab.title) return tab.title;
     try {
@@ -68,8 +73,9 @@ export function baseName(path: string): string {
 }
 
 /** How a closed tab is remembered for Ctrl+Shift+T (shell.ts `ClosedSurfaces`). */
-export function surfaceOf(tab: WorkspaceTab): "review" | `file:${string}` | `preview:${string}` {
+export function surfaceOf(tab: WorkspaceTab): "review" | "prs" | `file:${string}` | `preview:${string}` {
   if (tab.kind === "review") return "review";
+  if (tab.kind === "prs") return "prs";
   if (tab.kind === "file") return `file:${tab.path}`;
   return `preview:${tab.url}`;
 }

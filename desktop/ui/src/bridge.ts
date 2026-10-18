@@ -407,3 +407,33 @@ export const preview = {
     return () => window.removeEventListener("message", onMessage);
   },
 };
+
+/** A pull request as `gh pr list` and `gh pr view` answer (fields the tab reads). */
+export interface PullRequest {
+  number: number;
+  title: string;
+  author: { login: string } | null;
+  headRefName: string;
+  baseRefName: string;
+  isDraft: boolean;
+  reviewDecision: string | null;
+  updatedAt: string;
+  url: string;
+  body?: string;
+  state?: string;
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+  statusCheckRollup?: { __typename?: string; name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string; workflowName?: string }[];
+}
+
+/** The pull-request tab (DESKTOP_PARITY §2.5, Phase 3 item 9): the user's `gh` in the repository, in the app only. */
+export const prs = {
+  available: () => host() === "electron",
+  list: (root: string, inbox: "review" | "mine" | "open", thread: string | null) => send<PullRequest[]>({ type: "pr/list", root, inbox, thread }),
+  view: (root: string, number: number, thread: string | null) => send<PullRequest>({ type: "pr/view", root, number, thread }),
+  diff: (root: string, number: number, thread: string | null) => send<string>({ type: "pr/diff", root, number, thread }),
+  review: (root: string, number: number, verdict: "comment" | "approve" | "request-changes", body: string, thread: string | null) =>
+    send<string>({ type: "pr/review", root, number, verdict, body, thread }),
+  status: (root: string) => send<string>({ type: "pr/status", root }),
+};

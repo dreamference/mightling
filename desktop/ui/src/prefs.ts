@@ -55,6 +55,8 @@ export interface Prefs {
   petImage: string | null;
   /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */
   suggestPrompts: boolean;
+  /** The pull-request tab through the user's GitHub CLI (Settings › Git); off by default, refused at airgapped on. */
+  pullRequests: boolean;
   /** When a finished turn shows a desktop notification, and whether a waiting approval does (Settings › Notifications). */
   notifyTurns: "unfocused" | "always" | "never";
   notifyApprovals: boolean;

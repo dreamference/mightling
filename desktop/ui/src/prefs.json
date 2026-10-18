@@ -121,6 +121,10 @@
       "default": false,
       "type": "boolean"
     },
+    "pullRequests": {
+      "default": false,
+      "type": "boolean"
+    },
     "notifyTurns": {
       "default": "unfocused",
       "enum": [

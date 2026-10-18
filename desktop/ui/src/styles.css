@@ -649,6 +649,27 @@ html.pet-page body { margin: 0; }
 .import-panel .buttons { display: flex; gap: 8px; margin-bottom: 8px; }
 .import-history { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
 
+/* The pull-request tab (Phase 3 item 9). */
+.prs-tab { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 38%) 1fr; border-top: 1px solid var(--line); }
+.prs-list { overflow: auto; border-right: 1px solid var(--line); padding-top: 6px; }
+.prs-list ul { list-style: none; margin: 0; padding: 0 6px 12px; }
+.pr-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; border: none; background: none; padding: 6px 8px; border-radius: var(--radius-sm); color: var(--text); }
+.pr-row:hover { background: var(--hover); }
+.pr-row.selected { background: var(--selected); }
+.pr-number { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pr-title { font-size: 13px; font-weight: 500; }
+.pr-meta { font-size: 12px; color: var(--muted); }
+.pr-detail { overflow: auto; padding: 4px 16px 24px; }
+.pr-detail h3 { font-size: 15px; margin: 8px 0 4px; }
+.pr-detail h4 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 14px 0 6px; }
+.pr-detail .buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.pr-detail textarea { width: 100%; box-sizing: border-box; font: inherit; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; }
+.pr-checks { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.check-state { display: inline-block; min-width: 54px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+.check-failed .check-state { color: var(--del-text); }
+.check-passed .check-state { color: var(--add-text); }
+.pr-file summary { padding: 6px 10px; cursor: pointer; }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs
