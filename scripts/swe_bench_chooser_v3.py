@@ -110,7 +110,7 @@ PAUSED: Final[int] = 75
 CONTAINER_NAME: Final[str] = "ling-chooser-v3-"
 CONTAINER_LABEL: Final[str] = "ling.swe-bench.chooser=v3"
 OUTPUT_SHOWN_CHARS: Final[int] = 3_000
-FEEDBACK_CHARS: Final[int] = 600
+FEEDBACK_CHARS: Final[int] = 900
 # What may differ between two runs of one script without the behaviour differing.
 NOISE: Final[Tuple[Tuple[re.Pattern, str], ...]] = (
     (re.compile(r"0x[0-9a-fA-F]+"), "0x?"),
@@ -227,6 +227,15 @@ def normalised(output: str) -> str:
     return text
 
 
+def ends(text: str, limit: int = FEEDBACK_CHARS) -> str:
+    """A long output's head and tail (a traceback's last line is what says why it failed)."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    head = limit // 3
+    return text[:head] + f"\n[... {len(text) - limit} characters ...]\n" + text[-(limit - head):]
+
+
 def outcome(result: Dict[str, Any]) -> Tuple[Optional[int], str]:
     """A container's result as the round reads it: (exit status, None when it did not run; output)."""
     if result.get("error"):
@@ -311,7 +320,7 @@ class TaskChooser:
     def verdict_payload(self, script: str, expected: str, base: Dict[str, Any], p: Dict[str, Any],
                         q: Dict[str, Any]) -> Dict[str, Any]:
         """The outputs-only verdict: the issue, the script and what it printed; never a diff."""
-        shown = lambda result: v1.clip(outcome(result)[1].strip(), OUTPUT_SHOWN_CHARS) or "(no output)"
+        shown = lambda result: ends(outcome(result)[1], OUTPUT_SHOWN_CHARS) or "(no output)"
         user = VERDICT_TEMPLATE.format(
             issue=v1.clip(str(self.row.get("problem_statement") or ""), v1.MAX_ISSUE_CHARS),
             script=v1.clip(script, v2.MAX_TEST_CHARS), expected=expected or "(not stated)",
@@ -376,9 +385,9 @@ class TaskChooser:
             else:
                 entry["void"] = "both met the expectation" if met(rx) else "the same result with both fixes"
             void.append(f"- round {number + 1} (EXPECTED: {expected or 'not stated'}): "
-                        f"unpatched exit {outcome(base)[0]}, output {v1.clip(outcome(base)[1].strip(), FEEDBACK_CHARS)!r}; "
-                        f"fix X exit {ox[0]}, output {v1.clip(ox[1].strip(), FEEDBACK_CHARS)!r}; "
-                        f"fix Y exit {oy[0]}, output {v1.clip(oy[1].strip(), FEEDBACK_CHARS)!r}")
+                        f"unpatched exit {outcome(base)[0]}, output {ends(outcome(base)[1])!r}; "
+                        f"fix X exit {ox[0]}, output {ends(ox[1])!r}; "
+                        f"fix Y exit {oy[0]}, output {ends(oy[1])!r}")
         return None
 
     def compare(self, a: Any, b: Any) -> Optional[Tuple[float, float]]:
