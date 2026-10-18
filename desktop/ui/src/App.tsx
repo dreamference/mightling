@@ -9,7 +9,7 @@
 // (ling-rs/web/src/policy.rs) and the desktop app's main process (desktop/electron/src/policy.ts).
 // So both show Ask by default and Work one click away (`#work`).
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 
 import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAskThread, turnInput, type Attached } from "./ask";
 import * as bridge from "./bridge";
@@ -41,6 +41,10 @@ import { CommandMenu } from "./CommandMenu";
 import { ExtensionsView, type ExtensionsTab } from "./ExtensionsView";
 import { GoalRow } from "./GoalRow";
 import { ReviewPane } from "./ReviewPane";
+import { FileTree } from "./FileTree";
+import { FileView } from "./FileView";
+import { TabArea } from "./TabArea";
+import { REVIEW_TAB, fileTab, withTab, withoutTab, type WorkspaceTab } from "./tabs";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
@@ -145,9 +149,32 @@ export function App() {
   const closedSurfaces = useMemo(() => new ClosedSurfaces(), []);
   /** Set while back/forward moves the window, so the move is not recorded as a new place. */
   const travelling = useRef(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  /** The tab area shows when a tab (the review) is open and the layout does not hide it (§2.1). */
-  const tabsShown = reviewOpen && view === "work" && prefs.layout !== "chat";
+  /** The tab area's tabs (§2.1, §2.8): Review and file tabs, and the one in front. */
+  const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [treeShown, setTreeShown] = useState(false);
+  const reviewOpen = tabs.some((tab) => tab.kind === "review");
+  /** Opens (to the front) or closes the Review tab, as Ctrl+Shift+G and the bar's button do. */
+  const setReviewOpen = (open: boolean | ((was: boolean) => boolean)) => {
+    const next = typeof open === "function" ? open(reviewOpen) : open;
+    if (next) {
+      setTabs((list) => withTab(list, list.find((tab) => tab.kind === "review") ?? REVIEW_TAB));
+      setActiveTab(REVIEW_TAB.key);
+    } else closeTabKey(REVIEW_TAB.key);
+  };
+  const closeTabKey = (key: string) => {
+    const after = withoutTab(tabs, key, activeTab);
+    setTabs(after.tabs);
+    setActiveTab(after.active);
+  };
+  /** A file in a tab of its own, in front; the same file's tab is reused (and moved to the line). */
+  const openFile = (path: string, line: number | null = null) => {
+    setTabs((list) => withTab(list, fileTab(path, line)));
+    setActiveTab(fileTab(path).key);
+    if (prefsRef.current.layout === "chat") updatePrefsRef.current({ layout: "split" });
+  };
+  /** The tab area shows when a tab is open or the file tree is, and the layout does not hide it (§2.1). */
+  const tabsShown = (tabs.length > 0 || treeShown) && view === "work" && prefs.layout !== "chat";
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [wtSettings, setWtSettings] = useState<WorktreeSettings>(worktreeSettings(null));
   const [newChoice, setNewChoice] = useState<NewThreadChoice>({ mode: "local", base: null, withChanges: true, environment: null });
@@ -751,9 +778,10 @@ export function App() {
 
   /** Ctrl+W: the frontmost surface beside the thread closes (never the window); Ctrl+Shift+T opens it again. */
   const closeSurface = () => {
-    if (reviewOpen) {
-      setReviewOpen(false);
-      closedSurfaces.close("review");
+    const front = tabs.find((tab) => tab.key === activeTab) ?? tabs[tabs.length - 1];
+    if (front) {
+      closeTabKey(front.key);
+      closedSurfaces.close(front.kind === "review" ? "review" : `file:${front.path}`);
     } else if (prefsRef.current.bottomPanel) {
       updatePrefs({ bottomPanel: false });
       closedSurfaces.close("bottomPanel");
@@ -763,6 +791,7 @@ export function App() {
     const surface = closedSurfaces.reopen();
     if (surface === "review") setReviewOpen(true);
     else if (surface === "bottomPanel") updatePrefs({ bottomPanel: true });
+    else if (surface?.startsWith("file:")) openFile(surface.slice(5));
   };
 
   const openFolderDialog = async () => {
@@ -792,7 +821,19 @@ export function App() {
     redoAction: () => void undoAction(true),
     closeTab: closeSurface,
     reopenTab: reopenSurface,
-    closeOtherTabs: () => { if (reviewOpen) closedSurfaces.close("review"); setReviewOpen(false); if (prefsRef.current.bottomPanel) closedSurfaces.close("bottomPanel"); updatePrefs({ bottomPanel: false }); },
+    closeOtherTabs: () => {
+      // The tab in front stays; the others close (and reopen one by one with Ctrl+Shift+T).
+      const keep = tabs.find((tab) => tab.key === activeTab) ?? null;
+      for (const tab of tabs) if (tab !== keep) closedSurfaces.close(tab.kind === "review" ? "review" : `file:${tab.path}`);
+      setTabs(keep ? [keep] : []);
+      if (prefsRef.current.bottomPanel) closedSurfaces.close("bottomPanel");
+      updatePrefs({ bottomPanel: false });
+    },
+    fileTree: () => {
+      if (view !== "work") showView("work");
+      if (prefsRef.current.layout === "chat") updatePrefs({ layout: "split" });
+      setTreeShown((shown) => !shown || prefsRef.current.layout === "chat");
+    },
     fullScreen: () => void bridge.toggleFullScreen().catch(notice),
     quit: () => void bridge.quitApp(),
     viewAsk: () => showView("ask"),
@@ -1398,6 +1439,7 @@ export function App() {
       [keyAction("recentChat4"), "recentChat4"],
       [keyAction("recentChat5"), "recentChat5"],
       [keyAction("recentChat6"), "recentChat6"],
+      [keyAction("fileTree"), "fileTree"],
     ];
     for (const [action, id] of shellKeys) {
       if ((id === "undoAction" || id === "redoAction") && typing) continue;
@@ -1696,6 +1738,7 @@ export function App() {
             <button className="icon" aria-label="Close find" onClick={() => setFindOpen(false)}><Icon name="x" size={14} /></button>
           </div>
         ) : null}
+        <OpenFileContext.Provider value={view === "work" ? { open: openFile, cwd: selected?.thread.cwd ?? null } : null}>
         <div className="turns">
           {info ? (
             <section className="info-panel" aria-label={info.title}>
@@ -1720,6 +1763,7 @@ export function App() {
           ))}
           {otherRequests > 0 ? <div className="notice">{otherRequests} other thread(s) are waiting for an answer.</div> : null}
         </div>
+        </OpenFileContext.Provider>
 
         {view === "work" && !selected && newBranches && bridge.git.available() ? (
           <NewThreadOptions choice={newChoice} onChange={setNewChoice} branches={newBranches} environments={newEnvs} />
@@ -1797,23 +1841,39 @@ export function App() {
           onSave={(edited) => bridge.writeEnvironment(envProject, edited).then(() => setEditingEnv(false)).catch(notice)} />
       ) : null}
       {tabsShown ? (
-        <ReviewPane
+        <TabArea tabs={tabs} active={activeTab} onSelect={setActiveTab} onClose={(key) => {
+          const tab = tabs.find((entry) => entry.key === key);
+          if (tab) closedSurfaces.close(tab.kind === "review" ? "review" : `file:${tab.path}`);
+          closeTabKey(key);
+        }}
           workspaceLayout={prefs.layout} setWorkspaceLayout={(layout) => updatePrefs({ layout })}
-          cwd={composeRoot} threadId={selected?.thread.id ?? null}
-          turnDiff={lastTurnDiff(selected)}
-          airgapOn={airgap?.level === "on"}
-          layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
-          editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
-          refreshKey={turnsDone(selected)}
-          onComments={(comments) => setDraft((text) => (text.trim() ? `${text.trimEnd()}\n\n${comments}` : comments))}
-          onRevertTurn={selected && selected.turns.length > 0 && !selected.activeTurnId ? () => {
-            const last = selected.turns[selected.turns.length - 1];
-            client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: last.id }).then(() => openThread(selected.thread.id)).catch(notice);
-          } : null}
-          generateMessage={(root, diff) => commitMessage(client, listen, root, modelChoice ?? servedModel, diff, prefs.commitPrompt ?? undefined)}
-          forcePushDefault={prefs.forcePush}
-          notice={notice}
-          onClose={() => setReviewOpen(false)}
+          treeShown={treeShown} onToggleTree={composeRoot ? () => setTreeShown((shown) => !shown) : null}
+          tree={treeShown && composeRoot ? (
+            <FileTree root={composeRoot} client={client} listen={listen} selected={tabs.find((tab) => tab.key === activeTab && tab.kind === "file")?.key.slice(5) ?? null}
+              onOpen={(path) => openFile(path)} onClose={() => setTreeShown(false)} />
+          ) : null}
+          render={(tab) => tab.kind === "review" ? (
+            <ReviewPane
+              cwd={composeRoot} threadId={selected?.thread.id ?? null}
+              turnDiff={lastTurnDiff(selected)}
+              airgapOn={airgap?.level === "on"}
+              layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
+              editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
+              refreshKey={turnsDone(selected)}
+              onComments={(comments) => setDraft((text) => (text.trim() ? `${text.trimEnd()}\n\n${comments}` : comments))}
+              onRevertTurn={selected && selected.turns.length > 0 && !selected.activeTurnId ? () => {
+                const last = selected.turns[selected.turns.length - 1];
+                client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: last.id }).then(() => openThread(selected.thread.id)).catch(notice);
+              } : null}
+              generateMessage={(root, diff) => commitMessage(client, listen, root, modelChoice ?? servedModel, diff, prefs.commitPrompt ?? undefined)}
+              forcePushDefault={prefs.forcePush}
+              notice={notice}
+              onOpenFile={openFile}
+            />
+          ) : (
+            <FileView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
+              onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} />
+          )}
         />
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
@@ -1926,7 +1986,11 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
   );
 }
 
+/** Opens a file in a tab (Phase 3 item 1), for the items of the stream; null where there is no tab area (Ask). */
+const OpenFileContext = createContext<{ open: (path: string, line: number | null) => void; cwd: string | null } | null>(null);
+
 function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
+  const files = useContext(OpenFileContext);
   switch (item.type) {
     case "userMessage":
       return <div className="item user">{item.content.map(describeInput).filter(Boolean).join("\n")}</div>;
@@ -1955,7 +2019,12 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
         <div className={`item files status-${item.status}`}>
           {item.changes.map((change) => (
             <details key={change.path}>
-              <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code>{change.path}</code><DiffStat text={change.diff} /></summary>
+              <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code>{change.path}</code><DiffStat text={change.diff} />
+                {files && change.kind.type !== "delete" ? (
+                  <button className="icon open-file" title="Open in a tab" aria-label={`Open ${change.path} in a tab`}
+                    onClick={(event) => { event.preventDefault(); files.open(change.path.startsWith("/") || !files.cwd ? change.path : `${files.cwd.replace(/\/+$/, "")}/${change.path}`, null); }}><Icon name="file" size={13} /></button>
+                ) : null}
+              </summary>
               <Diff text={change.diff} />
             </details>
           ))}

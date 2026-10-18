@@ -347,6 +347,11 @@ export async function main(options: MainOptions): Promise<void> {
         git.launch(command, args, base);
         return null;
       }
+      case "file/size": {
+        if (typeof message.path !== "string" || !path.isAbsolute(message.path)) throw new Error("not an absolute path");
+        const stat = await fs.promises.stat(message.path).catch(() => null);
+        return stat?.isFile() ? stat.size : null;
+      }
       case "prefs/read":
         return prefs.read();
       case "prefs/write":

@@ -88,6 +88,7 @@ const usage = { totalTokens: 41210, inputTokens: 39000, cachedInputTokens: 30000
 const queues = {};
 const terminals = {};
 const goals = {};
+const watches = {};
 let asked = false;
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
@@ -264,6 +265,32 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       delete terminals[p.processId];
       return;
     }
+    case "fs/readDirectory":
+      try {
+        return answer({ entries: fs.readdirSync(p.path, { withFileTypes: true }).map((d) => ({ fileName: d.name, isDirectory: d.isDirectory(), isFile: d.isFile() })) });
+      } catch (error) {
+        return say({ id: m.id, error: { code: -32600, message: String(error.message) } });
+      }
+    case "fs/readFile":
+      try {
+        return answer({ dataBase64: fs.readFileSync(p.path).toString("base64") });
+      } catch (error) {
+        return say({ id: m.id, error: { code: -32600, message: String(error.message) } });
+      }
+    case "fs/getMetadata": {
+      const stat = fs.statSync(p.path, { throwIfNoEntry: false });
+      if (!stat) return say({ id: m.id, error: { code: -32600, message: "no such file" } });
+      return answer({ isDirectory: stat.isDirectory(), isFile: stat.isFile(), isSymlink: false, createdAtMs: 0, modifiedAtMs: Math.floor(stat.mtimeMs) });
+    }
+    case "fs/watch":
+      try {
+        watches[p.watchId] = fs.watch(p.path, () => say({ method: "fs/changed", params: { watchId: p.watchId, changedPaths: [p.path] } }));
+      } catch {}
+      return answer({ path: p.path });
+    case "fs/unwatch":
+      if (watches[p.watchId]) watches[p.watchId].close();
+      delete watches[p.watchId];
+      return answer({});
     case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
     default: return answer({ data: [] });
   }

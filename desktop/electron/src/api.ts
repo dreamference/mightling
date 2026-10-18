@@ -61,6 +61,8 @@ export type FromView =
   /** The editors found on this machine (editors.ts), and opening a file in one at a line. */
   | { type: "editors/list" }
   | { type: "editor/open"; root: string; path: string; line: number | null; editor: string | null }
+  /** A file's size before a file tab asks the server for it whole (DESKTOP_PARITY §2.8); null when there is no such file. */
+  | { type: "file/size"; path: string }
   /** The window's own preferences (prefs.ts): read whole, or some keys written. */
   | { type: "prefs/read" }
   | { type: "prefs/write"; values: Record<string, unknown> }
