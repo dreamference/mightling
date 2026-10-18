@@ -18,8 +18,11 @@ const { MakerDebOwnRelations } = require("./linux/deb-maker");
 const pkg = require("./package.json");
 
 const resources = path.join(__dirname, "resources");
+// Windows (DESKTOP_PARITY Phase 3 item 12): the bundled commands are `.exe`s, and the app's icon an `.ico`.
+const win32 = process.platform === "win32";
+const exe = win32 ? ".exe" : "";
 const extraResource = ["ling", "codex-code-mode-host", "rg"]
-  .map((name) => path.join(resources, name))
+  .map((name) => path.join(resources, `${name}${exe}`))
   .filter((file) => fs.existsSync(file));
 
 // What `Mightling --version` prints for the bundled `ling` (src/version.ts, LING_VERSION_FILE):
@@ -27,7 +30,7 @@ const extraResource = ["ling", "codex-code-mode-host", "rg"]
 // answer it. Run with a scratch HOME and CODEX_HOME, so it creates or migrates no real home folder.
 // A bundled `ling` whose version cannot be read stops the build.
 function stampLingVersion(packagerConfig) {
-  const ling = path.join(resources, "ling");
+  const ling = path.join(resources, `ling${exe}`);
   const stamp = path.join(resources, "ling.version");
   fs.rmSync(stamp, { force: true });
   if (!fs.existsSync(ling)) return;
@@ -53,6 +56,29 @@ function stampLingVersion(packagerConfig) {
 // (so it stays out of the asar, which carries icons/ for the tray).
 const darwin = process.platform === "darwin";
 
+// The Windows icon: an `.ico` holding the PNGs already in icons/ (Windows reads PNG entries since
+// Vista), written by hand rather than with an image tool, so the build needs nothing more.
+function writeIco(target) {
+  const images = [["32x32.png", 32], ["128x128.png", 128], ["128x128@2x.png", 256]].map(([file, size]) => [fs.readFileSync(path.join(__dirname, "icons", file)), size]);
+  const header = Buffer.alloc(6 + 16 * images.length);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  let offset = header.length;
+  images.forEach(([data, size], index) => {
+    const entry = 6 + 16 * index;
+    header.writeUInt8(size >= 256 ? 0 : size, entry);
+    header.writeUInt8(size >= 256 ? 0 : size, entry + 1);
+    header.writeUInt16LE(1, entry + 4);
+    header.writeUInt16LE(32, entry + 6);
+    header.writeUInt32LE(data.length, entry + 8);
+    header.writeUInt32LE(offset, entry + 12);
+    offset += data.length;
+  });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, Buffer.concat([header, ...images.map(([data]) => data)]));
+}
+
 module.exports = {
   packagerConfig: {
     name: app.productName,
@@ -60,7 +86,7 @@ module.exports = {
     appBundleId: app.identifier,
     appCopyright: "Copyright (C) 2026 Dreamference contributors. AGPL-3.0-or-later.",
     asar: true,
-    icon: darwin ? path.join(resources, "icon") : path.join(__dirname, "icons", "icon"),
+    icon: darwin || win32 ? path.join(resources, "icon") : path.join(__dirname, "icons", "icon"),
     extraResource,
     // macOS only (the packager ignores these elsewhere). The scheme, so `mightling://` links reach
     // `open-url`; the category; and the Local Network entries macOS 15 asks about before the app
@@ -146,8 +172,9 @@ module.exports = {
     },
   ],
   hooks: {
-    // The Mac icon (see `darwin` above); nothing to do elsewhere or when it is already there.
+    // The Mac icon (see `darwin` above), and the Windows one; nothing to do elsewhere or when it is already there.
     generateAssets: async () => {
+      if (win32) return writeIco(path.join(resources, "icon.ico"));
       if (!darwin || fs.existsSync(path.join(resources, "icon.icns"))) return;
       const { execFileSync } = require("node:child_process");
       const iconset = path.join(resources, "icon.iconset");
@@ -179,7 +206,7 @@ module.exports = {
         // On a Mac the fuses live in the bundle (fuses finds the framework from the `.app`), and
         // flipping them breaks the ad-hoc signature Apple silicon will not run without, so fuses
         // re-signs it ad hoc; the workflow then signs the whole bundle ad hoc (§10).
-        const binary = darwin ? path.join(outputPath, `${app.productName}.app`) : path.join(outputPath, app.executable);
+        const binary = darwin ? path.join(outputPath, `${app.productName}.app`) : path.join(outputPath, `${app.executable}${exe}`);
         await flipFuses(binary, {
           version: FuseVersion.V1,
           resetAdHocDarwinSignature: darwin,

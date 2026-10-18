@@ -82,10 +82,11 @@ export class BusyTracker {
   }
 }
 
-/** `ling`'s home folder: `$CODEX_HOME`, else `~/.mightling` (`ling-rs/src/home.rs`). */
+/** `ling`'s home folder: `$CODEX_HOME`, else `~/.mightling` (`ling-rs/src/home.rs`; on Windows the profile folder's). */
 export function codexHome(env: NodeJS.ProcessEnv = process.env): string | null {
   if (env.CODEX_HOME) return env.CODEX_HOME;
-  return env.HOME ? path.join(env.HOME, ".mightling") : null;
+  const home = env.HOME || env.USERPROFILE;
+  return home ? path.join(home, ".mightling") : null;
 }
 
 /** Where the busy marker of the app-server with process id `pid` goes; Night Shift reads the folder (`NightShiftHost.busy_app_server_pids`). */
@@ -118,17 +119,22 @@ const isFile = (file: string) => {
  * then the unpacked asar), then `ling` on PATH, then `~/.local/bin/ling`. Never a bare `codex`: the
  * launcher is what brings Mightling's model server, prompt and home (§4.3).
  */
-export function findLing(resourcesPath: string | null, env: NodeJS.ProcessEnv = process.env): string | null {
+export function findLing(resourcesPath: string | null, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string | null {
   if (env.MIGHTLING_BIN && isFile(env.MIGHTLING_BIN)) return env.MIGHTLING_BIN;
+  // On Windows `ling.exe`, and where install.ps1 puts it rather than ~/.local/bin (DESKTOP_PARITY Phase 3 item 12).
+  const windows = platform === "win32";
+  const name = windows ? "ling.exe" : "ling";
   if (resourcesPath) {
-    for (const candidate of [path.join(resourcesPath, "ling"), path.join(resourcesPath, "app.asar.unpacked", "ling")]) {
+    for (const candidate of [path.join(resourcesPath, name), path.join(resourcesPath, "app.asar.unpacked", name)]) {
       if (isFile(candidate)) return candidate;
     }
   }
-  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-    const candidate = path.join(dir, "ling");
+  for (const dir of (env.PATH ?? env.Path ?? "").split(windows ? ";" : path.delimiter).filter(Boolean)) {
+    const candidate = path.join(dir, name);
     if (isFile(candidate)) return candidate;
   }
-  const local = env.HOME ? path.join(env.HOME, ".local", "bin", "ling") : null;
-  return local && isFile(local) ? local : null;
+  const local = windows
+    ? (env.MIGHTLING_INSTALL_DIR || (env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "Programs", "Mightling", "bin") : null))
+    : env.HOME ? path.join(env.HOME, ".local", "bin") : null;
+  return local && isFile(path.join(local, name)) ? path.join(local, name) : null;
 }
