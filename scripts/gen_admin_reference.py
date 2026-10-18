@@ -20,7 +20,7 @@ OUTPUT: Final[str] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspat
 
 HEADER: Final[str] = """# `ling-admin` reference
 
-`ling-admin` runs everything around the agent: the model server, the web chat, the desktop app,
+`ling-admin` runs everything around the agent: the model server, the sidecars (search, images, voice, Google), the desktop app,
 models, and the mail commands the agent calls (`gmail`). The agent itself is `ling`, and its web
 commands are programs of their own, `ling-search` and `ling-fetch`; see [Terminal agent](ling.md).
 
@@ -57,7 +57,7 @@ def render(parser: argparse.ArgumentParser, path: List[str], depth: int, out: Li
         seen = set()
         helps = {a.dest: a.help for a in group._choices_actions}
         for name, sub in group.choices.items():
-            if id(sub) in seen:  # aliases (e.g. `onyx` for `ling`) point at the same parser
+            if id(sub) in seen:  # aliases (e.g. `onyx` for `chat`) point at the same parser
                 continue
             if helps.get(name) == argparse.SUPPRESS:  # a hidden subcommand (`node askpass`)
                 continue

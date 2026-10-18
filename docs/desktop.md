@@ -2,7 +2,7 @@
 
 `ling-app` is Mightling in a window of its own, with an application-menu entry, a dock icon and no
 browser tabs or address bar. Its main window has the same two views as
-[`ling web`](web-chat.md#ling-web-ask-and-work-in-a-browser) in a browser: **Ask**, questions with
+[`ling web`](web.md#ling-web-ask-and-work-in-a-browser) in a browser: **Ask**, questions with
 no project, and **Work**, the coding agent on your projects, one click apart. It is built the way
 the best-known desktop coding agents are built: an Electron app with its own rendering engine and
 the agent, `ling`, bundled inside, so typing stays smooth whatever graphics driver the machine has.
@@ -10,7 +10,7 @@ the agent, `ling`, bundled inside, so typing stays smooth whatever graphics driv
 ## Install and run
 
 The easiest way is the `.deb` on the release page: it installs the app, its launcher entry and the
-`ling-app` command. It needs no web chat: the app runs the agent itself.
+`ling-app` command. It needs no web server: the app runs the agent itself.
 
 From a checkout:
 
@@ -96,7 +96,7 @@ ling app                      # the app window on Ask
 
 There is one window. The menu's **Ask** and **Work** entries (Ctrl+1 and Ctrl+2), the tray icon's
 and `ling app` bring it forward on the view asked for; none opens a second window. In 1.5 the
-menu's Ask opened a separate window on [`ling web`](web-chat.md#ling-web-ask-and-work-in-a-browser),
+menu's Ask opened a separate window on [`ling web`](web.md#ling-web-ask-and-work-in-a-browser),
 which ran a second agent server on the same `~/.mightling`; the app no longer starts or uses
 `ling web`. `ling web` itself is unchanged, for browsers and phones.
 
@@ -118,8 +118,8 @@ Night Shift holds back while a Work turn is running, and the machine stays awake
 
 ## Notes
 
-- **No web chat needed.** Ask and Work run on the agent bundled in the app, one agent server for
-  the whole app; neither the Onyx web chat nor `ling web` has to be running.
+- **No web server needed.** Ask and Work run on the agent bundled in the app, one agent server for
+  the whole app; `ling web` does not have to be running.
 - **Nothing leaves the machine.** The app has no crash reporting, no update checks and none of the
   background services a browser engine normally talks to; `ling-admin audit egress --app` traces a
   whole session of it and lists every connection it made.

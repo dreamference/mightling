@@ -11,33 +11,35 @@ flowchart LR
     T["ling<br/>terminal agent"]
     B["Browser"]
     D["ling-app<br/>desktop window"]
-    O["Web chat (Onyx Lite)<br/>:3000"]
-    H["Helpers<br/>SearXNG · Whisper<br/>Gmail · Image search"]
+    W["ling web<br/>:3100"]
+    H["Helpers<br/>SearXNG · Whisper<br/>Google · Image search"]
     subgraph models["Model server"]
-        V["vLLM, main model<br/>:8000"]
+        V["SGLang, main model<br/>:8000"]
     end
     T --> V
-    T -- "search, fetch, Gmail" --> H
-    B --> O
-    D --> O
-    O --> V
-    O --> H
+    T -- "search, fetch, apps, images" --> H
+    B --> W
+    W -- "ling app-server" --> V
+    W -- "voice, images" --> H
+    D -- "ling app-server" --> V
+    D -- "voice, images" --> H
 ```
 
 | Part | What it is | Where it runs |
 |---|---|---|
 | Model server | SGLang (or vLLM) serving the main model through the standard `/v1` chat API | Docker container, port 8000 |
 | `ling` | The terminal agent | A native binary, linked from `~/.local/bin` |
-| Web chat | Onyx Lite: web server, API server, PostgreSQL | Docker containers, port 3000 |
+| `ling web` | Ask and Work in a browser, relayed to `ling app-server` | Part of `ling`, port 3100 |
 | SearXNG | Metasearch: queries public search engines for web search | Docker container, reachable only from this machine |
-| Whisper | Speech-to-text for the microphone button, on the CPU | Docker container |
-| Gmail service | Read-only IMAP search over connected Gmail accounts | Docker container, reachable only from this machine |
-| Image search | Finds and serves images for the web chat | Docker container |
-| `ling-app` | A Tauri window showing the web chat | Native app |
+| Whisper | Speech-to-text for the microphone button, on the CPU (`ling-admin voice start`) | Docker container, reachable only from this machine |
+| Google service | Read-only Gmail, Drive and Calendar for `/apps` | Docker container, reachable only from this machine |
+| Image search | Finds images for the `image_search` tool and keeps them on this machine (`ling-admin images start`) | Docker container, reachable only from this machine |
+| `ling-app` | An Electron window showing Ask and Work, with its own `ling app-server` | Native app |
 | `ling-admin` | Manages all of the above | Python CLI |
 
-The web chat reaches the model server through Docker's bridge network, because the model server
-shares the host's network while Onyx runs on Docker's default bridge. `configure` sets that up.
+The sidecars share one Docker network, `dreamference-sidecars`; image search reaches the model
+server through the host's bridge address, because the model server shares the host's network. The
+Onyx web chat that used to sit on port 3000 is retired.
 
 ## How `ling` is built
 

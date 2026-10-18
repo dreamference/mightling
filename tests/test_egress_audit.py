@@ -15,6 +15,7 @@ import pytest
 
 from dreamference.audit import EgressAudit, EgressTrace, StraceParser, TuiSession
 from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED
+from dreamference.audit.egress_audit import IMAGE_PROMPT
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "egress")
 ALLOWED = EgressAudit.allowed_ports("http://localhost:8000")
@@ -657,3 +658,143 @@ def test_every_bridge_on_is_three_lines(monkeypatch, tmp_path):
     _chat_files(monkeypatch, tmp_path, {"telegram.json": {"token": "t"}, "matrix-admin.json": {"push": False}})
     _fake_units(monkeypatch, {"mightling-signal.service", "mightling-chat.service", "mightling-matrix-proxy.socket"})
     assert [line.split(" ")[0] for line in EgressAudit.declared_exceptions()] == ["Signal", "Telegram", "Matrix"]
+
+
+# -- image search in the --web session (ASK §9, §19.6) ---------------------------------------------
+
+def test_the_image_search_service_is_on_the_allowlist_of_every_session():
+    for session in ("exec", "tui", "app", "web"):
+        assert EgressAudit.allowed_ports("http://localhost:8000", session)[8768] == "image search service"
+    trace = StraceParser.parse(CHROMIUM_PROBE.replace("htons(8000)", "htons(8768)"))
+    assert EgressAudit.judge(trace, EgressAudit.allowed_ports("http://localhost:8000", "web"), replied=True).status == PASS
+
+
+# A `ling-admin` from an installation without `images mcp`: what `~/.local/bin/ling-admin` was on
+# 2026-10-15, main's environment, while the audit ran Phase C's code.
+STALE_ADMIN = """#!/bin/sh
+echo "ling-admin: error: argument command: invalid choice: 'images' (choose from 'init', 'run')" >&2
+exit 2
+"""
+
+def _image_search_set_up(tmp_path, monkeypatch):
+    from dreamference.chat import image_search_sidecar
+
+    secret = tmp_path / "image-search" / "secret"
+    secret.parent.mkdir()
+    secret.write_text("s3cret")
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_SECRET_FILE", str(secret))
+    store = tmp_path / "store"
+    store.mkdir()
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_STORE_DIR", str(store))
+    # The link `codex build` made, to an installation that cannot serve the tool: never used.
+    link = tmp_path / "installed" / "ling-admin"
+    link.parent.mkdir()
+    link.write_text(STALE_ADMIN)
+    link.chmod(0o755)
+    real_link = os.path.expanduser("~/.local/bin/ling-admin")
+    os.makedirs(os.path.dirname(real_link), exist_ok=True)
+    os.symlink(link, real_link)
+    return store
+
+def _web_stand_ins(tmp_path, monkeypatch, answer: str):
+    """A traced `ling web serve` that only says it listens, and a `ling web ask` that records each
+    question and what the scratch home held, and answers `answer` to the image question."""
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{os.sys.executable}
+import os, shutil, signal, sys, time
+args = sys.argv[1:]
+shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
+web = os.path.join(os.environ["CODEX_HOME"], "web")
+os.makedirs(web, exist_ok=True)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+open(os.path.join(web, "server.json"), "w").write("{{}}")
+time.sleep(60)
+""")
+    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
+    asked = tmp_path / "asked.jsonl"
+    ling = tmp_path / "ling"
+    ling.write_text(f"""#!{os.sys.executable}
+import json, os, sys
+home = os.environ["HOME"]
+config = os.path.join(home, ".config", "dreamference")
+admin = os.path.join(home, ".local", "bin", "ling-admin")
+with open({str(asked)!r}, "a") as out:
+    out.write(json.dumps({{"prompt": sys.argv[-1], "node": os.path.isfile(os.path.join(config, "node-id")),
+                          "secret": open(os.path.join(config, "image-search", "secret")).read(),
+                          "admin_is_link": os.path.islink(admin)}}) + "\\n")
+print({answer!r} if "image_search" in sys.argv[-1] else "pong")
+""")
+    ling.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    return ling, asked
+
+def test_the_web_audit_asks_an_image_search_question_where_image_search_is_set_up(tmp_path, monkeypatch, capsys):
+    store = _image_search_set_up(tmp_path, monkeypatch)
+    (store / "0123456789abcdef.jpg").write_bytes(b"\xff\xd8\xff")
+    ling, asked = _web_stand_ins(tmp_path, monkeypatch, "![A puffin](/images/0123456789abcdef.jpg)")
+    code = EgressAudit.run(mightling_bin=str(ling), vllm_host="http://localhost:8000", web=True)
+    out = capsys.readouterr().out
+    assert code == 0 and "Image search turn: answered with an image from the image search service (0123456789abcdef.jpg)" in out
+    rows = [json.loads(line) for line in asked.read_text().splitlines()]
+    assert [row["prompt"] for row in rows] == ["Reply with exactly: pong", IMAGE_PROMPT]
+    assert all(row["node"] and row["secret"] == "s3cret" and not row["admin_is_link"] for row in rows)
+
+def test_the_session_gets_the_tool_server_of_the_code_under_audit_not_the_installed_link(tmp_path, monkeypatch):
+    # The 2026-10-15 finding: the scratch home's `ling-admin` was a link to `~/.local/bin/ling-admin`,
+    # main's environment, which has no `images mcp`; Codex could not start the server, the model
+    # answered without an image and the sidecar was never asked. Started as Codex starts it, the
+    # laid-out one must list the tool (no connection is made for `tools/list`).
+    _image_search_set_up(tmp_path, monkeypatch)
+    user_home = tmp_path / "user"
+    assert EgressAudit.prepare_image_search(str(user_home)) is True
+    admin = user_home / ".local" / "bin" / "ling-admin"
+    env = dict(os.environ, HOME=str(user_home), PYTHONPATH="/nonexistent")
+    done = subprocess.run([str(admin), "images", "mcp"], input='{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n',
+                          capture_output=True, text=True, env=env, timeout=60, check=False)
+    assert done.returncode == 0, done.stderr
+    assert [tool["name"] for tool in json.loads(done.stdout)["result"]["tools"]] == ["image_search"]
+    assert not admin.is_symlink()
+    assert EgressAudit.image_tool_problem(str(user_home), env) == ""
+
+def test_a_tool_server_that_cannot_start_is_named_and_the_question_not_asked(tmp_path, monkeypatch, capsys):
+    _image_search_set_up(tmp_path, monkeypatch)
+
+    def stale(cls, path):
+        with open(path, "w") as handle:
+            handle.write(STALE_ADMIN)
+        os.chmod(path, 0o755)
+
+    monkeypatch.setattr(EgressAudit, "write_admin", classmethod(stale))
+    ling, asked = _web_stand_ins(tmp_path, monkeypatch, "A puffin is a seabird.")
+    code = EgressAudit.run(mightling_bin=str(ling), vllm_host="http://localhost:8000", web=True)
+    out = capsys.readouterr().out
+    assert code == 0, "the egress verdict does not depend on the image turn"
+    assert "Image search turn: not asked: the image_search tool's server would not start" in out
+    assert "invalid choice: 'images'" in out and "exit 2" in out
+    assert [json.loads(line)["prompt"] for line in asked.read_text().splitlines()] == ["Reply with exactly: pong"]
+
+@pytest.mark.parametrize("answer, stored, expected", [
+    ("A puffin is a seabird.", False, "answered, without an image"),
+    ("![A puffin](/images/0123456789abcdef.jpg)", False,
+     "answered with an image line, but 0123456789abcdef.jpg is not in the image search store: the service did not answer it"),
+    ("![A puffin](/images/0123456789abcdef.jpg)", True,
+     "answered with an image from the image search service (0123456789abcdef.jpg); the image search service stored 1 new image"),
+])
+def test_the_image_turn_is_judged_by_the_store_not_by_the_answer_alone(tmp_path, monkeypatch, answer, stored, expected):
+    store = _image_search_set_up(tmp_path, monkeypatch)
+
+    def ask(argv, **kwargs):
+        if stored:
+            (store / "0123456789abcdef.jpg").write_bytes(b"\xff\xd8\xff")
+        return subprocess.CompletedProcess(argv, 0, stdout=answer + "\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", ask)
+    assert EgressAudit._image_turn("/x/ling", 1, str(tmp_path), {}) == expected
+
+def test_without_image_search_the_turn_is_skipped_and_says_so(tmp_path, monkeypatch, capsys):
+    from dreamference.chat import image_search_sidecar
+
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_SECRET_FILE", str(tmp_path / "absent"))
+    assert EgressAudit.prepare_image_search(str(tmp_path / "home")) is False
+    assert not (tmp_path / "home").exists()

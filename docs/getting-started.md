@@ -87,23 +87,17 @@ ling
 
 See [Terminal agent](ling.md) for what it can do.
 
-## 5. Optional: the web chat and desktop app
+## 5. Optional: the web UI and desktop app
 
 ```bash
-ling-admin chat start        # deploy the web chat (PostgreSQL, API and web servers)
-ling-admin chat configure --email you@example.com --password '<a strong password>'
+ling web start               # Ask and Work in a browser, on this machine only
+ling web open                # sign this machine's browser in (a link that works once)
+ling-admin images start      # optional: image search in Ask
+ling-admin voice start       # optional: the microphone button (speech-to-text on the CPU)
 ```
 
-`configure` connects the chat to the local model, switches its features on and, if no account
-exists yet, registers the one you give as the administrator.
-
-!!! note "The administrator account"
-    Run without `--email` and `--password`, `configure` creates the administrator account with a
-    password generated for this machine and keeps it in `~/.config/dreamference/chat-admin.json`,
-    readable by you only. `ling-admin chat password` shows it. Pass `--email` and `--password` to
-    use your own account instead.
-
-Open <http://localhost:3000> and sign in. See [Web chat](web-chat.md).
+See [Web UI](web.md). An install that had the retired Onyx web chat is offered its removal once;
+`ling-admin chat remove` does it at any time.
 
 For a window of its own:
 

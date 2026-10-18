@@ -216,7 +216,7 @@ Modelled on `0017-cave-mode` and `0018-night-slash-command`:
 
 Stated in the command's own output (§2), so nobody takes `on` for more than it is:
 
-- **The web chat.** Onyx searches through the same SearXNG, opens pages itself, and has the image-search and Gmail sidecars. None of them read this level. A machine-wide switch would have to stop or reconfigure containers, and belongs in `ling-admin`, not in a session's slash command (§11).
+- **The web chat.** (Onyx, retired in 1.7.0; `ling web`'s Ask threads are `ling` sessions and do read the level.) Onyx searched through the same SearXNG, opens pages itself, and has the image-search and Gmail sidecars. None of them read this level. A machine-wide switch would have to stop or reconfigure containers, and belongs in `ling-admin`, not in a session's slash command (§11).
 - **`ling-admin`'s own downloads:** models from Hugging Face, Docker images, the Codex build's crates and V8, the fonts.
 - **Inbound connections.** The model server listens on every interface by design ([README](./README.md), "Accepted by design").
 - **What the user runs** in their own terminal.
