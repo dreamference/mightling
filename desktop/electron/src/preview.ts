@@ -79,6 +79,11 @@ export class Previews {
       if (decision.verdict !== "allow") this.refused(found[0], found[1], decision);
       callback({ cancel: decision.verdict !== "allow" });
     });
+    // Chromium resolves names a page hints at (`<link rel="dns-prefetch">`, links) without a request
+    // the rules above would see: every page of the preview says not to (DESKTOP_PARITY §5's audit found it).
+    ses.webRequest.onHeadersReceived({ urls: ["<all_urls>"] }, (details, callback) => {
+      callback({ responseHeaders: { ...details.responseHeaders, "X-DNS-Prefetch-Control": ["off"] } });
+    });
     ses.on("will-download", (event, item, contents) => {
       const found = this.byContents(contents.id);
       const decision = found ? this.decision(found[1], item.getURL()) : null;

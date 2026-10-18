@@ -14,7 +14,7 @@ import { BrowserWindow, app, dialog, ipcMain, shell, type IpcMainInvokeEvent } f
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
-import type { WorkTarget } from "./args";
+import { auditPreview, type WorkTarget } from "./args";
 import { codexHome, findLing } from "./bridge";
 import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
@@ -457,6 +457,13 @@ export async function main(options: MainOptions): Promise<void> {
       server.start();
     } catch (error) {
       console.error(`ling-app: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    // The preview tab under audit: the audit's page in a preview, laid over the (hidden) window as a tab would be.
+    const page = auditPreview();
+    if (page && window) {
+      const host = window;
+      void previews.open(host, "audit", page, null).then(() => previews.place("audit", { x: 0, y: 0, width: 800, height: 600 }, true))
+        .catch((error) => console.error(`ling-app: the audit's preview: ${error instanceof Error ? error.message : String(error)}`));
     }
     setTimeout(() => app.quit(), options.audit * 1000);
   }
