@@ -547,7 +547,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 
 In this order (the owner, 2026-10-18), each item with its §2 row as acceptance:
 
-1. **File tree and file tabs** (§2.8): `fs/readDirectory|readFile|getMetadata|watch|unwatch`, read only.
+1. **File tree and file tabs** (§2.8): `fs/readDirectory|readFile|watch|unwatch`, read only.
 2. **Search files and go to line** (§2.8, §2.19: Ctrl+P, Ctrl+L).
 3. **Artifacts viewer** (§2.8): Markdown, images, PDF, HTML; LaTeX only if `tectonic` is bundled (§7 question 4).
 4. **Preview tab** with comments and per-site permissions (§2.9).

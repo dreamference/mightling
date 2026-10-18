@@ -271,12 +271,6 @@
       "out": {"id": 59, "method": "fs/readFile", "params": {"path": "/w/README.md"}}
     },
     {
-      "name": "fs/getMetadata passes: a file tab checks what a path is before it opens it",
-      "message": {"id": 60, "method": "fs/getMetadata", "params": {"path": "/w/src"}},
-      "accept": true,
-      "out": {"id": 60, "method": "fs/getMetadata", "params": {"path": "/w/src"}}
-    },
-    {
       "name": "fs/watch passes: the file tree follows a folder's changes",
       "message": {"id": 61, "method": "fs/watch", "params": {"watchId": "tree-1", "path": "/w"}},
       "accept": true,

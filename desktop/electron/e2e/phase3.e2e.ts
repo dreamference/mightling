@@ -245,8 +245,9 @@ test("3 artifacts viewer: Markdown with its picture, HTML without scripts, a PDF
 
     await tree.getByRole("button", { name: "report.pdf" }).click();
     const pdf = page.getByRole("tabpanel", { name: "report.pdf" });
-    await expect(pdf.locator(".pdf-tools")).toContainText("1 page");
-    await expect(pdf.locator("canvas[aria-label='Page 1']")).toBeVisible();
+    // pdf.js and its worker load on the first PDF; a cold start takes a moment.
+    await expect(pdf.locator(".pdf-tools")).toContainText("1 page", { timeout: 20_000 });
+    await expect(pdf.locator("canvas[aria-label='Page 1']")).toBeVisible({ timeout: 20_000 });
     await shoot("3-artifact-pdf.png");
 
     await tree.getByRole("button", { name: "img" }).click();
