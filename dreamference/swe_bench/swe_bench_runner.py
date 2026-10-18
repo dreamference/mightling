@@ -58,6 +58,17 @@ AUTO_EXEC_TOOL: Final[str] = "auto"
 DROP_OLD_OUTPUTS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
+# The turn-end compaction arm (spec §16, night 10): Codex's own key, pinned on every `ling exec`
+# command line of the run, since the launcher leaves `exec` alone whatever its switch says
+# (ling-rs/src/compaction.rs, `with_turn_end`); the switch is set beside it for the record.
+TURN_END_KEY: Final[str] = "model_post_turn_compact_threshold_percent"
+TURN_END_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION"
+AUTO_TURN_END: Final[str] = "auto"
+# The launcher's rule for the percentage (`turn_end_percent` there): the share of the limit a turn
+# must have passed, Codex's headroom off the window, and its cap on any limit.
+TURN_END_SHARE_PERCENT: Final[int] = 70
+EFFECTIVE_WINDOW_PERCENT: Final[int] = 95
+MAX_LIMIT_PERCENT_OF_WINDOW: Final[int] = 90
 
 # What a new run's name may hold. Grading passes `<name>-<n>` to the harness as its run id, which
 # names Docker containers (`sweb.eval.<instance>.<run id>`), so a `+` or a `,` would let the agent
@@ -164,6 +175,48 @@ class SweBenchRunner:
         return f"mightling-{tag}-{digest.hexdigest()[:8]}/{served_model}"
 
     @classmethod
+    def turn_end_setting(cls, value: Optional[str]) -> Optional[str]:
+        """
+        Checks a `--turn-end-compaction` value.
+
+        Args:
+            value: `on`, `off`, a percentage from 1 to 99, or None (the key is not set).
+
+        Returns:
+            Optional[str]: The value as given, or None when it is not one of those.
+        """
+        if value is None or value in ("on", "off"):
+            return value
+        return value if value.isdigit() and 1 <= int(value) <= 99 else None
+
+    @classmethod
+    def turn_end_percent(cls, setting: str, window: int, limit: int) -> Optional[int]:
+        """
+        The value `model_post_turn_compact_threshold_percent` gets for a run's setting.
+
+        Args:
+            setting: `on` (the launcher's own rule: a turn that ends past `TURN_END_SHARE_PERCENT`
+                of the limit compacts, the share converted to Codex's base, the window less its
+                headroom, as `turn_end_percent` in ling-rs/src/compaction.rs does), `off` (0, which
+                Codex reads as off), a percentage (of the usable window, as Codex reads it), or
+                `auto` (the key is not set: `exec` never compacts at a turn's end).
+            window: The served model's context window (the manifest's `served_context`).
+            limit: The run's `task_context`, the limit every session compacts at.
+
+        Returns:
+            Optional[int]: The percentage, 0 for `off`, None for `auto`.
+        """
+        if setting == AUTO_TURN_END:
+            return None
+        if setting == "off":
+            return 0
+        if setting.isdigit():
+            return int(setting)
+        usable = max(1, window * EFFECTIVE_WINDOW_PERCENT // 100)
+        target = min(limit, window * MAX_LIMIT_PERCENT_OF_WINDOW // 100) * TURN_END_SHARE_PERCENT // 100
+        return min(99, max(1, target * 100 // usable))
+
+    @classmethod
     def wait_for_index_runs(cls, limit_s: Optional[int] = None, poll_s: Optional[int] = None) -> bool:
         """
         Waits for an active index run (a `mightling-index-*` scope: `ling-code` or `ling-docs`
@@ -205,7 +258,7 @@ class SweBenchRunner:
                        code_index: str = "off", prompt: Optional[str] = None,
                        mask: str = "off", strip_names: bool = False, refine: bool = False,
                        task_rules: Optional[List[str]] = None, review_turn: bool = False,
-                       refine_version: str = "v1",
+                       refine_version: str = "v1", turn_end_compaction: Optional[str] = None,
                        hooks: Optional[List[str]] = None, restart_after_compactions: int = 0,
                        apply_patch: Optional[str] = None, exec_tool: Optional[str] = None,
                        drop_old_outputs: bool = False) -> Dict[str, Any]:
@@ -271,6 +324,7 @@ class SweBenchRunner:
             "review_turn": review_turn,
             "restart_after_compactions": int(restart_after_compactions or 0),
             "hooks": sorted(set(hooks or [])),
+            "turn_end_compaction": turn_end_compaction or AUTO_TURN_END,
             "apply_patch": apply_patch or AUTO_APPLY_PATCH,
             "exec_tool": exec_tool or AUTO_EXEC_TOOL,
             "drop_old_outputs": bool(drop_old_outputs),
@@ -343,6 +397,7 @@ class SweBenchRunner:
             review_turn: bool = False,
             refine_version: str = "v1",
             hooks: Optional[List[str]] = None,
+            turn_end_compaction: Optional[str] = None,
             restart_after_compactions: int = 0,
             apply_patch: Optional[str] = None,
             exec_tool: Optional[str] = None,
@@ -407,6 +462,12 @@ class SweBenchRunner:
                 holds the first edit once until the files and functions the issue names have
                 been read, and the first stop once until its example has been run; spec §20).
                 Independent of `task_rules`. A new run only, like `code_index`.
+            turn_end_compaction: Compaction at the end of a turn in every session of the run (spec
+                §16, night 10): `on` pins Codex's `model_post_turn_compact_threshold_percent` on
+                each `ling exec` command line at the launcher's own rule for the run's limit
+                (`turn_end_percent`), `off` pins it at 0, a number pins that percentage; None
+                leaves the key alone, and `exec` never compacts at a turn's end. The launcher's
+                switch is set to `1` or `0` beside it. A new run only, like `code_index`.
 
         Returns:
             int: 0 when the run did what it could (whatever its instances did), 1 when it could
@@ -415,6 +476,9 @@ class SweBenchRunner:
         settings = settings or swe_bench_settings.SweBenchSettings()
         if code_index not in ARMS:
             print(f"❌ --code-index is one of: {', '.join(ARMS)}.")
+            return 1
+        if turn_end_compaction is not None and cls.turn_end_setting(turn_end_compaction) is None:
+            print(f"❌ --turn-end-compaction {turn_end_compaction!r}: on, off or a percentage from 1 to 99.")
             return 1
         if prompt is not None:
             from dreamference.config import DreamferenceConfig
@@ -506,7 +570,7 @@ class SweBenchRunner:
                     manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
                                                   served, runtime_hash, mightling_bin, parallel, code_index,
                                                   prompt, mask, strip_names, refine, task_rules,
-                                                  review_turn, refine_version, hooks,
+                                                  review_turn, refine_version, hooks=hooks, turn_end_compaction=turn_end_compaction,
                                                   restart_after_compactions=restart_after_compactions,
                                                   apply_patch=apply_patch, exec_tool=exec_tool,
                                                   drop_old_outputs=drop_old_outputs)
@@ -532,6 +596,13 @@ class SweBenchRunner:
                              # The runner orchestrates `--refine` itself; the launcher's own refine mode
                              # would turn each step into two sessions, whatever the setting says.
                              "DREAMFERENCE_MIGHTLING_REFINE": "off"}
+                # The turn-end compaction arm (spec §16, night 10): Codex's key on every exec command
+                # line (`SweBenchInstanceRun`), the launcher's switch beside it, only when the run asks.
+                run_turn_end = str(manifest.get("turn_end_compaction") or AUTO_TURN_END)
+                turn_end_percent = cls.turn_end_percent(run_turn_end, int(manifest.get("served_context") or 0),
+                                                        int(manifest.get("task_context") or settings.task_context))
+                if turn_end_percent is not None:
+                    extra_env[TURN_END_ENV] = "0" if turn_end_percent == 0 else "1"
                 # The apply_patch arm (spec §22): the launcher's override, only when the run asks.
                 run_apply_patch = str(manifest.get("apply_patch") or AUTO_APPLY_PATCH)
                 if run_apply_patch != AUTO_APPLY_PATCH:
@@ -753,6 +824,12 @@ class SweBenchRunner:
                             # A run made before refine-v2 existed has no key: it ran v1.
                             refine_version=str(manifest.get("refine_version") or "v1"),
                             hooks=manifest.get("hooks") or [],
+                            # The turn-end compaction arm (spec §16): Codex's key on each exec command
+                            # line; a run made before the option existed never set it.
+                            turn_end_percent=cls.turn_end_percent(
+                                str(manifest.get("turn_end_compaction") or AUTO_TURN_END),
+                                int(manifest.get("served_context") or 0),
+                                int(manifest.get("task_context") or settings.task_context)),
                             # A run made before the option existed never restarted.
                             restart_after_compactions=int(manifest.get("restart_after_compactions") or 0),
                             # A run made before the option existed left the launcher's choice alone.

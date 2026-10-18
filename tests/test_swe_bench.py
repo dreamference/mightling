@@ -3187,6 +3187,60 @@ def test_the_apply_patch_arm_is_kept_on_resume_told_apart_by_against_and_parsed(
 
 # -- the Code Mode arm (`--exec-tool`, spec §23) -------------------------------------------------
 
+def test_the_turn_end_compaction_arm_pins_codexs_key_on_every_exec_command_line(bench, monkeypatch):
+    # Spec §16, night 10: the launcher leaves `exec` alone whatever its switch says, so the run pins
+    # Codex's own key on each exec command line, 13 for `on` on the default model (70% of the
+    # 49,152-token limit is 34,406, of the 249,036 usable tokens), 0 for `off`, and sets the switch
+    # beside it for the record. Without the flag neither reaches the container.
+    from dreamference.swe_bench.swe_bench_runner import TURN_END_ENV, TURN_END_KEY
+    monkeypatch.delenv(TURN_END_ENV, raising=False)
+    agent_calls = lambda: [call for call in bench["docker"].calls if call[0] == "exec" and len(call) > 2 and call[2].endswith("/ling")]  # noqa: E731
+    expected = {"on": ("13", "1"), "off": ("0", "0"), "20": ("20", "1")}
+    for setting, (percent, switch) in expected.items():
+        bench["docker"].calls.clear()
+        assert run(bench, name=f"te-{setting}", instances=["acme__widget-1"], turn_end_compaction=setting) == 0
+        env, _ = container_env(bench)
+        assert env[TURN_END_ENV] == switch
+        calls = agent_calls()
+        assert calls and all(f"{TURN_END_KEY}={percent}" in call for call in calls)
+        assert all(call.count("-c") >= 2 for call in calls)   # the limit, then the key
+        assert SweBenchRunStore(f"te-{setting}").manifest()["turn_end_compaction"] == setting
+    report = SweBenchReport.render(SweBenchRunStore("te-on"))
+    assert ("Turn-end compaction on (13% of the usable window on every exec command line: the launcher's rule, "
+            "70% of the 49152-token limit)") in report
+    assert "Turn-end compaction off (the key pinned at 0 in every session)" in SweBenchReport.render(SweBenchRunStore("te-off"))
+    assert "Turn-end compaction 20 (20% of the usable window on every exec command line: as asked)" in SweBenchReport.render(SweBenchRunStore("te-20"))
+    bench["docker"].calls.clear()
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert TURN_END_ENV not in env and not any(TURN_END_KEY in word for call in agent_calls() for word in call)
+    assert SweBenchRunStore("plain").manifest()["turn_end_compaction"] == "auto"
+    assert "Turn-end compaction auto (the key not set: exec never compacts at a turn's end)" in SweBenchReport.render(SweBenchRunStore("plain"))
+    # The two arms are told apart, a manifest from before the field reads as auto, and a bad value runs nothing.
+    for name in ("te-on", "te-off", "plain"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    assert "differs: turn_end_compaction: on | off" in SweBenchReport.against(SweBenchRunStore("te-on"), SweBenchRunStore("te-off"))
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["turn_end_compaction"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "turn_end_compaction" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    for bad in ("150", "0", "yes", "-5"):
+        assert run(bench, name=f"bad-{bad}", instances=["acme__widget-1"], turn_end_compaction=bad) == 1
+        assert not SweBenchRunStore(f"bad-{bad}").manifest_path.exists()
+    assert SweBenchRunner.turn_end_percent("on", 262144, 94144) == 26   # the launcher's own example
+    assert SweBenchRunner.turn_end_percent("on", 0, 94144) == 1 and SweBenchRunner.turn_end_percent("auto", 262144, 1) is None
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--turn-end-compaction", "off", "--name", "x"])) == 0
+    assert seen["turn_end_compaction"] == "off"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["turn_end_compaction"] is None
+
+
 def test_the_exec_tool_arm_sets_the_launchers_switch_and_counts_the_calls(bench, monkeypatch):
     monkeypatch.delenv(EXEC_TOOL_ENV, raising=False)
     assert run(bench, name="fn", instances=["acme__widget-1"], exec_tool="function") == 0

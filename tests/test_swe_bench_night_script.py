@@ -114,6 +114,46 @@ def test_a_misspelt_exec_tool_arm_ends_the_night_before_any_round(tmp_path, arm)
     assert (folder / "failed").exists() and not (folder / "done").exists()
 
 
+def test_night_10s_arms_pin_codexs_turn_end_key_off_and_on(tmp_path):
+    status, recorded, folder = night(tmp_path, "turn-end-compaction-off turn-end-compaction-on")
+    assert status == 0 and (folder / "done").exists()
+    record, candidate = runs(recorded)
+    assert "--name n4-turn-end-compaction-off " in record and record.count("--turn-end-compaction off") == 1
+    assert "--name n4-turn-end-compaction-on " in candidate and candidate.count("--turn-end-compaction on") == 1
+    assert "--task-rules" not in record and "--task-rules" not in candidate
+    assert "swe-bench report n4-turn-end-compaction-on --against n4-turn-end-compaction-off" in recorded
+    assert (folder / "turn-end-compaction-on-against-turn-end-compaction-off.txt").exists()
+    # A percentage of the usable window, and stacking with the other arms like any part.
+    stacked = tmp_path / "stacked"
+    stacked.mkdir()
+    _, recorded, _ = night(stacked, "turn-end-compaction-off turn-end-compaction-20+exec-tool-function")
+    assert "--turn-end-compaction 20 --exec-tool function" in runs(recorded)[1]
+
+
+@pytest.mark.parametrize("arm", ["turn-end-compaction", "turn-end-compaction-auto", "turn_end_compaction-on",
+                                 "turn-end-compaction-0", "turn-end-compaction-100", "turn-end-on"])
+def test_a_misspelt_turn_end_compaction_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"{arm} turn-end-compaction-on")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+def test_start_refuses_a_turn_end_night_where_only_one_arm_pins_the_key(tmp_path):
+    # In `exec` the key is off unless an arm pins it: `default` beside `turn-end-compaction-off`
+    # would measure off twice. Nothing is smoked and nothing is started.
+    result, recorded, verdicts, units, folder = start(tmp_path, "turn-end-compaction-off default")
+    assert result.returncode == 1 and "Arm default pins no turn-end compaction" in result.stdout
+    assert runs(recorded) == [] and verdicts == [] and units == [] and not folder.exists()
+    both = tmp_path / "both"
+    both.mkdir()
+    result, recorded, verdicts, units, folder = start(both, "turn-end-compaction-off turn-end-compaction-on")
+    assert result.returncode == 0, result.stdout + result.stderr
+    record, candidate = runs(recorded)
+    assert "--name n7-smoke-turn-end-compaction-off-" in record and record.count("--turn-end-compaction off") == 1
+    assert "--name n7-smoke-turn-end-compaction-on-" in candidate and candidate.count("--turn-end-compaction on") == 1
+    assert len(units) == 1
+
+
 @pytest.mark.parametrize("reads_it", [False, True])
 def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch(tmp_path, reads_it):
     # `start` with stand-ins: no unit is active (systemctl), git succeeds and changes nothing,
@@ -272,3 +312,53 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_drop_switch(tmp_
     if reads_it:
         assert "ling-code is missing" in result.stdout
     assert not (tmp_path / "night7").exists()
+
+
+def best_of_night(tmp_path, arms="default", best_of="3"):
+    """The night's `run` step with BEST_OF set; returns (exit status, recorded calls, D)."""
+    calls = tmp_path / "calls.txt"
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    task_list = tmp_path / "list.txt"
+    task_list.write_text("# two tasks\nacme__widget-1\nacme__widget-2\n")
+    folder = tmp_path / "night11"
+    folder.mkdir()
+    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder),
+           "NIGHT": "11", "PREFIX": "n11", "ARMS": arms, "REFINE": "0", "BEST_OF": best_of,
+           "CHOOSER_SERVER": "http://localhost:8000", "CHOOSER_SEED": "20261013"}
+    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    recorded = calls.read_text().splitlines() if calls.exists() else []
+    return result.returncode, recorded, folder
+
+
+def test_best_of_three_runs_the_arm_three_times_then_chooser_v1_and_the_report(tmp_path):
+    status, recorded, folder = best_of_night(tmp_path)
+    assert status == 0 and (folder / "done").exists() and not (folder / "failed").exists()
+    rounds = runs(recorded)
+    assert [r.split("--name ")[1].split()[0] for r in rounds] == ["n11-default-1", "n11-default-2", "n11-default-3"]
+    assert all("--eval --remove-images" in r and "--task-rules" not in r for r in rounds)
+    assert 'attempt 2 of 3' in rounds[1]
+    # No drop-test-hunks regrade: the chooser reads the plain gradings.
+    assert not any("--drop-test-hunks" in line for line in recorded)
+    assert "swe-bench report n11-default-3 --against n11-default-1" in recorded
+    # The chooser comes after every round, over the three, with v1's measured seed.
+    chooser = next(i for i, line in enumerate(recorded) if "--runs n11-default-1,n11-default-2,n11-default-3 --seed" in line)
+    assert chooser > max(recorded.index(r) for r in rounds)
+    assert recorded[chooser].startswith("http://localhost:8000 --runs ") and "--seed 20261013" in recorded[chooser]
+    assert f"--out {folder}/chooser-v1" in recorded[chooser]
+    report = next(line for line in recorded if f"--chooser {folder}/chooser-v1/summary.json" in line)
+    assert report.startswith("n11-default-1,n11-default-2,n11-default-3 ")
+
+
+def test_best_of_takes_exactly_one_arm(tmp_path):
+    status, recorded, folder = best_of_night(tmp_path, arms="default tests-v2")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+def test_without_best_of_the_night_is_the_two_arm_night(tmp_path):
+    status, recorded, _ = best_of_night(tmp_path, arms="default apply-patch-function", best_of="1")
+    assert status == 0
+    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n11-default", "n11-apply-patch-function"]
+    assert not any("--seed 20261013" in line for line in recorded)
