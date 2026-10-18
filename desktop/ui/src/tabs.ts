@@ -6,7 +6,9 @@
 export type WorkspaceTab =
   | { key: "review"; kind: "review" }
   /** A file read through `fs/readFile`; `line` is where it was asked to open (go to line), 1-based. */
-  | { key: string; kind: "file"; path: string; line: number | null };
+  | { key: string; kind: "file"; path: string; line: number | null }
+  /** A page in the preview tab (Phase 3 item 4); `url` is where it was opened, its title once known. */
+  | { key: string; kind: "preview"; id: string; url: string; title: string | null };
 
 export const REVIEW_TAB: WorkspaceTab = { key: "review", kind: "review" };
 
@@ -40,11 +42,34 @@ export function stepTab(tabs: WorkspaceTab[], active: string | null, step: 1 | -
   return tabs[(Math.max(at, 0) + step + tabs.length) % tabs.length].key;
 }
 
-/** What a tab is called in the strip: the file's name, or Review. */
+let nextPreview = 1;
+
+export function previewTab(url: string): WorkspaceTab {
+  const id = `p${Date.now().toString(36)}${nextPreview++}`;
+  return { key: `preview:${id}`, kind: "preview", id, url, title: null };
+}
+
+/** What a tab is called in the strip: the file's name, the page's title (or host), or Review. */
 export function tabLabel(tab: WorkspaceTab): string {
-  return tab.kind === "review" ? "Review" : baseName(tab.path);
+  if (tab.kind === "review") return "Review";
+  if (tab.kind === "preview") {
+    if (tab.title) return tab.title;
+    try {
+      return tab.url ? new URL(tab.url).host || "Preview" : "New preview";
+    } catch {
+      return "Preview";
+    }
+  }
+  return baseName(tab.path);
 }
 
 export function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+/** How a closed tab is remembered for Ctrl+Shift+T (shell.ts `ClosedSurfaces`). */
+export function surfaceOf(tab: WorkspaceTab): "review" | `file:${string}` | `preview:${string}` {
+  if (tab.kind === "review") return "review";
+  if (tab.kind === "file") return `file:${tab.path}`;
+  return `preview:${tab.url}`;
 }

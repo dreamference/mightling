@@ -743,7 +743,7 @@
     "Ctrl+L"
    ],
    "context": "preview",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "previewOpen",
@@ -753,7 +753,7 @@
     "Ctrl+T"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "previewBack",
@@ -763,7 +763,7 @@
     "Alt+ArrowLeft"
    ],
    "context": "preview",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "previewForward",
@@ -773,7 +773,7 @@
     "Alt+ArrowRight"
    ],
    "context": "preview",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "previewReload",
@@ -783,7 +783,7 @@
     "Ctrl+R"
    ],
    "context": "preview",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "copyUrl",
@@ -793,7 +793,7 @@
     "Ctrl+Shift+C"
    ],
    "context": "preview",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "commentMode",
@@ -803,7 +803,7 @@
     "Ctrl+Shift+."
    ],
    "context": "preview",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "copyConversationPath",
