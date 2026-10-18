@@ -114,6 +114,8 @@ FEEDBACK_CHARS: Final[int] = 900
 # What may differ between two runs of one script without the behaviour differing.
 NOISE: Final[Tuple[Tuple[re.Pattern, str], ...]] = (
     (re.compile(r"0x[0-9a-fA-F]+"), "0x?"),
+    # A traceback through a patched file has other line numbers with each patch.
+    (re.compile(r"\bline \d+"), "line ?"),
     (re.compile(r"/tmp/[\w.-]+"), "/tmp/?"),
     (re.compile(r"\d+\.\d+ ?(s|ms|seconds)\b"), "?s"),
     (re.compile(r"[ \t]+"), " "),
