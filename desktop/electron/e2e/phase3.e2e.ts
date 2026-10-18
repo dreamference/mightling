@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
 
@@ -562,6 +563,51 @@ test("9 pull requests: off by default; through gh, an inbox, checks, Fix and Rev
     // gh ran in the repository, with no update check, and with nothing else.
     expect(calls().every((call) => call.cwd === projectFolders(home).fetcher && call.noUpdate === "1")).toBe(true);
     expect([...new Set(calls().map((call) => call.args.slice(0, 2).join(" ")))].sort()).toEqual(["pr diff", "pr list", "pr review", "pr view"]);
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});
+
+/** A message board as Codex's board extension leaves it: one agent tree (thread w1), a channel, a discussion. */
+function messageBoard(home: string): void {
+  const file = path.join(home, ".mightling", "agent_message_board_1.sqlite");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec(`CREATE TABLE deleted_boards (board TEXT PRIMARY KEY NOT NULL);
+    CREATE TABLE channels (board TEXT NOT NULL, name TEXT NOT NULL, name_search TEXT NOT NULL, created_at TEXT NOT NULL, timestamp INTEGER NOT NULL, author TEXT NOT NULL, PRIMARY KEY(board,name));
+    CREATE TABLE posts (seq INTEGER PRIMARY KEY AUTOINCREMENT, board TEXT NOT NULL, id TEXT NOT NULL, channel TEXT NOT NULL, root TEXT NOT NULL, author TEXT NOT NULL, timestamp INTEGER NOT NULL, body_search TEXT NOT NULL, payload TEXT NOT NULL, request_id TEXT NOT NULL, request TEXT NOT NULL);
+    INSERT INTO channels VALUES ('w1', 'retry', 'retry', '2026-10-18T09:00:00Z', 1, '/root');`);
+  const post = db.prepare("INSERT INTO posts(board,id,channel,root,author,timestamp,body_search,payload,request_id,request) VALUES(?,?,?,?,?,?,?,?,?,?)");
+  const now = Date.now() * 1000;
+  post.run("w1", "p1", "retry", "p1", "/root/explorer", now - 120_000_000, "", JSON.stringify({ metadata: {}, text: "The flaky test **really sleeps**: `time.sleep(1)` in the loop." }), "r1", "{}");
+  post.run("w1", "p2", "retry", "p1", "/root/reviewer", now - 60_000_000, "", JSON.stringify({ metadata: {}, text: "Then patch `backoff()` to zero in the test, not the sleep." }), "r2", "{}");
+  db.close();
+}
+
+test("10 message board: off until Settings › Agents turns it on; the subagents' discussion, read only", async () => {
+  const { page, home, shoot, close } = await open(messageBoard);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Message board" })).toHaveCount(0);
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("button", { name: "Agents" }).click();
+    await settings.getByRole("checkbox", { name: /A message board for subagents/ }).click();
+    await expect(settings.getByRole("checkbox", { name: /A message board for subagents/ })).toBeChecked();
+    await page.keyboard.press("Escape");
+    const writes = received(home).filter((message) => message.method === "config/value/write").map((message) => (message.params as { keyPath: string }).keyPath);
+    expect(writes).toEqual(expect.arrayContaining(["features.multi_agent_v2", "features.agent_message_board"]));
+    const before = fs.readFileSync(path.join(home, ".mightling", "agent_message_board_1.sqlite"));
+    await page.getByRole("button", { name: "Message board" }).click();
+    const board = page.getByRole("dialog", { name: "Message board" });
+    await expect(board.getByRole("button", { name: "Fix the flaky retry test" })).toBeVisible();
+    await expect(board.locator(".board-post")).toHaveCount(2);
+    await expect(board.locator(".board-post.reply")).toContainText("patch backoff() to zero");
+    await shoot("10-message-board.png");
+    await board.getByRole("button", { name: /# retry/ }).click();
+    await expect(board.locator(".board-discussion")).toHaveCount(1);
+    expect(fs.readFileSync(path.join(home, ".mightling", "agent_message_board_1.sqlite")).equals(before)).toBe(true);
     expect(appServers(home)).toBe(1);
   } finally {
     await close();

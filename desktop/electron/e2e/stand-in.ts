@@ -89,6 +89,7 @@ const queues = {};
 const terminals = {};
 const goals = {};
 const watches = {};
+const config = { features: { memories: false }, memories: {}, desktop: null };
 let asked = false;
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
@@ -215,7 +216,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "memory/status": return answer({ v2ConsolidatedThreads: 7, v2Ready: true });
     case "memory/reset": return answer({});
     case "thread/memoryMode/set": return answer({});
-    case "config/read": return answer({ config: { features: { memories: false }, memories: {}, desktop: null }, origins: {}, layers: null });
+    case "config/read": return answer({ config, origins: {}, layers: null });
     case "plugin/list": return answer({ marketplaces: [{ name: "Team tools", path: "/srv/team/marketplace.json", interface: null, plugins: [
       { id: "lint@team", remotePluginId: null, version: "1.2.0", localVersion: null, name: "lint", shareContext: null, source: { type: "local", path: "/srv/team/lint" }, installed: false, installedAt: null, enabled: false,
         installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: [] }] }],
@@ -227,7 +228,14 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "hooks/list": return answer({ data: [{ cwd: (p.cwds || ["/"])[0], warnings: [], errors: [], hooks: [{ key: "ledger", eventName: "Stop", matcher: null, timeoutSec: 30, statusMessage: null,
       additionalContextLimit: null, sourcePath: "/home/u/.mightling/hooks.json", source: "user", pluginId: null, displayOrder: 0, enabled: true, isManaged: false, currentHash: "x", trustStatus: "trusted",
       handlerType: "command", command: "ling ledger", async: false }] }] });
-    case "config/value/write": return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
+    case "config/value/write": {
+      // Kept, so a later config/read answers what was written.
+      const keys = String(p.keyPath).split(".");
+      let at = config;
+      for (const key of keys.slice(0, -1)) at = at[key] = (at[key] && typeof at[key] === "object" ? at[key] : {});
+      at[keys[keys.length - 1]] = p.value;
+      return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
+    }
     case "review/start": {
       const id = "turn-" + next++;
       const where = p.delivery === "detached" ? "r" + next++ : p.threadId;

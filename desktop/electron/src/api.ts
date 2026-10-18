@@ -98,6 +98,8 @@ export type FromView =
   | { type: "pr/diff"; root: string; number: number; thread: string | null }
   | { type: "pr/review"; root: string; number: number; verdict: "comment" | "approve" | "request-changes"; body: string; thread: string | null }
   | { type: "pr/status"; root: string }
+  /** The agent message board (board.ts): its SQLite file, read only; `sqliteHome` is config.toml's `sqlite_home`, if set. */
+  | { type: "board/read"; sqliteHome: string | null }
   /** The preview tab (preview.ts): a page in a view laid over the tab's body, under the rules of preview-rules.ts. */
   | { type: "preview/open"; id: string; url: string; thread: string | null }
   | { type: "preview/navigate"; id: string; url: string; thread: string | null }
