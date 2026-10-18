@@ -104,6 +104,19 @@
       "default": false,
       "type": "boolean"
     },
+    "petShown": {
+      "default": false,
+      "type": "boolean"
+    },
+    "petSize": {
+      "default": "medium",
+      "enum": ["small", "medium", "large"]
+    },
+    "petImage": {
+      "default": null,
+      "nullable": true,
+      "type": "string"
+    },
     "notifyTurns": {
       "default": "unfocused",
       "enum": [

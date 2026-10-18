@@ -90,6 +90,8 @@ export type FromView =
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" }
+  /** Settings › Pets: a picture of the user's own for the pet. */
+  | { type: "dialog/open-image" }
   /** The preview tab (preview.ts): a page in a view laid over the tab's body, under the rules of preview-rules.ts. */
   | { type: "preview/open"; id: string; url: string; thread: string | null }
   | { type: "preview/navigate"; id: string; url: string; thread: string | null }
@@ -114,6 +116,8 @@ export type ForView =
   | { channel: "task://event"; payload: { id: string; kind: "started" | "output" | "exit"; label?: string; cwd?: string; data?: string; code?: number | null } }
   /** A preview tab's page moved, loaded, or asked for a site the rules hold back (preview.ts). */
   | { channel: "preview://event"; payload: { id: string; kind: "state" | "ask" | "blocked" | "download" | "key"; key?: string; url?: string; title?: string; loading?: boolean; canGoBack?: boolean; canGoForward?: boolean; site?: string; reason?: string; error?: string | null } }
+  /** The pet's state (pet.ts), for the pet's own window. */
+  | { channel: "pet://state"; payload: { working: number; waiting: number; finished: number; size: "small" | "medium" | "large"; image: string | null } }
   /** Show Ask or Work: the menu, a second instance or a link asked for one. */
   | { channel: "view"; payload: "ask" | "work" };
 
