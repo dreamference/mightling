@@ -432,3 +432,38 @@ test("6 pets: Mightling's ling above the windows, working with a turn, a quick q
     await close();
   }
 });
+
+test("7 suggested prompts: off by default; on, a finished turn brings three follow-ups, a click fills the composer", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("textbox", { name: "Project folder" }).fill(projectFolders(home).fetcher);
+    await page.locator(".composer textarea").fill("Make the retry test deterministic.");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".item.agent").last()).toContainText("Done: the retry counter");
+    await page.waitForTimeout(800);
+    await expect(page.getByRole("group", { name: "Suggested follow-ups" })).toHaveCount(0);
+    expect(received(home).filter((message) => message.method === "thread/start" && (message.params as { ephemeral?: boolean })?.ephemeral)).toHaveLength(0);
+
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("button", { name: "Suggested prompts" }).click();
+    await settings.getByRole("checkbox", { name: "Suggest follow-ups when a turn ends" }).check();
+    await page.keyboard.press("Escape");
+    await page.locator(".composer textarea").fill("Now log every retry.");
+    await page.keyboard.press("Enter");
+    const group = page.getByRole("group", { name: "Suggested follow-ups" });
+    await expect(group.getByRole("button", { name: "Log the URL on every retry" })).toBeVisible({ timeout: 10_000 });
+    await expect(group.locator(".suggestion")).toHaveCount(3);
+    await shoot("7-suggested-prompts.png");
+    await group.getByRole("button", { name: "Add a test for the retry limit" }).click();
+    await expect(page.locator(".composer textarea")).toHaveValue("Add a test for the retry limit");
+    await expect(group).toHaveCount(0);
+    const unkept = received(home).filter((message) => message.method === "thread/start" && (message.params as { ephemeral?: boolean; sandbox?: string })?.ephemeral);
+    expect(unkept).toHaveLength(1);
+    expect((unkept[0].params as { sandbox?: string }).sandbox).toBe("read-only");
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});
