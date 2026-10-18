@@ -2,7 +2,7 @@
 Best-of-N for a Night Shift task (specs/DREAMFERENCE_BACKLOG.md item 6;
 specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.9).
 
-A task is attempted N times (`[night] best_of`, 3 by default; a task's own `best_of` outranks it),
+A task is attempted N times (`[night] best_of`, 1 by default; a task's own `best_of` outranks it),
 one attempt after another inside the task's one slot, so the scheduler's memory and request
 accounting stays one task, one scope. Each attempt is a whole `NightShiftTaskRun` in its own
 worktree on `night/<id>-a<k>`, with its own session, test run and time limit (`task_timeout`, never
