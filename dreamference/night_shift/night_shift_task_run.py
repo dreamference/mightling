@@ -80,7 +80,7 @@ class NightShiftTaskRun:
     def __init__(self, night_dir: Path, task: Dict[str, Any], settings: NightShiftSettings,
                  mightling_bin: str, deadline: float, model_host: Optional[str] = None,
                  context_budget: Optional[int] = None, model_node: Optional[str] = None,
-                 window_end: Optional[float] = None) -> None:
+                 window_end: Optional[float] = None, attempt: Optional[int] = None) -> None:
         """
         Args:
             night_dir: The queue directory.
@@ -98,6 +98,11 @@ class NightShiftTaskRun:
             window_end: `time.time()` at which the night's window closes. With refine mode the
                 step that does the task gets a full task timeout of its own after the study step,
                 as in SWE-bench's `--refine` arm, but never past the window.
+            attempt: The attempt's number when this run is one attempt of a best-of-N task
+                (`NightShiftBestOfN`): its worktree, branch and logs carry `-a<k>`, it starts a
+                session of its own, it never writes the task's record, and where a single run
+                would commit it stages its change and leaves the worktree for the chooser
+                (`outcome`).
         """
         self.model_host = model_host
         self.model_node = model_node
@@ -140,6 +145,17 @@ class NightShiftTaskRun:
         self.unit_counter = 0
         self.current_unit: Optional[str] = None
         self.started = time.time()
+        # Best-of-N: this run is attempt `attempt` of the task; its end is `outcome`, not the record.
+        self.attempt: Optional[int] = attempt
+        self.outcome: Optional[Dict[str, Any]] = None
+        if attempt is not None:
+            suffix = f"-a{attempt}"
+            self.session = None
+            self.branch = f"{self.branch}{suffix}"
+            self.worktree = night_dir / "worktrees" / f"{self.task_id}{suffix}"
+            self.log_path = night_dir / "logs" / f"{self.task_id}{suffix}.jsonl"
+            self.last_message_path = night_dir / "logs" / f"{self.task_id}{suffix}.last.txt"
+            self.diff_path: Path = night_dir / "logs" / f"{self.task_id}{suffix}.diff"
 
     @property
     def unit_prefix(self) -> str:
@@ -154,6 +170,14 @@ class NightShiftTaskRun:
         Returns:
             str: The status written.
         """
+        if self.attempt is not None:
+            # One attempt of a best-of-N task: the coordinator has counted and marked the task.
+            if self._cancelled():
+                return self._finish("cancelled")
+            try:
+                return self._run()
+            except Exception as error:  # A runner bug must not stop the other attempts.
+                return self._finish("failed", note=f"night run error: {error}")
         if self._cancelled():
             return NightShiftQueue.transition(self.night_dir, self.task_id, "cancelled")
         self.attempts += 1
@@ -231,6 +255,11 @@ class NightShiftTaskRun:
     # -- steps -------------------------------------------------------------------------------
 
     def _prepare_worktree(self) -> Optional[str]:
+        if self.attempt is not None:
+            # An attempt always starts from the base: what an earlier, broken run left is the runner's own.
+            if self.worktree.is_dir():
+                self._git(self.repo, "worktree", "remove", "--force", str(self.worktree))
+            self._git(self.repo, "branch", "-D", self.branch)
         if self.worktree.is_dir():
             return None
         if self._git(self.repo, "cat-file", "-e", f"{self.base}^{{commit}}")[0] != 0:
@@ -338,7 +367,8 @@ class NightShiftTaskRun:
         session = self.thread_id_in(self.log_path, offset)
         if record_session and session and session != self.session:
             self.session = session
-            NightShiftQueue.transition(self.night_dir, self.task_id, "running", session=session)
+            if self.attempt is None:
+                NightShiftQueue.transition(self.night_dir, self.task_id, "running", session=session)
         if code == "timeout":
             return "interrupted"
         return "ok" if code == 0 else "error"
@@ -396,6 +426,12 @@ class NightShiftTaskRun:
 
     def _commit(self, test_command: Optional[str], test_source: str,
                 test_result: Optional[Dict[str, Any]]) -> str:
+        if self.attempt is not None:
+            # A candidate: staged, its diff kept for the report, the worktree left for the chooser.
+            # Staged before the tests ran (`_run`), so what the test run left stays out, as in a commit.
+            result = self._result(test_command, test_source, test_result)
+            result.update(self._staged_change(stage=False))
+            return self._finish("candidate", result=result)
         first_line = (self.text.strip().splitlines() or ["task"])[0][:72]
         identity: List[str] = []
         if self.author:
@@ -413,8 +449,34 @@ class NightShiftTaskRun:
         result["diff_stat"] = stat
         return self._finish("done", result=result)
 
+    def _staged_change(self, stage: bool = True) -> Dict[str, Any]:
+        """An attempt's change, staged in its worktree: the diff written to `diff_path`, and its stat."""
+        if stage:
+            self._git(self.worktree, "add", "-A")
+        diff = self._git(self.worktree, "diff", "--cached", "--binary")[1]
+        self.diff_path.parent.mkdir(parents=True, exist_ok=True)
+        self.diff_path.write_text(diff)
+        stat = self._git(self.worktree, "diff", "--cached", "--stat")[1].rstrip()
+        return {"diff": str(self.diff_path), "diff_stat": stat, "worktree": str(self.worktree),
+                "branch": self.branch, "session": self.session}
+
+    def window_closed(self) -> bool:
+        """Whether the night's window (or a stop of the whole run) ended this run, not its own timeout."""
+        return self.stop_event.is_set() or (self.window_end is not None and time.time() >= self.window_end)
+
     def _interrupted(self) -> str:
         """Window or timeout: keep the worktree, branch and session for the next night."""
+        if self.attempt is not None:
+            # An attempt is never resumed. Its own time limit makes what it changed a candidate that
+            # did not finish (the filter drops it unless every attempt broke); the window's end
+            # leaves it to the coordinator, which discards it.
+            if not self.window_closed() and self._has_changes():
+                result = {"timed_out": True, "test_result": "untested (the attempt's time ran out)",
+                          "last_message": self._last_message(), **self._timing()}
+                result.update(self._staged_change())
+                return self._finish("candidate", result=result)
+            status = "interrupted" if self.window_closed() else "timed-out"
+            return self._finish(status, result={"last_message": self._last_message(), **self._timing()})
         result = {"branch": self.branch, "worktree": str(self.worktree),
                   "last_message": self._last_message(), **self._timing()}
         return self._finish("interrupted", result=result)
@@ -436,6 +498,9 @@ class NightShiftTaskRun:
         result = dict(result or self._timing())
         if status == "failed" and note:
             result.setdefault("last_message", note)
+        if self.attempt is not None:
+            self.outcome = {"attempt": self.attempt, "status": status, "result": result}
+            return status
         return NightShiftQueue.transition(self.night_dir, self.task_id, status, note=note,
                                           result=result, attempts=self.attempts)
 

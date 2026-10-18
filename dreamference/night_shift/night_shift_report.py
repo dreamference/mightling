@@ -82,6 +82,9 @@ class NightShiftReport:
                          f"{result.get('test_result', '?')}{sandbox}")
         lines.append(f"- Attempts: {result.get('attempts', task.get('attempts', 0))}, "
                      f"nudges: {result.get('nudges', 0)}, wall time: {cls._minutes(result.get('wall_s'))}")
+        best = result.get("best_of")
+        if isinstance(best, dict):
+            lines += cls._best_of_lines(best)
         refine = result.get("refine")
         if isinstance(refine, dict):
             edited = "; it changed the worktree, which was put back" if refine.get("study_edited") else ""
@@ -93,6 +96,35 @@ class NightShiftReport:
             lines.append(f"- Last message: {message[:400]}")
         if task.get("status") == "running":
             lines.append("- Still running when the report was written.")
+        return lines
+
+    @classmethod
+    def _best_of_lines(cls, best: Dict[str, Any]) -> List[str]:
+        """Best-of-N (`NightShiftBestOfN`): what ran, the chosen attempt and why, and every alternative's diff."""
+        chosen = best.get("chosen")
+        points = best.get("points") or {}
+        ran = f"{best.get('ran', 0)} of {best.get('n', '?')} attempts ran"
+        if chosen is None:
+            lines = [f"- Best of {best.get('n', '?')}: {ran}; none chosen"]
+        else:
+            scored = "; points " + ", ".join(f"{key} {value:.2f}" for key, value in sorted(points.items())) \
+                if points else ""
+            lines = [f"- Best of {best.get('n', '?')}: {ran}; chose attempt {chosen} by {best.get('stage', '?')}{scored}"]
+        if best.get("judge_calls"):
+            errors = f", {best['judge_errors']} unreadable or failed" if best.get("judge_errors") else ""
+            lines.append(f"  - Judge: {best['judge_calls']} call(s){errors}")
+        for entry in best.get("attempts") or []:
+            parts = [str(entry.get("status", "?"))]
+            if entry.get("changes"):
+                parts.append(entry["changes"])
+            if entry.get("test_result"):
+                parts.append(f"tests {entry['test_result']}")
+            parts.append(cls._minutes(entry.get("wall_s")))
+            if entry.get("attempt") == chosen:
+                parts.append("chosen: the branch")
+            elif entry.get("diff"):
+                parts.append(f"diff `{entry['diff']}`")
+            lines.append(f"  - Attempt {entry.get('attempt')}: " + ", ".join(parts))
         return lines
 
     @classmethod

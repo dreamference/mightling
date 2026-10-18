@@ -21,6 +21,7 @@ from dreamference.night_shift import (
     NightShiftHost, NightShiftIndex, NightShiftQueue, NightShiftReport, NightShiftRunner, NightShiftScheduler,
     NightShiftSettings, NightShiftTaskRun,
 )
+from dreamference.night_shift import night_shift_settings
 from dreamference.night_shift.night_shift_task_run import NUDGE
 from dreamference.night_shift.refine_prompt import FIX_RULES_V2, STUDY_SECTIONS_V2, RefinePrompt
 
@@ -90,6 +91,9 @@ def git(cwd, *args):
 def setup(tmp_path, monkeypatch):
     """A repository with one commit, a queue directory and the fake `ling`."""
     monkeypatch.setattr(NightShiftTaskRun, "USE_SCOPE", False)
+    # These tests are about one attempt (the default, pinned here); best-of-N has its own, in
+    # test_night_shift_best_of_n.py, with a stand-in judge.
+    monkeypatch.setattr(night_shift_settings, "DEFAULT_BEST_OF", 1)
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q")

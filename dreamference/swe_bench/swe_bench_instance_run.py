@@ -323,6 +323,8 @@ LET_ME_KNOW: Final[re.Pattern] = re.compile(r"\blet me know\b", re.IGNORECASE)
 # within their last 400 characters. Read back over six earlier rounds (219 finished instances),
 # the rule fires 6 times, each on a message that ends mid-work, and on no summary.
 MID_WORK_TAIL: Final[int] = 400
+# Codex's key for compaction at the end of a turn (ling-rs/src/compaction.rs, `TURN_END_KEY`).
+TURN_END_KEY: Final[str] = "model_post_turn_compact_threshold_percent"
 
 STOP_GRACE_S: Final[int] = 30
 LAST_MESSAGE_LIMIT: Final[int] = 2000
@@ -346,7 +348,8 @@ class SweBenchInstanceRun:
                  task_rules: Optional[List[str]] = None, review_turn: bool = False,
                  refine_version: str = "v1",
                  hooks: Optional[List[str]] = None, restart_after_compactions: int = 0,
-                 apply_patch: str = "auto", exec_tool: str = "auto") -> None:
+                 apply_patch: str = "auto", exec_tool: str = "auto",
+                 turn_end_percent: Optional[int] = None) -> None:
         """
         Args:
             store: The run's files.
@@ -376,6 +379,9 @@ class SweBenchInstanceRun:
             apply_patch: The form `--apply-patch` asked for (`auto` when it did not; spec §22).
             exec_tool: The form `--exec-tool` asked for Code Mode's `exec` (`auto` when it did
                 not; spec §23).
+            turn_end_percent: What `model_post_turn_compact_threshold_percent` gets on every exec
+                command line (the turn-end compaction arm, spec §16): 0 for off, None leaves
+                the key alone.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -396,6 +402,10 @@ class SweBenchInstanceRun:
         self.task_rules: List[str] = list(task_rules or [])
         self.review_turn = review_turn
         self.hooks: List[str] = list(hooks or [])
+        # The turn-end compaction arm (spec §16, night 10): Codex's own key on every exec command
+        # line of this instance, 0 for off; None leaves it alone (`exec` then never compacts at a
+        # turn's end, whatever the launcher's switch says).
+        self.turn_end_percent = turn_end_percent
         # `--restart-after-compactions N` (spec §21): 0 is off. Armed only around the fix
         # session's turns; the baseline keeps the refine arm's study step out of the count.
         self.restart_after_compactions = int(restart_after_compactions or 0)
@@ -1053,6 +1063,8 @@ class SweBenchInstanceRun:
                    "-C", "/testbed", "-c", f"model_auto_compact_token_limit={self.settings.task_context}"]
         for override in (self.code_index or {}).get("config", []):
             command += ["-c", override]
+        if self.turn_end_percent is not None:
+            command += ["-c", f"{TURN_END_KEY}={self.turn_end_percent}"]
         command += ["resume", self.session, prompt] if resume and self.session else [prompt]
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0
         self.in_model = True

@@ -23,6 +23,11 @@ DEFAULT_TASK_MEMORY: Final[str] = "8G"
 DEFAULT_NUDGES: Final[int] = 2
 DEFAULT_IDLE_MINUTES: Final[int] = 10
 DEFAULT_INDEX_TIMEOUT: Final[str] = "20m"
+# Best-of-N (backlog item 6): each task is attempted this many times, one attempt after another in
+# worktrees of their own, and chooser v1 picks the one the runner commits. 1 by default (the owner's
+# decision of 2026-10-18, after night 11's best-of-3 18/30 against 15/30, p = 0.375): a task gets
+# more attempts only when `[night] best_of` or the task's own `best_of` asks for them.
+DEFAULT_BEST_OF: Final[int] = 1
 
 # The smallest KV budget a concurrent task may be given; the run splits the pool evenly between as
 # many tasks as can each get at least this much, and each task's session compacts at its share
@@ -51,6 +56,9 @@ class NightShiftSettings:
         self.test_timeout_s: int = self.parse_duration(table.get("test_timeout", DEFAULT_TEST_TIMEOUT))
         self.task_memory: str = str(table.get("task_memory", DEFAULT_TASK_MEMORY))
         self.nudges: int = max(0, int(table.get("nudges", DEFAULT_NUDGES)))
+        # Attempts per task, chosen among by chooser v1 (`NightShiftBestOfN`); a task's own `best_of`
+        # outranks it. Read at construction, so a test can lower the default for the single path.
+        self.best_of: int = max(1, int(table.get("best_of", DEFAULT_BEST_OF)))
         self.test: Optional[str] = table.get("test")
         # The runner's test run executes agent-written code; `false` runs it with the user's rights
         # (for a test command that must reach Docker or write outside the worktree).
