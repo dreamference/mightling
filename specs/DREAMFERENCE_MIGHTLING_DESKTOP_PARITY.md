@@ -548,7 +548,7 @@ In the order the owner's use suggests, each item with its §2 row as acceptance:
 In this order (the owner, 2026-10-18), each item with its §2 row as acceptance:
 
 1. **File tree and file tabs** (§2.8): `fs/readDirectory|readFile|watch|unwatch`, read only. **File tree and file tabs: merged 2026-10-18, 93426fd.**
-3. **Artifacts viewer** (§2.8): Markdown, images, PDF, HTML; LaTeX only if `tectonic` is bundled (§7 question 4).
+3. **Artifacts viewer** (§2.8): Markdown, images, PDF, HTML; LaTeX only if `tectonic` is bundled (§7 question 4). **Artifacts viewer (Markdown, images, PDF, HTML; no LaTeX: tectonic not bundled): merged 2026-10-18, 5a217b2.**
 4. **Preview tab** with comments and per-site permissions (§2.9).
 5. **Activity view** (§2.4, Ctrl+Alt+U).
 6. **Pets** with Mightling's art (§2.1, §2.15, §7 question 5).
