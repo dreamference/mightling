@@ -467,3 +467,29 @@ test("7 suggested prompts: off by default; on, a finished turn brings three foll
     await close();
   }
 });
+
+test("8 import: another agent's configuration found, plugins refused, the ticked items imported through the server", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("button", { name: "Skills and tools" }).click();
+    const dialog = page.getByRole("dialog", { name: "Skills and tools" });
+    await dialog.getByRole("button", { name: "Import" }).click();
+    const found = dialog.getByRole("list", { name: "Found" });
+    await expect(found.getByRole("listitem")).toHaveCount(4);
+    await expect(found.getByRole("checkbox", { name: /Instructions \(AGENTS.md\)/ })).toBeChecked();
+    await expect(found.getByRole("checkbox", { name: /Skills/ })).toBeChecked();
+    await expect(found.getByRole("checkbox", { name: /Past sessions/ })).not.toBeChecked();
+    await expect(found.getByRole("checkbox", { name: /Plugins/ })).toBeDisabled();
+    await expect(dialog.locator(".import-history")).toContainText("1 imported");
+    await shoot("8-import.png");
+    await dialog.getByRole("button", { name: "Import the ticked items" }).click();
+    await expect(dialog.locator(".import-results")).toContainText("Skills: 1 imported");
+    await expect(dialog.locator(".import-results")).toContainText("Instructions (AGENTS.md): 1 imported");
+    const sent = received(home).find((message) => message.method === "externalAgentConfig/import");
+    expect(((sent?.params as { migrationItems: { itemType: string }[] }).migrationItems).map((item) => item.itemType).sort()).toEqual(["AGENTS_MD", "SKILLS"]);
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});

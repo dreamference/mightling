@@ -9,13 +9,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Icon } from "./icons";
+import { ImportPanel } from "./ImportPanel";
+import type { Listen } from "./turns";
 import type { RpcClient } from "./rpc";
 import type { AppInfo } from "./protocol/v2/AppInfo";
 import type { HooksListEntry } from "./protocol/v2/HooksListEntry";
 import type { PluginMarketplaceEntry } from "./protocol/v2/PluginMarketplaceEntry";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 
-export type ExtensionsTab = "skills" | "plugins" | "mcp" | "apps" | "hooks";
+export type ExtensionsTab = "skills" | "plugins" | "mcp" | "apps" | "hooks" | "import";
 
 interface McpServer {
   name: string;
@@ -43,7 +45,7 @@ export function mcpServerValue(kind: "command" | "url", target: string, args: st
   return { command: target.trim(), args: words };
 }
 
-export function ExtensionsView(props: { client: RpcClient; cwd: string | null; tab: ExtensionsTab; setTab: (tab: ExtensionsTab) => void; onClose: () => void; notice: (error: unknown) => void }) {
+export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: string | null; tab: ExtensionsTab; setTab: (tab: ExtensionsTab) => void; onClose: () => void; notice: (error: unknown) => void }) {
   const { client, cwd, notice } = props;
   const [skills, setSkills] = useState<SkillMetadata[] | null>(null);
   const [servers, setServers] = useState<McpServer[] | null>(null);
@@ -90,13 +92,14 @@ export function ExtensionsView(props: { client: RpcClient; cwd: string | null; t
       <section className="dialog extensions" role="dialog" aria-label="Skills and tools" onClick={(event) => event.stopPropagation()}>
         <header><h2>Skills and tools</h2><button className="icon" aria-label="Close" onClick={props.onClose}><Icon name="x" size={16} /></button></header>
         <nav className="review-scopes" aria-label="Kinds">
-          {(["skills", "plugins", "mcp", "apps", "hooks"] as const).map((tab) => (
+          {(["skills", "plugins", "mcp", "apps", "hooks", "import"] as const).map((tab) => (
             <button key={tab} className={props.tab === tab ? "selected" : ""} aria-pressed={props.tab === tab} onClick={() => props.setTab(tab)}>
-              {{ skills: "Skills", plugins: "Plugins", mcp: "MCP servers", apps: "Apps", hooks: "Hooks" }[tab]}
+              {{ skills: "Skills", plugins: "Plugins", mcp: "MCP servers", apps: "Apps", hooks: "Hooks", import: "Import" }[tab]}
             </button>
           ))}
         </nav>
         {changed ? <div className="notice">Saved to config.toml: new threads use it; a running thread keeps what it started with.</div> : null}
+        {props.tab === "import" ? <ImportPanel client={client} listen={props.listen} cwd={cwd} notice={notice} onImported={() => { setChanged(true); load(); }} /> : null}
         {props.tab === "skills" ? (
           <>
             <p className="dialog-note">Skills{cwd ? ` for ${cwd}` : ""}: type $ in the composer to use one. Skills of other agents are linked in at every start (~/.mightling/skills/from-…).</p>
