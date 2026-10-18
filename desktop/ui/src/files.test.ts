@@ -68,3 +68,17 @@ describe("files", () => {
     expect(sizeLabel(14_540)).toBe("14.2 KB");
   });
 });
+
+describe("search files and go to line", () => {
+  it("reads a line after the name, or alone for the file in front", async () => {
+    const { parseFileQuery, lineWithin } = await import("./files");
+    expect(parseFileQuery("hero.ts")).toEqual({ text: "hero.ts", line: null });
+    expect(parseFileQuery("src/hero.ts:12")).toEqual({ text: "src/hero.ts", line: 12 });
+    expect(parseFileQuery("hero.ts:12:5")).toEqual({ text: "hero.ts", line: 12 });
+    expect(parseFileQuery(":40")).toEqual({ text: "", line: 40 });
+    expect(parseFileQuery(":0")).toEqual({ text: "", line: null });
+    expect(lineWithin("500", 68)).toBe(68);
+    expect(lineWithin(":3", 68)).toBe(3);
+    expect(lineWithin("x", 68)).toBeNull();
+  });
+});

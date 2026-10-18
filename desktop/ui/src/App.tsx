@@ -43,6 +43,7 @@ import { GoalRow } from "./GoalRow";
 import { ReviewPane } from "./ReviewPane";
 import { FileTree } from "./FileTree";
 import { FileView } from "./FileView";
+import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
 import { REVIEW_TAB, fileTab, withTab, withoutTab, type WorkspaceTab } from "./tabs";
 import { SubagentsPanel } from "./SubagentsPanel";
@@ -153,6 +154,8 @@ export function App() {
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [treeShown, setTreeShown] = useState(false);
+  /** Search files (Ctrl+P) open, with what it starts with (":" for go to line). */
+  const [fileSearch, setFileSearch] = useState<string | null>(null);
   const reviewOpen = tabs.some((tab) => tab.kind === "review");
   /** Opens (to the front) or closes the Review tab, as Ctrl+Shift+G and the bar's button do. */
   const setReviewOpen = (open: boolean | ((was: boolean) => boolean)) => {
@@ -829,6 +832,10 @@ export function App() {
       if (prefsRef.current.bottomPanel) closedSurfaces.close("bottomPanel");
       updatePrefs({ bottomPanel: false });
     },
+    searchFiles: () => {
+      if (view !== "work" || !composeRoot) return notice("Search files looks in a thread's folder: open a thread in Work, or name a project folder.");
+      setFileSearch((open) => (open === null ? "" : null));
+    },
     fileTree: () => {
       if (view !== "work") showView("work");
       if (prefsRef.current.layout === "chat") updatePrefs({ layout: "split" });
@@ -1440,6 +1447,7 @@ export function App() {
       [keyAction("recentChat5"), "recentChat5"],
       [keyAction("recentChat6"), "recentChat6"],
       [keyAction("fileTree"), "fileTree"],
+      [keyAction("searchFiles"), "searchFiles"],
     ];
     for (const [action, id] of shellKeys) {
       if ((id === "undoAction" || id === "redoAction") && typing) continue;
@@ -1448,6 +1456,13 @@ export function App() {
         commands[id]();
         return;
       }
+    }
+    // Go to line (Ctrl+L) when a file tab is in front; the terminal's Ctrl+L (clear) is the terminal's own.
+    const frontTab = tabs.find((tab) => tab.key === activeTab);
+    if (matches(event, keyAction("goToLine")) && tabsShown && frontTab?.kind === "file" && !(document.activeElement as HTMLElement | null)?.closest(".terminal-host, .xterm")) {
+      event.preventDefault();
+      setFileSearch(":");
+      return;
     }
     if (matches(event, keyAction("modelPicker"))) {
       event.preventDefault();
@@ -1476,7 +1491,8 @@ export function App() {
       event.preventDefault();
       setSettingsPage("general");
       setSettingsOpen((open) => !open);
-    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen)) {
+    } else if (event.key === "Escape" && (picker !== "closed" || settingsOpen || info || menuOpen || findOpen || rowMenu || extensions || scheduledOpen || fileSearch !== null)) {
+      setFileSearch(null);
       setScheduledOpen(false);
       setExtensions(null);
       setPicker("closed");
@@ -1885,6 +1901,11 @@ export function App() {
           seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
       ) : null}
       {extensions ? <ExtensionsView client={client} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
+      {fileSearch !== null && composeRoot ? (
+        <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
+          front={(() => { const tab = tabs.find((entry) => entry.key === activeTab); return tab?.kind === "file" && tabsShown ? tab.path : null; })()}
+          onOpen={(path, line) => openFile(path, line)} onClose={() => setFileSearch(null)} />
+      ) : null}
       {menuOpen ? <CommandMenu entries={menuOpen === "projects" ? menuEntries().filter((entry) => entry.kind === "project") : menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
     </div>
   );

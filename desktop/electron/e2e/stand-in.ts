@@ -118,7 +118,11 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "skills/list": return answer({ data: (p.cwds || []).map((cwd) => ({ cwd, skills, errors: [] })) });
     case "fuzzyFileSearch": {
       const q = String(p.query || "").toLowerCase();
-      const found = files.filter((f) => f.toLowerCase().includes(q)).map((f, i) => ({ root: p.roots[0], path: f, match_type: "file", file_name: f.split("/").pop(), score: 100 - i, indices: null }));
+      // A folder with files in it is searched for real (Phase 3's search files); an empty one answers the made-up list.
+      const walk = (dir, rel) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.name === ".git" ? [] : d.isDirectory() ? walk(dir + "/" + d.name, rel + d.name + "/") : [rel + d.name]);
+      let real = [];
+      try { real = walk(p.roots[0], ""); } catch {}
+      const found = (real.length ? real : files).filter((f) => f.toLowerCase().includes(q)).map((f, i) => ({ root: p.roots[0], path: f, match_type: "file", file_name: f.split("/").pop(), score: 100 - i, indices: null }));
       return answer({ files: found });
     }
     case "thread/resume": {

@@ -140,3 +140,18 @@ export function sizeLabel(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** What Ctrl+P was given: a name to search for, and a line after a colon (`hero.ts:12`, or `:12` for the file in front). */
+export function parseFileQuery(query: string): { text: string; line: number | null } {
+  const match = /^(.*?):(\d+)(?::\d+)?\s*$/.exec(query.trim());
+  if (!match) return { text: query.trim(), line: null };
+  const line = Number(match[2]);
+  return { text: match[1].trim(), line: line > 0 ? line : null };
+}
+
+/** A line the user typed for go to line, kept inside the file; null when it is not a number. */
+export function lineWithin(typed: string, lines: number): number | null {
+  const number = Number.parseInt(typed.trim().replace(/^:/, ""), 10);
+  if (!Number.isFinite(number)) return null;
+  return Math.min(Math.max(number, 1), Math.max(lines, 1));
+}
