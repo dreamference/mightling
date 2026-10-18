@@ -92,6 +92,12 @@ export type FromView =
   | { type: "dialog/open-folder" }
   /** Settings › Pets: a picture of the user's own for the pet. */
   | { type: "dialog/open-image" }
+  /** The pull-request tab (prs.ts): `gh` in the repository, when Settings › Git turns it on; refused at airgapped on. */
+  | { type: "pr/list"; root: string; inbox: "review" | "mine" | "open"; thread: string | null }
+  | { type: "pr/view"; root: string; number: number; thread: string | null }
+  | { type: "pr/diff"; root: string; number: number; thread: string | null }
+  | { type: "pr/review"; root: string; number: number; verdict: "comment" | "approve" | "request-changes"; body: string; thread: string | null }
+  | { type: "pr/status"; root: string }
   /** The preview tab (preview.ts): a page in a view laid over the tab's body, under the rules of preview-rules.ts. */
   | { type: "preview/open"; id: string; url: string; thread: string | null }
   | { type: "preview/navigate"; id: string; url: string; thread: string | null }

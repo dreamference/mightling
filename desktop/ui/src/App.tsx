@@ -47,8 +47,9 @@ import { ArtifactView } from "./ArtifactView";
 import { artifactKind, createdArtifacts } from "./artifacts";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
-import { REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type WorkspaceTab } from "./tabs";
+import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type WorkspaceTab } from "./tabs";
 import { PreviewTab } from "./PreviewTab";
+import { PullRequestsTab } from "./PullRequestsTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { ActivityView } from "./ActivityView";
@@ -201,6 +202,12 @@ export function App() {
   };
   const openFileRef = useRef<(path: string) => void>(() => {});
   openFileRef.current = (path: string) => openFile(path);
+  /** The pull-request tab (Phase 3 item 9), in front. */
+  const openPullRequests = () => {
+    setTabs((list) => withTab(list, list.find((tab) => tab.kind === "prs") ?? PR_TAB));
+    setActiveTab(PR_TAB.key);
+    if (prefsRef.current.layout === "chat") updatePrefsRef.current({ layout: "split" });
+  };
   /** A preview tab (Ctrl+T), in front; an empty address waits for the user to type one. */
   const openPreview = (url = "") => {
     const tab = previewTab(url);
@@ -855,6 +862,7 @@ export function App() {
     else if (surface === "bottomPanel") updatePrefs({ bottomPanel: true });
     else if (surface?.startsWith("file:")) openFile(surface.slice(5));
     else if (surface?.startsWith("preview:")) openPreview(surface.slice(8));
+    else if (surface === "prs") openPullRequests();
   };
 
   const openFolderDialog = async () => {
@@ -1807,6 +1815,7 @@ export function App() {
               canHandOff={!selected.activeTurnId} environment={environment}
               onCreateBranch={createBranch} branchPrefix={prefs.branchPrefix} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
           ) : null}
+          {view === "work" && prefs.pullRequests && bridge.prs.available() && composeRoot ? <button className={`icon bar-action${tabs.some((tab) => tab.kind === "prs") ? " active" : ""}`} title="Pull requests, through your GitHub CLI" aria-label="Pull requests" onClick={openPullRequests}><Icon name="gitPullRequest" size={16} /></button> : null}
           {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => { if (reviewOpen && prefs.layout === "chat") updatePrefs({ layout: "split" }); else setReviewOpen(!reviewOpen); }}><Icon name="fileDiff" size={16} /></button> : null}
           {workingCount(state) > 1 ? <span className="chip optional" title="Threads and subagents working at once share the one model server">{workingCount(state)} working</span> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
@@ -1965,7 +1974,10 @@ export function App() {
             <FileTree root={composeRoot} client={client} listen={listen} selected={tabs.find((tab) => tab.key === activeTab && tab.kind === "file")?.key.slice(5) ?? null}
               onOpen={(path) => openFile(path)} onClose={() => setTreeShown(false)} />
           ) : null}
-          render={(tab) => tab.kind === "preview" ? (
+          render={(tab) => tab.kind === "prs" ? (
+            <PullRequestsTab root={composeRoot} thread={selected?.thread.id ?? null} notice={notice}
+              onCompose={(text) => setDraft((draft) => (draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text))} />
+          ) : tab.kind === "preview" ? (
             <PreviewTab id={tab.id} url={tab.url} thread={selected?.thread.id ?? null} devTools={prefs.previewDevTools}
               visible={tabsShown && tab.key === (tabs.find((entry) => entry.key === activeTab) ?? tabs[0])?.key && !overlayOpen}
               layoutKey={`${prefs.layout}|${prefs.sidebarHidden}|${prefs.fontScale}|${treeShown}|${prefs.bottomPanel}|${tabs.length}`}
