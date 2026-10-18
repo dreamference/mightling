@@ -390,3 +390,45 @@ test("5 activity: what the agent did across threads, by kind and project, a row 
     await close();
   }
 });
+
+test("6 pets: Mightling's ling above the windows, working with a turn, a quick question to Ask, Super+Alt+P", async () => {
+  const { app, page, home, close } = await open();
+  try {
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("button", { name: "Pets" }).click();
+    await settings.getByRole("checkbox", { name: "Show the pet" }).check();
+    await page.keyboard.press("Escape");
+    await expect.poll(() => app.windows().some((entry) => entry.url().endsWith("#pet")), { timeout: 15_000 }).toBe(true);
+    const pet = app.windows().find((entry) => entry.url().endsWith("#pet"))!;
+    const body = pet.locator(".pet-body");
+    await expect(body).toHaveAttribute("aria-label", /Resting/);
+    // A turn starts: the pet works.
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    await page.locator(".composer textarea").fill("Try WebP at 80% quality.");
+    await page.keyboard.press("Enter");
+    await expect(body).toHaveClass(/mood-working/);
+    await expect(body).toHaveAttribute("aria-label", /One thread working/);
+    if (out) {
+      fs.mkdirSync(out, { recursive: true });
+      await pet.screenshot({ path: path.join(out, "6-pet-working.png"), omitBackground: true });
+    }
+    // A click: the bubble, and a quick question that lands in Ask's composer.
+    await body.click();
+    const bubble = pet.getByRole("dialog", { name: "Mightling pet" });
+    await expect(bubble).toContainText("One thread working.");
+    if (out) await pet.screenshot({ path: path.join(out, "6-pet-bubble.png"), omitBackground: true });
+    await bubble.getByRole("textbox", { name: "A quick question" }).fill("How big is the hero image now?");
+    await bubble.getByRole("textbox", { name: "A quick question" }).press("Enter");
+    await expect(page.locator(".view-ask")).toBeVisible();
+    await expect(page.locator(".composer textarea")).toHaveValue("How big is the hero image now?");
+    // Super+Alt+P hides it.
+    await page.locator(".turns").click({ position: { x: 10, y: 10 } });
+    await page.keyboard.press("Meta+Alt+p");
+    await expect.poll(() => app.windows().some((entry) => entry.url().endsWith("#pet"))).toBe(false);
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});

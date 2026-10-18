@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
+import { PetView } from "./PetView";
 import { host } from "./bridge";
 import "./styles.css";
 
@@ -16,7 +17,7 @@ const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      <App />
+      {location.hash === "#pet" ? <PetView /> : <App />}
     </StrictMode>,
   );
 }

@@ -27,7 +27,7 @@ export interface WorkTarget {
 /** What a link names (desktop/electron/src/args.ts). */
 export interface LinkTarget extends WorkTarget {
   prompt?: string | null;
-  page?: "new" | "settings" | "skills" | "night" | "plugins";
+  page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask";
   plugin?: string;
 }
 
@@ -263,6 +263,8 @@ export const night = {
 };
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
+/** Settings › Pets: a picture for the pet; null when the dialog was cancelled. */
+export const chooseImage = () => send<string | null>({ type: "dialog/open-image" });
 
 export interface Uploaded {
   path: string;

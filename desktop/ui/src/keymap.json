@@ -646,6 +646,16 @@
    "status": "built"
   },
   {
+   "id": "togglePet",
+   "group": "General",
+   "label": "Show or hide the pet",
+   "keys": [
+    "Super+Alt+P"
+   ],
+   "context": "global",
+   "status": "built"
+  },
+  {
    "id": "activityView",
    "group": "Input",
    "label": "Activity view",
