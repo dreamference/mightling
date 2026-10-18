@@ -52,7 +52,7 @@ ling-admin voice start       # speech-to-text for the microphone button (Whisper
 - **Images.** Ask for pictures ("show me a puffin in flight") and the agent searches the web, has
   the served model pick the best matches, and keeps them on this machine. They appear in the answer,
   served by `ling web` and the app from that local copy. Off at `/airgapped on`.
-- **Voice.** The 🎤 button in the composer records; press it again and the text appears in the
+- **Voice.** The microphone button in the composer records; press it again and the text appears in the
   composer, for you to read before sending. Transcription runs on this machine, so it works at
   `/airgapped on`. The button is shown in the app and in a browser on this machine; from another
   device the page is text only (see above).
