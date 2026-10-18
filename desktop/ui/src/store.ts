@@ -174,8 +174,9 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
           ...existing,
           status: turn.status,
           error: turn.error,
-          // A completion may carry no items; the streamed ones stay.
-          items: turn.items.length > 0 ? [...turn.items] : existing.items,
+          // ling's completion lists only some of the turn's items (the answer); every item streamed
+          // during the turn stays, each one the completion names is updated in place, new ones last.
+          items: turn.items.reduce((items, item) => upsertItem({ ...existing, items }, item).items, existing.items),
         })),
         activeTurnId: view.activeTurnId === turn.id ? null : view.activeTurnId,
       }));
