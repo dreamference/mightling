@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
 
-import { projectFolders, received, runs, writeStandIn } from "./stand-in";
+import { DIFF, projectFolders, received, runs, writeStandIn } from "./stand-in";
 
 const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.cjs");
 const out = process.env.MIGHTLING_LOOK_DIR;
@@ -26,7 +26,7 @@ interface Session {
   close: () => Promise<void>;
 }
 
-async function open(prepare?: (home: string) => void): Promise<Session> {
+async function open(prepare?: (home: string) => void, extraEnv: (home: string) => Record<string, string> = () => ({})): Promise<Session> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-p3-"));
   const codexHome = path.join(home, ".mightling");
   const askRoot = path.join(codexHome, "ask");
@@ -36,7 +36,7 @@ async function open(prepare?: (home: string) => void): Promise<Session> {
   const ling = writeStandIn(home, askRoot);
   const app = await electron.launch({
     args: [main],
-    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }) },
+    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv(home) },
   });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -488,6 +488,80 @@ test("8 import: another agent's configuration found, plugins refused, the ticked
     await expect(dialog.locator(".import-results")).toContainText("Instructions (AGENTS.md): 1 imported");
     const sent = received(home).find((message) => message.method === "externalAgentConfig/import");
     expect(((sent?.params as { migrationItems: { itemType: string }[] }).migrationItems).map((item) => item.itemType).sort()).toEqual(["AGENTS_MD", "SKILLS"]);
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});
+
+/** A stand-in for the GitHub CLI: two pull requests, one failing check, a diff; every call logged. */
+function fakeGh(home: string): string {
+  const gh = path.join(home, "gh");
+  const log = path.join(home, "gh.jsonl");
+  const pr = (number: number, title: string, head: string, author: string) => ({ number, title, author: { login: author }, headRefName: head, baseRefName: "main", isDraft: false, reviewDecision: "REVIEW_REQUIRED", updatedAt: "2026-10-18T09:00:00Z", url: `https://github.example/acme/fetcher/pull/${number}` });
+  const prs = [pr(12, "Retry with backoff", "retry-backoff", "ada"), pr(15, "Log every retry", "retry-log", "brin")];
+  const detail = { ...prs[0], body: "Retries now wait **0.5 s, 1 s, 2 s**.", state: "OPEN", additions: 9, deletions: 3, changedFiles: 1,
+    statusCheckRollup: [{ __typename: "CheckRun", name: "tests", status: "COMPLETED", conclusion: "FAILURE" }, { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }] };
+  fs.writeFileSync(gh, `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), noUpdate: process.env.GH_NO_UPDATE_NOTIFIER }) + "\\n");
+const [what, verb] = args;
+if (what === "auth") { console.log("github.example: Logged in to github.example account ada"); process.exit(0); }
+if (what === "pr" && verb === "list") { console.log(${JSON.stringify(JSON.stringify(prs))}); process.exit(0); }
+if (what === "pr" && verb === "view") { console.log(${JSON.stringify(JSON.stringify(detail))}); process.exit(0); }
+if (what === "pr" && verb === "diff") { process.stdout.write(${JSON.stringify(`diff --git a/fetcher/client.py b/fetcher/client.py\n--- a/fetcher/client.py\n+++ b/fetcher/client.py\n${DIFF}`)}); process.exit(0); }
+if (what === "pr" && verb === "review") { console.log("- Reviewed pull request #12"); process.exit(0); }
+process.stderr.write("unknown command\\n"); process.exit(1);
+`);
+  fs.chmodSync(gh, 0o755);
+  return gh;
+}
+
+test("9 pull requests: off by default; through gh, an inbox, checks, Fix and Review into the composer, a review submitted", async () => {
+  const { page, home, shoot, close } = await open((dir) => {
+    fakeGh(dir);
+    execFileSync("git", ["init", "-q", projectFolders(dir).fetcher]);
+  }, (dir) => ({ MIGHTLING_GH: path.join(dir, "gh") }));
+  const calls = () => {
+    try {
+      return fs.readFileSync(path.join(home, "gh.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as { args: string[]; cwd: string; noUpdate: string });
+    } catch {
+      return [];
+    }
+  };
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await expect(page.getByRole("button", { name: "Pull requests" })).toHaveCount(0);
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await settings.getByRole("button", { name: "Git" }).click();
+    await settings.getByRole("checkbox", { name: /A pull-request tab/ }).check();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Pull requests" }).click();
+    const tab = page.getByRole("tabpanel", { name: "Pull requests" });
+    const list = tab.getByRole("list", { name: "Pull requests" });
+    await expect(list.getByRole("button")).toHaveCount(2);
+    await list.getByRole("button", { name: /Retry with backoff/ }).click();
+    const detail = tab.getByRole("region", { name: "Pull request #12" });
+    await expect(detail.getByRole("list", { name: "Checks" })).toContainText("tests");
+    await expect(detail.locator(".review-file")).toHaveCount(1);
+    await shoot("9-pull-requests.png");
+    await detail.locator(".check-failed").getByRole("button", { name: "Fix" }).click();
+    await expect(page.locator(".composer textarea")).toHaveValue(/The check "tests" fails on pull request #12/);
+    await page.locator(".composer textarea").fill("");
+    await detail.getByRole("button", { name: "Review with Mightling" }).click();
+    await expect(page.locator(".composer textarea")).toHaveValue(/Review pull request #12/);
+    await detail.getByRole("textbox", { name: "Your review" }).fill("Looks right; one nit on the log level.");
+    page.once("dialog", (dialog) => void dialog.accept());
+    await detail.getByRole("button", { name: "Comment" }).click();
+    await expect.poll(() => calls().some((call) => call.args.join(" ") === "pr review 12 --comment --body Looks right; one nit on the log level.")).toBe(true);
+    // gh ran in the repository, with no update check, and with nothing else.
+    expect(calls().every((call) => call.cwd === projectFolders(home).fetcher && call.noUpdate === "1")).toBe(true);
+    expect([...new Set(calls().map((call) => call.args.slice(0, 2).join(" ")))].sort()).toEqual(["pr diff", "pr list", "pr review", "pr view"]);
     expect(appServers(home)).toBe(1);
   } finally {
     await close();
