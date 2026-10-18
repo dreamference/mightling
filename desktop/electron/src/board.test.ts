@@ -25,9 +25,11 @@ function boardDb(file: string): void {
 
 describe("the agent message board", () => {
   it("finds the file where the server keeps it", () => {
-    expect(boardFile("/home/u/.mightling", null, {})).toBe("/home/u/.mightling/agent_message_board_1.sqlite");
-    expect(boardFile("/home/u/.mightling", "/data/sqlite", {})).toBe("/data/sqlite/agent_message_board_1.sqlite");
-    expect(boardFile("/home/u/.mightling", "/data/sqlite", { CODEX_SQLITE_HOME: "/env/sqlite" })).toBe("/env/sqlite/agent_message_board_1.sqlite");
+    const home = path.resolve("/home/u/.mightling");
+    const configured = path.resolve("/data/sqlite");
+    expect(boardFile(home, null, {})).toBe(path.join(home, "agent_message_board_1.sqlite"));
+    expect(boardFile(home, configured, {})).toBe(path.join(configured, "agent_message_board_1.sqlite"));
+    expect(boardFile(home, configured, { CODEX_SQLITE_HOME: "/env/sqlite" })).toBe(path.join(path.resolve("/env/sqlite"), "agent_message_board_1.sqlite"));
   });
 
   it("reads boards, channels and posts newest first, leaves deleted boards out, changes nothing", () => {
