@@ -194,9 +194,15 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
         say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
         // The user's message as an item, as the server reports it.
         say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "userMessage", id: "u" + id, content: p.input || [] } } });
+        const asked = String(((p.input || [])[0] || {}).text || "");
         return setTimeout(() => {
-          say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "agentMessage", id: "m" + id, text: "Done: the retry counter is in fetcher/client.py." } } });
-          say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [], status: "completed", error: null } } });
+          if (asked.includes("with a command")) {
+            say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
+          }
+          const answerItem = { type: "agentMessage", id: "m" + id, text: "Done: the retry counter is in fetcher/client.py." };
+          say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: answerItem } });
+          // As ling sends it: the completed turn lists the answer alone, not what the turn streamed.
+          say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
         }, 300);
       }
       if (String(p.threadId).startsWith("e")) {
