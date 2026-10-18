@@ -10,7 +10,6 @@ import type { RequestId } from "./protocol/RequestId";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { ServerRequest } from "./protocol/ServerRequest";
 import type { ConfigReadResponse } from "./protocol/v2/ConfigReadResponse";
-import type { FsGetMetadataResponse } from "./protocol/v2/FsGetMetadataResponse";
 import type { FsReadDirectoryResponse } from "./protocol/v2/FsReadDirectoryResponse";
 import type { FsReadFileResponse } from "./protocol/v2/FsReadFileResponse";
 import type { GetAccountResponse } from "./protocol/v2/GetAccountResponse";
@@ -47,7 +46,6 @@ interface Responses {
   "turn/interrupt": TurnInterruptResponse;
   "fs/readDirectory": FsReadDirectoryResponse;
   "fs/readFile": FsReadFileResponse;
-  "fs/getMetadata": FsGetMetadataResponse;
 }
 export type ResponseOf<M extends Method> = M extends keyof Responses ? Responses[M] : unknown;
 

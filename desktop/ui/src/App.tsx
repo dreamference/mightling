@@ -43,6 +43,8 @@ import { GoalRow } from "./GoalRow";
 import { ReviewPane } from "./ReviewPane";
 import { FileTree } from "./FileTree";
 import { FileView } from "./FileView";
+import { ArtifactView } from "./ArtifactView";
+import { artifactKind, createdArtifacts } from "./artifacts";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
 import { REVIEW_TAB, fileTab, withTab, withoutTab, type WorkspaceTab } from "./tabs";
@@ -176,6 +178,8 @@ export function App() {
     setActiveTab(fileTab(path).key);
     if (prefsRef.current.layout === "chat") updatePrefsRef.current({ layout: "split" });
   };
+  const openFileRef = useRef<(path: string) => void>(() => {});
+  openFileRef.current = (path: string) => openFile(path);
   /** The tab area shows when a tab is open or the file tree is, and the layout does not hide it (§2.1). */
   const tabsShown = (tabs.length > 0 || treeShown) && view === "work" && prefs.layout !== "chat";
   const [tasks, setTasks] = useState<TaskView[]>([]);
@@ -317,6 +321,24 @@ export function App() {
     }).catch(notice);
     return () => stop?.();
   }, [client, connect, answerUnasked, notice, showView, refreshQueue, hub]);
+
+  // The artifacts viewer (Phase 3 item 3): what the agent created in the shown thread's turn opens when the turn ends.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  useEffect(() => {
+    const made = new Map<string, string[]>();
+    return listen((notification) => {
+      if (notification.method === "item/completed") {
+        const cwd = stateRef.current.threads[notification.params.threadId]?.thread.cwd ?? null;
+        const paths = createdArtifacts(notification.params.item, cwd);
+        if (paths.length) made.set(notification.params.turnId, [...(made.get(notification.params.turnId) ?? []), ...paths]);
+      } else if (notification.method === "turn/completed") {
+        const paths = made.get(notification.params.turn.id) ?? [];
+        made.delete(notification.params.turn.id);
+        if (paths.length && notification.params.threadId === selectedRef.current && prefsRef.current.openArtifacts) openFileRef.current(paths[0]);
+      }
+    });
+  }, [listen]);
 
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
@@ -1887,8 +1909,13 @@ export function App() {
               onOpenFile={openFile}
             />
           ) : (
-            <FileView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
-              onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} />
+            artifactKind(tab.path) && !tab.line ? (
+              <ArtifactView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
+                onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} onOpenFile={(path) => openFile(path)} />
+            ) : (
+              <FileView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
+                onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} />
+            )
           )}
         />
       ) : null}

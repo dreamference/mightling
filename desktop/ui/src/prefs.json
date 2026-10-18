@@ -92,6 +92,10 @@
       "default": true,
       "type": "boolean"
     },
+    "openArtifacts": {
+      "default": true,
+      "type": "boolean"
+    },
     "notifyTurns": {
       "default": "unfocused",
       "enum": [

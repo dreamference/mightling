@@ -43,6 +43,8 @@ export interface Prefs {
   layout: "split" | "tabs" | "chat";
   /** Keep the machine awake while a turn runs (Settings › General). */
   preventSleep: boolean;
+  /** Open a document or an image the agent created in a tab when its turn ends (the artifacts viewer, Settings › General). */
+  openArtifacts: boolean;
   /** When a finished turn shows a desktop notification, and whether a waiting approval does (Settings › Notifications). */
   notifyTurns: "unfocused" | "always" | "never";
   notifyApprovals: boolean;

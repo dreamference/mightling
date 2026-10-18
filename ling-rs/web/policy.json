@@ -52,7 +52,6 @@
     "command/exec/terminate",
     "fs/readDirectory",
     "fs/readFile",
-    "fs/getMetadata",
     "fs/watch",
     "fs/unwatch",
     "fuzzyFileSearch",
