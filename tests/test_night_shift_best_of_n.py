@@ -104,6 +104,8 @@ def test_the_default_is_three_attempts_and_one_runs_as_before(tmp_path):
     assert NightShiftBestOfN.attempts_for(task, settings) == 3
     assert NightShiftBestOfN.attempts_for({**task, "best_of": 5}, settings) == 5    # the task's own wins
     assert NightShiftBestOfN.attempts_for({**task, "best_of": 1}, settings) == 1
+    # `/night add` without `--best-of` writes the key as null: the table's count applies.
+    assert NightShiftBestOfN.attempts_for({**task, "best_of": None}, settings) == 3
     assert NightShiftBestOfN.attempts_for({**task, "session": "s"}, settings) == 1  # resumed: one attempt
     assert NightShiftBestOfN.attempts_for({**task, "remote": {"from": "n"}}, settings) == 1
     (tmp_path / "worktrees" / "t").mkdir(parents=True)                             # an earlier single run's
