@@ -49,6 +49,10 @@ export interface Prefs {
   previewSites: Record<string, "allow" | "block">;
   /** Developer tools for preview tabs (Settings › Browser › Developer mode); off by default. */
   previewDevTools: boolean;
+  /** The pet (Settings › Pets, Super+Alt+P): shown or not, its size, and a picture of the user's own instead of Mightling's mark. */
+  petShown: boolean;
+  petSize: "small" | "medium" | "large";
+  petImage: string | null;
   /** When a finished turn shows a desktop notification, and whether a waiting approval does (Settings › Notifications). */
   notifyTurns: "unfocused" | "always" | "never";
   notifyApprovals: boolean;

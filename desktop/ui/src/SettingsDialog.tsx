@@ -14,7 +14,7 @@ import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser";
+export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -49,6 +49,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "project", label: "Project and terminal", desktopOnly: true },
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
   { id: "browser", label: "Browser", desktopOnly: true },
+  { id: "pets", label: "Pets", desktopOnly: true },
 ];
 
 export function SettingsDialog(props: SettingsProps) {
@@ -76,6 +77,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "project" ? <Project {...props} /> : null}
             {props.page === "worktrees" && bridge.git.available() ? <Worktrees {...props} /> : null}
             {props.page === "browser" && bridge.preview.available() ? <Browser {...props} /> : null}
+            {props.page === "pets" && bridge.git.available() ? <Pets {...props} /> : null}
           </div>
         </div>
       </section>
@@ -505,6 +507,32 @@ function Browser({ prefs, onChange, notice }: SettingsProps) {
       <fieldset>
         <legend>Data</legend>
         <button onClick={() => bridge.preview.clear().then(() => notice("The preview's cookies, storage and cache are cleared.")).catch(notice)}>Clear the preview's cookies, storage and cache</button>
+      </fieldset>
+    </>
+  );
+}
+
+/** Settings › Pets (DESKTOP_PARITY §2.15, Phase 3 item 6): the pet on or off, its size, Mightling's mark or a picture of your own. */
+function Pets({ prefs, onChange, notice }: SettingsProps) {
+  return (
+    <>
+      <h3>Pets</h3>
+      <p className="dialog-note">A small companion above your other windows that shows what the agent is doing: resting, working, waiting for you, done. Click it for a quick question or to open Mightling; drag it anywhere. Super+Alt+P shows or hides it.</p>
+      <fieldset>
+        <legend>The pet</legend>
+        <label><input type="checkbox" checked={prefs.petShown} onChange={(event) => onChange({ petShown: event.target.checked })} /> Show the pet</label>
+      </fieldset>
+      <fieldset>
+        <legend>Size</legend>
+        {(["small", "medium", "large"] as const).map((size) => (
+          <label key={size}><input type="radio" name="pet-size" checked={prefs.petSize === size} onChange={() => onChange({ petSize: size })} /> {size === "small" ? "Mini" : size === "medium" ? "Medium" : "Large"}</label>
+        ))}
+      </fieldset>
+      <fieldset>
+        <legend>Look</legend>
+        <label><input type="radio" name="pet-look" checked={!prefs.petImage} onChange={() => onChange({ petImage: null })} /> Mightling's ling</label>
+        <label><input type="radio" name="pet-look" checked={Boolean(prefs.petImage)} onChange={() => bridge.chooseImage().then((file) => file && onChange({ petImage: file })).catch(notice)} /> A picture of your own{prefs.petImage ? `: ${prefs.petImage.split("/").pop()}` : " (PNG, GIF, WebP, SVG or JPEG, 2 MB at most)"}</label>
+        {prefs.petImage ? <button className="link-button" onClick={() => bridge.chooseImage().then((file) => file && onChange({ petImage: file })).catch(notice)}>Choose another picture</button> : null}
       </fieldset>
     </>
   );

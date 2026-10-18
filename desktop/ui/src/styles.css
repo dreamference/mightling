@@ -608,6 +608,35 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .activity-summary { font-family: var(--font-code); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-thread { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 
+/* The pet (Phase 3 item 6): its own transparent window, the pet at the bottom right of it. */
+html.pet-page, html.pet-page body, html.pet-page #root { background: transparent; overflow: hidden; height: 100%; }
+html.pet-page body { margin: 0; }
+.pet { position: fixed; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end; user-select: none; }
+.pet-body { position: relative; width: 100vw; height: 100vw; max-height: 100vh; border: none; background: none; padding: 6px; cursor: grab; touch-action: none; }
+.pet.open .pet-body { width: var(--pet-side); height: var(--pet-side); }
+.pet.size-small { --pet-side: 72px; } .pet.size-medium { --pet-side: 104px; } .pet.size-large { --pet-side: 144px; }
+.pet-body img, .pet-mark { width: 100%; height: 100%; object-fit: contain; pointer-events: none; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.18)); }
+.pet-mark { overflow: visible; }
+.pet-wing { transform-origin: 120px 60px; transform-box: view-box; }
+.pet-eye { transform-origin: 184px 63px; transform-box: view-box; animation: pet-blink 5s infinite; }
+.mood-resting .pet-mark { animation: pet-bob 3.2s ease-in-out infinite; }
+.mood-working .pet-mark { animation: pet-swim 0.9s ease-in-out infinite; }
+.mood-working .pet-wing { animation: pet-flap 0.45s ease-in-out infinite; }
+.mood-waiting .pet-mark { animation: pet-wiggle 1.2s ease-in-out infinite; }
+.mood-done .pet-mark { animation: pet-hop 1.6s ease-out 3; }
+.pet-badge { position: absolute; top: 2px; right: 6px; min-width: 18px; height: 18px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font: 600 12px/18px var(--font-ui); text-align: center; }
+.pet-bubble { margin: 0 6px 4px; width: calc(100vw - 12px); box-sizing: border-box; padding: 10px 12px; border-radius: var(--radius-md); background: var(--raised); box-shadow: var(--shadow-focus); border: 1px solid var(--line); font: 13px/1.4 var(--font-ui); color: var(--text); display: flex; flex-direction: column; gap: 8px; }
+.pet-mood { margin: 0; }
+.pet-bubble input { width: 100%; box-sizing: border-box; font: inherit; padding: 5px 9px; border: 1px solid var(--line); border-radius: var(--radius-pill); }
+.pet-actions { display: flex; gap: 6px; }
+.pet-actions button { font-size: 12.5px; padding: 3px 10px; }
+@keyframes pet-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4%); } }
+@keyframes pet-swim { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(2%, -3%) rotate(-3deg); } }
+@keyframes pet-flap { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-14deg); } }
+@keyframes pet-wiggle { 0%, 100% { transform: rotate(0deg); } 20% { transform: rotate(-6deg); } 40% { transform: rotate(6deg); } 60% { transform: rotate(-3deg); } 80% { transform: rotate(3deg); } }
+@keyframes pet-hop { 0%, 100% { transform: translateY(0); } 30% { transform: translateY(-14%); } 55% { transform: translateY(0); } 70% { transform: translateY(-5%); } }
+@keyframes pet-blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs
