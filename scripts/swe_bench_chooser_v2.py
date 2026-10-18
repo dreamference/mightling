@@ -435,9 +435,11 @@ def parse_container(stdout: str, count: int) -> Dict[str, Any]:
 class Containers:
     """The task's containers: started one at a time, each removed when its step ends."""
 
-    def __init__(self, image: str, instance_id: str, args: argparse.Namespace) -> None:
+    def __init__(self, image: str, instance_id: str, args: argparse.Namespace, name: str = "ling-chooser-v2-",
+                 label: str = CONTAINER_LABEL) -> None:
         self.image = image
-        self.prefix = "ling-chooser-v2-" + re.sub(r"[^a-zA-Z0-9_.-]", "-", instance_id)
+        self.prefix = name + re.sub(r"[^a-zA-Z0-9_.-]", "-", instance_id)
+        self.label = label
         self.args = args
         self.count = 0
 
@@ -454,7 +456,7 @@ class Containers:
         SweBenchDocker.run(["rm", "-f", name], timeout=120)
         try:
             started = SweBenchDocker.run(
-                ["run", "-d", "--init", "--name", name, "--label", CONTAINER_LABEL,
+                ["run", "-d", "--init", "--name", name, "--label", self.label,
                  "--network", self.args.container_network,
                  "--memory", self.args.memory, "--memory-swap", self.args.memory,
                  "--cpus", str(self.args.cpus), "--pids-limit", "4096",
