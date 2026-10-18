@@ -137,7 +137,7 @@ function PdfArtifact(props: { data: Uint8Array<ArrayBuffer>; stamp: number }) {
         const [pdfjs, worker] = await Promise.all([import("pdfjs-dist"), import("pdfjs-dist/build/pdf.worker.min.mjs?url")]);
         pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
         // A copy: pdf.js hands the buffer to its worker, and the bytes stay ours for a reload.
-        const pdf = await pdfjs.getDocument({ data: props.data.slice(), isEvalSupported: false, enableXfa: false }).promise;
+        const pdf = await pdfjs.getDocument({ data: props.data.slice(), isEvalSupported: false, enableXfa: false, useSystemFonts: true }).promise;
         if (cancelled || !holder) return;
         setCount(pdf.numPages);
         holder.replaceChildren();
