@@ -274,6 +274,22 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       delete terminals[p.processId];
       return;
     }
+    case "externalAgentConfig/detect":
+      return answer({ connectors: [], items: [
+        { itemType: "AGENTS_MD", description: "Instructions in " + fetcher + "/OTHER-AGENT.md, as AGENTS.md", cwd: fetcher, details: null },
+        { itemType: "SKILLS", description: "2 skills in ~/.other-agent/skills", cwd: null, details: null },
+        { itemType: "PLUGINS", description: "1 plugin from a marketplace", cwd: null, details: null },
+        { itemType: "SESSIONS", description: "14 past sessions", cwd: null, details: null },
+      ] });
+    case "externalAgentConfig/import": {
+      const importId = "imp-" + next++;
+      answer({ importId });
+      const results = (p.migrationItems || []).map((item) => ({ itemType: item.itemType, successes: [{ itemType: item.itemType, cwd: item.cwd, source: null, target: null, title: null }], failures: [] }));
+      say({ method: "externalAgentConfig/import/progress", params: { importId, itemTypeResults: results.slice(0, 1) } });
+      return setTimeout(() => say({ method: "externalAgentConfig/import/completed", params: { importId, itemTypeResults: results } }), 200);
+    }
+    case "externalAgentConfig/import/readHistories":
+      return answer({ connectors: [], data: [{ importId: "imp-0", providerId: "mightling_desktop", completedAtMs: Date.now() - 86400000, successes: [{}], failures: [] }] });
     case "thread/turns/list": {
       const found = threads.find((t) => t.id === p.threadId);
       return answer({ data: found ? [...(found.turns || [])].reverse() : [], nextCursor: null, backwardsCursor: null });

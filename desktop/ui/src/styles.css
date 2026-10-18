@@ -642,6 +642,13 @@ html.pet-page body { margin: 0; }
 .suggestion { border: 1px solid var(--line); background: var(--raised); border-radius: var(--radius-pill); padding: 4px 12px; font-size: 13px; color: var(--text); text-align: left; }
 .suggestion:hover { border-color: var(--accent); background: var(--accent-soft); }
 
+/* Skills and tools › Import (Phase 3 item 8). */
+.import-items { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.import-items label { display: flex; gap: 8px; align-items: center; }
+.import-description { margin-left: 26px; font-size: 12.5px; color: var(--muted); }
+.import-panel .buttons { display: flex; gap: 8px; margin-bottom: 8px; }
+.import-history { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs
