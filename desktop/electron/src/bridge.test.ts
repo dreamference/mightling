@@ -116,6 +116,11 @@ describe("the bridge", () => {
     fs.writeFileSync(path.join(resources, "ling"), "");
     expect(findLing(resources, env)).toBe(path.join(resources, "ling"));
     expect(findLing(resources, { ...env, MIGHTLING_BIN: path.join(bin, "ling") })).toBe(path.join(bin, "ling"));
+    // Windows (Phase 3 item 12): ling.exe, bundled or where install.ps1 puts it.
+    fs.writeFileSync(path.join(bin, "ling.exe"), "");
+    expect(findLing(null, { LOCALAPPDATA: "/nowhere", PATH: bin }, "win32")).toBe(path.join(bin, "ling.exe"));
+    expect(findLing(null, { MIGHTLING_INSTALL_DIR: bin }, "win32")).toBe(path.join(bin, "ling.exe"));
+    expect(findLing(null, { PATH: "/nowhere" }, "win32")).toBeNull();
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

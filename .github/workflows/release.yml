@@ -444,6 +444,15 @@ jobs:
               echo
             } >> notes.md
           fi
+          # The Windows desktop app (windows.yml's desktop job) is a preview too, and unsigned.
+          if printf '%s\n' "${files[@]}" | grep -q -- 'Mightling-win32-.*\.zip$'; then
+            {
+              echo "### Windows desktop app (preview, unsigned)"
+              echo
+              echo "\`Mightling-win32-arm64-${VERSION}.zip\` (Windows on Arm) and \`Mightling-win32-x64-${VERSION}.zip\` (x86-64) are a preview of the desktop app for Windows 11, with ling.exe inside, a client of a Mightling node on your network. They are not signed: Windows SmartScreen warns the first time (More info → Run anyway), and Smart App Control must be off. Unzip anywhere and run Mightling.exe; check the zip against SHA256SUMS first. There is no installer yet."
+              echo
+            } >> notes.md
+          fi
           # Then the description from specs/DREAMFERENCE_RELEASE_<version>.md (checked by `validate`
           # already; checked again here, before the release exists, since a published release
           # carries it with no hand step after this one).
