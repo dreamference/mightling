@@ -13,7 +13,7 @@ export interface WorkTarget {
   /** Text for the composer of a new thread (`ling://new?prompt=…`). */
   prompt?: string | null;
   /** A page of the window a link names (`ling://settings`, `ling://skills`, …), or `new` for a new thread. */
-  page?: "new" | "settings" | "skills" | "night" | "plugins";
+  page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask";
   /** The plugin `ling://plugins/<id>` names. */
   plugin?: string;
 }
@@ -50,6 +50,9 @@ export function linkTarget(link: string): WorkTarget {
       case "skills":
       case "night":
         return { cwd: null, thread: null, page: url.hostname };
+      // `ling://pets` and the vendor's `pets/install` shape: Settings › Pets (a pet is not installed from a link).
+      case "pets":
+        return { cwd: null, thread: null, page: "pets" };
       case "plugins":
         return { cwd: null, thread: null, page: "plugins", ...(rest ? { plugin: rest.slice(0, 200) } : {}) };
       default:

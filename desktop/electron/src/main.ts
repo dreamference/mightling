@@ -30,6 +30,7 @@ import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./
 import { Notices } from "./notices";
 import { transcribe } from "./voice";
 import { Previews } from "./preview";
+import { PetStatus, fitPet, openPet, petImage, type PetSize, type PetState } from "./pet";
 import type { SiteChoice } from "./preview-rules";
 import { openWork } from "./work";
 
@@ -78,13 +79,18 @@ export async function main(options: MainOptions): Promise<void> {
           if (notice.threadId) deliver({ channel: "link", payload: { cwd: null, thread: notice.threadId } });
         });
       }
+      if (petStatus.observe(message.payload)) sendPet();
       const routed = router.incoming(message.payload);
       for (const target of windows()) {
         if (routed.to === "all" || String(target.webContents.id) === routed.to) send(target, { channel: "work://message", payload: routed.payload });
       }
       return;
     }
-    if (message.channel === "work://exit") router.reset();
+    if (message.channel === "work://exit") {
+      router.reset();
+      petStatus.reset();
+      sendPet();
+    }
     // The menu's view and a link are for the app window; the rest for every window.
     const targets = message.channel === "view" || message.channel === "link" ? [window].filter((entry): entry is BrowserWindow => entry !== null && !entry.isDestroyed()) : windows();
     for (const target of targets) send(target, message);
@@ -113,6 +119,72 @@ export async function main(options: MainOptions): Promise<void> {
   };
   const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };
 
+  // The pet (pet.ts, Phase 3 item 6): a window of its own, shown while Settings › Pets says so.
+  const petStatus = new PetStatus();
+  let pet: BrowserWindow | null = null;
+  let petPicture: { file: unknown; data: string | null } = { file: null, data: null };
+  const petSize = (): PetSize => {
+    const size = prefs.read().petSize;
+    return size === "small" || size === "large" ? size : "medium";
+  };
+  const petState = (): PetState => {
+    const file = prefs.read().petImage;
+    if (file !== petPicture.file) petPicture = { file, data: petImage(file) };
+    return { ...petStatus.counts(), size: petSize(), image: petPicture.data };
+  };
+  function sendPet(): void {
+    if (pet && !pet.isDestroyed()) send(pet, { channel: "pet://state", payload: petState() });
+  }
+  const syncPet = () => {
+    const wanted = prefs.read().petShown === true;
+    if (wanted && (!pet || pet.isDestroyed())) {
+      pet = openPet(path.join(__dirname, "preload.cjs"), petSize(), show);
+      pet.on("closed", () => (pet = null));
+    } else if (!wanted && pet && !pet.isDestroyed()) {
+      pet.close();
+      pet = null;
+    } else if (pet && !pet.isDestroyed()) {
+      fitPet(pet, petSize(), false);
+      sendPet();
+    }
+  };
+  /** What the pet's window may ask for; nothing else of the app's channel answers it. */
+  const handlePet = (message: { type?: string; open?: boolean; dx?: number; dy?: number; prompt?: string }): unknown => {
+    switch (message.type) {
+      case "pet/state":
+        return petState();
+      case "pet/expand":
+        if (pet && !pet.isDestroyed()) fitPet(pet, petSize(), Boolean(message.open));
+        if (message.open) {
+          petStatus.seen();
+          sendPet();
+        }
+        return null;
+      case "pet/move": {
+        if (!pet || pet.isDestroyed()) return null;
+        const [x, y] = pet.getPosition();
+        pet.setPosition(Math.round(x + Number(message.dx || 0)), Math.round(y + Number(message.dy || 0)));
+        return null;
+      }
+      case "pet/open": {
+        const thread = petStatus.focus();
+        showView(thread ? "work" : "ask");
+        if (thread) deliver({ channel: "link", payload: { cwd: null, thread } });
+        return null;
+      }
+      case "pet/ask":
+        showView("ask");
+        deliver({ channel: "link", payload: { cwd: null, thread: null, page: "ask", prompt: String(message.prompt ?? "").slice(0, 4000) } });
+        return null;
+      case "pet/hide":
+        prefs.write({ petShown: false });
+        syncPet();
+        return null;
+      default:
+        throw new Error("the pet asks for nothing else");
+    }
+  };
+
   installMenu(actions);
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
   installTray(path.join(__dirname, "..", "..", "icons"), actions);
@@ -120,6 +192,7 @@ export async function main(options: MainOptions): Promise<void> {
   // The one channel from the page.
   const fromView = new Reassembler();
   ipcMain.handle(CHANNEL_FROM_VIEW, async (event: IpcMainInvokeEvent, data: unknown) => {
+    if (pet && !pet.isDestroyed() && event.sender.id === pet.webContents.id) return handlePet(data as { type?: string });
     const own = windowFor(event.sender.id);
     if (!own) throw new Error("only the app's windows talk to the agent");
     let message = data;
@@ -170,6 +243,9 @@ export async function main(options: MainOptions): Promise<void> {
       case "work/start":
         return server.start();
       case "work/send": {
+        // The page answering a request for the user (an approval): the pet stops waiting on it.
+        const sent = message.message as { id?: unknown; method?: unknown; result?: unknown; error?: unknown };
+        if (sent && sent.id !== undefined && sent.method === undefined && petStatus.answered(sent.id)) sendPet();
         const routed = router.outgoing(String(own.webContents.id), message.message);
         if (routed.reply) send(own, { channel: "work://message", payload: routed.reply });
         if (routed.send !== null) await server.send(routed.send);
@@ -398,8 +474,11 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "prefs/read":
         return prefs.read();
-      case "prefs/write":
-        return prefs.write(message.values);
+      case "prefs/write": {
+        const written = prefs.write(message.values);
+        if (["petShown", "petSize", "petImage"].some((key) => key in (message.values ?? {}))) syncPet();
+        return written;
+      }
       case "window/minimize":
         own.minimize();
         return null;
@@ -416,6 +495,10 @@ export async function main(options: MainOptions): Promise<void> {
       case "app/quit":
         app.quit();
         return null;
+      case "dialog/open-image": {
+        const chosen = await dialog.showOpenDialog(own, { title: "A picture for the pet", properties: ["openFile"], filters: [{ name: "Pictures", extensions: ["png", "gif", "webp", "svg", "jpg", "jpeg"] }] });
+        return chosen.canceled ? null : chosen.filePaths[0] ?? null;
+      }
       case "dialog/open-folder": {
         const chosen = await dialog.showOpenDialog(own, { title: "Open a project folder", properties: ["openDirectory"] });
         return chosen.canceled ? null : chosen.filePaths[0] ?? null;
@@ -452,6 +535,8 @@ export async function main(options: MainOptions): Promise<void> {
   app.on("before-quit", () => server.stop());
 
   showView(options.work ? "work" : "ask");
+  // The pet, when Settings › Pets has it on (never in the egress audit's session).
+  if (options.audit === null) syncPet();
   if (options.audit !== null) {
     try {
       server.start();

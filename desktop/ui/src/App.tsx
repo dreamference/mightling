@@ -867,6 +867,10 @@ export function App() {
       updatePrefs({ bottomPanel: false });
     },
     activityView: () => setActivityOpen((open) => !open),
+    togglePet: () => {
+      if (HOST !== "electron") return notice("The pet is the desktop app's.");
+      updatePrefs({ petShown: !prefsRef.current.petShown });
+    },
     previewOpen: () => {
       if (!bridge.preview.available()) return notice("The preview tab is the desktop app's: open the page in your browser.");
       openPreview("");
@@ -997,6 +1001,16 @@ export function App() {
       const known = state.threads[target.thread]?.thread;
       if (known) setView(isAskThread(known, askRoot) ? "ask" : "work");
       void openThread(target.thread);
+      return;
+    }
+    if (target.page === "pets") {
+      setSettingsPage("pets");
+      return setSettingsOpen(true);
+    }
+    // The pet's quick question: a new Ask question with the text in the composer.
+    if (target.page === "ask") {
+      showView("ask");
+      if (target.prompt) setDraft(target.prompt);
       return;
     }
     if (target.page === "settings") {
@@ -1489,6 +1503,7 @@ export function App() {
       [keyAction("searchFiles"), "searchFiles"],
       [keyAction("previewOpen"), "previewOpen"],
       [keyAction("activityView"), "activityView"],
+      [keyAction("togglePet"), "togglePet"],
     ];
     // With a preview tab in front, Ctrl+Shift+C copies the page's address (the preview's own key, PreviewTab.tsx).
     const previewInFront = tabsShown && tabs.find((tab) => tab.key === activeTab)?.kind === "preview";

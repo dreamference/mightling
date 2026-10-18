@@ -31,6 +31,8 @@ describe("what ling app asks for", () => {
     expect(linkTarget("ling://new?prompt=Fix%20the%20build&path=%2Fhome%2Fu%2Fapp")).toEqual({ cwd: "/home/u/app", thread: null, prompt: "Fix the build", page: "new" });
     expect(linkTarget("ling://settings")).toEqual({ cwd: null, thread: null, page: "settings" });
     expect(linkTarget("ling://night")).toEqual({ cwd: null, thread: null, page: "night" });
+    expect(linkTarget("ling://pets")).toEqual({ cwd: null, thread: null, page: "pets" });
+    expect(linkTarget("ling://pets/install?url=https://example.com/p.zip")).toEqual({ cwd: null, thread: null, page: "pets" });
     expect(linkTarget("ling://plugins/acme.lint")).toEqual({ cwd: null, thread: null, page: "plugins", plugin: "acme.lint" });
     expect(workTarget(["ling://threads/t2"])).toEqual({ cwd: null, thread: "t2" });
   });
