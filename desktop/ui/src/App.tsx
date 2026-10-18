@@ -1952,7 +1952,7 @@ export function App() {
               <button className={`icon mic${dictation === "recording" ? " recording" : ""}`} onClick={() => void toggleDictation()}
                 disabled={dictation === "transcribing"} aria-pressed={dictation === "recording"}
                 title={dictation === "recording" ? "Stop and write down what you said" : dictation === "transcribing" ? "Writing it down…" : "Dictate (speech-to-text on this machine)"}
-                aria-label={dictation === "recording" ? "Stop dictation" : "Dictate"}>{dictation === "transcribing" ? "…" : "🎤"}</button>
+                aria-label={dictation === "recording" ? "Stop dictation" : "Dictate"}>{dictation === "transcribing" ? "…" : <Icon name="mic" size={18} />}</button>
             ) : null}
             </>}
             models={models} model={modelChoice ?? servedModel} effort={effort} recentModels={prefs.recentModels}
