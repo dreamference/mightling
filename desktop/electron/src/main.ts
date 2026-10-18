@@ -19,6 +19,7 @@ import { codexHome, findLing } from "./bridge";
 import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
+import * as prs from "./prs";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
@@ -495,6 +496,23 @@ export async function main(options: MainOptions): Promise<void> {
       case "app/quit":
         app.quit();
         return null;
+      case "pr/list":
+      case "pr/view":
+      case "pr/diff":
+      case "pr/review": {
+        // Off unless Settings › Git turned it on; never at airgapped on (it is GitHub, over the network).
+        if (prefs.read().pullRequests !== true) throw new Error("the pull-request tab is off: turn it on in Settings › Git");
+        await offline(message.thread ?? null, "the pull-request tab");
+        const root = await git.checkRoot(message.root);
+        if (message.type === "pr/list") return prs.list(root, message.inbox);
+        if (message.type === "pr/view") return prs.view(root, message.number);
+        if (message.type === "pr/diff") return prs.diff(root, message.number);
+        return prs.review(root, message.number, message.verdict, message.body);
+      }
+      case "pr/status": {
+        if (prefs.read().pullRequests !== true) return "The pull-request tab is off.";
+        return prs.status(await git.checkRoot(message.root));
+      }
       case "dialog/open-image": {
         const chosen = await dialog.showOpenDialog(own, { title: "A picture for the pet", properties: ["openFile"], filters: [{ name: "Pictures", extensions: ["png", "gif", "webp", "svg", "jpg", "jpeg"] }] });
         return chosen.canceled ? null : chosen.filePaths[0] ?? null;
