@@ -314,3 +314,98 @@ def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_produc
 def test_a_misspelt_model_server_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default {arm}")
     assert status == 2 and not runs(recorded) and (folder / "failed").exists()
+
+
+HELPER = os.path.join(ROOT, "scripts", "engine_ab_remote.sh")
+
+
+@pytest.fixture
+def remote(tmp_path):
+    """node-b in miniature for scripts/engine_ab_remote.sh: stand-in `docker` (m0-prod8000 running),
+    `curl` (every port answers) and `ss` (every port free) on PATH, a drafter and target snapshot of its own, and
+    the GPU lock under the test's folder. Returns (run, docker calls, lock path, AB_DIR); any lease is killed after."""
+    bindir, state, ab_dir = tmp_path / "bin", tmp_path / "state", tmp_path / "ab-n12"
+    for folder in (bindir, state, ab_dir):
+        folder.mkdir()
+    (state / "m0").touch()
+    calls = tmp_path / "docker.txt"
+    stubs = {
+        "docker": f'#!/bin/bash\necho "$*" >> "{calls}"\ncase "$1" in\n'
+                  f'  ps) case "$*" in *m0-prod8000*) [ -e "{state}/m0" ] && echo c0ffee ;; esac ;;\n'
+                  f'  stop) rm -f "{state}/m0" ;;\n  start) touch "{state}/m0" ;;\n  inspect) echo true ;;\nesac\n',
+        "curl": "#!/bin/bash\necho '{\"data\": [{\"id\": \"m\", \"owned_by\": \"sglang\"}]}'\n",
+        "ss": "#!/bin/bash\nexit 0\n",
+    }
+    for name, body in stubs.items():
+        (bindir / name).write_text(body)
+        (bindir / name).chmod(0o755)
+    (ab_dir / "serve.py").write_text("print('docker run ...')\n")
+    draft, model = tmp_path / "drafter", tmp_path / "snapshot"
+    draft.mkdir()
+    model.mkdir()
+    (draft / "model.safetensors").write_bytes(b"drafter")
+    digest = subprocess.run(["sha256sum", str(draft / "model.safetensors")], capture_output=True, text=True).stdout.split()[0]
+    lock = tmp_path / ".ling-gpu.lock"
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "HOME": str(tmp_path), "AB_DIR": str(ab_dir),
+           "MODEL_DIR": str(model), "DRAFT": str(draft), "DRAFT_SHA256": digest, "GPU_LOCK": str(lock),
+           "GPU_LOCK_WAIT": "3", "SETTLE_S": "0"}
+
+    def run(*args, **extra):
+        with open(HELPER) as script:
+            return subprocess.run(["bash", "-s", "--", *args], stdin=script, env={**env, **extra},
+                                  capture_output=True, text=True, timeout=60)
+
+    yield run, calls, lock, ab_dir
+    pid_file = ab_dir / "gpu-lease.pid"
+    if pid_file.exists():
+        subprocess.run(["kill", pid_file.read_text().strip()], capture_output=True)
+
+
+def lock_free(lock):
+    return subprocess.run(["flock", "-n", str(lock), "true"]).returncode == 0
+
+
+def wait_until(check, seconds=10.0):
+    import time
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if check():
+            return True
+        time.sleep(0.2)
+    return check()
+
+
+def test_the_night_holds_the_engines_gpu_lock_from_its_first_serve_until_production_is_back(remote):
+    run, calls, lock, ab_dir = remote
+    first = run("serve", "sglang")
+    assert first.returncode == 0 and "ready sglang" in first.stdout, first.stderr
+    # The lock outlives the ssh session that took it: day-time engine work waits for the whole arm.
+    assert not lock_free(lock)
+    assert "stop m0-prod8000" in calls.read_text()
+    # The next round's serve reuses the night's lease instead of waiting on itself (GPU_LOCK_WAIT is 3 s).
+    second = run("serve", "sglang")
+    assert second.returncode == 0 and "already the night's" in second.stderr, second.stderr
+    assert not lock_free(lock)
+    restored = run("restore")
+    assert restored.returncode == 0 and "restored" in restored.stdout
+    # Production is started first, then the lock is let go.
+    assert wait_until(lambda: lock_free(lock))
+    assert "start m0-prod8000" in calls.read_text()
+    assert not (ab_dir / "gpu-lease.pid").exists()
+
+
+def test_serve_waits_for_engine_work_holding_the_gpu_lock_and_touches_nothing_without_it(remote):
+    import fcntl
+    run, calls, lock, ab_dir = remote
+    with open(lock, "w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        result = run("serve", "sglang")
+    assert result.returncode == 1 and "was not free within 3 s" in result.stderr
+    assert "m0-prod8000" not in (calls.read_text() if calls.exists() else "").replace("ps -q -f name=^m0-prod8000$", "")
+    assert not (ab_dir / "gpu-lease.pid").exists()
+
+
+def test_a_lease_no_restore_ends_lets_the_gpu_lock_go_by_itself(remote):
+    run, calls, lock, ab_dir = remote
+    assert run("serve", "sglang", HOLD_MAX="1").returncode == 0
+    assert wait_until(lambda: lock_free(lock), seconds=15)

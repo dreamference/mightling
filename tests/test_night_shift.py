@@ -572,6 +572,8 @@ def test_tui_command_lines_are_told_from_the_rest():
     assert not NightShiftHost.is_interactive(["night", "list"])
     # The web server runs for days; its busy marker, not its command line, says when a turn runs.
     assert not NightShiftHost.is_interactive(["web", "serve", "--lan"])
+    # An app's server (the desktop app's Gmail search) lives as long as the window, with no user at it.
+    assert not NightShiftHost.is_interactive(["apps", "serve", "gmail"])
 
 
 def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_path):

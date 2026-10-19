@@ -106,7 +106,9 @@ uses_remote() { case "$ARMS" in *on-sglang*|*on-engine*) return 0 ;; esac; retur
 remote_serve() {
     local server=$1 port out
     case "$server" in sglang) port=30000 ;; engine) port=8300 ;; *) return 2 ;; esac
-    out=$(timeout 60m ssh -o BatchMode=yes "$REMOTE" bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
+    # The helper first waits for REMOTE's GPU lock (up to 14 h, while day-time engine work holds it), then up to
+    # about 45 min for the arm: the ssh session outlasts both.
+    out=$(timeout "${REMOTE_SERVE_TIMEOUT:-15h}" ssh -o BatchMode=yes "$REMOTE" bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
     local rc=$?
     echo "$out" | tail -3 | sed 's/^/   /'
     [ "$rc" -eq 0 ] && echo "$out" | grep -q '^ready ' || return 1
