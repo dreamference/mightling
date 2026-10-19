@@ -1,0 +1,36 @@
+# The rank-32 arm of the first Rust adapter on every servable linear layer, against the served base.
+# docs/dev/adapter-pipeline-2026-10-19.md explains each choice.
+name = "rust-r32-48k"
+
+[lora]
+rank = 32
+alpha = 64          # alpha = 2 x rank
+dropout = 0.0
+
+[train]
+base = "served"                 # served FP8/NVFP4 bytes, dequantized per matmul (served_base.py)
+fake_quant_inputs = true        # round the base path's inputs as the W8A8/W4A4 kernels do
+# snapshot = "~/.cache/huggingface/hub/models--RadixArk--Qwen3.8-27B-NVFP4/snapshots/<rev>/"
+samples = "~/.local/share/dreamference/adapters/rust/samples-v1.jsonl"
+output_dir = "~/.local/share/dreamference/adapters/rust/rust-r32-48k"
+max_seq_len = 49152             # the nights' task_context: every recorded segment fits
+epochs = 2
+grad_accum = 16                 # trajectories per optimizer step
+learning_rate = 1.0e-4
+min_lr_share = 0.1
+warmup_share = 0.03
+weight_decay = 0.0
+max_grad_norm = 1.0
+loss_chunk = 2048               # tokens per cross-entropy chunk (2048 x 248320 fp32 = 2 GB)
+validation_share = 0.05
+eval_every = 25
+save_every = 50
+seed = 20261019
+psi_full_avg10_limit = 20.0
+
+[estimate]
+# Used by `plan` until the samples exist: 1,200 accepted segments (300 at each of the night runs'
+# measured quartiles (19K / 28K / 38K / 45K tokens)), and the GB10 throughput range to measure first.
+assumed_samples = 300
+assumed_lengths = [19360, 28486, 38429, 44619]
+effective_tflops = [30, 45, 60]
