@@ -385,7 +385,7 @@ export function ReviewPane(props: ReviewPaneProps) {
             {status.upstream ? <span>{status.ahead ? ` ↑${status.ahead}` : ""}{status.behind ? ` ↓${status.behind}` : ""}{!status.ahead && !status.behind ? " up to date" : ""} with {status.upstream}</span> : null}
             {against ? <span className="against">against {against}</span> : null}
           </>
-        ) : !windowGit ? null : root ? "…" : gitMissing ? "Git is unavailable on this machine." : "This folder is not in a git repository."}
+        ) : !windowGit ? null : root ? "…" : gitMissing ? "Git is unavailable on this machine." : !props.cwd ? "Name the project folder to see its changes." : "This folder is not in a git repository."}
       </div>
       {gitMissing && scope !== "turn" ? <div className="notice">{gitMissing}</div> : error ? <div className="notice">{error}</div> : null}
       {files.length > 0 && root && ready && (scope === "unstaged" || scope === "staged") ? (

@@ -163,6 +163,16 @@ test("6 review pane across threads: nothing of the last repository, and no Rever
     await page.locator(".thread", { hasText: "flaky retry" }).click();
     await page.locator(".approval").waitFor();
     await page.getByRole("button", { name: "Decline" }).click();
+    // The Open menu closes on Escape and on a click outside it.
+    const openMenu = page.getByRole("menu", { name: "Open" });
+    await page.locator(".worktree-header").getByRole("button", { name: "Open", exact: true }).click();
+    await expect(openMenu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(openMenu).toHaveCount(0);
+    await page.locator(".worktree-header").getByRole("button", { name: "Open", exact: true }).click();
+    await expect(openMenu).toBeVisible();
+    await page.locator(".turns").click({ position: { x: 5, y: 5 } });
+    await expect(openMenu).toHaveCount(0);
     await page.keyboard.press("Control+Shift+G");
     const pane = page.getByRole("complementary", { name: "Review" });
     await expect(pane.locator(".review-status")).toHaveText("Reading this folder's repository…");
