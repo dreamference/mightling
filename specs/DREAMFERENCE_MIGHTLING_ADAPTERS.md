@@ -63,7 +63,7 @@ The constraints set with them, each specified below: air-gapped by default, with
 | `ling-admin adapter download <name>[@<version>]` | node | Fetches a catalogued adapter at its pinned revision, verifies it (§5) and installs it. The only adapter command that reaches the network |
 | `ling-admin adapter download --repo <org>/<repo>@<commit>` | node | An adapter signed by Dreamference but not in this release's catalogue (published after it). The commit is required: a branch name is refused |
 | `ling-admin adapter download --third-party --repo <org>/<repo>@<commit>` | node | A third-party adapter (§5.4): prints the warning, asks for the typed confirmation, installs with `trust = third-party` |
-| `ling-admin adapter remove <name> [--version <v>]` | node | Unloads it if loaded (§8.3), deletes its snapshot and its entry. Sessions using it fall back to the base at their next turn, with a notice (§10.4) |
+| `ling-admin adapter remove <name> [--version <v>]` | node | Unloads it if loaded (§8.3), deletes its snapshot and its entry. A running session on it has its next request refused with the reason, never silently answered by another model; `/adapter off` or a new session returns to the base (§10.3) |
 | `/adapter`, `/adapter <name>`, `/adapter off` | `ling` TUI | Shows the session's adapter and the installed ones; switches this session (§11.1) |
 | `ling --adapter <name> …` | `ling` | Starts or resumes a session with that adapter; the launcher handles the flag before Codex parses its arguments, like `ling app` (§10.3) |
 | `mightling_adapter = "<name>"` / `DREAMFERENCE_MIGHTLING_ADAPTER` | config / env | The adapter a new session starts with; unset means the base. The tier order is cave mode's: the session's own file, the variable, the TOML file, then the base |
@@ -335,7 +335,7 @@ On a GB10, "CPU memory" and "GPU memory" are the same memory (MODELS §3), so th
 
 **The loader is in the model gate.** `server start` already puts the engine on `127.0.0.1:<port + 10000>` and the gate (`dreamference-gate-<port>`, `model_gate_service.py`) on the public port (`docs/dev/swe-bench.md`). Every request passes the gate, so the gate is where an adapter is loaded on first use:
 
-1. A request names `<base>+<name>` (§10.1). The gate looks `name` up in `installed.json` (mounted read-only). Not installed, third-party not shown, or `base mismatch`: answered 404 with the reason, in the API's usual error shape.
+1. A request names `<base>+<name>` (§10.1). The gate looks `name` up in `installed.json` (mounted read-only). Not installed (removed since the session chose it, or never installed) or `base mismatch`: answered 404 with the reason, in the API's usual error shape. The gate never substitutes the base: a thread's model does not change under it.
 2. Not loaded: the gate hashes the adapter's files against the manifest (standard library `hashlib`; about 220 MB at rank 16, well under a second), unloads the least recently used loaded adapter if the cache is full, and calls the engine's `/load_lora_adapter` on loopback with the name and the snapshot path from `installed.json`. Concurrent first requests for one adapter wait on one load.
 3. It rewrites the model id (§10.1) and forwards the request.
 
@@ -403,7 +403,7 @@ Step 10 of the launcher prepends `--model <id>`. With adapters, `<id>` is the se
 3. `DREAMFERENCE_MIGHTLING_ADAPTER`, then `mightling_adapter` in the TOML file;
 4. the base.
 
-A name that `/v1/models` does not list (removed, never installed, or `base mismatch` after a base change) falls back to the base with a notice at start ("The Rust adapter is not on this node; this session uses the base model."), never an error that stops the session.
+A name that `/v1/models` does not list (removed, never installed, or `base mismatch` after a base change) falls back to the base with a notice at start ("The Rust adapter is not on this node; this session uses the base model."), never an error that stops the session. This fallback happens only at launch, where the person sees it; mid-session the gate refuses instead (§8.3).
 
 ### 10.4 Unattended callers
 
