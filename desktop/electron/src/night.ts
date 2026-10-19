@@ -6,6 +6,7 @@
 // `ling-admin night run`, the runner, which gives way to a busy machine on its own. No Electron here.
 
 import { execFile, spawn } from "node:child_process";
+import { command } from "./platform";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -78,7 +79,8 @@ export function readReport(nightDir: string, name: unknown): string {
 
 function run(ling: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(ling, args, { cwd, timeout: 30_000 }, (error, stdout, stderr) => {
+    const started = command(ling, args);
+    execFile(started.file, started.args, { cwd, timeout: 30_000, shell: started.shell, windowsHide: true }, (error, stdout, stderr) => {
       const output = String(stdout || stderr).trim();
       if (error && !output) reject(new Error(error.message));
       else if (error) reject(new Error(output));

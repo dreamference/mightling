@@ -182,18 +182,22 @@ describe("local environments", () => {
 describe("bottom-panel tasks", () => {
   it("run a script in the folder, stream its output and end", async () => {
     const events: TaskEvent[] = [];
+    // The user's shell: a POSIX shell here, cmd.exe on Windows.
+    const windows = process.platform === "win32";
     const ended = new Promise<void>((resolve) => {
       const tasks = new Tasks((event) => {
         events.push(event);
         if (event.kind === "exit") resolve();
-      }, "/bin/sh");
-      tasks.run("Run", "pwd; echo done", scratchHome);
+      }, windows ? null : "/bin/sh");
+      tasks.run("Run", windows ? "cd & echo done" : "pwd; echo done", scratchHome);
       expect(() => tasks.run("Run", "", scratchHome)).toThrow("needs a script");
       expect(() => tasks.run("Run", "true", "relative")).toThrow("absolute");
     });
     await ended;
     expect(events[0]).toMatchObject({ kind: "started", label: "Run", cwd: scratchHome });
-    expect(events.filter((event) => event.kind === "output").map((event) => event.data).join("")).toBe(`${fs.realpathSync(scratchHome)}\ndone\n`);
+    const output = events.filter((event) => event.kind === "output").map((event) => event.data).join("").replace(/\r\n/g, "\n");
+    if (windows) expect(output.toLowerCase()).toBe(`${fs.realpathSync.native(scratchHome)}\ndone\n`.toLowerCase());
+    else expect(output).toBe(`${fs.realpathSync(scratchHome)}\ndone\n`);
     expect(events[events.length - 1]).toMatchObject({ kind: "exit", code: 0 });
   });
 });

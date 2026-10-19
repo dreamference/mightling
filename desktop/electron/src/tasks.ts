@@ -8,6 +8,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
+import { taskShell } from "./platform";
+
 export interface TaskEvent {
   id: string;
   kind: "started" | "output" | "exit";
@@ -21,7 +23,8 @@ export class Tasks {
   private readonly running = new Map<string, ChildProcess>();
   private next = 1;
 
-  constructor(private readonly emit: (event: TaskEvent) => void, private readonly shell: string = process.env.SHELL || "/bin/bash") {}
+  /** `shell`: a POSIX shell to use instead of the user's (`-l -c`); by default the login shell, or cmd.exe on Windows. */
+  constructor(private readonly emit: (event: TaskEvent) => void, private readonly shell: string | null = null) {}
 
   /** Starts `script` in `cwd`; resolves with the task's id at once, its output arriving as events. */
   run(label: unknown, script: unknown, cwd: unknown): string {
@@ -30,7 +33,8 @@ export class Tasks {
     if (this.running.size >= 8) throw new Error("eight tasks are running already");
     const id = `task-${this.next++}`;
     const name = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "Task";
-    const child = spawn(this.shell, ["-l", "-c", script], { cwd, env: { ...process.env, TERM: "dumb", NO_COLOR: "1" }, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const shell = this.shell ? { file: this.shell, args: ["-l", "-c", script] } : taskShell(script);
+    const child = spawn(shell.file, shell.args, { cwd, env: { ...process.env, TERM: "dumb", NO_COLOR: "1" }, detached: true, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     this.running.set(id, child);
     this.emit({ id, kind: "started", label: name, cwd });
     const out = (chunk: Buffer) => this.emit({ id, kind: "output", data: chunk.toString("utf8") });
@@ -50,6 +54,11 @@ export class Tasks {
   stop(id: unknown): void {
     const child = typeof id === "string" ? this.running.get(id) : undefined;
     if (!child?.pid) return;
+    // Windows has no process groups to signal: taskkill ends the task's whole tree.
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true }).on("error", () => child.kill());
+      return;
+    }
     try {
       process.kill(-child.pid, "SIGTERM");
     } catch {
