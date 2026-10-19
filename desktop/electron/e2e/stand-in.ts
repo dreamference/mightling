@@ -38,7 +38,7 @@ export function threads(home: string, askRoot: string) {
   const ago = (minutes: number) => Math.floor(Date.now() / 1000) - minutes * 60;
   const { fetcher, website } = projectFolders(home);
   return [
-    thread("w1", fetcher, "Fix the flaky retry test", "The retry test fails one run in ten", ago(12), [{
+    { ...thread("w1", fetcher, "Fix the flaky retry test", "The retry test fails one run in ten", ago(12), [{
       id: "t1", status: "completed", error: null, items: [
         { type: "userMessage", id: "u1", content: text("The retry test fails one run in ten. Find out why and fix it, without making the test slower.") },
         { type: "commandExecution", id: "c1", command: "pytest tests/test_fetch.py -q -k retry", cwd: fetcher, processId: null, status: "completed",
@@ -46,7 +46,8 @@ export function threads(home: string, askRoot: string) {
         { type: "fileChange", id: "f1", status: "completed", changes: [{ path: "fetcher/client.py", kind: { type: "update", move_path: null }, diff: DIFF }] },
         { type: "agentMessage", id: "a1", text: "The loop swallowed the last `ConnectionError`. Now the last attempt re-raises, and the pause comes from `backoff()`, which the test patches to zero." },
       ],
-    }]),
+    }]), status: { type: "active", activeFlags: [] } },
+    // w1 is running (an approval waits, a subagent works), so the app resumes it to watch it; the others are read.
     thread("w2", fetcher, "Log every retry at debug level", "", ago(3), [{
       id: "t2", status: "inProgress", error: null, items: [
         { type: "userMessage", id: "u2", content: text("Log every retry at debug level, with the URL and the error.") },
@@ -125,6 +126,11 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       try { real = walk(p.roots[0], ""); } catch {}
       const found = (real.length ? real : files).filter((f) => f.toLowerCase().includes(q)).map((f, i) => ({ root: p.roots[0], path: f, match_type: "file", file_name: f.split("/").pop(), score: 100 - i, indices: null }));
       return answer({ files: found });
+    }
+    case "thread/read": {
+      const found = threads.find((t) => t.id === p.threadId);
+      if (!found) return say({ id: m.id, error: { code: -32600, message: "no such thread" } });
+      return answer({ thread: found });
     }
     case "thread/resume": {
       const found = threads.find((t) => t.id === p.threadId);
