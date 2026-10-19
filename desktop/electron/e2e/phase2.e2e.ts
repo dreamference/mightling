@@ -180,6 +180,38 @@ test("6 review pane across threads: nothing of the last repository, and no Rever
   }
 });
 
+test("6 Revert asks first, and keeps the thread whole when the turn's file changes cannot be undone", async () => {
+  // One click on a first turn's Revert emptied a thread on a Mac (thread/revert changes the history
+  // only, and nothing asked); now it asks, undoes the files first, and stops if they cannot be undone.
+  const { page, home, close } = await open();
+  scratchRepo(home);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    const revert = page.locator(".turn").first().getByRole("button", { name: "Revert" });
+    // Cancelled: nothing happens.
+    page.once("dialog", (dialog) => void dialog.dismiss());
+    await revert.click();
+    await page.waitForTimeout(500);
+    expect(received(home).some((m) => m.method === "thread/revert")).toBe(false);
+    // Accepted, but the stand-in's turn diff is not what the files hold: the undo fails, said so, and
+    // the thread keeps its history.
+    let asked = "";
+    page.once("dialog", (dialog) => {
+      asked = dialog.message();
+      void dialog.accept();
+    });
+    await revert.click();
+    await expect(page.locator(".notice").last()).toContainText(/patch|apply|does not/i, { timeout: 10_000 });
+    expect(asked).toMatch(/^Remove this turn( and the \d+ after it)? from the thread and undo the file changes it made\?/);
+    expect(received(home).some((m) => m.method === "thread/revert")).toBe(false);
+  } finally {
+    await close();
+  }
+});
+
 test("6 review pane: scopes, stage by hunk, comments, split view, a generated message, commit", async () => {
   const { page, home, shoot, close } = await open();
   const root = scratchRepo(home);

@@ -185,3 +185,20 @@ export function commentsMessage(comments: ReviewComment[]): string {
   const items = comments.map((comment) => `- ${comment.path}:${comment.line}${comment.side === "old" ? " (removed line)" : ""} \`${comment.quote.trim().slice(0, 120)}\`: ${comment.text.trim()}`);
   return `Please address these review comments:\n${items.join("\n")}`;
 }
+
+/**
+ * A turn's diff with its paths moved under `directory` (a folder inside the repository, `/`
+ * separated): the agent names paths from the thread's folder, git applies them from the
+ * repository's top. `git apply --directory` does the same.
+ */
+export function underDirectory(diff: string, directory: string): string {
+  const dir = directory.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!dir) return diff;
+  return diff.split("\n").map((line) => {
+    const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    if (header) return `diff --git a/${dir}/${header[1]} b/${dir}/${header[2]}`;
+    const side = /^(---|\+\+\+) ([ab])\/(.+)$/.exec(line);
+    if (side) return `${side[1]} ${side[2]}/${dir}/${side[3]}`;
+    return line;
+  }).join("\n");
+}
