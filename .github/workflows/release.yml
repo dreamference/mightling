@@ -445,11 +445,11 @@ jobs:
             } >> notes.md
           fi
           # The Windows desktop app (windows.yml's desktop job) is a preview too, and unsigned.
-          if printf '%s\n' "${files[@]}" | grep -q -- 'Mightling-win32-.*\.zip$'; then
+          if printf '%s\n' "${files[@]}" | grep -q -- 'Mightling-Setup-.*\.exe$'; then
             {
               echo "### Windows desktop app (preview, unsigned)"
               echo
-              echo "\`Mightling-win32-arm64-${VERSION}.zip\` (Windows on Arm) and \`Mightling-win32-x64-${VERSION}.zip\` (x86-64) are a preview of the desktop app for Windows 11, with ling.exe inside, a client of a Mightling node on your network. They are not signed: Windows SmartScreen warns the first time (More info → Run anyway), and Smart App Control must be off. Unzip anywhere and run Mightling.exe; check the zip against SHA256SUMS first. There is no installer yet."
+              echo "\`Mightling-Setup-${VERSION}-arm64.exe\` (Windows on Arm) and \`Mightling-Setup-${VERSION}-x64.exe\` (x86-64) install a preview of the desktop app for Windows 11, with ling.exe inside, for you alone (no administrator), with a Start menu entry; Windows' Apps list uninstalls it. They are not signed: SmartScreen warns the first time (More info, then Run anyway), and Smart App Control must be off. Check the installer against SHA256SUMS first."
               echo
             } >> notes.md
           fi
