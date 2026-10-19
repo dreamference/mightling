@@ -39,6 +39,21 @@ use ling_node_locator as locator;
 /// How long a browse may take when nothing answers.
 const BROWSE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// How long a browse for one node (remembered, or named) may take before that node answers. The
+/// browse sends its query at 0, 1 and 3 s (`mdns-sd` doubles the interval), so this is one query
+/// more than [`BROWSE_TIMEOUT`] allows: on the owner's desktop, on Wi-Fi with power saving, the
+/// remembered node missed a 2 s browse in five of ten runs (2026-10-19), each then saved only by
+/// its last address. The browse still ends as soon as the node answers.
+const WANTED_TIMEOUT: Duration = Duration::from_millis(4500);
+
+/// How long a browse may take: longer when it waits for one node.
+fn browse_timeout(wanted: Option<&Node>) -> Duration {
+    match wanted {
+        Some(node) if !node.node.is_empty() || !node.name.trim().is_empty() => WANTED_TIMEOUT,
+        _ => BROWSE_TIMEOUT,
+    }
+}
+
 /// How long to keep listening after the first answer, for a second node or a better address.
 /// When a node is remembered, only its own answer starts this (see [`after_answer`]).
 const SETTLE: Duration = Duration::from_millis(400);
@@ -694,7 +709,7 @@ impl Browser for MdnsBrowser {
             let _ = daemon.shutdown();
             return Vec::new();
         };
-        let deadline = Instant::now() + BROWSE_TIMEOUT;
+        let deadline = Instant::now() + browse_timeout(wanted);
         let mut settle: Option<Instant> = None;
         let mut found: Vec<Advert> = Vec::new();
         loop {
@@ -893,6 +908,15 @@ mod tests {
 
     fn stopped(advert: Advert) -> Advert {
         Advert { state: "stopped".into(), ..advert }
+    }
+
+    #[test]
+    fn a_browse_for_one_node_waits_one_query_longer() {
+        assert_eq!(browse_timeout(None), BROWSE_TIMEOUT);
+        assert_eq!(browse_timeout(Some(&named(" "))), BROWSE_TIMEOUT);
+        assert_eq!(browse_timeout(Some(&spark1().node)), WANTED_TIMEOUT);
+        assert_eq!(browse_timeout(Some(&named("spark-1"))), WANTED_TIMEOUT);
+        assert!(WANTED_TIMEOUT > Duration::from_secs(3));
     }
 
     #[test]
