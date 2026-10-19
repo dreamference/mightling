@@ -12,7 +12,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { pathKey, realPath, samePath } from "./platform";
+import { pathKey, realPath, resolvedPath, samePath } from "./platform";
 import path from "node:path";
 
 import { GitError, git } from "./git";
@@ -226,13 +226,16 @@ export interface Listed extends ManagedWorktree {
 /** The source repository's managed worktrees under `worktreeRoot` (the crate's `list`). */
 export async function list(sourceCwd: string, worktreeRoot: string): Promise<Listed[]> {
   const sourceRoot = await top(sourceCwd);
-  const rootDir = checkWorktreeRoot(worktreeRoot);
+  // Compared as the file system has them: git lists long names, and the root may be an 8.3 short name on Windows.
+  const rootDir = resolvedPath(checkWorktreeRoot(worktreeRoot));
   const text = await git(sourceRoot, ["worktree", "list", "--porcelain", "-z"]);
   const found: Listed[] = [];
   for (const record of text.split("\0\0")) {
     const fields = record.split("\0").filter(Boolean);
-    const checkout = fields.find((field) => field.startsWith("worktree "))?.slice(9);
-    if (!checkout || !isManaged(rootDir, checkout) || !fs.existsSync(checkout)) continue;
+    const listed = fields.find((field) => field.startsWith("worktree "))?.slice(9);
+    if (!listed || !fs.existsSync(listed)) continue;
+    const checkout = realPath(listed);
+    if (!isManaged(rootDir, checkout)) continue;
     const head = fields.find((field) => field.startsWith("HEAD "))?.slice(5) ?? "";
     const branch = fields.find((field) => field.startsWith("branch "))?.slice(7).replace(/^refs\/heads\//, "") ?? null;
     found.push({
@@ -245,7 +248,7 @@ export async function list(sourceCwd: string, worktreeRoot: string): Promise<Lis
 
 /** Checks that `checkout` is one of `sourceCwd`'s managed worktrees under `worktreeRoot`, and returns the source's root. */
 export async function checkManaged(sourceCwd: string, checkout: unknown, worktreeRoot: string): Promise<string> {
-  if (typeof checkout !== "string" || !isManaged(checkWorktreeRoot(worktreeRoot), checkout)) throw new GitError("not a managed worktree");
+  if (typeof checkout !== "string" || !isManaged(resolvedPath(checkWorktreeRoot(worktreeRoot)), resolvedPath(checkout))) throw new GitError("not a managed worktree");
   const listed = await list(sourceCwd, worktreeRoot);
   const real = (place: string) => pathKey(place);
   const match = listed.find((entry) => real(entry.root) === real(checkout));
