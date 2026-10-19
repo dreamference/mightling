@@ -4,6 +4,7 @@
 // and Work switch that one window.
 // Runs against the Vite build in `.vite/` (`npm run package` first); windows are hidden
 // (`MIGHTLING_HIDDEN=1`) so a test does not take the screen.
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,6 +27,7 @@ function standIn(home: string): string {
   fs.writeFileSync(ling, `#!/usr/bin/env node
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
+if (process.argv.includes("app-server")) fs.writeFileSync(${JSON.stringify(path.join(home, "server.pid"))}, String(process.pid));
 if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
 const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
@@ -163,6 +165,71 @@ test("Ask in the app window: the main process composes the prompt, makes the fol
     expect(fs.readFileSync(path.join(folder, "shot.png"))).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   } finally {
     await closeApp(app);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a refusal reaches the page without an error in the main process's log", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-refused-"));
+  const ling = standIn(home);
+  const app = await launch({
+    args: [main, "--work"],
+    env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0" },
+  });
+  let log = "";
+  app.process().stderr?.on("data", (chunk: Buffer) => (log += chunk.toString("utf8")));
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+    await expect.poll(() => runs(home).some((args) => args.includes("app-server")), { timeout: 30_000 }).toBe(true);
+    // Refused twice (a method the bridge does not send, a repository that is not one): the page gets each as an error.
+    const refusals = await page.evaluate(async (folder) => {
+      const bridge = (window as unknown as { electronBridge: { sendMessageFromView(m: unknown): Promise<unknown> } }).electronBridge;
+      const errors: string[] = [];
+      for (const message of [{ type: "work/send", message: { id: 98, method: "feedback/upload", params: {} } }, { type: "git/status", root: folder }]) {
+        await bridge.sendMessageFromView(message).then(() => errors.push("answered"), (error: Error) => errors.push(error.message));
+      }
+      return errors;
+    }, home);
+    expect(refusals[0]).toContain("does not send feedback/upload");
+    expect(refusals[1]).toContain("not a git repository");
+    expect(log).not.toContain("Error occurred in handler");
+  } finally {
+    await closeApp(app);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Started as a user starts it, not through Playwright: a debugger attached (as Playwright attaches
+// one) holds a quitting app until it lets go, which would hide what this checks.
+test("SIGTERM quits the app, the agent's server with it", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-term-"));
+  const ling = standIn(home);
+  const electronBinary = require("electron") as unknown as string;
+  const child = spawn(electronBinary, [main, "--work"], {
+    env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0" },
+    stdio: "ignore",
+  });
+  try {
+    await expect.poll(() => runs(home).some((args) => args.includes("app-server")), { timeout: 30_000 }).toBe(true);
+    const ended = new Promise<boolean>((resolve) => {
+      child.once("exit", () => resolve(true));
+      setTimeout(() => resolve(false), 10_000);
+    });
+    child.kill("SIGTERM");
+    expect(await ended).toBe(true);
+    // The agent's server went with it.
+    const server = Number(fs.readFileSync(path.join(home, "server.pid"), "utf8"));
+    await expect.poll(() => {
+      try {
+        process.kill(server, 0);
+        return "running";
+      } catch {
+        return "gone";
+      }
+    }, { timeout: 5_000 }).toBe("gone");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

@@ -8,6 +8,18 @@ export const CHANNEL_FROM_VIEW = "mightling_desktop:message-from-view";
 export const CHANNEL_FOR_VIEW = "mightling_desktop:message-for-view";
 export const CHANNEL_CHUNK_ACK = "mightling_desktop:chunk-ack";
 
+/**
+ * A refusal crosses back as `{ [FAILED]: message }`, and the preload throws it in the page: a handler
+ * that threw would also reach the page, but Electron logs every such throw in the main process as
+ * "Error occurred in handler", which a refusal (a stopped server, a path outside a repository) is not.
+ */
+export const FAILED = "__mightlingFailed";
+
+/** The refusal in an answer, or null for an answer. */
+export function failure(answer: unknown): string | null {
+  return answer !== null && typeof answer === "object" && typeof (answer as Record<string, unknown>)[FAILED] === "string" ? ((answer as Record<string, string>)[FAILED]) : null;
+}
+
 /** Payloads bigger than this cross in pieces, each acknowledged before the next (the Codex app does the same). */
 export const CHUNK_BYTES = 1 << 20;
 
