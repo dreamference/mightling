@@ -56,9 +56,9 @@ def test_the_export_refuses_a_qkv_of_the_wrong_height(modules):
             {"x.in_proj_qkv.lora_B.weight": torch.zeros(5, 2)}, TEXT_CONFIG)
 
 
-def test_the_exported_config_names_the_split_modules(modules):
+def test_the_exported_config_names_the_fused_module_sglang_wraps(modules):
     config = modules["adapter_format"].export_config({"target_modules": ["in_proj_qkv", "in_proj_z", "q_proj"], "r": 16})
-    assert config["target_modules"] == ["in_proj_k", "in_proj_q", "in_proj_v", "in_proj_z", "q_proj"]
+    assert config["target_modules"] == ["in_proj_qkvz", "q_proj"]
     assert config["r"] == 16
 
 
