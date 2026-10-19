@@ -4,13 +4,14 @@
 
 import fs from "node:fs";
 import os from "node:os";
-import { nodeScript } from "./test-ling";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FILE_CAP, IMAGE_CAP, cleanFileName, composePrompt, folderOf, isFolder, linkThread, newFolder, writeUpload } from "./ask";
 import type { ForView } from "./api";
+import { samePath } from "./platform";
 import { AppServer } from "./server";
+import { nodeScript } from "./test-ling";
 
 const scratches: string[] = [];
 const scratch = (tag: string) => {
@@ -75,14 +76,17 @@ describe("Ask folders", () => {
     expect(isFolder(root, folder)).toBe(true);
     expect(folderOf(root, "0199-thread")).toBeNull();
     linkThread(root, "0199-thread", folder);
-    expect(fs.readlinkSync(path.join(root, "0199-thread"))).toBe(path.basename(folder));
+    // A relative link here; on Windows a junction, which always holds the absolute target.
+    const target = fs.readlinkSync(path.join(root, "0199-thread"));
+    if (process.platform === "win32") expect(samePath(target, folder)).toBe(true);
+    else expect(target).toBe(path.basename(folder));
     expect(folderOf(root, "0199-thread")).toBe(folder);
     // A second link for the same thread changes nothing; a path is not a thread id.
     linkThread(root, "0199-thread", folder);
     expect(() => linkThread(root, "../escape", folder)).toThrow();
     expect(folderOf(root, "../escape")).toBeNull();
     // A link planted in the root that points out of it is not an Ask folder.
-    fs.symlinkSync(home, path.join(root, "planted"));
+    fs.symlinkSync(home, path.join(root, "planted"), process.platform === "win32" ? "junction" : undefined);
     expect(folderOf(root, "planted")).toBeNull();
     expect(isFolder(root, home)).toBe(false);
   });

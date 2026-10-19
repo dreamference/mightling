@@ -34,7 +34,7 @@ const LINES = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`);
 
 /** A repository with one committed file of 40 lines, then two separate edits to it and a new file. */
 function repo(): string {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-")));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-")));
   run(root, "init", "-q");
   fs.writeFileSync(path.join(root, "a.txt"), LINES.join("\n") + "\n");
   run(root, "add", "a.txt");
@@ -66,7 +66,7 @@ describe("window-side git", () => {
     expect(git.insidePath(root, "sub/../a.txt")).toBe("a.txt");
     expect(await git.repositories(path.join(root, "sub"))).toEqual([root]);
     // A folder that is not itself in a repository lists the repositories below it.
-    const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-parent-")));
+    const parent = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-parent-")));
     fs.renameSync(root, path.join(parent, "one"));
     expect(await git.repositories(parent)).toEqual([path.join(parent, "one")]);
   });
