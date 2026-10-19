@@ -568,6 +568,16 @@ export function App() {
     setDrawer(false);
   };
 
+  // New thread, like Ctrl+N, only clears the selection: the thread starts with its first message
+  // (`sendWork`), so a click never leaves an empty "(new thread)" behind. Without a folder yet, the
+  // folder field takes the focus.
+  const folderField = useRef<HTMLInputElement>(null);
+  const newThread = () => {
+    dispatch({ type: "select", threadId: null });
+    setDrawer(false);
+    if (!newCwd.trim()) folderField.current?.focus();
+  };
+
   const addFiles = (files: Iterable<File>, paths: (string | null)[] = []) => {
     const added: PendingFile[] = [];
     let index = 0;
@@ -1730,10 +1740,10 @@ export function App() {
           </>
         ) : (
           <>
-            <button className="nav-row new-thread-button" onClick={() => void startThread()}><Icon name="squarePen" />New thread</button>
+            <button className="nav-row new-thread-button" onClick={newThread}><Icon name="squarePen" />New thread</button>
             <label className="new-thread" title="The project folder a new thread starts in">
               <Icon name="folder" size={14} />
-              <input value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
+              <input ref={folderField} value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
             </label>
             <label className="search">
               <Icon name="search" size={14} />

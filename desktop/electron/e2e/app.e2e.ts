@@ -233,3 +233,33 @@ test("SIGTERM quits the app, the agent's server with it", async () => {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("New thread with a folder named starts nothing until the first message, which starts the thread there", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-new-"));
+  const ling = standIn(home);
+  const project = path.join(home, "project");
+  fs.mkdirSync(project);
+  const app = await launch({
+    args: [main, "--work"],
+    env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0" },
+  });
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+    await expect.poll(() => received(home).some((m) => m.method === "initialize"), { timeout: 30_000 }).toBe(true);
+    await page.getByLabel("Project folder").fill(project);
+    await page.getByRole("button", { name: "New thread" }).click();
+    await page.waitForTimeout(1_000);
+    // No empty thread was started by the click.
+    expect(received(home).filter((m) => m.method === "thread/start")).toEqual([]);
+    await page.getByPlaceholder(/^Ask Mightling/).fill("Run the tests");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect.poll(() => received(home).some((m) => m.method === "turn/start"), { timeout: 30_000 }).toBe(true);
+    const starts = received(home).filter((m) => m.method === "thread/start");
+    expect(starts).toHaveLength(1);
+    expect(starts[0].params!.cwd).toBe(project);
+  } finally {
+    await closeApp(app);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
