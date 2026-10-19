@@ -307,7 +307,9 @@ jobs:
           $source = (Resolve-Path "desktop\electron\out\Mightling-win32-${{ matrix.arch }}").Path
           New-Item -ItemType Directory -Force -Path dist-desktop | Out-Null
           $out = Join-Path (Resolve-Path dist-desktop).Path "Mightling-Setup-$env:MIGHTLING_VERSION-${{ matrix.arch }}.exe"
-          & $makensis /V2 "/DVERSION=$env:MIGHTLING_VERSION" "/DARCH=${{ matrix.arch }}" "/DSOURCE=$source" "/DOUTFILE=$out" desktop\electron\windows\installer.nsi
+          # A release candidate (1.7.0-rc.1) names the installer in full; Windows' file version is 1.7.0.
+          $numeric = ($env:MIGHTLING_VERSION -split '[-+]')[0]
+          & $makensis /V2 "/DVERSION=$env:MIGHTLING_VERSION" "/DNUMERIC_VERSION=$numeric" "/DARCH=${{ matrix.arch }}" "/DSOURCE=$source" "/DOUTFILE=$out" desktop\electron\windows\installer.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
           Get-Item $out | Format-List Name, Length
       # Installed silently, as a user would get it; then the audit's session, hidden, from the installed
