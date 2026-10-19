@@ -17,6 +17,7 @@ import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
 import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
+import { inGitInternals } from "./files";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
 import { APPEARANCE_TOKENS, DEFAULT_PREFS, cleanAppearance, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
@@ -448,7 +449,8 @@ export function App() {
   const searchFiles = useCallback(async (query: string): Promise<FuzzyFileSearchResult[]> => {
     if (!composeRoot) return [];
     const answer = (await client.request("fuzzyFileSearch", { query, roots: [composeRoot], cancellationToken: "composer" })) as { files?: FuzzyFileSearchResult[] };
-    return answer.files ?? [];
+    // The server's search honours .gitignore, which never names .git itself.
+    return (answer.files ?? []).filter((file) => !inGitInternals(file.path));
   }, [client, composeRoot]);
 
   // Pasted or picked images show a preview until they are sent or removed.
