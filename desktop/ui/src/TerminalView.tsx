@@ -45,7 +45,11 @@ export function TerminalView(props: { hub: TerminalHub; processId: string; visib
     term.current = terminal;
     fit.current = fitter;
     terminal.attachCustomKeyEventHandler((event) => {
-      if (event.type === "keydown" && matches(event, keyAction("clearTerminal"))) terminal.clear();
+      // Cleared here and not also sent to the shell, whose own Ctrl+L redrew its prompt beside the one kept.
+      if (event.type === "keydown" && matches(event, keyAction("clearTerminal"))) {
+        terminal.clear();
+        return false;
+      }
       // The window's own shortcuts are not typed into the shell.
       if (event.type === "keydown" && (matches(event, keyAction("terminal")) || matches(event, keyAction("bottomPanel")))) return false;
       return true;
