@@ -11,11 +11,11 @@
 // hand-off itself. No Electron here.
 
 import crypto from "node:crypto";
-import fs from "node:fs";
-import { pathKey, realPath, resolvedPath, samePath } from "./platform";
+import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { GitError, git } from "./git";
+import * as userFs from "./userfs";
 
 export interface ManagedWorktree {
   root: string;
@@ -48,12 +48,12 @@ export function isManaged(root: string, checkout: string): boolean {
 }
 
 /** A new bucket under `root` for `name`: the crate's `allocate_worktree_root`. */
-function allocate(root: string, name: string): string {
-  fs.mkdirSync(root, { recursive: true });
+async function allocate(root: string, name: string): Promise<string> {
+  await fsp.mkdir(root, { recursive: true });
   for (let attempt = 0; attempt < 65536; attempt++) {
     const bucket = path.join(root, crypto.randomUUID().replace(/-/g, "").slice(0, 4));
     try {
-      fs.mkdirSync(bucket);
+      await fsp.mkdir(bucket);
       return path.join(bucket, name);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -62,21 +62,21 @@ function allocate(root: string, name: string): string {
   throw new GitError("all managed worktree identifiers are in use");
 }
 
-const removeEmptyBucket = (checkout: string) => {
+const removeEmptyBucket = async (checkout: string) => {
   try {
-    fs.rmdirSync(path.dirname(checkout));
+    await fsp.rmdir(path.dirname(checkout));
   } catch {
     // Not empty, or gone already.
   }
 };
 
-const top = async (cwd: string) => realPath((await git(cwd, ["rev-parse", "--show-toplevel"])).trim());
+const top = async (cwd: string) => userFs.realPath((await git(cwd, ["rev-parse", "--show-toplevel"])).trim());
 
 /** The ignored files `.worktreeinclude` names (and an ignored `AGENTS.override.md`), relative to the root. */
 export async function includedIgnoredFiles(sourceRoot: string): Promise<string[]> {
   const ignored = new Set((await git(sourceRoot, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard"])).split("\0").filter(Boolean));
   const wanted = new Set<string>();
-  if (fs.existsSync(path.join(sourceRoot, ".worktreeinclude"))) {
+  if (await userFs.exists(path.join(sourceRoot, ".worktreeinclude"))) {
     const listed = await git(sourceRoot, ["ls-files", "-z", "--others", "--ignored", `--exclude-from=${path.join(sourceRoot, ".worktreeinclude")}`]);
     for (const file of listed.split("\0").filter(Boolean)) if (ignored.has(file)) wanted.add(file);
   }
@@ -85,15 +85,15 @@ export async function includedIgnoredFiles(sourceRoot: string): Promise<string[]
 }
 
 /** Copies files into a new checkout: never a symlink, never over a file that is there. */
-export function copyInto(sourceRoot: string, checkout: string, files: string[]): string[] {
+export async function copyInto(sourceRoot: string, checkout: string, files: string[]): Promise<string[]> {
   const copied: string[] = [];
   for (const file of files) {
     const from = path.join(sourceRoot, file);
     const to = path.join(checkout, file);
-    const stat = fs.lstatSync(from, { throwIfNoEntry: false });
-    if (!stat || !stat.isFile() || stat.isSymbolicLink() || fs.existsSync(to)) continue;
-    fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL);
+    const stat = await userFs.lstatOrNull(from);
+    if (!stat || !stat.isFile() || stat.isSymbolicLink() || (await userFs.exists(to))) continue;
+    await userFs.mkdir(path.dirname(to));
+    await userFs.copyFile(from, to);
     copied.push(file);
   }
   return copied;
@@ -119,7 +119,7 @@ export async function snapshot(checkout: string, name: string): Promise<string |
     await git(checkout, ["update-ref", `${SNAPSHOTS}/${name.replace(/[^A-Za-z0-9._-]/g, "-")}`, commit]);
     return commit;
   } finally {
-    fs.rmSync(index, { force: true });
+    await fsp.rm(index, { force: true });
   }
 }
 
@@ -150,17 +150,17 @@ export interface Created extends ManagedWorktree {
 export async function create(options: CreateOptions): Promise<Created> {
   const worktreeRoot = checkWorktreeRoot(options.worktreeRoot);
   if (!path.isAbsolute(options.sourceCwd)) throw new GitError("the project folder must be an absolute path");
-  const sourceCwd = realPath(options.sourceCwd);
+  const sourceCwd = await userFs.realPath(options.sourceCwd);
   const sourceRoot = await top(sourceCwd);
   const relative = path.relative(sourceRoot, sourceCwd);
   if (relative.startsWith("..")) throw new GitError("the working directory is outside the repository root");
   const base = options.base && /^[\w./@^~-]+$/.test(options.base) && !options.base.startsWith("-") ? options.base : "HEAD";
   const headSha = (await git(sourceRoot, ["rev-parse", "--verify", "--end-of-options", `${base}^{commit}`])).trim();
-  const root = allocate(worktreeRoot, path.basename(sourceRoot));
+  const root = await allocate(worktreeRoot, path.basename(sourceRoot));
   try {
     await git(sourceRoot, ["worktree", "add", "--detach", "--no-checkout", root, headSha]);
   } catch (error) {
-    removeEmptyBucket(root);
+    await removeEmptyBucket(root);
     throw new GitError(`cannot create managed worktree: ${(error as Error).message}`);
   }
   try {
@@ -175,9 +175,9 @@ export async function create(options: CreateOptions): Promise<Created> {
     await removeChecked(sourceRoot, root, null).catch(() => {});
     throw new GitError(`cannot populate managed worktree: ${(error as Error).message}`);
   }
-  const included = copyInto(sourceRoot, root, await includedIgnoredFiles(sourceRoot));
+  const included = await copyInto(sourceRoot, root, await includedIgnoredFiles(sourceRoot));
   const cwd = path.join(root, relative);
-  if (!fs.existsSync(cwd)) {
+  if (!(await userFs.exists(cwd))) {
     await removeChecked(sourceRoot, root, null).catch(() => {});
     throw new GitError(`the base does not contain the working directory ${relative}`);
   }
@@ -189,7 +189,7 @@ export async function owner(checkout: string): Promise<string | null> {
   const file = path.resolve(checkout, (await git(checkout, ["rev-parse", "--git-path", OWNER_FILE])).trim());
   let record: { version?: unknown; ownerThreadId?: unknown };
   try {
-    record = JSON.parse(fs.readFileSync(file, "utf8"));
+    record = JSON.parse(await userFs.readText(file));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new GitError(`invalid worktree owner at ${file}`);
@@ -206,14 +206,14 @@ export async function bindThread(checkout: string, threadId: string): Promise<vo
   if (existing) throw new GitError(`worktree already belongs to thread ${existing}`);
   const file = path.resolve(checkout, (await git(checkout, ["rev-parse", "--git-path", OWNER_FILE])).trim());
   const temporary = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify({ version: 1, ownerThreadId: threadId }));
+  await fsp.writeFile(temporary, JSON.stringify({ version: 1, ownerThreadId: threadId }));
   try {
-    fs.linkSync(temporary, file);
+    await fsp.link(temporary, file);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST" && (await owner(checkout)) === threadId) return;
     throw new GitError("worktree was concurrently assigned to another thread");
   } finally {
-    fs.rmSync(temporary, { force: true });
+    await fsp.rm(temporary, { force: true });
   }
 }
 
@@ -227,20 +227,20 @@ export interface Listed extends ManagedWorktree {
 export async function list(sourceCwd: string, worktreeRoot: string): Promise<Listed[]> {
   const sourceRoot = await top(sourceCwd);
   // Compared as the file system has them: git lists long names, and the root may be an 8.3 short name on Windows.
-  const rootDir = resolvedPath(checkWorktreeRoot(worktreeRoot));
+  const rootDir = await userFs.resolvedPath(checkWorktreeRoot(worktreeRoot));
   const text = await git(sourceRoot, ["worktree", "list", "--porcelain", "-z"]);
   const found: Listed[] = [];
   for (const record of text.split("\0\0")) {
     const fields = record.split("\0").filter(Boolean);
     const listed = fields.find((field) => field.startsWith("worktree "))?.slice(9);
-    if (!listed || !fs.existsSync(listed)) continue;
-    const checkout = realPath(listed);
+    if (!listed || !(await userFs.exists(listed))) continue;
+    const checkout = await userFs.realPath(listed);
     if (!isManaged(rootDir, checkout)) continue;
     const head = fields.find((field) => field.startsWith("HEAD "))?.slice(5) ?? "";
     const branch = fields.find((field) => field.startsWith("branch "))?.slice(7).replace(/^refs\/heads\//, "") ?? null;
     found.push({
       root: checkout, cwd: checkout, sourceRoot, sourceCwd: sourceRoot, headSha: head, branch,
-      owner: await owner(checkout).catch(() => null), modified: fs.statSync(checkout).mtimeMs,
+      owner: await owner(checkout).catch(() => null), modified: (await userFs.statOrNull(checkout))?.mtimeMs ?? 0,
     });
   }
   return found.sort((a, b) => a.root.localeCompare(b.root));
@@ -248,10 +248,11 @@ export async function list(sourceCwd: string, worktreeRoot: string): Promise<Lis
 
 /** Checks that `checkout` is one of `sourceCwd`'s managed worktrees under `worktreeRoot`, and returns the source's root. */
 export async function checkManaged(sourceCwd: string, checkout: unknown, worktreeRoot: string): Promise<string> {
-  if (typeof checkout !== "string" || !isManaged(resolvedPath(checkWorktreeRoot(worktreeRoot)), resolvedPath(checkout))) throw new GitError("not a managed worktree");
+  if (typeof checkout !== "string" || !isManaged(await userFs.resolvedPath(checkWorktreeRoot(worktreeRoot)), await userFs.resolvedPath(checkout))) throw new GitError("not a managed worktree");
   const listed = await list(sourceCwd, worktreeRoot);
-  const real = (place: string) => pathKey(place);
-  const match = listed.find((entry) => real(entry.root) === real(checkout));
+  const wanted = await userFs.pathKey(checkout);
+  let match: Listed | undefined;
+  for (const entry of listed) if ((await userFs.pathKey(entry.root)) === wanted) match = entry;
   if (!match) throw new GitError(`${checkout} is not a worktree of ${sourceCwd}`);
   return match.sourceRoot;
 }
@@ -267,13 +268,13 @@ export async function remove(sourceCwd: string, checkout: string, worktreeRoot: 
 
 async function removeChecked(sourceRoot: string, checkout: string, name: string | null): Promise<string | null> {
   let saved: string | null = null;
-  if (name && fs.existsSync(checkout)) saved = await snapshot(checkout, name).catch(() => null);
+  if (name && (await userFs.exists(checkout))) saved = await snapshot(checkout, name).catch(() => null);
   try {
     await git(sourceRoot, ["worktree", "remove", "--force", checkout]);
   } catch {
     await git(sourceRoot, ["worktree", "remove", "--force", "--force", checkout]);
   }
-  removeEmptyBucket(checkout);
+  await removeEmptyBucket(checkout);
   return saved;
 }
 
@@ -315,7 +316,7 @@ async function branchOf(checkout: string): Promise<string | null> {
 export async function handOff(direction: "toLocal" | "toWorktree", worktree: string, local: string, worktreeRoot: string, threadId: string): Promise<{ snapshot: string | null }> {
   if (typeof local !== "string" || !path.isAbsolute(local)) throw new GitError("the local checkout is named by its absolute path");
   const sourceRoot = await checkManaged(local, worktree, worktreeRoot);
-  if (!samePath(await top(local), sourceRoot)) throw new GitError("the local checkout is not the worktree's source");
+  if (!(await userFs.samePath(await top(local), sourceRoot))) throw new GitError("the local checkout is not the worktree's source");
   local = sourceRoot;
   const [from, to] = direction === "toLocal" ? [worktree, local] : [local, worktree];
   if (!(await clean(to))) {

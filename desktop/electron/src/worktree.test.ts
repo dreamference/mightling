@@ -144,7 +144,7 @@ describe("managed worktrees", () => {
 });
 
 describe("local environments", () => {
-  it("are read from .codex/ and .mightling/, per platform, and written to .mightling/ only", () => {
+  it("are read from .codex/ and .mightling/, per platform, and written to .mightling/ only", async () => {
     const { source } = repo();
     fs.mkdirSync(path.join(source, ".codex", "environments"), { recursive: true });
     fs.writeFileSync(path.join(source, ".codex", "environments", "environment.toml"), [
@@ -162,21 +162,21 @@ describe("local environments", () => {
       'script = "npm test"',
       'macos = "npm run test:mac"',
     ].join("\n"));
-    const { found, problems } = environments(source, "linux");
+    const { found, problems } = await environments(source, "linux");
     expect(problems).toEqual([]);
     expect(found).toEqual([{ file: ".codex/environments/environment.toml", folder: ".codex", name: "Shared", setup: "npm ci",
       actions: [{ name: "Run", icon: "play", script: "npm start" }, { name: "Tests", icon: "test", script: "npm test" }] }]);
     expect(readEnvironment('[[actions]]\nname = "T"\nscript = "a"\nmacos = "b"\n', ".codex/environment.toml", "darwin").actions[0].script).toBe("b");
 
-    expect(writeEnvironment(source, { name: "Mine", setup: "uv sync", actions: [{ name: "Serve", icon: "globe", script: "uv run serve" }, { name: "empty", script: " " }] })).toBe(WRITE_FILE);
+    expect(await writeEnvironment(source, { name: "Mine", setup: "uv sync", actions: [{ name: "Serve", icon: "globe", script: "uv run serve" }, { name: "empty", script: " " }] })).toBe(WRITE_FILE);
     expect(fs.existsSync(path.join(source, ".mightling", "environments", "default.toml"))).toBe(true);
-    const after = environments(source, "linux").found;
+    const after = (await environments(source, "linux")).found;
     expect(after.map((entry) => [entry.folder, entry.name])).toEqual([[".mightling", "Mine"], [".codex", "Shared"]]);
     expect(after[0].actions).toEqual([{ name: "Serve", icon: "globe", script: "uv run serve" }]);
     // The .codex file is never rewritten.
     expect(fs.readFileSync(path.join(source, ".codex", "environments", "environment.toml"), "utf8")).toContain('name = "Shared"');
     fs.writeFileSync(path.join(source, ".mightling", "environment.toml"), "not = [toml");
-    expect(environments(source, "linux").problems[0]).toMatch(/^\.mightling\/environment\.toml: /);
+    expect((await environments(source, "linux")).problems[0]).toMatch(/^\.mightling\/environment\.toml: /);
   });
 });
 
