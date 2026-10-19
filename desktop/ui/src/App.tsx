@@ -568,6 +568,16 @@ export function App() {
     setDrawer(false);
   };
 
+  // New thread, like Ctrl+N, only clears the selection: the thread starts with its first message
+  // (`sendWork`), so a click never leaves an empty "(new thread)" behind. Without a folder yet, the
+  // folder field takes the focus.
+  const folderField = useRef<HTMLInputElement>(null);
+  const newThread = () => {
+    dispatch({ type: "select", threadId: null });
+    setDrawer(false);
+    if (!newCwd.trim()) folderField.current?.focus();
+  };
+
   const addFiles = (files: Iterable<File>, paths: (string | null)[] = []) => {
     const added: PendingFile[] = [];
     let index = 0;
@@ -1730,10 +1740,10 @@ export function App() {
           </>
         ) : (
           <>
-            <button className="nav-row new-thread-button" onClick={() => void startThread()}><Icon name="squarePen" />New thread</button>
+            <button className="nav-row new-thread-button" onClick={newThread}><Icon name="squarePen" />New thread</button>
             <label className="new-thread" title="The project folder a new thread starts in">
               <Icon name="folder" size={14} />
-              <input value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
+              <input ref={folderField} value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
             </label>
             <label className="search">
               <Icon name="search" size={14} />
@@ -1812,7 +1822,7 @@ export function App() {
         {!POPOUT && board.on && HOST === "electron" ? <button className="nav-row board-button" onClick={() => setBoardOpen(true)} title="What subagents posted for each other"><Icon name="messageSquare" size={14} />Message board</button> : null}
         {!POPOUT ? <button className="nav-row activity-button" onClick={() => setActivityOpen(true)} title={`What the agent did, across threads (${shortcutLabel("activityView")})`}><Icon name="activity" size={14} />Activity</button> : null}
         {!POPOUT ? <button className="nav-row skills-button" onClick={() => setExtensions("skills")} title="Skills, MCP servers and apps"><Icon name="info" size={14} />Skills and tools</button> : null}
-        <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title="Settings (Ctrl+,)"><Icon name="settings" size={14} />Settings</button>
+        <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title={`Settings (${shortcutLabel("settings")})`}><Icon name="settings" size={14} />Settings</button>
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
       </aside>
       <div className="backdrop" onClick={() => setDrawer(false)} />
@@ -1835,7 +1845,7 @@ export function App() {
               onCreateBranch={createBranch} branchPrefix={prefs.branchPrefix} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction} />
           ) : null}
           {view === "work" && prefs.pullRequests && bridge.prs.available() && composeRoot ? <button className={`icon bar-action${tabs.some((tab) => tab.kind === "prs") ? " active" : ""}`} title="Pull requests, through your GitHub CLI" aria-label="Pull requests" onClick={openPullRequests}><Icon name="gitPullRequest" size={16} /></button> : null}
-          {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title="Review: the repository's changes (Ctrl+Shift+G)" aria-label="Review" aria-pressed={reviewOpen} onClick={() => { if (reviewOpen && prefs.layout === "chat") updatePrefs({ layout: "split" }); else setReviewOpen(!reviewOpen); }}><Icon name="fileDiff" size={16} /></button> : null}
+          {view === "work" ? <button className={`icon bar-action${reviewOpen ? " active" : ""}`} title={`Review: the repository's changes (${shortcutLabel("reviewTab")})`} aria-label="Review" aria-pressed={reviewOpen} onClick={() => { if (reviewOpen && prefs.layout === "chat") updatePrefs({ layout: "split" }); else setReviewOpen(!reviewOpen); }}><Icon name="fileDiff" size={16} /></button> : null}
           {workingCount(state) > 1 ? <span className="chip optional" title="Threads and subagents working at once share the one model server">{workingCount(state)} working</span> : null}
           {airgap ? <span className={`chip airgap-${airgap.level}`} title={airgap.source}>airgapped {airgap.level}</span> : null}
           {usage ? (

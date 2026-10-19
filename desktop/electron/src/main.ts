@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 
-import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
+import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
@@ -202,7 +202,12 @@ export async function main(options: MainOptions): Promise<void> {
       message = fromView.take(data);
       if (message === undefined) return null;
     }
-    return handle(message as FromView, own);
+    // A refusal is an answer, not a crash: the page gets it as an error, the main process's log stays quiet.
+    try {
+      return await handle(message as FromView, own);
+    } catch (error) {
+      return { [FAILED]: error instanceof Error ? error.message : String(error) };
+    }
   });
   ipcMain.on(CHANNEL_CHUNK_ACK, () => {});
 
@@ -559,6 +564,18 @@ export async function main(options: MainOptions): Promise<void> {
     app.quit();
   });
   app.on("before-quit", () => server.stop());
+  // A SIGTERM (logging out, `kill`, a service manager) or a Ctrl+C in the terminal that started the
+  // app quits it as the menu's Quit does, the agent's server and the tasks with it; a quit that has
+  // not finished within five seconds (on a Mac one stopped the server and left the window open)
+  // ends the app regardless.
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, () => {
+      tasks.stopAll();
+      server.stop();
+      setTimeout(() => app.exit(0), 5_000).unref();
+      app.quit();
+    });
+  }
 
   showView(options.work ? "work" : "ask");
   // The pet, when Settings › Pets has it on (never in the egress audit's session).

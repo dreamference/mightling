@@ -9,6 +9,7 @@ import type * as bridge from "./bridge";
 import { actionIcon } from "./BottomPanel";
 import { Icon } from "./icons";
 import type { WorktreeLink } from "./prefs";
+import { shortcutLabel } from "./keymap";
 
 export interface NewThreadChoice {
   mode: "local" | "worktree";
@@ -79,7 +80,7 @@ export function WorktreeHeader(props: {
   return (
     <span className="worktree-header">
       {props.environment?.actions.slice(0, 4).map((action, index) => (
-        <button key={action.name} className="icon bar-action" title={`${action.name}${index === 0 ? " (Super+Shift+D)" : ""}: ${action.script}`} aria-label={action.name} onClick={() => props.onAction(action)}>
+        <button key={action.name} className="icon bar-action" title={`${action.name}${index === 0 ? ` (${shortcutLabel("environmentAction1")})` : ""}: ${action.script}`} aria-label={action.name} onClick={() => props.onAction(action)}>
           <Icon name={actionIcon(action.icon)} size={14} />
         </button>
       ))}
