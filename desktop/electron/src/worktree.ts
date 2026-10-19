@@ -12,6 +12,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { pathKey, realPath, samePath } from "./platform";
 import path from "node:path";
 
 import { GitError, git } from "./git";
@@ -69,7 +70,7 @@ const removeEmptyBucket = (checkout: string) => {
   }
 };
 
-const top = async (cwd: string) => (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+const top = async (cwd: string) => realPath((await git(cwd, ["rev-parse", "--show-toplevel"])).trim());
 
 /** The ignored files `.worktreeinclude` names (and an ignored `AGENTS.override.md`), relative to the root. */
 export async function includedIgnoredFiles(sourceRoot: string): Promise<string[]> {
@@ -149,7 +150,7 @@ export interface Created extends ManagedWorktree {
 export async function create(options: CreateOptions): Promise<Created> {
   const worktreeRoot = checkWorktreeRoot(options.worktreeRoot);
   if (!path.isAbsolute(options.sourceCwd)) throw new GitError("the project folder must be an absolute path");
-  const sourceCwd = fs.realpathSync(options.sourceCwd);
+  const sourceCwd = realPath(options.sourceCwd);
   const sourceRoot = await top(sourceCwd);
   const relative = path.relative(sourceRoot, sourceCwd);
   if (relative.startsWith("..")) throw new GitError("the working directory is outside the repository root");
@@ -246,7 +247,7 @@ export async function list(sourceCwd: string, worktreeRoot: string): Promise<Lis
 export async function checkManaged(sourceCwd: string, checkout: unknown, worktreeRoot: string): Promise<string> {
   if (typeof checkout !== "string" || !isManaged(checkWorktreeRoot(worktreeRoot), checkout)) throw new GitError("not a managed worktree");
   const listed = await list(sourceCwd, worktreeRoot);
-  const real = (place: string) => (fs.existsSync(place) ? fs.realpathSync(place) : path.resolve(place));
+  const real = (place: string) => pathKey(place);
   const match = listed.find((entry) => real(entry.root) === real(checkout));
   if (!match) throw new GitError(`${checkout} is not a worktree of ${sourceCwd}`);
   return match.sourceRoot;
@@ -311,7 +312,7 @@ async function branchOf(checkout: string): Promise<string | null> {
 export async function handOff(direction: "toLocal" | "toWorktree", worktree: string, local: string, worktreeRoot: string, threadId: string): Promise<{ snapshot: string | null }> {
   if (typeof local !== "string" || !path.isAbsolute(local)) throw new GitError("the local checkout is named by its absolute path");
   const sourceRoot = await checkManaged(local, worktree, worktreeRoot);
-  if (fs.realpathSync(await top(local)) !== fs.realpathSync(sourceRoot)) throw new GitError("the local checkout is not the worktree's source");
+  if (!samePath(await top(local), sourceRoot)) throw new GitError("the local checkout is not the worktree's source");
   local = sourceRoot;
   const [from, to] = direction === "toLocal" ? [worktree, local] : [local, worktree];
   if (!(await clean(to))) {

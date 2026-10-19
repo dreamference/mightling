@@ -277,14 +277,11 @@ jobs:
           npm ci
           npm run typecheck
           npm run make -- --targets @electron-forge/maker-zip
-      # The main process's unit tests were written on Linux: some still assume POSIX paths, file
-      # modes and shell scripts (ask, git, worktrees, tasks, prefs, night, the .deb maker), so on
-      # Windows they are reported here and do not fail the job until that port is done
-      # (DESKTOP_PARITY Phase 3 item 12).
-      - name: Main process unit tests (POSIX-bound ones known to fail here)
+      # The main process's unit tests, ported to Windows for 1.7.1 (paths compared as the file system
+      # has them, `.cmd` stand-ins for ling, cmd.exe for tasks): they gate the job again.
+      - name: Main process unit tests
         working-directory: desktop/electron
         shell: bash
-        continue-on-error: true
         run: npm test
       # The audit's session, hidden: the window opens on Ask, its own `ling app-server` starts
       # (MIGHTLING_BIN is not set, so the bundled ling.exe is the one found), and the app quits by

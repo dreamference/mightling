@@ -4,6 +4,7 @@
 // the launcher's own resolver, rather than kept as a fourth copy of the resolver crate.
 
 import { execFile } from "node:child_process";
+import { command } from "./platform";
 
 import type { Airgapped } from "./api";
 
@@ -16,7 +17,8 @@ export function parseStatus(text: string): Airgapped | null {
 export function airgapped(ling: string, thread: string | null): Promise<Airgapped> {
   const args = ["airgapped", ...(thread && /^[A-Za-z0-9-]+$/.test(thread) ? ["--thread", thread] : [])];
   return new Promise((resolve) => {
-    execFile(ling, args, { timeout: 10_000 }, (_error, stdout) => {
+    const run = command(ling, args);
+    execFile(run.file, run.args, { timeout: 10_000, shell: run.shell, windowsHide: true }, (_error, stdout) => {
       resolve(parseStatus(String(stdout)) ?? { level: "off", source: "unknown (ling airgapped did not answer)" });
     });
   });
@@ -26,7 +28,8 @@ export function airgapped(ling: string, thread: string | null): Promise<Airgappe
 export function setDefault(ling: string, level: "off" | "on"): Promise<string> {
   if (level !== "off" && level !== "on") return Promise.reject(new Error("the level is off or on"));
   return new Promise((resolve, reject) => {
-    execFile(ling, ["airgapped", "default", level], { timeout: 10_000 }, (error, stdout, stderr) => {
+    const run = command(ling, ["airgapped", "default", level]);
+    execFile(run.file, run.args, { timeout: 10_000, shell: run.shell, windowsHide: true }, (error, stdout, stderr) => {
       if (error) reject(new Error(String(stderr || stdout || error.message).trim()));
       else resolve(String(stdout).trim());
     });
