@@ -1,0 +1,36 @@
+diff --git a/codex-rs/tui/src/chatwidget/tests/slash_commands.rs b/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
+--- a/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
++++ b/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
+@@ -2806,2 +2806,32 @@
+ }
++
++// Mightling: patch 0012 hides /import, so the popup never lists it and a typed /import is an
++// unrecognized command that never reaches the importer.
++#[tokio::test]
++async fn ling_slash_import_is_hidden_and_refused() {
++    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
++
++    assert!(
++        !crate::slash_command::built_in_slash_commands()
++            .iter()
++            .any(|(name, command)| *command == SlashCommand::Import || *name == "import")
++    );
++
++    submit_composer_text(&mut chat, "/import");
++
++    let mut rendered = Vec::new();
++    while let Ok(event) = rx.try_recv() {
++        assert!(
++            !matches!(event, AppEvent::OpenExternalAgentConfigMigration),
++            "typed /import opened the importer"
++        );
++        if let AppEvent::InsertHistoryCell(cell) = event {
++            rendered.push(lines_to_single_string(&cell.display_lines(/*width*/ 80)));
++        }
++    }
++    assert!(
++        rendered.iter().any(|text| text.contains("Unrecognized command '/import'")),
++        "expected /import to be refused, got {rendered:?}"
++    );
++}
+ 

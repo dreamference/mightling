@@ -188,7 +188,7 @@ CASES: Dict[str, Case] = {
     "approve": Case("absent", reason="hidden by patch 0012: auto-review defaults to an OpenAI model"),
     "memories": Case("popup"),
     "skills": Case("popup"),
-    "import": Case("popup"),
+    "import": Case("absent", reason="hidden by patch 0012: its plugin step can add a marketplace hosted on GitHub"),
     "hooks": Case("popup"),
     # Opens a picker of what to review; the first entry is the uncommitted changes in a.txt.
     "review": Case("turn", keys="\r"),
