@@ -13,6 +13,7 @@
 // `rg`); never the Codex app's analytics flag.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { command } from "./platform";
 import path from "node:path";
 import readline from "node:readline";
 
@@ -47,7 +48,8 @@ export class AppServer {
     if (!ling) throw new Error("ling is not installed: build it with `ling-admin codex build`, or install Mightling");
     const env: NodeJS.ProcessEnv = { ...process.env, LOG_FORMAT: "json", RUST_LOG: process.env.RUST_LOG ?? "warn" };
     if (this.resourcesPath) env.PATH = `${this.resourcesPath}${path.delimiter}${env.PATH ?? ""}`;
-    const child = spawn(ling, ["-c", "features.code_mode_host=true", "app-server"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    const run = command(ling, ["-c", "features.code_mode_host=true", "app-server"]);
+    const child = spawn(run.file, run.args, { env, stdio: ["pipe", "pipe", "pipe"], shell: run.shell, windowsHide: true });
     this.child = child;
     this.launch = { ling, env };
     this.pending.clear();
