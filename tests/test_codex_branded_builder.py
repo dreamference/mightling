@@ -92,6 +92,9 @@ def test_the_patches_stay_small():
     # Not raised for 0027 (675 bytes, 2026-10-14: the request hook also gets the thread id and whether
     # the request is a compaction, so a compaction offers the turn's tools and hits the prefix cache;
     # logic in ling-rs/tools/src/compaction.rs), the cache patch the cap allowed for; 44,672 after.
+    # Not raised for /import (2026-10-19): two lines in 0012's hunk hide it (163 bytes; a patch of
+    # its own would have cost ~550 and crossed the cap), since its plugin step clones a marketplace
+    # hosted on GitHub, which the egress audit does not cover; 44,835 after.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 45_000
 
 
