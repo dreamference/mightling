@@ -81,8 +81,23 @@ export class RpcClient {
     this.transport = transport;
   }
 
+  /** Runs before each request, which waits for it when it returns a promise (App.tsx: a thread loaded first, loader.ts). */
+  beforeRequest: (method: string, params: unknown) => Promise<void> | undefined = () => undefined;
+
   /** Sends a request and resolves with the server's answer. */
   request<M extends Method>(method: M, params: ParamsOf<M>): Promise<ResponseOf<M>> {
+    const before = this.beforeRequest(method, params);
+    const sent = before ? before.then(() => this.send(method, params)) : this.send(method, params);
+    return sent.then((result) => {
+      this.afterResponse(method, result);
+      return result;
+    });
+  }
+
+  /** Sees each answer before the caller does (App.tsx: the threads a start, fork or resume loaded, loader.ts). */
+  afterResponse: (method: string, result: unknown) => void = () => {};
+
+  private send<M extends Method>(method: M, params: ParamsOf<M>): Promise<ResponseOf<M>> {
     const id = this.nextId++;
     return new Promise<ResponseOf<M>>((resolve, reject) => {
       this.waiting.set(key(id), { resolve: resolve as (value: unknown) => void, reject });
