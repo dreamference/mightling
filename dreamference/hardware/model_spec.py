@@ -7,7 +7,7 @@ qualified to run on NVIDIA GB10 hardware.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 @dataclass
 class ModelSpec:
@@ -35,6 +35,11 @@ class ModelSpec:
             needs a patch its own upstream ships cannot be served by whatever image the rest of the
             matrix uses, and pinning it per model is cheaper than forking one image to suit every model.
             Unset means DEFAULT_VLLM_IMAGE.
+
+            'load_transient_gb' is read by the start-up memory gate, not by the launch builder: the
+            memory a load needs beyond its arena, measured for this checkpoint, in place of the
+            global `LOAD_TRANSIENT_FRACTION` estimate (never below `MIN_LOAD_TRANSIENT_GB`). Unset
+            means the global estimate. The PSI watchdog does not read it and stays on regardless.
         supports_vision (bool): Whether the checkpoint accepts image input as well as text. Not a
             launch flag -- vLLM reads this from the checkpoint's own config and needs no telling --
             but clients do: the retired Onyx web chat refused an upload unless told, and Ask relies
@@ -47,6 +52,10 @@ class ModelSpec:
             through transformers with trust_remote_code and their own block-denoising generate --
             so this flag routes them to the diffusion sidecar and keeps `main-model set` from
             pointing vLLM at a checkpoint it would fail to launch.
+        swe_bench_max_parallel (Optional[int]): The most SWE-bench instances that may run at once
+            beside this model, whatever `[swe_bench] max_parallel` says. For a checkpoint that
+            leaves the host too little memory for the default number of task containers. None
+            means no cap of the model's own.
     """
     name: str
     params_b: float
@@ -59,3 +68,4 @@ class ModelSpec:
     launch_overrides: Dict[str, Any] = field(default_factory=dict)
     supports_vision: bool = False
     is_diffusion: bool = False
+    swe_bench_max_parallel: Optional[int] = None

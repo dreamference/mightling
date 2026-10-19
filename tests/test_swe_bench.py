@@ -872,6 +872,29 @@ def test_a_run_resumed_with_another_model_or_build_is_refused(bench, monkeypatch
     assert "one configuration" in capsys.readouterr().out
 
 
+def test_a_models_own_parallelism_cap_lowers_max_parallel_and_nothing_else_does():
+    # Flash-Next leaves about 15 GiB free while serving: one task container at a time,
+    # whatever `[swe_bench] max_parallel` says. Production has no cap of its own.
+    settings = SweBenchSettings({"max_parallel": 3})
+    flash_next = ("local-inference-lab/Qwen3.8-Flash-Next-NVFP4", 131072)
+    assert SweBenchRunner.max_parallel(settings, flash_next) == 1
+    assert SweBenchRunner.max_parallel(settings, ("RadixArk/Qwen3.8-27B-NVFP4", 262144)) == 3
+    assert SweBenchRunner.max_parallel(settings, ("unknown/model", 1)) == 3
+    assert SweBenchRunner.max_parallel(SweBenchSettings({"max_parallel": 1}), flash_next) == 1
+
+
+def test_a_run_against_a_capped_model_sizes_its_lane_from_the_cap(bench, monkeypatch, capsys):
+    asked = []
+    monkeypatch.setattr(FakeHost, "served_model", classmethod(
+        lambda cls, host, timeout=3.0: ("local-inference-lab/Qwen3.8-Flash-Next-NVFP4", 131072)))
+    monkeypatch.setattr(FakeHost, "parallelism", classmethod(
+        lambda cls, max_parallel, kv_pool, task_context: asked.append(max_parallel) or max_parallel))
+    bench["settings"] = SweBenchSettings({"task_timeout": "5s", "max_parallel": 3})
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert asked and set(asked) == {1}
+    assert "At most 1 instance(s) at once" in capsys.readouterr().out
+
+
 # -- validation and exclusion ---------------------------------------------------------------------
 
 def test_only_validated_instances_run_and_the_rest_are_excluded_not_unresolved(bench):

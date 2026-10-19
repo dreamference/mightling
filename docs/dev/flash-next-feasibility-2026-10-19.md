@@ -2,6 +2,17 @@
 
 Why: the owner asked (2026-10-19) whether **Qwen3.8-Flash-Next** can be Mightling's model on one GB10, as preparation for a SWE-bench A/B night against production, `qwen3.8-27b-nvfp4-dflash2` on SGLang v0.5.21. Qwen's model card puts it ahead of the 27B on agentic coding: SWE-bench Pro 62.5 against 61.7, DeepSWE 1.1 58.7 against 42.2, SWE-bench Multilingual 81.0 against 73.8.
 
+**Status (2026-10-19, later).** The owner approved the trial, with a per-model memory-headroom override in place of the global start gate. Branch `models/flash-next` has the following:
+- the registry entry `qwen3.8-flash-next-nvfp4-mtp`;
+- `load_transient_gb`, the gate override, provisional at 8.0 GiB until measured;
+- `swe_bench_max_parallel=1`;
+- the smoke-boot plan, [flash-next-smoke-boot.md](flash-next-smoke-boot.md), not yet run.
+
+The entry departs from the §5 sketch in three places:
+- `gpu_memory_utilization` is 0.86, not 0.90, because the container's cgroup cap is clamped at total − 12 GiB;
+- context is 131,072 instead of 65,536, so the 120K needle runs (the KV pool does not depend on it);
+- `--kv-cache-dtype` and `--max-num-batched-tokens` go through their recipe keys. Chunked prefill is already on.
+
 **Short answer.** Yes, it can be served, with conditions. Two quantization-aware-distilled (QAD) 4-bit checkpoints fit in memory with the n-gram table resident. Neither loads on any SGLang release, our pinned v0.5.21 included. On vLLM nightly, one of them, `local-inference-lab/Qwen3.8-Flash-Next-NVFP4`, loads with upstream code. Community recipes measure about **49 tok/s on prose and 68 on code** single-stream with MTP on one GB10. Production does 25.5 and 50.3, so Flash-Next is faster on both. The fit is tight. About 15 GiB of host memory stays free, where a SWE-bench night at its default parallelism of 3 needs about 32. Today's start gate (`LOAD_TRANSIENT_FRACTION`) also refuses the load. The A/B therefore needs two small code changes beyond a registry entry (§5), and it runs at parallelism 1 or 2 unless the table moves out of memory.
 
 The download of the recommended checkpoint started on node-b (§4).
