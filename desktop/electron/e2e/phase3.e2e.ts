@@ -321,6 +321,8 @@ test("4 preview tab: a local page, comment mode to the composer, a site out on t
     void previewed;
     const view = app.windows().find((entry) => entry.url().startsWith("http://127.0.0.1"))!;
     expect(await view.evaluate(() => typeof (window as unknown as { electronBridge?: unknown }).electronBridge)).toBe("undefined");
+    // Opened empty (Ctrl+T), the tab's view is shown and sized as soon as it exists (a Mac kept it 0×0 and hidden).
+    await expect.poll(() => view.evaluate(() => [document.visibilityState, innerWidth > 0 && innerHeight > 0].join(" ")), { timeout: 5_000 }).toBe("visible true");
     // The page fills the tab's body: its viewport is the body's size (a Mac once reported about half).
     await expect.poll(async () => {
       const body = await page.locator(".preview-surface").boundingBox();
