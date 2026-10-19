@@ -78,3 +78,38 @@ def test_model_list_runs(capsys):
         DreamferenceCLIController.run_cli(["model", "list"])
     assert exit_info.value.code == 0
     assert "Available Mightling Models" in capsys.readouterr().out
+
+
+def test_chat_status_rejects_extra_arguments(capsys):
+    # `chat status <anything>` used to ignore the rest and exit 0.
+    import pytest
+
+    from dreamference.chat.retired_web_chat import RetiredWebChat
+
+    with patch.object(RetiredWebChat, "describe", side_effect=AssertionError("must not run")):
+        for argv in (["chat", "status", "extra"], ["chat", "status", "--bogus"], ["onyx", "status", "--yes"]):
+            with pytest.raises(SystemExit) as exit_info:
+                DreamferenceCLIController.run_cli(argv)
+            assert exit_info.value.code == 2, argv
+            assert f"usage: ling-admin chat status (not {argv[2]})" in capsys.readouterr().out, argv
+
+
+def test_audit_egress_docs_takes_json_and_refuses_a_prompt(capsys):
+    # `--docs` used to drop `--prompt` and `--json` silently: `--json` now writes its result, and
+    # `--prompt`, which no part of that scenario could use, is refused.
+    import pytest
+
+    from dreamference.audit import DocsEgressAudit, EgressAudit
+
+    with patch.object(DocsEgressAudit, "run", return_value=0) as docs_run, \
+            patch.object(EgressAudit, "run", side_effect=AssertionError("not the session audit")):
+        with pytest.raises(SystemExit) as exit_info:
+            DreamferenceCLIController.run_cli(["audit", "egress", "--docs", "--json"])
+        assert exit_info.value.code == 0
+        docs_run.assert_called_once_with(ling_docs=None, write_json=True)
+        docs_run.reset_mock()
+        with pytest.raises(SystemExit) as exit_info:
+            DreamferenceCLIController.run_cli(["audit", "egress", "--docs", "--prompt", "hello"])
+        assert exit_info.value.code == 2
+        docs_run.assert_not_called()
+        assert "--prompt has no effect with --docs" in capsys.readouterr().out

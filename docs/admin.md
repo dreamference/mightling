@@ -388,7 +388,7 @@ Trace one real ling session and list every network destination and process, with
 | `--web` | Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`. |
 | `--docs` | Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
-| `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
+| `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web or docs) |
 
 ### `ling-admin node`
 

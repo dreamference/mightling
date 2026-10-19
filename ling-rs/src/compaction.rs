@@ -12,7 +12,8 @@
 //! 2. **The ledger hook.** `ling ledger` (ledger.rs) is registered in `config.toml` as a
 //!    `SessionStart` hook with matcher `compact`, together with the hash that marks it trusted:
 //!    Codex skips a hook nobody trusted, silently. The hook is this binary and nothing else.
-//! 3. **Compaction at the end of a turn** (§4.3), off until measured: Codex's
+//! 3. **Compaction at the end of a turn** (§4.3), on by default since 2026-10-15 at 20% of the
+//!    usable window (see [`TURN_END_DEFAULT`] and [`TURN_END_SHARE_PERCENT`]): Codex's
 //!    `model_post_turn_compact_threshold_percent` compacts after a final answer, while the user
 //!    reads it, instead of in the middle of the next turn. [`with_turn_end`] sets it so that it
 //!    fires below the limit of point 1, for sessions someone reads (not `exec`).
