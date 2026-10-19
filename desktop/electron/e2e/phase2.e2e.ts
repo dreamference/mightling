@@ -204,6 +204,10 @@ test("6 review pane: scopes, stage by hunk, comments, split view, a generated me
     await scopes.getByRole("button", { name: "Last turn" }).click();
     await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py"]);
     await shoot("6-review-last-turn.png");
+    // A thread outside any repository: nothing of fetcher's stays in the pane.
+    await scopes.getByRole("button", { name: "Unstaged" }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    await expect(pane.locator(".review-status")).toHaveText("This folder is not in a git repository.");
     expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
   } finally {
     await close();

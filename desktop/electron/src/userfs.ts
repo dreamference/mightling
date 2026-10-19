@@ -36,6 +36,14 @@ const REAL: UserFsCalls = {
 
 let calls: UserFsCalls = REAL;
 
+/** Calls the file system has not answered yet, timed out or not (each still holds a libuv worker). */
+let inFlight = 0;
+
+/** How many reads of the user's folders are still with the file system (main.ts quits hard while any is). */
+export function pendingCalls(): number {
+  return inFlight;
+}
+
 /** How long one call may take before it is given up (a permission prompt nobody answers, a hung network share). */
 export let USER_FS_TIMEOUT_MS = 10_000;
 
@@ -54,7 +62,10 @@ function bounded<T>(what: string, place: string, call: () => Promise<T>): Promis
       () => reject(new UserFsTimeout(`${place} did not answer within ${Math.round(USER_FS_TIMEOUT_MS / 1000)} s (${what}); on a Mac, answer the folder-access prompt`)),
       USER_FS_TIMEOUT_MS,
     );
-    call().then(
+    inFlight++;
+    const settled = call();
+    void settled.then(() => inFlight--, () => inFlight--);
+    settled.then(
       (value) => {
         clearTimeout(timer);
         resolve(value);

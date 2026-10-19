@@ -520,7 +520,7 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 
 /* The tab area (DESKTOP_PARITY §2.1, §2.8): its tabs, the file tree on its left, file tabs. */
 .tab-columns { display: flex; flex: 1; min-height: 0; }
-.tab-bodies { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tab-bodies { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .tab-body[hidden] { display: none; }
 .tab-strip { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
@@ -532,7 +532,7 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .file-tree { width: 240px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel); min-height: 0; }
 .tree-head { display: flex; align-items: center; gap: 4px; padding: 4px 6px 4px 12px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .tree-root { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-body { flex: 1; overflow: auto; padding: 2px 4px 12px; }
+.tree-body { flex: 1; min-height: 0; overflow: auto; padding: 2px 4px 12px; }
 .tree-row { display: flex; align-items: center; gap: 5px; width: 100%; border: none; background: none; padding: 2px 6px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text); text-align: left; white-space: nowrap; }
 .tree-row span { overflow: hidden; text-overflow: ellipsis; }
 .tree-row:hover { background: var(--hover); }
