@@ -661,6 +661,29 @@ test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task 
   }
 });
 
+test("Settings › Node: the nodes on the network by name, the one in use marked, and Use for another", async () => {
+  const { page, home, shoot, close } = await open();
+  try {
+    // Nothing browses before the page opens.
+    expect(runs(home).some((args) => args[0] === "node")).toBe(false);
+    await page.keyboard.press("Control+,");
+    await page.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: "Node" }).click();
+    const table = page.getByRole("table", { name: "Nodes" });
+    await expect(table.locator("tr.in-use")).toContainText("spark-1");
+    await expect(table).toContainText("RadixArk/Qwen3.8-27B-NVFP4");
+    // Names only: no address on the page.
+    await expect(page.getByRole("dialog", { name: "Settings" })).not.toContainText("192.168.");
+    await shoot("node-settings.png");
+    await table.locator("tr", { hasText: "spark-2" }).getByRole("button", { name: "Use" }).click();
+    await expect(page.getByText("Using spark-2.")).toBeVisible();
+    await expect(table.locator("tr.in-use")).toContainText("spark-2");
+    await expect(page.getByRole("dialog", { name: "Settings" })).not.toContainText("192.168.");
+    expect(runs(home).filter((args) => args[0] === "node").map((args) => args.join(" "))).toEqual(["node list --json", "node use spark-2", "node list --json"]);
+  } finally {
+    await close();
+  }
+});
+
 test("13 subagents and memories: the panel of a thread's subagents with Stop, the working count, Settings › Memories", async () => {
   const { page, home, shoot, close } = await open();
   try {

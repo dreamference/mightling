@@ -79,6 +79,15 @@ const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
+if (process.argv[2] === "node") {
+  // ling node list --json and ling node use <name> (Settings › Node): two nodes, the chosen one remembered in a file.
+  const chosen = ${JSON.stringify(path.join(home, "node-choice"))};
+  const used = fs.existsSync(chosen) ? fs.readFileSync(chosen, "utf8") : "spark-1";
+  if (process.argv[3] === "use") { fs.writeFileSync(chosen, process.argv[4]); console.log("Using node " + process.argv[4] + " at http://192.168.50.106:8000/v1."); process.exit(0); }
+  const node = (name, id, model) => ({ name, id, choice: name, inUse: used === name, model, contextTokens: model ? 262144 : null, state: model ? "ready" : "stopped", version: "1.7.1", coding: true });
+  console.log(JSON.stringify({ thisMachine: "client", nodes: [node("spark-1", "11111111-aaaa", "RadixArk/Qwen3.8-27B-NVFP4"), node("spark-2", "22222222-bbbb", null)], rememberedAway: null, hint: null }));
+  process.exit(0);
+}
 if (process.argv[2] === "night") { console.log(process.argv[3] === "add" ? "Queued 20261017-0930 on branch night/20261017-0930, from 1a2b3c4d5e." : "Dropped " + process.argv[4] + "."); process.exit(0); }
 const threads = ${JSON.stringify(threads(home, askRoot))};
 const files = ${JSON.stringify(FILES)};

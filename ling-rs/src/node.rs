@@ -117,7 +117,7 @@ fn named(name: &str) -> Node {
 /// One command's choice of node, by name, address or id.
 pub const PIN_ENV: &str = "MIGHTLING_NODE";
 
-const USAGE: &str = "Usage: ling node [list] | ling node use <name|address> | ling node forget";
+const USAGE: &str = "Usage: ling node [list [--json]] | ling node use <name|address> | ling node forget";
 
 /// What a node advertises: where it is, and the records that are not kept in `node.json`.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -528,6 +528,8 @@ fn version_notice_line(mine: &str, node: &Node, last_notice: Option<&str>, today
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     List,
+    /// `ling node list --json`: the same browse for the desktop app's node page, as JSON.
+    ListJson,
     Use(String),
     Forget,
     Usage,
@@ -537,6 +539,7 @@ impl Request {
     pub fn from_args(args: &[String]) -> Request {
         match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
             [] | ["list"] => Request::List,
+            ["list", "--json"] => Request::ListJson,
             ["use", name] => Request::Use(name.to_string()),
             ["forget"] => Request::Forget,
             _ => Request::Usage,
@@ -561,16 +564,21 @@ pub async fn run_cli(args: &[String]) -> i32 {
             }
             0
         }
-        Request::List => {
+        Request::List | Request::ListJson => {
             let adverts = MdnsBrowser.browse(None);
             let mut models = Vec::new();
             for advert in &adverts {
                 models.push(served(&advert.node.model_url()).await);
             }
+            let hint = wifi_hint(adverts.is_empty());
+            if Request::from_args(args) == Request::ListJson {
+                println!("{}", list_json(&inputs(), &adverts, &models, hint.as_deref()));
+                return 0;
+            }
             for line in list_lines(&inputs(), &adverts, &models) {
                 println!("{line}");
             }
-            if let Some(hint) = wifi_hint(adverts.is_empty()) {
+            if let Some(hint) = hint {
                 println!("{hint}");
             }
             0
@@ -645,6 +653,60 @@ fn forget(path: &Path) -> Vec<String> {
     }
 }
 
+/// Whether `node` is the one `used` stands for: the same id, or for a node remembered without one
+/// the same address.
+fn is_used(used: &Node, node: &Node) -> bool {
+    (!used.node.is_empty() && used.node == node.node) || (used.node.is_empty() && used.address == node.address)
+}
+
+/// What `ling node use` is given to choose `node`: its name, else its id; never its address, which
+/// changes (a node is found by name or id at use time). None for a node advertising neither.
+fn choice_of(node: &Node) -> Option<&str> {
+    [node.name.as_str(), node.node.as_str()].into_iter().find(|text| !text.is_empty())
+}
+
+/// `ling node list --json`, for the desktop app's node page: the nodes that answered, by name, with
+/// what each serves and which one this machine uses. No address, URL or configured host is in it,
+/// so the page shows and sends names only.
+pub fn list_json(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::ServedModel>], hint: Option<&str>) -> serde_json::Value {
+    let this_machine = if inputs.configured.is_some() {
+        "configured"
+    } else if inputs.is_node {
+        "node"
+    } else {
+        "client"
+    };
+    let in_use = inputs.remembered.as_ref().filter(|_| inputs.configured.is_none() && !inputs.is_node);
+    let nodes: Vec<serde_json::Value> = adverts
+        .iter()
+        .enumerate()
+        .map(|(index, advert)| {
+            let node = &advert.node;
+            let model = models.get(index).and_then(Option::as_ref);
+            serde_json::json!({
+                "name": node.name,
+                "id": node.node,
+                "choice": choice_of(node),
+                "inUse": in_use.is_some_and(|used| is_used(used, node)),
+                "model": model.map(|model| model.id.clone()),
+                "contextTokens": model.map(|model| model.max_model_len),
+                "state": advert.state,
+                "version": node.version,
+                "coding": advert.main,
+            })
+        })
+        .collect();
+    let away = in_use.filter(|used| {
+        !adverts.iter().any(|advert| (!used.node.is_empty() && advert.node.node == used.node) || advert.node.address == used.address)
+    });
+    serde_json::json!({
+        "thisMachine": this_machine,
+        "nodes": nodes,
+        "rememberedAway": away.map(|used| serde_json::json!({ "name": used.name, "id": used.node })),
+        "hint": hint,
+    })
+}
+
 /// The lines `ling node list` prints: every node that answered, with what it serves, which one
 /// this machine uses, and the URL to paste into another tool.
 pub fn list_lines(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::ServedModel>]) -> Vec<String> {
@@ -665,9 +727,7 @@ pub fn list_lines(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::S
             None if advert.state.is_empty() => "not answering".to_string(),
             None => advert.state.clone(),
         };
-        let used = in_use.is_some_and(|used| {
-            (!used.node.is_empty() && used.node == node.node) || (used.node.is_empty() && used.address == node.address)
-        });
+        let used = in_use.is_some_and(|used| is_used(used, node));
         lines.push(format!(
             "{}{}  {}/v1  {}  Mightling {}{}",
             if used { "* " } else { "  " },
@@ -1213,6 +1273,8 @@ mod tests {
         let args = |words: &[&str]| words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
         assert_eq!(Request::from_args(&[]), Request::List);
         assert_eq!(Request::from_args(&args(&["list"])), Request::List);
+        assert_eq!(Request::from_args(&args(&["list", "--json"])), Request::ListJson);
+        assert_eq!(Request::from_args(&args(&["--json"])), Request::Usage);
         assert_eq!(Request::from_args(&args(&["use", "spark-2"])), Request::Use("spark-2".into()));
         assert_eq!(Request::from_args(&args(&["forget"])), Request::Forget);
         assert_eq!(Request::from_args(&args(&["use"])), Request::Usage);
@@ -1234,6 +1296,46 @@ mod tests {
         let on_node = list_lines(&Inputs { is_node: true, ..Inputs::default() }, &[spark1()], &[None]);
         assert!(on_node[0].starts_with("This machine is a node") && on_node[1].starts_with("  spark-1"));
         assert_eq!(list_lines(&Inputs::default(), &[], &[]), vec!["No Mightling node answered on this network.".to_string()]);
+    }
+
+    #[test]
+    fn the_json_list_names_the_nodes_and_never_an_address() {
+        let model = crate::ServedModel { id: "RadixArk/Qwen3.8-27B-NVFP4".into(), max_model_len: 262_144, owned_by: "sglang".into() };
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        let stopped = Advert { state: "stopped".into(), main: false, ..spark2() };
+        let list = list_json(&inputs, &[spark1(), stopped], &[Some(model), None], None);
+        assert_eq!(list["thisMachine"], "client");
+        assert_eq!(list["nodes"][0]["name"], "spark-1");
+        assert_eq!(list["nodes"][0]["choice"], "spark-1");
+        assert_eq!(list["nodes"][0]["inUse"], true);
+        assert_eq!(list["nodes"][0]["model"], "RadixArk/Qwen3.8-27B-NVFP4");
+        assert_eq!(list["nodes"][0]["contextTokens"], 262_144);
+        assert_eq!(list["nodes"][1]["inUse"], false);
+        assert_eq!(list["nodes"][1]["model"], serde_json::Value::Null);
+        assert_eq!(list["nodes"][1]["state"], "stopped");
+        assert_eq!(list["nodes"][1]["coding"], false);
+        assert_eq!(list["rememberedAway"], serde_json::Value::Null);
+        let text = list.to_string();
+        assert!(!text.contains("192.168.") && !text.contains("http"), "{text}");
+        // The remembered node did not answer: named, still without its address.
+        let away = list_json(&inputs, &[spark2()], &[None], Some("Wi-Fi power saving is on"));
+        assert_eq!(away["rememberedAway"]["name"], "spark-1");
+        assert_eq!(away["hint"], "Wi-Fi power saving is on");
+        assert!(!away.to_string().contains("192.168.50.105"));
+        // A node with no name is chosen by its id; one with neither cannot be chosen.
+        let unnamed = Advert { node: Node { name: String::new(), ..spark2().node }, ..spark2() };
+        let bare = Advert { node: Node { name: String::new(), node: String::new(), ..spark2().node }, ..spark2() };
+        let list = list_json(&Inputs::default(), &[unnamed, bare], &[None, None], None);
+        assert_eq!(list["nodes"][0]["choice"], "22222222-bbbb");
+        assert_eq!(list["nodes"][1]["choice"], serde_json::Value::Null);
+        assert!(!list.to_string().contains("192.168."));
+        // A node, or a configured host, uses no node from the list.
+        let on_node = list_json(&Inputs { is_node: true, remembered: Some(spark1().node), ..Inputs::default() }, &[spark1()], &[None], None);
+        assert_eq!(on_node["thisMachine"], "node");
+        assert_eq!(on_node["nodes"][0]["inUse"], false);
+        let configured = list_json(&Inputs { configured: Some("http://10.0.0.7:8000".into()), ..Inputs::default() }, &[], &[], None);
+        assert_eq!(configured["thisMachine"], "configured");
+        assert!(!configured.to_string().contains("10.0.0.7"));
     }
 
     #[test]
