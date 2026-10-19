@@ -4,7 +4,7 @@
 // and Work switch that one window.
 // Runs against the Vite build in `.vite/` (`npm run package` first); windows are hidden
 // (`MIGHTLING_HIDDEN=1`) so a test does not take the screen.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -260,6 +260,34 @@ test("New thread with a folder named starts nothing until the first message, whi
     expect(starts[0].params!.cwd).toBe(project);
   } finally {
     await closeApp(app);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// A read the file system never answers (a macOS folder-access prompt left open, here a FIFO nobody
+// writes) holds a libuv worker, and Node's teardown waits for it: a Mac kept the main process alive,
+// windowless, after SIGTERM. Started without Playwright, as the SIGTERM test above.
+test("SIGTERM quits the app while a read of the user's folders hangs", async () => {
+  test.skip(process.platform === "win32", "a FIFO is POSIX");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-hang-"));
+  const ling = standIn(home);
+  const fifo = path.join(home, "never-written");
+  execFileSync("mkfifo", [fifo]);
+  const electronBinary = require("electron") as unknown as string;
+  const child = spawn(electronBinary, [main, "--work"], {
+    env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0", MIGHTLING_TEST_PENDING_READ: fifo },
+    stdio: "ignore",
+  });
+  try {
+    await expect.poll(() => runs(home).some((args) => args.includes("app-server")), { timeout: 30_000 }).toBe(true);
+    const ended = new Promise<boolean>((resolve) => {
+      child.once("exit", () => resolve(true));
+      setTimeout(() => resolve(false), 15_000);
+    });
+    child.kill("SIGTERM");
+    expect(await ended).toBe(true);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
