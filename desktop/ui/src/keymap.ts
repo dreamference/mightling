@@ -26,7 +26,9 @@ const BY_ID = new Map(KEYMAP.map((action) => [action.id, action]));
  * the terminal's own (Control+L clears it). The table and the user's bindings stay one, written for
  * Linux and Windows.
  */
-let mac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent || "");
+// The browser's own word (Chromium on a Mac says "Macintosh; Intel Mac OS X"); Node, which runs the
+// tests, says "Node.js/…" on every platform, so the tests read the table one way unless they ask.
+let mac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent ?? "");
 
 /** Sets whether the keys are a Mac's (the window decides at start; tests set both). */
 export function setMacKeys(value: boolean): void {
