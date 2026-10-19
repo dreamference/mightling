@@ -16,6 +16,7 @@ Night Shift is two halves that share only files:
 - The run never starts or loads the model server, gives way to an open `ling` session or an outside request, and `server start`, `codex build` and `index` refuse while it holds its lock.
 - Before the first task the run refreshes each repository's code index (`ling-code index --exact --wait`, `night_shift_index.py`; `[night] index = false` switches it off).
 - The desktop app's bundled `ling` is recognised as an app-server by name and `app-server` in its command line (`NightShiftHost._is_app_server`); see [desktop.md](desktop.md).
+- A `ling` whose binary a build has since replaced is still recognised: `/proc/<pid>/exe` then reads `<path> (deleted)`, and `NightShiftHost.executable_of` drops that trailing suffix before comparing; the exact comparison missed a busy app-server after a rebuild and deleted its marker (found 2026-10-19).
 - `[night] nodes` and `/night add --on <node>` use paired nodes; see [node.md](node.md).
 - The sandbox needs the AppArmor profile when the run comes from the timer; see [host-safety.md](host-safety.md#bubblewrap-needs-an-apparmor-profile-and-this-machine-now-has-one).
 
