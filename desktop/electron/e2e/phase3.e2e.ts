@@ -108,7 +108,7 @@ function website(home: string): string {
 }
 
 test("1 file tree and file tabs: the folder read and followed, files highlighted, tabs beside Review", async () => {
-  const { page, home, shoot, close } = await open(website);
+  const { app, page, home, shoot, close } = await open(website);
   const root = projectFolders(home).website;
   try {
     await page.getByRole("button", { name: "Work", exact: true }).click();
@@ -138,6 +138,12 @@ test("1 file tree and file tabs: the folder read and followed, files highlighted
     await page.keyboard.press("Control+Shift+G");
     await expect(page.getByRole("tab")).toHaveText([/hero\.ts/, /README\.md/, /Review/]);
     await expect(page.getByRole("complementary", { name: "Review" })).toBeVisible();
+    // The file tree, the tabs and Review beside the thread fit an 860-pixel window (the page grew to 1024 px).
+    for (let index = 0; index < 60; index++) fs.writeFileSync(path.join(root, `extra-${String(index).padStart(2, "0")}.txt`), "x\n");
+    await expect(tree.getByRole("button", { name: "extra-59.txt" })).toBeVisible({ timeout: 10_000 });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 860));
+    await expect.poll(() => page.evaluate(() => innerHeight)).toBe(860);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
     await page.keyboard.press("Control+w");
     await expect(page.getByRole("tab")).toHaveText([/hero\.ts/, /README\.md/]);
     await page.keyboard.press("Control+Shift+T");

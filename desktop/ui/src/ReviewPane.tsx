@@ -6,7 +6,7 @@
 // chosen editor (Ctrl+click a line for that line); commit with a generated message, push, and the
 // forge's pull-request page. In a browser on `ling web` only Last turn is shown.
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import * as bridge from "./bridge";
 import { commentsMessage, fingerprint, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
@@ -84,6 +84,10 @@ export function ReviewPane(props: ReviewPaneProps) {
       return;
     }
     let current = true;
+    // Another thread's folder: what the last repository showed goes at once, not when the new one answers.
+    setStatus(null);
+    setAgainst(null);
+    setCommits([]);
     bridge.git.missing().then((why) => current && setGitMissing(why)).catch(() => {});
     bridge.git.repos(props.cwd).then((found) => {
       if (!current) return;
@@ -96,6 +100,8 @@ export function ReviewPane(props: ReviewPaneProps) {
     };
   }, [props.cwd, windowGit, notice]);
 
+  const rootRef = useRef(root);
+  rootRef.current = root;
   const load = useCallback(async () => {
     setError(null);
     if (scope === "turn") {
@@ -104,11 +110,17 @@ export function ReviewPane(props: ReviewPaneProps) {
       return;
     }
     if (!root) {
+      // Nothing of the last repository's carries over to a folder outside any (it showed "main, against the index").
       setDiff("");
+      setStatus(null);
+      setAgainst(null);
+      setCommits([]);
       return;
     }
     try {
       const [answer, now] = await Promise.all([bridge.git.diff(root, scope, scope === "commit" ? commit : null), bridge.git.status(root)]);
+      // An answer for a repository the pane has since left is dropped.
+      if (rootRef.current !== root) return;
       setDiff(answer.diff);
       setAgainst(answer.against);
       setStatus(now);

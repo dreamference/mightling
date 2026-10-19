@@ -45,6 +45,9 @@ describe("reads of the user's folders", () => {
     const read = await ticksDuring(environments(home));
     expect(read.result).toBeInstanceOf(userFs.UserFsTimeout);
 
+    // The reads that timed out are still with the file system: main.ts quits hard while any is.
+    expect(userFs.pendingCalls()).toBeGreaterThan(0);
+
     // With the real calls, the same folder reads at once.
     userFs.setUserFs(null);
     expect(await userFs.isDirectory(home)).toBe(true);
