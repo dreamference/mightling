@@ -613,3 +613,20 @@ test("10 message board: off until Settings › Agents turns it on; the subagents
     await close();
   }
 });
+
+test("a finished turn keeps its question and its commands when ling's turn/completed lists only the answer", async () => {
+  const { page, home, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("textbox", { name: "Project folder" }).fill(projectFolders(home).fetcher);
+    await page.locator(".composer textarea").fill("Run the tests with a command, then fix the retry.");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".item.agent").last()).toContainText("Done: the retry counter");
+    await page.waitForTimeout(500);
+    await expect(page.locator(".item.user")).toContainText("Run the tests with a command");
+    await expect(page.locator(".item.command")).toContainText("pytest -q");
+    expect(appServers(home)).toBe(1);
+  } finally {
+    await close();
+  }
+});

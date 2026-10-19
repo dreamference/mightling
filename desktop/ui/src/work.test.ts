@@ -123,6 +123,24 @@ describe("a scripted session", () => {
     expect(contextUse(done.threads.t1.usage)).toEqual({ used: 4500, window: 90000, percent: 5 });
   });
 
+  it("a completion that lists only the answer keeps every item the turn streamed, the answer updated in place", () => {
+    const state = run([
+      note("turn/started", { threadId: "t1", turn: { id: "u3", status: "inProgress", items: [], error: null } }),
+      note("item/completed", { threadId: "t1", turnId: "u3", item: { type: "userMessage", id: "q3", content: [{ type: "text", text: "Fix it", text_elements: [] }] } }),
+      note("item/completed", { threadId: "t1", turnId: "u3", item: { type: "commandExecution", id: "c3", command: "pytest", cwd: "/w", processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 10, aggregatedOutput: "ok" } }),
+      note("item/completed", { threadId: "t1", turnId: "u3", item: { type: "fileChange", id: "f3", status: "completed", changes: [] } }),
+      note("item/started", { threadId: "t1", turnId: "u3", item: { type: "agentMessage", id: "a3", text: "", phase: null, memoryCitation: null, delivery: null, questions: null } }),
+      note("item/agentMessage/delta", { threadId: "t1", turnId: "u3", itemId: "a3", delta: "Done" }),
+      // As ling sends it: the completed turn carries the answer alone, in its final form.
+      note("turn/completed", { threadId: "t1", turn: { id: "u3", status: "completed", error: null,
+        items: [{ type: "agentMessage", id: "a3", text: "Done: the test is fixed.", phase: null, memoryCitation: null, delivery: null, questions: null }] } }),
+    ], opened);
+    const turn = state.threads.t1.turns[0];
+    expect(turn.items.map((item) => item.id)).toEqual(["q3", "c3", "f3", "a3"]);
+    const answer = turn.items[3];
+    expect(answer.type === "agentMessage" && answer.text).toBe("Done: the test is fixed.");
+  });
+
   it("an interrupted turn ends, and its streamed items stay", () => {
     const state = run([
       note("turn/started", { threadId: "t1", turn: { id: "u2", status: "inProgress", items: [], error: null } }),
