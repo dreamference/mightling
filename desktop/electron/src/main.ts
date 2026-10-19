@@ -9,7 +9,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { pathKey, samePath } from "./platform";
+import * as userFs from "./userfs";
 import { BrowserWindow, app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
@@ -241,8 +241,9 @@ export async function main(options: MainOptions): Promise<void> {
     return worktree.defaultRoot(home);
   };
   /** A folder the page names for Open: absolute and existing. */
-  const folder = (dir: unknown) => {
-    if (typeof dir !== "string" || !path.isAbsolute(dir) || !fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error("not a folder");
+  // Asynchronous (userfs.ts): a folder macOS guards must not stop the main thread while its prompt waits.
+  const folder = async (dir: unknown): Promise<string> => {
+    if (typeof dir !== "string" || !path.isAbsolute(dir) || !(await userFs.isDirectory(dir))) throw new Error("not a folder");
     return dir;
   };
 
@@ -370,16 +371,16 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "worktree/create": {
         const root = worktreeRoot(message.root);
-        return worktree.create({ sourceCwd: folder(message.sourceCwd), base: message.base, withChanges: Boolean(message.withChanges), worktreeRoot: root });
+        return worktree.create({ sourceCwd: await folder(message.sourceCwd), base: message.base, withChanges: Boolean(message.withChanges), worktreeRoot: root });
       }
       case "worktree/bind":
         return worktree.bindThread(await git.checkRoot(message.checkout), message.thread);
       case "worktree/list":
-        return worktree.list(folder(message.sourceCwd), worktreeRoot(message.root));
+        return worktree.list(await folder(message.sourceCwd), worktreeRoot(message.root));
       case "worktree/remove":
-        return worktree.remove(folder(message.sourceCwd), message.checkout, worktreeRoot(message.root), message.snapshot);
+        return worktree.remove(await folder(message.sourceCwd), message.checkout, worktreeRoot(message.root), message.snapshot);
       case "worktree/restore":
-        return worktree.restore(folder(message.sourceCwd), message.snapshot, worktreeRoot(message.root));
+        return worktree.restore(await folder(message.sourceCwd), message.snapshot, worktreeRoot(message.root));
       case "worktree/branch":
         return worktree.createBranch(await git.checkRoot(message.checkout), message.name);
       case "worktree/handoff":
@@ -387,19 +388,19 @@ export async function main(options: MainOptions): Promise<void> {
       case "git/branches":
         return git.branches(await git.checkRoot(message.root));
       case "env/list":
-        return environments(folder(message.project));
+        return environments(await folder(message.project));
       case "env/write":
-        return writeEnvironment(folder(message.project), message.environment);
+        return writeEnvironment(await folder(message.project), message.environment);
       case "task/run": {
-        const project = folder(message.project);
-        const cwd = folder(message.cwd);
-        const environment = environments(project).found.find((entry) => entry.file === message.file);
+        const project = await folder(message.project);
+        const cwd = await folder(message.cwd);
+        const environment = (await environments(project)).found.find((entry) => entry.file === message.file);
         if (!environment) throw new Error(`${project} has no environment ${message.file}`);
         const script = message.action === "setup" ? environment.setup : environment.actions[Number(message.action)]?.script;
         if (!script?.trim()) throw new Error("that environment has no such script");
         // The script runs in the project or in one of its worktrees, nowhere else.
-        const common = async (dir: string) => pathKey(path.resolve(dir, (await git.git(dir, ["rev-parse", "--git-common-dir"])).trim()));
-        if (!samePath(cwd, project) && (await common(cwd).catch(() => "")) !== (await common(project).catch(() => "-"))) {
+        const common = async (dir: string) => userFs.pathKey(path.resolve(dir, (await git.git(dir, ["rev-parse", "--git-common-dir"])).trim()));
+        if (!(await userFs.samePath(cwd, project)) && (await common(cwd).catch(() => "")) !== (await common(project).catch(() => "-"))) {
           throw new Error("a project's script runs in the project or one of its worktrees");
         }
         await offline(message.thread, "a project's own script (nothing sandboxes it)");
@@ -410,14 +411,14 @@ export async function main(options: MainOptions): Promise<void> {
         tasks.stop(message.id);
         return null;
       case "open/terminal": {
-        const dir = folder(message.dir);
+        const dir = await folder(message.dir);
         const terminal = terminalCommand(dir);
         if (!terminal) throw new Error("no terminal emulator was found");
         git.launch(terminal.command, terminal.args, dir);
         return null;
       }
       case "open/editor": {
-        const dir = folder(message.dir);
+        const dir = await folder(message.dir);
         const editor = (editors ?? (editors = findEditors())).find((entry) => entry.id === message.editor) ?? editors[0];
         if (!editor) throw new Error("no editor was found; choose one in the review pane");
         const { command, args } = openCommand(editor, dir, null);
@@ -425,7 +426,7 @@ export async function main(options: MainOptions): Promise<void> {
         return null;
       }
       case "open/folder": {
-        const failed = await shell.openPath(folder(message.dir));
+        const failed = await shell.openPath(await folder(message.dir));
         if (failed) throw new Error(failed);
         return null;
       }
@@ -479,7 +480,7 @@ export async function main(options: MainOptions): Promise<void> {
         return null;
       case "file/size": {
         if (typeof message.path !== "string" || !path.isAbsolute(message.path)) throw new Error("not an absolute path");
-        const stat = await fs.promises.stat(message.path).catch(() => null);
+        const stat = await userFs.statOrNull(message.path).catch(() => null);
         return stat?.isFile() ? stat.size : null;
       }
       case "prefs/read":

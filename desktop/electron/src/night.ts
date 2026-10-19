@@ -9,6 +9,7 @@ import { execFile, spawn } from "node:child_process";
 import { command } from "./platform";
 import fs from "node:fs";
 import path from "node:path";
+import * as userFs from "./userfs";
 
 export interface NightTask {
   id: string;
@@ -90,9 +91,10 @@ function run(ling: string, args: string[], cwd: string): Promise<string> {
 }
 
 /** Queues a task for tonight in `repo` (`ling night add [--test <cmd>] <task>`); resolves with what it printed. */
-export function addTask(ling: string, repo: unknown, task: unknown, test: unknown): Promise<string> {
-  if (typeof repo !== "string" || !path.isAbsolute(repo) || !fs.statSync(repo, { throwIfNoEntry: false })?.isDirectory()) return Promise.reject(new Error("name the project folder"));
-  if (typeof task !== "string" || !task.trim() || task.length > 8000) return Promise.reject(new Error("describe the task"));
+export async function addTask(ling: string, repo: unknown, task: unknown, test: unknown): Promise<string> {
+  // Asynchronous (userfs.ts): the project may be a folder macOS guards behind a prompt.
+  if (typeof repo !== "string" || !path.isAbsolute(repo) || !(await userFs.isDirectory(repo))) throw new Error("name the project folder");
+  if (typeof task !== "string" || !task.trim() || task.length > 8000) throw new Error("describe the task");
   const testArgs = typeof test === "string" && test.trim() ? ["--test", test.trim()] : [];
   return run(ling, ["night", "add", ...testArgs, task.trim()], repo);
 }
