@@ -687,6 +687,26 @@ html.pet-page body { margin: 0; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
+/* The thread in a narrow column (the review or file tabs beside it, a small window): its header and
+   composer fit the column, not the window. The header wraps rather than running into the tabs, and
+   drops the folder and the optional chips first; the composer's controls wrap, and the model's name
+   is cut short, so the send button stays inside the card (it was drawn over the commit area and
+   over the dialogs' scrim). */
+.thread-pane { container: thread / inline-size; }
+.bar { flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+.bar .title { flex-shrink: 1; }
+.composer-actions { flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+/* Wrapped, the stop and send buttons keep to the right on their own line. */
+.composer-actions > .spacer + * { margin-left: auto; }
+.composer-actions .picker-anchor { min-width: 0; max-width: 100%; }
+.model-chip { min-width: 0; max-width: 100%; }
+.model-chip .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container thread (max-width: 640px) {
+  .bar .cwd, .bar .chip.optional { display: none; }
+  .bar .title { max-width: none; min-width: 0; flex: 1 1 120px; }
+  .model-chip .chip-label { max-width: 160px; }
+}
+
 /* Narrow windows and phones: the thread list becomes a drawer behind the menu button, and inputs
    are 16px so mobile browsers do not zoom into them. `ling web` is text-only from other devices
    (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.4). */
