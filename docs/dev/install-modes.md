@@ -23,4 +23,6 @@ A GB10 is recognised by arm64 and `nvidia-smi` naming it, or the GPU's PCI id `1
 
 ## Old release names
 
-Releases still publish the `puffin-<target>.gz` / `puffin-<target>.sha256sums` asset set (built from the same binaries) so 1.4.x installs can `puffin update` into Mightling; see `specs/DREAMFERENCE_RENAME_MIGHTLING.md`.
+Mightling was called Puffin until 1.5 (renamed 2026-10-07; `specs/DREAMFERENCE_RENAME_MIGHTLING.md`). Two things carry the old name on purpose: releases still publish the `puffin-<target>.gz` / `puffin-<target>.sha256sums` asset set (built from the same binaries) so 1.4.x installs can `puffin update` into Mightling, and a one-time migration (`ling-rs/src/rename.rs` in the launcher, `dreamference/cli/legacy_name_migration.py` in `ling-admin`) moves an old installation's folders, links, keys, units and settings.
+
+Internal names kept unchanged: the build caches `~/.cache/dreamference/puffin-codex` (and `puffin-web`, `puffin-code-build`), the AppArmor profile `/etc/apparmor.d/puffin-bwrap`, and SWE-bench's stored `puffin_version` / `puffin_code_calls` keys.
