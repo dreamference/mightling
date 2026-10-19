@@ -1,6 +1,6 @@
 # Mightling Node — splitting Mightling into a client and `mightling-node`
 
-**Status:** implemented in part on 2026-10-02, on one GB10 (a second one was paired on 2026-10-08, §18.10), and Parts 2 and 3 completed on 2026-10-03 except for sending from a client (§18.8). Part 1: the node side (`ling-admin node enable|disable|status`), the launcher's resolution tiers and `ling node`, `ling-search` on the node's SearXNG, and `ling-app`'s forwarder. Part 2: the SSH pairing, `node list|add|remove|status|set|start|stop|sync-model`, and replicas as extra model servers for Night Shift and SWE-bench. Part 3: script jobs, `node run|jobs|logs|cancel|fetch` with `--setup`, `--out` and `--bind`, pruning, and night tasks worked by another node (`/night add --on`). **§18 records what was built, what was measured and what was not;** where it differs from the sections above, §18 and §15.1 win. Nothing between two machines was run, `node enable` itself was not run (it needs root), and nothing was built for macOS or Windows.
+**Status:** implemented in part on 2026-10-02, on one GB10 (a second one was paired on 2026-10-08, §18.10), and Parts 2 and 3 completed on 2026-10-03 except for sending from a client (§18.8). Part 1: the node side (`ling-admin node enable|disable|status|id`), the launcher's resolution tiers and `ling node`, and `ling-search` on the node's SearXNG; `ling-app`'s forwarder was built too, and removed on 2026-10-08 (`3febddb`, §7). Part 2: the SSH pairing, `node list|add|remove|status|set|start|stop|sync-model`, and replicas as extra model servers for Night Shift and SWE-bench. Part 3: script jobs, `node run|jobs|logs|cancel|fetch` with `--setup`, `--out` and `--bind`, pruning, and night tasks worked by another node (`/night add --on`). Since: `/node` in the TUI (2026-10-07, §18.9), `node provision|prepare|askpass` ([MIGHTLING_FLEET](./DREAMFERENCE_MIGHTLING_FLEET.md), merged 2026-10-08, `249c262`), and the Onyx web chat retired on 2026-10-18 (`eb42c76`, `d43a926`): the advertised web UI is `ling web` on 3100. **§18 records what was built, what was measured and what was not;** where it differs from the sections above, §18 and §15.1 win. Checked against the code of 1.6.4 on 2026-10-19. Two machines have been paired since 2026-10-08 and the second was installed with `node enable --yes` (§18.10); jobs and `/night add --on` between them have still not been run, and a Night Shift lane on the second machine ran once, on the night of 2026-10-09, and was lost to a DHCP move (§13.2). Clients for x86-64 Linux and macOS have been built since 2026-10-07 (§8.4) and for Windows as a preview since 1.5.1.
 **Target:** the GB10 (DGX Spark) as the server, and Ubuntu, macOS and Windows machines on the same local network as clients.
 **Builds on:**
 - the launcher in `ling-rs/` and its `vllm_host()` tiers ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md));
@@ -50,7 +50,7 @@ Checked on this GB10 (`gx10-9428`, Wi-Fi address `192.168.0.105`) on 2026-10-01:
 | Is the model server already reachable from the LAN? | Yes: `http://192.168.0.105:8000/v1/models` answers 200 (it binds `0.0.0.0:8000`, accepted by design). |
 | What else listens beyond loopback? | Nothing of Mightling's. The web UI (3000, 80), SearXNG (8888), Gmail (8767), image search (8768), speech-to-text (8100) and the diffusion sidecar (8001; switched off since 2026-10-03) are all on `127.0.0.1`. |
 | Does the web UI accept a non-localhost `Host`? | Yes: `/app` answers 200 for `Host: 192.168.0.105:3000` and `Host: gx10-9428.local:3000` as for `localhost:3000`. |
-| Do the model containers come back after a reboot with nobody logged in? | Their restart policy is `unless-stopped` (model server, SearXNG, nginx). The user's systemd lingering is **off**, so a user unit would not run before login. |
+| Do the model containers come back after a reboot with nobody logged in? | Their restart policy is `unless-stopped` (model server, SearXNG, nginx). The user's systemd lingering is **off**, so a user unit would not run before login. (`install.sh` turns lingering on for a node since 2026-10-08, SETUP §3.2.1.) |
 | Can Codex be built for the client platforms? | Upstream's release workflows build `aarch64`/`x86_64` for `apple-darwin` and `unknown-linux-musl`, and `x86_64`/`aarch64-pc-windows-msvc` in a separate Windows workflow. The pinned V8 manifests (`third_party/v8/rusty_v8_150_4_0_release_manifests.sha256`) list pointer-compression-and-sandbox builds for all of them plus `linux-gnu`. Read from the submodule; **never built here**. |
 | Do the index tools exist for the client platforms? | codebase-memory-mcp v0.11.0 ships `darwin-amd64`, `darwin-arm64`, `linux-amd64` and `linux-arm64`; a Windows asset was seen only for its UI build. The scip CLI v0.10.0 ships `darwin` and `linux`, both architectures, and **no Windows build**. |
 
@@ -108,10 +108,10 @@ A node that is not advertised keeps today's binds. `ling-admin node enable` (§5
 - nginx had been published on every interface, which put the web UI's default admin account on the LAN; `configure()` bound it to loopback.
 - SearXNG was loopback-only.
 
-Under the trusted-LAN decision both become "accepted by design" on an advertised node. When this is implemented the two rows move to that table in [README](./README.md) with the date and this reason; they are not silently reopened. Mechanically: `HOST_PORT=0.0.0.0:3000` in the web UI's `.env` (the variable `bind_to_loopback()` already writes) and the SearXNG sidecar's publish address, both keyed on one config value, `node_advertise`.
+Under the trusted-LAN decision both become "accepted by design" on an advertised node. When this is implemented the two rows move to that table in [README](./README.md) with the date and this reason; they are not silently reopened. Mechanically: `HOST_PORT=0.0.0.0:3000` in the web UI's `.env` (the variable `bind_to_loopback()` already writes) and the SearXNG sidecar's publish address, both keyed on one config value, `node_advertise`. *As built (2026-10-02), the value is `~/.config/dreamference/node-advertise.json` (§18.2). Since 2026-10-18 (`eb42c76`) there is no `.env` to write: `NodeAdvertiser.apply_binds()` starts `ling web start --lan` as the user unit `mightling-web.service` (`serve_web`) and restarts SearXNG on its publish address (`dreamference/node/node_advertiser.py`).*
 
 **What that exposed while Onyx was the web UI, stated plainly** (§11 has the rest; since 1.7.0 the web UI is `ling web`, which serves a device only once paired, MIGHTLING_ASK §4.3):
-- **The web UI has one account**, `admin@dreamference.dev`, with a password generated per install since 2026-10-07 (before that, a published default; ONYX §2 step 2). Every person on the LAN given that password shares one chat history and the admin panel; `ling-admin chat password` on the node prints it for a client's login page.
+- **The web UI has one account**, `admin@dreamference.dev`, with a password generated per install since 2026-10-07 (before that, a published default; ONYX §2 step 2). Every person on the LAN given that password shares one chat history and the admin panel; `ling-admin chat password` on the node printed it for a client's login page (since 2026-10-18 `ling-admin chat` answers only `remove` and `status`).
 - **The web UI's Gmail tool reads the node owner's mail.** Anyone on the LAN using the web UI can ask it to search that mail. `ling-admin node enable --no-web` leaves the web UI on loopback for an owner who wants remote `ling` but not a shared web UI (question 2).
 
 ---
@@ -130,7 +130,7 @@ Under the trusted-LAN decision both become "accepted by design" on an advertised
 | `proto` | `1` | Version of this contract. A client refuses a node whose `proto` is higher than it knows. |
 | `node` | `7c1e…` | The node's stable id, a UUID written once to `~/.config/dreamference/node-id`. It, not the address or the name, is what a client remembers. |
 | `version` | `1.3.0` | Mightling's version on the node, for the skew notice (§6.5). |
-| `web` | `3000` | Port of the web UI; absent when it is not shared. |
+| `web` | `3100` | Port of the web UI (`ling web` since 2026-10-08, `WEB_PORT` in `node_advertiser.py`; Onyx's 3000 before); absent when it is not shared or `ling` is not installed. |
 | `search` | `8888` | Port of SearXNG; absent when it is not shared. |
 | `state` | `ready` | `stopped`, `loading` or `ready`. Written by `server start` when it launches the model (`loading`) and when `/v1/models` first answers (`ready`), and by `server stop`. It changes once per launch, not per request. |
 | `main` | `1` | Present when the model assigned to the node is a chat model a coding client can use: any matrix entry that is not a diffusion, speech or embedding model. It is a property of the matrix entry, so nobody sets it. Used only to choose between several nodes (§12.3). |
@@ -140,7 +140,7 @@ Nothing that changes from minute to minute is advertised. Which model is loaded 
 
 ### 5.2 The node side: a static Avahi service file
 
-`ling-admin node enable` writes `/etc/avahi/services/mightling-node.service` (Avahi watches that directory and publishes the file without a restart), sets `node_advertise`, and re-publishes the web UI and SearXNG on every interface. `node disable` removes the file and restores the loopback binds. `node status` prints the file's records, the binds, and what a browse of the local network returns.
+`ling-admin node enable [--no-web] [--yes]` writes `/etc/avahi/services/mightling-node.service` (Avahi watches that directory and publishes the file without a restart), sets `node_advertise`, and re-publishes the web UI and SearXNG on every interface. `node disable` removes the file and restores the loopback binds. `node status` prints the file's records, the binds, and what a browse of the local network returns.
 
 - **Why a file and not a process.** A file needs no running publisher, so the node is advertised after a reboot with nobody logged in, like the model containers. A user unit holding the registration would need lingering, which is off here (§2).
 - **Why Avahi and not a responder of our own.** The node already runs one. A second responder on the same host competes for port 5353 and for the host name.
@@ -171,6 +171,8 @@ A `mightling-node` daemon that advertises itself, serves a descriptor and revers
 
 1. `DREAMFERENCE_VLLM_HOST`.
 2. `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml` or `~/.config/dreamference/config.toml`.
+
+   *As built, `MIGHTLING_NODE=<name>` comes between tiers 2 and 3 (one node, for one command; §18.2), and the launcher's own list (`ling-rs/src/node.rs`) numbers tiers 1 and 2 as one.*
 3. **This machine is a node** (`~/.config/dreamference/node-id` exists): `http://localhost:8000`, with no discovery at all. A GB10 never browses for itself.
 4. **The remembered node** (`$CODEX_HOME/node.json`): a browse looks for its `node` id and stops at the first answer, typically well under a second, and the address in that answer is used. This is what survives a DHCP address change. Only when the browse returns **nothing at all** is the remembered address tried, with one line saying so. The order matters: the model server's own answers carry no node id, so trying the old address first would connect a laptop that has moved to another network to whatever answers there on port 8000.
 5. **A browse.** One node found: it is used and remembered, with one line saying so. Several: §6.3. None: §6.4.
@@ -183,11 +185,13 @@ Tiers 1 and 2 are today's behaviour and still mean "I know where the server is".
 
 ```json
 { "node": "7c1e…", "name": "gx10-9428", "address": "192.168.0.105",
-  "model_port": 8000, "web_port": 3000, "search_port": 8888,
-  "version": "1.3.0", "last_seen": "2026-10-01T22:10:04+01:00" }
+  "model_port": 8000, "web_port": 3100, "search_port": 8888,
+  "version": "1.6.4", "last_seen": "2026-10-01T22:10:04+01:00" }
 ```
 
-- A small std-only crate, `ling-rs/node-locator/`, reads it and returns the endpoints. The launcher, `ling-search`, `ling-code` and `ling-app` share it, the way `/airgapped`'s resolver is shared, with the same byte-identical-copy test for the web crate.
+(`web_port` is the advert's `web` record: 3100, `ling web`, since 2026-10-08; it was 3000, Onyx's, when this was written.)
+
+- A small std-only crate, `ling-rs/node-locator/`, reads it and returns the endpoints. The launcher, `ling-search`, `ling-code` and `ling-app` share it, the way `/airgapped`'s resolver is shared, with the same byte-identical-copy test for the web crate. *(The app's copies, Tauri's `node_locator.rs` and then Electron's `node_locator.ts`, were removed on 2026-10-07 and 2026-10-08: the app's bundled `ling` resolves the node itself. Two copies remain, compared by `test_the_web_crates_locator_is_a_byte_identical_copy`.)*
 - `ling-search` uses `http://<address>:<search_port>` when `DREAMFERENCE_SEARXNG_URL` is unset, the machine is not a node and the file exists; otherwise today's `127.0.0.1:8888`.
 - **The remembered address is the fallback for blocked multicast.** Where a browse silently returns nothing (a guest Wi-Fi with client isolation, macOS without the local-network grant), a node used once, or set by hand, keeps working by address (tier 4).
 - **The file is the agent's to write when a session's working directory is the home folder**, as `/airgapped`'s level files are: the workspace-write sandbox allows writes under the working directory. The "never adopted silently" rule of §6.3 is launcher logic that such a session could get round by rewriting the file. The check that `$CODEX_HOME` does not lie under a writable root, which the `/airgapped` spec lists as not yet built, covers both.
@@ -202,7 +206,7 @@ A launcher subcommand, intercepted in `prepare_args` the way `night` is, so it c
 | `ling node use <name\|address>` | Remembers that node. An address works with no mDNS at all |
 | `ling node forget` | Deletes `node.json`; the next start browses again |
 
-There is no `/node` slash command: the patch series stands at 31,175 of 31,500 bytes.
+~~There is no `/node` slash command: the patch series stands at 31,175 of 31,500 bytes.~~ *Built on 2026-10-07 (`741353a`, merged `b6a7509`): patch `0025-node-slash-command` adds `/node`, which runs `ling-admin node …` (`provision`, `add`, `list`, `status`, `remove`) in the terminal, outside the sandbox (§18.9). It is the node-management command, not this one: `use` and `forget` stay `ling node`'s.*
 
 **Several nodes and none remembered:** an interactive `ling` lists them and asks which; `ling exec` and other non-interactive commands refuse with the list and the `ling node use` line. The client does not guess.
 
@@ -235,8 +239,8 @@ From the sources' outlines and a search on 2026-10-01; Phase 1 starts by repeati
 | `ling-rs/src/lib.rs` `DEFAULT_VLLM_HOST` | `http://localhost:8000` | the last tier only; the locator's address before it (§6.1) |
 | `ling-rs/src/lib.rs` `GMAIL_SERVICE_URL` | `http://127.0.0.1:8767` | unchanged, and asked only when this machine is a node (§10) |
 | `ling-rs/src/lib.rs` `OFFLINE_CHATGPT_BASE_URL` | `http://127.0.0.1:9/…` | unchanged: it is a deliberate dead end |
-| `ling-rs/src/app.rs` `ONYX_WEB_URL` | `http://localhost:3000` | unchanged; `ling app` starts `ling-app`, whose forwarder makes it true on a client (§7) |
-| `desktop/src-tauri/tauri.conf.json` window `url` | `http://localhost:3000/app` | unchanged, for the same reason |
+| `ling-rs/src/app.rs` `ONYX_WEB_URL` | `http://localhost:3000` | unchanged; `ling app` starts `ling-app`, whose forwarder makes it true on a client (§7). *Replaced: the constant is gone; since 2026-10-09 `ling app` opens Ask or Work, views of the app's own `ling app-server`, and names no web UI address (`ling-rs/src/app.rs`)* |
+| `desktop/src-tauri/tauri.conf.json` window `url` | `http://localhost:3000/app` | unchanged, for the same reason. *Replaced on 2026-10-07 (`690c9e7`) by the Electron app in `desktop/electron/`, which loads no node address* |
 | `ling-web-rs/src/search.rs` `DEFAULT_SEARXNG_URL` | `http://127.0.0.1:8888` | the locator's address when not a node (§6.2) |
 | `ling-web-rs/src/search.rs` `SEARXNG_START_HINT` | `ling-admin searxng start` | on a client: "on the node: …" |
 | `ling-code-rs/src/index/probe.rs` | asks the served model's `/metrics` whether it is busy, to freeze indexers | skipped when this machine is not a node: a remote model's load is no reason to pause a laptop's indexer (§8.3) |
@@ -250,7 +254,7 @@ Unchanged in kind: the catalog and `config.toml` in `$CODEX_HOME`, with the prov
 
 ## 7. `ling-app` on a client
 
-> **Superseded on 2026-10-07 and 2026-10-08.** This section describes the Tauri `ling-app`, which the Electron app replaced ([MIGHTLING_DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md)); `desktop/src-tauri/`, its forwarder and its copy of the node locator no longer exist. The Electron app reaches no web UI on the node: its Ask window is `ling web` on the same machine (port 3100) and its Work window `ling app-server`, both started from the bundled `ling`, whose launcher resolves the node's model server (§6.1). The node's advertisement names `ling web`'s port 3100 since 2026-10-08. Kept as the record of the Tauri design.
+> **Superseded on 2026-10-07 and 2026-10-08.** This section describes the Tauri `ling-app`, which the Electron app replaced ([MIGHTLING_DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md)); `desktop/src-tauri/`, its forwarder and its copy of the node locator no longer exist, and neither do the Electron ports of them (`forwarder.ts`, `discover.ts`, `node_locator.ts`, `sign-in.ts`, removed on 2026-10-08, `3febddb`). The Electron app reaches no web UI on the node and signs in to nothing: since 2026-10-09 Ask and Work are two views of one window on the app's own `ling app-server`, started from the bundled `ling`, whose launcher resolves the node's model server (§6.1; `ling-rs/src/app.rs`, MIGHTLING_ASK §18.6). The macOS bundle's local-network keys are in `desktop/electron/forge.config.js` (`extendInfo`), for that `ling`'s browse. The node's advertisement names `ling web`'s port 3100 since 2026-10-08. Kept as the record of the Tauri design.
 
 Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/src-tauri/tauri.conf.json` and `ONYX_WEB_URL` in `ling-rs/src/app.rs`.
 
@@ -277,6 +281,8 @@ Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/s
 
 ### 8.1 Builds
 
+*As built: the x86-64 Linux and both macOS targets since 2026-10-07 (`82e0e94`, `.github/workflows/build-clients.yml`, §8.4); `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc` as an unsigned preview since 1.5.1 (built 2026-10-07 from `d50a252`, merged `0c11248`; `.github/workflows/windows.yml`, `install.ps1`, MIGHTLING_WINDOWS_ARM). `ling-app` is Electron (Forge's `.deb` and `.zip` makers, and an unsigned `.dmg` preview from `.github/workflows/mac-preview.yml`), not the AppImage and `.msi` below.*
+
 | Target | Agent and web commands | `ling-code` | `ling-app` |
 |---|---|---|---|
 | `aarch64-unknown-linux-gnu` | today | today | `.deb`, AppImage (today) |
@@ -300,7 +306,7 @@ Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/s
 | Installer | `.deb` / script | script, `.dmg` for the app | PowerShell script, `.msi` for the app |
 
 - **`/airgapped` off Linux.** The `on` level's guarantee comes from three lines in `linux-sandbox`. On macOS and Windows the level still switches off `ling-search` and `ling-fetch` and still tells the model, but a command can reach the network. `/airgapped` must print that on those systems, as it already prints its other holes. Extending the hook to Seatbelt and the Windows sandbox is that spec's work, and costs patch bytes.
-- **macOS local-network permission.** `ling-app`'s bundle declares `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_mightling-node._tcp`), or the browse and the forwarder both fail silently. For `ling` in a terminal the grant belongs to the terminal application; whether that covers multicast from a child process is unverified. If it does not, macOS falls back to the system's own DNS-SD (§5.3) or to `ling node use <address>`.
+- **macOS local-network permission.** `ling-app`'s bundle declares `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_mightling-node._tcp`; since 2026-10-07 in `desktop/electron/forge.config.js`, `extendInfo`), or the browse and the forwarder both fail silently (the forwarder is gone since 2026-10-08; the browse is the bundled `ling`'s). For `ling` in a terminal the grant belongs to the terminal application; whether that covers multicast from a child process is unverified. If it does not, macOS falls back to the system's own DNS-SD (§5.3) or to `ling node use <address>`.
 - **Unsigned binaries.** A script that downloads with `curl` sets no quarantine flag, so the command-line tools run unsigned. (Apple silicon still needs a signature to run anything; the Rust linker gives every `aarch64-apple-darwin` binary an ad-hoc one, which gzip preserves.) A `.dmg` or `.msi` opened from a browser meets Gatekeeper or SmartScreen; signing needs an Apple Developer ID and a Windows code-signing certificate (question 4).
 
 ### 8.3 Indexing on a client
@@ -352,7 +358,7 @@ One entry point per system, and the machine decides the role:
 | `ling-search` | yes, through the node's SearXNG | |
 | `ling-fetch` | yes, from the client | |
 | `ling-code` | yes, with the per-system limits of §8.3 | |
-| `ling-app`, including voice | yes | forwarder (§7) |
+| `ling-app`, including voice | yes; voice on a node only (since 2026-10-08) | forwarder (§7), removed 2026-10-08: Ask and Work run on the client's own `ling app-server` against the node's model server. The microphone sends to the speech-to-text service on the same machine's loopback (`SPEECH_URL` in `desktop/electron/src/voice.ts`), and a client runs no Docker sidecars |
 | `/airgapped` | yes; `on` is kernel-enforced on Linux only | §8.2 |
 | Gmail in `ling` (`ling-admin gmail`) | **no** | The command is Python, and the service's shared secret is a file on the node. The launcher adds the Gmail block to the prompt only on a node; a remote client never sees a command it cannot run |
 | `/night` and Night Shift | **no** | The queue is on the machine where `/night add` ran, and the runner is `ling-admin` on the node. On a client `/night` answers that Night Shift runs on the node, in place of queueing tasks nothing will run. Part 3's follow-up (§13.3) is what would change this |
@@ -467,11 +473,11 @@ Sending work to a node: a script, or an agent task of Night Shift's kind. It com
 
 ### 13.2 Pairing: `ling-admin node add`
 
-- `ling-admin node add <node>` finds the node by the browse of §5, creates a key used for nothing else (`~/.ssh/mightling-node_ed25519`), and installs its public half on the node. That one step needs the node's password, typed once at `ssh-copy-id`'s own prompt; there is no way to authorise a key without authenticating once.
+- `ling-admin node add <node>` finds the node by the browse of §5, creates a key used for nothing else (`~/.ssh/mightling-node_ed25519`), and installs its public half on the node. That one step needs the node's password, typed once at `ssh-copy-id`'s own prompt; there is no way to authorise a key without authenticating once. *(As built, not `ssh-copy-id`: one ordinary SSH login runs `ling-admin node authorize` on the node, which writes the forced-command line, §18.6.)*
 - **The key is restricted on the node** to one forced command, `ling-admin node serve-job`, with no terminal, no port forwarding and no agent forwarding. It can push to the job repositories and ask for jobs; it cannot open a shell. That is what makes the caps of §13.4 mandatory: a raw `ssh <node> python train.py` with this key is refused.
 - **How git gets through a forced command.** `sshd` ignores the command the client asked for and runs `serve-job`, passing the request in `SSH_ORIGINAL_COMMAND`. `serve-job` runs `git-receive-pack` or `git-upload-pack` itself when the request is one of those two for a path under the job repositories, handles its own job operations, and refuses everything else. This is the pattern gitolite uses.
 - **The node's host key is pinned to its `node` id** at `node add`, so a different machine answering at the same address later is refused, not trusted.
-- **The node's address is resolved at every connection, as the client resolves its node (§6.1, tier 4).** A paired record remembers the address seen last, but no connection uses it directly: a browse looks for the node's id, the address in that answer is used and the record updated. The remembered address is never connected to: a browse that does not show the node (nothing answering, or other nodes answering and this one not) is repeated for up to a minute, then the node is reported as off the network and the old address, which may be another machine's by now, is left alone. (Added 2026-10-10 after a night's lane was lost to a DHCP move: the lanes had used the recorded address. The owner's rule: never use an address, always resolve; when the network does not answer, retry for a minute, then refuse.) `node sync-model --address` is the one deliberate exception, for a direct link.
+- **The node's address is resolved at every connection, as the client resolves its node (§6.1, tier 4).** A paired record remembers the address seen last, but no connection uses it directly: a browse looks for the node's id, the address in that answer is used and the record updated. The remembered address is never connected to: a browse that does not show the node (nothing answering, or other nodes answering and this one not) is repeated for up to a minute, then the node is reported as off the network and the old address, which may be another machine's by now, is left alone. (Added 2026-10-10 after a night's lane was lost to a DHCP move: the lanes had used the recorded address. The owner's rule: never use an address, always resolve; when the network does not answer, retry for a minute, then refuse.) `node sync-model --address` is the one deliberate exception, for a direct link. (Built in `d746115` and `7275cdf`, `NodePairing.resolve`. This is stricter than the launcher's tier 4, which still tries the last address when a browse returns nothing at all: a paired node never is.)
 - `ling-admin node remove <node>` deletes the key on both sides.
 - **Once this exists, control (§12.4) can ride it.** A paired node could accept `node set` and `node stop` through the same restricted key, which would make the open control agent unnecessary between paired Sparks. Whether to keep the agent at all is decided when Part 3 is built (question 3).
 
@@ -554,6 +560,8 @@ A worktree on another machine has no virtualenv, and Night Shift's fallback (the
 
 ## 14. Phases
 
+*As of 2026-10-19: Phase 1 built 2026-10-02 (its "done when" met on one machine only, §18.3); Phase 2's forwarder and sign-in built 2026-10-02 and removed 2026-10-08 (§7), the installers built (`install.sh`, `install.ps1`); Phase 3 built for the client builds (§8.4) but not `ling-code setup` in Rust; Phase 4 built 2026-10-03 (`869f6d2`) with SSH in place of `node control` (§15.1); Phase 5 built 2026-10-03 (`869f6d2`), not yet run between two machines (§18.10).*
+
 | Part | Phase | Work | Done when |
 |---|---|---|---|
 | 1 | 0 | The unverified items of §2: build the client on macOS and Windows; `mdns-sd` beside each system's resolver; the macOS local-network grant for a terminal tool; SearXNG from a LAN address; the web UI through a forwarder | each has a measured answer recorded here |
@@ -583,7 +591,7 @@ These settle the corresponding questions below; where an earlier section says ot
 2. *(Decided, §15.1.)* **Is the web UI meant to be shared with the whole LAN by default?** It has one account and can search the node owner's mail. The alternative default is `node enable --no-web`, with `ling-app` on other machines switched on deliberately.
 3. *(Decided, §15.1.)* **Control between nodes.** Part 2 chooses a per-node switch that, once on, lets any LAN machine set or stop that node's model with no key (§12.4). Part 3 introduces an SSH pairing for jobs (§13.2) that could carry control as well. Keep the open switch for its simplicity, or drop it once pairing exists?
 4. *(Decided, §15.1.)* **Signing.** Without an Apple Developer ID and a Windows code-signing certificate, `ling-app` installers show a warning on first open. Buy them, or document the warning?
-5. **Which client targets matter?** Intel Macs and Windows on ARM each add a build and a test machine.
+5. **Which client targets matter?** Intel Macs and Windows on ARM each add a build and a test machine. *(Answered in part by building both: Intel Macs on 2026-10-07, §8.4; Windows on Arm as a preview in 1.5.1, MIGHTLING_WINDOWS_ARM.)*
 6. *(Decided, §15.1.)* **Windows natively, or WSL?** Native costs the items of §8 (sandbox executables, no exact code index). Under WSL the Linux client runs unchanged, but mDNS does not cross WSL's default NAT, so discovery would be `ling node use <address>`.
 7. **Gmail from a remote client.** Out of scope here. Wanted at all, given that it would let every LAN client read one person's mail?
 8. *(Decided, §15.1.)* **GPU jobs beside a resident model** (§13.4). The default refuses them unless the node's model server is stopped. Is there a case, such as a small fine-tune beside the 27B, worth an override?
@@ -598,7 +606,7 @@ Offline, with no network and no real Avahi:
 - **Launcher:** each resolution tier in order, with a stand-in browser; a node machine never browses; the remembered node is found again by id at a new address; several nodes and none remembered refuses in `exec`; a different node is never adopted silently; each message of §6.4; `proto` too new is refused; `ling node list/use/forget`; `node.json` written whole.
 - **Locator crate:** the web crate's copy is byte-identical; `ling-search` picks the node's SearXNG only when the machine is not a node and no override is set.
 - **`ling-admin node`:** the service file's exact text for a given port, id, version, `main` and `control`; `enable` and `disable` change the two binds and nothing else, with `sudo` and `docker` mocked (the suite must not write `/etc` or touch a running container); staleness is reported by `server start --port` and by an update.
-- **`ling-app`:** the forwarder passes a streamed response and a WebSocket upgrade from a stand-in server; no forwarder on a node.
+- **`ling-app`:** the forwarder passes a streamed response and a WebSocket upgrade from a stand-in server; no forwarder on a node. *(Replaced on 2026-10-08 by `test_ask_in_the_app_reaches_no_server_and_reads_no_password` in `tests/test_node.py`: the retired forwarder, discovery, locator and sign-in sources stay absent from `desktop/electron/src`.)*
 - **Night Shift on a client:** `/night add` refuses with the node message.
 - **Remote jobs (Part 3), with `ssh` and `git` replaced by stand-ins:** a job cannot be composed without a memory cap and a time limit; the `authorized_keys` line written by `node add` carries the forced command and the no-terminal, no-forwarding options; `serve-job` refuses anything that is not one of its operations; the sandbox argument list has no read-write bind outside the worktree, the job's own `CODEX_HOME` and scratch; an agent job keeps the network namespace and a script job at `on` does not; `node add` reports lingering that is off; the stricter of two `/airgapped` levels is applied; a CPU-only job's environment hides the GPU; the setup result is reused for unchanged lock files; a job record survives its stream being closed.
 
@@ -615,7 +623,7 @@ Live, on two machines:
 - [README](./README.md): the header line "Deployment Model: single-node, air-gapped"; the two rows of §4 move to "Accepted by design".
 - [ARCHITECTURE](./DREAMFERENCE_ARCHITECTURE.md): the two halves of §3.
 - [SETUP](./DREAMFERENCE_SETUP.md): the installers and roles of §9.
-- [ONYX](./DREAMFERENCE_ONYX.md): `bind_to_loopback()` becomes conditional on `node_advertise`; the SearXNG publish address.
+- [ONYX](./DREAMFERENCE_ONYX.md): `bind_to_loopback()` becomes conditional on `node_advertise`; the SearXNG publish address. *(Moot since Onyx's retirement on 2026-10-18; the web UI's share is `ling web --lan`, MIGHTLING_ASK.)*
 - [MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md): the resolution tiers, `ling node`, the build targets.
 - [MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md): `ling-code setup` and the per-system rules of §8.3.
 - [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md): the statement for macOS and Windows; [MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md): the allow-list entry for the node.
@@ -642,25 +650,25 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 
 ### 18.1 What exists
 
-*As built on 2026-10-02. The `desktop/src-tauri` rows are history: the Electron app replaced the Tauri one on 2026-10-07 (§7).*
+*As built on 2026-10-02. The `desktop/src-tauri` rows are history: the Electron app replaced the Tauri one on 2026-10-07 (`690c9e7`), whose TypeScript ports of the forwarder, discovery, locator and sign-in were removed on 2026-10-08 (`3febddb`, §7). The `OnyxRunner` row is history too: Onyx was retired on 2026-10-18 (`eb42c76`).*
 
 | Piece | Where | State |
 |---|---|---|
 | `ling-admin node enable [--no-web]`, `disable`, `status`, `id` | `dreamference/node/` (`NodeAdvertiser`, `NodeServiceFile`, `NodeSettings`, `NodeIdentity`, `NodeBrowser`) | Tested offline (20 tests). `status` run live. **`enable` was not run on this machine**: it needs root once and it opens the web UI to the LAN, which is the owner's act |
 | The Avahi service file, rewritten by `server start|stop|remove` | `NodeServiceFile`; hooks in the CLI controller | Exact text tested; the three state changes tested |
-| The two binds (§4) | `OnyxRunner.web_bind_env()`, `SearxngSidecar.run_command()` and `start()` | Tested offline; no container was recreated |
-| The locator crate and its copies | `ling-rs/node-locator/`, `ling-web-rs/src/node_locator.rs`, `desktop/src-tauri/src/node_locator.rs` | 8 tests; a Python test holds the three byte-identical |
+| The two binds (§4) | `OnyxRunner.web_bind_env()`, `SearxngSidecar.run_command()` and `start()` | Tested offline; no container was recreated. *Replaced on 2026-10-08 and 2026-10-18: the web UI's bind is `NodeAdvertiser.serve_web()` (`ling web start --lan`, unit `mightling-web.service`); `OnyxRunner` is deleted (`eb42c76`)* |
+| The locator crate and its copies | `ling-rs/node-locator/`, `ling-web-rs/src/node_locator.rs`, `desktop/src-tauri/src/node_locator.rs` | 8 tests; a Python test holds the three byte-identical. *Two copies since 2026-10-07: the Tauri copy went with Tauri, its Electron port on 2026-10-08* |
 | The resolution tiers, the messages, `node.json` | `ling-rs/src/node.rs`, three hunks in `lib.rs` | 25 launcher tests with a stand-in browser. The real browse run live (§18.3) |
 | `ling node list|use|forget`, `MIGHTLING_NODE=<name>` | `node.rs` | Parsing and decisions tested; run live as commands (§18.3) |
 | `ling-search` on the node's SearXNG | `ling-web-rs/src/search.rs` | 3 new tests in the web crate's 43 |
-| `ling-app`'s forwarder and one-time sign-in | `desktop/src-tauri/src/forwarder.rs`, `discover.rs`, `auto_sign_in.js`, `main.rs` | 7 Rust tests and 4 Python tests (the sign-in script runs under node); the crate builds; the forwarder run live in front of the real web UI (§18.3). The window itself was not opened |
+| `ling-app`'s forwarder and one-time sign-in | `desktop/src-tauri/src/forwarder.rs`, `discover.rs`, `auto_sign_in.js`, `main.rs` | 7 Rust tests and 4 Python tests (the sign-in script runs under node); the crate builds; the forwarder run live in front of the real web UI (§18.3). The window itself was not opened. *Replaced: ported to Electron on 2026-10-07, removed on 2026-10-08 (`3febddb`); nothing forwards or signs in since (§7)* |
 | `/night add` refused on a client; Gmail prompt block only on a node | `ling-rs/src/night.rs`, `lib.rs` | Tested |
 
 ### 18.2 Where the build departs from the design
 
 - **Whether a node is advertised is not a `dreamference.toml` value.** §4 names one config value, `node_advertise`. It is kept in `~/.config/dreamference/node-advertise.json` instead: `dreamference.toml` is resolved from the working directory first, and the address a container publishes on must not depend on the folder `ling-admin chat configure` was run from.
 - **A machine becomes a node when it first loads a model, builds `ling` or builds the window**, not only at `node enable`: `server start`, `codex build` and `desktop build|install` write `~/.config/dreamference/node-id` if it is missing. Otherwise a GB10 that never ran `node enable` would browse for a node on every start (tier 3 is keyed on that file).
-- **A last tier keeps an old install working.** With no node id, nothing remembered and nothing found, the launcher uses `localhost:8000` if a model server answers there, and `ling-app` uses a web UI answering on `localhost:3000`. This is the GB10 that was installed before the split and has not run any of the three commands above yet. It costs such a machine one 2 s browse per start until then.
+- **A last tier keeps an old install working.** With no node id, nothing remembered and nothing found, the launcher uses `localhost:8000` if a model server answers there, and `ling-app` uses a web UI answering on `localhost:3000` (until 2026-10-08; the app's bundled `ling` follows the launcher's rule since). This is the GB10 that was installed before the split and has not run any of the three commands above yet. It costs such a machine one 2 s browse per start until then.
 - **`MIGHTLING_NODE` ranks above "this machine is a node"**, so a node can use another node for one command.
 - **Loopback and link-local IPv6 addresses are never used from a browse.** §5.3 says IPv6 "with its scope id"; the URL type the launcher uses cannot carry a scope, so a link-local IPv6 answer is dropped and a global or unique-local one is used. Loopback is dropped because a machine that browses is by definition not the node it finds.
 - **A stale advert and a node still loading after a reboot look the same.** The file says `ready` from before the reboot while Docker restarts the model server. The message for `state=ready` with a refusing port therefore says both: the server may have stopped, or may still be loading.
@@ -692,17 +700,17 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 ### 18.4 Not built, not run
 
 - **No client on a second machine.** The Phase 1 "done when" needs one; §18.3 has the one-machine stand-in. The "No Mightling node found" message was not seen live either: on this machine a model server always answers on loopback, which is the last tier.
-- **`node enable` with root**, the file under `/etc/avahi/services`, Avahi publishing a file the user owns, and the two containers recreated on `0.0.0.0`.
+- **`node enable` with root**, the file under `/etc/avahi/services`, Avahi publishing a file the user owns, and the two containers recreated on `0.0.0.0`. *Run since: the second GB10 was installed and advertised on 2026-10-08, and this machine's browse found it (§18.10); the Onyx half of the binds is gone since 2026-10-18.*
 - **SearXNG answering a LAN client.** It does answer a client that is not on loopback: asked for JSON from the web UI's API container (`172.18.0.7`, over the Docker network), it returned 200 with 20 results on 2026-10-02. A client on the LAN address was not tried, because the port is not published there until `node enable`.
-- `install.ps1` and a macOS run of `install.sh` (§9). `install.sh` itself exists (written on the same day: release assets with checksums, the role decided by the machine, `--role`); its node role now writes the node id (`ling-admin node id`) and runs `ling-admin node enable --yes` with no question asked (since 2026-10-08, with lingering and the model too: SETUP §3.2.1), with `--no-advertise` to opt out. The node role was not run end to end. Also not built: the release matrix of §8.1, `ling-code setup` in Rust (§8.3), and every macOS and Windows build. The macOS bundle's two local-network keys are in `desktop/src-tauri/Info.plist`, untested.
-- **The window itself**: `ling-app` was built and tested as a crate, but not opened as a client, so the one-time sign-in (tested under node, and the default account answers 204 here), voice through the forwarder and the port-33000 fallback were not watched.
+- `install.ps1` and a macOS run of `install.sh` (§9). `install.sh` itself exists (written on the same day: release assets with checksums, the role decided by the machine, `--role`); its node role now writes the node id (`ling-admin node id`) and runs `ling-admin node enable --yes` with no question asked (since 2026-10-08, with lingering and the model too: SETUP §3.2.1), with `--no-advertise` to opt out. The node role was not run end to end. Also not built: the release matrix of §8.1, `ling-code setup` in Rust (§8.3), and every macOS and Windows build. The macOS bundle's two local-network keys are in `desktop/src-tauri/Info.plist`, untested. *Since built: `install.ps1` and the Windows preview (`d50a252`, 2026-10-07, released in 1.5.1), the x86-64 Linux and macOS clients (`82e0e94`, §8.4); the node role ran unattended on the second GB10 on 2026-10-08 (§18.10). The local-network keys are in `desktop/electron/forge.config.js` since 2026-10-07. `ling-code setup` in Rust is still not built.*
+- **The window itself**: `ling-app` was built and tested as a crate, but not opened as a client, so the one-time sign-in (tested under node, and the default account answers 204 here), voice through the forwarder and the port-33000 fallback were not watched. *Moot since 2026-10-08: the forwarder and the sign-in are removed (§7).*
 - **In Part 3:** sending jobs from a client (the sender is Python; open question 9 is undecided). Everything else this bullet listed on 2026-10-02 was built on 2026-10-03 (§18.8).
 
 ### 18.5 Tests
 
 - `tests/test_node.py` (Python): the service file's exact text; an update changing one record; a node never enabled never advertised by a side effect; the state through `server start|stop`; a file the user cannot write reported; the node id written once; settings independent of the working directory; the web UI's and SearXNG's publish addresses; SearXNG recreated when its address no longer matches; `enable` without root (binds applied, file printed), with root once (then no root), `disable` with and without root; `status`; the browse output; the three locator copies; the commands; every unattended caller naming its model server.
 - `ling-rs/src/node.rs` (launcher, in the export): each tier in order; a node never browses; the remembered node found again by id at a new address; the last address only when nothing answers; a different node never adopted silently; several nodes with and without exactly one `main`; the refusal where no question can be asked; `proto` too new; each message of §6.4; names, addresses and id prefixes; `ling node` parsing, `use`, `forget`, the list; the advert parsed; address choice; one row per node; `node.json` written whole; the version notice once a day. One ignored test runs the real browse.
-- `ling-rs/node-locator` (8), `ling-web-rs` (3 new), `desktop/src-tauri` (forwarder 4, discovery 3).
+- `ling-rs/node-locator` (8), `ling-web-rs` (3 new), `desktop/src-tauri` (forwarder 4, discovery 3). *The `desktop/src-tauri` tests went with Tauri on 2026-10-07; their Electron ports went on 2026-10-08, replaced by `test_ask_in_the_app_reaches_no_server_and_reads_no_password`.*
 
 ### 18.6 Part 2 as built: pairing, and managing a node from another
 
@@ -794,7 +802,7 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 
 **Tests (offline).** `tests/test_node.py`: lanes (a same-model replica is a lane; another model, a held runner lock and a silent node are each named; `none` asks nobody), memory in the list and in `info`, the environment built once and reused, a changed lock file or command is a new one, a failed setup and a missing module, `--out` kept and not committed and its tar stream, a hostile archive that cannot write outside, binds only under `[node] bindable`, pruning by both rules, `sync-model` end to end and each refusal, the CLI reaching every new option. `tests/test_night_shift.py`: a session here holding this lane and not a replica's, a replica counting only its own tasks, no SSH without a paired node, a task handed to a node (simulated in-process, with git pushing and fetching through real repositories) worked there and its branch brought back, a drop forwarded, the node's refusals, the job sandbox argument list for a task from another machine. `tests/test_swe_bench.py`: instances on a replica through the relay URL, the relay forwarding and closing. `ling-rs/src/night.rs`: `--on` in both orders and forms, refused names, the field, `list`, `show` and the forwarded drop (14 tests, run in a stub crate with the launcher's own sources).
 
-**Not run:** anything between two machines, a real `node sync-model`, and a real hand-off over SSH. The launcher change is in the build of `258c3b5` (2026-10-03): `ling night --help` there lists `/night add [--test "<cmd>"] [--on <node>] <task>`; no task was queued with `--on`, since there is no second node.
+**Not run:** anything between two machines, a real `node sync-model`, and a real hand-off over SSH. *(Since: a `node sync-model` was tried on 2026-10-08 and did not complete, and a lane ran on 2026-10-09; §18.10.)* The launcher change is in the build of `258c3b5` (2026-10-03): `ling night --help` there lists `/night add [--test "<cmd>"] [--on <node>] <task>`; no task was queued with `--on`, since there is no second node.
 
 
 ### 18.9 Added on 2026-10-07: `/node` in the TUI
@@ -817,8 +825,22 @@ A second GB10 (an ASUS GX10, renamed `second-puffin`, on Wi-Fi like this one) wa
 - **`node sync-model` did not complete** between the two 1.4.1 installs; the weights were copied with rsync, and the transfer was not retried on 1.5.1.
 - **The upgrade to 1.5.1 on both machines** moved the advertisement to `_mightling-node._tcp` and rewrote the paired key's forced command in `authorized_keys` to the renamed `ling-admin` (RENAME_MIGHTLING §4.2), which is what the pairing between the two needed to keep working.
 
-Not yet run between the two: jobs (`node run`), lanes for Night Shift or SWE-bench (the second machine is reserved), `/night add --on`, and `node provision`.
+Not yet run between the two: jobs (`node run`), lanes for Night Shift or SWE-bench (the second machine is reserved), `/night add --on`, and `node provision`. *(Except once: a Night Shift lane on the second machine ran on the night of 2026-10-09 and was lost when its DHCP lease moved, which led to resolving every connection by id, `d746115` and `7275cdf`, §13.2.)*
 
 ### 18.11 Added on 2026-10-09: a proxy left in the environment
 
 A node's address is exempt from any `HTTP_PROXY` the user's shell carries (EGRESS §11): `ling` adds the configured host and the remembered node's address to `NO_PROXY` before Codex starts, and Night Shift adds a lane's host to each task's environment. A node found by a browse for the first time is not in it for that first session, because the variable can only be set before any thread exists and the browse comes later; the launcher's own requests to it skip proxies regardless, and from the next start it is the remembered node and exempt.
+
+### 18.12 Added since 2026-10-08 (recorded 2026-10-19, against 1.6.4)
+
+The `node` group as the code has it (`dreamference/cli/dreamference_cli_controller.py`): `enable [--no-web] [--yes]`, `disable`, `status [<name>]`, `id`, `list`, `add <name> [--user] [--ssh-port 22]`, `remove`, `set <name> --model <key>`, `start`, `stop`, `run <name> [--memory] [--time] [--test] [--gpu] [--setup] [--out] [--bind …] -- <command>`, `jobs [<name>]`, `logs`, `cancel`, `fetch`, `sync-model <name> <model> [--address]`, `provision`, `prepare`; and, typed by no person, `askpass`, `job-exec`, `authorize` and `serve-job [--key]`. `--gpu` is parsed and refused by the node (§18.7).
+
+| Piece | Where | Since |
+|---|---|---|
+| `node provision [hosts…] [--all] [--web] …` (set up a new GB10 from this one, or update paired ones) and `node prepare` (its root steps, run with sudo) | `dreamference/node/node_provisioner.py`, `node_prepare.py`, `fleet_*.py`; spec [MIGHTLING_FLEET](./DREAMFERENCE_MIGHTLING_FLEET.md) | merged 2026-10-08 (`249c262`), released in 1.5.1 |
+| `node askpass`: ssh's password prompt answered from the provisioning run's socket | `dreamference/node/fleet_askpass.py` (FLEET §8.2) | same |
+| `provision --web` shares `ling web` through `node enable`; it no longer installs Onyx (it had failed at that step since 1.5.1) | `node_provisioner.py` | 2026-10-18 (`d43a926`) |
+| Wi-Fi power saving: `node enable` warns, `node prepare` turns it off (its one NetworkManager change), a client's missed browse adds a hint (§6.4) | `dreamference/vllm_server/wifi_power_save.py`, `ling_node_locator::wifi_power_save_hint` (both copies) | 2026-10-12 (`9fb0b1e`, `1ae9387`, `80b2594`) |
+| Onyx retired: `node enable` no longer reads Onyx's `.env` or binds its nginx, and `node status` no longer reports port 3000 | `node_advertiser.py`, `node_settings.py` | 2026-10-18 (`eb42c76`) |
+
+`node provision` has still not been run against a machine (FLEET's status line).

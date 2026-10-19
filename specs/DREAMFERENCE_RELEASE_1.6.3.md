@@ -1,8 +1,8 @@
 # Mightling 1.6.3 — release notes
 
-**Status:** prepared 2026-10-15 on the branch `release/1.6.3` (origin/main at `730a93e`, the version
+**Status:** published 2026-10-15 as `v1.6.3` (tag on `18aa24a`; this line updated 2026-10-19). Prepared 2026-10-15 on the branch `release/1.6.3` (origin/main at `730a93e`, the version
 set to 1.6.3 in `setup.py`, `dreamference/__init__.py`, the MCP server's `serverInfo` and
-`desktop/electron/package.json`, and these notes); not yet published. Cut the night the turn-end
+`desktop/electron/package.json`, and these notes). Cut the night the turn-end
 compaction bench v2 passed (owner's decision of 2026-10-14: a pass merges `compaction/cache-hit`
 with the winning arm on by default and releases). There is no 1.6.2: the Code Mode fix merged after
 1.6.1 (`c906339`) was never cut on its own and ships here. Built from `git log v1.6.1..origin/main`.

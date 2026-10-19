@@ -34,7 +34,7 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 - `minima-ai/mnma_qwen3.8_27b_nvfp4`: the night-2 candidate, pinned to revision `16e768e7…`;
 - `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1`: the diffusion model.
 
-**The recipe (`qwen3.8-27b-nvfp4-dflash2`)** runs on SGLang from `lmsysorg/sglang` pinned by digest (v0.5.21 since 1.6.2, after `docs/dev/sglang-probe-2026-10-14.md`; v0.5.19 before, from github.com/hasso5703/dgx-spark-qwen38 v1.18):
+**The recipe (`qwen3.8-27b-nvfp4-dflash2`)** runs on SGLang from `lmsysorg/sglang` pinned by digest (v0.5.21 since 1.6.4, which carries the unpublished 1.6.2's pin, after `docs/dev/sglang-probe-2026-10-14.md`; v0.5.19 before, from github.com/hasso5703/dgx-spark-qwen38 v1.18):
 - context 262,144 tokens (`max_model_len`); `gpu_memory_utilization` 0.50; `container_headroom_gb` 24;
 - tool calls `qwen3_coder`, reasoning parser `qwen3`;
 - DFlash2 drafter (`method: DFLASH`, `quantization: modelopt_fp4`) with 16 speculative tokens;
