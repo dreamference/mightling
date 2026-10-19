@@ -205,9 +205,21 @@ def build(requests: List[Dict[str, Any]], attempts: List[Dict[str, Any]], runs_d
         # The completion follows the generation prompt directly: label it whole.
         for t in range(len(prompt), len(ids)):
             labels[t] = ids[t]
+        headers = _count(ids, start_header)
+        spans = sum(1 for t in range(1, len(ids)) if labels[t] != IGNORE and labels[t - 1] == IGNORE)
+        if headers != spans:
+            # A tokenization surprise at a turn boundary (e.g. `</think>\n\n` merging with the
+            # text after it) would silently train on the wrong tokens: refuse the sample.
+            counts["label_mismatch"] = counts.get("label_mismatch", 0) + 1
+            continue
         samples.append({"attempt": owner, "input_ids": ids, "labels": labels,
                         "tokens": len(ids), "trained": sum(1 for x in labels if x != IGNORE)})
     return samples, counts
+
+
+def _count(haystack: Sequence[int], needle: Sequence[int]) -> int:
+    m = len(needle)
+    return sum(1 for i in range(len(haystack) - m + 1) if list(haystack[i:i + m]) == list(needle))
 
 
 def _contains(haystack: Sequence[int], needle: Sequence[int]) -> bool:
@@ -254,7 +266,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     trained = sum(s["trained"] for s in samples)
     total = sum(s["tokens"] for s in samples)
     print(f"✅ {len(samples)} samples ({counts['segments']} segments, {counts['matched']} matched, "
-          f"{counts['no_completion']} without a completion): {total / 1e6:.2f}M tokens, "
+          f"{counts['no_completion']} without a completion, {counts.get('label_mismatch', 0)} refused "
+          f"for a label mismatch): {total / 1e6:.2f}M tokens, "
           f"{trained / 1e6:.2f}M trained -> {args.out}")
     return 0
 

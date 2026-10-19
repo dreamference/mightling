@@ -19,7 +19,8 @@ k 2,048, v 6,144, split in that order in `Qwen3_5GatedDeltaNet.forward`). SGLang
 (`LoRAAdapter._normalize_in_proj_qkvz`) accepts either split `in_proj_q/k/v/z` or one merged
 `in_proj_qkvz`, never `in_proj_qkv`. `export` therefore writes the split form: `lora_A` of
 `in_proj_qkv` is repeated for q, k and v, `lora_B` is cut into its row slices, and `in_proj_z` is
-copied. That is exact: each slice's product `B_slice @ A` is the matching rows of `B @ A`.
+copied. That is exact: each slice's product `B_slice @ A` is the matching rows of `B @ A`. Its
+`adapter_config.json` names the fused `in_proj_qkvz` (see `export_config`).
 
 `audit` checks the targets against the checkpoint's tensors, against the HF model built on the
 meta device (no memory, no GPU), against PEFT, and against SGLang's list and dimensions; and runs
@@ -109,11 +110,20 @@ def export_for_sglang(tensors: Dict[str, Any], text_config: Dict[str, Any]) -> D
 
 
 def export_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """The adapter_config.json SGLang reads: the split names in place of `in_proj_qkv`."""
+    """
+    The adapter_config.json SGLang reads.
+
+    SGLang normalizes `target_modules` by name (`get_normalized_target_modules`) and refuses an
+    adapter naming a module outside `--lora-target-modules`, or, without that flag, adds the names
+    as they are, so `in_proj_qkv`, `in_proj_z` or `in_proj_q` would leave the fused
+    `in_proj_qkvz` unwrapped. The config therefore names `in_proj_qkvz` while the tensors stay
+    split (`in_proj_q/k/v/z`), which `_normalize_in_proj_qkvz` stacks into it.
+    """
     out = dict(config)
-    modules = [m for m in config["target_modules"] if m != "in_proj_qkv"]
-    if "in_proj_qkv" in config["target_modules"]:
-        modules += ["in_proj_q", "in_proj_k", "in_proj_v"]
+    gdn_inputs = {"in_proj_qkv", "in_proj_z", "in_proj_q", "in_proj_k", "in_proj_v"}
+    modules = [m for m in config["target_modules"] if m not in gdn_inputs]
+    if gdn_inputs & set(config["target_modules"]):
+        modules.append("in_proj_qkvz")
     out["target_modules"] = sorted(set(modules))
     return out
 
