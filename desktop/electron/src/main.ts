@@ -566,6 +566,14 @@ export async function main(options: MainOptions): Promise<void> {
     app.quit();
   });
   app.on("before-quit", () => server.stop());
+  // Node's own teardown, after the last window and before the process ends, waits for every file-system
+  // request still pending, and a read a macOS folder-access prompt holds never ends: the main process
+  // stayed alive, windowless, after SIGTERM (1.7.0 Mac test), past the fallback below. With such a
+  // read pending, the app ends here, at the last moment JavaScript runs, without that teardown.
+  const hardExit = () => process.kill(process.pid, "SIGKILL");
+  app.on("will-quit", () => {
+    if (userFs.pendingCalls() > 0) hardExit();
+  });
   // A SIGTERM (logging out, `kill`, a service manager) or a Ctrl+C in the terminal that started the
   // app quits it as the menu's Quit does, the agent's server and the tasks with it; a quit that has
   // not finished within five seconds (on a Mac one stopped the server and left the window open)
@@ -574,10 +582,14 @@ export async function main(options: MainOptions): Promise<void> {
     process.on(signal, () => {
       tasks.stopAll();
       server.stop();
-      setTimeout(() => app.exit(0), 5_000).unref();
+      setTimeout(() => (userFs.pendingCalls() > 0 ? hardExit() : app.exit(0)), 5_000);
       app.quit();
     });
   }
+
+  // The e2e's stand-in for a folder-access prompt nobody answers: a read of a FIFO no one writes,
+  // which holds a libuv worker for good (app.e2e.ts, "quits while a read hangs").
+  if (process.env.MIGHTLING_TEST_PENDING_READ) void userFs.readText(process.env.MIGHTLING_TEST_PENDING_READ).catch(() => {});
 
   showView(options.work ? "work" : "ask");
   // The pet, when Settings › Pets has it on (never in the egress audit's session).
