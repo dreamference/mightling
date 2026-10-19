@@ -321,6 +321,12 @@ test("4 preview tab: a local page, comment mode to the composer, a site out on t
     void previewed;
     const view = app.windows().find((entry) => entry.url().startsWith("http://127.0.0.1"))!;
     expect(await view.evaluate(() => typeof (window as unknown as { electronBridge?: unknown }).electronBridge)).toBe("undefined");
+    // The page fills the tab's body: its viewport is the body's size (a Mac once reported about half).
+    await expect.poll(async () => {
+      const body = await page.locator(".preview-surface").boundingBox();
+      const inner = await view.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+      return body ? Math.abs(inner.width - body.width) <= 2 && Math.abs(inner.height - body.height) <= 2 : false;
+    }, { timeout: 5_000 }).toBe(true);
     // The picture from the internet asked rather than loaded.
     await expect(page.locator(".preview-ask")).toContainText("example.com");
     await shoot("4-preview-ask.png");
