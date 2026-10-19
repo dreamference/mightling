@@ -10,7 +10,9 @@ import http from "node:http";
 import os from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+
+import { closeApp, closeLeftovers, launch } from "./apps";
 
 import { DIFF, projectFolders, received, runs, writeStandIn } from "./stand-in";
 
@@ -18,6 +20,7 @@ const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.cjs")
 const out = process.env.MIGHTLING_LOOK_DIR;
 
 test.skip(!process.env.DISPLAY || !fs.existsSync(main), "needs a display and the Vite build");
+test.afterEach(closeLeftovers);
 
 interface Session {
   app: ElectronApplication;
@@ -35,7 +38,7 @@ async function open(prepare?: (home: string) => void, extraEnv: (home: string) =
   for (const folder of [path.join(askRoot, "q-1a2b3c"), fetcher, website]) fs.mkdirSync(folder, { recursive: true });
   prepare?.(home);
   const ling = writeStandIn(home, askRoot);
-  const app = await electron.launch({
+  const app = await launch({
     args: [main],
     env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv(home) },
   });
@@ -75,7 +78,7 @@ async function open(prepare?: (home: string) => void, extraEnv: (home: string) =
   return {
     app, page, home, shoot,
     close: async () => {
-      await app.close();
+      await closeApp(app);
       fs.rmSync(home, { recursive: true, force: true });
     },
   };
