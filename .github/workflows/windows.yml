@@ -219,7 +219,8 @@ jobs:
   # Electron): desktop/electron packaged natively on each runner with this run's ling.exe and
   # codex-code-mode-host.exe inside, its tests and typecheck first, then the same hidden audit
   # session the Mac preview runs (the window opens, the bundled app-server starts, the app quits by
-  # itself). A zip, unsigned like the rest of the Windows preview; no installer yet.
+  # itself), from where the installer put it. An NSIS installer (windows/installer.nsi), per user and
+  # unsigned like the rest of the Windows preview, installed, started and uninstalled here.
   desktop:
     name: Desktop app - ${{ matrix.target }}
     needs: ling
@@ -276,33 +277,80 @@ jobs:
           set -euo pipefail
           npm ci
           npm run typecheck
-          npm run make -- --targets @electron-forge/maker-zip
+          npm run package
       # The main process's unit tests, ported to Windows for 1.7.1 (paths compared as the file system
       # has them, `.cmd` stand-ins for ling, cmd.exe for tasks): they gate the job again.
       - name: Main process unit tests
         working-directory: desktop/electron
         shell: bash
         run: npm test
-      # The audit's session, hidden: the window opens on Ask, its own `ling app-server` starts
-      # (MIGHTLING_BIN is not set, so the bundled ling.exe is the one found), and the app quits by
-      # itself; a crash or a hang fails the job. No model server here, so nothing is answered.
-      - name: The packaged app starts and quits
+      # The installer, built with makensis (where it comes from: below).
+      - name: Installer
         shell: pwsh
         run: |
-          $app = Get-ChildItem -Recurse -Filter Mightling.exe desktop\electron\out | Select-Object -First 1
-          if (-not $app) { throw "no Mightling.exe under desktop/electron/out" }
+          # NSIS from the runner image if it has one, else NSIS 3.12 as electron-builder ships it, from its
+          # GitHub release and pinned by SHA-256 (Chocolatey's feed answered 503 in runs 39257291454 and
+          # 39269638527). makensis is an x86 program, which Windows on Arm emulates.
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($makensis) { $makensis = $makensis.Source } else {
+            $makensis = @("${env:ProgramFiles(x86)}\NSIS\makensis.exe", "$env:ProgramFiles\NSIS\makensis.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $makensis) {
+            $bundle = Join-Path $env:RUNNER_TEMP "nsis-bundle-3.12.tar.gz"
+            Invoke-WebRequest -Uri "https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis%402.0.1/nsis-bundle-3.12.tar.gz" -OutFile $bundle -MaximumRetryCount 3 -RetryIntervalSec 10
+            if ((Get-FileHash $bundle -Algorithm SHA256).Hash -ne "fe36a357f3a220db893498e830fd80e0769768a18a99f4e4d2447b982538feed") { throw "the NSIS bundle is not the one pinned" }
+            tar -xzf $bundle -C $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw "could not unpack the NSIS bundle" }
+            $env:NSISDIR = Join-Path $env:RUNNER_TEMP "nsis-bundle\windows"
+            $makensis = Join-Path $env:NSISDIR "makensis.exe"
+          }
+          $source = (Resolve-Path "desktop\electron\out\Mightling-win32-${{ matrix.arch }}").Path
+          New-Item -ItemType Directory -Force -Path dist-desktop | Out-Null
+          $out = Join-Path (Resolve-Path dist-desktop).Path "Mightling-Setup-$env:MIGHTLING_VERSION-${{ matrix.arch }}.exe"
+          & $makensis /V2 "/DVERSION=$env:MIGHTLING_VERSION" "/DARCH=${{ matrix.arch }}" "/DSOURCE=$source" "/DOUTFILE=$out" desktop\electron\windows\installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          Get-Item $out | Format-List Name, Length
+      # Installed silently, as a user would get it; then the audit's session, hidden, from the installed
+      # app: the window opens on Ask, its own `ling app-server` starts (the bundled ling.exe), and the
+      # app quits by itself; a crash or a hang fails the job. Then uninstalled, and checked gone.
+      - name: Install, start and quit, uninstall
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist-desktop\Mightling-Setup-*.exe | Select-Object -First 1
+          $process = Start-Process -FilePath $setup.FullName -ArgumentList "/S" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "the installer exited with $($process.ExitCode)" }
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\Mightling\App"
+          $app = Join-Path $installed "Mightling.exe"
+          if (-not (Test-Path $app)) { throw "no Mightling.exe in $installed" }
+          if (-not (Test-Path (Join-Path $installed "resources\ling.exe"))) { throw "the installed app has no ling.exe" }
+          $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Mightling"
+          if ((Get-ItemProperty $key).DisplayVersion -ne $env:MIGHTLING_VERSION) { throw "the uninstall entry does not say $env:MIGHTLING_VERSION" }
+          $shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Mightling.lnk"
+          if (-not (Test-Path $shortcut)) { throw "no Start menu entry at $shortcut" }
           $scratch = Join-Path $env:RUNNER_TEMP "mightling-app-home"
           New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          $ownProfile = $env:USERPROFILE
           $env:USERPROFILE = $scratch
           $env:CODEX_HOME = Join-Path $scratch ".mightling"
           $env:MIGHTLING_APP_AUDIT = "8"
           $env:ELECTRON_ENABLE_LOGGING = "1"
-          $process = Start-Process -FilePath $app.FullName -PassThru
-          if (-not $process.WaitForExit(90000)) { Stop-Process -Id $process.Id -Force; throw "the app did not quit by itself" }
-          if ($process.ExitCode -ne 0) { throw "the app exited with $($process.ExitCode)" }
+          $started = Start-Process -FilePath $app -PassThru
+          $null = $started.Handle  # kept, so ExitCode is there after the app has gone
+          if (-not $started.WaitForExit(90000)) { Stop-Process -Id $started.Id -Force; throw "the app did not quit by itself" }
+          if ($started.ExitCode -ne 0) { throw "the app exited with $($started.ExitCode)" }
+          # The uninstaller with the runner's own profile: Windows finds the Start menu from USERPROFILE.
+          $env:USERPROFILE = $ownProfile
+          # An NSIS uninstaller copies itself to the temporary folder and runs from there, so -Wait
+          # returns at once: wait for the folder to go.
+          Start-Process -FilePath (Join-Path $installed "Uninstall Mightling.exe") -ArgumentList "/S" -Wait
+          $deadline = (Get-Date).AddSeconds(120)
+          while ((Test-Path $installed) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Test-Path $app) { throw "the uninstaller left Mightling.exe" }
+          if (Test-Path $shortcut) { throw "the uninstaller left the Start menu entry" }
+          if (Test-Path $key) { throw "the uninstaller left its Apps entry" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
           name: desktop-windows-${{ matrix.arch }}
-          path: desktop/electron/out/make/zip/**/*.zip
+          path: dist-desktop/Mightling-Setup-*.exe
           if-no-files-found: error
