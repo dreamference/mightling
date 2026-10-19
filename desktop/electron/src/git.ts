@@ -8,6 +8,7 @@
 
 import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
+import { realPath, samePath } from "./platform";
 import path from "node:path";
 
 /** The most a diff or log may weigh: the pane is for reading, and this machine's memory is shared with a model. */
@@ -98,8 +99,9 @@ export async function checkRoot(root: unknown): Promise<string> {
   } catch {
     throw new GitError(`${root} is not a git repository`);
   }
-  if (fs.realpathSync(top) !== fs.realpathSync(root)) throw new GitError(`${root} is not the top of its repository (${top} is)`);
-  return top;
+  // git answers with forward slashes and long names; Windows may hand us a short (8.3) name.
+  if (!samePath(top, root)) throw new GitError(`${root} is not the top of its repository (${top} is)`);
+  return realPath(top);
 }
 
 /** A path inside the repository, relative to its root; anything that would leave it is refused. */
@@ -125,7 +127,7 @@ export async function repositories(cwd: unknown): Promise<string[]> {
   // Without a git to run, there is no repository to show (the page shows why: `gitToolsMissing`).
   if (gitToolsMissing()) return [];
   try {
-    return [(await git(cwd, ["rev-parse", "--show-toplevel"])).trim()];
+    return [realPath((await git(cwd, ["rev-parse", "--show-toplevel"])).trim())];
   } catch {
     // Not inside a repository: look a little way down.
   }

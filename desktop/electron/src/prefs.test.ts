@@ -23,7 +23,7 @@ describe("the window's preferences", () => {
     prefs.write({ followUp: "queue" });
     prefs.write({ recentModels: ["qwen3.8-27b"] });
     expect(prefs.read()).toMatchObject({ followUp: "queue", recentModels: ["qwen3.8-27b"], enterBehaviour: "enter" });
-    expect(fs.statSync(path.join(folder, "prefs.json")).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(fs.statSync(path.join(folder, "prefs.json")).mode & 0o777).toBe(0o600);
   });
 
   it("refuse a key the schema does not have, or a value of the wrong shape, and write nothing", () => {

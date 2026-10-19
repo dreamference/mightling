@@ -25,7 +25,8 @@ function fakePackagedApp(): string {
   return dir;
 }
 
-describe("the .deb's control file", () => {
+// The .deb is Linux's; its maker (electron-installer-debian) is not even installed on Windows.
+describe.skipIf(process.platform === "win32")("the .deb's control file", () => {
   it("names only our relationships", async () => {
     const src = fakePackagedApp();
     const ours = debOptions();
