@@ -16,6 +16,7 @@ It follows the same shape as the agent runners: provision the tooling if it is m
 off to a subprocess.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -24,6 +25,9 @@ from pathlib import Path
 from typing import Final, List, Optional
 
 from dreamference.chat.desktop_installer import CARGO_BIN, DesktopInstaller
+
+# Left in `node_modules` by a successful `npm ci`: the hash of the lock file it installed from.
+LOCK_STAMP: Final[str] = ".mightling-lock-sha256"
 
 # The project lives beside the Python package rather than inside it: it has its own build system,
 # and `pip install -e .` has no business copying it around.
@@ -112,18 +116,61 @@ class DesktopRunner:
         return subprocess.call([npm, *args], cwd=cwd, env=cls._environment()) == 0
 
     @classmethod
-    def install_packages(cls) -> bool:
-        """Installs the two projects' npm packages from their lock files, once.
+    def lock_hash(cls, directory: Path) -> str:
+        """
+        The SHA-256 of a project's `package-lock.json`, which names every package `npm ci` installs.
+
+        Args:
+            directory (Path): The npm project.
 
         Returns:
-            bool: True when both have their `node_modules`.
+            str: The hash, or "" when the project has no lock file.
+        """
+        lock = Path(directory) / "package-lock.json"
+        return hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else ""
+
+    @classmethod
+    def packages_current(cls, directory: Path) -> bool:
+        """
+        Whether a project's `node_modules` was installed from its lock file as it is now: a stamp
+        `npm ci` left there holds the lock file's hash. A dependency added since (smol-toml was,
+        and Rolldown then could not resolve it) changes the hash, so the packages are installed again.
+
+        Args:
+            directory (Path): The npm project.
+
+        Returns:
+            bool: True when `node_modules` exists and its stamp matches the lock file.
+        """
+        stamp = Path(directory) / "node_modules" / LOCK_STAMP
+        return stamp.is_file() and stamp.read_text().strip() == cls.lock_hash(directory)
+
+    @classmethod
+    def mark_installed(cls, directory: Path) -> None:
+        """
+        Records, after a successful `npm ci`, which lock file `node_modules` was installed from.
+
+        Args:
+            directory (Path): The npm project.
+        """
+        modules = Path(directory) / "node_modules"
+        modules.mkdir(exist_ok=True)
+        (modules / LOCK_STAMP).write_text(cls.lock_hash(directory) + "\n")
+
+    @classmethod
+    def install_packages(cls) -> bool:
+        """Installs the two projects' npm packages from their lock files, again whenever a lock file changed.
+
+        Returns:
+            bool: True when both have their `node_modules`, as their lock files say.
         """
         for directory, what in ((UI_DIR, "the app window's packages (desktop/ui)"), (ELECTRON_DIR, "the app's packages (desktop/electron: Electron, Forge, Vite)")):
-            if (directory / "node_modules").is_dir():
+            if cls.packages_current(directory):
                 continue
             print(f"📦 Installing {what}...")
             if not cls._npm(["ci", "--no-audit", "--no-fund"], directory):
                 return False
+            cls.mark_installed(directory)
         return True
 
     @classmethod

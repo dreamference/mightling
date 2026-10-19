@@ -34,6 +34,7 @@ import re
 import sys
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Final, List, Optional
 
 from dreamference.chat.desktop_installer import DesktopInstaller
@@ -303,11 +304,13 @@ class CodexBrandedBuilder:
             print("💡 Install Node.js 20 or later, then build again.")
             return None
         environment = DesktopRunner._environment()
-        if not os.path.isdir(os.path.join(WEB_UI_DIR, "node_modules")):
+        # Again whenever the lock file changed since the last install (DesktopRunner.packages_current).
+        if not DesktopRunner.packages_current(Path(WEB_UI_DIR)):
             print("📦 Installing the Mightling UI's packages (desktop/ui)...")
             if subprocess.call([npm, "ci", "--no-audit", "--no-fund"], cwd=WEB_UI_DIR, env=environment) != 0:
                 print("❌ npm ci failed in desktop/ui; see its output above.")
                 return None
+            DesktopRunner.mark_installed(Path(WEB_UI_DIR))
         print("🔨 Building the Mightling UI for ling web...")
         if subprocess.call([npm, "run", "build"], cwd=WEB_UI_DIR, env=environment) != 0:
             print("❌ The Mightling UI did not build; see its output above.")
