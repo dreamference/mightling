@@ -4,6 +4,8 @@
 ; beside install.ps1's bin, adds a Start menu entry and the uninstaller Windows lists in Apps.
 ; Built by windows.yml:
 ;   makensis /DVERSION=1.7.1 /DARCH=arm64 /DSOURCE=<packaged app folder> /DOUTFILE=<installer.exe> installer.nsi
+; VERSION may carry a pre-release part (1.7.0-rc.1); Windows' file version takes four numbers only,
+; so it is made from NUMERIC_VERSION (1.7.0), which defaults to VERSION.
 
 !include "MUI2.nsh"
 
@@ -15,6 +17,9 @@
 !endif
 !ifndef SOURCE
   !error "SOURCE (the packaged app's folder) is required"
+!endif
+!ifndef NUMERIC_VERSION
+  !define NUMERIC_VERSION "${VERSION}"
 !endif
 !ifndef OUTFILE
   !define OUTFILE "Mightling-Setup-${VERSION}-${ARCH}.exe"
@@ -31,10 +36,10 @@ RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Programs\Mightling\App"
 InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 SetCompressor /SOLID lzma
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${NUMERIC_VERSION}.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
-VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "FileVersion" "${NUMERIC_VERSION}"
 VIAddVersionKey "FileDescription" "${PRODUCT} desktop app installer"
 VIAddVersionKey "CompanyName" "Dreamference"
 VIAddVersionKey "LegalCopyright" "Copyright (C) 2026 Dreamference contributors. AGPL-3.0-or-later."
