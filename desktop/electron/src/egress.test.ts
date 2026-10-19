@@ -8,7 +8,7 @@ import { SWITCHES, applySwitches } from "./egress";
 
 describe("the switches that keep Chromium quiet", () => {
   it("are the Codex app's background-networking set plus Cast discovery, always applied", () => {
-    applySwitches();
+    applySwitches("linux");
     const calls = (app.commandLine.appendSwitch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
     expect(calls).toEqual(SWITCHES.map(([name, value]) => (value === undefined ? [name] : [name, value])));
     const features = SWITCHES.find(([name]) => name === "disable-features")?.[1] ?? "";
@@ -20,6 +20,19 @@ describe("the switches that keep Chromium quiet", () => {
     expect(SWITCHES).toContainEqual(["blink-settings", "dnsPrefetchingEnabled=false"]);
     // No GPU switch: Electron's defaults, as the Codex app runs.
     expect(SWITCHES.some(([name]) => /gpu|angle|gl/.test(name))).toBe(false);
+  });
+
+  it("add the mock keychain on macOS only, so the app never waits on a keychain prompt", async () => {
+    const { platformSwitches } = await import("./egress");
+    expect(platformSwitches("darwin")).toEqual([["use-mock-keychain"]]);
+    for (const platform of ["linux", "win32"] as const) expect(platformSwitches(platform)).toEqual([]);
+    const append = app.commandLine.appendSwitch as unknown as { mock: { calls: unknown[][] }; mockClear(): void };
+    append.mockClear();
+    applySwitches("darwin");
+    expect(append.mock.calls).toContainEqual(["use-mock-keychain"]);
+    append.mockClear();
+    applySwitches("linux");
+    expect(append.mock.calls.some(([name]) => name === "use-mock-keychain")).toBe(false);
   });
 });
 
