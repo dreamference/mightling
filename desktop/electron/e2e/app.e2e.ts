@@ -7,11 +7,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { _electron as electron, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+
+import { closeApp, closeLeftovers, launch } from "./apps";
 
 const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.cjs");
 
 test.skip(!process.env.DISPLAY || !fs.existsSync(main), "needs a display and the Vite build");
+test.afterEach(closeLeftovers);
 
 /**
  * A stand-in `ling`: composes the `ask` prompt, reports the air-gap level, and as the app-server
@@ -61,7 +64,7 @@ const runs = (home: string): string[][] => {
 test("ling app alone opens the one app window on Ask, and the menu switches it rather than opening another", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-one-"));
   const ling = standIn(home);
-  const app = await electron.launch({
+  const app = await launch({
     args: [main],
     env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0" },
   });
@@ -89,7 +92,7 @@ test("ling app alone opens the one app window on Ask, and the menu switches it r
     expect(runs(home).filter((args) => args.includes("app-server"))).toHaveLength(1);
     expect(runs(home).filter((args) => args[0] === "web")).toEqual([]);
   } finally {
-    await app.close();
+    await closeApp(app);
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -97,7 +100,7 @@ test("ling app alone opens the one app window on Ask, and the menu switches it r
 test("Work opens on app:// and reaches the agent through electronBridge", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-"));
   const ling = standIn(home);
-  const app = await electron.launch({
+  const app = await launch({
     args: [main, "--work"],
     env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".mightling"), MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0" },
   });
@@ -121,7 +124,7 @@ test("Work opens on app:// and reaches the agent through electronBridge", async 
     });
     expect(refused).toContain("does not send feedback/upload");
   } finally {
-    await app.close();
+    await closeApp(app);
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -130,7 +133,7 @@ test("Ask in the app window: the main process composes the prompt, makes the fol
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-e2e-ask-"));
   const ling = standIn(home);
   const codexHome = path.join(home, ".mightling");
-  const app = await electron.launch({
+  const app = await launch({
     args: [main, "--work"],
     env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_HIDDEN: "1", MIGHTLING_LEGACY_MIGRATION: "0" },
   });
@@ -159,7 +162,7 @@ test("Ask in the app window: the main process composes the prompt, makes the fol
     expect(input).toContainEqual({ type: "localImage", path: path.join(folder, "shot.png") });
     expect(fs.readFileSync(path.join(folder, "shot.png"))).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   } finally {
-    await app.close();
+    await closeApp(app);
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

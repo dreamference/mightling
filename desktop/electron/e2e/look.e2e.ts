@@ -7,12 +7,15 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { _electron as electron, test } from "@playwright/test";
+import { test } from "@playwright/test";
+
+import { closeApp, closeLeftovers, launch } from "./apps";
 
 const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.cjs");
 const out = process.env.MIGHTLING_LOOK_DIR;
 
 test.skip(!out || !process.env.DISPLAY || !fs.existsSync(main), "needs MIGHTLING_LOOK_DIR, a display and the Vite build");
+test.afterEach(closeLeftovers);
 
 const ANSWER = `The GB10 has **one pool of LPDDR5X memory** that the CPU and the GPU both address, so there is no copy over a bus before the GPU can use a tensor.
 
@@ -126,7 +129,7 @@ test("the look", async () => {
   fs.writeFileSync(path.join(codexHome, "model_catalog.json"), JSON.stringify({ models: [{ slug: "qwen3.8-27b-nvfp4" }] }));
   const ling = standIn(home, askRoot);
   fs.mkdirSync(out!, { recursive: true });
-  const app = await electron.launch({
+  const app = await launch({
     args: [main],
     env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0" },
   });
@@ -164,7 +167,7 @@ test("the look", async () => {
     });
     await shoot("work-narrow-light.png");
   } finally {
-    await app.close();
+    await closeApp(app);
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
