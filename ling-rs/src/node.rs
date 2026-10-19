@@ -53,15 +53,24 @@ enum Listen {
     Deadline,
 }
 
-/// Decides, after each answer, how much longer the browse listens. With nothing remembered, the
-/// first answer starts [`SETTLE`]. With a node remembered, another node's answer starts nothing:
-/// on Wi-Fi the remembered node often answers well after another one, and settling on the first
-/// answer declared it gone and asked for the other one (a client on the owner's desktop,
-/// 2026-10-19: two of four `ling exec` runs saw only the stopped second node).
+/// Decides, after each answer, how much longer the browse listens. With no node wanted, the first
+/// answer starts [`SETTLE`]. With one wanted, another node's answer starts nothing: on Wi-Fi the
+/// wanted node often answers well after another one, and settling on the first answer declared it
+/// gone (a client on the owner's desktop, 2026-10-19, with a second, stopped node advertised: two of
+/// four `ling exec` runs said the remembered node was not on the network, and `ling node use
+/// <name>` said there was no such node). The wanted node is the remembered one, by its id, or, with
+/// no id, the one named by `MIGHTLING_NODE` or `ling node use` (its name, address or id, as
+/// [`matches`] reads them).
 fn after_answer(wanted: Option<&Node>, found: &[Advert]) -> Listen {
-    let Some(wanted) = wanted.filter(|wanted| !wanted.node.is_empty()) else {
+    let Some(wanted) = wanted else {
         return Listen::Settle;
     };
+    if wanted.node.is_empty() {
+        if wanted.name.trim().is_empty() {
+            return Listen::Settle;
+        }
+        return if found.iter().any(|seen| matches(seen, &wanted.name)) { Listen::Stop } else { Listen::Deadline };
+    }
     let mut same_id = found.iter().filter(|seen| seen.node.node == wanted.node).peekable();
     if same_id.peek().is_none() {
         Listen::Deadline
@@ -70,6 +79,11 @@ fn after_answer(wanted: Option<&Node>, found: &[Advert]) -> Listen {
     } else {
         Listen::Settle
     }
+}
+
+/// The node a name stands for while a browse looks for it: no id, so [`after_answer`] matches the name.
+fn named(name: &str) -> Node {
+    Node { name: name.trim().to_string(), ..Node::default() }
 }
 
 /// One command's choice of node, by name, address or id.
@@ -135,7 +149,7 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
         return Resolution::Host(host.to_string());
     }
     if let Some(name) = inputs.pinned.as_deref().filter(|name| !name.trim().is_empty()) {
-        let found = browser.browse(None);
+        let found = browser.browse(Some(&named(name)));
         return match found.iter().find(|advert| matches(advert, name)) {
             Some(advert) => checked(advert.clone(), false, None),
             None => Resolution::Refused(format!(
@@ -522,7 +536,7 @@ pub async fn run_cli(args: &[String]) -> i32 {
             0
         }
         Request::Use(name) => {
-            let adverts = MdnsBrowser.browse(None);
+            let adverts = MdnsBrowser.browse(Some(&named(&name)));
             let node = match pick(&adverts, &name) {
                 Ok(node) => node,
                 Err(message) => {
@@ -789,17 +803,19 @@ mod tests {
     struct Fixed {
         adverts: Vec<Advert>,
         asked: RefCell<Vec<Option<String>>>,
+        asked_names: RefCell<Vec<Option<String>>>,
     }
 
     impl Fixed {
         fn new(adverts: Vec<Advert>) -> Fixed {
-            Fixed { adverts, asked: RefCell::new(Vec::new()) }
+            Fixed { adverts, asked: RefCell::new(Vec::new()), asked_names: RefCell::new(Vec::new()) }
         }
     }
 
     impl Browser for Fixed {
         fn browse(&self, wanted: Option<&Node>) -> Vec<Advert> {
             self.asked.borrow_mut().push(wanted.map(|node| node.node.clone()));
+            self.asked_names.borrow_mut().push(wanted.map(|node| node.name.clone()));
             self.adverts.clone()
         }
     }
@@ -841,10 +857,21 @@ mod tests {
         // The remembered node at another address: settle, in case it answers where it was.
         let moved = advert("spark-1", "11111111-aaaa", "192.168.0.120");
         assert_eq!(after_answer(Some(&remembered), &[moved]), Listen::Settle);
-        // Nothing remembered (or remembered by address only): the first answer settles.
+        // Nothing wanted: the first answer settles.
         assert_eq!(after_answer(None, &[spark2()]), Listen::Settle);
-        let by_address = Node { node: String::new(), ..remembered };
-        assert_eq!(after_answer(Some(&by_address), &[spark2()]), Listen::Settle);
+        assert_eq!(after_answer(Some(&named(" ")), &[spark2()]), Listen::Settle);
+        // A node wanted by name (MIGHTLING_NODE, `ling node use`): listen until it answers.
+        assert_eq!(after_answer(Some(&named("spark-1")), &[spark2()]), Listen::Deadline);
+        assert_eq!(after_answer(Some(&named("spark-1.local")), &[spark2(), spark1()]), Listen::Stop);
+        assert_eq!(after_answer(Some(&named("192.168.0.105")), &[spark1()]), Listen::Stop);
+    }
+
+    #[test]
+    fn a_pinned_node_is_browsed_for_by_its_name() {
+        let browser = Fixed::new(vec![spark2(), spark1()]);
+        let inputs = Inputs { pinned: Some("spark-1".into()), ..Inputs::default() };
+        assert!(matches!(resolve(&inputs, &browser), Resolution::Found { remember: false, .. }));
+        assert_eq!(*browser.asked_names.borrow(), vec![Some("spark-1".to_string())]);
     }
 
     #[test]
