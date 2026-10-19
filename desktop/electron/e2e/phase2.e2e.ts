@@ -28,7 +28,7 @@ interface Session {
   close: () => Promise<void>;
 }
 
-async function open(): Promise<Session> {
+async function open(extraEnv: Record<string, string> = {}): Promise<Session> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-p2-"));
   const codexHome = path.join(home, ".mightling");
   const askRoot = path.join(codexHome, "ask");
@@ -37,7 +37,7 @@ async function open(): Promise<Session> {
   const ling = writeStandIn(home, askRoot);
   const app = await launch({
     args: [main],
-    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }) },
+    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv },
   });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -152,6 +152,33 @@ function scratchRepo(home: string): string {
   fs.writeFileSync(path.join(root, "fetcher", "backoff.py"), "def backoff(attempt):\n    return min(2 ** attempt, 30)\n");
   return root;
 }
+
+test("6 review pane across threads: nothing of the last repository, and no Revert, until the new folder answers", async () => {
+  // The folder's repositories answer 3 s late, as a Mac's did while its folder-access prompt waited
+  // (20-45 s), when the pane kept the last repository's diff with Stage and Revert live.
+  const { page, home, close } = await open({ MIGHTLING_TEST_GIT_REPOS_DELAY_MS: "3000" });
+  scratchRepo(home);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.keyboard.press("Control+Shift+G");
+    const pane = page.getByRole("complementary", { name: "Review" });
+    await expect(pane.locator(".review-status")).toHaveText("Reading this folder's repository…");
+    await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py", "fetcher/backoff.py"], { timeout: 15_000 });
+    await expect(pane.getByRole("button", { name: "Revert all" })).toBeVisible();
+    // Another thread, outside any repository: at once, nothing of fetcher's and nothing to press.
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    await expect(pane.locator(".review-status")).toHaveText("Reading this folder's repository…", { timeout: 1_000 });
+    await expect(pane.locator(".file-name")).toHaveCount(0);
+    for (const name of ["Revert all", "Stage all", "Revert", "Stage", "Push"]) await expect(pane.getByRole("button", { name, exact: true })).toHaveCount(0);
+    await expect(pane.getByRole("textbox", { name: "Commit message" })).toHaveCount(0);
+    await expect(pane.locator(".review-status")).toHaveText("This folder is not in a git repository.", { timeout: 15_000 });
+  } finally {
+    await close();
+  }
+});
 
 test("6 review pane: scopes, stage by hunk, comments, split view, a generated message, commit", async () => {
   const { page, home, shoot, close } = await open();
