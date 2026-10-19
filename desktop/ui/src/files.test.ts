@@ -2,7 +2,7 @@
 // the server read is decoded, named and highlighted.
 import { describe, expect, it } from "vitest";
 
-import { decodeFile, highlighted, joinPath, languageOf, lineCount, parentOf, relativeTo, sizeLabel, treeEntries } from "./files";
+import { decodeFile, highlighted, inGitInternals, joinPath, languageOf, lineCount, parentOf, relativeTo, sizeLabel, treeEntries } from "./files";
 import { REVIEW_TAB, fileTab, stepTab, tabLabel, withTab, withoutTab } from "./tabs";
 
 const b64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
@@ -80,5 +80,12 @@ describe("search files and go to line", () => {
     expect(lineWithin("500", 68)).toBe(68);
     expect(lineWithin(":3", 68)).toBe(3);
     expect(lineWithin("x", 68)).toBeNull();
+  });
+});
+
+describe("search files", () => {
+  it("leaves out what is inside .git, and nothing else", () => {
+    for (const internal of [".git/HEAD", ".git/refs/heads/main", ".git/hooks/pre-commit.sample", "sub/.git/config", ".git\\worktrees\\a\\HEAD", ".git"]) expect(inGitInternals(internal)).toBe(true);
+    for (const file of [".gitignore", ".github/workflows/ci.yml", "src/git.ts", "docs/.gitkeep", "a.git/b"]) expect(inGitInternals(file)).toBe(false);
   });
 });
