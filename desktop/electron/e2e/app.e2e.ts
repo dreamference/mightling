@@ -258,6 +258,15 @@ test("New thread with a folder named starts nothing until the first message, whi
     const starts = received(home).filter((m) => m.method === "thread/start");
     expect(starts).toHaveLength(1);
     expect(starts[0].params!.cwd).toBe(project);
+    // Drafts are the thread's: one typed here stays here, and New thread opens an empty composer
+    // (it once came up holding the message that started the last thread).
+    // The new thread is the one in front (its title), so what is typed now is its draft.
+    await expect(page.locator(".bar .title")).toHaveText("New thread");
+    await page.getByPlaceholder(/^Ask Mightling/).fill("half a thought");
+    await page.getByRole("button", { name: "New thread", exact: true }).click();
+    await expect(page.getByPlaceholder(/^Ask Mightling/)).toHaveValue("");
+    await page.getByRole("button", { name: "(new thread)" }).click();
+    await expect(page.getByPlaceholder(/^Ask Mightling/)).toHaveValue("half a thought");
   } finally {
     await closeApp(app);
     fs.rmSync(home, { recursive: true, force: true });
