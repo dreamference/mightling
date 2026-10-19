@@ -114,23 +114,103 @@ def test_run_stops_when_the_packages_cannot_be_installed():
         call.assert_not_called()
 
 
-def test_install_writes_the_profile_only_where_the_namespace_is_refused():
+def test_install_writes_the_profile_only_where_a_binary_has_none():
     # The one step that changes the machine outside this user's home, and only when needed.
     with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
          patch.object(DesktopRunner, "install_packages", return_value=True), \
          patch.object(DesktopRunner, "binary_path", return_value=None), \
-         patch.object(DesktopInstaller, "userns_allowed", return_value=True), \
+         patch.object(DesktopRunner, "dev_binaries", return_value=["/opt/electron"]), \
+         patch.object(DesktopInstaller, "uncovered", return_value=[]), \
          patch.object(DesktopInstaller, "install_apparmor_profile") as profile:
         assert DesktopRunner.install() == 0
         profile.assert_not_called()
     with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
          patch.object(DesktopRunner, "install_packages", return_value=True), \
          patch.object(DesktopRunner, "binary_path", return_value=None), \
-         patch.object(DesktopRunner, "dev_binaries", return_value=["/opt/electron"]), \
-         patch.object(DesktopInstaller, "userns_allowed", return_value=False), \
+         patch.object(DesktopRunner, "dev_binaries", return_value=["/opt/electron", "/opt/out/Mightling-linux-arm64/Mightling"]), \
+         patch.object(DesktopInstaller, "uncovered", return_value=["/opt/out/Mightling-linux-arm64/Mightling"]), \
+         patch.object(DesktopInstaller, "covering_profile", side_effect=lambda binary: "/etc/apparmor.d/mightling-desktop-dev" if binary == "/opt/electron" else None), \
          patch.object(DesktopInstaller, "install_apparmor_profile", return_value=True) as profile:
         assert DesktopRunner.install() == 0
+        # The checkout's profile is rewritten whole: what it named before, and what it lacked.
+        profile.assert_called_once_with(["/opt/electron", "/opt/out/Mightling-linux-arm64/Mightling"])
+
+
+def test_install_leaves_a_binary_another_profile_names():
+    # An unpacked build's own profile (or the .deb's) already attaches to it; a second profile
+    # with the same attachment would conflict.
+    with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
+         patch.object(DesktopRunner, "install_packages", return_value=True), \
+         patch.object(DesktopRunner, "binary_path", return_value=None), \
+         patch.object(DesktopRunner, "dev_binaries", return_value=["/opt/electron", "/opt/out/Mightling-linux-arm64/Mightling"]), \
+         patch.object(DesktopInstaller, "uncovered", return_value=["/opt/electron"]), \
+         patch.object(DesktopInstaller, "covering_profile", side_effect=lambda binary: None if binary == "/opt/electron" else "/etc/apparmor.d/mightling-unpacked"), \
+         patch.object(DesktopInstaller, "install_apparmor_profile", return_value=False) as profile:
+        # A profile that could not be written fails the install.
+        assert DesktopRunner.install() == 1
         profile.assert_called_once_with(["/opt/electron"])
+
+
+def test_the_packaged_binary_is_covered_before_it_is_built(tmp_path):
+    # `desktop install` runs before the first `desktop run` packages the app; the profile it
+    # wrote named npm's electron only, so the binary the launcher starts died with "No usable
+    # sandbox!" (2026-10-19). The packaged path is predicted, by the packager's arch names.
+    electron = tmp_path / "node_modules" / "electron" / "dist" / "electron"
+    electron.parent.mkdir(parents=True)
+    electron.write_bytes(b"")
+    with patch("dreamference.chat.desktop_runner.ELECTRON_DIR", tmp_path), \
+         patch("platform.machine", return_value="aarch64"):
+        assert DesktopRunner.packaged_binary_path() == str(tmp_path / "out" / "Mightling-linux-arm64" / "Mightling")
+        assert DesktopRunner.dev_binaries() == [str(electron), str(tmp_path / "out" / "Mightling-linux-arm64" / "Mightling")]
+    with patch("dreamference.chat.desktop_runner.ELECTRON_DIR", tmp_path), \
+         patch("platform.machine", return_value="x86_64"):
+        assert DesktopRunner.packaged_binary_path().endswith("/out/Mightling-linux-x64/Mightling")
+    # The profile is written for a path that does not exist yet: AppArmor attaches it at exec.
+    with patch("shutil.which", return_value="/usr/bin/x"), \
+         patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        assert DesktopInstaller.install_apparmor_profile([str(tmp_path / "out" / "Mightling-linux-arm64" / "Mightling")]) is True
+    assert f'"{tmp_path}/out/Mightling-linux-arm64/Mightling"' in run.call_args_list[0].kwargs["input"]
+
+
+def test_a_profile_is_found_by_the_binary_it_names(tmp_path):
+    profiles = tmp_path / "apparmor.d"
+    (profiles / "abstractions").mkdir(parents=True)
+    (profiles / "mightling").write_text('profile mightling "/usr/lib/mightling/Mightling" flags=(unconfined) {\n  userns,\n}\n')
+    (profiles / "other").write_text('profile other "/opt/Other/Mightling" {\n}\n')
+    sysctl = tmp_path / "restrict"
+    sysctl.write_text("1\n")
+    with patch("dreamference.chat.desktop_installer.APPARMOR_DIR", str(profiles)), \
+         patch("dreamference.chat.desktop_installer.USERNS_SYSCTL", str(sysctl)):
+        assert DesktopInstaller.covering_profile("/usr/lib/mightling/Mightling") == str(profiles / "mightling")
+        # A profile without `userns,` grants nothing; a path that is only a prefix is not a match.
+        assert DesktopInstaller.covering_profile("/opt/Other/Mightling") is None
+        assert DesktopInstaller.covering_profile("/usr/lib/mightling/Might") is None
+        assert DesktopInstaller.uncovered(["/usr/lib/mightling/Mightling", "/opt/x/Mightling"]) == ["/opt/x/Mightling"]
+        sysctl.write_text("0\n")
+        # Where the kernel does not restrict user namespaces, nothing needs a profile.
+        assert DesktopInstaller.userns_restricted() is False
+        assert DesktopInstaller.uncovered(["/opt/x/Mightling"]) == []
+    with patch("dreamference.chat.desktop_installer.APPARMOR_DIR", str(tmp_path / "missing")):
+        assert DesktopInstaller.covering_profile("/usr/lib/mightling/Mightling") is None
+
+
+def test_run_says_when_the_packaged_binary_has_no_profile(capsys):
+    with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
+         patch.object(DesktopRunner, "install_packages", return_value=True), \
+         patch.object(DesktopRunner, "copy_bundled_binaries", return_value=True), \
+         patch.object(DesktopRunner, "_npm", return_value=True), \
+         patch.object(DesktopRunner, "binary_path", return_value="/opt/out/Mightling-linux-arm64/Mightling"), \
+         patch.object(DesktopRunner, "install_desktop_entry"), \
+         patch.object(DesktopRunner, "clear_webview_cache"), \
+         patch.object(DesktopInstaller, "uncovered", side_effect=lambda binaries: list(binaries)), \
+         patch("subprocess.call", return_value=0) as call:
+        # Still opened: from PyCharm's terminal (a permissive profile) it starts anyway.
+        assert DesktopRunner.run() == 0
+    out = capsys.readouterr().out
+    assert "/opt/out/Mightling-linux-arm64/Mightling" in out and "No usable sandbox!" in out
+    assert "`ling-admin desktop install`" in out
+    assert call.call_args[0][0] == ["/opt/out/Mightling-linux-arm64/Mightling"]
 
 
 def test_the_profile_install_is_announced_before_sudo_runs(capsys):
@@ -336,7 +416,7 @@ def test_run_packages_the_app_and_opens_the_packaged_binary():
     commands = []
     with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
          patch.object(DesktopRunner, "install_packages", return_value=True), \
-         patch.object(DesktopInstaller, "userns_allowed", return_value=True), \
+         patch.object(DesktopInstaller, "uncovered", return_value=[]), \
          patch.object(DesktopRunner, "copy_bundled_binaries", return_value=True), \
          patch.object(DesktopRunner, "_npm", side_effect=lambda args, cwd: commands.append(args) or True), \
          patch.object(DesktopRunner, "binary_path", return_value="/opt/out/Mightling-linux-arm64/Mightling"), \
@@ -394,3 +474,92 @@ def test_packages_are_installed_again_when_the_lock_file_changes(tmp_path):
     (old / "node_modules").mkdir(parents=True)
     (old / "package-lock.json").write_text("{}")
     assert not DesktopRunner.packages_current(old)
+
+
+SANDBOX_SCRIPT = ELECTRON / "linux" / "install-sandbox-profile.sh"
+
+
+def _unpacked(tmp_path: Path) -> Path:
+    """An unpacked build: the binary and, beside it, the script the postPackage hook puts there."""
+    folder = tmp_path / "Mightling-linux-arm64"
+    folder.mkdir()
+    (folder / "Mightling").write_bytes(b"#!/bin/sh\n")
+    (folder / "Mightling").chmod(0o755)
+    script = folder / "install-sandbox-profile.sh"
+    script.write_bytes(SANDBOX_SCRIPT.read_bytes())
+    script.chmod(0o755)
+    return folder
+
+
+def _script_env(tmp_path: Path, restricted: bool) -> dict:
+    """The script's environment: scratch profiles and sysctl, and stand-ins for sudo and apparmor_parser."""
+    profiles = tmp_path / "apparmor.d"
+    profiles.mkdir(exist_ok=True)
+    sysctl = tmp_path / "restrict"
+    sysctl.write_text("1\n" if restricted else "0\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    log = tmp_path / "root.log"
+    # The stand-in sudo runs nothing as root: it records its arguments and what it was fed.
+    (bin_dir / "sudo").write_text(f'#!/bin/sh\necho "$@" >> "{log}"\n[ "$1" = tee ] && cat > "{tmp_path}/written" || true\n')
+    (bin_dir / "apparmor_parser").write_text("#!/bin/sh\nexit 0\n")
+    for name in ("sudo", "apparmor_parser"):
+        (bin_dir / name).chmod(0o755)
+    return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "MIGHTLING_APPARMOR_DIR": str(profiles), "MIGHTLING_USERNS_SYSCTL": str(sysctl)}
+
+
+def test_an_unpacked_build_carries_its_own_profile_script():
+    # The zip (and `out/Mightling-linux-<arch>/`) has no postinst; the script beside the binary
+    # writes the profile for the folder it is in. It names the binary app.json names.
+    forge = (ELECTRON / "forge.config.js").read_text(encoding="utf-8")
+    assert 'path.join(__dirname, "linux", "install-sandbox-profile.sh")' in forge
+    assert 'if (process.platform === "linux")' in forge
+    script = SANDBOX_SCRIPT.read_text(encoding="utf-8")
+    assert f'BINARY="$DIR/{app_config()["executable"]}"' in script
+    assert os.access(SANDBOX_SCRIPT, os.X_OK)
+    # Its own name: neither the .deb's (`mightling`) nor a checkout's (`mightling-desktop-dev`).
+    assert "PROFILE_NAME=mightling-unpacked" in script
+    assert 'profile $PROFILE_NAME "$BINARY" flags=(unconfined) {' in script and "userns," in script
+    # No SUID helper and no --no-sandbox as a way out.
+    assert "--no-sandbox" not in script and "chmod 4755" not in script
+
+
+def test_the_script_prints_the_commands_before_sudo_runs(tmp_path):
+    import subprocess
+    folder = _unpacked(tmp_path)
+    env = _script_env(tmp_path, restricted=True)
+    # A file that names the binary but grants no `userns,` does not count.
+    (tmp_path / "apparmor.d" / "stale").write_text(f'profile stale "{folder.resolve()}/Mightling" {{\n}}\n')
+    result = subprocess.run([str(folder / "install-sandbox-profile.sh")], env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    binary = str(folder.resolve() / "Mightling")
+    assert "sudo tee /etc/apparmor.d/mightling-unpacked" in result.stdout
+    assert "sudo apparmor_parser -r -T -W /etc/apparmor.d/mightling-unpacked" in result.stdout
+    assert (tmp_path / "root.log").read_text().splitlines() == [
+        "tee /etc/apparmor.d/mightling-unpacked",
+        "apparmor_parser -r -T -W /etc/apparmor.d/mightling-unpacked",
+    ]
+    written = (tmp_path / "written").read_text()
+    assert f'profile mightling-unpacked "{binary}" flags=(unconfined) {{' in written and "userns," in written
+
+
+def test_the_script_changes_nothing_when_nothing_is_needed(tmp_path):
+    import subprocess
+    folder = _unpacked(tmp_path)
+    script = str(folder / "install-sandbox-profile.sh")
+    # --print: the commands and the profile, and no sudo.
+    env = _script_env(tmp_path, restricted=True)
+    printed = subprocess.run([script, "--print"], env=env, capture_output=True, text=True, timeout=30)
+    assert printed.returncode == 0 and "profile mightling-unpacked" in printed.stdout
+    # Already covered (the .deb's profile, say): a second attachment would conflict.
+    (tmp_path / "apparmor.d" / "mightling").write_text(f'profile mightling "{folder.resolve()}/Mightling" flags=(unconfined) {{\n  userns,\n}}\n')
+    covered = subprocess.run([script], env=env, capture_output=True, text=True, timeout=30)
+    assert covered.returncode == 0 and "Nothing to do" in covered.stdout
+    # A kernel that does not restrict user namespaces needs no profile.
+    unrestricted = subprocess.run([script], env=_script_env(tmp_path, restricted=False), capture_output=True, text=True, timeout=30)
+    assert unrestricted.returncode == 0 and "does not restrict" in unrestricted.stdout
+    assert not (tmp_path / "root.log").exists()
+    # No binary beside it: refused.
+    (folder / "Mightling").unlink()
+    assert subprocess.run([script], env=env, capture_output=True, text=True, timeout=30).returncode == 1

@@ -14,7 +14,10 @@ creates a user namespace, which the kernel refuses to programs without an AppArm
 (`kernel.apparmor_restrict_unprivileged_userns=1`). The `.deb` writes that profile in its
 `postinst`; for a checkout's build and dev run, `install_apparmor_profile()` writes one covering
 the binaries here, with sudo, and the escalation is deliberately *visible*: the command is
-printed before it runs and sudo prompts on the terminal.
+printed before it runs and sudo prompts on the terminal. An unpacked build (the zip) carries its
+own `install-sandbox-profile.sh` beside the binary (desktop/electron/linux/), since nothing of
+ours installs it. `covering_profile()` tells whether a binary already has a profile, whichever of
+the three wrote it.
 
 The Rust helpers (`has_rust`, `cargo_path`, `install_rust`) stay here because the Codex build
 (`CodexBrandedBuilder`, `CodexTestRunner`) drives rustup through them; the desktop app no longer
@@ -37,6 +40,11 @@ MIN_NODE_VERSION: Final[Tuple[int, int]] = (22, 13)
 # Where a checkout's AppArmor profile goes, and its name.
 APPARMOR_PROFILE_PATH: Final[str] = "/etc/apparmor.d/mightling-desktop-dev"
 APPARMOR_PROFILE_NAME: Final[str] = "mightling-desktop-dev"
+
+# Where every AppArmor profile is read from, and the switch under which a program without one is
+# refused a user namespace (Ubuntu 24.04 and later set it to 1).
+APPARMOR_DIR: Final[str] = "/etc/apparmor.d"
+USERNS_SYSCTL: Final[str] = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
 
 
 class DesktopInstaller:
@@ -170,6 +178,69 @@ class DesktopInstaller:
             return True
 
     @classmethod
+    def userns_restricted(cls) -> bool:
+        """
+        Whether this kernel refuses a user namespace to programs without an AppArmor profile.
+
+        Returns:
+            bool: True if `kernel.apparmor_restrict_unprivileged_userns` is 1.
+        """
+        try:
+            with open(USERNS_SYSCTL) as handle:
+                return handle.read().strip() == "1"
+        except OSError:
+            return False
+
+    @classmethod
+    def covering_profile(cls, binary: str) -> Optional[str]:
+        """
+        Finds a profile file that attaches to the binary: the `.deb`'s (`mightling`), a checkout's
+        (`mightling-desktop-dev`) or an unpacked build's (`mightling-unpacked`). A profile
+        attaches by the quoted absolute path, which is how all three name it; the files are
+        world-readable, so no root is needed to look.
+
+        Args:
+            binary (str): The Electron binary's absolute path.
+
+        Returns:
+            Optional[str]: The profile file naming it, or None.
+        """
+        needle = f'"{binary}"'
+        try:
+            names = sorted(os.listdir(APPARMOR_DIR))
+        except OSError:
+            return None
+        for name in names:
+            path = os.path.join(APPARMOR_DIR, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding="utf-8", errors="replace") as handle:
+                    text = handle.read()
+            except OSError:
+                continue
+            if needle in text and "userns," in text:
+                return path
+        return None
+
+    @classmethod
+    def uncovered(cls, binaries: List[str]) -> List[str]:
+        """
+        The binaries that would be refused their sandbox when started from the launcher or a
+        plain terminal: none where the kernel does not restrict user namespaces, else those no
+        profile names.
+
+        Args:
+            binaries (List[str]): Absolute paths, whether or not they exist yet.
+
+        Returns:
+            List[str]: The binaries that need a profile.
+        """
+        if not cls.userns_restricted():
+            return []
+        return [binary for binary in binaries if cls.covering_profile(binary) is None]
+
+    @classmethod
     def apparmor_profile(cls, binaries: List[str]) -> str:
         """
         The AppArmor profile text that grants `userns` to the given binaries: the shape of the
@@ -199,13 +270,16 @@ class DesktopInstaller:
         """
         Writes and loads the profile with sudo, printing the command first.
 
+        A binary need not exist yet: a profile attaches by path when the program is started, so
+        the packaged app's path is covered before the first `desktop run` writes it.
+
         Args:
-            binaries (List[str]): The binaries to cover.
+            binaries (List[str]): The absolute paths to cover.
 
         Returns:
-            bool: True once a user namespace can be created, or when nothing needed doing.
+            bool: True once the profile is loaded, or when nothing needed doing.
         """
-        binaries = [binary for binary in binaries if os.path.isfile(binary)]
+        binaries = [binary for binary in binaries if os.path.isabs(binary)]
         if not binaries:
             return cls.userns_allowed()
         if not shutil.which("sudo") or not shutil.which("apparmor_parser"):
