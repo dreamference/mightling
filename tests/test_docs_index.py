@@ -146,3 +146,41 @@ def test_without_strace_or_ling_docs_the_trace_fails(monkeypatch, tmp_path):
     assert DocsEgressAudit.run(ling_docs=str(tmp_path / "ling-docs")) == 2
     monkeypatch.setattr(shutil_module, "which", lambda name: "/usr/bin/strace")
     assert DocsEgressAudit.run(ling_docs=str(tmp_path / "missing")) == 2
+
+
+def test_json_writes_the_result_as_timestamp_docs_json(monkeypatch, tmp_path, capsys):
+    # `audit egress --docs --json` used to ignore `--json`; the file sits beside the session
+    # audit's `<timestamp>-<session>.json`.
+    import json
+    import shutil as shutil_module
+    ling_docs = tmp_path / "ling-docs"
+    ling_docs.write_bytes(b"#!/bin/sh\n")
+    ling_docs.chmod(0o755)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    monkeypatch.setattr(shutil_module, "which", lambda name: "/usr/bin/strace")
+    monkeypatch.setattr(DocsEgressAudit, "trace", classmethod(
+        lambda cls, binary, work_dir: (StraceParser.parse(CLEAN), True, True, {})))
+    assert DocsEgressAudit.run(ling_docs=str(ling_docs)) == 0
+    assert not (tmp_path / "codex-home" / "audit").exists()
+    assert DocsEgressAudit.run(ling_docs=str(ling_docs), write_json=True) == 0
+    written = list((tmp_path / "codex-home" / "audit").iterdir())
+    assert len(written) == 1 and written[0].name.endswith("-docs.json")
+    assert str(written[0]) in capsys.readouterr().out
+    result = json.loads(written[0].read_text())
+    assert result["session"] == "docs" and result["verdict"] == "pass" and result["problems"] == []
+    assert result["destinations"] == {} and "bwrap" in result["processes"]
+    assert result["ling_docs_sha256"] and result["ling_docs"] == str(ling_docs)
+
+
+def test_every_setting_ling_docs_reads_reaches_its_mcp_server():
+    # `ling-docs mcp` runs with Codex's short allow-list plus the launcher's FORWARDED_ENV; four
+    # `DREAMFERENCE_MIGHTLING_DOCS_*` settings (the embedding model among them) were not in it.
+    import re
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    read = set(re.findall(r'"(DREAMFERENCE_MIGHTLING_DOCS\w*)"', (repo / "ling-docs-rs" / "src" / "config.rs").read_text()))
+    launcher = (repo / "ling-rs" / "src" / "docs_index.rs").read_text()
+    forwarded = set(re.findall(r'"(\w+)"', launcher.split("const FORWARDED_ENV", 1)[1].split("];", 1)[0]))
+    assert "DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL" in read
+    assert read <= forwarded, sorted(read - forwarded)

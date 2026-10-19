@@ -629,6 +629,9 @@ class DreamferenceCLIController:
                 return 2
             return RetiredWebChat.remove(yes=yes, delete_data=delete_data)
         if args.chat_command == "status":
+            if rest:
+                print(f"usage: ling-admin chat status (not {' '.join(rest)})")
+                return 2
             print(RETIRED_MESSAGE)
             for line in RetiredWebChat.describe():
                 print(f"  {line}")
@@ -1219,7 +1222,7 @@ class DreamferenceCLIController:
         audit_egress_mode.add_argument("--web", action="store_true", help="Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`")
         audit_egress_mode.add_argument("--docs", action="store_true", help="Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
-        audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
+        audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web or docs)")
         audit_egress_parser.add_argument("--ling-docs-bin", default=None, help=argparse.SUPPRESS)
 
         # Command: ling-admin node (offer this machine to the local network as a Mightling node)
@@ -2517,7 +2520,12 @@ class DreamferenceCLIController:
             if args.audit_command == "egress":
                 if args.docs:
                     from dreamference.audit import DocsEgressAudit
-                    sys.exit(DocsEgressAudit.run(ling_docs=args.ling_docs_bin))
+                    if args.prompt is not None:
+                        # `--docs` traces `ling-docs index` and a fixed search: no session takes a prompt.
+                        print("❌ --prompt has no effect with --docs: it traces `ling-docs index` and a fixed "
+                              "search over a fixture folder, with no ling session to prompt.")
+                        sys.exit(2)
+                    sys.exit(DocsEgressAudit.run(ling_docs=args.ling_docs_bin, write_json=args.json))
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
                 sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui, app=args.app, web=args.web))
             print("usage: ling-admin audit {egress}")

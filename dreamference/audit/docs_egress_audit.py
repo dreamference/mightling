@@ -10,10 +10,14 @@ embedder run in `systemd-run --scope` (which execs the command, so strace follow
 with an empty network namespace; the trace covers them too.
 """
 
+import datetime
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import tempfile
+from dataclasses import asdict
 from typing import Dict, List, Optional, Tuple
 
 from dreamference.audit.egress_trace import EgressTrace
@@ -24,6 +28,8 @@ TRACED_SYSCALLS = "connect,sendto,sendmsg,sendmmsg,execve"
 RUN_TIMEOUT_S = 900
 FIXTURE_QUESTION = "Which bird nests in burrows on sea cliffs?"
 FIXTURE_ANSWER = "puffins nest in burrows"
+# The session name in the result file's name and body, beside `exec`, `tui`, `app` and `web`.
+DOCS_SESSION = "docs"
 
 
 class DocsEgressAudit:
@@ -150,12 +156,54 @@ class DocsEgressAudit:
         return StraceParser.parse(text), indexed, found, outputs
 
     @classmethod
-    def run(cls, ling_docs: Optional[str] = None) -> int:
+    def write_result(cls, trace: EgressTrace, verdict: EgressVerdict, ling_docs: str) -> str:
+        """
+        Writes the full result as JSON under `$CODEX_HOME/audit/`, as `<timestamp>-docs.json`
+        beside the session audit's `<timestamp>-<session>.json`.
+
+        Args:
+            trace (EgressTrace): What the two commands did.
+            verdict (EgressVerdict): The verdict.
+            ling_docs (str): The executable that was traced.
+
+        Returns:
+            str: The file written.
+        """
+        from dreamference.runner.codex_installer import CodexInstaller
+        directory = os.path.join(CodexInstaller.home_dir(), "audit")
+        os.makedirs(directory, exist_ok=True)
+        now = datetime.datetime.now().astimezone()
+        path = os.path.join(directory, f"{now:%Y%m%d-%H%M%S}-{DOCS_SESSION}.json")
+        digest = hashlib.sha256()
+        try:
+            with open(ling_docs, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(chunk)
+            sha256: Optional[str] = digest.hexdigest()
+        except OSError:
+            sha256 = None
+        result = {
+            "at": now.isoformat(timespec="seconds"),
+            "session": DOCS_SESSION,
+            "verdict": verdict.status,
+            "problems": verdict.problems,
+            **asdict(trace),
+            "ling_docs": ling_docs,
+            "ling_docs_sha256": sha256,
+        }
+        with open(path, "w") as handle:
+            json.dump(result, handle, indent=2)
+            handle.write("\n")
+        return path
+
+    @classmethod
+    def run(cls, ling_docs: Optional[str] = None, write_json: bool = False) -> int:
         """
         Runs the scenario and prints its report.
 
         Args:
             ling_docs (Optional[str]): The executable; the installed one by default.
+            write_json (bool): Also write the full result to `$CODEX_HOME/audit/<timestamp>-docs.json`.
 
         Returns:
             int: 0 on a pass, 1 on any destination, 2 when the trace itself failed.
@@ -187,4 +235,6 @@ class DocsEgressAudit:
         print(f"Unix sockets: {', '.join(sorted(trace.unix_sockets)) or 'none'}")
         programs = ", ".join(f"{name} ({count})" for name, count in sorted(trace.processes.items(), key=lambda item: (-item[1], item[0])))
         print(f"Processes started: {programs or 'none'}")
+        if write_json:
+            print(f"💡 Full result: {cls.write_result(trace, verdict, ling_docs)}")
         return verdict.exit_code
