@@ -19,6 +19,7 @@ import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor
 import { Icon, MightlingMark } from "./icons";
 import { underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
+import { ThreadLoader } from "./loader";
 import { inGitInternals } from "./files";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -119,6 +120,15 @@ export function App() {
   const [state, dispatch] = useReducer(reduce, initialState);
   const client = useMemo(() => new RpcClient(bridge.bridgeTransport), []);
   const [servedModel, setServedModel] = useState<string | null>(null);
+  const servedModelRef = useRef(servedModel);
+  servedModelRef.current = servedModel;
+  // Threads are read to be viewed and resumed only when a request needs them loaded (loader.ts).
+  const loader = useMemo(() => {
+    const threads = new ThreadLoader((threadId) => client.request("thread/resume", { threadId, model: servedModelRef.current }));
+    client.beforeRequest = (method, params) => threads.before(method, params);
+    client.afterResponse = (method, result) => threads.after(method, result);
+    return threads;
+  }, [client]);
   const [askRoot, setAskRoot] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<PermissionProfileSummary[]>([]);
   const [profile, setProfile] = useState(":workspace");
@@ -326,6 +336,7 @@ export function App() {
       const first = POPOUT ?? target?.thread ?? null;
       if (first) {
         const resumed = await client.request("thread/resume", { threadId: first, model: started.served_model });
+        loader.markLoaded(first);
         dispatch({ type: "opened", thread: resumed.thread });
         if (POPOUT) setView(isAskThread(resumed.thread, started.ask_root ?? null) ? "ask" : "work");
       }
@@ -341,6 +352,8 @@ export function App() {
       // A terminal's output goes to its tab, not to the store.
       if (hub.deliver(notification)) return;
       dispatch({ type: "notification", notification });
+      // A thread this window starts (or forks) is loaded in the server from the start.
+      if (notification.method === "thread/started") loader.markLoaded(notification.params.thread.id);
       if (notification.method === "thread/queue/changed") refreshQueue(notification.params.threadId);
       // A turn that ends while its thread is not in front leaves the thread unread.
       if (notification.method === "turn/completed") {
@@ -373,6 +386,7 @@ export function App() {
       protocolError: (line) => dispatch({ type: "protocolError", line }),
       exit: (code) => {
         client.fail(`${SERVER_EXITED}${code === null ? "" : ` with code ${code}`}`);
+        loader.reset();
         dispatch({ type: "server", status: "exited" });
       },
     }).then((unlisten) => {
@@ -473,8 +487,19 @@ export function App() {
     setDrawer(false);
     setInfo(null);
     try {
-      const resumed = await client.request("thread/resume", { threadId, model: servedModel });
-      dispatch({ type: "opened", thread: resumed.thread });
+      // Read, not resumed: resuming writes to the thread's rollout, which `thread/list` then reports
+      // as activity. A thread loaded already, or running (from another client too), is resumed, so
+      // its events stream here.
+      const known = state.threads[threadId]?.thread;
+      const live = loader.isLoaded(threadId) || known?.status.type === "active";
+      if (live) {
+        const resumed = await client.request("thread/resume", { threadId, model: servedModel });
+        loader.markLoaded(threadId);
+        dispatch({ type: "opened", thread: resumed.thread });
+      } else {
+        const read = await client.request("thread/read", { threadId, includeTurns: true });
+        dispatch({ type: "opened", thread: read.thread });
+      }
       refreshQueue(threadId);
       client.request("thread/goal/get", { threadId }).then((answer) => dispatch({ type: "goal", threadId, goal: (answer as { goal: ThreadGoal | null }).goal })).catch(() => {});
     } catch (error) {

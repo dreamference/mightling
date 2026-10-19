@@ -503,6 +503,9 @@ test("5 plan mode: the Plan chip and /plan send the turn in Plan mode", async ()
   try {
     await page.getByRole("button", { name: "Work", exact: true }).click();
     await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    // Opened to be read: thread/read, not thread/resume (which writes to the rollout, whose time the list shows).
+    await expect.poll(() => received(home).some((m) => m.method === "thread/read" && m.params?.threadId === "w3")).toBe(true);
+    expect(received(home).some((m) => m.method === "thread/resume" && m.params?.threadId === "w3")).toBe(false);
     const composer = page.getByRole("textbox", { name: "Message", exact: true });
     await page.getByRole("button", { name: "Plan" }).click();
     await expect(page.getByRole("button", { name: "Plan" })).toHaveAttribute("aria-pressed", "true");
@@ -510,6 +513,9 @@ test("5 plan mode: the Plan chip and /plan send the turn in Plan mode", async ()
     await shoot("5-plan-mode.png");
     await composer.press("Enter");
     await expect.poll(() => (received(home).find((m) => m.method === "turn/start")?.params?.collaborationMode as { mode?: string } | undefined)?.mode).toBe("plan");
+    // Sending loads it first: one resume, before the turn.
+    const order = received(home).filter((m) => (m.method === "thread/resume" || m.method === "turn/start") && m.params?.threadId === "w3").map((m) => m.method);
+    expect(order.slice(0, 2)).toEqual(["thread/resume", "turn/start"]);
     // /plan switches it off again for the next turn.
     await composer.fill("/plan");
     await composer.press("Enter");
