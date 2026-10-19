@@ -18,8 +18,20 @@ export const SWITCHES: ReadonlyArray<[string, string?]> = [
   ["blink-settings", "dnsPrefetchingEnabled=false"],
 ];
 
-export function applySwitches(): void {
-  for (const [name, value] of SWITCHES) {
+/**
+ * The switches for one platform only. On macOS, Chromium's cookie encryption (os_crypt) asks the
+ * login keychain for "Mightling Safe Storage" at start; an ad-hoc-signed build gets a keychain prompt
+ * every time it changes, and an `open` hung in SecItemCopyMatching with no window (the 1.7.0 Mac
+ * test). The mock keychain skips the keychain: the app keeps no secret (no `safeStorage`, no token),
+ * and the only data it encrypts is the preview tab's cookies, which are then stored with a fixed key.
+ * To revisit once the app is signed with a Developer ID, whose keychain entry would persist.
+ */
+export function platformSwitches(platform: NodeJS.Platform = process.platform): ReadonlyArray<[string, string?]> {
+  return platform === "darwin" ? [["use-mock-keychain"]] : [];
+}
+
+export function applySwitches(platform: NodeJS.Platform = process.platform): void {
+  for (const [name, value] of [...SWITCHES, ...platformSwitches(platform)]) {
     if (value === undefined) app.commandLine.appendSwitch(name);
     else app.commandLine.appendSwitch(name, value);
   }
