@@ -203,6 +203,13 @@ module.exports = {
         // Not shipped: the SUID sandbox helper. The AppArmor profile of linux/postinst grants the
         // user namespace Chromium's sandbox uses instead, as the Codex app does.
         fs.rmSync(path.join(outputPath, "chrome-sandbox"), { force: true });
+        // An unpacked build (the zip, or this folder run as it is) has no postinst to write that
+        // profile: the script beside the binary writes it for the folder it is in, with sudo.
+        if (process.platform === "linux") {
+          const script = path.join(outputPath, "install-sandbox-profile.sh");
+          fs.copyFileSync(path.join(__dirname, "linux", "install-sandbox-profile.sh"), script);
+          fs.chmodSync(script, 0o755);
+        }
         // On a Mac the fuses live in the bundle (fuses finds the framework from the `.app`), and
         // flipping them breaks the ad-hoc signature Apple silicon will not run without, so fuses
         // re-signs it ad hoc; the workflow then signs the whole bundle ad hoc (§10).
