@@ -9,7 +9,8 @@
 //! 4. the node remembered in `$CODEX_HOME/node.json`, found again on the network **by its id**, so
 //!    an address change costs nothing; its last address is tried only when a browse returns
 //!    nothing at all;
-//! 5. a browse of `_mightling-node._tcp`: one node is used and remembered, several are a question.
+//! 5. a browse of `_mightling-node._tcp`: one node is used and remembered, several are a question
+//!    unless only one of them serves a coding model, or only one of those is not stopped.
 //!
 //! When a browse misses (nothing answered, the remembered node did not, or the pinned one is not
 //! there), a Linux client whose own Wi-Fi saves power gets one more line saying so, with the
@@ -54,20 +55,26 @@ enum Listen {
 }
 
 /// Decides, after each answer, how much longer the browse listens. With no node wanted, the first
-/// answer starts [`SETTLE`]. With one wanted, another node's answer starts nothing: on Wi-Fi the
+/// answer from a node that is [`serving`] starts [`SETTLE`]. With one wanted, another node's answer starts nothing: on Wi-Fi the
 /// wanted node often answers well after another one, and settling on the first answer declared it
 /// gone (a client on the owner's desktop, 2026-10-19, with a second, stopped node advertised: two of
 /// four `ling exec` runs said the remembered node was not on the network, and `ling node use
 /// <name>` said there was no such node). The wanted node is the remembered one, by its id, or, with
 /// no id, the one named by `MIGHTLING_NODE` or `ling node use` (its name, address or id, as
 /// [`matches`] reads them).
+///
+/// With nothing wanted, a node whose model server is stopped, or one without a coding model,
+/// starts nothing either: a client with nothing remembered would otherwise end the browse with
+/// only such a node and adopt it (the owner keeps a second node advertised with its model server
+/// usually stopped).
 fn after_answer(wanted: Option<&Node>, found: &[Advert]) -> Listen {
+    let any_serving = || if found.iter().any(serving) { Listen::Settle } else { Listen::Deadline };
     let Some(wanted) = wanted else {
-        return Listen::Settle;
+        return any_serving();
     };
     if wanted.node.is_empty() {
         if wanted.name.trim().is_empty() {
-            return Listen::Settle;
+            return any_serving();
         }
         return if found.iter().any(|seen| matches(seen, &wanted.name)) { Listen::Stop } else { Listen::Deadline };
     }
@@ -79,6 +86,12 @@ fn after_answer(wanted: Option<&Node>, found: &[Advert]) -> Listen {
     } else {
         Listen::Settle
     }
+}
+
+/// Whether a node offers a coding model that is not advertised as stopped: the only kind of node
+/// a client may end up using without being told which.
+fn serving(advert: &Advert) -> bool {
+    advert.main && advert.state != "stopped"
 }
 
 /// The node a name stands for while a browse looks for it: no id, so [`after_answer`] matches the name.
@@ -191,7 +204,9 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
             });
             return checked(advert, true, note);
         }
-        if found.is_empty() {
+        // Nothing answered, or only nodes whose model server is stopped: nothing to choose
+        // between, so the remembered node's last address is tried, as when the browse is silent.
+        if !found.iter().any(serving) {
             return Resolution::LastAddress {
                 node: remembered.clone(),
                 note: Some(format!(
@@ -209,20 +224,30 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
         [only] => only,
         several => {
             // Two Sparks, one with a coding model and one with speech or embeddings, need no
-            // answer from anyone; two that both serve a coding model need one, once.
+            // answer from anyone; two that both serve a coding model need one, once. Nor do two
+            // coding nodes of which only one has its model server up: a stopped one can serve
+            // nothing, and counting it made a client that remembers no node (the desktop app on
+            // the owner's desktop, 2026-10-19) refuse to start.
             let mut main = several.iter().filter(|advert| advert.main);
-            match (main.next(), main.next()) {
-                (Some(only), None) => only,
+            let mut up = several.iter().filter(|advert| serving(advert));
+            match (main.next(), main.next(), up.next(), up.next()) {
+                (Some(only), None, _, _) => only,
+                (_, _, Some(only), None) => only,
                 _ => return Resolution::Choose { adverts: found, gone: None },
             }
         }
     };
-    let note = format!(
-        "Using Mightling node {} at {} (remembered; `ling node list` shows every node).",
-        label(&chosen.node),
-        chosen.node.address
-    );
-    checked(chosen.clone(), true, Some(note))
+    // A node advertised as stopped is used, since it is the only one, but not remembered: once its
+    // model server is up, or another node's, the next browse decides again.
+    let remember = chosen.state != "stopped";
+    let note = remember.then(|| {
+        format!(
+            "Using Mightling node {} at {} (remembered; `ling node list` shows every node).",
+            label(&chosen.node),
+            chosen.node.address
+        )
+    });
+    checked(chosen.clone(), remember, note)
 }
 
 /// Whether the tiers ended because a browse did not find the node: nothing answered and nothing
@@ -864,6 +889,58 @@ mod tests {
         assert_eq!(after_answer(Some(&named("spark-1")), &[spark2()]), Listen::Deadline);
         assert_eq!(after_answer(Some(&named("spark-1.local")), &[spark2(), spark1()]), Listen::Stop);
         assert_eq!(after_answer(Some(&named("192.168.0.105")), &[spark1()]), Listen::Stop);
+    }
+
+    fn stopped(advert: Advert) -> Advert {
+        Advert { state: "stopped".into(), ..advert }
+    }
+
+    #[test]
+    fn a_stopped_node_does_not_cut_a_browse_for_any_node_short() {
+        assert_eq!(after_answer(None, &[stopped(spark2())]), Listen::Deadline);
+        assert_eq!(after_answer(None, &[Advert { main: false, ..spark2() }]), Listen::Deadline);
+        assert_eq!(after_answer(None, &[stopped(spark2()), spark1()]), Listen::Settle);
+        assert_eq!(after_answer(None, &[Advert { state: "loading".into(), ..spark1() }]), Listen::Settle);
+    }
+
+    #[test]
+    fn of_two_coding_nodes_the_one_whose_model_server_is_up_is_used() {
+        // The owner's second node stays advertised with its model server stopped: a client that
+        // remembers no node uses the other, and remembers it.
+        let browser = Fixed::new(vec![spark1(), stopped(spark2())]);
+        assert!(matches!(
+            resolve(&Inputs::default(), &browser),
+            Resolution::Found { advert, remember: true, note: Some(_) } if advert == spark1()
+        ));
+        let loading = Advert { state: "loading".into(), ..spark1() };
+        let browser = Fixed::new(vec![loading.clone(), stopped(spark2())]);
+        assert!(matches!(resolve(&Inputs::default(), &browser), Resolution::Found { advert, .. } if advert == loading));
+        // Both stopped, or both up: still a question.
+        let browser = Fixed::new(vec![stopped(spark1()), stopped(spark2())]);
+        assert!(matches!(resolve(&Inputs::default(), &browser), Resolution::Choose { gone: None, .. }));
+    }
+
+    #[test]
+    fn a_stopped_node_found_alone_is_used_but_not_remembered() {
+        let browser = Fixed::new(vec![stopped(spark2())]);
+        assert!(matches!(
+            resolve(&Inputs::default(), &browser),
+            Resolution::Found { remember: false, note: None, .. }
+        ));
+    }
+
+    #[test]
+    fn only_stopped_nodes_answering_send_the_remembered_one_to_its_last_address() {
+        // The remembered node did not answer and the only other node's model server is stopped:
+        // nothing to choose between, so the last address is tried, as when nothing answers.
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        let browser = Fixed::new(vec![stopped(spark2())]);
+        let Resolution::LastAddress { node, note } = resolve(&inputs, &browser) else { panic!("not the last address") };
+        assert_eq!(node, spark1().node);
+        assert!(note.is_some_and(|note| note.contains("did not answer a browse")));
+        // Another node that serves is still a question, never a silent switch.
+        let browser = Fixed::new(vec![stopped(spark2()), advert("spark-3", "33333333-cccc", "192.168.0.107")]);
+        assert!(matches!(resolve(&inputs, &browser), Resolution::Choose { gone: Some(_), .. }));
     }
 
     #[test]
