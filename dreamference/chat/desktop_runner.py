@@ -19,12 +19,13 @@ off to a subprocess.
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Final, List, Optional
 
-from dreamference.chat.desktop_installer import CARGO_BIN, DesktopInstaller
+from dreamference.chat.desktop_installer import APPARMOR_PROFILE_NAME, CARGO_BIN, DesktopInstaller
 
 # Left in `node_modules` by a successful `npm ci`: the hash of the lock file it installed from.
 LOCK_STAMP: Final[str] = ".mightling-lock-sha256"
@@ -64,6 +65,10 @@ WINDOW_CLASS: Final[str] = "Mightling"
 # so the applications grid does not show two of it, one pointing at a binary that no longer builds.
 # `puffin-app` is the name it had until the product became Mightling.
 LEGACY_ENTRY_NAMES: Final[tuple] = ("puffin-desktop", "puffin-ui", "puffin-app")
+
+# The architecture names Electron's packager puts in `out/<name>-linux-<arch>/` (Node's
+# `process.arch`), by what `platform.machine()` says.
+PACKAGER_ARCH: Final[dict] = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x64", "amd64": "x64"}
 
 # Chromium's HTTP cache, inside the app's data directory, emptied on launch so a window never
 # shows a page from before an upgrade. Emptying it costs little: the UI is bundled in the app.
@@ -196,6 +201,8 @@ class DesktopRunner:
               "install does not have.")
         print("💡 Install the app from the release instead: the Mightling .deb on the release page "
               "puts `ling-app` in your launcher.")
+        print("💡 Running an unpacked build (a zip) instead: run `./install-sandbox-profile.sh` beside its "
+              "binary once, or Chromium's sandbox is refused (\"No usable sandbox!\").")
         return 1
 
     @classmethod
@@ -251,11 +258,6 @@ class DesktopRunner:
             return cls._run_installed()
         if not cls._ensure_toolchain() or not cls.install_packages():
             return 1
-        if not DesktopInstaller.userns_allowed():
-            print("⚠️  Chromium's sandbox needs a user namespace, which this machine refuses without an AppArmor")
-            print("   profile; from a plain terminal or the launcher the app would abort at start.")
-            print("💡 `ling-admin desktop install` writes the profile (sudo once).")
-
         if not cls.copy_bundled_binaries():
             return 1
         print("🔨 Building the desktop app (Vite, then Forge's package)...")
@@ -266,6 +268,7 @@ class DesktopRunner:
             print(f"❌ The package step wrote no app under {ELECTRON_DIR / 'out'}.")
             return 1
         cls.install_desktop_entry()
+        cls.warn_uncovered([binary])
 
         cls.clear_webview_cache()
         print("🚀 Opening the Mightling desktop window...")
@@ -358,19 +361,62 @@ class DesktopRunner:
         return None
 
     @classmethod
-    def dev_binaries(cls) -> List[str]:
+    def packaged_binary_path(cls) -> str:
         """
-        The Electron binaries a checkout runs: npm's prebuilt `electron` (for `desktop run`) and
-        the packaged app (for `desktop build`'s output). Both need the AppArmor profile.
+        Where `electron-forge package` writes the app's binary on this machine, whether or not it
+        has been written yet: `out/<productName>-linux-<arch>/<executable>`.
 
         Returns:
-            List[str]: Absolute paths that exist.
+            str: The absolute path.
         """
-        candidates = [str(ELECTRON_DIR / "node_modules" / "electron" / "dist" / "electron")]
-        packaged = cls.binary_path()
-        if packaged:
-            candidates.append(packaged)
-        return [path for path in candidates if os.path.isfile(path)]
+        config = cls._app_config()
+        name = config.get("productName", "Mightling")
+        executable = config.get("executable", "Mightling")
+        machine = platform.machine().lower()
+        arch = PACKAGER_ARCH.get(machine, machine)
+        return str(ELECTRON_DIR / "out" / f"{name}-linux-{arch}" / executable)
+
+    @classmethod
+    def dev_binaries(cls) -> List[str]:
+        """
+        The Electron binaries a checkout runs: npm's prebuilt `electron`, and the packaged app
+        `desktop run` and the launcher entry start. All need the AppArmor profile. The packaged
+        path is included before it exists: `desktop install` runs before the first `desktop run`
+        packages the app, and a profile written then without it left the app the launcher starts
+        refused its sandbox ("No usable sandbox!", 2026-10-19).
+
+        Returns:
+            List[str]: Absolute paths: npm's `electron` if it is installed, the packaged binary's
+                path always, and another packaged binary found under `out/` (if any).
+        """
+        electron = str(ELECTRON_DIR / "node_modules" / "electron" / "dist" / "electron")
+        binaries = [electron] if os.path.isfile(electron) else []
+        for packaged in (cls.packaged_binary_path(), cls.binary_path()):
+            if packaged and packaged not in binaries:
+                binaries.append(packaged)
+        return binaries
+
+    @classmethod
+    def warn_uncovered(cls, binaries: List[str]) -> bool:
+        """
+        Says, with the fix, when a binary about to be started has no AppArmor profile on a machine
+        that needs one. From PyCharm's terminal (a permissive profile) it still starts; from the
+        launcher or a plain terminal Chromium aborts with "No usable sandbox!".
+
+        Args:
+            binaries (List[str]): The binaries to check.
+
+        Returns:
+            bool: True if every binary is covered (or none needs to be).
+        """
+        missing = DesktopInstaller.uncovered(binaries)
+        if not missing:
+            return True
+        print("⚠️  Chromium's sandbox needs a user namespace, which this machine refuses to a program without an")
+        print(f"   AppArmor profile, and none names {', '.join(missing)}: from the launcher or a plain")
+        print('   terminal the app would abort at start with "No usable sandbox!".')
+        print("💡 `ling-admin desktop install` writes the profile (sudo once).")
+        return False
 
     @classmethod
     def install_desktop_entry(cls) -> bool:
@@ -447,14 +493,21 @@ class DesktopRunner:
         (Electron among them), and the AppArmor profile Chromium's sandbox needs on this machine.
 
         Returns:
-            int: 0 if the toolchain is complete afterwards.
+            int: 0 if the toolchain is complete afterwards and every binary has its profile.
         """
         if not cls.has_source():
             return cls._no_source()
         if not cls._ensure_toolchain() or not cls.install_packages():
             return 1
-        if not DesktopInstaller.userns_allowed():
-            DesktopInstaller.install_apparmor_profile(cls.dev_binaries())
+        binaries = cls.dev_binaries()
+        if DesktopInstaller.uncovered(binaries):
+            # The checkout's one file, rewritten with every binary it covered or should: a profile
+            # from before that named fewer is replaced, not joined by a second. A binary another
+            # profile names (an unpacked build's) is left to it: two attachments would conflict.
+            ours = [binary for binary in binaries
+                    if os.path.basename(DesktopInstaller.covering_profile(binary) or APPARMOR_PROFILE_NAME) == APPARMOR_PROFILE_NAME]
+            if not DesktopInstaller.install_apparmor_profile(ours):
+                return 1
         if cls.binary_path():
             cls.install_desktop_entry()
         return 0
@@ -473,7 +526,5 @@ class DesktopRunner:
         print(f"{'✅' if built else '❌'} ling, which the app bundles for Work and Ask"
               f"{f' ({ling})' if built else ' — build it with: ling-admin codex build'}")
         complete, _ = DesktopInstaller.report()
-        if not DesktopInstaller.userns_allowed():
-            print("⚠️  Chromium's sandbox cannot create a user namespace from an unconfined program here: "
-                  "`ling-admin desktop install` writes the AppArmor profile.")
-        return 0 if built and complete else 1
+        covered = cls.warn_uncovered(cls.dev_binaries()) if cls.has_source() else True
+        return 0 if built and complete and covered else 1
