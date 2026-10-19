@@ -33,8 +33,18 @@ NON_INTERACTIVE: Final[frozenset] = frozenset({
     "review", "plugin", "remote-control", "exec-server", "queue", "archive", "unarchive", "delete", "execpolicy",
     "migrate-rollouts", "responses-api-proxy", "stdio-to-uds", "tcp-tunnel",
     "audit", "docs", "chat", "signal", "ledger", "notice", "refine",
-    "--version", "-V",
-    "--help", "-h",
+})
+
+# Options that print and exit wherever they stand on the command line.
+PRINT_AND_EXIT: Final[frozenset] = frozenset({"--version", "-V", "--help", "-h"})
+
+# `ling`'s options before the subcommand that take a value as the next argument (Codex's
+# `MultitoolCli`: `CliConfigOverrides`, `FeatureToggles`, `InteractiveRemoteOptions`, `TuiCli` and its
+# `SharedCliOptions`), so that a value (`-C docs`, `-m exec-model`) is never read as the subcommand.
+VALUE_OPTIONS: Final[frozenset] = frozenset({
+    "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env",
+    "-i", "--image", "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox",
+    "-a", "--ask-for-approval", "-C", "--cd", "--add-dir",
 })
 
 # What `/proc/<pid>/exe` appends to a program whose file has since been removed or replaced, as a
@@ -393,17 +403,47 @@ class NightShiftHost:
         return True
 
     @classmethod
-    def is_interactive(cls, args: List[str]) -> bool:
+    def subcommand(cls, args: List[str]) -> str | None:
         """
-        Tells whether a `ling` command line opens the TUI.
+        Finds the subcommand of a `ling` command line: its first argument that is neither an option
+        nor an option's value. A prompt in that place is returned as it is; after `--` everything is
+        the prompt, so there is no subcommand.
 
         Args:
             args: The arguments after the program name.
 
         Returns:
-            bool: False when any argument names a non-interactive subcommand.
+            str | None: The subcommand or prompt; None when the line has no subcommand.
         """
-        return not any(arg in NON_INTERACTIVE for arg in args)
+        rest = iter(args)
+        for arg in rest:
+            if arg == "--":
+                return None
+            if arg in VALUE_OPTIONS:
+                next(rest, None)
+            elif not arg.startswith("-") or arg == "-":
+                return arg
+        return None
+
+    @classmethod
+    def is_interactive(cls, args: List[str]) -> bool:
+        """
+        Tells whether a `ling` command line opens the TUI.
+
+        Only the subcommand's place counts: a word that names a non-interactive subcommand
+        elsewhere, as an option's value (`ling -C docs`) or in a prompt, does not.
+
+        Args:
+            args: The arguments after the program name.
+
+        Returns:
+            bool: False when the subcommand is a non-interactive one, or the line asks for help or
+                the version.
+        """
+        options = args[:args.index("--")] if "--" in args else args
+        if any(arg in PRINT_AND_EXIT for arg in options):
+            return False
+        return cls.subcommand(args) not in NON_INTERACTIVE
 
     @classmethod
     def heavy_jobs(cls) -> List[str]:
