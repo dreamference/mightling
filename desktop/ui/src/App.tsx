@@ -17,6 +17,7 @@ import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
 import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
+import { underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
 import { inGitInternals } from "./files";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
@@ -479,6 +480,35 @@ export function App() {
     } catch (error) {
       notice(error);
     }
+  };
+
+  /**
+   * Revert: the turn's file changes undone (its diff applied in reverse, in the thread's repository),
+   * then the turn and every later one removed from the thread (`thread/revert`, which changes the
+   * history only). Asked first: one click on the first turn's Revert emptied a thread on a Mac, its
+   * files untouched. If the files cannot be undone, the history stays as it is.
+   */
+  const revertTurn = async (turn: TurnView) => {
+    if (!selected) return;
+    const thread = selected.thread;
+    const later = selected.turns.length - 1 - selected.turns.findIndex((entry) => entry.id === turn.id);
+    const diff = turn.diff?.trim() ? turn.diff : null;
+    const what = `${later > 0 ? `this turn and the ${later} after it` : "this turn"} from the thread`;
+    const files = diff ? " and undo the file changes it made" : "; it made no file changes this window knows of, so files stay as they are";
+    if (!window.confirm(`Remove ${what}${files}? The conversation cannot be brought back from here.`)) return;
+    if (diff) {
+      const [root] = bridge.git.available() ? await bridge.git.repos(thread.cwd) : [];
+      if (!root) throw new Error("Undoing a turn's file changes needs its folder in a git repository: nothing was changed.");
+      const inside = thread.cwd.startsWith(root) ? thread.cwd.slice(root.length).replace(/^[\\/]+/, "") : "";
+      try {
+        await bridge.git.apply(root, diff, { reverse: true });
+      } catch (error) {
+        if (!inside) throw error;
+        await bridge.git.apply(root, underDirectory(diff, inside), { reverse: true });
+      }
+    }
+    await client.request("thread/revert", { threadId: thread.id, beforeTurnId: turn.id });
+    await openThread(thread.id);
   };
 
   /** The goal row's requests (`thread/goal/*`); the server's notifications update the row. */
@@ -1904,8 +1934,7 @@ export function App() {
           ) : null}
           {selected ? selected.turns.map((turn, index) => (
             <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1} commandOutput={prefs.commandOutput}
-              onRevert={() => client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: turn.id })
-                .then(() => openThread(selected.thread.id)).catch(notice)}
+              onRevert={() => void revertTurn(turn).catch(notice)}
               onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
           )) : view === "ask" ? (
             <div className="empty ask-empty">
@@ -2038,8 +2067,7 @@ export function App() {
               refreshKey={turnsDone(selected)}
               onComments={(comments) => setDraft((text) => (text.trim() ? `${text.trimEnd()}\n\n${comments}` : comments))}
               onRevertTurn={selected && selected.turns.length > 0 && !selected.activeTurnId ? () => {
-                const last = selected.turns[selected.turns.length - 1];
-                client.request("thread/revert", { threadId: selected.thread.id, beforeTurnId: last.id }).then(() => openThread(selected.thread.id)).catch(notice);
+                void revertTurn(selected.turns[selected.turns.length - 1]).catch(notice);
               } : null}
               generateMessage={(root, diff) => commitMessage(client, listen, root, modelChoice ?? servedModel, diff, prefs.commitPrompt ?? undefined)}
               forcePushDefault={prefs.forcePush}
