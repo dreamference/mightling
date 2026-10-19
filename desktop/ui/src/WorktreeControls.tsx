@@ -3,7 +3,7 @@
 // setup runs; in the header of a thread, where its work is (worktree or local), Create branch here,
 // Hand off, Open in the editor, a terminal or the file manager, and the environment's actions.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type * as bridge from "./bridge";
 import { actionIcon } from "./BottomPanel";
@@ -76,9 +76,26 @@ export function WorktreeHeader(props: {
   const [name, setName] = useState("");
   const { link } = props;
   useEffect(() => setMenu(null), [link?.checkout, link?.location]);
+  // An open menu closes on Escape and on a click anywhere outside these controls.
+  const area = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(null);
+    };
+    const onDown = (event: MouseEvent) => {
+      if (area.current && !area.current.contains(event.target as Node)) setMenu(null);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, [menu]);
   const inWorktree = link?.location === "worktree";
   return (
-    <span className="worktree-header">
+    <span className="worktree-header" ref={area}>
       {props.environment?.actions.slice(0, 4).map((action, index) => (
         <button key={action.name} className="icon bar-action" title={`${action.name}${index === 0 ? ` (${shortcutLabel("environmentAction1")})` : ""}: ${action.script}`} aria-label={action.name} onClick={() => props.onAction(action)}>
           <Icon name={actionIcon(action.icon)} size={14} />

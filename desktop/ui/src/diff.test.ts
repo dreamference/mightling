@@ -2,7 +2,7 @@
 // patch; the split view's rows; the comments sent to the composer.
 import { describe, expect, it } from "vitest";
 
-import { commentsMessage, filePatch, fingerprint, hunkPatch, parseDiff, splitRows } from "./diff";
+import { commentsMessage, filePatch, fingerprint, hunkPatch, parseDiff, splitRows, underDirectory } from "./diff";
 
 const GIT = `diff --git a/a.txt b/a.txt
 index 1111111..2222222 100644
@@ -82,5 +82,16 @@ index 1111111..2222222 100644
       { path: "a.txt", line: 2, side: "old", quote: "line 2", text: "Keep this one." },
     ])).toBe("Please address these review comments:\n- a.txt:2 `line 2 changed`: Say why it changed.\n- a.txt:2 (removed line) `line 2`: Keep this one.");
     expect(commentsMessage([])).toBe("");
+  });
+});
+
+describe("a turn's diff under a folder of the repository", () => {
+  it("moves every path under the folder, and nothing else", () => {
+    const diff = "diff --git a/greet.py b/greet.py\n--- a/greet.py\n+++ b/greet.py\n@@ -1 +1 @@\n-print('Hello ')\n+print('Hi, ')\n";
+    expect(underDirectory(diff, "app")).toBe("diff --git a/app/greet.py b/app/greet.py\n--- a/app/greet.py\n+++ b/app/greet.py\n@@ -1 +1 @@\n-print('Hello ')\n+print('Hi, ')\n");
+    expect(underDirectory(diff, "src\\app\\")).toContain("+++ b/src/app/greet.py");
+    expect(underDirectory(diff, "")).toBe(diff);
+    // A new file keeps /dev/null.
+    expect(underDirectory("--- /dev/null\n+++ b/new.txt\n", "app")).toBe("--- /dev/null\n+++ b/app/new.txt\n");
   });
 });
