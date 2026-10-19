@@ -27,6 +27,7 @@ export type FromView =
   | { type: "context-menu"; x: number; y: number; editable: boolean; selection: string }
   /** Window-side git (git.ts): the review pane, commit, push and the pull-request page. */
   | { type: "git/repos"; cwd: string }
+  | { type: "git/missing" }
   | { type: "git/status"; root: string }
   | { type: "git/diff"; root: string; scope: "unstaged" | "staged" | "commit" | "branch"; commit?: string | null }
   | { type: "git/log"; root: string }
