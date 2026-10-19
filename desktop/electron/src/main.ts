@@ -9,6 +9,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { pathKey, samePath } from "./platform";
 import { BrowserWindow, app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
@@ -390,8 +391,8 @@ export async function main(options: MainOptions): Promise<void> {
         const script = message.action === "setup" ? environment.setup : environment.actions[Number(message.action)]?.script;
         if (!script?.trim()) throw new Error("that environment has no such script");
         // The script runs in the project or in one of its worktrees, nowhere else.
-        const common = async (dir: string) => fs.realpathSync(path.resolve(dir, (await git.git(dir, ["rev-parse", "--git-common-dir"])).trim()));
-        if (fs.realpathSync(cwd) !== fs.realpathSync(project) && (await common(cwd).catch(() => "")) !== (await common(project).catch(() => "-"))) {
+        const common = async (dir: string) => pathKey(path.resolve(dir, (await git.git(dir, ["rev-parse", "--git-common-dir"])).trim()));
+        if (!samePath(cwd, project) && (await common(cwd).catch(() => "")) !== (await common(project).catch(() => "-"))) {
           throw new Error("a project's script runs in the project or one of its worktrees");
         }
         await offline(message.thread, "a project's own script (nothing sandboxes it)");

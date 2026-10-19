@@ -2,6 +2,7 @@
 // and its queueing through a stand-in `ling night`.
 import fs from "node:fs";
 import os from "node:os";
+import { nodeScript } from "./test-ling";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -26,11 +27,12 @@ describe("Night Shift for the Scheduled view", () => {
   });
 
   it("queues and drops through ling night, never writing a task itself", async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-cli-"));
+    // The real path, as ling reports where it runs: macOS links /var to /private/var, Windows may hand out a short (8.3) name.
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-cli-")));
     const log = path.join(home, "calls.txt");
-    const ling = path.join(home, "ling");
-    fs.writeFileSync(ling, `#!/bin/sh\necho "$PWD|$*" >> ${log}\necho "Queued 20261017-0900 on branch night/20261017-0900."\n`);
-    fs.chmodSync(ling, 0o755);
+    const ling = nodeScript(home, "ling", `require("fs").appendFileSync(${JSON.stringify(log)}, process.cwd() + "|" + process.argv.slice(2).join(" ") + "\\n");
+console.log("Queued 20261017-0900 on branch night/20261017-0900.");
+`);
     await expect(addTask(ling, home, "Update the changelog", "npm test")).resolves.toContain("Queued");
     await dropTask(ling, home, "20261017-0900");
     expect(fs.readFileSync(log, "utf8").trim().split("\n")).toEqual([`${home}|night add --test npm test Update the changelog`, `${home}|night drop 20261017-0900`]);
