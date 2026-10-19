@@ -98,6 +98,9 @@ h3 { font-size: 20px; margin: 0 0 8px; }
 .pillar p { margin: 0 0 10px; }
 .pillar ul { margin: 0; padding-left: 18px; }
 .pillar li { margin: 6px 0; }
+.pillar ol { margin: 0 0 10px; padding-left: 20px; }
+.pillar .cmd { margin: 0 0 10px; }
+.pillar .cmd pre { font-size: 0.82em; }
 @media (max-width: 900px) { .pillars { grid-template-columns: 1fr; } }
 
 .proof { display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; align-items: start; }
