@@ -109,6 +109,9 @@ let nextPendingId = 1;
 
 const IMAGE_TYPES = /^image\/(png|jpe?g|gif|webp)$/i;
 
+/** The notice a new thread without a folder gets; it goes once a folder is named. */
+const NAME_THE_FOLDER = "Name the project folder for the new thread.";
+
 export function App() {
   const [state, dispatch] = useReducer(reduce, initialState);
   const client = useMemo(() => new RpcClient(bridge.bridgeTransport), []);
@@ -118,6 +121,10 @@ export function App() {
   const [profile, setProfile] = useState(":workspace");
   const [airgap, setAirgap] = useState<bridge.Airgapped | null>(null);
   const [newCwd, setNewCwd] = useState("");
+  // The folder named, the notice asking for it goes (it stayed until a restart).
+  useEffect(() => {
+    if (newCwd.trim()) dispatch({ type: "dropNotice", message: NAME_THE_FOLDER });
+  }, [newCwd]);
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<View>(initialView);
   const [search, setSearch] = useState("");
@@ -486,9 +493,10 @@ export function App() {
   const startThread = async (): Promise<Thread | null> => {
     const cwd = newCwd.trim();
     if (!cwd) {
-      notice("Name the project folder for the new thread.");
+      notice(NAME_THE_FOLDER);
       return null;
     }
+    dispatch({ type: "dropNotice", message: NAME_THE_FOLDER });
     try {
       if (newChoice.mode === "worktree" && bridge.git.available()) return await startInWorktree(cwd);
       const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile });
