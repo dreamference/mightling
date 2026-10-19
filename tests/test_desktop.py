@@ -355,3 +355,42 @@ def test_works_page_is_served_from_the_built_renderer_in_every_mode():
     # The tray's icon is read from the asar, where the icons are packed.
     assert 'installTray(path.join(__dirname, "..", "..", "icons")' in main
     assert "app.asar.unpacked/icons" not in main
+
+
+def test_packages_are_installed_again_when_the_lock_file_changes(tmp_path):
+    # `ling-admin desktop build` on 2026-10-18: desktop/electron's node_modules predated smol-toml,
+    # which package-lock.json had gained, and Rolldown could not resolve it. The install now
+    # leaves the lock file's hash in node_modules and runs `npm ci` again when the hash differs.
+    from unittest.mock import patch
+
+    import dreamference.chat.desktop_runner as runner_module
+
+    ui, electron = tmp_path / "ui", tmp_path / "electron"
+    for project in (ui, electron):
+        project.mkdir()
+        (project / "package-lock.json").write_text('{"packages": {}}')
+    calls = []
+
+    def fake_npm(args, cwd):
+        calls.append(Path(cwd).name)
+        (Path(cwd) / "node_modules").mkdir(exist_ok=True)
+        return True
+
+    with patch.object(runner_module, "UI_DIR", ui), patch.object(runner_module, "ELECTRON_DIR", electron), \
+            patch.object(DesktopRunner, "_npm", side_effect=fake_npm):
+        assert DesktopRunner.install_packages() is True
+        assert calls == ["ui", "electron"]
+        assert DesktopRunner.packages_current(ui) and DesktopRunner.packages_current(electron)
+        # Nothing changed: no install.
+        assert DesktopRunner.install_packages() is True
+        assert calls == ["ui", "electron"]
+        # A dependency added to the app's lock file: that project alone is installed again.
+        (electron / "package-lock.json").write_text('{"packages": {"node_modules/smol-toml": {}}}')
+        assert not DesktopRunner.packages_current(electron)
+        assert DesktopRunner.install_packages() is True
+        assert calls == ["ui", "electron", "electron"]
+    # A node_modules from before the stamp counts as stale once.
+    old = tmp_path / "old"
+    (old / "node_modules").mkdir(parents=True)
+    (old / "package-lock.json").write_text("{}")
+    assert not DesktopRunner.packages_current(old)
