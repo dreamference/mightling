@@ -43,6 +43,10 @@ export interface PendingRequest {
 
 export type ServerStatus = "stopped" | "starting" | "ready" | "exited";
 
+/** How the requests still waiting fail when `ling app-server` exits (App.tsx), and so how their
+ * notices begin: a server that is ready again takes them back. */
+export const SERVER_EXITED = "the agent's server exited";
+
 export interface WorkState {
   server: ServerStatus;
   /** The launcher's own messages: the wait for the model server, shown on the start-up screen. */
@@ -297,7 +301,15 @@ function removeThread(state: WorkState, threadId: string): WorkState {
 export function reduce(state: WorkState, action: Action): WorkState {
   switch (action.type) {
     case "server":
-      return { ...state, server: action.status, requests: action.status === "exited" ? [] : state.requests };
+      return {
+        ...state,
+        server: action.status,
+        requests: action.status === "exited" ? [] : state.requests,
+        // Start again worked: the notices of the exit are no longer true (they stayed until a restart).
+        notices: action.status === "ready" && state.notices.some((message) => message.startsWith(SERVER_EXITED))
+          ? state.notices.filter((message) => !message.startsWith(SERVER_EXITED))
+          : state.notices,
+      };
     case "stderr":
       return { ...state, stderr: [...state.stderr, action.line].slice(-STDERR_KEPT) };
     case "protocolError":
