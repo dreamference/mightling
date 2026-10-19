@@ -108,6 +108,8 @@ export interface Editor {
 export const git = {
   available: () => host() === "electron",
   repos: (cwd: string) => send<string[]>({ type: "git/repos", cwd }),
+  /** Why git cannot run on this machine (a Mac without the Command Line Tools), or null. */
+  missing: () => send<string | null>({ type: "git/missing" }),
   status: (root: string) => send<GitStatus>({ type: "git/status", root }),
   diff: (root: string, scope: GitScope, commit: string | null = null) => send<{ scope: GitScope; diff: string; against: string | null }>({ type: "git/diff", root, scope, commit }),
   log: (root: string) => send<GitCommit[]>({ type: "git/log", root }),

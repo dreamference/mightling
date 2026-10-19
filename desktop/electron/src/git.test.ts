@@ -169,3 +169,41 @@ describe("editors", () => {
     expect(execProgram("%F")).toBeNull();
   });
 });
+
+describe("git on a Mac without the Command Line Tools", () => {
+  // The stub git and xcode-select are shell scripts: the check itself runs only on macOS, and is tested here by name.
+  const unix = process.platform !== "win32";
+  /** A folder with an executable `name` that runs `body`, and records each run in `runs.txt`. */
+  const program = (name: string, body: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-tools-"));
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, `#!/bin/sh\necho run >> "${path.join(dir, "runs.txt")}"\n${body}\n`);
+    fs.chmodSync(file, 0o755);
+    return { dir, file, runs: () => (fs.existsSync(path.join(dir, "runs.txt")) ? fs.readFileSync(path.join(dir, "runs.txt"), "utf8").split("\n").filter(Boolean).length : 0) };
+  };
+
+  it.runIf(unix)("never offers the stub, says why, and uses a real git when there is one", () => {
+    const stub = program("git", "echo 'the stub ran' >&2; exit 1");
+    const noTools = program("xcode-select", "echo 'xcode-select: error: unable to get active developer directory' >&2; exit 2");
+    const darwin = { platform: "darwin" as const, pathEnv: stub.dir, stub: stub.file };
+    // Not a Mac: nothing to check.
+    expect(git.gitMissing({ ...darwin, platform: "linux" })).toBeNull();
+    // The stub alone and no developer folder: missing, with the hint, and the stub never ran.
+    expect(git.gitMissing({ ...darwin, xcodeSelect: noTools.file })).toBe(git.NO_COMMAND_LINE_TOOLS);
+    expect(git.NO_COMMAND_LINE_TOOLS).toContain("xcode-select --install");
+    // A developer folder named that has no git in it is no better.
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), "ling-git-developer-"));
+    const emptyFolder = program("xcode-select", `echo ${empty}`);
+    expect(git.gitMissing({ ...darwin, xcodeSelect: emptyFolder.file })).toBe(git.NO_COMMAND_LINE_TOOLS);
+    // The tools installed: xcode-select names a folder with usr/bin/git, and git runs.
+    fs.mkdirSync(path.join(empty, "usr", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(empty, "usr", "bin", "git"), "");
+    expect(git.gitMissing({ ...darwin, xcodeSelect: emptyFolder.file })).toBeNull();
+    // A git before the stub on PATH (Homebrew's) is used without asking xcode-select.
+    const brew = program("git", "exit 0");
+    const asked = program("xcode-select", "exit 2");
+    expect(git.gitMissing({ ...darwin, pathEnv: [brew.dir, stub.dir].join(path.delimiter), xcodeSelect: asked.file })).toBeNull();
+    expect(asked.runs()).toBe(0);
+    expect(stub.runs()).toBe(0);
+  });
+});
