@@ -141,6 +141,26 @@ describe("a scripted session", () => {
     expect(answer.type === "agentMessage" && answer.text).toBe("Done: the test is fixed.");
   });
 
+  it("a new thread is titled by its first question as it is sent, and a listing without one keeps it", () => {
+    expect(opened.threads.t1.thread.preview).toBe("");
+    const asked = run([
+      note("turn/started", { threadId: "t1", turn: { id: "u4", status: "inProgress", items: [], error: null } }),
+      note("item/started", { threadId: "t1", turnId: "u4", item: { type: "userMessage", id: "q4", clientId: null, content: [{ type: "image", url: "data:," }, { type: "text", text: "Create hello.sh", text_elements: [] }] } }),
+    ], opened);
+    expect(asked.threads.t1.thread.preview).toBe("Create hello.sh");
+    // The second question does not rename it; ling's own name, when it sends one, wins in the title.
+    const again = run([
+      note("item/completed", { threadId: "t1", turnId: "u5", item: { type: "userMessage", id: "q5", clientId: null, content: [{ type: "text", text: "And run it", text_elements: [] }] } }),
+      note("thread/name/updated", { threadId: "t1", threadName: "Hello script" }),
+    ], asked);
+    expect(again.threads.t1.thread.preview).toBe("Create hello.sh");
+    expect(again.threads.t1.thread.name).toBe("Hello script");
+    // A listing read before ling wrote the thread down has no preview yet: what the window knows stays.
+    const listed = run([{ type: "threads", list: [thread("t1", "/w", 2)] }], again);
+    expect(listed.threads.t1.thread.preview).toBe("Create hello.sh");
+    expect(listed.threads.t1.thread.name).toBe("Hello script");
+  });
+
   it("an interrupted turn ends, and its streamed items stay", () => {
     const state = run([
       note("turn/started", { threadId: "t1", turn: { id: "u2", status: "inProgress", items: [], error: null } }),
@@ -169,6 +189,18 @@ describe("a scripted session", () => {
   it("notifications for threads this window does not know change nothing", () => {
     const state = run([note("item/agentMessage/delta", { threadId: "other", turnId: "x", itemId: "y", delta: "z" })], opened);
     expect(state).toBe(opened);
+  });
+
+  it("a notice whose cause is gone is taken back, and the same notice does not stack up", () => {
+    const told = run([
+      { type: "notice", message: "Name the project folder for the new thread." },
+      { type: "notice", message: "the model server stopped" },
+      { type: "notice", message: "Name the project folder for the new thread." },
+    ], opened);
+    expect(told.notices).toEqual(["the model server stopped", "Name the project folder for the new thread."]);
+    const named = run([{ type: "dropNotice", message: "Name the project folder for the new thread." }], told);
+    expect(named.notices).toEqual(["the model server stopped"]);
+    expect(run([{ type: "dropNotice", message: "Name the project folder for the new thread." }], named)).toBe(named);
   });
 
   it("the server exiting drops the questions it can no longer take answers to", () => {
