@@ -68,6 +68,19 @@ local network: allow it, or the app cannot reach the node (System Settings → P
 Local Network turns it back on). Because the signature is ad hoc, macOS may ask again after each
 update.
 
+Work in a project under `~/Documents`, `~/Desktop` or `~/Downloads` waits on macOS's folder-access
+dialog ("Mightling would like to access files in your Documents folder"): until you allow it, the
+thread shows nothing and the agent cannot read the project (System Settings → Privacy & Security →
+Files and Folders changes it later). Projects anywhere else in your home folder need no dialog.
+
+Git projects need Apple's Command Line Tools, which give the Mac its `git`: without them the review
+pane, worktrees and commits do nothing, and macOS offers to install them the first time something
+runs `git`. Install them once in Terminal:
+
+```bash
+xcode-select --install
+```
+
 What the preview does not do yet: `ling app` in a Mac terminal does not open it (open it from
 Applications or Spotlight), it does not update itself (download the new dmg), and closing its
 window quits it, as on Linux.
