@@ -180,7 +180,7 @@ class ServedLinear(torch.nn.Linear):
 
     It subclasses `nn.Linear` so PEFT's default LoRA dispatch wraps it (`in_features`,
     `out_features` and a `weight` attribute are what PEFT reads); the `weight` parameter holds the
-    served bytes (uint8 or float8) and never takes a gradient.
+    served bytes (uint8; FP8 bytes are viewed as uint8) and never takes a gradient.
     """
 
     def __init__(self, in_features: int, out_features: int, fmt: str, tensors: Dict[str, torch.Tensor],
@@ -190,7 +190,12 @@ class ServedLinear(torch.nn.Linear):
         self.out_features = out_features
         self.fmt = fmt
         self.fake_quant_inputs = fake_quant_inputs
-        self.weight = torch.nn.Parameter(tensors["weight"], requires_grad=False)
+        weight = tensors["weight"]
+        # FP8 bytes are held as uint8: PEFT casts a new adapter to its base layer's dtype when that
+        # dtype is floating point, and float8 counts as one.
+        if weight.dtype == torch.float8_e4m3fn:
+            weight = weight.view(torch.uint8)
+        self.weight = torch.nn.Parameter(weight, requires_grad=False)
         self.register_parameter("bias", None)
         for name in ("weight_scale", "weight_scale_2", "input_scale"):
             if name in tensors:
@@ -203,7 +208,7 @@ class ServedLinear(torch.nn.Linear):
         if self.fmt == "nvfp4":
             return dequantize_nvfp4(self.weight, self.weight_scale, self.weight_scale_2, dtype)
         if self.fmt == "fp8":
-            return dequantize_fp8(self.weight, self.weight_scale, dtype)
+            return dequantize_fp8(self.weight.view(torch.float8_e4m3fn), self.weight_scale, dtype)
         return self.weight.to(dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
