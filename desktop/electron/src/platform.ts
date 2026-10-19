@@ -20,9 +20,14 @@ export function samePath(a: string, b: string, platform: NodeJS.Platform = proce
   return windows(platform) ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
+/** `realPath` for a place that exists, else the path resolved as it is. */
+export function resolvedPath(place: string): string {
+  return fs.existsSync(place) ? realPath(place) : path.resolve(place);
+}
+
 /** A path as `samePath` compares it: real, and folded to lower case on Windows. */
 export function pathKey(place: string, platform: NodeJS.Platform = process.platform): string {
-  const real = fs.existsSync(place) ? realPath(place) : path.resolve(place);
+  const real = resolvedPath(place);
   return windows(platform) ? real.toLowerCase() : real;
 }
 

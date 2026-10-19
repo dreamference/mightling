@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { WRITE_FILE, environments, readEnvironment, writeEnvironment } from "./environments";
 import { gitEnv } from "./git";
+import { samePath } from "./platform";
 import { Tasks, type TaskEvent } from "./tasks";
 import * as worktree from "./worktree";
 
@@ -35,7 +36,7 @@ const run = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd,
 
 /** A repository `app` with a committed file, an ignored .env, a .worktreeinclude naming it, and a subfolder. */
 function repo(): { source: string; root: string } {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ling-wt-")));
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-wt-")));
   const source = path.join(base, "app");
   fs.mkdirSync(path.join(source, "src"), { recursive: true });
   run(source, "init", "-q");
@@ -196,8 +197,12 @@ describe("bottom-panel tasks", () => {
     await ended;
     expect(events[0]).toMatchObject({ kind: "started", label: "Run", cwd: scratchHome });
     const output = events.filter((event) => event.kind === "output").map((event) => event.data).join("").replace(/\r\n/g, "\n");
-    if (windows) expect(output.toLowerCase()).toBe(`${fs.realpathSync.native(scratchHome)}\ndone\n`.toLowerCase());
-    else expect(output).toBe(`${fs.realpathSync(scratchHome)}\ndone\n`);
+    if (windows) {
+      // cmd.exe prints the folder as it was given (Node's temporary folder can be an 8.3 short name).
+      const [where, ...rest] = output.split("\n");
+      expect(samePath(where, scratchHome)).toBe(true);
+      expect(rest.join("\n")).toBe("done\n");
+    } else expect(output).toBe(`${fs.realpathSync(scratchHome)}\ndone\n`);
     expect(events[events.length - 1]).toMatchObject({ kind: "exit", code: 0 });
   });
 });
