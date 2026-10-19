@@ -99,7 +99,7 @@ export function FileTree(props: { root: string; client: RpcClient; listen: Liste
   const branch = (dir: string, depth: number): ReactNode => {
     const listing = listings[dir];
     if (!listing || listing === "loading") return <div className="tree-note" style={{ paddingLeft: 12 + depth * 14 }}>…</div>;
-    if (!Array.isArray(listing)) return <div className="tree-note error" style={{ paddingLeft: 12 + depth * 14 }}>{listing.error}</div>;
+    if (!Array.isArray(listing)) return <div className="tree-note error" style={{ paddingLeft: 12 + depth * 14 }}>{folderError(listing.error)}</div>;
     if (listing.length === 0) return <div className="tree-note" style={{ paddingLeft: 12 + depth * 14 }}>empty</div>;
     return listing.map((entry) => {
       const full = joinPath(dir, entry.fileName);
@@ -135,4 +135,15 @@ export function FileTree(props: { root: string; client: RpcClient; listen: Liste
       <div className="tree-body" role="tree" aria-label={root}>{branch(root, 0)}</div>
     </nav>
   );
+}
+
+/**
+ * What a folder that could not be read says: on a Mac, a read that macOS holds behind its access
+ * prompt (~/Documents, ~/Desktop, ~/Downloads) ends as "Interrupted system call (os error 4)", and a
+ * refused one as "Operation not permitted (os error 1)"; both mean the prompt, which says so.
+ */
+export function folderError(message: string): string {
+  if (/os error 4\b|Interrupted system call/i.test(message)) return "macOS is asking whether Mightling may read this folder: answer its prompt, then open the folder again.";
+  if (/os error 1\b|Operation not permitted/i.test(message)) return "macOS did not let Mightling read this folder: allow it in System Settings, Privacy & Security, Files and Folders.";
+  return message;
 }
