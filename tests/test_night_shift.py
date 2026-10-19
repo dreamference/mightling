@@ -576,6 +576,23 @@ def test_tui_command_lines_are_told_from_the_rest():
     assert not NightShiftHost.is_interactive(["night", "list"])
     # The web server runs for days; its busy marker, not its command line, says when a turn runs.
     assert not NightShiftHost.is_interactive(["web", "serve", "--lan"])
+    # The desktop app's Gmail search, started by Codex as an MCP server, lives as long as the window.
+    assert not NightShiftHost.is_interactive(["apps", "serve", "gmail"])
+    assert NightShiftHost.is_interactive(["fork", "--last"])
+    assert NightShiftHost.is_interactive(["agents"])
+
+
+@pytest.mark.parametrize("args", [
+    ["chat", "start"], ["signal", "status"], ["docs", "status"], ["audit", "egress"],
+    ["ledger", "show"], ["notice"], ["refine", "hook"], ["plugin", "list"], ["remote-control"],
+    ["exec-server"], ["queue", "t1", "next"], ["archive", "t1"], ["unarchive", "t1"], ["delete", "t1"],
+    ["execpolicy", "check"], ["migrate-rollouts"], ["responses-api-proxy"], ["stdio-to-uds", "/s"],
+    ["tcp-tunnel"], ["mcp-server"], ["app-server", "--listen", "unix:///s"],
+])
+def test_daemons_hooks_and_one_shot_commands_are_not_sessions(args):
+    # Every `ling` subcommand that runs without a person at the TUI (ling-rs/src/lib.rs and Codex's
+    # CLI): counting one would hold every night back while it runs.
+    assert not NightShiftHost.is_interactive(args)
 
 
 def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_path):
@@ -620,6 +637,66 @@ def test_the_desktop_apps_bundled_ling_is_recognised_as_an_app_server(tmp_path):
         for process in (server, other):
             process.kill()
             process.wait()
+
+
+def _wait_for_exe(process, path):
+    for _ in range(50):  # until it has exec'd the program
+        if os.path.realpath(f"/proc/{process.pid}/exe") == str(path):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"{process.pid} never ran {path}")
+
+
+def test_a_ling_replaced_by_a_rebuild_still_counts(tmp_path):
+    # A build replaces the installed binary (a new inode at the same path) under running processes:
+    # their /proc exe then reads "<path> (deleted)". A busy app-server keeps its marker and a TUI
+    # still counts.
+    import shutil
+    installed = tmp_path / "bin" / "ling"
+    installed.parent.mkdir()
+    shutil.copy("/bin/bash", installed)
+    busy = tmp_path / "home" / "night" / "busy"
+    busy.mkdir(parents=True)
+    # `sleep 30; :` keeps bash itself running: a lone command would be exec'd in its place.
+    server = subprocess.Popen([str(installed), "-c", "sleep 30; :", "app-server"])
+    tui = subprocess.Popen([str(installed), "-c", "sleep 30; :"])
+    try:
+        for process in (server, tui):
+            _wait_for_exe(process, installed)
+        (busy / str(server.pid)).write_text('{"threads": ["t1"]}')
+        installed.unlink()
+        shutil.copy("/bin/bash", installed)
+        assert os.readlink(f"/proc/{server.pid}/exe") == f"{installed} (deleted)"
+        assert NightShiftHost.executable_of(str(server.pid)) == str(installed)
+        assert NightShiftHost.busy_app_server_pids(str(installed), str(tmp_path / "home")) == [server.pid]
+        assert [p.name for p in busy.iterdir()] == [str(server.pid)]
+        assert tui.pid in NightShiftHost.interactive_mightling_pids(str(installed))
+        assert server.pid not in NightShiftHost.interactive_mightling_pids(str(installed))
+    finally:
+        for process in (server, tui):
+            process.kill()
+            process.wait()
+
+
+def test_only_a_trailing_deleted_suffix_is_dropped(monkeypatch):
+    # A fake /proc entry: the suffix is stripped only at the end, never from inside a path.
+    links = {
+        "/proc/1/exe": "/opt/ling (deleted)",
+        "/proc/2/exe": "/opt/ling (deleted)/ling",
+        "/proc/3/exe": "/opt/ling",
+    }
+
+    def readlink(path):
+        if path not in links:
+            raise FileNotFoundError(path)
+        return links[path]
+
+    monkeypatch.setattr(os, "readlink", readlink)
+    monkeypatch.setattr(os.path, "realpath", lambda path: path)
+    assert NightShiftHost.executable_of("1") == "/opt/ling"
+    assert NightShiftHost.executable_of("2") == "/opt/ling (deleted)/ling"
+    assert NightShiftHost.executable_of("3") == "/opt/ling"
+    assert NightShiftHost.executable_of("4") == ""
 
 
 def test_sizes_parse():
