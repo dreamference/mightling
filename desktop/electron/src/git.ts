@@ -6,7 +6,7 @@
 // the network except `push`, which only a click runs and which main.ts refuses at `/airgapped on`.
 // No Electron here, so this tests against scratch repositories.
 
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -20,8 +20,64 @@ export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv
 
 export class GitError extends Error {}
 
+/** What the page shows when a Mac has only the stub `git`. */
+export const NO_COMMAND_LINE_TOOLS =
+  "Git needs Apple's Command Line Tools. Install them once in Terminal with xcode-select --install, then reopen the project.";
+
+/** Where `gitMissing` looks; each is this machine's own unless a test names another. */
+export interface GitToolsOptions {
+  platform?: NodeJS.Platform;
+  /** The PATH `git` is found on. */
+  pathEnv?: string;
+  /** The macOS stub: a `git` that only offers to install the Command Line Tools. */
+  stub?: string;
+  xcodeSelect?: string;
+}
+
+/**
+ * Why window-side git cannot run here, or null when it can; it never runs `git` itself. On macOS,
+ * `/usr/bin/git` is a stub until Apple's Command Line Tools (or Xcode) are installed, and every run of
+ * it pops the system's "install the command line developer tools" dialog, so the stub is run only
+ * when `xcode-select -p` names a developer folder with a real git in it. A `git` found on PATH
+ * before the stub (Homebrew's, say) is used as it is.
+ */
+export function gitMissing(options: GitToolsOptions = {}): string | null {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "darwin") return null;
+  const stub = options.stub ?? "/usr/bin/git";
+  const found = (options.pathEnv ?? process.env.PATH ?? "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((dir) => path.join(dir, "git"))
+    .find((file) => {
+      try {
+        fs.accessSync(file, fs.constants.X_OK);
+        return fs.statSync(file).isFile();
+      } catch {
+        return false;
+      }
+    });
+  if (found && path.resolve(found) !== path.resolve(stub)) return null;
+  try {
+    const developer = execFileSync(options.xcodeSelect ?? "/usr/bin/xcode-select", ["-p"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (developer && fs.existsSync(path.join(developer, "usr", "bin", "git"))) return null;
+  } catch {
+    // No developer folder chosen: the tools are not installed.
+  }
+  return NO_COMMAND_LINE_TOOLS;
+}
+
+/** This machine's answer, kept once git is there and asked again after a while while it is not (the tools may arrive). */
+let toolsAnswer: { missing: string | null; at: number } | null = null;
+export function gitToolsMissing(now = Date.now()): string | null {
+  if (!toolsAnswer || (toolsAnswer.missing !== null && now - toolsAnswer.at > 30_000)) toolsAnswer = { missing: gitMissing(), at: now };
+  return toolsAnswer.missing;
+}
+
 /** Runs `git args` in `cwd`; resolves with stdout, rejects with git's own message. */
 export function git(cwd: string, args: string[], input?: string, timeoutMs = 60_000, extraEnv: Record<string, string> = {}): Promise<string> {
+  const missing = gitToolsMissing();
+  if (missing) return Promise.reject(new GitError(missing));
   return new Promise((resolve, reject) => {
     const child = execFile("git", args, { cwd, env: { ...gitEnv(), ...extraEnv }, maxBuffer: MAX_OUTPUT, timeout: timeoutMs, encoding: "utf8" }, (error, stdout, stderr) => {
       if (error) {
@@ -66,6 +122,8 @@ const paths = (root: string, files: unknown): string[] => {
  */
 export async function repositories(cwd: unknown): Promise<string[]> {
   if (typeof cwd !== "string" || !path.isAbsolute(cwd) || !fs.existsSync(cwd)) return [];
+  // Without a git to run, there is no repository to show (the page shows why: `gitToolsMissing`).
+  if (gitToolsMissing()) return [];
   try {
     return [(await git(cwd, ["rev-parse", "--show-toplevel"])).trim()];
   } catch {
@@ -174,6 +232,7 @@ function notShown(file: string, why: string): string {
 /** `git diff --no-index` exits 1 on a difference; this runs it and keeps the output. */
 function diffNoIndex(root: string, file: string): Promise<string> {
   return new Promise((resolve) => {
+    if (gitToolsMissing()) return resolve("");
     execFile("git", ["diff", ...DIFF_FLAGS, "--no-index", "--", "/dev/null", file], { cwd: root, env: gitEnv(), maxBuffer: MAX_OUTPUT, encoding: "utf8" },
       (_error, stdout) => resolve(stdout));
   });

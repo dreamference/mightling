@@ -73,9 +73,11 @@ dialog ("Mightling would like to access files in your Documents folder"): until 
 thread shows nothing and the agent cannot read the project (System Settings → Privacy & Security →
 Files and Folders changes it later). Projects anywhere else in your home folder need no dialog.
 
-Git projects need Apple's Command Line Tools, which give the Mac its `git`: without them the review
-pane, worktrees and commits do nothing, and macOS offers to install them the first time something
-runs `git`. Install them once in Terminal:
+The review pane, worktrees and commits need Apple's Command Line Tools, which give the Mac its `git`.
+Without them the app never runs the `git` the Mac comes with (which would only pop up macOS's offer
+to install the tools, in any folder): those features show as unavailable, with a hint, and work as
+soon as the tools are there. A `git` of your own on the app's PATH, such as Homebrew's, is used
+instead. Install the tools once in Terminal:
 
 ```bash
 xcode-select --install

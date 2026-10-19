@@ -332,6 +332,8 @@ export async function main(options: MainOptions): Promise<void> {
         return null;
       case "git/repos":
         return git.repositories(message.cwd);
+      case "git/missing":
+        return git.gitToolsMissing();
       case "git/status":
         return git.status(await git.checkRoot(message.root));
       case "git/diff":
