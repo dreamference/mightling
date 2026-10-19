@@ -127,6 +127,7 @@ A sketch for `ModelMatrixRegistry.MATRIX`, to be verified by a smoke boot. The e
 
 - **The chat template is Qwen's own**, byte-identical to the base model's. Both of production's `chat_template_patches` anchors (the `xhigh` default and "System message must be at the beginning") occur in it exactly once, so the patches carry over unchanged. The template does honour `enable_thinking: false`, despite the SGLang cookbook saying thinking cannot be turned off.
 - **The server is asked which model runs.** The served id is the repository name, which `model_key_for_served_id` maps back through `hf_repo_id`. Nothing reads the configuration for that.
+- `HardwareManager`'s compatibility check (`min_memory_gb` at most 0.95 × total, about 115 GB) passes at 105.
 - **Not covered by a registry entry. Both items need code changes, with tests:**
   1. **The start gate refuses the load.** `start_server()` requires the arena plus `max(4, 0.15 × weights)` free. That is about 109 GB for the arena (0.90 × 121.6) plus 16 GB of load transient, against roughly 115 GB available on an idle machine. The calibration came from a 78 GB checkpoint loaded through fastsafetensors. Options:
      - A per-recipe transient figure measured on a guarded first load: PSI watchdog on, desktop session closed, nothing else resident. This is the safety layer, and changing it needs the owner's call.
@@ -154,7 +155,7 @@ A sketch for `ModelMatrixRegistry.MATRIX`, to be verified by a smoke boot. The e
   - The SM121 NVFP4 path, whose symptom is all-`!` output.
 - **Memory:** about 15 GiB of headroom on a machine that has needed the power button. The PSI watchdog and the host-safety gates stay on.
 - **Image:** the nightly is unreleased code, pinned by digest but untested by us. MTP on upstream with this checkpoint has not been measured.
-- **Expectations:** the published gains are on DeepSWE and SWE-bench Multilingual. On SWE-bench Pro the gap (62.5 against 61.7) is within noise, and Qwen ran these benchmarks in its own agent harnesses at 256K context and temperature 1.0. A SWE-bench Verified A/B here may show no quality gain.
+- **Expectations:** the published gains are on DeepSWE and SWE-bench Multilingual. On SWE-bench Pro the gap (62.5 against 61.7) is within noise, and Qwen ran these benchmarks in third-party agent harnesses at 256K context and temperature 1.0. A SWE-bench Verified A/B here may show no quality gain.
 - **Logistics:** the checkpoint is on node-b, and this machine has 216 G free before tonight's night.
 - **Licence:** the Qwen Community License 1.0 applies, inherited by the local-inference-lab checkpoint. Check its terms before shipping, not before measuring.
 
