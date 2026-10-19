@@ -145,6 +145,16 @@ function appendAt(list: string[], index: number, delta: string): string[] {
   return next;
 }
 
+/**
+ * A thread's first question becomes its preview here as it is sent, as ling's thread/list has it
+ * after a restart: a new thread is titled by it at once, not "New thread" until the app restarts.
+ */
+function withPreview(view: ThreadView, item: ThreadItem): ThreadView {
+  if (view.thread.preview || item.type !== "userMessage") return view;
+  const text = item.content.map((input) => (input.type === "text" ? input.text : "")).join(" ").trim();
+  return text ? { ...view, thread: { ...view.thread, preview: text } } : view;
+}
+
 function onNotification(state: WorkState, notification: ServerNotification): WorkState {
   switch (notification.method) {
     case "thread/started": {
@@ -184,7 +194,7 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
     case "item/started":
     case "item/completed": {
       const { threadId, turnId, item } = notification.params;
-      return withThread(state, threadId, (view) => withTurn(view, turnId, (turn) => upsertItem(turn, item)));
+      return withThread(state, threadId, (view) => withPreview(withTurn(view, turnId, (turn) => upsertItem(turn, item)), item));
     }
     case "item/agentMessage/delta": {
       const { threadId, turnId, itemId, delta } = notification.params;
@@ -294,8 +304,10 @@ export function reduce(state: WorkState, action: Action): WorkState {
       const threads = { ...state.threads };
       for (const thread of action.list) {
         // A listed thread keeps what this window already streamed into it.
-        threads[thread.id] = threads[thread.id]
-          ? { ...threads[thread.id], thread: { ...thread, turns: threads[thread.id].thread.turns } }
+        // So do its title and first question, when the listing has none yet.
+        const known = threads[thread.id]?.thread;
+        threads[thread.id] = known
+          ? { ...threads[thread.id], thread: { ...thread, turns: known.turns, preview: thread.preview || known.preview, name: thread.name ?? known.name } }
           : emptyView(thread);
       }
       return { ...state, threads };
