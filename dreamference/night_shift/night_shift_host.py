@@ -23,13 +23,23 @@ from dreamference.runner.codex_installer import CodexInstaller
 NIGHT_RUN_ENV: Final[str] = "MIGHTLING_NIGHT_RUN"
 
 # `ling` subcommands that are not an interactive session. Anything else (no subcommand, a
-# prompt, `resume`, `fork`) is the TUI.
+# prompt, `resume`, `fork`, `agents`) is the TUI. Besides Codex's own, the launcher's (ling-rs/src/lib.rs):
+# the servers and bridges that run without a person (`apps serve`, the desktop app's Gmail search, lives as
+# long as its window; `web`, `chat`, `signal`), the hooks Codex runs inside a session (`ledger`, `notice`,
+# `refine hook`) and one-shot commands.
 NON_INTERACTIVE: Final[frozenset] = frozenset({
     "exec", "e", "app-server", "mcp-server", "mcp", "sandbox", "apply", "a", "completion",
-    "debug", "features", "doctor", "night", "node", "airgapped", "skill", "prompt", "update", "app", "web", "help", "review",
+    "debug", "features", "doctor", "night", "node", "airgapped", "skill", "prompt", "update", "app", "apps", "web", "help",
+    "review", "plugin", "remote-control", "exec-server", "queue", "archive", "unarchive", "delete", "execpolicy",
+    "migrate-rollouts", "responses-api-proxy", "stdio-to-uds", "tcp-tunnel",
+    "audit", "docs", "chat", "signal", "ledger", "notice", "refine",
     "--version", "-V",
     "--help", "-h",
 })
+
+# What `/proc/<pid>/exe` appends to a program whose file has since been removed or replaced, as a
+# `ling` build replaces the installed binary under a running session.
+DELETED_SUFFIX: Final[str] = " (deleted)"
 
 # Where `ling-app` marks a `ling app-server` that is running a turn, under `$CODEX_HOME/night`
 # (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3); `desktop/electron/src/server.ts` writes it.
@@ -255,7 +265,8 @@ class NightShiftHost:
         """
         Finds `ling` TUI sessions: processes of the `ling` binary that are not one of a night
         run's own sessions, not a subcommand that runs without a user, and not one of Codex's
-        helper re-executions (its sandbox runs as the same binary under another `argv[0]`).
+        helper re-executions (its sandbox runs as the same binary under another `argv[0]`). A
+        session started before a build replaced the binary still counts (`executable_of`).
 
         Args:
             mightling_bin: The installed `ling` executable.
@@ -269,7 +280,7 @@ class NightShiftHost:
             if not entry.name.isdigit():
                 continue
             try:
-                if os.path.realpath(entry / "exe") != target:
+                if cls.executable_of(entry.name) != target:
                     continue
                 argv = (entry / "cmdline").read_bytes().split(b"\0")
                 environ = (entry / "environ").read_bytes().split(b"\0")
@@ -293,7 +304,8 @@ class NightShiftHost:
         marker named after the server's pid in `$CODEX_HOME/night/busy/`
         (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3). A marker counts when its pid is alive and is
         a `ling app-server`: the installed `ling`, or the one bundled inside the desktop app
-        (desktop/electron, `<app>/resources/ling`), which has the same name and runs `app-server`.
+        (desktop/electron, `<app>/resources/ling`), which has the same name and runs `app-server`;
+        a server started before a build replaced the binary still counts (`executable_of`).
         Any other marker is left by a window killed hard, or names a pid since reused, and is
         deleted.
 
@@ -330,7 +342,7 @@ class NightShiftHost:
         Returns:
             bool: True for the installed `ling`, or a program of the same name running `app-server`.
         """
-        exe = os.path.realpath(f"/proc/{pid}/exe")
+        exe = cls.executable_of(str(pid))
         if exe == target:
             return True
         if os.path.basename(exe) != os.path.basename(target):
@@ -340,6 +352,27 @@ class NightShiftHost:
         except OSError:
             return False
         return b"app-server" in args
+
+    @classmethod
+    def executable_of(cls, pid: str) -> str:
+        """The path a process was started from, as it was when it started.
+
+        `/proc/<pid>/exe` of a program whose file a build has since replaced (a new inode at the
+        same path) or removed reads `<path> (deleted)`: that process still runs the old `ling`
+        from the installed path, so only that trailing suffix is dropped. A path whose name merely
+        contains the words elsewhere is kept as it is.
+
+        Args:
+            pid: The process id, as its `/proc` entry names it.
+
+        Returns:
+            str: The resolved path, without the suffix; empty when it cannot be read.
+        """
+        try:
+            exe = os.readlink(f"/proc/{pid}/exe")
+        except OSError:
+            return ""
+        return os.path.realpath(exe.removesuffix(DELETED_SUFFIX))
 
     @classmethod
     def _process_alive(cls, pid: int) -> bool:
