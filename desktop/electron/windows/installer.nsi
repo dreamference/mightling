@@ -42,7 +42,8 @@ VIAddVersionKey "LegalCopyright" "Copyright (C) 2026 Dreamference contributors. 
 !define MUI_ICON "${SOURCE}\..\..\resources\icon.ico"
 !define MUI_UNICON "${SOURCE}\..\..\resources\icon.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${EXE}"
-!insertmacro MUI_PAGE_DIRECTORY
+; No folder page: the app always goes in the one per-user place, which the install empties first
+; (a chosen folder could be one that holds other things).
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -54,7 +55,9 @@ Section "Install"
   ; A running app holds its files: ask it to close first (it quits on its own when its window closes).
   nsExec::Exec 'taskkill /im "${EXE}"'
   Sleep 1000
-  RMDir /r "$INSTDIR"
+  ; An earlier install is replaced whole; a folder without the app in it is never emptied.
+  IfFileExists "$INSTDIR\${EXE}" 0 +2
+    RMDir /r "$INSTDIR"
   SetOutPath "$INSTDIR"
   File /r "${SOURCE}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall Mightling.exe"
