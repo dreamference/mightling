@@ -1,6 +1,6 @@
 # Mightling — Changes Made to Codex
 
-**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0025` bring it to **23 patches and 42,958 bytes** (checked 2026-10-12, after `0020` grew by 217 bytes for Code Mode's `exec` on SGLang) touching 43 upstream files, under the 43,000-byte limit `test_the_patches_stay_small` enforces. The limit was 20,000 until 2026-09-30 and has been raised explicitly, each time only by what a hook needed: 25,000 for `0017` (`/cavemode`), 27,500 for `0018` (`/night`), 31,500 for `0019` (`/airgapped`), 32,500 for `0020` (MCP tools as plain functions), 33,750 for `0019`'s Full Access hooks, 34,750 for `0021` (observation masking), 36,250 for `0022` (`/apps`), 37,500 for `0023` (the app server's air-gap rule), and 43,000 on 2026-10-08 when `0024` (`/airgapped on` on Windows) and `0025` (`/node`) were merged together. Everything larger than a one-line hook or a renamed string lives in `ling-rs/`. The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from the standalone crate `ling-web-rs/` since 2026-09-30 (§4.1).
+**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0027` bring it to **25 patches and 44,672 bytes** (checked 2026-10-19; 42,958 on 2026-10-12, after `0020` grew by 217 bytes for Code Mode's `exec` on SGLang, then `0026` and `0027` on 2026-10-14) touching 44 upstream files, under the 45,000-byte limit `test_the_patches_stay_small` enforces. The limit was 20,000 until 2026-09-30 and has been raised explicitly, each time only by what a hook needed: 25,000 for `0017` (`/cavemode`), 27,500 for `0018` (`/night`), 31,500 for `0019` (`/airgapped`), 32,500 for `0020` (MCP tools as plain functions), 33,750 for `0019`'s Full Access hooks, 34,750 for `0021` (observation masking), 36,250 for `0022` (`/apps`), 37,500 for `0023` (the app server's air-gap rule), 43,000 on 2026-10-08 when `0024` (`/airgapped on` on Windows) and `0025` (`/node`) were merged together, and 45,000 on 2026-10-14, once, by the owner, for `0026` (drop-first compaction, 1,039 bytes), the sandbox fix and the compaction cache patch; `0027` (675 bytes, the cache patch) landed under it without a raise. Everything larger than a one-line hook or a renamed string lives in `ling-rs/`. The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from the standalone crate `ling-web-rs/` since 2026-09-30 (§4.1).
 **Supersedes:** `DREAMFERENCE_CODEX.md`, which describes the older setup where an upstream `codex` on PATH was launched from Python.
 **Upstream:** [`openai/codex`](https://github.com/openai/codex), the open-source coding agent this fork began from, release `rust-v0.158.0`.
 
@@ -33,26 +33,27 @@ Running `cargo` inside `codex/` is forbidden: even `cargo tree` rewrites the sub
 1. **Export.** `git archive <pinned commit> codex-rs` into `~/.cache/dreamference/puffin-codex/src`. Only the Rust workspace is exported; the npm wrapper, Bazel files and SDKs play no part.
 2. **Add the launcher.** Copy `ling-rs/` to `codex-rs/ling`. This has to happen before the patches, because `0002` makes the CLI depend on it. A path dependency inside the workspace root becomes a workspace member automatically, so the workspace manifest is not patched.
    - The copy uses `shutil.copy`, not `copy2`. That gives the files fresh modification times, which matters because Cargo decides freshness by mtime. A copied file with its original, older mtime was once taken as already compiled, and a stale launcher got linked in.
-3. **Patch.** For each file in `codex-patches/`, run `git apply --check` and then `git apply`. A patch that does not fit stops the build before anything is half-applied, and the error names the release tag the patches were written for.
+3. **Patch.** For each file in `codex-patches/`, run `git apply --check` and then `git apply`. A patch that does not fit stops the build before anything is half-applied, and the error names the release tag the patches were written for. Then `stamp_version()` sets the exported workspace's `[workspace.package]` version to `MIGHTLING_VERSION`, else the Python package's version (since 2026-10-07, `d26518b`), so `--version`, the session header, the status card and `exec`'s banner report Mightling's release rather than the upstream tag.
 4. **Fetch V8.** Code Mode embeds V8 built with pointer compression and the sandbox enabled. denoland does not publish that build for aarch64 Linux, so the `v8` crate's own download returns 404. `fetch_rusty_v8()` does what upstream's `.github/actions/setup-rusty-v8` does:
    - it downloads the upstream vendor's `rusty-v8-v<version>` release assets;
    - it verifies them against `third_party/v8/rusty_v8_*_release_manifests.sha256` from the submodule;
    - it passes the archive and bindings to Cargo as `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`.
 
    Verified files are cached, so later builds don't download them again.
-5. **Compile.** Run `cargo build --release -p codex-cli --bin codex -p codex-code-mode-host --bin codex-code-mode-host` with these settings. Cargo still calls the binary `codex`; step 6 names the file.
+5. **Compile.** Run `cargo build --release -p codex-cli --bin codex -p codex-code-mode-host --bin codex-code-mode-host` with these settings, plus `-p ling-signal --bin ling-signal` on Linux and `-p codex-windows-sandbox` with its two helpers on Windows. Cargo still calls the binary `codex`; step 6 names the file.
    - `CARGO_TARGET_DIR=~/.cache/dreamference/puffin-codex/target`. This directory persists, so a patch edit recompiles only the crates it touches.
    - `CARGO_PROFILE_RELEASE_DEBUG=none` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`. Upstream keeps line tables and strips only when it packages; built as-is, the binary is 1.4 GB instead of about 315 MB. These are set through the environment, not a patch, so they touch no Codex source.
    - No `--locked`. Upstream's `Cargo.lock` records the workspace crates at `0.0.0`, and its release job bumps them just before building, so Cargo rewrites those 158 entries. Every third-party version stays as pinned.
    - In release builds, the `ling` job of `.github/workflows/release.yml` sets `MIGHTLING_VERSION=<release version>`. `update.rs` reads it with `option_env!`; a local build has none and reports itself as `source`.
 6. **Install.** Copy the binaries to `~/.local/share/dreamference/mightling/bin/`:
    - `ling`, which is Cargo's `codex` binary under its new name;
-   - `codex-code-mode-host`, which keeps its upstream name because Codex looks for that exact name next to its own executable.
+   - `codex-code-mode-host`, which keeps its upstream name because Codex looks for that exact name next to its own executable;
+   - on Linux, `ling-signal`, the Signal bridge's daemon, beside `ling` and never linked onto `PATH`; on Windows, `codex-windows-sandbox-setup` and `codex-command-runner`.
 
    Each is written to a temporary name and renamed into place. `~/.local/bin/ling` is then symlinked to the installed binary. The helper is still found through the link, because Codex resolves its own executable path. The link only replaces a missing file or an existing symlink.
-7. **Stamp.** A `build-key` file records a hash of every input: the source commit, the patch bytes, the launcher source and the profile overrides. An unchanged tree is not rebuilt; any change to an input triggers a rebuild.
+7. **Stamp.** A `build-key` file records a hash of every input: the source commit, the patch bytes, the launcher source, the profile overrides, the stamped version and the files of `desktop/ui/` (which `ling web` embeds). An unchanged tree is not rebuilt; any change to an input triggers a rebuild.
 8. **Web commands** (`build_web_tools()`, run first and independently of steps 0–7). `cargo build --release --locked --bin ling-search --bin ling-fetch` in `ling-web-rs/` itself, against its own committed `Cargo.lock`, with `CARGO_TARGET_DIR=~/.cache/dreamference/puffin-web/target` (the cache folders keep their pre-rename names so the compiled dependencies survive). The two binaries are installed beside `ling` the same way (temporary name, then rename), linked as `~/.local/bin/ling-search` and `~/.local/bin/ling-fetch`, and stamped in their own `web-build-key` (a hash of the crate's source). A change to the crate never relinks Codex, and a Codex rebuild never recompiles the crate. `CodexInstaller.is_installed()` requires both builds to be current. The helper behind it, `build_crate()`, takes any standalone crate of Mightling commands, so a later one (`ling-code-rs/`, `DREAMFERENCE_MIGHTLING_CODE_INDEX.md` §4.2) can use it as it is.
-9. **The other standalone commands**, built the same way and also before Codex: `ling-code` from `ling-code-rs/` (`build_code_index()`, target `~/.cache/dreamference/puffin-code-build`) and, on Linux, `ling-docs` from `ling-docs-rs/` (`build_docs_index()`, target `~/.cache/dreamference/ling-docs-build`), each `--locked` against its own lockfile and stamped separately. The Mightling UI that `ling web` embeds (`desktop/ui/`) is built with `npm ci` and Vite (`build_web_ui()`) and handed to the Codex build as `LING_WEB_UI_DIST`.
+9. **The other standalone commands**, built the same way and also before Codex: `ling-code` from `ling-code-rs/` (`build_code_index()`, target `~/.cache/dreamference/puffin-code-build`) and, on Linux, `ling-docs` from `ling-docs-rs/` (`build_docs_index()`, target `~/.cache/dreamference/ling-docs-build`), each `--locked` against its own lockfile and stamped separately. The Mightling UI that `ling web` embeds (`desktop/ui/`) is built with `npm ci` and Vite (`build_web_ui()`) inside the locked Codex build (after V8, step 4) and handed to it as `LING_WEB_UI_DIST`.
 10. **The egress audit.** After installing a new `ling`, `codex build` runs `ling-admin audit egress` (and the `--tui` one) unless `--no-audit`; without a model server it says so and does not wait ([MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md)).
 
 **Host requirements:** Rust through rustup (the toolchain version is pinned by `codex-rs/rust-toolchain.toml` and fetched on first use), `git`, `tar`, `perl` and a C compiler. No `libssl-dev` (the launcher crate enables `openssl-sys/vendored`, §4) and no `libcap-dev`: the bundled `bwrap` binary is not built, and Codex falls back to the system's `/usr/bin/bwrap`.
@@ -61,7 +62,7 @@ Running `cargo` inside `codex/` is forbidden: even `cargo tree` rewrites the sub
 
 ## 3. The patches
 
-Only changes that cannot be made from outside are patches, and each is a one-line edit. Anything larger goes in `ling-rs/`, which Cargo compiles into the same binary. A test (`test_the_patches_stay_small`) keeps the series under a cap, 43,000 bytes since 2026-10-08, raised explicitly and only by what a hook needs.
+Only changes that cannot be made from outside are patches, and each is a one-line edit. Anything larger goes in `ling-rs/`, which Cargo compiles into the same binary. A test (`test_the_patches_stay_small`) keeps the series under a cap, 45,000 bytes since 2026-10-14 (44,672 in use on 2026-10-19), raised explicitly and only by what a hook needs.
 
 ### `0001-brand-mightling-name.patch` (visible name)
 
@@ -69,10 +70,14 @@ Only changes that cannot be made from outside are patches, and each is a one-lin
 | --- | --- |
 | `tui/src/history_cell/session.rs` | Session header `>_ Codex (vX)` → `>_ Mightling (vX)`, in the compact, boxed and raw renderings |
 | `tui/src/status/card.rs` | `/status` card title → `Mightling` |
-| `exec/src/event_processor_with_human_output.rs` | `exec` banner `Codex vX` → `Mightling vX` |
-| `cli/src/main.rs` | clap `name`, `bin_name`, `override_usage` and the shell-completion name → `ling`, so `--version` prints `ling 0.158.0` |
-| `cli/src/plugin_cmd.rs`, `marketplace_cmd.rs`, `mcp_cmd.rs` | Subcommand usage lines `codex plugin …`, `codex mcp add …` → `ling …` |
+| `exec/src/event_processor_with_human_output.rs` | `exec` banner `Codex vX` → `Mightling vX`; the italic `codex` reply label → `ling` |
+| `cli/src/main.rs` | clap `name`, `bin_name`, `override_usage` and the shell-completion name → `ling`, so `--version` prints `ling <Mightling version>` (the builder stamps the version into the exported workspace, §2 step 3) |
+| `cli/src/mcp_cmd.rs` | Subcommand usage line `codex mcp add …` → `ling mcp add …` |
 | `exec/src/cli.rs` | `exec`'s hard-coded usage `codex exec …` → `ling exec …` (clap exposes no getter for `override_usage`, so the parse-time rebrand cannot reach it) |
+| `tui/src/chatwidget.rs`, `tui/src/startup_draft.rs` | Composer placeholder `Ask Codex to do anything` → `Ask Mightling to do anything` |
+| `tui/src/onboarding/welcome.rs`, `tui/src/onboarding/trust_directory.rs` | The welcome line (`Mightling, your local coding agent`) and the trust-folder question name Mightling |
+| `tui/src/bottom_pane/command_popup.rs` | Slash-command descriptions shown with `Codex` replaced by `Mightling` |
+| `tui/src/chatwidget/permissions_menu.rs` | The Full Access warning names Mightling |
 
 ### `0002-ling-launcher-hook.patch` (the hook)
 
@@ -83,7 +88,7 @@ Only changes that cannot be made from outside are patches, and each is a one-lin
 
 The call sits in `cli_main`. That is after `arg0` dispatch, so the `codex-linux-sandbox`, `apply_patch` and `codex-execve-wrapper` aliases never reach it, and before Codex parses its command line.
 
-### `0005`–`0025` (switches: hide, reroute, replace, closing network channels, cave mode, `/night`, `/airgapped`, MCP tools, masking, `/apps`, `/node`)
+### `0005`–`0027` (switches: hide, reroute, replace, closing network channels, cave mode, `/night`, `/airgapped`, MCP tools, masking, `/apps`, `/node`, drop-first compaction, compaction with the turn's tools)
 
 Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand that must not run is *also* refused by the launcher (§4, step 1). A hidden slash command (`is_visible() == false`) is gone from the popup, and typing it is not recognised either, because the command lookup only matches visible commands. In every case the code behind the command stays compiled.
 
@@ -94,7 +99,7 @@ Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand
 | `0007-hide-remote-control` | `cli/src/main.rs` | `remote-control` gets `hide = true`. It relays through the upstream vendor's servers today and is kept for a private relay later. It is hidden only, **not** refused: `ling remote-control` still runs, and fails without the vendor's sign-in. |
 | `0008-mightling-update` | `cli/src/main.rs` | `update` calls `ling_launcher::update::run()` instead of Codex's installer logic, and its help reads "Update Mightling to the latest release." |
 | `0009-remove-feedback` | `tui/src/slash_command.rs`, `tui/src/chatwidget/turn_runtime.rs` | `/feedback`, which uploads session logs to the upstream vendor, is not visible. The interrupted-turn hint no longer says "Hit `/feedback`…". |
-| `0010-hide-voice` | `tui/src/slash_command.rs` | `/voice`, the upstream vendor's realtime voice API, is not visible. It is kept for a future local voice. |
+| `0010-hide-voice` | `tui/src/slash_command.rs` | `/voice`, the upstream vendor's realtime voice API, is not visible. It is kept for a future local voice. `/pets` is not visible either: a pet fetches its art from the upstream vendor's CDN (`oaistatic.com`). |
 | `0011-usage-token-stats` | `tui/Cargo.toml`, `tui/src/bottom_pane/slash_commands.rs`, `tui/src/chatwidget/slash_dispatch.rs`, `tui/src/slash_command.rs` | `/usage` is always listed, and shows this session's token statistics from `ling_launcher::usage::report()`, fed by the counters `/status` already uses, instead of the hosted service's plan limits. It drops upstream's `/usage daily\|weekly\|cumulative` form. The TUI crate gains a path dependency on the launcher. |
 | `0017-cave-mode` | `tui/src/slash_command.rs`, `tui/src/chatwidget/slash_dispatch.rs`, `app-server/Cargo.toml`, `app-server/src/extensions.rs`, `cli/src/main.rs` | Adds `/cavemode` (after `/model`, inline arguments, available during a task), whose two dispatch arms print `ling_launcher::cave::command()`; and registers `ling_launcher::cave::install` beside `codex_git_attribution::install` in the app server's extension registry (the TUI, `exec` and app-server clients) and in the one `debug prompt-input` builds. The app server gains a path dependency on the launcher. See [MIGHTLING_CAVE_MODE](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md). |
 | `0012-hide-auto-review` | `tui/src/slash_command.rs` | `/approve` (`SlashCommand::AutoReview`) is not visible. It defaults to the upstream vendor's `codex-auto-review` model, which the local catalog lacks. |
@@ -110,6 +115,8 @@ Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand
 | `0023-airgapped-app-server` | `core/Cargo.toml`, `core/src/config/mod.rs` | The app server refuses Full Access at `/airgapped on` for every client, as the TUI does (the desktop app's Work window included). 1,220 bytes. |
 | `0024-airgapped-windows` | `windows-sandbox-rs/Cargo.toml`, `src/resolved_permissions.rs`, `src/elevated_impl.rs`, `src/unified_exec/backends/elevated.rs` | `/airgapped on` on Windows: the elevated sandbox clears a command's network when its session is at `on`, through its offline account ([MIGHTLING_WINDOWS_ARM](./DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md)). Compiled only for Windows; nothing has run on Windows here. 2,048 bytes. |
 | `0025-node-slash-command` | `tui/src/app/event_dispatch.rs`, `tui/src/app_event.rs`, `tui/src/chatwidget/slash_dispatch.rs`, `tui/src/slash_command.rs` | `/node provision|add|list|status|remove`: suspends the TUI and runs `ling-admin node …` on the terminal (`ling-rs/src/node_command.rs`, [MIGHTLING_NODE §18.9](./DREAMFERENCE_MIGHTLING_NODE.md)). 3,382 bytes. |
+| `0026-drop-old-outputs` | `core/src/context_manager/history.rs`, `core/src/session/turn.rs` | Drop-first compaction (2026-10-15, `8de91ae`): a method on the history hands its items and size to `ling_masking::drop_first`, and three lines at the top of `run_auto_compact` skip the summary when dropping old tool outputs was enough. Off by default (`DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS`, `mightling_drop_old_outputs`; `compaction.rs`, [MIGHTLING_COMPACTION §13](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). 1,039 bytes. |
+| `0027-compaction-same-tools` | `core/src/client.rs` | The request hook (`ling_tools::for_request`) also gets the thread id and whether the request is a compaction, so a compaction offers the turn's tools and hits the prefix cache instead of re-reading the whole context (2026-10-15, `362def2`; `ling-rs/tools/src/compaction.rs`). 675 bytes. |
 
 ### What used to be patches
 
@@ -134,7 +141,7 @@ This is the Rust port of what the Python `ling` entry point used to do before ex
    - `ling app` alone opens **Ask**, the Mightling UI on `ling web`, which the app starts itself when nothing answers on port 3100; `ling app --work`, `ling app <folder>` and `ling app --thread <id>` open **Work** on `ling app-server`. Neither needs Onyx (until 2026-10-08 the first window was the Onyx web UI on `localhost:3000`), and both wait for the model server on their own start-up screen.
    - It empties the app's HTTP cache before opening Ask, keeping Chromium's `Cookies`, so a window never shows a page from before an upgrade.
    - It starts the app detached, so closing the terminal does not close it.
-3. **Skips setup for commands that never reach a model.** These are `--help`/`-h`, `--version`/`-V`, and the subcommands `help completion apply a features doctor mcp plugin archive unarchive delete sandbox update`. They answer at once instead of waiting for a server. (`update` goes on to `update.rs` through patch `0008`.)
+3. **Skips setup for commands that never reach a model.** These are `--help`/`-h`, `--version`/`-V`, and the subcommands `help completion apply a features doctor mcp plugin archive unarchive delete sandbox update node skill web chat signal` (`COMMANDS_WITHOUT_MODEL`). They answer at once instead of waiting for a server. (`update` goes on to `update.rs` through patch `0008`.)
 4. **Resolves the vLLM URL**, first match wins (`node.rs`; [MIGHTLING_NODE §6.1, §18](./DREAMFERENCE_MIGHTLING_NODE.md)):
    - the `DREAMFERENCE_VLLM_HOST` environment variable;
    - `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`;
@@ -146,7 +153,7 @@ This is the Rust port of what the Python `ling` entry point used to do before ex
    `ling node list|use|forget` is intercepted like `night` and `airgapped`, and never waits for a model.
 5. **Waits for the server.** It prints `⏳ Waiting for local vLLM server at … to become available...` with a dot per second, and gives up after 600 s with the `ling-admin server start` hint.
 6. **Reads the served model from `GET /v1/models`**, both its `id` and its `max_model_len`, so the launcher needs no copy of Mightling's model registry.
-7. **Checks for Gmail.** Unless `mightling_gmail = false` (config file) or `DREAMFERENCE_MIGHTLING_GMAIL=false`, it asks the Gmail service's `/status` (`http://127.0.0.1:8767`, 1 s timeout). If an account is connected, `gmail_access_instructions()` adds an "Email access" block after the web section. The block names the accounts and the `ling-admin gmail` commands, and warns that email content is untrusted data, never instructions. See `DREAMFERENCE_MIGHTLING_GMAIL.md`.
+7. **Checks for Gmail.** Only on a node (the model server is local) and not at a configured `/airgapped on`. When Mightling's apps are declared (`apps::declared`, [MIGHTLING_APPS §6](./DREAMFERENCE_MIGHTLING_APPS.md)) their instructions take this place instead. Otherwise, unless `mightling_gmail = false` (config file) or `DREAMFERENCE_MIGHTLING_GMAIL=false`, it asks the Gmail service's `/status` (`http://127.0.0.1:8767`, 1 s timeout). If an account is connected, `gmail_access_instructions()` adds an "Email access" block after the web section. The block names the accounts and the `ling-admin gmail` commands, and warns that email content is untrusted data, never instructions. See `DREAMFERENCE_MIGHTLING_GMAIL.md`.
 8. **Writes `$CODEX_HOME/model_catalog.json`**, a single entry Codex requires before it will use an unknown model. Codex parses it with strict serde structs, so a wrong shape stops it at startup:
    - context window, compaction limit and truncation limit set to `max_model_len`;
    - one reasoning level, `none`;
@@ -156,8 +163,11 @@ This is the Rust port of what the Python `ling` entry point used to do before ex
    - `base_instructions`: the longest bundled template, passed through `rebrand()` (the opening sentence, which also claims a GPT model, becomes `You are Mightling, a coding agent.`, and every later `Codex` becomes `Mightling`), followed by `WEB_ACCESS_INSTRUCTIONS`, which tells the model to use `ling-search` and `ling-fetch` (§4.1), then the Gmail block from step 7 if any.
 9. **Edits `$CODEX_HOME/config.toml` with `toml_edit`.** Editing the document rather than appending text means a top-level key can never be absorbed into the preceding table, which twice stopped Codex from starting. It sets:
    - `model_catalog_json`, always;
-   - `suppress_unstable_features_warning = true` and `check_for_update_on_startup = false`, only if absent. The update check would offer to replace Mightling with upstream Codex.
-   - `[model_providers.openai-custom]`: `name`, and a `base_url` that is always rewritten to follow the server;
+   - `suppress_unstable_features_warning = true`, only if absent;
+   - `check_for_update_on_startup = false`, always (a `true` left in the file turned the request back on). The update check would offer to replace Mightling with upstream Codex.
+   - `chatgpt_base_url = "http://127.0.0.1:9/backend-api/"`, always: a privacy boundary, not a preference;
+   - `[tui] pet` removed, since a pet's art comes from the upstream vendor's CDN (`/pets` is hidden by `0010`);
+   - `[model_providers.openai-custom]`: `name`, a `base_url` that is always rewritten to follow the server, and `stream_idle_timeout_ms`, only if absent;
    - `[features] code_mode = true`, `enable_mcp_apps = false`, only if absent;
    - `[sandbox_workspace_write] network_access = true`, only if absent. Without it, DNS fails inside the sandbox and the web commands break.
    - `[sandbox_workspace_write] writable_roots = ["$CODEX_HOME/skills"]`, only if absent (2026-10-01). Codex's built-in `skill-installer` downloads a skill from the public `github.com/openai/skills` into `$CODEX_HOME/skills`, which the sandbox otherwise mounts read-only: `ling exec` could not install one, and the TUI needed an approval. No vendor login is involved, and patch `0015` (which stops the *plugin* sync) is unchanged. `writable_roots = []` in the file switches it off. The cost: a session can now write instructions that later sessions read. Checked live: `ling exec -s workspace-write` installed the curated `pdf` skill into `~/.mightling/skills/pdf`, and a skill placed there by hand was found and followed.
@@ -173,10 +183,14 @@ The hook then parses the result with `help::parse` (`help.rs`), not `MultitoolCl
 | `usage.rs` | `/usage` (patch `0011`) | Formats the session's input tokens (cached / new), output tokens (plus reasoning tokens), total, and the last request's share of the context window, or "No tokens used yet in this session." |
 | `cave.rs` | `/cavemode` and every model request (patch `0017`) | Cave mode: the four levels and their texts (`ling-rs/cave/`, byte-for-byte the benchmark's), the level's resolution (this session's file `$CODEX_HOME/cave_mode/<thread-id>`, `DREAMFERENCE_MIGHTLING_CAVE_MODE`, `mightling_cave_mode` in the TOML file, then `ultra`), the `/cavemode` command, and the World State section that sends a level's full text once, a one-line reminder at each later turn, and the full text again after a switch or a compaction. |
 | `app.rs` | `ling app` (step 2) | Opens `ling-app`. |
-| `compaction.rs` | every launch that reaches the model | Reads the server's KV pool from `/metrics` and passes `-c model_auto_compact_token_limit=<60% of it>` unless the command line or `config.toml` sets that key; registers the ledger hook in `config.toml` (`[[hooks.SessionStart]]`, matcher `compact`) with the `trusted_hash` Codex requires before it runs a hook, or removes it, by `mightling_compaction_ledger` ([MIGHTLING_COMPACTION §11](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). |
+| `compaction.rs` | every launch that reaches the model | Reads the server's KV pool from `/metrics` and passes `-c model_auto_compact_token_limit=<60% of it>` unless the command line or `config.toml` sets that key; registers the ledger hook in `config.toml` (`[[hooks.SessionStart]]`, matcher `compact`) with the `trusted_hash` Codex requires before it runs a hook, or removes it, by `mightling_compaction_ledger` ([MIGHTLING_COMPACTION §11](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). Turn-end compaction (`model_post_turn_compact_threshold_percent`), **on by default since 2026-10-15** (`955a0f3`): set to 53% of the session's limit, which Codex reads as about 20% of its usable window, for sessions someone reads (not one-shot `exec`); off with `DREAMFERENCE_MIGHTLING_TURN_END_COMPACTION=0` or `mightling_turn_end_compaction = false`. Drop-first compaction (patch `0026`), off by default ([MIGHTLING_COMPACTION §13–14](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). |
+| `summary_cap.rs` | every launch that reaches the model | A length bound on the compaction summary: Codex's own compact prompt byte for byte plus one paragraph, passed as `-c compact_prompt=…`; 800 words by default since 2026-10-15 (`955a0f3`), `DREAMFERENCE_MIGHTLING_COMPACT_SUMMARY_WORDS=0` switches it off; a `compact_prompt` the user set is left alone. |
+| `exec_tool.rs` | every launch that reaches the model | Whether Code Mode's `exec` goes out as Codex's custom tool or as a function (step 8, `DREAMFERENCE_MIGHTLING_EXEC_TOOL`). |
+| `images.rs` | every launch that reaches the model | The `image_search` tool (2026-10-18, `73164c4`, replacing the retired Onyx chat's): adds `-c mcp_servers.mightling_images.…` so Codex starts `ling-admin images mcp`, only on a node with a local model server, not at a configured `/airgapped on`, after `ling-admin images start`, and unless `DREAMFERENCE_MIGHTLING_IMAGES` is off ([MIGHTLING_ASK §6](./DREAMFERENCE_MIGHTLING_ASK.md)). |
+| `proxy.rs` | first statement of `main()` (through `home.rs`, patch `0014`); every loopback request | Extends `NO_PROXY` and `no_proxy` with loopback and the model server's host, so a proxy left in the shell never sees local traffic, and gives the launcher's own requests a client that never uses a proxy ([MIGHTLING_EGRESS §11](./DREAMFERENCE_MIGHTLING_EGRESS.md)). |
 | `ledger.rs` | `ling ledger` (the hook), `ling ledger show <rollout>` | Rebuilds from the session's rollout and `git status`, by rule, what a compaction drops: files changed, other files read, commands that failed since the previous compaction, the last test result. Standard library and `serde_json` only. |
 | `help.rs` | every parse | Rebrands the help tree (above). |
-| `home.rs` | first statement of `main()` (patch `0014`) | `CODEX_HOME` is `~/.mightling` (below). |
+| `home.rs` | first statement of `main()` (patch `0014`) | `CODEX_HOME` is `~/.mightling` (below); before that it exports refine mode's flag and the proxy exclusions (`proxy.rs`) and runs the Puffin migration (`rename.rs`). |
 | `node.rs`, `node_command.rs` | every launch that needs a model; `ling node …`; `/node` (patch `0025`) | Where the model server is (step 4), and `/node` running `ling-admin node …` on the real terminal ([MIGHTLING_NODE §18.9](./DREAMFERENCE_MIGHTLING_NODE.md)). |
 | `night.rs` | `/night` (patch `0018`), `ling night …` | Night Shift's queue ([MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md)). |
 | `airgapped.rs` | `/airgapped` (patch `0019`), `ling airgapped` | The command and the World State fragments; the resolution is the leaf crate `ling-airgapped` ([MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)). |
@@ -242,11 +256,13 @@ Run them in the **export** directory, never in `codex/`: `cargo test --release -
 
 ## 5. What is deliberately not changed
 
+> **Out of date (2026-10-19):** the "vendor-hosted features" bullet predates `/apps`: since 2026-10-06 (patch `0022`) Gmail, Google Drive and Google Calendar are Mightling's own read-only MCP tools served by `ling apps serve`, not the vendor's connectors. `/pets` is also hidden now (`0010`). The current source is `ling-rs/src/apps.rs` and `codex-patches/0022-ling-apps.patch`.
+
 - **Most "Codex" strings in the TUI** (about 365 in `tui/src`): tips, onboarding, approval wording. Only the identity the user sees on every screen (the header, status card, banner, `--version` and usage lines) and the CLI's help text (via `help.rs`) are renamed. More TUI strings can be added to `0001`, one line each.
 - **`codex-code-mode-host`**, crate names and the `CODEX_HOME` variable name: renaming them would break lookups inside Codex. The *folder* it points at is Mightling's own (§4).
 - **The vendor-hosted features.** Gmail and the other connectors (`codex_apps`) need the vendor's sign-in and run on the upstream vendor's servers, so they never activate in an `--oss` session. Local mail access is `ling-admin gmail` (`DREAMFERENCE_MIGHTLING_GMAIL.md`). Upstream's `app` is replaced by the launcher (§4, step 2).
 - **Still visible and unchanged:** `/model` (vLLM serves one model, so the picker lists one entry), `/memories`, `/import`, `/ide`, `/daemon`, and the `plugin` / `doctor` subcommands. The last two still refer to the upstream vendor's marketplace and to `chatgpt.com` connectivity checks. These were reviewed on 2026-09-28 and left for later decisions.
-- **`ling-admin gmail`**, the agent's mail command, is still Python: it is a thin client of the Gmail service the web UI runs. The web commands became Rust on 2026-09-30 (§4.1).
+- **`ling-admin gmail`**, the agent's mail command, is still Python: it is a thin client of the Google service on `127.0.0.1:8767` (`ling-admin google start`, `dreamference/chat/google_service.py`; the web UI ran it until Onyx was retired on 2026-10-18). The web commands became Rust on 2026-09-30 (§4.1).
 
 ---
 
@@ -263,7 +279,7 @@ Run them in the **export** directory, never in `codex/`: `cargo test --release -
 
 5. Check for drift in anything the launcher depends on: the model-catalog fields, the `--oss` and `--local-provider` flags, the `config.toml` keys, `bundled_models_response()`, and the pinned `v8` version with its checksum manifest.
 6. Verify:
-   - `ling --version` prints `ling X.Y.Z`;
+   - `ling --version` prints `ling <Mightling version>` (the stamped workspace version, §2 step 3, not the upstream `X.Y.Z`);
    - the header reads `>_ Mightling`;
    - asked its name, the model answers Mightling;
    - `git -C codex status --porcelain` prints nothing.

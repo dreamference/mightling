@@ -1,6 +1,6 @@
 # Mightling Egress — audit and airlock
 
-**Status:** Phase 1 (the audit) implemented: `exec` sessions on 2026-10-01, the full-screen interface (`--tui`) and the audit after `ling-admin codex build` on 2026-10-02: `dreamference/audit/`, `ling-admin audit egress`; §10 records what was built and where it differs. Phase 2 (the airlock) is not built; its mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2).
+**Status:** Phase 1 (the audit) implemented: `exec` sessions on 2026-10-01, the full-screen interface (`--tui`) and the audit after `ling-admin codex build` on 2026-10-02: `dreamference/audit/`, `ling-admin audit egress`; §10 records what was built and where it differs. Phase 2 (the airlock) is not built; its mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2). The desktop app (`--app`), the web server (`--web`) and the file index (`--docs`) are traced since 2026-10-07/08 (§10.7, §10.8); the preview tab, the image search turn and the declared exceptions for the messenger bridges since 2026-10-18 (§10.9).
 **Superseded in part (2026-10-01):** the airlock's switch is now the `on` level of `/airgapped` ([MIGHTLING_AIRGAPPED §5.4](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)), not `ling --airlock`. The mechanism (§4.1, §4.2), the ledger (§4.4) and the audit (§3) stand; the surface (§2), the allowlist (§4.3) and §5 are read through that spec, which allows only the model server at `on`.
 **Target:** the `ling` terminal agent. `ling-admin` runs the audit.
 **Builds on:**
@@ -26,7 +26,7 @@ Make "your code stays on your machine" something a user can check, not a promise
 **Non-goals:**
 - **Calling it air-gapped.** Web search and `ling-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them. The command `/airgapped` keeps to this: only its `on` level, which allows neither, carries the word ([MIGHTLING_AIRGAPPED §1](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)).
 - **Inbound exposure.** The model server listening on `0.0.0.0:8000` is accepted by design: Mightling assumes the local network is trusted ([README](./README.md), "Accepted by design").
-- **Containers.** The containers' own egress (SearXNG, the sidecars; Onyx until its retirement in 1.7.0) is out of scope. Onyx's telemetry was handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md), history).
+- **Containers.** The containers' own egress (SearXNG, the sidecars; Onyx until its retirement in 1.7.0, merged 2026-10-18 in `dd2fb78`) is out of scope. Onyx's telemetry was handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md), history).
 
 ---
 
@@ -36,7 +36,7 @@ This spec adds no slash command of its own. (When it was written the patch budge
 
 | Command | Phase | Effect |
 |---|---|---|
-| `ling-admin audit egress [--tui] [--prompt "…"] [--json]` | 1 | Traces one session; prints destinations, processes, verdict; exit 0 on pass, 1 on an unexpected destination, 2 when the trace itself failed. |
+| `ling-admin audit egress [--tui \| --app \| --web \| --docs] [--prompt "…"] [--json]` | 1 | Traces one session (the four flags are mutually exclusive, §10.5, §10.7, §10.8; `--docs` ignores `--prompt` and `--json`); prints destinations, processes, verdict; exit 0 on pass, 1 on an unexpected destination, 2 when the trace itself failed. |
 | `ling --airlock …` or `airlock = true` in `$CODEX_HOME/config.toml` | 2 | Runs `ling` in the airlock. The launcher handles the flag before Codex parses its arguments, like `ling app`, so it needs no patch. |
 | `ling airlock log [--since 1d]` | 2 | Prints the ledger (§4.4). |
 
@@ -63,7 +63,7 @@ This productises the 2026-09-29 procedure.
 - **Fail:** anything else, listed first.
 - **Trace failed:** the session did not produce a reply, or `strace` could not attach. This is not a pass.
 
-`--json` writes the full result to `~/.mightling/audit/<timestamp>-<exec|tui>.json` as well (the session kind is in the name since 2026-10-02, so a build's two records cannot collide): destinations, DNS names, processes, verdict, the `ling --version` output, and the Codex tag and patch hashes from the build stamp. Two audits can then be compared across builds.
+`--json` writes the full result to `~/.mightling/audit/<timestamp>-<exec|tui|app|web>.json` as well (the session kind is in the name since 2026-10-02, so a build's two records cannot collide): destinations, DNS names, processes, verdict, the `ling --version` output, and the Codex tag and patch hashes from the build stamp. Two audits can then be compared across builds.
 
 ### 3.3. Requirements
 
@@ -115,6 +115,7 @@ The allowlist is `airlock.allow` in `$CODEX_HOME/config.toml`, written by the la
 | vLLM port (from the resolved `vllm_host`) | model server | The agent's model. |
 | `8767` | Gmail search service | `ling-admin gmail`. |
 | `8888` | SearXNG | `ling-search` (§5). |
+| `8768` | image search service | The `image_search` tool. On the audit's allowlist for every session since 2026-10-18 (`IMAGE_SEARCH_PORT`, `d0cc859`, §10.9). |
 
 **The diffusion endpoint (`8001`) is not allowed:** the agent does not use it. Unix sockets on the host are unaffected by a network namespace, which is intended: the Docker socket, the D-Bus session and the like stay reachable. If one of them should be closed too, that belongs to Codex's command sandbox, not the airlock.
 
@@ -299,6 +300,15 @@ Tests added (36 in all): the recorded probe line is a route lookup and the app s
 - **`--docs`** (`DocsEgressAudit`, `audit/docs_egress_audit.py`): `ling-docs index` over a fixture folder and a `ling-docs search`, both under `strace -f` in a throwaway home. It passes only with **no network destination at all**, loopback included, and no DNS query, because the document index never talks to anything; it needs no model server. The extractor and the embedder run in `systemd-run --scope` inside bwrap with an empty network namespace, and the trace follows them ([MIGHTLING_LOCAL_INDEX](./DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md) §10.2).
 
 `codex build` still runs only the `exec` and `--tui` scenarios after a new build (§10.5).
+
+### 10.9 The preview tab, the image search turn, and declared exceptions (2026-10-18)
+
+- **`--app` opens a preview tab** (DESKTOP_PARITY §5, Phase 3 item 4; `ef92a15`). `PreviewPage` (`audit/preview_page.py`) serves one loopback page for the session's length, and the app opens it in a preview tab (`MIGHTLING_APP_AUDIT_PREVIEW`). The page reaches for `example.com`, `.org` and `.net` by picture, script, stylesheet, `fetch`, `dns-prefetch` and `preconnect` hints (in the page and added by script) and a link followed by script; the preview's rules must turn each away before a connection or a lookup. Only the page's own port joins the allowlist. A pass whose page never loaded is reported as "trace failed", because the rules were not exercised. The same commit turned Blink's DNS prefetching off in the app, which had resolved hinted names past the request rules.
+- **`--web` asks an image question** where image search is set up on this machine (its secret file exists; `d0cc859`, `e58ed98`). The scratch home is laid out as a node with a copy of that secret and a `ling-admin` that runs the code under audit (`write_admin`, not a link to `~/.local/bin/ling-admin`); the audit starts the tool's MCP server as Codex will and asks for its tools first. A second `ling web ask` then calls `image_search`; the tool's server is traced with the app-server, and its one connection, to `8768`, is allowed (§4.3). The report prints `Image search turn: …` (`skipped`, `not asked: …`, `no answer`, `answered, without an image` or `answered with an image`, the last only when the answer names an image the service's store holds) and the JSON result carries `image_search_turn`.
+- **Declared exceptions** (`EgressAudit.declared_exceptions`; `429e268`, `3aae82f`, `cde669f`). Every report ends with one `Declared exception:` line per messenger bridge that is on, which talks to an outside service outside any traced session: the system unit `mightling-signal.service` and each further `mightling-signal@<name>.service` (SIGNAL §18), the user unit `mightling-chat.service` when a Telegram token is set, and the user socket `mightling-matrix-proxy.socket` (with whether push is on). With every bridge off nothing is added, and they never change the verdict.
+- **Onyx's retirement** (`eb42c76`, merged 2026-10-18 in `dd2fb78`) changed nothing in the allowlist: every session's is the same (model server, `8767`, `8888`, `8768`), and a connect to the retired web UI's `3000` or `ling web`'s `3100` from an `--app` session is a finding.
+
+Tests: 46 in `tests/test_egress_audit.py`.
 
 ## 11. Local traffic and a leftover proxy (2026-10-09)
 

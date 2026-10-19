@@ -1,6 +1,8 @@
 # Mightling Desktop — the Codex desktop app's shape, on `ling app-server`, grown from today's `ling-app`
 
-**Status:** proposed on 2026-10-03, revised the same day after review. Phase 1 (the Work window on `ling app-server`, §15) was merged and shipped as a preview in 1.4.0 (2026-10-06), in the Tauri shell. On 2026-10-07 the shell was replaced by an Electron app ([MIGHTLING_DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), which supersedes §9 and §10 below and is what shipped in 1.5.1), so the Tauri files this document names (`desktop/src-tauri/`, `forwarder.rs`, `discover.rs`, `auto_sign_in.js`, `desktop/bridge/`) no longer exist; their roles moved to `desktop/electron/src/`. On 2026-10-08 the app's Chat window became **Ask** on `ling web` ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10), so it no longer shows Onyx; Onyx itself is retired in 1.7.0 (MIGHTLING_ASK §19), so §4.2's Chat window on `localhost:3000` below is history. The windows, the bridge's guarantees and the feature map below still hold; the rest is proposed. §1 was read from the upstream vendor's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`). §2 lists the Codex app's features from the launch announcement (read from the Wayback Machine's copy; the page itself answers 403 and its videos could not be analysed, only their captions) and the upstream vendor's documentation and third-party write-ups. **§5 records what was measured on this GB10 on 2026-10-03** by driving the installed `ling app-server` over stdio from a script; everything else about behaviour is marked as read, not run.
+> **Superseded in part (2026-10-19):** the Tauri shell, `desktop/src-tauri` and `desktop/bridge` are gone; the app is the stock Electron build of [DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) (Electron 42.11.11), one window with Ask and Work on one app-server ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §18.6), its one IPC channel vetted against `ling-rs/web/policy.json`; Onyx and the Chat window are gone (Onyx retired 2026-10-18, dd2fb78). Its current feature set and status are [DESKTOP_PARITY](./DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md) (§2, §4: Phase 2 and Phase 3 merged by 2026-10-18 apart from dark mode). What still holds: §1 (the vendor's app as read), §3's constraints apart from the WebKitGTK and Chat rows, §5 (the measurements), §8 (the air-gap rule in the server, patch `0023`; the busy marker), §13 (risks) and §14's decisions 3 to 5. Kept as the design record.
+
+**Status:** proposed on 2026-10-03, revised the same day after review. Phase 1 (the Work window on `ling app-server`, §15) was merged and shipped as a preview in 1.4.0 (2026-10-06), in the Tauri shell. On 2026-10-07 the shell was replaced by an Electron app ([MIGHTLING_DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), which supersedes §9 and §10 below and is what shipped in 1.5.1), so the Tauri files this document names (`desktop/src-tauri/`, `forwarder.rs`, `discover.rs`, `auto_sign_in.js`, `desktop/bridge/`) no longer exist; their roles moved to `desktop/electron/src/`. On 2026-10-08 the app's Chat window became **Ask** on `ling web` ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10), so it no longer shows Onyx; Onyx itself was retired on 2026-10-18 (dd2fb78, MIGHTLING_ASK §19), for 1.7.0, so §4.2's Chat window on `localhost:3000` below is history. The bridge's guarantees below still hold (in `ling-rs/web/policy.json` and the main process since the Electron rebuild); the two windows do not (one window since 2026-10-09, ASK §18.6), and the feature map is superseded by DESKTOP_PARITY §2 (2026-10-14); the rest was proposed. §1 was read from the upstream vendor's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`). §2 lists the Codex app's features from the launch announcement (read from the Wayback Machine's copy; the page itself answers 403 and its videos could not be analysed, only their captions) and the upstream vendor's documentation and third-party write-ups. **§5 records what was measured on this GB10 on 2026-10-03** by driving the installed `ling app-server` over stdio from a script; everything else about behaviour is marked as read, not run.
 
 **Goal:** make Mightling's desktop app work the way Codex desktop app does — a desktop client that drives the agent through Codex's **app-server** (JSON-RPC over stdio), with the same projects → threads → turns model, the same composer, approvals, diffs, review, worktrees and terminal — and **get there by growing today's `ling-app` in place, never breaking it**. Today `ling-app` (`desktop/`) is a window on the Onyx web chat with no coding agent in it. That window stays exactly as it is and becomes the app's **Chat** window; the coding agent arrives beside it as the **Work** window.
 
@@ -64,14 +66,16 @@ The app-server it drives is the one in our submodule. Its client requests (`app-
 | The upstream vendor's app is proprietary and not ours to redistribute | Mightling cannot ship it, its webview bundle, its icons, sounds or strings |
 | Mightling is AGPL-3.0 | Anything we take must be licence-compatible (MIT and Apache-2.0 are) |
 | The model is local and smaller | Features that need the upstream vendor's hosted models (image generation, deep research, the upstream vendor's computer-use model) have nothing to call |
-| The webview is WebKitGTK, not Chromium | The upstream vendor's agent-driven browser plugin cannot be reproduced. A **preview pane** showing a local dev server is just another webview and can be |
-| Today's `ling-app` has users | Its window, its address, its sign-in and its client forwarding must keep working through every phase (§4.1) |
+| The webview is WebKitGTK, not Chromium (Tauri era; since 2026-10-07 the app is Chromium through Electron, DESKTOP_ELECTRON, and the preview tab is built, DESKTOP_PARITY §2.9) | The upstream vendor's agent-driven browser plugin cannot be reproduced. A **preview pane** showing a local dev server is just another webview and can be |
+| Today's `ling-app` has users (2026-10-03; the Chat window it protects is gone, DESKTOP_ELECTRON §11, ASK §18.6) | Its window, its address, its sign-in and its client forwarding must keep working through every phase (§4.1) |
 
 So "as close as possible" means: **the same architecture** (an app-server client over stdio), **the same information architecture and interaction model** (projects, threads, a composer, item-by-item streaming, inline approvals, a review pane, worktrees per thread, terminal tabs, settings that write `config.toml`), **the same keyboard shortcuts and slash commands where they apply** (§6.10), and **sessions shared with the TUI** as the upstream vendor's app shares them with its CLI. Not the same pixels, and not the upstream vendor's trade dress: Mightling's own name, icon (`OnyxBrandAssets.render_app_icon()`), colours and copy.
 
 ---
 
 ## 4. The approach: grow `desktop/` in place
+
+> **Superseded (2026-10-19):** §4.1 to §4.3 and §4.5 describe the Tauri project, its two windows and the Onyx Chat window, all gone. The shell is [DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) §3 and §4; the one window and one app-server are ASK §18.6; the bridge's allow-list and dropped fields (§4.3) are `ling-rs/web/policy.json`, enforced by the main process (`policy.ts`) and `ling web` alike (DESKTOP_PARITY §1.5). §4.3's launcher rules (`ling app-server`, `clientInfo` `mightling_desktop`), §4.4 (types generated from the pin) and §4.6 still hold.
 
 **Chosen: evolve the existing Tauri project.** `desktop/` stays the project, `ling-app` (`dev.dreamference.mightling`) stays the binary, and nothing a user has today changes until Work passes its Phase 1 acceptance.
 
@@ -306,7 +310,7 @@ Rebindable in Settings, stored with the window's preferences, not in `config.tom
 
 - **No telemetry SDK** of any kind in Work's bundle, no remote fonts or scripts (§4.2's CSP), no auto-updater: updates come from `ling update`, as for the binaries.
 - **The egress audit grows an `--app` mode:** trace `ling-app` plus its `ling app-server` through one scripted turn, with the same verdict rules. It must pass before a release ships Work.
-- **Chat cannot reach the agent:** no capability names its origin (§4.2).
+- **Chat cannot reach the agent:** no capability names its origin (§4.2). (2026-10-19: there is no Chat window any more; the one window's IPC is answered only for its own `webContents`, DESKTOP_ELECTRON §3.) The `--app` mode exists: `ling-admin audit egress --app`.
 
 ### 8.2 The air-gap rule must hold in the server, not the window
 
@@ -323,17 +327,21 @@ Work also disables the Full Access row at `on`, but as a courtesy, not as the en
 
 ### 8.3 Sessions and Night Shift
 
-Threads the app starts are ordinary Codex sessions in `~/.mightling/sessions`. Today Night Shift ignores an app-server entirely (§5). An always-open desktop app must not block every night, and process scanning cannot tell a busy server from an idle one. So: **the bridge writes a busy marker** `$CODEX_HOME/night/busy/<pid>`, where `<pid>` is **the `ling app-server` process's** (the bridge's child, so the night run can check it without knowing about windows), holding the ids of the threads with a live turn. It is written on `turn/started`, rewritten on `turn/completed`, and removed when the last turn ends or the server exits. Night Shift's admission treats a marker whose pid is alive (signal 0, the probe `_probe_direct_kill` uses) and whose `/proc/<pid>/exe` is the installed `ling` as an open session, and deletes any other marker: a window killed hard leaves a marker with a dead pid, which the next check prunes. The night run's own `ling exec` processes are unaffected.
+Threads the app starts are ordinary Codex sessions in `~/.mightling/sessions`. Today Night Shift ignores an app-server entirely (§5). An always-open desktop app must not block every night, and process scanning cannot tell a busy server from an idle one. So: **the bridge writes a busy marker** `$CODEX_HOME/night/busy/<pid>`, where `<pid>` is **the `ling app-server` process's** (the bridge's child, so the night run can check it without knowing about windows), holding the ids of the threads with a live turn. It is written on `turn/started`, rewritten on `turn/completed`, and removed when the last turn ends or the server exits. Night Shift's admission treats a marker whose pid is alive (signal 0, the probe `_probe_direct_kill` uses) and whose `/proc/<pid>/exe` is the installed `ling` (or, since 2026-10-07, a program of that name running `app-server`, so the app's bundled `ling` counts: `NightShiftHost._is_app_server`, DESKTOP_ELECTRON §9) as an open session, and deletes any other marker: a window killed hard leaves a marker with a dead pid, which the next check prunes. The night run's own `ling exec` processes are unaffected.
 
 ---
 
 ## 9. The webview: what `desktop/` already learned
+
+> **Superseded (2026-10-07):** by DESKTOP_ELECTRON §1 and §3. WebKitGTK, `main.rs` and `tauri-plugin-opener` are gone; the app renders with Electron's Chromium and its defaults.
 
 Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (`docs/dev/onyx-ui-patches.md`, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
 
 ---
 
 ## 10. Packaging
+
+> **Superseded (2026-10-07):** by DESKTOP_ELECTRON §3 (decision 7) and §12: an Electron Forge 8 `.deb` (`mightling`), the unsigned macOS preview dmg (§10, minimum macOS 12.0) and, since 2026-10-18, a Windows zip built in CI (DESKTOP_PARITY §2.17). The scheme is `ling://` with `mightling://` kept (DESKTOP_PARITY §2.20).
 
 - The app stays `ling-app` (`dev.dreamference.mightling`), built by `ling-admin desktop build` (which now also builds `desktop/ui/`) and attached to releases; `install.sh` installs it on a client and a node alike. The `.desktop` entry gains `MimeType=x-scheme-handler/ling;`.
 - `ling app` opens Chat until Work passes Phase 1, then Work; `ling app --chat`, `ling app <folder>`, `ling app --thread <id>`.
@@ -342,6 +350,8 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 ---
 
 ## 11. Phases
+
+> **Dated (2026-10-19):** Phase 1 shipped (1.4.0, then on Electron in 1.5.1). Phases 2 and 3 were re-planned and are tracked in DESKTOP_PARITY §4.2 and §4.3: Phase 2 merged 2026-10-16 to 2026-10-18 (1d9eb48 last); Phase 3 items 1 to 10 and 12 merged 2026-10-18 (the Windows app in CI as an unsigned zip, 54a4578); dark mode not built and not approved. `git.rs` was never written: window-side git is `desktop/electron/src/git.ts` and `worktree.ts` on the `codex-worktree` contract (Phase 0 item 9 still open).
 
 **Phase 0 — check (about a day; part done, §5).**
 1. ~~`ling app-server` handshake, sign-in gate, one turn, clean stdout~~ — done (§5).
@@ -367,6 +377,8 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 ---
 
 ## 12. Tests
+
+> **Dated (2026-10-19):** the Chat-window and `git.rs` items no longer apply; the current tests are DESKTOP_PARITY §5 and [docs/dev/desktop.md](../docs/dev/desktop.md) (Tests).
 
 - **The Chat window is unchanged:** its label, URL, sign-in script and the forwarder path on a client, compared with today's.
 - The bridge: JSON-RPC framing, a server that dies mid-turn, a launcher still waiting for the model (stderr shown, no hang), stray stdout (fails loudly), the dropped `thread/start` fields (§4.3).
@@ -396,7 +408,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 ## 14. Open questions
 
 1. ~~Fork CodexMonitor or start from scratch?~~ **Settled by the user's direction:** grow `desktop/` in place, CodexMonitor as a parts bin (§4).
-2. ~~Does Chat stay inside the app?~~ **Settled:** Chat is today's window, unchanged (§4.1).
+2. ~~Does Chat stay inside the app?~~ **Settled:** Chat is today's window, unchanged (§4.1). **Reversed:** Chat became Ask on 2026-10-08 and a view of the one window on 2026-10-09 (DESKTOP_ELECTRON §11, ASK §18.6).
 3. ~~Dark mode?~~ **Decided by the user (2026-10-03): light only for now.** Work stays light like Chat (`GTK_THEME=Adwaita:light` applies to both, §9); dark mode stays in Phase 3, as one change for both windows.
 4. ~~One app-server per app or per project?~~ **Decided (2026-10-03): one per app** (§4.3), as the upstream vendor's app does: one process, one place for the air-gap check of §8.2. Phase 0 item 8 still measures it, to record the cost, not to decide.
 5. ~~Installing the upstream vendor's package for the reference run?~~ **Decided (2026-10-03): yes, installed and kept** for reference comparisons beyond the one run of §4.6. The user runs `sudo apt install ~/Downloads/chatgpt_arm64.deb` from a terminal. Kept means the upstream vendor's apt repository (`/etc/apt/sources.list.d/chatgpt.sources`) and its updater stay, and the app's own `~/.codex` is separate from Mightling's `~/.mightling`. Every reference run still uses a scratch `HOME` and a network namespace reaching only the model server (§4.6, Phase 0 item 6), because the window carries the upstream vendor's telemetry clients and must not reach the upstream vendor while pointed at `ling app-server`.
@@ -404,6 +416,8 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 ---
 
 ## 15. As built (2026-10-03, branch `desktop/work-window`)
+
+> **History (2026-10-19):** `desktop/bridge/` and `desktop/src-tauri/` no longer exist; DESKTOP_ELECTRON §4 maps each part to where it moved, and `ling-rs/web/policy.json` replaced the bridge's method allow-list.
 
 Written while an overnight SWE-bench run held the machine: nothing below was built into `ling-app`, installed, or run against the model server. What was run is named in §15.5.
 
