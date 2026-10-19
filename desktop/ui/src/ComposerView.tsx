@@ -12,7 +12,7 @@ import {
   type CommandContext, type PromptHistory, type SlashCommand, type Trigger,
 } from "./composer";
 import { Icon } from "./icons";
-import { keyAction, matches, shortcutLabel } from "./keymap";
+import { keyAction, keyLabel, matches, shortcutLabel } from "./keymap";
 import type { FuzzyFileSearchResult } from "./protocol/FuzzyFileSearchResult";
 import type { Model } from "./protocol/v2/Model";
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
@@ -226,7 +226,7 @@ export function Composer(props: ComposerProps) {
   };
 
   const sendLabel = props.running ? (props.followUp === "queue" ? "Queue" : "Steer") : "Send";
-  const enterHint = props.enterBehaviour === "ctrlEnter" ? "Ctrl+Enter; Enter for a new line" : `Enter; ${shortcutLabel("newLine")} for a new line`;
+  const enterHint = props.enterBehaviour === "ctrlEnter" ? `${keyLabel("Ctrl+Enter", "composer")}; Enter for a new line` : `Enter; ${shortcutLabel("newLine")} for a new line`;
   const menuOpen = trigger !== null && entries.length > 0;
 
   return (
@@ -323,7 +323,7 @@ function ModelPicker(props: ComposerProps) {
     <span className="picker-anchor">
       <button className="chip model-chip" title={`Model and effort (${shortcutLabel("modelPicker")})`} aria-haspopup="menu" aria-expanded={props.picker !== "closed"}
         onClick={() => props.setPicker(props.picker === "closed" ? "open" : "closed")}>
-        {label}<Icon name="chevronDown" size={12} />
+        <span className="chip-label">{label}</span><Icon name="chevronDown" size={12} />
       </button>
       {props.picker !== "closed" ? (
         <div className="picker" role="menu" aria-label="Model and effort" onKeyDown={(event) => event.key === "Escape" && props.setPicker("closed")}>

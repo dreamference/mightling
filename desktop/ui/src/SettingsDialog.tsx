@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent 
 
 import * as bridge from "./bridge";
 import { Icon } from "./icons";
-import { KEYMAP, chordOf, conflicts, type KeyAction } from "./keymap";
+import { chordOf, conflicts, keyLabel, KEYMAP, shortcutLabel, type KeyAction } from "./keymap";
 import { boardOn } from "./board";
 import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
@@ -97,7 +97,7 @@ function General({ prefs, onChange }: SettingsProps) {
       <fieldset>
         <legend>Enter in the composer</legend>
         <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "enter"} onChange={() => onChange({ enterBehaviour: "enter" })} /> Enter sends; Shift+Enter starts a new line</label>
-        <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "ctrlEnter"} onChange={() => onChange({ enterBehaviour: "ctrlEnter" })} /> Enter starts a new line; Ctrl+Enter sends</label>
+        <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "ctrlEnter"} onChange={() => onChange({ enterBehaviour: "ctrlEnter" })} /> Enter starts a new line; {keyLabel("Ctrl+Enter", "composer")} sends</label>
       </fieldset>
       <fieldset>
         <legend>A message sent while the agent is working</legend>
@@ -111,7 +111,7 @@ function General({ prefs, onChange }: SettingsProps) {
       </fieldset>
       <fieldset>
         <legend>Text size</legend>
-        <label className="field">{Math.round(prefs.fontScale * 100)}% (Ctrl+= bigger, Ctrl+- smaller, Ctrl+0 back to 100%)
+        <label className="field">{Math.round(prefs.fontScale * 100)}% ({shortcutLabel("fontBigger")} bigger, {shortcutLabel("fontSmaller")} smaller, {shortcutLabel("fontReset")} back to 100%)
           <input type="range" min={0.75} max={2} step={0.05} value={prefs.fontScale} aria-label="Text size" onChange={(event) => onChange({ fontScale: Number(event.target.value) })} />
         </label>
       </fieldset>
@@ -161,7 +161,7 @@ function Shortcuts({ prefs, onChange }: SettingsProps) {
     <>
       <h3>Keyboard shortcuts</h3>
       <div className="shortcut-search">
-        <input type="search" value={query} placeholder={byKeys ? "Press keys, then type them here, e.g. Ctrl+K" : "Search by command"} aria-label="Search shortcuts"
+        <input type="search" value={query} placeholder={byKeys ? `Press keys, then type them here, e.g. ${keyLabel("Ctrl+K")}` : "Search by command"} aria-label="Search shortcuts"
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
             if (!byKeys) return;
@@ -186,7 +186,7 @@ function Shortcuts({ prefs, onChange }: SettingsProps) {
                 <td>
                   {recording === action.id
                     ? <button className="recording" autoFocus onKeyDown={(event) => record(action, event)} onBlur={() => setRecording(null)}>Press the new keys…</button>
-                    : action.keys.map((key) => <kbd key={key}>{key}</kbd>)}
+                    : action.keys.map((key) => <kbd key={key}>{keyLabel(key, action.context)}</kbd>)}
                 </td>
                 <td className="shortcut-actions">
                   <button className="link-button" onClick={() => { setProblem(null); setRecording(action.id); }}>Change</button>
@@ -409,7 +409,7 @@ function Project({ prefs, onChange }: SettingsProps) {
         <label className="field">Shell (empty for your login shell, $SHELL)
           <input defaultValue={prefs.terminalShell ?? ""} placeholder="/bin/bash" aria-label="Terminal shell" onBlur={(event) => onChange({ terminalShell: event.target.value.trim() || null })} />
         </label>
-        <p className="dialog-note">Terminal tabs open in the bottom panel (Ctrl+`), in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
+        <p className="dialog-note">Terminal tabs open in the bottom panel ({shortcutLabel("terminal")}), in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
       </fieldset>
       <fieldset>
         <legend>Where files open</legend>
@@ -480,7 +480,7 @@ function Browser({ prefs, onChange, notice }: SettingsProps) {
   return (
     <>
       <h3>Browser</h3>
-      <p className="dialog-note">The preview tab (Ctrl+T) opens pages on this machine, on the local network and files without asking. A site on the internet asks first; what you chose is kept here. With airgapped on, only this machine is reachable, whatever is allowed. A download always asks where to save it.</p>
+      <p className="dialog-note">The preview tab ({shortcutLabel("previewOpen")}) opens pages on this machine, on the local network and files without asking. A site on the internet asks first; what you chose is kept here. With airgapped on, only this machine is reachable, whatever is allowed. A download always asks where to save it.</p>
       <fieldset>
         <legend>Sites on the internet</legend>
         {sites.length === 0 ? <p className="empty small">None yet: every site asks.</p> : null}

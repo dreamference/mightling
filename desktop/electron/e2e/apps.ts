@@ -1,8 +1,11 @@
 // The apps a test launches, and how they end. Playwright's worker waits at teardown for every
-// Electron it launched to quit; one still running (a test that failed before its `close`, or an app
-// whose quit stalls) held up the full run's teardown past its timeout while each file alone passed.
-// So every launch is recorded, a close is bounded and ends in a kill, and an `afterEach` closes
-// whatever a test left open.
+// Electron it launched to quit; one still running held up the full run's teardown past its timeout
+// while each file alone passed. An app Playwright closes within about a second of its agent's
+// server starting never exits (its windows close, the main process stays until killed: seen every
+// time on Linux, and only under Playwright; the same quit from a SIGTERM, without Playwright's
+// debugger attached, exits at once), and app.e2e.ts's second test closes in that window. So every
+// launch is recorded, a close is bounded and ends in a kill, and an `afterEach` closes whatever a
+// test left open.
 import { _electron as electron, type ElectronApplication } from "@playwright/test";
 
 const open = new Set<ElectronApplication>();
@@ -15,7 +18,7 @@ export async function launch(options: Parameters<typeof electron.launch>[0]): Pr
 }
 
 /** Quits the app, and kills it when it has not quit within `ms`. */
-export async function closeApp(app: ElectronApplication, ms = 15_000): Promise<void> {
+export async function closeApp(app: ElectronApplication, ms = 5_000): Promise<void> {
   open.delete(app);
   const child = app.process();
   const closed = app.close().then(

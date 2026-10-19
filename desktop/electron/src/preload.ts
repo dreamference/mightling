@@ -6,7 +6,7 @@
 
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
-import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk } from "./api";
+import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, failure, isChunk } from "./api";
 
 const incoming = new Reassembler();
 
@@ -24,7 +24,11 @@ contextBridge.exposeInMainWorld("electronBridge", {
   /** Sends one message to the main process and resolves with its answer; large ones go in pieces, each acknowledged before the next. */
   async sendMessageFromView(message: unknown): Promise<unknown> {
     let answer: unknown;
-    for (const piece of chunked(message)) answer = await ipcRenderer.invoke(CHANNEL_FROM_VIEW, piece);
+    for (const piece of chunked(message)) {
+      answer = await ipcRenderer.invoke(CHANNEL_FROM_VIEW, piece);
+      const refused = failure(answer);
+      if (refused !== null) throw new Error(refused);
+    }
     return answer;
   },
   /** Where a file dropped on the page lives (a Shift+drag image is sent by its path, DESKTOP_PARITY §2.3); "" when it has none. */

@@ -9,6 +9,7 @@ import type * as bridge from "./bridge";
 import { Icon } from "./icons";
 import type { TerminalHub, TerminalSession } from "./terminal";
 import { TerminalView } from "./TerminalView";
+import { shortcutLabel } from "./keymap";
 
 export interface TaskView {
   id: string;
@@ -86,14 +87,14 @@ export function BottomPanel(props: BottomPanelProps) {
               : <button className="icon" aria-label={`Close ${entry.label}`} onClick={() => props.onClose(entry.id)}><Icon name="x" size={12} /></button>}
           </span>
         ))}
-        <button className="icon" aria-label="New terminal" title="New terminal (Ctrl+`)" onClick={props.onNewTerminal}><Icon name="plus" size={14} /></button>
+        <button className="icon" aria-label="New terminal" title={`New terminal (${shortcutLabel("terminal")})`} onClick={props.onNewTerminal}><Icon name="plus" size={14} /></button>
         <span className="spacer" />
         {terminal ? <button className="link-button" title="Put this terminal's recent output in the composer, for the agent to read" onClick={() => props.onSendToThread(terminal.processId)}>Send to the thread</button> : null}
         {props.environment?.actions.map((action) => (
           <button key={action.name} className="link-button" title={action.script} onClick={() => props.onRun(action)}><Icon name={actionIcon(action.icon)} size={12} /> {action.name}</button>
         ))}
         {props.project ? <button className="link-button" onClick={props.onEdit}>Environment…</button> : null}
-        <button className="icon" aria-label="Hide the bottom panel" title="Hide (Ctrl+J)" onClick={props.onHide}><Icon name="x" size={14} /></button>
+        <button className="icon" aria-label="Hide the bottom panel" title={`Hide (${shortcutLabel("bottomPanel")})`} onClick={props.onHide}><Icon name="x" size={14} /></button>
       </header>
       {props.problems.map((problem) => <div key={problem} className="notice">{problem}</div>)}
       <div className="panel-body">
@@ -106,7 +107,7 @@ export function BottomPanel(props: BottomPanelProps) {
         ) : null}
         {!task && !terminal ? (
           <p className="empty small panel-empty">{props.environment
-            ? `${props.environment.name}: its actions run here (Super+Shift+D runs the first); + opens a terminal.`
+            ? `${props.environment.name}: its actions run here (${shortcutLabel("environmentAction1")} runs the first); + opens a terminal.`
             : props.project ? "+ opens a terminal in this thread's folder. This project has no local environment yet: Environment… makes one in .mightling/." : "Open a thread in a project to run a terminal here."}</p>
         ) : null}
       </div>

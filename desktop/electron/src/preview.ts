@@ -165,7 +165,9 @@ export class Previews {
     contents.on("before-input-event", (event, input) => {
       if (input.type !== "keyDown") return;
       const key = input.key.length === 1 ? input.key.toUpperCase() : input.key;
-      const chord = [input.control ? "Ctrl" : "", input.alt ? "Alt" : "", input.shift ? "Shift" : "", key].filter(Boolean).join("+");
+      // The page's `Ctrl` is ⌘ on a Mac (desktop/ui/src/keymap.ts).
+      const command = process.platform === "darwin" ? input.meta : input.control;
+      const chord = [command ? "Ctrl" : "", input.alt ? "Alt" : "", input.shift ? "Shift" : "", key].filter(Boolean).join("+");
       const action = FORWARDED[chord];
       if (!action) return;
       event.preventDefault();
