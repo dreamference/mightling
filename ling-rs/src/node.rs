@@ -39,7 +39,38 @@ use ling_node_locator as locator;
 const BROWSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long to keep listening after the first answer, for a second node or a better address.
+/// When a node is remembered, only its own answer starts this (see [`after_answer`]).
 const SETTLE: Duration = Duration::from_millis(400);
+
+/// What a browse does after an answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Listen {
+    /// Stop now: the remembered node answered where it is remembered.
+    Stop,
+    /// Keep listening for [`SETTLE`] after the first such answer, then stop.
+    Settle,
+    /// Keep listening until the browse's deadline.
+    Deadline,
+}
+
+/// Decides, after each answer, how much longer the browse listens. With nothing remembered, the
+/// first answer starts [`SETTLE`]. With a node remembered, another node's answer starts nothing:
+/// on Wi-Fi the remembered node often answers well after another one, and settling on the first
+/// answer declared it gone and asked for the other one (a client on the owner's desktop,
+/// 2026-10-19: two of four `ling exec` runs saw only the stopped second node).
+fn after_answer(wanted: Option<&Node>, found: &[Advert]) -> Listen {
+    let Some(wanted) = wanted.filter(|wanted| !wanted.node.is_empty()) else {
+        return Listen::Settle;
+    };
+    let mut same_id = found.iter().filter(|seen| seen.node.node == wanted.node).peekable();
+    if same_id.peek().is_none() {
+        Listen::Deadline
+    } else if same_id.any(|seen| seen.addresses.contains(&wanted.address)) {
+        Listen::Stop
+    } else {
+        Listen::Settle
+    }
+}
 
 /// One command's choice of node, by name, address or id.
 pub const PIN_ENV: &str = "MIGHTLING_NODE";
@@ -644,17 +675,14 @@ impl Browser for MdnsBrowser {
                     let Some(advert) = advert_from(&service.fullname, service.port, &addresses, &records) else {
                         continue;
                     };
-                    let id = advert.node.node.clone();
                     merge(&mut found, advert);
-                    // The remembered node, answering where it is remembered: nothing more to learn.
-                    let settled = wanted.is_some_and(|wanted| {
-                        wanted.node == id
-                            && found.iter().any(|seen| seen.node.node == id && seen.addresses.contains(&wanted.address))
-                    });
-                    if settled {
-                        break;
+                    match after_answer(wanted, &found) {
+                        Listen::Stop => break,
+                        Listen::Settle => {
+                            settle.get_or_insert(Instant::now() + SETTLE);
+                        }
+                        Listen::Deadline => {}
                     }
-                    settle.get_or_insert(Instant::now() + SETTLE);
                 }
                 Ok(_) => {}
                 Err(_) => break,
@@ -801,6 +829,22 @@ mod tests {
 
     fn spark2() -> Advert {
         advert("spark-2", "22222222-bbbb", "192.168.0.106")
+    }
+
+    #[test]
+    fn another_nodes_answer_does_not_cut_the_browse_for_the_remembered_one_short() {
+        let remembered = spark1().node;
+        // Only the other node so far: keep listening until the deadline, not just SETTLE more.
+        assert_eq!(after_answer(Some(&remembered), &[spark2()]), Listen::Deadline);
+        // The remembered node where it is remembered: done.
+        assert_eq!(after_answer(Some(&remembered), &[spark2(), spark1()]), Listen::Stop);
+        // The remembered node at another address: settle, in case it answers where it was.
+        let moved = advert("spark-1", "11111111-aaaa", "192.168.0.120");
+        assert_eq!(after_answer(Some(&remembered), &[moved]), Listen::Settle);
+        // Nothing remembered (or remembered by address only): the first answer settles.
+        assert_eq!(after_answer(None, &[spark2()]), Listen::Settle);
+        let by_address = Node { node: String::new(), ..remembered };
+        assert_eq!(after_answer(Some(&by_address), &[spark2()]), Listen::Settle);
     }
 
     #[test]
