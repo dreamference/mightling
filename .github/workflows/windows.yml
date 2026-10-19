@@ -284,14 +284,25 @@ jobs:
         working-directory: desktop/electron
         shell: bash
         run: npm test
-      # The installer: NSIS from the runner image, else Chocolatey's (an x86 program, which Windows on Arm emulates).
+      # The installer, built with makensis (where it comes from: below).
       - name: Installer
         shell: pwsh
         run: |
+          # NSIS from the runner image if it has one, else NSIS 3.12 as electron-builder ships it, from its
+          # GitHub release and pinned by SHA-256 (Chocolatey's feed answered 503 in runs 39257291454 and
+          # 39269638527). makensis is an x86 program, which Windows on Arm emulates.
           $makensis = Get-Command makensis -ErrorAction SilentlyContinue
           if ($makensis) { $makensis = $makensis.Source } else {
-            $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-            if (-not (Test-Path $makensis)) { choco install nsis -y --no-progress | Out-Null }
+            $makensis = @("${env:ProgramFiles(x86)}\NSIS\makensis.exe", "$env:ProgramFiles\NSIS\makensis.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $makensis) {
+            $bundle = Join-Path $env:RUNNER_TEMP "nsis-bundle-3.12.tar.gz"
+            Invoke-WebRequest -Uri "https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis%402.0.1/nsis-bundle-3.12.tar.gz" -OutFile $bundle -MaximumRetryCount 3 -RetryIntervalSec 10
+            if ((Get-FileHash $bundle -Algorithm SHA256).Hash -ne "fe36a357f3a220db893498e830fd80e0769768a18a99f4e4d2447b982538feed") { throw "the NSIS bundle is not the one pinned" }
+            tar -xzf $bundle -C $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw "could not unpack the NSIS bundle" }
+            $env:NSISDIR = Join-Path $env:RUNNER_TEMP "nsis-bundle\windows"
+            $makensis = Join-Path $env:NSISDIR "makensis.exe"
           }
           $source = (Resolve-Path "desktop\electron\out\Mightling-win32-${{ matrix.arch }}").Path
           New-Item -ItemType Directory -Force -Path dist-desktop | Out-Null
