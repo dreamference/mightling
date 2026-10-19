@@ -163,3 +163,17 @@ def test_the_plan_needs_neither_torch_nor_a_gpu(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "memory at max_seq_len" in out and "optimizer steps" in out
     sys.modules.pop("train_lora", None)
+
+
+def test_the_tiny_model_trains_through_the_served_layers_end_to_end():
+    pytest.importorskip("torch")
+    pytest.importorskip("peft")
+    pytest.importorskip("transformers.models.qwen3_5")
+    sys.path.insert(0, ADAPTERS)
+    try:
+        smoke = load("smoke_tiny")
+        assert smoke.run("cpu", 6) == []
+    finally:
+        sys.path.remove(ADAPTERS)
+        for name in ("smoke_tiny", "served_base", "adapter_format", "train_lora"):
+            sys.modules.pop(name, None)

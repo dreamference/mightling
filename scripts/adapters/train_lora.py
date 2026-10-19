@@ -193,7 +193,7 @@ def chunked_cross_entropy(hidden: Any, weight: Any, labels: Any, chunk: int) -> 
     return total
 
 
-def build_model(config: Dict[str, Any]) -> Any:
+def build_model(config: Dict[str, Any], device: str = "cuda") -> Any:
     import torch
     from peft import LoraConfig, get_peft_model
 
@@ -204,7 +204,7 @@ def build_model(config: Dict[str, Any]) -> Any:
     train = config["train"]
     if train["base"] == "served":
         snapshot = find_snapshot(train.get("snapshot"))
-        model = load_served_text_model(snapshot, "cuda", fake_quant_inputs=train.get("fake_quant_inputs", True))
+        model = load_served_text_model(snapshot, device, fake_quant_inputs=train.get("fake_quant_inputs", True))
         head = model.lm_head.dequantized(torch.bfloat16)
     elif train["base"] == "nf4":
         from transformers import AutoModelForCausalLM, BitsAndBytesConfig
@@ -257,7 +257,8 @@ def train(config: Dict[str, Any]) -> None:
     (out / "config.json").write_text(json.dumps(config, indent=2))
     (out / "validation.json").write_text(json.dumps([s.get("attempt") for s in validation]))
 
-    model, head = build_model(config)
+    device = t.get("device", "cuda")
+    model, head = build_model(config, device)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=t["learning_rate"], betas=(0.9, 0.999),
                                   weight_decay=t.get("weight_decay", 0.0))
@@ -271,10 +272,10 @@ def train(config: Dict[str, Any]) -> None:
         return t["learning_rate"] * (t["min_lr_share"] + (1 - t["min_lr_share"]) * 0.5 * (1 + math.cos(math.pi * progress)))
 
     def loss_of(sample: Dict[str, Any]) -> Any:
-        ids = torch.tensor(sample["input_ids"][:t["max_seq_len"]], device="cuda").unsqueeze(0)
-        labels = torch.tensor(sample["labels"][:t["max_seq_len"]], device="cuda")
+        ids = torch.tensor(sample["input_ids"][:t["max_seq_len"]], device=device).unsqueeze(0)
+        labels = torch.tensor(sample["labels"][:t["max_seq_len"]], device=device)
         shifted = torch.cat([labels[1:], labels.new_full((1,), -100)])
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast(device.split(":")[0], dtype=torch.bfloat16):
             hidden = model.base_model.model.model(input_ids=ids).last_hidden_state[0]
         return chunked_cross_entropy(hidden, head, shifted, t["loss_chunk"]), int((shifted != -100).sum())
 
@@ -300,7 +301,7 @@ def train(config: Dict[str, Any]) -> None:
         elapsed = time.time() - began
         record = {"step": step, "of": total_steps, "loss": loss_sum / max(1, trained), "lr": lr_at(step - 1),
                   "grad_norm": float(norm), "tokens": tokens, "tok_s": tokens / elapsed,
-                  "peak_gb": torch.cuda.max_memory_allocated() / 1e9}
+                  "peak_gb": torch.cuda.max_memory_allocated() / 1e9 if device.startswith("cuda") else None}
         if step % t["eval_every"] == 0 or step == total_steps:
             model.eval()
             with torch.no_grad():

@@ -89,6 +89,8 @@ def export_for_sglang(tensors: Dict[str, Any], text_config: Dict[str, Any]) -> D
     q_rows, k_rows, v_rows = qkv_split(text_config)
     out: Dict[str, Any] = {}
     for name, tensor in tensors.items():
+        # An adapter trained on the multimodal class names the text stack `language_model`.
+        name = name.replace(".model.language_model.layers.", ".model.layers.")
         if ".in_proj_qkv." not in name:
             out[name] = tensor
             continue
