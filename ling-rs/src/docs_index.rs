@@ -34,7 +34,9 @@ pub fn binary() -> Option<PathBuf> {
 pub const MCP_SERVER: &str = "ling_docs";
 
 /// What `ling-docs mcp` must see beyond Codex's short allow-list: where the home, the settings
-/// and the installed model are when they are not in their default places; for `pdf_search`
+/// and the installed model are when they are not in their default places; every
+/// `DREAMFERENCE_MIGHTLING_DOCS_*` setting `ling-docs-rs/src/config.rs` reads (the embedding
+/// model above all: a query embedded with another model than the index's finds nothing); for `pdf_search`
 /// (PDF_SEARCH §3.2), the user's systemd and the shared admission ledger (a scope cannot be
 /// started without them, and admission would keep a ledger of its own), the air-gap level and
 /// the proxy settings `ling-fetch` downloads with.
@@ -43,6 +45,10 @@ const FORWARDED_ENV: &[&str] = &[
     "DREAMFERENCE_CONFIG_PATH",
     "DREAMFERENCE_MIGHTLING_DOCS",
     "DREAMFERENCE_MIGHTLING_DOCS_BM25_WEIGHT",
+    "DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL",
+    "DREAMFERENCE_MIGHTLING_DOCS_SCAN_INTERVAL_MIN",
+    "DREAMFERENCE_MIGHTLING_DOCS_MAX_INDEX_GB",
+    "DREAMFERENCE_MIGHTLING_DOCS_EXTRACT_TIMEOUT_S",
     "MIGHTLING_DOCS_LIB_DIR",
     "MIGHTLING_DOCS_MODEL_DIR",
     "XDG_RUNTIME_DIR",
@@ -196,6 +202,23 @@ mod tests {
         assert_eq!(out[2], format!("mcp_servers.ling_docs.command={}", toml::Value::String(binary.display().to_string())));
         assert_eq!(out[4], "mcp_servers.ling_docs.args=[\"mcp\"]");
         assert!(out[6].starts_with("mcp_servers.ling_docs.env_vars=[\"CODEX_HOME\""), "{}", out[6]);
+        // Every setting ling-docs reads from its environment (ling-docs-rs/src/config.rs).
+        for name in [
+            "DREAMFERENCE_MIGHTLING_DOCS",
+            "DREAMFERENCE_MIGHTLING_DOCS_BM25_WEIGHT",
+            "DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL",
+            "DREAMFERENCE_MIGHTLING_DOCS_SCAN_INTERVAL_MIN",
+            "DREAMFERENCE_MIGHTLING_DOCS_MAX_INDEX_GB",
+            "DREAMFERENCE_MIGHTLING_DOCS_EXTRACT_TIMEOUT_S",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_MB",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_MAX_PAGES",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_TIMEOUT_S",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_WAIT_S",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_MB",
+            "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_DAYS",
+        ] {
+            assert!(out[6].contains(&format!("\"{name}\"")), "{name}: {}", out[6]);
+        }
         assert_eq!(&out[7..], ["exec", "hi"]);
         // PDF search alone (no collection) offers the server too, with what its runs need.
         let pdf: Vec<String> = with_tools(base.clone(), "\n\n# PDFs\n\nTo search a long PDF").iter().map(|a| a.to_string_lossy().into_owned()).collect();
