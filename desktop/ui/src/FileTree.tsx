@@ -10,6 +10,7 @@ import { Icon } from "./icons";
 import type { FsReadDirectoryEntry } from "./protocol/v2/FsReadDirectoryEntry";
 import type { RpcClient } from "./rpc";
 import type { Listen } from "./turns";
+import { shortcutLabel } from "./keymap";
 
 type Listing = FsReadDirectoryEntry[] | "loading" | { error: string };
 
@@ -129,7 +130,7 @@ export function FileTree(props: { root: string; client: RpcClient; listen: Liste
         <span className="tree-root" title={root}>{root.split(/[\\/]/).filter(Boolean).pop() ?? root}</span>
         <span className="spacer" />
         <button className="icon" title="Read the folder again" aria-label="Refresh the files" onClick={() => { for (const dir of open) read(dir); }}><Icon name="undo" size={13} /></button>
-        <button className="icon" title="Hide the file tree (Ctrl+Shift+E)" aria-label="Hide the file tree" onClick={props.onClose}><Icon name="x" size={13} /></button>
+        <button className="icon" title={`Hide the file tree (${shortcutLabel("fileTree")})`} aria-label="Hide the file tree" onClick={props.onClose}><Icon name="x" size={13} /></button>
       </header>
       <div className="tree-body" role="tree" aria-label={root}>{branch(root, 0)}</div>
     </nav>

@@ -19,6 +19,25 @@ export const KEYMAP: KeyAction[] = (keymapFile as { actions: KeyAction[] }).acti
 
 const BY_ID = new Map(KEYMAP.map((action) => [action.id, action]));
 
+/**
+ * On a Mac the table's `Ctrl` is the Command key (⌘) and its `Super` the Control key, as in the
+ * Codex app and every Mac program: Cmd+P searches files there, not Control+P. Two kinds of binding
+ * keep the literal Control key on a Mac, as Mac programs do: those on Tab (Control+Tab cycles) and
+ * the terminal's own (Control+L clears it). The table and the user's bindings stay one, written for
+ * Linux and Windows.
+ */
+let mac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent || "");
+
+/** Sets whether the keys are a Mac's (the window decides at start; tests set both). */
+export function setMacKeys(value: boolean): void {
+  mac = value;
+}
+
+/** Whether `Ctrl` in a binding on `key` in `context` means ⌘ here. */
+function commandIsCtrl(key: string, context?: KeyContext): boolean {
+  return mac && key !== "Tab" && context !== "terminal";
+}
+
 /** Bindings the user chose in Settings › Keyboard shortcuts (kept in the window's preferences). */
 let overrides: Record<string, string[]> = {};
 
@@ -46,8 +65,11 @@ export function effectiveKeymap(): KeyAction[] {
 /** The binding a key event spells, as the table writes them (`Ctrl+Shift+K`); null for a lone modifier. */
 export function chordOf(event: KeyLike): string | null {
   if (["Control", "Shift", "Alt", "Meta", "OS"].includes(event.key)) return null;
-  const mods = [event.ctrlKey ? "Ctrl" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", event.metaKey ? "Super" : ""].filter(Boolean);
   const key = event.key.length === 1 ? event.key.toUpperCase() : event.key === "Esc" ? "Escape" : event.key;
+  const swap = commandIsCtrl(key);
+  const ctrl = swap ? event.metaKey : event.ctrlKey;
+  const meta = swap ? event.ctrlKey : event.metaKey;
+  const mods = [ctrl ? "Ctrl" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", meta ? "Super" : ""].filter(Boolean);
   return [...mods, key === " " ? "Space" : key].join("+");
 }
 
@@ -86,10 +108,13 @@ function keyName(event: KeyLike): string {
 /** Shifted punctuation: with Shift held the event reports `?` for `/`, `>` for `.`, `+` for `=`. */
 const UNSHIFTED: Record<string, string> = { "?": "/", ">": ".", "+": "=", "_": "-", "{": "[", "}": "]", "~": "`", ")": "0", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9" };
 
-/** Whether `event` is the chord `binding` (one chord; a sequence's chords are matched one by one). */
-export function matchesChord(event: KeyLike, binding: string): boolean {
+/** Whether `event` is the chord `binding` (one chord; a sequence's chords are matched one by one), in `context`. */
+export function matchesChord(event: KeyLike, binding: string, context?: KeyContext): boolean {
   const chord = parseChord(binding);
-  if (chord.ctrl !== event.ctrlKey || chord.alt !== event.altKey || chord.meta !== event.metaKey) return false;
+  const swap = commandIsCtrl(chord.key, context);
+  const ctrl = swap ? event.metaKey : event.ctrlKey;
+  const meta = swap ? event.ctrlKey : event.metaKey;
+  if (chord.ctrl !== ctrl || chord.alt !== event.altKey || chord.meta !== meta) return false;
   const target = chord.key.length === 1 ? chord.key.toUpperCase() : chord.key;
   if (keyName(event) === target) return chord.shift === event.shiftKey;
   // Shifted punctuation (`Ctrl+Shift+.` arrives as `>`; `Ctrl+=` is typed as `Ctrl++` on many layouts).
@@ -98,7 +123,7 @@ export function matchesChord(event: KeyLike, binding: string): boolean {
 
 /** Whether `event` triggers `action` (its single-chord bindings; sequences are handled by their owner). */
 export function matches(event: KeyLike, action: KeyAction): boolean {
-  return action.keys.some((binding) => !binding.includes(" ") && matchesChord(event, binding));
+  return action.keys.some((binding) => !binding.includes(" ") && matchesChord(event, binding, action.context));
 }
 
 /** Two actions in one context sharing a binding: the keymap's one rule. */
@@ -116,7 +141,24 @@ export function conflicts(actions: KeyAction[] = KEYMAP): string[] {
   return found;
 }
 
-/** The label a menu or tooltip shows for an action's first binding, e.g. "Ctrl+Shift+M". */
+/** A binding as this machine's keyboard names it: `Cmd+Shift+M` and `Option` on a Mac, as written elsewhere. */
+export function keyLabel(binding: string, context?: KeyContext): string {
+  if (!mac) return binding;
+  return binding.split(" ").map((chord) => {
+    const parts = chord.split("+");
+    const key = parts[parts.length - 1];
+    const swap = commandIsCtrl(key, context);
+    return parts.map((part, index) => {
+      if (index === parts.length - 1) return part;
+      if (part === "Ctrl") return swap ? "Cmd" : "Ctrl";
+      if (part === "Super") return swap ? "Ctrl" : "Cmd";
+      return part === "Alt" ? "Option" : part;
+    }).join("+");
+  }).join(" ");
+}
+
+/** The label a menu or tooltip shows for an action's first binding, e.g. "Ctrl+Shift+M" (Cmd+Shift+M on a Mac). */
 export function shortcutLabel(id: string): string {
-  return keyAction(id).keys[0] ?? "";
+  const action = keyAction(id);
+  return action.keys[0] ? keyLabel(action.keys[0], action.context) : "";
 }

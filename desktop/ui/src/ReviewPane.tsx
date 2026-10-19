@@ -11,6 +11,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent } 
 import * as bridge from "./bridge";
 import { commentsMessage, fingerprint, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
 import { Icon } from "./icons";
+import { keyLabel } from "./keymap";
 
 export type ReviewScope = bridge.GitScope | "turn";
 
@@ -194,7 +195,7 @@ export function ReviewPane(props: ReviewPaneProps) {
       <>
         {side !== "right" ? <td className="ln">{side === "both" ? line.oldNo ?? "" : line.oldNo ?? line.newNo ?? ""}</td> : <td className="ln">{line.newNo ?? ""}</td>}
         {side === "both" ? <td className="ln">{line.newNo ?? ""}</td> : null}
-        <td className={`code ${line.kind}`} onClick={(event) => onLineClick(event, file, line)} title="Ctrl+click to open the file at this line">
+        <td className={`code ${line.kind}`} onClick={(event) => onLineClick(event, file, line)} title={`${keyLabel("Ctrl+click")} to open the file at this line`}>
           {line.kind !== "note" ? <button className="add-comment" aria-label="Comment on this line" onClick={(event) => { event.stopPropagation(); startComment(file, line); }}>+</button> : null}
           <span className="sign">{sign}</span>{line.text}
         </td>

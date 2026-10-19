@@ -7,6 +7,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 
 import { Icon } from "./icons";
 import { tabLabel, type WorkspaceTab } from "./tabs";
+import { shortcutLabel } from "./keymap";
 
 export interface TabAreaProps {
   tabs: WorkspaceTab[];
@@ -33,7 +34,7 @@ export function TabArea(props: TabAreaProps) {
     <aside className={`review-pane tab-area${props.tree ? " with-tree" : ""}`} aria-label={front ? tabLabel(front) : "Files"}>
       <header className="review-bar">
         {props.onToggleTree ? (
-          <button className={`icon bar-action${props.treeShown ? " active" : ""}`} aria-pressed={props.treeShown} aria-label="File tree" title="The file tree (Ctrl+Shift+E)" onClick={props.onToggleTree}><Icon name="folderTree" size={14} /></button>
+          <button className={`icon bar-action${props.treeShown ? " active" : ""}`} aria-pressed={props.treeShown} aria-label="File tree" title={`The file tree (${shortcutLabel("fileTree")})`} onClick={props.onToggleTree}><Icon name="folderTree" size={14} /></button>
         ) : null}
         <span className="tab-strip" role="tablist" aria-label="Tabs" ref={strip}>
           {props.tabs.map((tab) => {
@@ -43,16 +44,16 @@ export function TabArea(props: TabAreaProps) {
               <span key={tab.key} className={`tab${selected ? " selected" : ""}`} role="tab" aria-selected={selected} title={tab.kind === "file" ? tab.path : tab.kind === "preview" ? tab.url : label}
                 onClick={() => props.onSelect(tab.key)} onAuxClick={(event) => { if (event.button === 1) props.onClose(tab.key); }}>
                 <Icon name={tab.kind === "review" ? "fileDiff" : tab.kind === "preview" ? "globe" : tab.kind === "prs" ? "gitPullRequest" : "file"} size={13} /> <span className="tab-label">{label}</span>
-                <button className="icon" aria-label={`Close the ${label} tab`} title="Close (Ctrl+W)" onClick={(event) => { event.stopPropagation(); props.onClose(tab.key); }}><Icon name="x" size={12} /></button>
+                <button className="icon" aria-label={`Close the ${label} tab`} title={`Close (${shortcutLabel("closeTab")})`} onClick={(event) => { event.stopPropagation(); props.onClose(tab.key); }}><Icon name="x" size={12} /></button>
               </span>
             );
           })}
         </span>
         <span className="spacer" />
         <span className="segmented layout-switch" role="radiogroup" aria-label="Layout">
-          <button role="radio" aria-checked={props.workspaceLayout === "split"} className={props.workspaceLayout === "split" ? "selected" : ""} title="Beside the thread (Ctrl+Shift+B cycles)" onClick={() => props.setWorkspaceLayout("split")}>Split</button>
-          <button role="radio" aria-checked={props.workspaceLayout === "tabs"} className={props.workspaceLayout === "tabs" ? "selected" : ""} title="The tabs in full (Ctrl+Shift+F)" onClick={() => props.setWorkspaceLayout("tabs")}>Full</button>
-          <button role="radio" aria-checked={false} title="Hide the tabs, keep them open (Ctrl+Alt+B)" onClick={() => props.setWorkspaceLayout("chat")}>Hide</button>
+          <button role="radio" aria-checked={props.workspaceLayout === "split"} className={props.workspaceLayout === "split" ? "selected" : ""} title={`Beside the thread (${shortcutLabel("cycleLayout")} cycles)`} onClick={() => props.setWorkspaceLayout("split")}>Split</button>
+          <button role="radio" aria-checked={props.workspaceLayout === "tabs"} className={props.workspaceLayout === "tabs" ? "selected" : ""} title={`The tabs in full (${shortcutLabel("fullView")})`} onClick={() => props.setWorkspaceLayout("tabs")}>Full</button>
+          <button role="radio" aria-checked={false} title={`Hide the tabs, keep them open (${shortcutLabel("chatTabsToggle")})`} onClick={() => props.setWorkspaceLayout("chat")}>Hide</button>
         </span>
       </header>
       <div className="tab-columns">

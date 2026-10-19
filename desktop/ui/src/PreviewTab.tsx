@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Icon } from "./icons";
-import { keyAction, matches } from "./keymap";
+import { keyAction, matches, shortcutLabel } from "./keymap";
 
 export interface PreviewTabProps {
   id: string;
@@ -173,13 +173,13 @@ export function PreviewTab(props: PreviewTabProps) {
       <div className="preview-tools">
         <button className="icon" aria-label="Back" title="Back (Alt+←)" disabled={!state?.canGoBack} onClick={() => bridge.preview.go(id, "back").catch(notice)}><Icon name="chevronLeft" size={14} /></button>
         <button className="icon" aria-label="Forward" title="Forward (Alt+→)" disabled={!state?.canGoForward} onClick={() => bridge.preview.go(id, "forward").catch(notice)}><Icon name="chevronRight" size={14} /></button>
-        <button className="icon" aria-label="Reload" title="Reload (Ctrl+R)" onClick={() => bridge.preview.reload(id).catch(notice)}><Icon name="refresh" size={14} /></button>
+        <button className="icon" aria-label="Reload" title={`Reload (${shortcutLabel("previewReload")})`} onClick={() => bridge.preview.reload(id).catch(notice)}><Icon name="refresh" size={14} /></button>
         <form className="address" onSubmit={(event) => { event.preventDefault(); go(typed); }}>
           <input ref={address} value={typed} placeholder="localhost:5173, a LAN page, or a file" aria-label="Address"
             spellCheck={false} onChange={(event) => setTyped(event.target.value)} />
         </form>
-        <button className={`icon${picking ? " active" : ""}`} aria-pressed={picking} aria-label="Comment on the page" title="Comment on an element of the page (Ctrl+Shift+.)" onClick={() => void pick()}><Icon name="messageSquare" size={14} /></button>
-        <button className="icon" aria-label="Copy the address" title="Copy the address (Ctrl+Shift+C)" onClick={() => void copyText(state?.url ?? typed)}><Icon name="copy" size={14} /></button>
+        <button className={`icon${picking ? " active" : ""}`} aria-pressed={picking} aria-label="Comment on the page" title={`Comment on an element of the page (${shortcutLabel("commentMode")})`} onClick={() => void pick()}><Icon name="messageSquare" size={14} /></button>
+        <button className="icon" aria-label="Copy the address" title={`Copy the address (${shortcutLabel("copyUrl")})`} onClick={() => void copyText(state?.url ?? typed)}><Icon name="copy" size={14} /></button>
         {props.devTools ? <button className="icon" aria-label="Developer tools" title="Developer tools (Developer mode is on)" onClick={() => bridge.preview.devTools(id).catch(notice)}><Icon name="code" size={14} /></button> : null}
       </div>
       {picking ? <div className="preview-note">Click an element of the page to comment on it; Esc in the page stops.</div> : null}
