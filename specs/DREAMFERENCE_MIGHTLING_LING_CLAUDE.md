@@ -1,8 +1,8 @@
-# Mightling `ling-claude` — Claude Code's way of working, on the local model (working name)
+# Mightling: Claude Code compatibility mode in `ling` — Claude Code's way of working, on the local model
 
-**Status:** **proposal, not built.** Asked for by the owner on 2026-10-19 and written the same day. Nothing in this document exists in the code yet; every "today" below was checked against `main` at `a5c0ad7` and the pinned Codex source (`rust-v0.158.0`) on 2026-10-19.
+**Status:** **proposal, not built.** Asked for by the owner on 2026-10-19 and written the same day; updated on 2026-10-20 with the owner's three decisions of that day (§0, first block) and a black-box study of Claude Code's terminal interface (§6.5). Nothing in this document exists in the code yet; every "today" below was checked against `main` at `a5c0ad7` and the pinned Codex source (`rust-v0.158.0`) on 2026-10-19, and the interface study against `ling` 1.6.4 and the same pin on 2026-10-20.
 
-**Name:** `ling-claude` is a **working name** and must not ship (§2.4, §14 Q1). Everywhere below it means "the agent this spec proposes".
+**Name:** there is **no new product name** (owner, 2026-10-20). This is a **mode of `ling`**, the compatibility mode, switched on with `ling --compat claude`, `DREAMFERENCE_MIGHTLING_COMPAT=claude` or `mightling_compat = "claude"` (§0.4). The file and branch keep the old working name `ling-claude` only as a label; it is never a command, a link or a package.
 
 **Subject:** an open-source, clean-room re-implementation of the user experience and feature set of Anthropic's Claude Code terminal agent, as its public documentation describes them, running against Mightling's own model server (Qwen3.8-27B on SGLang today, ling-engine later) with Mightling's sandbox, `/airgapped` and egress audit.
 
@@ -15,12 +15,20 @@
 
 ---
 
-## 0. Decisions, stated first (proposed, for the owner)
+## 0. Decisions, stated first
+
+### Decided by the owner on 2026-10-20
+
+- **D1. No new product name.** The work lives inside `ling` as a **mode of the same agent**, the *compatibility mode*, not as a second command, link or package. The switch follows the pattern `ling` already uses for named prompts and cave mode (a launcher flag, a `DREAMFERENCE_MIGHTLING_*` variable, a `mightling_*` key in the Dreamference TOML file, and a `ling <noun> use|status` subcommand): §0.4. The naming question (old §14 Q1) is closed.
+- **D2. The terminal interface does what Claude Code does.** Studied as a **black box only**: what the installed CLI prints to a terminal, its `--help` and `--version` output, and its public documentation; never its bundled JavaScript or any other file of its package. The findings, the escape-sequence evidence in summary, and how `ling` gets there on Codex's TUI are §6.5. This also answers old §14 Q2 (the interface is in scope) and §14 Q11 (observing behaviour is allowed, black box only).
+- **D3. The first scope is four things together**: (1) Claude Code's terminal interface (§6.5); (2) its slash command names and key bindings (§6.5.3, §6.5.5); (3) `CLAUDE.md`, `.claude/skills` and `.claude/agents` read beside `AGENTS.md` (§9.1, §9.4); (4) subagents and hooks configured the way Claude Code configures them (`.claude/agents/*.md`, the `hooks` block of `.claude/settings*.json`; §9.4, §9.5). Items (3) and (4) were already Phase 1 of §12; items (1) and (2) join them in Phase 1 for their zero-patch part and in Phase 3 for the part that needs the patch cap raised (§6.5.6, §14 Q12).
+
+### Proposed in this spec
 
 1. **Clean room, without exception.** Claude Code is proprietary. This spec and the implementation use only its public documentation and its observable behaviour; no code, prompt text or asset of it is copied, read from a leak, or decompiled (§2).
 2. **Build on `ling`, do not write a second agent (option (c), §5).** The pinned Codex already carries most of what Claude Code's feature list asks for, including hooks with the same event names and the same JSON decision fields, plan mode, subagents, background terminals, `/review`, `/worktree`, `/resume`, MCP and skills, and even a one-time importer of Claude Code's configuration (`/import`, §4.2). What is missing is a **compatibility layer**: Claude Code's file formats read live, its print-mode command line, its tool roster as an option, and its permission rules. All of it fits in `ling-rs/` with **no new patch** in Phase 1.
-3. **What "alternative agent" means here, stated openly.** The owner asked for an alternative agent with Claude Code's user experience and feature set. This spec delivers the **feature set, the file formats and the command line** a Claude Code user types (`ling-claude -p … --output-format stream-json`, `-c`, `-r`, `CLAUDE.md`, `.claude/settings.json`, `.claude/commands`, `.claude/agents`), inside `ling`'s engine and TUI. It does **not** clone Claude Code's full-screen interface (its look, its key bindings beyond the documented few) in Phases 1–3; that is a separate decision (§14 Q2), and a TUI clone would raise trade-dress questions as well as cost.
-4. **One binary, two front doors.** `ling-claude` is a second name for the installed `ling` (a link created by `CodexBrandedBuilder`, like `ling-search`), and the launcher switches on the compatibility profile when it is invoked under that name, or with `DREAMFERENCE_MIGHTLING_COMPAT=claude`, or `mightling_compat = "claude"`. Everything Mightling guarantees for `ling` (the vendor channels closed, `CODEX_HOME=~/.mightling`, the sandbox, `/airgapped`, the egress audit, Night Shift, the desktop app) holds unchanged because it is the same binary.
+3. **What "alternative agent" means here, stated openly.** The owner asked for an alternative agent with Claude Code's user experience and feature set. This spec delivers the **feature set, the file formats and the command line** a Claude Code user types (`ling --compat claude -p … --output-format stream-json`, `-c`, `-r`, `CLAUDE.md`, `.claude/settings.json`, `.claude/commands`, `.claude/agents`), and, by D2, the **behaviour of its terminal interface**: inline or full screen, scrollback, the live region at the bottom, the redraw method, the transcript view, the key bindings and the command names (§6.5). It does **not** copy its look: no colours, logo, spinner words, glyphs or wording are taken (§2.1 item 2), which keeps the interface Mightling's and answers the trade-dress concern.
+4. **One binary, one name, one switch.** The compatibility mode is a launch-time setting of the installed `ling`. First match wins: the launcher flag `--compat claude` (or `--compat off`), consumed by the launcher before Codex parses the command line, like the launcher's other intercepted flags; then `DREAMFERENCE_MIGHTLING_COMPAT=claude|off`; then `mightling_compat = "claude"|"off"` in the Dreamference TOML file, which `ling compat use claude|off` writes and `ling compat status` reports (as `ling prompt use` does for `mightling_prompt`); then `off`. The value names the file format being read (as Claude Code's own `/import` names the agents it imports from), not a product of Mightling's. A repository can never turn the mode on: `mightling_compat` is honoured only from the user's own config file (`~/.config/dreamference/config.toml`), never from a `dreamference.toml` inside the repository, and nothing in `.claude/` or `CLAUDE.md` is read until the user has switched the mode on (AGENTS.md's rule against taking the user's choices from where a clone could write them). The mode is fixed for the life of a session, because its command line, memory and key map are fixed at launch; there is no `/compat` slash command (a TUI hook would cost cap bytes for a rare action), and `ling compat use` takes effect at the next start. Everything Mightling guarantees for `ling` (the vendor channels closed, `CODEX_HOME=~/.mightling`, the sandbox, `/airgapped`, the egress audit, Night Shift, the desktop app) holds unchanged because it is the same binary and the same name. **One flag collides**: Codex's `-p` is `--profile`, Claude Code's `-p` is `--print`; in the mode `-p` means print and Codex's profile is reachable only as `--profile`; outside it nothing changes.
 5. **Read, never write, the other agent's files.** `CLAUDE.md`, `.claude/settings*.json`, `.claude/commands`, `.claude/agents` and `~/.claude/…` are read at start and translated in memory or into `$CODEX_HOME`; nothing is ever written into the repository or into `~/.claude` (AGENTS.md's rule against writing the user's choices where a clone or the agent could write them).
 6. **Measured before it is anyone's default.** The compatibility profile is opt-in. Its one model-visible change, the Claude-Code-shaped tool roster (§7.2), is an SWE-bench arm against `ling`'s default before any default changes (§11).
 
@@ -30,7 +38,7 @@
 
 ### 1.1 Goals
 
-1. A developer who uses Claude Code at work can use Mightling at home or offline **without relearning**: the same memory files, the same settings files, the same hooks, the same custom slash commands, skills and subagents, the same print-mode flags and output formats in scripts and CI.
+1. A developer who uses Claude Code at work can use Mightling at home or offline **without relearning**: the same memory files, the same settings files, the same hooks, the same custom slash commands, skills and subagents, the same print-mode flags and output formats in scripts and CI, and a terminal interface that behaves the same way: where the conversation goes, what redraws, which key does what, what the commands are called (§6.5).
 2. A repository set up for Claude Code (a `CLAUDE.md`, a `.claude/` folder) works in Mightling as it is, with no conversion step and nothing written into it.
 3. Everything runs against the local model server; no request ever goes to Anthropic or any other vendor. The egress audit proves it for the new front door as it does for `ling` (§8).
 4. The local model gets the tool shapes it handles best, decided by measurement (§7, §11), not by imitation.
@@ -41,7 +49,7 @@
 - **Copying Claude Code.** No source, no system prompt, no tool descriptions, no UI assets, no names or wording from it beyond the public file and flag names a user types (§2).
 - **Anthropic's services.** No sign-in, no API key helper that reaches Anthropic, no Anthropic model ids, no claude.ai features, no remote MCP connectors from Anthropic's directory, no GitHub App or hosted Actions runner (`claude-code-action`), no web or mobile session hand-off.
 - **Telemetry, cost accounting in dollars, usage limits.** Mightling has none and adds none (`/usage` reports tokens on the local server only).
-- **Its full-screen interface** in Phases 1–3 (§0.3, §14 Q2).
+- **Its look.** The interface's behaviour is in scope (D2, §6.5); its colours, logo and splash art, spinner words, glyphs, animations and wording are not, in any phase (§2.1 item 2).
 - **Marketplace plugins fetched from the internet** (Claude Code's plugin marketplaces). A plugin already on disk may be read; nothing is fetched (§8.3).
 - **Bit-exact output schemas.** The JSON and stream-JSON output follows the fields the public documentation names (§6.4); undocumented fields are not guessed.
 - **Model choice.** Mightling serves one model; `--model` and `/model` accept only what `/v1/models` lists.
@@ -56,18 +64,18 @@
 
 Therefore:
 
-1. **Sources allowed:** Anthropic's public documentation pages (cited in §3 and §15) and Anthropic's public announcements. Observable behaviour of an installed copy (what it prints, what files it reads and writes, what a flag does), recorded as behaviour and never as code, is allowed **only after the owner has confirmed that the terms the copy is used under permit it**: Anthropic's commercial and usage terms may restrict using its services to build a competing product (not checked for this spec; §14 Q11). Until then, the public documentation is the only source, and this spec was written from it alone.
+1. **Sources allowed:** Anthropic's public documentation pages (cited in §3 and §15) and Anthropic's public announcements; the installed CLI's `--help` and `--version` output; and the **observable behaviour** of an installed copy (what it prints to a terminal, including the escape sequences it writes, what files it reads and writes, what a flag does), recorded as behaviour and never as code. The owner allowed observation on 2026-10-20 (D2), **as a black box only**: the CLI is run in a pseudo-terminal in a throwaway folder, with a few trivial prompts, without signing in to anything new and without changing its settings; its package files are never opened. Whether Anthropic's commercial and usage terms restrict using the product to build a competing one was not checked by a lawyer (§14 Q11 keeps that part open); the owner accepted the risk for behaviour observation.
 2. **Sources forbidden:** Claude Code's source, minified or not; decompiled, deobfuscated or "leaked" copies of it; its system prompts or tool descriptions, however obtained (including from a model's output, a proxy capture or a debugging log); its images, icons, colours, animations, spinner words and other assets.
 3. **Open-source projects derived from forbidden sources are forbidden too.** Several popular community projects were built from Claude Code's own code, recovered from source maps or from the 2026-03-31 leak (anon-kode, Kode, claw-code, OpenClaude, free-code and mirrors of the leak; §5.2), whatever licence they now claim. They are excluded from option (b) on purpose, and nobody working on this spec's implementation opens their code. A project that only *reads* Claude Code's documented files for compatibility (OpenCode, Crush) is not in this class.
 4. **The implementation contains no copied code, prompts or assets.** Every tool description, every prompt block, every message the user sees is written fresh for Mightling, in Mightling's voice, and reviewed against this rule before merge. Names of files, folders, settings keys, hook event names, flag names and JSON field names that the public documentation gives users to type or parse are interface facts and are used as such (the same way `ling-rs/skills/` already reads `.claude/skills` and Codex's own upstream code reads `CLAUDE.md`, §4.2).
-5. **One person, one direction.** If observation is allowed (item 1), whoever observes Claude Code's behaviour writes a behavioural note (inputs, outputs, files touched); the implementer works from that note and the public docs. Notes are kept in `docs/dev/ling-claude-observations.md` with the version observed and the date, so a later question about provenance has an answer.
+5. **One person, one direction.** Whoever observes Claude Code's behaviour writes a behavioural note (inputs, outputs, files touched, escape sequences in summary); the implementer works from that note and the public docs. The first study is §6.5 (version 2.1.304, 2026-10-20, with its method and environment); later notes go to `docs/dev/ling-claude-observations.md` with the version observed and the date, so a later question about provenance has an answer.
 6. **A review step per merge**: the pull request template for this work asks "every user-visible string and every model-visible string written for this change; no text copied from Claude Code; sources: …".
 
 ### 2.2 What the licences allow
 
 | Component | Licence | Use here |
 |---|---|---|
-| Mightling | AGPL-3.0-or-later | the whole of `ling-claude` |
+| Mightling | AGPL-3.0-or-later | the whole of the compatibility mode |
 | Codex (the pinned `codex/` submodule) | Apache-2.0 | the engine, unchanged; its `external-agent-migration` crate is upstream Apache-2.0 code and may be called as it is |
 | Claude Code | proprietary (Anthropic's terms) | nothing; behaviour and documented interfaces only |
 | Option (b) candidates | see §5.2 | only an OSI-approved licence compatible with AGPL-3.0 (Apache-2.0, MIT) could be forked; source-available licences are excluded |
@@ -78,13 +86,9 @@ Reading another tool's documented file formats and accepting its documented comm
 
 ### 2.4 The name
 
-"Claude" and "Claude Code" are Anthropic's trademarks, and Anthropic's public legal page says their names may not be used "as part of your own product, feature, or company name … or in a way that suggests Anthropic built, endorses, or is partnered with your product" (§3.17). A shipped command, package or product name containing "Claude" is therefore a legal risk. **`ling-claude` stays a working name** until the owner chooses (§14 Q1). Proposed alternatives, none of which contains a third party's mark or collides with an existing `ling-*` binary (`ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-docs`, `ling-signal`):
+"Claude" and "Claude Code" are Anthropic's trademarks, and Anthropic's public legal page says their names may not be used "as part of your own product, feature, or company name … or in a way that suggests Anthropic built, endorses, or is partnered with your product" (§3.17). By the owner's decision D1 there is **no new name at all**: the product stays `ling`, and the feature is called the **compatibility mode** everywhere a user reads it (help text, start-up line, documentation). The one place the mark appears is the switch's *value*, `claude`, and the sentence that says what the mode reads ("reads Claude Code's `CLAUDE.md` and `.claude/` files"): a nominative, factual use that names the format, not Mightling's product, the same way Claude Code's own `/import` names the agents whose files it reads. Nothing in the mode says or suggests that Anthropic built, endorses or is partnered with it.
 
-1. **`ling-compat`**: plain, says what it is (`ling` with compatibility for other agents' files and flags), and extends naturally if Gemini CLI's or another agent's formats are added later.
-2. **`ling-cc`**: short, and familiar to those who alias Claude Code as `cc`; but because "CC" is commonly read as "Claude Code" it may still "suggest" the association the legal page rules out, so it is the riskiest of the three.
-3. **`lingo`**: a separate word ("speaks the other agents' language"), no mark in it, easy to type; it must be checked for collisions with existing packages before it is chosen.
-
-User-facing documentation may say "reads Claude Code's `CLAUDE.md` and settings files" (a nominative, factual use) without using the mark in the product's name.
+The old candidates (`ling-claude`, `ling-compat`, `ling-cc`, `lingo`) are withdrawn; no `ling-*` link is added.
 
 ---
 
@@ -215,7 +219,7 @@ The documentation now lives at `https://code.claude.com/docs/en/<page>`; the old
 | 10 | Permission rules (`allow`/`ask`/`deny`, `Bash(npm run *)`, `Read(./.env)`) | Codex exec-policy rules (a different syntax), no path rules | translated, Phase 2 (§9.3) | P0 |
 | 11 | Command hooks in settings files | Codex's hooks (same core events, same exit-code and decision fields), `/import` once | read live with a translating shim, Phase 1 (§9.5) | P0 |
 | 12 | `http`, `mcp_tool`, `prompt`, `agent` hook handlers | none | `mcp_tool` and loopback `http` in Phase 3; `prompt`/`agent` P2 | P2 |
-| 13 | Built-in slash commands | most exist under Codex's names (`/init`, `/compact`, `/resume`, `/model`, `/permissions`, `/hooks`, `/mcp`, `/agents`, `/plan`, `/review`, `/export`, `/status`, `/statusline`, `/ide`, `/skills`) | aliases for `/cost` and `/context` (→ `/status`), `/add-dir`, `/doctor` (→ `ling-claude doctor`), `/memory` in Phase 3 | P1 |
+| 13 | Built-in slash commands | most exist under Codex's names (`/init`, `/compact`, `/resume`, `/model`, `/permissions`, `/hooks`, `/mcp`, `/agents`, `/plan`, `/review`, `/export`, `/status`, `/statusline`, `/ide`, `/skills`) | Claude Code's names through one slash-command fallback served from `ling-rs/` (§6.5.5, §6.5.6 item 1): renamed ones (`/branch`, `/keybindings`, `/tasks`, `/cost`) and missing ones (`/memory`, `/rewind`, `/context`, `/config`, `/add-dir`, `/doctor`, `/help`); Phase 3, after the cap is raised (§14 Q12) | P0 (D3) |
 | 14 | Custom commands, `.claude/commands/` | not read | converted into skills per session, Phase 1 (§9.4) | P0 |
 | 15 | Skills, `.claude/skills/` | **done**: linked as `from-claude` and `from-repo-claude` (SKILLS §15) | exists | P0 (exists) |
 | 16 | Plugins (`.claude-plugin/plugin.json`, marketplaces) | Codex's own plugins; `/import` can add marketplaces (§8.3) | local plugins only, Phase 3; no marketplace fetch | P2 |
@@ -223,7 +227,7 @@ The documentation now lives at `https://code.claude.com/docs/en/<page>`; the old
 | 18 | `.claude/rules/*.md` scoped to paths | none | Phase 3 | P2 |
 | 19 | Auto memory, `/memory` | Codex's memories feature (off) | `/memory` Phase 3; auto memory not planned | P2 / — |
 | 20 | MCP: `.mcp.json`, `~/.claude.json` servers, `mcp__server__tool` names | Codex MCP from `config.toml`, flattened to functions by `0020` | `.mcp.json` and `~/.claude.json` read, Phase 1 | P0 |
-| 21 | Plan mode, `Shift+Tab`, plan approval | `/plan` (Codex's Plan mode) | `--permission-mode plan`; the key binding checked in Phase 0 | P0 |
+| 21 | Plan mode, `Shift+Tab`, plan approval | `/plan` (Codex's Plan mode) | `--permission-mode plan`; `Shift+Tab` per §6.5.4 and §14 Q14 | P0 |
 | 22 | Automatic compaction, `/compact [focus]` | Codex's plus Mightling's tuned compaction (KV-pool limit, turn-end, summary cap) | exists; the focus argument checked in Phase 0 | P1 |
 | 23 | Print mode `-p`, `--output-format text\|json\|stream-json` | `ling exec --json` (Codex's event schema), `-o` | Phase 1 (§6.3, §6.4) | P0 |
 | 24 | `--input-format stream-json` | none | Phase 2 | P1 |
@@ -240,6 +244,7 @@ The documentation now lives at `https://code.claude.com/docs/en/<page>`; the old
 | 35 | Checkpoints and `/rewind` (code and conversation) | `/fork` and backtracking restore the conversation only | Phase 4, by the owner's decision (§14 Q7) | P1 |
 | 36 | Agent SDK | `ling exec`, `ling app-server` (Codex's protocol) | not planned (the SDK is Anthropic's) | — |
 | 37 | Sign-in, cost in dollars, usage limits | none (patches `0005`, `0013`, `0015`) | not planned, by design | — |
+| 38 | The terminal interface's behaviour (inline or fullscreen, scrollback, live region, transcript view) and key bindings | Codex's TUI: fullscreen by default, `--no-alt-screen` inline, its own key map | §6.5: zero-patch configuration in Phase 1 (§6.5.4), hooks in Phase 3 (§6.5.6) | P0 (D2, D3) |
 
 ### 4.2 What the pinned Codex already brings
 
@@ -276,17 +281,17 @@ In order of how often a Claude Code user would hit them:
 **(a) From scratch in Rust**, a new agent loop reusing the `ling-rs` leaf crates (`airgapped/`, `node-locator/`, `skills/`, `masking/`, `web/`, `tools/`).
 
 - *For:* full control of the loop, the tool roster and the interface; no Codex rebase cost; could match Claude Code's interface most closely.
-- *Against:* everything `ling` gets from Codex has to be written again and kept secure: the TUI, sessions and resume, compaction (and the six compaction measures Mightling has tuned since 2026-10-02), MCP, skills loading, subagents, plan mode, the hook engine, the app-server protocol the desktop app speaks, and above all **the sandbox**. `ling-admin`'s own sandbox (`SandboxManager`) was removed on 2026-10-01; `/airgapped on` is enforced inside Codex's sandbox helper (patch `0019`) and on Windows by patch `0024`; bwrap needs the AppArmor profile (`docs/dev/host-safety.md`). A new binary would need its own `bwrap` policy, its own network-namespace enforcement, its own `audit egress --claude` trace, its own SWE-bench runtime (another patchelf'd binary per container) and its own desktop adapter. Months of work before the first parity row, and a second security surface for good.
+- *Against:* everything `ling` gets from Codex has to be written again and kept secure: the TUI, sessions and resume, compaction (and the six compaction measures Mightling has tuned since 2026-10-02), MCP, skills loading, subagents, plan mode, the hook engine, the app-server protocol the desktop app speaks, and above all **the sandbox**. `ling-admin`'s own sandbox (`SandboxManager`) was removed on 2026-10-01; `/airgapped on` is enforced inside Codex's sandbox helper (patch `0019`) and on Windows by patch `0024`; bwrap needs the AppArmor profile (`docs/dev/host-safety.md`). A new binary would need its own `bwrap` policy, its own network-namespace enforcement, its own `audit egress --compat claude` trace, its own SWE-bench runtime (another patchelf'd binary per container) and its own desktop adapter. Months of work before the first parity row, and a second security surface for good.
 
 **(b) Fork or extend an open-source agent** with a compatible licence (§5.2).
 
-- *For:* a working loop and interface on day one; several candidates already read `CLAUDE.md` or `AGENTS.md`, speak MCP and take an OpenAI-compatible endpoint; Qwen Code is tuned for the Qwen family's tool calls.
+- *For:* a working loop and interface on day one; several candidates already read `CLAUDE.md` or `AGENTS.md`, speak MCP and take a chat-completions-compatible local endpoint; Qwen Code is tuned for the Qwen family's tool calls.
 - *Against:* the strongest candidates are TypeScript/Node or Go, not Rust, so none of `ling-rs`'s crates is reused directly; every one has its own sandbox story (Docker/Podman, Seatbelt, or none) that would have to be replaced with bwrap and `/airgapped on`; several carry telemetry or update checks on by default that must be found and closed the way patches `0013`, `0015`, `0016` closed Codex's (a new egress audit and a new patch series to rebase on every upstream release); and Mightling would then maintain two agents, two patch series and two session formats. Night Shift, SWE-bench and the desktop app each need an adapter.
 
 **(c) Extend `ling` (Codex) with a compatibility layer** in `ling-rs/`: read `CLAUDE.md` and `.claude/` live, translate hooks, permission rules, commands and subagents, accept Claude Code's print-mode flags, and offer a Claude-Code-shaped tool roster as a measured option.
 
 - *For:* the engine already has most of the feature set (§4.2); the sandbox, `/airgapped`, the egress audit, the vendor channels closed, the compaction work, Night Shift, the desktop app, the code index, `ling-docs` and the SWE-bench harness all keep working because it is the same binary; Phase 1 needs no patch, so the 45 KB cap is untouched; the work is small enough to measure in days.
-- *Against:* the interface stays Codex's, not Claude Code's (§0.3); some semantics cannot be mapped exactly (permission rules over paths, hook `allow`/`ask` decisions that Codex rejects, `acceptEdits`), so the layer must say clearly where it differs; and every Codex bump must re-check the translation (a test pins it, §13).
+- *Against:* the interface is Codex's TUI made to behave like Claude Code's through configuration and a few hooks (§6.5), not a new interface, and the hooks need the patch cap raised (§6.5.6); some semantics cannot be mapped exactly (permission rules over paths, hook `allow`/`ask` decisions that Codex rejects, `acceptEdits`), so the layer must say clearly where it differs; and every Codex bump must re-check the translation (a test pins it, §13).
 
 ### 5.2 The open-source agents that already clone parts of it
 
@@ -294,12 +299,12 @@ Checked on 2026-10-19 (licence from each repository's licence file, activity fro
 
 | Agent | Repository | Language | Licence | Status | How much of Claude Code's way of working |
 |---|---|---|---|---|---|
-| OpenCode | [anomalyco/opencode](https://github.com/anomalyco/opencode) (`sst/opencode` redirects) | TypeScript | MIT | active | the closest: `AGENTS.md` with `CLAUDE.md` and `~/.claude/CLAUDE.md` as fallbacks ([rules](https://opencode.ai/docs/rules/)), skills including `.claude/skills/` ([skills](https://opencode.ai/docs/skills/)), a read-only plan agent, subagents, `.opencode/commands/`, plugin hooks ([plugins](https://opencode.ai/docs/plugins/)), `opencode run --format json`; any OpenAI-compatible endpoint |
+| OpenCode | [anomalyco/opencode](https://github.com/anomalyco/opencode) (`sst/opencode` redirects) | TypeScript | MIT | active | the closest: `AGENTS.md` with `CLAUDE.md` and `~/.claude/CLAUDE.md` as fallbacks ([rules](https://opencode.ai/docs/rules/)), skills including `.claude/skills/` ([skills](https://opencode.ai/docs/skills/)), a read-only plan agent, subagents, `.opencode/commands/`, plugin hooks ([plugins](https://opencode.ai/docs/plugins/)), `opencode run --format json`; any chat-completions-compatible endpoint |
 | Kilo Code | [Kilo-Org/kilocode](https://github.com/Kilo-Org/kilocode) | TypeScript | MIT | active | its CLI is a fork of OpenCode |
 | Crush | [charmbracelet/crush](https://github.com/charmbracelet/crush) | Go | **FSL-1.1-MIT** (source-available; bars competing use until it converts to MIT) | active | `CRUSH.md`/`AGENTS.md`, skills, MCP, early hooks; custom providers. Excluded from (b) by its licence |
 | opencode (Go) | [opencode-ai/opencode](https://github.com/opencode-ai/opencode) | Go | MIT | archived 2025-09, became Crush | historical |
 | Qwen Code | [QwenLM/qwen-code](https://github.com/QwenLM/qwen-code) | TypeScript | Apache-2.0 | active | began from Gemini CLI; subagents, skills, hooks, MCP, plan mode, `qwen -p`; built for the Qwen family's tool calls; vLLM and Ollama endpoints |
-| Gemini CLI | [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | Apache-2.0 | active | hooks, skills, subagents, plan mode, MCP, custom commands, `--output-format json\|stream-json`; `GEMINI.md`; a local OpenAI-compatible endpoint is *unverified* |
+| Gemini CLI | [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | Apache-2.0 | active | hooks, skills, subagents, plan mode, MCP, custom commands, `--output-format json\|stream-json`; `GEMINI.md`; a local chat-completions-compatible endpoint is *unverified* |
 | Codex CLI | [openai/codex](https://github.com/openai/codex) | Rust | Apache-2.0 | active | `ling`'s engine: `AGENTS.md`, hooks, subagents, skills, MCP, `exec`, and the Claude Code importer (§4.2) |
 | Goose | [aaif-goose/goose](https://github.com/aaif-goose/goose) (`block/goose` redirects) | Rust | Apache-2.0 | active | Agent Skills and MCP extensions; Ollama; the rest *unverified* |
 | Cline | [cline/cline](https://github.com/cline/cline) | TypeScript | Apache-2.0 | active | Plan/Act modes, `.clinerules`, skills, MCP, a CLI with JSON output; SDK hooks, not shell hooks; already a Mightling runner |
@@ -337,12 +342,14 @@ Keep from (b) only what costs nothing: Qwen Code (Apache-2.0) is the best public
 ### 6.1 Where it lives
 
 ```text
-~/.local/bin/ling-claude ──► ~/.local/share/dreamference/mightling/bin/ling   (same binary as ling)
+ling --compat claude …   (or DREAMFERENCE_MIGHTLING_COMPAT=claude, or mightling_compat = "claude")
+   ~/.local/bin/ling ──► ~/.local/share/dreamference/mightling/bin/ling   (the one binary, no new link)
                                    │
                                    ▼
          ling-rs/src/lib.rs (the launcher, before Codex parses its arguments)
-           ├── compat::profile()          argv[0] = ling-claude, or DREAMFERENCE_MIGHTLING_COMPAT=claude,
-           │                              or mightling_compat = "claude"
+           ├── compat::profile()          --compat, then the variable, then the TOML key, then off (§0.4);
+           │                              `ling compat use|status|doctor` (launcher subcommands)
+           ├── compat::tui                the interface of §6.5: -c tui.* overrides and [tui.keymap]
            ├── compat::cli                Claude-Code-style flags  →  Codex flags / `exec` / `resume`
            ├── compat::memory             CLAUDE.md hierarchy + @imports  →  a SessionStart hook's context
            ├── compat::settings           .claude/settings*.json  →  -c overrides, exec-policy rules,
@@ -350,17 +357,18 @@ Keep from (b) only what costs nothing: Qwen Code (Apache-2.0) is the best public
            ├── compat::commands           .claude/commands/*.md  →  skills linked like from-claude
            ├── compat::agents             .claude/agents/*.md  →  agent roles under $CODEX_HOME
            ├── compat::output             Codex exec JSONL  →  text | json | stream-json
-           └── ling-claude tools (MCP)    optional Read/Write/Edit/Grep/Glob/WebFetch/WebSearch
+           └── ling compat tools (MCP)    optional Read/Write/Edit/Grep/Glob/WebFetch/WebSearch
                                           as plain functions (patch 0020 flattens MCP tools)
                                    │
                                    ▼
-         Codex, unchanged (TUI, exec, sandbox, hooks engine, compaction, app-server)
+         Codex (TUI, exec, sandbox, hooks engine, compaction, app-server): unchanged in Phase 1;
+         Phase 3 adds the TUI hooks of §6.5.6 under a raised patch cap
                                    │
                                    ▼
          the model server: SGLang (Qwen3.8-27B, qwen3_coder tool parser) or ling-engine
 ```
 
-A leaf crate, `ling-rs/compat/`, holds the parsers and translators (pure functions, unit-tested without a model, as `ling-rs/skills/` is); `ling-rs/src/compat.rs` wires them into the launcher. The new MCP server is a subcommand of the same binary (`ling-claude tools serve`, intercepted by the launcher like `ling apps serve`).
+A leaf crate, `ling-rs/compat/`, holds the parsers and translators (pure functions, unit-tested without a model, as `ling-rs/skills/` is); `ling-rs/src/compat.rs` wires them into the launcher. The new MCP server is a subcommand of the same binary (`ling compat tools serve`, intercepted by the launcher like `ling apps serve`).
 
 ### 6.2 What happens at start
 
@@ -368,17 +376,17 @@ A leaf crate, `ling-rs/compat/`, holds the parsers and translators (pure functio
 2. It resolves the model server and reads `/v1/models` as it does for `ling`.
 3. It finds the project root (git top level, as Codex does) and reads, in this order, never writing any of them: managed settings if present, `~/.claude/settings.json`, `.claude/settings.json`, `.claude/settings.local.json` (precedence as documented, §3.14), plus `~/.claude/CLAUDE.md`, the project's `CLAUDE.md` files and `CLAUDE.local.md` (§9).
 4. It translates what it read into Codex's terms for **this session only**: `-c` overrides on the command line, a session folder `$CODEX_HOME/compat/claude/<project-hash>/` for the translated hooks, rules and agent roles, and links for commands (§9.4). The folder is rebuilt at every start from the source files, so an edit to `.claude/settings.json` is seen at the next session.
-5. It prints one start-up line naming what it read (`ling-claude: CLAUDE.md (2), .claude/settings.json (hooks 3, rules 7), commands 4, agents 2; differences: …`), and the full report under `ling-claude doctor`.
+5. It prints one start-up line naming what it read (`Claude Code compatibility: CLAUDE.md (2), .claude/settings.json (hooks 3, rules 7), commands 4, agents 2; differences: …`), and the full report under `ling compat doctor`.
 6. It runs Codex with the translated arguments.
 
 ### 6.3 The command line
 
-The launcher accepts the print-mode flags the public CLI reference documents (§3.9) and maps them; anything it cannot honour is refused with a message, never silently ignored (the `ling-admin` rule that every command rejects unknown arguments).
+The launcher accepts the print-mode flags the public CLI reference documents (§3.9) and maps them; anything it cannot honour is refused with a message, never silently ignored (the `ling-admin` rule that every command rejects unknown arguments). In the mode `-p` is Claude Code's `--print`, not Codex's `--profile`, which stays reachable as `--profile` (§0.4); `--compat` itself is removed from the arguments before Codex sees them.
 
-| Claude Code (documented) | `ling-claude` maps it to |
+| Claude Code (documented) | `ling --compat claude` maps it to |
 |---|---|
-| `ling-claude` (no prompt) | the `ling` TUI with the profile on |
-| `ling-claude "prompt"` | the TUI with a first prompt |
+| `ling --compat claude` (no prompt) | the `ling` TUI with the profile on and the interface of §6.5 |
+| `ling --compat claude "prompt"` | the TUI with a first prompt |
 | `-p`, `--print "prompt"` | `ling exec` with the profile, output translated (§6.4) |
 | `--output-format text\|json\|stream-json` | `exec --json`, translated into the chosen format |
 | `--input-format stream-json` | a launcher reader that turns each user message into a turn of one `exec` session (`exec resume` between messages) |
@@ -398,7 +406,7 @@ The launcher accepts the print-mode flags the public CLI reference documents (§
 | `--mcp-config <file>` | MCP entries translated into `-c mcp_servers.…` for this session |
 | `--verbose`, `--debug` | `RUST_LOG` as `ling-admin run --debug` sets it |
 
-Session ids are Codex's; `ling-claude -r` accepts them and prints them in `json` output as `session_id`.
+Session ids are Codex's; `ling --compat claude -r` accepts them and prints them in `json` output as `session_id`.
 
 ### 6.4 Output formats
 
@@ -410,6 +418,111 @@ Session ids are Codex's; `ling-claude -r` accepts them and prints them in `json`
 
 The exact field list is pinned by fixtures written from the public reference (§13); the spec does not reproduce it here because the documentation, not this file, is the authority, and it changes.
 
+### 6.5 The terminal interface: what Claude Code does, and how `ling` does the same
+
+By the owner's decision D2 the mode's interface does what Claude Code's does. This section is the black-box study behind that sentence (§2.1 items 1 and 5): what the installed CLI writes to a terminal, summarised from captures, plus what its public documentation says about what was not observed. It records **mechanics only** (where text goes, how the screen is redrawn, which key does what); the look (colours, logo, spinner words, glyphs, wording) is not recorded and not copied. Every row says whether it was **observed** in a capture or is **documented** only.
+
+**Method and provenance.** Claude Code **2.1.304**, 2026-10-20, run from `~/.nvm/…/bin/claude` in throwaway folders under the session's scratch directory, with a scrubbed environment (`env -i` with only `HOME`, `USER`, `SHELL`, `LANG=C.UTF-8`, `TERM=xterm-256color`, `PATH`), inside **tmux 3.4** (`-f /dev/null`, 120×40) with `pipe-pane` recording the raw bytes and `capture-pane` the rendered screen. Four runs: (A) a fresh, signed-out configuration folder (`CLAUDE_CONFIG_DIR` in the scratch directory), which stops at the theme and sign-in screens; (B1) the existing configuration with `--safe-mode` (no hooks, plugins, MCP servers or custom key bindings) and `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`, the **classic** renderer, after accepting the folder-trust dialog for the throwaway folder; (B2) the same session resumed with `--continue` and `CLAUDE_CODE_NO_FLICKER=1`, the **fullscreen** renderer; (P) a Python `pty` run of the signed-out screens that answered the terminal probes as a capable terminal would (synchronized output supported, kitty keyboard flags 0, an XTVERSION reply), because tmux 3.4 does not report synchronized output. Five trivial prompts in total (a greeting, writing a five-line file, editing one line of it, `seq 1 120` through the shell tool, a second greeting); the project's state was removed afterwards with `claude purge`. No setting was changed and no package file was opened. `ling` 1.6.4 was captured the same way: its default start (L1), `--no-alt-screen` (L2) and `/raw` (L3); the model gate refused its requests during a benchmark night, which does not affect rendering, so no `ling` tool call was seen.
+
+#### 6.5.1 Two renderers, and which one starts
+
+Claude Code has **two renderers**, both observed:
+
+- **Classic** (B1): **inline, on the normal screen**. No `ESC[?1049h` in 57.6 KB of output, and no `ESC[2J`, `ESC[3J` or `ESC c` either: it never clears the screen or the scrollback. Finished output (the user's prompt, the reply, each tool call and its result) is written once and then scrolls up into the terminal's own scrollback (tmux history grew from 0 to 27 rows as the session filled the screen); a **live region** at the bottom (a spinner line with a verb, the elapsed time and a token count while a turn runs, then the input box between two horizontal rules, then a footer with the permission mode and hints) is redrawn in place. On exit the live region is left on screen, the cursor moved below it, the terminal modes reset, and a one-line hint printed with the command that resumes the session.
+- **Fullscreen** (B2): **the alternate screen**. `ESC[?1049h` and `ESC[2J` after start-up, mouse reporting on (`?1000h`, `?1002h`, `?1003h`, `?1006h`: any-motion tracking with SGR coordinates), absolute cursor positioning. The conversation scrolls *inside* the application (`PgUp`, a "jump to bottom" control while scrolled up, a dim header row naming the prompt that scrolled above the view), the input box stays fixed at the bottom, and nothing reaches the terminal's scrollback during the session (history stayed at 0). On exit `ESC[?1049l` restores the screen as it was before the session, and the resume hint is printed below it.
+
+Which one starts is documented, not observed: the classic renderer when `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` or `CLAUDE_CODE_NO_FLICKER=0`; fullscreen when `CLAUDE_CODE_NO_FLICKER=1`; otherwise the saved `tui` setting (`"default"` or `"fullscreen"`, written by `/tui default|fullscreen`, which relaunches into the other renderer with the conversation intact); otherwise, for a session that fetches no feature flags (the case of a machine with no network) and whose machine first ran 2.1.239 or later, **fullscreen**; long-time accounts that fetch flags start in classic and are offered the switch. The sign-in and theme screens (run A) render inline before either renderer starts.
+
+**`ling` today** has the same two shapes, under Codex's names: `tui.alternate_screen = "auto"|"always"|"never"` (and `--no-alt-screen`) decides whether the alternate screen is used at all, and `tui.fullscreen_transcript` (default `true`) whether the session **owns the transcript** in it (scrolling inside the application) or leaves it to the terminal's scrollback; Codex's own `/tui` picker chooses between "Scrollback" and "Fullscreen" for the next launch. Its default start (L1) is the fullscreen shape: `?1049h`, absolute positioning, mouse reporting on while the screen is owned (`?1000h`/`?1002h`/`?1003h`/`?1006h`, seen in L3). `--no-alt-screen` (L2) is the classic shape: inline, history in the terminal's scrollback. So **the renderer split needs no new code**, only a mapping of Claude Code's switches onto Codex's keys (§6.5.4).
+
+#### 6.5.2 How each draws: the escape-sequence evidence, summarised
+
+| | Claude Code classic (B1) | Claude Code fullscreen (B2) | `ling` fullscreen (L1) | `ling --no-alt-screen` (L2) |
+|---|---|---|---|---|
+| Screen | normal screen, never cleared | `?1049h` + `2J`; `?1049l` at exit | `?1049h`; `?1049l` at exit | normal screen |
+| Cursor motion | **relative only**: `CUU`/`CUD`/`CUF`/`CUB`, `CR`, `EL` (`K`, `2K`); it never learns its absolute row | absolute `CUP` (`ESC[row;colH`) | absolute `CUP` (ratatui) | asks the row once with `CSI 6n`, then absolute `CUP` inside its viewport |
+| A frame | hide cursor, move up to the changed rows, rewrite **only the changed cells**, erase to end of line, move back to the input caret, show cursor (about 200 frames in the session) | same cell diff in absolute coordinates, cursor parked at the input caret | ratatui's cell diff | ratatui's cell diff in the viewport |
+| New history | printed above the live region, scrolls into the terminal's scrollback | kept in the application | kept in the application | inserted above the viewport with a scroll region (`DECSTBM`) and reverse index (`ESC M`), so it scrolls into the terminal's scrollback |
+| Live region grows past the screen (a permission dialog with a diff), then shrinks | cursor home, erase every visible row (`2K` + `CUD` per row), repaint the visible screen; scrollback untouched | redrawn in place | redrawn in place | the viewport is resized |
+| Synchronized output (`?2026h`/`?2026l` around each frame) | **only after the terminal says it supports it**: probed with `DECRQM ?2026`; none under tmux 3.4, every frame wrapped in run P | same | **always**, without waiting for a reply (20 frames in L1, 95 in L2) | always |
+| Kitty keyboard protocol | queried (`CSI ?u`); pushed with flags 5 (`CSI >5u`: disambiguate + report alternate keys) only when the terminal answers (run P); popped with `CSI <u` at exit | same | pushed with flags 7 (`CSI >7u`) after the query; popped at exit | same |
+| Other modes set at start | bracketed paste `?2004h`, focus events `?1004h`, colour-palette change notifications `?2031h` | same, plus mouse | bracketed paste, focus events, cursor style `CSI 0 q`, `?1007` (alternate scroll) toggled | bracketed paste, focus events |
+| Probes at start | OSC 11 (background colour), DA1, XTVERSION (`CSI >0q`), kitty keyboard, `DECRQM ?2026`, `DECRQM ?1016` (pixel mouse), `CSI 16t` (cell size), an APC query, and a private OSC 7501 query | same | OSC 10/11, DA1, kitty keyboard, `CSI 6n` | same |
+| Window title | OSC 0 set to a session title, animated while a turn runs, cleared at exit | same | OSC 0 set to the folder name, animated while a turn runs, cleared at exit | same |
+| Exit | resets focus events, `CSI >4m` (modifyOtherKeys, though it was never seen set), `?2031`, `?2004`, every mouse mode (defensively, even in classic), shows the cursor, prints the resume hint | same, after `?1049l` | resets mouse, kitty, alternate scroll, bracketed paste, focus; `?1049l`; prints the resume hint | erases the input box; the history stays in the scrollback |
+
+**Resize** (SIGWINCH through `tmux resize-window`, 120×40 to 90×30): classic Claude Code moves the cursor home, erases each visible row and repaints the tail of the conversation at the new width; **the scrollback is left as it was** (older rows keep their old wrapping). Fullscreen Claude Code erases every row and repaints the whole frame. `ling` fullscreen repaints its frame; **`ling --no-alt-screen` writes `ESC[2J ESC[3J`, clearing the terminal's scrollback, and replays the transcript rewrapped** (capped by `tui.terminal_resize_reflow_max_rows`). That is the one redraw behaviour where the two differ in a way a user sees: after a resize, Claude Code's classic scrollback still holds everything, and `ling`'s is rebuilt.
+
+#### 6.5.3 What the user sees and does
+
+| Behaviour | Claude Code (2.1.304) | `ling` today | Source |
+|---|---|---|---|
+| Live region | spinner line (verb, seconds, tokens), input box between two rules, footer: permission mode, the interrupt key while running, background-agent count, effort; a greyed **prompt suggestion** in the empty input after a turn | status line above the composer, composer, footer with model, folder and hints | observed |
+| Tool call in the history | one line naming the tool and its argument (`Write(notes.txt)`, `Bash(seq 1 120)`), its result indented below; long output **collapsed to its first 3 lines and one row counting the hidden lines and naming the key that expands them** in classic, to **one summary row counting the calls** in fullscreen | an exec cell with the command and the output's head and tail, at most 5 lines (`TOOL_CALL_MAX_LINES`) | observed (Claude Code); read at the pin (`ling`) |
+| Diffs | a write shows the new file's numbered lines; an edit shows numbered rows with removed and added rows on distinct backgrounds, the changed words highlighted, and a row counting added and removed lines | Codex's diff rendering of `apply_patch` | observed; `ling` not captured (no model) |
+| Permission prompt | replaces the input box inside the live region: a rule, the kind of action, the file, a framed preview (the whole new file or the diff), a question, three numbered choices (yes; yes and switch to accept-edits for the session; no), and a hint that `Esc` cancels and `Tab` adds a comment; `Enter` or the digit answers | Codex's approval overlay (`[tui.keymap.approval]`: approve, approve for session, approve for prefix, deny, cancel) | observed; `ling` not captured |
+| Multi-line input | `\` then `Enter`, and `Ctrl+J`, insert a newline; the box grows; `Ctrl+G` opens `$EDITOR` (hint shown once the input has text) | `Ctrl+J` inserts a newline; `Ctrl+G` opens the editor; a trailing `\` is not special | observed (Claude Code); read at the pin (`ling`) |
+| Paste | bracketed; a multi-line paste (12 lines) becomes a numbered placeholder with its line count, a long single line (1,500 characters) a numbered placeholder; pasting again expands it | bracketed; pastes over 1,000 characters become "[Pasted Content N chars]" | observed; read at the pin |
+| `Ctrl+C` | with a draft: clears it; on an empty idle prompt: a hint to press it again, and a second press within about a second exits | with a draft: clears it and shows the quit hint; on an empty prompt: **quits at once** (`DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED = false`) | observed both |
+| `Ctrl+D` | empty prompt: the same hint, a second press exits | quits | observed (Claude Code); read at the pin |
+| `Esc` | while running: interrupts (the footer says so; the effect is documented); with a draft: a hint, and the second press clears it | interrupts (`interrupt_turn`) | observed; documented |
+| `Esc Esc` on an empty prompt | opens the **rewind** list in the live region: every prompt with the file changes it caused (or none), and the current point; restores code, conversation or both | edits the last message (Codex's backtrack): conversation only | observed both |
+| `Shift+Tab` | cycles the permission mode: auto → manual → accept edits → plan → auto (from the owner's auto default) | "Change mode" (collaboration modes); the permission-mode action exists unbound | observed both |
+| `?` on an empty prompt | shortcut panel in the live region | shortcut overlay | observed both |
+| `/` | command menu in the live region, filtered as you type | command popup | observed both |
+| `Ctrl+O` | classic: prints the **detailed transcript inline** (timestamps, model id, every tool output expanded) below the conversation, into the scrollback (history grew from 27 to 149 rows), no screen switch; `Ctrl+E` shows all; `Ctrl+O` again returns to the prompt. Fullscreen: transcript mode **inside** the alternate screen, with `less`-style keys | `Ctrl+O` copies the last answer; `Ctrl+T` opens Codex's transcript overlay | observed both |
+| Transcript `[` (fullscreen) | erases the screen, turns the mouse off, **leaves the alternate screen** and writes the whole conversation, expanded, into the normal screen and its scrollback (history 0 to 152 rows); `q` re-enters (`?1049h` + `2J`) and repaints | `/raw` (`Alt+R`) switches to a copy-friendly rendering but **stays** in the alternate screen with the mouse captured | observed both |
+| Transcript `v` | writes the conversation to a temporary file and opens `$VISUAL`/`$EDITOR` | `/export` writes Markdown | documented |
+| Scrolling (fullscreen) | `PgUp`/`PgDn` half a screen, `Ctrl+Home`/`Ctrl+End`, the wheel; a "jump to bottom" control while auto-follow is paused | `PgUp`/`PgDn`, `Ctrl+Home`/`Ctrl+End` in the transcript | observed `PgUp` and the control; the rest documented |
+| Mouse (fullscreen) | click to place the cursor, click a collapsed tool result to expand it, drag to select (copied on release), `Ctrl`+click opens links; `CLAUDE_CODE_DISABLE_MOUSE=1` turns capture off | mouse captured in the owned screen; selection with `Ctrl+Space` | modes observed; behaviour documented |
+| `Ctrl+L` | redraws, keeping the conversation and the input | `clear_terminal` | documented; to check in Phase 0 |
+| Folder trust | a dialog before the first session in a folder: exit, or trust it | a dialog: trust and continue, or quit | observed both |
+
+#### 6.5.4 In the mode, with no patch: configuration the launcher writes
+
+All of this is launcher code in `ling-rs/src/compat.rs`, as `-c` overrides on the command line of a session started in the mode (never written into `~/.mightling/config.toml`, so a plain `ling` start is unchanged; §13):
+
+1. **The renderer**, from Claude Code's own switches in Claude Code's documented order: `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` or `CLAUDE_CODE_NO_FLICKER=0` → classic, i.e. `-c tui.alternate_screen="never"` (the inline viewport, history in the terminal's scrollback, L2's shape); `CLAUDE_CODE_NO_FLICKER=1` → fullscreen, `-c tui.alternate_screen="auto" -c tui.fullscreen_transcript=true` (L1's shape); otherwise the `tui` key of the Claude Code settings files the mode already reads (§9.2: `"default"` → classic, `"fullscreen"` → fullscreen); otherwise **fullscreen** (§14 Q13). `--no-alt-screen` on the command line still wins, as in Codex. The `/tui` picker keeps working and chooses for the next launch, as in both programs.
+2. **The key map**, as `-c tui.keymap.<context>.<action>=…` overrides of the pinned TUI's `[tui.keymap]` (`config/src/tui_keymap.rs`): `global.open_transcript = "ctrl-o"`; `global.copy` unbound (the answer is copied with `/copy`, as in Claude Code); `chat.next_permission_mode = "shift-tab"` (§14 Q14); the pager's `scroll_down`/`scroll_up` add `j`/`k`, `jump_top`/`jump_bottom` add `g`/`G`, `half_page_down`/`half_page_up` add `ctrl-d`/`ctrl-u`, `page_down`/`page_up` add `space`/`b`, `close_transcript` adds `ctrl-o`, `q` and `esc`, and `find` adds `/`. Bindings both programs already share stay as they are: `Ctrl+J`, `Ctrl+G`, `Ctrl+R`, `Ctrl+V`, `Ctrl+Z`, `Esc` to interrupt, `?`, `/`, `@`, `!`, `PgUp`/`PgDn`, `Ctrl+Home`/`Ctrl+End`. A user's own `~/.claude/keybindings.json` is **not** translated in Phase 1 (its action names are Claude Code's; a later translation table can map the ones with a Codex action); the user's own `[tui.keymap]` in `~/.mightling/config.toml` is applied after the mode's, so it wins.
+3. **Mouse capture** follows `CLAUDE_CODE_DISABLE_MOUSE` where the pinned TUI has a switch for it; whether it has one is a Phase 0 check, and without one the variable is reported by `ling compat doctor` as not honoured.
+4. **The resize reflow cap**: `tui.terminal_resize_reflow_max_rows` stays at Codex's terminal-specific default; it bounds the replay but does not stop the scrollback being cleared (§6.5.6 item 6).
+
+#### 6.5.5 Command names
+
+Claude Code's built-in commands (the public commands page, read on 2026-10-20; its bundled skills and workflows such as `/simplify` or `/loop` are skills, not commands, and come in as skills if the user has them on disk) against the pinned Codex's (`tui/src/slash_command.rs`):
+
+| Group | Claude Code names | In the mode |
+|---|---|---|
+| Same name and job in `ling` | `/agents`, `/btw`, `/cd`, `/clear`, `/compact`, `/copy`, `/diff`, `/exit`, `/export`, `/fork`, `/goal`, `/hooks`, `/ide`, `/init`, `/mcp`, `/model`, `/permissions`, `/plan`, `/recap`, `/rename`, `/resume`, `/skills`, `/status`, `/statusline`, `/theme`, `/tui`, `/usage` | as they are. `/init` writes `AGENTS.md` (which of the two files it writes in the mode is §14 Q10); `/tui` is Codex's picker and takes no argument; `/review` exists under the same name but reviews differently, and is listed as such by `ling compat doctor` |
+| Another name in `ling` | `/branch` → `/fork`, `/keybindings` → `/keymap`, `/tasks` → `/ps`, `/plugin` → `/plugins`, `/cost` and `/stats` → `/usage`, `/checkpoint` and `/undo` (aliases of `/rewind`) → see below | served by the slash-command fallback (§6.5.6 item 1), which runs the Codex command |
+| Missing, written in `ling-rs/` | `/memory` (list and open the memory files, §9.1), `/rewind` (Codex's backtrack list, conversation only until §14 Q7), `/context` (the session's token use from the local server, as `/status` prints it), `/config` (the mode's settings and where each came from, `ling compat doctor`'s report), `/help`, `/add-dir` (a writable root for the session), `/doctor` (the same report), `/reload-skills`, `/effort` (the reasoning effort, as `Alt+,`/`Alt+.` change it) | served by the slash-command fallback; Phase 3 |
+| Not planned | everything tied to Anthropic's services or accounts (`/login`, `/logout`, `/upgrade`, `/usage-credits`, `/passes`, `/privacy-settings`, `/rate-limit-options`, `/mobile`, `/desktop`, `/remote-control`, `/remote-env`, `/teleport`, `/web-setup`, `/install-github-app`, `/install-slack-app`, `/chrome`, `/schedule`, `/ultrareview`, `/autofix-pr`, `/artifacts`, `/advisor`, `/fast`, `/insights`, `/release-notes`, `/feedback`, `/bug`, `/radio`, `/stickers`, `/powerup`, `/heapdump`); and `/focus`, `/output-style`, `/color`, `/scroll-speed`, `/terminal-setup`, `/sandbox` (Mightling's sandbox is always on), `/background`, `/voice` (hidden in `ling` by patch `0010`), `/vim` (removed from Claude Code; `ling`'s stays) | the fallback answers with one line saying the command is not part of the mode |
+
+#### 6.5.6 What needs a patch, and what stays different
+
+The patch series is at **44,835 of 45,000 bytes**, so every hook below needs the owner to raise the cap first (§14 Q12). Each is the smallest call into `ling-rs/`, in the style of `0017`/`0018`, with the logic in the launcher crate:
+
+1. **A slash-command fallback** (about 1.2 KB): where the composer rejects an unknown `/name`, call `ling_launcher::compat::slash(name, args, thread_id)`, which returns either lines to show or the name of a Codex command to run instead. One hook serves every row of §6.5.5's second and third groups from `ling-rs/`, so later commands cost no patch bytes; outside the mode it returns nothing and Codex's message stands.
+2. **Double-press exit** (about 0.4 KB): `DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED` read from the launcher instead of a constant, so `Ctrl+C` and `Ctrl+D` on an empty prompt ask for a second press in the mode.
+3. **`\` + `Enter`** (about 0.6 KB): in the mode, a draft ending in a backslash gets a newline instead of being sent.
+4. **Transcript to scrollback and to the editor** (about 1.3 KB): two keys in the transcript overlay, `[` and `v`, calling a launcher function that leaves the alternate screen with the TUI's own `with_restored`, writes the transcript (the `/export` text) to the terminal or to a temporary file opened in `$VISUAL`/`$EDITOR`, and re-enters on a key, as run B2 showed Claude Code doing.
+
+About **3.5 KB** together; a cap of about 48,500 bytes covers them with the usual margin.
+
+Not planned, each a visible difference stated in `ling compat doctor` and the documentation:
+
+5. **The look**: line glyphs, the spinner, the 3-line collapse with its "+N lines" row against Codex's 5-line exec cell, the one-row tool summaries of fullscreen, the paste chips' wording. These are presentation, and copying them is what §2.1 forbids.
+6. **Classic resize keeping the scrollback**: Codex's inline mode rebuilds the scrollback after a resize (`2J`/`3J` and a replay); Claude Code's classic renderer repaints only the visible rows. Changing it means a different history model in Codex's `insert_history`, far beyond a hook.
+7. **Mouse behaviour beyond wheel scrolling** (click to expand a tool result, drag-to-select with copy on release, click to place the cursor), the prompt suggestion, the rewind of files (§14 Q7), and the synchronized-output probe (`ling` always sends `?2026h`, which terminals that do not know it ignore; no user-visible difference was found).
+
+#### 6.5.7 Checks for Phase 0
+
+- The keymap overrides of §6.5.4 load in the built `ling` without a conflict error and do what the table says (a pseudo-terminal run like this study's, marked `installed_binary`).
+- Whether `chat.next_permission_mode` can sit on `Shift+Tab` beside the collaboration-mode cycle, or one of them must move (§14 Q14).
+- Whether the pinned TUI has a switch for mouse capture (§6.5.4 item 3), and what its `Ctrl+L` does against Claude Code's redraw.
+- `ling`'s own tool-call and approval rendering against §6.5.3's rows, once the model gate lets a request through (not captured on 2026-10-20).
+- Shift+Enter in a kitty-protocol terminal: Claude Code documents it as a newline; `ling` pushes the protocol with flags 7, so it can tell the keys apart, but its binding was not checked.
+
 ---
 
 ## 7. The model side
@@ -417,7 +530,7 @@ The exact field list is pinned by fixtures written from the public reference (§
 ### 7.1 What the server can do
 
 - **Tool calls on SGLang** go through the `qwen3_coder` tool parser with the `qwen3` reasoning parser (registry entry `qwen3.8-27b-nvfp4-dflash2`, [AGENTS §7](./DREAMFERENCE_AGENTS.md), [MODELS](./DREAMFERENCE_MODELS.md)). The chat template is patched at launch so Codex's reasoning efforts and a second system message are accepted (`ChatTemplatePatcher`).
-- **Only plain function tools reach the model.** SGLang and vLLM silently drop Codex's `custom` (freeform) and `namespace` tool types. That is why patch `0020` flattens MCP tools into functions, why `apply_patch` is offered freeform only on ling-engine, and why Code Mode's `exec` is translated into a function on SGLang (`ling-rs/tools/src/custom.rs`). Any tool `ling-claude` adds is a plain JSON-schema function, served over MCP so that `0020` presents it, and must stay within the parser's handling (no deeply nested `anyOf`, string-typed free text).
+- **Only plain function tools reach the model.** SGLang and vLLM silently drop Codex's `custom` (freeform) and `namespace` tool types. That is why patch `0020` flattens MCP tools into functions, why `apply_patch` is offered freeform only on ling-engine, and why Code Mode's `exec` is translated into a function on SGLang (`ling-rs/tools/src/custom.rs`). Any tool the mode adds is a plain JSON-schema function, served over MCP so that `0020` presents it, and must stay within the parser's handling (no deeply nested `anyOf`, string-typed free text).
 - **ling-engine** (`owned_by: ling-engine` on `/v1/models`) runs custom tools; `ServedModel::runs_custom_tools` stays the one gate, and the compatibility layer does not add a second.
 
 ### 7.2 The tool roster
@@ -427,7 +540,7 @@ Rosters chosen per session by `DREAMFERENCE_MIGHTLING_CLAUDE_TOOLS=codex|discret
 | Claude Code's tool (documented name, §3.1) | `codex` roster (today's `ling`) | `discrete` roster |
 |---|---|---|
 | Bash | Codex's shell (`exec_command`, sandboxed) | the same shell |
-| Read | `cat`/`sed -n` in the shell | `Read` (path, offset, limit; numbered lines), from `ling-claude tools` |
+| Read | `cat`/`sed -n` in the shell | `Read` (path, offset, limit; numbered lines), from `ling compat tools` |
 | Write | `apply_patch` (add file) | `Write` (path, content) |
 | Edit, multiple edits | `apply_patch` | `Edit` (path, old text, new text, replace all) |
 | Grep | `rg` in the shell | the shell by default, as Claude Code itself does on Linux (§3.1); `Grep` (pattern, path, glob, output mode, running `rg`) only in a `discrete-search` variant |
@@ -441,11 +554,11 @@ Rosters chosen per session by `DREAMFERENCE_MIGHTLING_CLAUDE_TOOLS=codex|discret
 
 Every description is written fresh (§2.1). Each discrete tool is a thin, typed front for something `ling` already does, so the arm measures the **shape** of the tools and not new capability.
 
-**Where the discrete tools run, and the sandbox.** MCP servers started by Codex are not run inside the command sandbox (as read in the pinned source; Phase 0 confirms it on this host), so `ling-claude tools` confines itself: writes only under the session's writable roots (the workspace, `--add-dir`), reads refused for paths a deny rule names (§9.3), no network of its own (`WebFetch`/`WebSearch` run `ling-fetch`/`ling-search`, which already follow `/airgapped`, [AIRGAPPED §4](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)), and the server process itself started under bwrap with the network unshared when `/airgapped on`. Edits through `Edit`/`Write` must still show as diffs in the TUI and the desktop app: Phase 2 checks whether Codex's turn-diff tracker sees them (it tracks `apply_patch`); if it does not, `Edit` is implemented as a translation to `apply_patch` inside the launcher's request hook (the way `custom.rs` translates `exec`), which keeps Codex's approval and diff paths. This choice is Phase 2's first measurement (§12).
+**Where the discrete tools run, and the sandbox.** MCP servers started by Codex are not run inside the command sandbox (as read in the pinned source; Phase 0 confirms it on this host), so `ling compat tools` confines itself: writes only under the session's writable roots (the workspace, `--add-dir`), reads refused for paths a deny rule names (§9.3), no network of its own (`WebFetch`/`WebSearch` run `ling-fetch`/`ling-search`, which already follow `/airgapped`, [AIRGAPPED §4](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)), and the server process itself started under bwrap with the network unshared when `/airgapped on`. Edits through `Edit`/`Write` must still show as diffs in the TUI and the desktop app: Phase 2 checks whether Codex's turn-diff tracker sees them (it tracks `apply_patch`); if it does not, `Edit` is implemented as a translation to `apply_patch` inside the launcher's request hook (the way `custom.rs` translates `exec`), which keeps Codex's approval and diff paths. This choice is Phase 2's first measurement (§12).
 
 ### 7.3 Context limits
 
-- The model's window is **262,144 tokens** (`max_model_len`), but SGLang's KV pool is **about 157K tokens shared by every stream** ([COMPACTION §1](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). The launcher already sets the interactive compaction limit to 60% of the pool (~94K) and turns on turn-end compaction at 20% of the usable window with an 800-word summary cap (1.6.3). `ling-claude` inherits all of it unchanged.
+- The model's window is **262,144 tokens** (`max_model_len`), but SGLang's KV pool is **about 157K tokens shared by every stream** ([COMPACTION §1](./DREAMFERENCE_MIGHTLING_COMPACTION.md)). The launcher already sets the interactive compaction limit to 60% of the pool (~94K) and turns on turn-end compaction at 20% of the usable window with an 800-word summary cap (1.6.3). The mode inherits all of it unchanged.
 - **Memory files cost context on every request.** Codex caps project documents at `project_doc_max_bytes` (32 KiB); the compatibility layer applies one budget to `AGENTS.md` plus the `CLAUDE.md` hierarchy together (default the same 32 KiB, the larger files truncated first with a notice), because a 27B model's useful context is smaller than its window.
 - **The discrete roster adds schema tokens.** Five tool schemas (seven with `discrete-search`) are measured once (Phase 2) and counted in the SWE-bench report's token column; [CONTEXT_BUDGET](./DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md) found the index's tool schemas were 23% of unattended context, so this is not free.
 - **`/compact <instructions>`** (Claude Code's focused compaction) maps to Codex's `/compact` with the text passed to the compaction prompt; whether the pinned Codex accepts an argument is checked in Phase 1, and if not, the launcher's turn-end compaction hook carries the focus ([BACKLOG](./DREAMFERENCE_BACKLOG.md) item 12 already proposes a context meter with `/compact <focus>`).
@@ -457,15 +570,15 @@ Every description is written fresh (§2.1). Each discrete tool is a thin, typed 
 
 ### 8.1 Unchanged guarantees
 
-Because `ling-claude` is the same binary:
+Because the mode is the same binary:
 
 - Commands run in Codex's sandbox (bwrap on Linux, which needs the AppArmor profile `ling-admin host setup` installs; Seatbelt on macOS; the elevated sandbox on Windows).
-- `/airgapped on` gives every sandboxed command an empty network namespace (patch `0019`) and is refused together with Full Access; it applies to `ling-claude` sessions with no new code. `bypassPermissions` maps to Full Access and is therefore refused at `on` (§9.3).
+- `/airgapped on` gives every sandboxed command an empty network namespace (patch `0019`) and is refused together with Full Access; it applies to compatibility-mode sessions with no new code. `bypassPermissions` maps to Full Access and is therefore refused at `on` (§9.3).
 - The vendor channels stay closed (patches `0013`, `0015`, `0016`, the forced `chatgpt_base_url`), and nothing in the layer adds a channel to Anthropic: there is no Anthropic endpoint, model id, key helper or sign-in anywhere in the code, and a test greps the compatibility crate for Anthropic hosts (§13).
 
 ### 8.2 The egress audit
 
-`ling-admin audit egress` gains `--claude`: the same strace method ([EGRESS §3.1](./DREAMFERENCE_MIGHTLING_EGRESS.md)) around `ling-claude -p "<prompt>" --output-format json` in a throwaway repository that contains a `CLAUDE.md`, a `.claude/settings.json` with one hook and one permission rule, a `.claude/commands/` file and a `.claude/agents/` file, so every translation path runs inside the trace. With `--tools discrete` it also starts `ling-claude tools`. The verdict is the existing one (only allowlisted loopback ports, no DNS query, no networked git). `codex build` runs the `--claude` form after `--tui`, and the JSON record is `<timestamp>-claude.json`.
+`ling-admin audit egress` gains `--compat claude`: the same strace method ([EGRESS §3.1](./DREAMFERENCE_MIGHTLING_EGRESS.md)) around `ling --compat claude -p "<prompt>" --output-format json` in a throwaway repository that contains a `CLAUDE.md`, a `.claude/settings.json` with one hook and one permission rule, a `.claude/commands/` file and a `.claude/agents/` file, so every translation path runs inside the trace. With `--tools discrete` it also starts `ling compat tools`. The verdict is the existing one (only allowlisted loopback ports, no DNS query, no networked git). `codex build` runs the `--compat claude` form after `--tui`, and the JSON record is `<timestamp>-claude.json`.
 
 ### 8.3 `/import` and plugins
 
@@ -477,7 +590,7 @@ A repository's `.claude/settings.json` can name hook commands, which run on the 
 
 - translated hooks from a **repository** are registered only after the user trusts the project (Codex's trust prompt) and then go through Codex's hook trust (`/hooks`), by hash, so a changed command needs approving again;
 - hooks from `~/.claude/settings.json` are the user's own and are trusted like Codex's own `hooks.json` in `$CODEX_HOME`;
-- hooks run outside the command sandbox, as Codex's own hooks do (Phase 0 confirms this at the pin); at `/airgapped on` the start-up line says so, and `ling-claude doctor` lists every hook command.
+- hooks run outside the command sandbox, as Codex's own hooks do (Phase 0 confirms this at the pin); at `/airgapped on` the start-up line says so, and `ling compat doctor` lists every hook command.
 
 ---
 
@@ -485,12 +598,12 @@ A repository's `.claude/settings.json` can name hook commands, which run on the 
 
 ### 9.1 Memory: `CLAUDE.md` read live, beside `AGENTS.md`
 
-**Yes, `ling-claude` reads `CLAUDE.md`**, with the hierarchy the public memory page documents (§3.5): managed (`/etc/claude-code/CLAUDE.md`, if present), the user's `~/.claude/CLAUDE.md`, the project's `CLAUDE.md` (or `.claude/CLAUDE.md`) in the working directory and every ancestor, root first, `CLAUDE.local.md`, files in subfolders when the agent first works there, and `@path` imports relative to the importing file, at most four hops, ignored inside code.
+**Yes, the mode reads `CLAUDE.md`**, with the hierarchy the public memory page documents (§3.5): managed (`/etc/claude-code/CLAUDE.md`, if present), the user's `~/.claude/CLAUDE.md`, the project's `CLAUDE.md` (or `.claude/CLAUDE.md`) in the working directory and every ancestor, root first, `CLAUDE.local.md`, files in subfolders when the agent first works there, and `@path` imports relative to the importing file, at most four hops, ignored inside code.
 
 **How, without a patch:**
 
 - Codex keeps reading `AGENTS.md` itself (root to working directory, plus `$CODEX_HOME/AGENTS.md`). That stays Mightling's canonical project document.
-- The launcher composes the `CLAUDE.md` hierarchy, with imports expanded, and hands it to the session through a built-in **`SessionStart` hook** (`ling-claude memory`, a subcommand of the same binary) whose `additionalContext` carries the text. Hooks support `additionalContext` at the pinned tag (§4.2), the hook is registered by the launcher with its trust entry the way `SweBenchHooks` registers the benchmark's, and no patch is needed.
+- The launcher composes the `CLAUDE.md` hierarchy, with imports expanded, and hands it to the session through a built-in **`SessionStart` hook** (`ling compat memory`, a subcommand of the same binary) whose `additionalContext` carries the text. Hooks support `additionalContext` at the pinned tag (§4.2), the hook is registered by the launcher with its trust entry the way `SweBenchHooks` registers the benchmark's, and no patch is needed.
 - **Deduplication:** files are keyed by canonical path. A `CLAUDE.md` that only imports `AGENTS.md` (this repository's case) adds nothing; an `AGENTS.md` that imports `CLAUDE.md` is handled the same way; two different files in one folder are both read, `AGENTS.md` first.
 - **A deliberate difference from Claude Code**, which reads `AGENTS.md` only when no `CLAUDE.md` exists (§3.5): in Mightling `AGENTS.md` is the canonical project document and is always read, because `ling`, Night Shift and SWE-bench depend on it. A repository with both is read with both; §14 Q10 asks whether a setting should restore Claude Code's rule.
 - **Subfolder files** are read when the agent first touches a path under them: a `PostToolUse` hook on reads and edits notices the new folder and injects its `CLAUDE.md` as context once per session.
@@ -517,13 +630,13 @@ Read, in the documented precedence (managed, then `--settings`, then `.claude/se
 | `statusLine` | Codex's `/statusline` items where one matches; a command status line is P2 | 3 |
 | `outputStyle` | P2 (a named Mightling prompt, [PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md), is the nearest) | — |
 | `enabledPlugins`, marketplaces | local plugins only (§8.3) | 3 |
-| anything else | listed by `ling-claude doctor` as not supported | 1 |
+| anything else | listed by `ling compat doctor` as not supported | 1 |
 
 Mightling's own settings stay where they are (`dreamference.toml`, `~/.config/dreamference/config.toml`, `$CODEX_HOME/config.toml`). When a Mightling setting and a Claude Code setting disagree, **Mightling's safety settings win** (the `/airgapped` rule "the strictest wins" applies: a `.claude/settings.json` cannot loosen `/airgapped`, the sandbox mode set by `ling-admin`, or the approval policy below what Mightling's config sets).
 
 ### 9.3 Permissions
 
-| Claude Code (documented, §3.2) | `ling-claude` |
+| Claude Code (documented, §3.2) | `ling --compat claude` |
 |---|---|
 | mode `default` | `-a on-request -s workspace-write` (Mightling's default) |
 | mode `acceptEdits` | `-s workspace-write` with edits inside the workspace approved; commands still asked. Codex's workspace-write already lets edits inside the workspace through, so the difference is in what is asked for commands (documented as a difference) |
@@ -535,14 +648,14 @@ Mightling's own settings stay where they are (`dreamference.toml`, `~/.config/dr
 | `Bash(npm run *)`, legacy `Bash(ls:*)`, `Bash(exact)` in `allow` | an exec-policy prefix rule with `allow`, in the session's rules folder; a `*` inside a word (not a prefix) cannot be a prefix rule and becomes the `guard` hook's check |
 | `Bash(…)` in `deny` | a prefix rule with `forbidden` |
 | `Bash(…)` in `ask` | a prefix rule with `prompt` |
-| `Read(path)`, `Edit(path)`, `Write(path)` (gitignore syntax) | a `PreToolUse` hook (`ling-claude guard`) that denies or asks on matching paths, for `apply_patch` and the discrete tools; shell reads of a denied path cannot be matched reliably and the doc says so |
+| `Read(path)`, `Edit(path)`, `Write(path)` (gitignore syntax) | a `PreToolUse` hook (`ling compat guard`) that denies or asks on matching paths, for `apply_patch` and the discrete tools; shell reads of a denied path cannot be matched reliably and the doc says so |
 | `Agent(name)`, `Skill(name *)` | the guard hook on Codex's subagent tool; skills: the catalogue left out of the session |
 | protected paths (`.git`, `.claude/`) | never approved automatically: the guard asks |
 | `WebFetch(domain:…)` | passed to `ling-fetch` as an allow-list (a flag to add in `ling-web-rs/`) |
 | `mcp__server__tool` | Codex's MCP tool approval settings |
 | `additionalDirectories` | writable roots |
 
-The mapping is not exact (§14 Q4): where Claude Code would *allow* without asking and Codex's model cannot express it (a `PreToolUse` hook may not return a plain `allow` at the pinned tag, only `allow` with a rewritten input), `ling-claude` asks, which is the safe direction. Claude Code's own rule that a hook's `allow` never overrides a deny or ask rule holds trivially.
+The mapping is not exact (§14 Q4): where Claude Code would *allow* without asking and Codex's model cannot express it (a `PreToolUse` hook may not return a plain `allow` at the pinned tag, only `allow` with a rewritten input), the mode asks, which is the safe direction. Claude Code's own rule that a hook's `allow` never overrides a deny or ask rule holds trivially.
 
 ### 9.4 Commands, skills and subagents
 
@@ -557,7 +670,7 @@ Translated at start from every settings file into Codex hook groups in the sessi
 - **Events**: the core names are the same (§4.2): `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SubagentStart`, `SubagentStop`, `Stop`, `SessionEnd`. Claude Code documents over twenty more (`PostToolUseFailure`, `PermissionDenied`, `Notification`, `InstructionsLoaded`, `CwdChanged`, `FileChanged`, `WorktreeCreate`, …, §3.3) that the pinned Codex lacks; `doctor` lists each one skipped. `PostToolUseFailure` can be emulated from `PostToolUse` by the shim (a failed result) and is the one worth doing in Phase 2.
 - **Handler types**: `command` in Phase 1; `mcp_tool` and `http` to a loopback address in Phase 3 (an `http` hook to any other address is refused at `/airgapped on` and named by the egress audit when off); `prompt` and `agent` hooks, which call the model, are P2.
 - **Matchers**: Claude Code's tool names are mapped onto Codex's: `Bash` → the shell tools, `Edit`/`Write`/`MultiEdit` → `apply_patch` (and the discrete `Edit`/`Write`), `Read`/`Grep`/`Glob`/`WebFetch`/`WebSearch` → the discrete tools when that roster is on, and to the shell otherwise with a notice that a shell command cannot be matched by tool name; `mcp__<server>__<tool>` → the flattened MCP name `0020` gives the tool.
-- **Inputs and outputs**: each translated command runs through `ling-claude hook-shim -- <the user's command>`, which rewrites Codex's stdin JSON into the shape the public hooks reference documents (`tool_name` in Claude Code's names, `tool_input` with its documented fields such as `command` or `file_path`, the session and transcript fields) and passes the output back. Exit code 2 and `decision`/`hookSpecificOutput` already mean the same thing; a plain `allow`, an `ask` or a `defer`, which Codex rejects, is turned into "no decision" (Codex's own approval then applies) by the shim and reported once; `allow` with `updatedInput`, which Codex accepts, is passed on with the input's fields translated back into Codex's tool input.
+- **Inputs and outputs**: each translated command runs through `ling compat hook-shim -- <the user's command>`, which rewrites Codex's stdin JSON into the shape the public hooks reference documents (`tool_name` in Claude Code's names, `tool_input` with its documented fields such as `command` or `file_path`, the session and transcript fields) and passes the output back. Exit code 2 and `decision`/`hookSpecificOutput` already mean the same thing; a plain `allow`, an `ask` or a `defer`, which Codex rejects, is turned into "no decision" (Codex's own approval then applies) by the shim and reported once; `allow` with `updatedInput`, which Codex accepts, is passed on with the input's fields translated back into Codex's tool input.
 - **Environment**: the documented project-directory variable is set to the project root.
 
 ---
@@ -566,11 +679,11 @@ Translated at start from every settings file into Codex hook groups in the sessi
 
 ### 10.1 As a runner
 
-`ling-claude` is not a new runner pair, because it is not a new program: `config.agent_runner` keeps `codex` and the profile is a setting of it. `ling-admin` gains:
+The compatibility mode is not a new runner pair, because it is not a new program: `config.agent_runner` keeps `codex` and the mode is a setting of it. `ling-admin` gains:
 
-- `ling-admin run "…" --agent ling-claude`: a fifth choice in the strategy switch, implemented by `CodexRunner` with `DREAMFERENCE_MIGHTLING_COMPAT=claude` in the environment (no new installer: `CodexInstaller` resolves the same binary; the new link is created by `CodexBrandedBuilder` beside `ling-search`).
-- `ling-admin codex build` creates `~/.local/bin/ling-claude` and runs `audit egress --claude` (§8.2).
-- `DREAMFERENCE_MIGHTLING_COMPAT`, `mightling_compat`, `DREAMFERENCE_MIGHTLING_CLAUDE_TOOLS` and `mightling_claude_md` documented in [CLI](./DREAMFERENCE_CLI.md).
+- `ling-admin run "…" --compat claude`: the Codex runner with `DREAMFERENCE_MIGHTLING_COMPAT=claude` in the environment; not a new choice in the strategy switch (no new installer, no new link: `CodexInstaller` resolves the same binary).
+- `ling-admin codex build` runs `audit egress --compat claude` (§8.2) beside the plain audit; it creates no link.
+- `ling --compat`, `ling compat use|status|doctor`, `DREAMFERENCE_MIGHTLING_COMPAT`, `mightling_compat`, `DREAMFERENCE_MIGHTLING_CLAUDE_TOOLS` and `mightling_claude_md` documented in [CLI](./DREAMFERENCE_CLI.md).
 
 Under (a) or (b) this would have been a real pair (`ling_claude_installer.py`, `ling_claude_runner.py`, exported from `runner/__init__.py`, a `VLLMReadinessWaiter` wait); under (c) the launcher waits for the server as it does for `ling`.
 
@@ -596,7 +709,7 @@ Following the pattern of §20–§23 of [SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE
 - **The instances carry no `CLAUDE.md`**, so the profile alone changes only the command line and the output; the arm that matters is **`--compat claude --claude-tools discrete`** against the record arm (`default`). A second pair adds a generated `CLAUDE.md` per instance (the same text the record arm gets as its task preamble, moved into the memory file) to check that memory delivered through the `SessionStart` hook scores the same as through the prompt.
 - **The list**: the night-2 list without mismatched tasks (`docs/dev/swe-bench/night2-no-mismatch.txt`, 44 tasks), record arm first, as on every night; McNemar exact, the report's verdict. Columns: resolved, tokens (the roster's schema tokens counted), tool calls by name, edits by tool, compactions, wall time.
 - **Decision rule** (proposed for the owner to set before the night): a clear win for `discrete` makes it the profile's default and opens the question for `ling`'s default; a tie keeps `codex` (fewer schema tokens, one less server); a loss keeps `codex` and the discrete roster stays an option.
-- **The container**: the same patchelf'd `ling` (the link `ling-claude` is created in the container, or the variable set); `ling-claude tools` runs inside the container as the agent's MCP server, so it needs nothing outside it. Under (a)/(b) the harness would have needed a second runtime per container.
+- **The container**: the same patchelf'd `ling` (the variable set in each container's environment); `ling compat tools` runs inside the container as the agent's MCP server, so it needs nothing outside it. Under (a)/(b) the harness would have needed a second runtime per container.
 - **Tests**: as for `--apply-patch` and `--exec-tool`: the variables are set only when the flags are, the manifest and the report tell the arms apart, a call is counted for the discrete `Edit` and not for a shell command naming it.
 
 ---
@@ -605,13 +718,13 @@ Following the pattern of §20–§23 of [SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE
 
 | Phase | What | Exit criterion |
 |---|---|---|
-| **0. Checks** (1–2 days) | Trace `/import` for network (§8.3); confirm `-c` overrides can register hooks with a trust identity and an `additionalContext` `SessionStart` hook reaches the model on SGLang; confirm `/compact` takes an argument; confirm whether Codex's turn-diff tracker sees MCP edits; write `docs/dev/ling-claude-observations.md` from the public docs | a page of findings appended here as §16; the owner picks the name (Q1) |
-| **1. Files and the command line** | `ling-rs/compat/` and `src/compat.rs`; the `ling-claude` link; `CLAUDE.md` hierarchy with imports through the `SessionStart` hook; `mightling_claude_md` for plain `ling`; settings read with `env`, `model`, hooks (with the shim) and the ignored keys; commands and agents converted; `-p`, `--output-format`, `-c`, `-r`, `--max-turns`, `--append-system-prompt`, `--add-dir`, `--model`; `ling-claude doctor`; `audit egress --claude` | offline tests green; the audit passes; a repository with only `CLAUDE.md` and a `.claude/settings.json` hook works in `ling-claude -p` and in the TUI |
-| **2. Permissions and the tool roster** | `--permission-mode`, `--allowedTools`/`--disallowedTools`, permission rules (exec-policy rules and `ling-claude guard`); `ling-claude tools` with the discrete roster; `--input-format stream-json`; SWE-bench options | the SWE-bench night of §11 run and reported |
-| **3. Comfort** | `/memory` (one hook, counted against the patch cap with the owner's approval); `.claude/rules/`; `mcp_tool` and loopback `http` hooks; skills with `context: fork`; the desktop setting; `/night add --compat claude`; status line and local plugins; documentation in `docs/` ("Coming from Claude Code") | the desktop app and Night Shift run a profile session end to end on this machine |
-| **4. Optional** | rewind of file changes (checkpoints; a patch or a launcher-side snapshot of the worktree per turn), a Claude-Code-like full-screen interface | each only by a separate owner decision |
+| **0. Checks** (1–2 days) | Trace `/import` for network (§8.3); confirm `-c` overrides can register hooks with a trust identity and an `additionalContext` `SessionStart` hook reaches the model on SGLang; confirm `/compact` takes an argument; confirm whether Codex's turn-diff tracker sees MCP edits; the interface checks of §6.5.7 (the keymap overrides load without conflict, Shift+Tab can drive both the permission and the plan cycle, a Claude-shaped `[tui.keymap]` survives a Codex bump); later observations of Claude Code into `docs/dev/ling-claude-observations.md` | a page of findings appended here as §16; the name is decided (D1) |
+| **1. Files and the command line** | `ling-rs/compat/` and `src/compat.rs`; the switch (`--compat`, `DREAMFERENCE_MIGHTLING_COMPAT`, `mightling_compat`, `ling compat use\|status`, §0.4); the zero-patch interface settings (§6.5.4); `CLAUDE.md` hierarchy with imports through the `SessionStart` hook; `mightling_claude_md` for plain `ling`; settings read with `env`, `model`, hooks (with the shim) and the ignored keys; commands and agents converted; `-p`, `--output-format`, `-c`, `-r`, `--max-turns`, `--append-system-prompt`, `--add-dir`, `--model`; `ling compat doctor`; `audit egress --compat claude` | offline tests green; the audit passes; a repository with only `CLAUDE.md`, a `.claude/settings.json` hook and a `.claude/agents/` subagent works in `ling --compat claude -p` and in the TUI; in the TUI, `Ctrl+O` opens the transcript, `Shift+Tab` cycles the modes and the renderer follows Claude Code's switches (§6.5.4) |
+| **2. Permissions and the tool roster** | `--permission-mode`, `--allowedTools`/`--disallowedTools`, permission rules (exec-policy rules and `ling compat guard`); `ling compat tools` with the discrete roster; `--input-format stream-json`; SWE-bench options | the SWE-bench night of §11 run and reported |
+| **3. Comfort** | the interface hooks of §6.5.6 (one slash-command fallback that serves `/memory`, `/rewind`, `/context`, `/config` and the other names of §6.5.5 from `ling-rs/`, the double-press exit, `\`+`Enter`, the transcript's write-to-scrollback; all counted against the patch cap, which the owner must raise first, §14 Q12); `.claude/rules/`; `mcp_tool` and loopback `http` hooks; skills with `context: fork`; the desktop setting; `/night add --compat claude`; status line and local plugins; documentation in `docs/` ("Coming from Claude Code") | the desktop app and Night Shift run a profile session end to end on this machine |
+| **4. Optional** | rewind of file changes (checkpoints; a patch or a launcher-side snapshot of the worktree per turn); the remaining interface differences §6.5.6 lists as not planned (classic resize that keeps the scrollback, mouse selection and click-to-expand) | each only by a separate owner decision |
 
-Milestone for a release note: Phase 1 can ship as a preview in the next minor release, off unless invoked as `ling-claude`.
+Milestone for a release note: Phase 1 can ship as a preview in the next minor release, off unless switched on (§0.4).
 
 ---
 
@@ -622,17 +735,18 @@ Milestone for a release note: Phase 1 can ship as a preview in the next minor re
 - **Rust, offline** (`ling-rs/compat/`, `cargo test` in a copy of the folder as for `ling-rs/skills/`; the launcher's in the build's export directory, never in `codex/`): memory discovery with fixtures under a temporary home (hierarchy, `CLAUDE.local.md`, `@path` imports, the depth limit, a cycle, a symlink out of the tree refused, deduplication with `AGENTS.md`, this repository's `@AGENTS.md` case, the budget); settings precedence and every translated key; the hook shim's stdin and stdout rewriting against fixtures written from the public hooks reference; matcher mapping; permission rules into exec-policy rules; the `guard` hook's decisions; commands and agents conversion; every CLI flag mapped or refused; the output translator against recorded `exec --json` streams (no model); a grep that the crate contains no Anthropic host name, key variable or model id.
 - **The profile is opt-in**: a plain `ling` launch in a fixture home writes byte-for-byte the same `config.toml` and catalog with the compatibility code present as without it.
 - **Nothing written outside `$CODEX_HOME`**: a test runs the start-up translation on a fixture repository with a full `.claude/` and asserts the repository and the fixture `~/.claude` are unchanged (mtime and content).
-- **Python, offline** (`tests/`): `ling-admin run --agent ling-claude` sets the variable and runs `CodexRunner` against a `FAKE_MIGHTLING`-style stand-in; `codex build` creates the link (in the test's home) and calls the audit's `--claude` form (mocked); `audit egress --claude` builds its fixture repository and parses a recorded trace; SWE-bench's `--compat` and `--claude-tools` options (as §22–§23's tests do); Night Shift's `--compat` passes the variable to the stand-in.
-- **Patch size**: `test_the_patches_stay_small` is unchanged; Phase 1 adds no patch.
-- **Live, marked `installed_binary`** (like `test_mightling_slash_commands.py`, run only by hand against a built binary and a running server): `ling-claude -p "…" --output-format json` in a fixture repository whose `CLAUDE.md` names a word the answer must contain; a `PreToolUse` hook from `.claude/settings.json` that blocks a command; `-c` continuing the last session.
+- **Python, offline** (`tests/`): `ling-admin run --compat claude` sets the variable and runs `CodexRunner` against a `FAKE_MIGHTLING`-style stand-in; `codex build` calls the audit's `--compat claude` form (mocked); `audit egress --compat claude` builds its fixture repository and parses a recorded trace; SWE-bench's `--compat` and `--claude-tools` options (as §22–§23's tests do); Night Shift's `--compat` passes the variable to the stand-in.
+- **Patch size**: `test_the_patches_stay_small` is unchanged in Phases 1 and 2, which add no patch. Phase 3's interface hooks raise its cap only once the owner has approved the number (§14 Q12), with a comment in the test's style naming each hook and its bytes.
+- **The interface, offline**: the launcher's `-c tui.*` overrides and the generated `[tui.keymap]` are written only when the mode is on (a plain `ling` start passes none of them); the key map loads in the pinned TUI's keymap validation without a conflict (a test builds it against the export's `tui_keymap.rs` schema); the renderer choice follows `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN`, `CLAUDE_CODE_NO_FLICKER` and the `tui` setting in the documented order (§6.5.4); a test fails if the pinned Codex renames a keymap action or a `tui.*` key the mode writes. A recorded-bytes test (like §6.5.2's captures, made from the built `ling` in a pseudo-terminal, marked `installed_binary`) checks the mode's fullscreen start enters the alternate screen and its classic start never does.
+- **Live, marked `installed_binary`** (like `test_mightling_slash_commands.py`, run only by hand against a built binary and a running server): `ling --compat claude -p "…" --output-format json` in a fixture repository whose `CLAUDE.md` names a word the answer must contain; a `PreToolUse` hook from `.claude/settings.json` that blocks a command; `-c` continuing the last session.
 - **Codex bump**: a test reads the pinned Codex's hook event names and `HookEventName` list from the export and fails if the translation table names an event that no longer exists.
 
 ---
 
 ## 14. Open questions
 
-1. **The product name.** "Claude" is Anthropic's trademark; a shipped name containing it is a legal risk. `ling-claude` stays a working name. Alternatives: `ling-compat`, `ling-cc` (shorter, but read as "Claude Code"), `lingo` (§2.4). The owner chooses before Phase 1 ships.
-2. **Is the feature set enough, or must the interface look like Claude Code's too?** This spec delivers the files, flags and features inside `ling`'s TUI (§0.3). A Claude-Code-like full-screen interface would be Phase 4 at the earliest, a large piece of work (and a trade-dress question): does the owner want it at all?
+1. ~~**The product name.**~~ **Decided 2026-10-20 (D1):** no new name; a mode of `ling` (§0.4, §2.4).
+2. ~~**Must the interface behave like Claude Code's too?**~~ **Decided 2026-10-20 (D2):** yes, its behaviour (not its look), from a black-box study (§6.5).
 3. **Should plain `ling` read `CLAUDE.md` by default** (`mightling_claude_md = true`), given many repositories now carry one? Proposed: off in Phase 1, decided after a release with it available.
 4. **Permission semantics that do not map** (path rules for shell reads, plain `allow` and `ask` decisions from hooks, `acceptEdits`): is "ask in doubt" acceptable, or should a small patch let a `PreToolUse` hook allow (counted against the cap)?
 5. **`/import` today**: trace it in Phase 0 and, if it fetches, hide it or confine it to local sources with a one-line hook?
@@ -640,8 +754,11 @@ Milestone for a release note: Phase 1 can ship as a preview in the next minor re
 7. **Rewind of file changes**: Claude Code's checkpoints are a frequently used feature with no equivalent in the pinned Codex. Launcher-side snapshots (a `git stash create` per turn into a hidden ref), a patch, or wait for upstream?
 8. **Managed settings** (an organisation's policy file): read it if present (strictest wins) or ignore it on a single-user machine?
 9. **Documentation drift**: the docs read on 2026-10-19 describe Claude Code 2.1.2xx–2.1.303 and change often (the subagent tool was renamed from `Task` to `Agent`, `TodoWrite` gave way to the `Task*` tools, custom commands merged into skills). Who re-checks §3 and the output fixtures, and how often (a line in the Codex-bump checklist)?
-10. **`AGENTS.md` and `CLAUDE.md` together.** Claude Code reads `AGENTS.md` only when there is no `CLAUDE.md`; `ling-claude` reads both, `AGENTS.md` first (§9.1). Keep that, or offer a setting for Claude Code's rule? And which of the two should `/memory` and `/init` write when both exist?
-11. **Observing a running copy.** Do the terms under which a Claude Code copy would be used permit observing its behaviour to build an interoperable alternative (§2.1 item 1)? Until a lawyer or the owner says yes, the work uses the public documentation only.
+10. **`AGENTS.md` and `CLAUDE.md` together.** Claude Code reads `AGENTS.md` only when there is no `CLAUDE.md`; the mode reads both, `AGENTS.md` first (§9.1). Keep that, or offer a setting for Claude Code's rule? And which of the two should `/memory` and `/init` write when both exist?
+11. **Observing a running copy.** **Decided by the owner 2026-10-20 (D2)** for black-box observation: running the CLI in a pseudo-terminal and recording what it writes, never opening its package (§2.1 item 1). Still open: whether a lawyer should confirm that Anthropic's terms allow it for building a competing product; until then nothing beyond the black-box rule is done.
+12. **The patch cap for the interface hooks.** The series is at 44,835 of 45,000 bytes (2026-10-20). Phase 3's interface hooks (§6.5.6) are estimated at about 3.5 KB together: raise the cap to about 48,500 for them, take only some (the slash-command fallback first, because it unlocks every missing command name from `ling-rs/`), or keep the interface at its zero-patch part?
+13. **Which renderer the mode starts in.** Claude Code's documented default for a machine that fetches no feature flags and first ran a recent version is fullscreen, and so is Codex's (§6.5.1); long-time users of Claude Code start in classic. Proposed: fullscreen, with `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`, `CLAUDE_CODE_NO_FLICKER=0` or `"tui": "default"` in the user's settings choosing classic, as they do for Claude Code.
+14. **Shift+Tab.** Claude Code cycles Manual, accept-edits, plan and auto with one key; `ling` cycles its collaboration modes (plan) with it and has an unbound action for the permission mode. One key for both needs a small hook or a choice: proposed, bind it to the permission mode in the mode and reach plan through `/plan`, unless Phase 0 finds the pinned TUI can chain them.
 
 ---
 
