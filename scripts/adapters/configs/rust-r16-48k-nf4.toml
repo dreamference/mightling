@@ -29,8 +29,8 @@ seed = 20261019
 psi_full_avg10_limit = 20.0
 
 [estimate]
-# Used by `plan` until the samples exist: 1,200 accepted segments (300 at each of the night runs'
+# Used by `plan` until the samples exist: 800 accepted segments (200 at each of the night runs'
 # measured quartiles (19K / 28K / 38K / 45K tokens)), and the GB10 throughput range to measure first.
-assumed_samples = 300
+assumed_samples = 200
 assumed_lengths = [19360, 28486, 38429, 44619]
 effective_tflops = [30, 45, 60]
