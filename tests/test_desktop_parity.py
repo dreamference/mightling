@@ -13,14 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from dreamference.chat.desktop_protocol_types import PROTOCOL_DIR
+from dreamference.chat.desktop_protocol_types import PROTOCOL_DIR, DesktopProtocolTypes
 from dreamference.chat.desktop_runner import UI_DIR
 
 REPO = Path(UI_DIR).parent.parent
 SPEC = REPO / "specs" / "DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md"
 POLICY = REPO / "ling-rs" / "web" / "policy.json"
 INVENTORY = Path(UI_DIR) / "src" / "protocol-inventory.json"
-SCHEMA = REPO / "codex" / "codex-rs" / "app-server-protocol" / "schema" / "typescript"
 KINDS = ("ClientRequest", "ServerRequest", "ServerNotification", "ClientNotification")
 
 # How many methods of each kind the pinned Codex (rust-v0.158.0) has: §1.4 states these numbers.
@@ -45,8 +44,10 @@ NOT_ADDED = {
 }
 
 
-def methods_in(path: Path) -> set[str]:
-    return set(re.findall(r'"method": "([^"]+)"', path.read_text(encoding="utf-8")))
+def methods_in(path: Path | str) -> set[str]:
+    """The method names in a generated file, given as its path or as its text."""
+    text = path.read_text(encoding="utf-8") if isinstance(path, Path) else path
+    return set(re.findall(r'"method": "([^"]+)"', text))
 
 
 def test_the_inventory_lists_every_method_of_the_committed_types_once():
@@ -64,10 +65,14 @@ def test_the_spec_states_the_inventory_counts():
             f"{COUNTS['ServerNotification']} server notifications, {COUNTS['ClientNotification']} client notification") in text
 
 
-@pytest.mark.skipif(not (SCHEMA / "ClientRequest.ts").is_file(), reason="needs the Codex submodule")
+# The pinned Codex's experimental export, which `generate-ts --experimental` writes and the committed
+# types come from. The submodule's `schema/typescript/` is the stable surface (107 client requests,
+# no experimental methods), so it is never the inventory's reference.
+@pytest.mark.skipif(not DesktopProtocolTypes.has_source(), reason="needs the Codex submodule and zstd")
 def test_the_inventory_is_the_pinned_codexs():
+    exports = DesktopProtocolTypes.exports()
     for kind in KINDS:
-        assert methods_in(SCHEMA / f"{kind}.ts") == methods_in(PROTOCOL_DIR / f"{kind}.ts"), kind
+        assert methods_in(exports[f"{kind}.ts"]) == methods_in(PROTOCOL_DIR / f"{kind}.ts"), kind
 
 
 def expand(token: str) -> list[str]:
