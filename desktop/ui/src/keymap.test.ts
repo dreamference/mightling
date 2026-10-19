@@ -87,6 +87,8 @@ describe("on a Mac", () => {
     expect(shortcutLabel("searchFiles")).toBe("Cmd+P");
     expect(shortcutLabel("togglePet")).toBe("Ctrl+Option+P");
     expect(shortcutLabel("nextChat")).toBe("Ctrl+Tab");
+    expect(keyLabel(keyAction("previousChat").keys[1])).toBe("Ctrl+PageUp");
+    expect(matches(key("PageDown", { ctrlKey: true }), keyAction("nextChat"))).toBe(true);
     expect(keyLabel("Ctrl+L", "terminal")).toBe("Ctrl+L");
     setMacKeys(false);
     expect(matches(key("p", { ctrlKey: true }), keyAction("searchFiles"))).toBe(true);

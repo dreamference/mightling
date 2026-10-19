@@ -161,6 +161,18 @@ describe("a scripted session", () => {
     expect(listed.threads.t1.thread.name).toBe("Hello script");
   });
 
+  it("opening a thread keeps the time of its last activity, not the time the server resumed it", () => {
+    const listed = run([{ type: "threads", list: [thread("t9", "/w", 1000)] }], opened);
+    const turn = { id: "u", items: [], itemsView: "full", status: "completed", error: null, startedAt: 900, completedAt: 950, durationMs: 50000 };
+    const resumed = run([{ type: "opened", thread: thread("t9", "/w", 5000, { turns: [turn] as unknown as Thread["turns"] }) }], listed);
+    expect(resumed.threads.t9.thread.updatedAt).toBe(950);
+    // No turns in the answer: the time the listing gave stays.
+    const bare = run([{ type: "opened", thread: thread("t9", "/w", 5000) }], listed);
+    expect(bare.threads.t9.thread.updatedAt).toBe(1000);
+    // A thread the window never listed takes the server's word.
+    expect(run([{ type: "opened", thread: thread("t8", "/w", 5000) }], opened).threads.t8.thread.updatedAt).toBe(5000);
+  });
+
   it("an interrupted turn ends, and its streamed items stay", () => {
     const state = run([
       note("turn/started", { threadId: "t1", turn: { id: "u2", status: "inProgress", items: [], error: null } }),
