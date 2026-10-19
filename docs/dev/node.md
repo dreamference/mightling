@@ -18,7 +18,7 @@ Mightling is a client and a node, and `ling` finds the node.
 
   When a browse misses (tier 5 finds nothing, the remembered node of tier 4 does not answer, or `MIGHTLING_NODE` names a node that is not there; `browse_missed`), a Linux client reads its own Wi-Fi the way `WifiPowerSave` does (below) and, if a connected Wi-Fi connection saves power, adds one line naming it with the commands that turn it off (`ling_node_locator::wifi_power_save_hint`). It is a hint: the error or the fallback to the last address is unchanged, `ling` runs no `sudo`, and on another system, without NetworkManager or on Ethernet it says nothing. `ling node list` with no answer and `ling node use` with a name nothing answered to print it too.
 
-Only the launcher and `ling-app` browse; `ling-search` reads `node.json` through `ling-rs/node-locator/`, a std-only crate with **byte-identical copies** in `ling-web-rs/src/node_locator.rs` (a test compares them, as for the air-gap resolver; the desktop app's `desktop/electron/src/node_locator.ts` is a port with the crate's tests).
+Only the launcher browses (`ling-app` through the bundled `ling` its `ling app-server` runs); `ling-search` reads `node.json` through `ling-rs/node-locator/`, a std-only crate with **byte-identical copies** in `ling-web-rs/src/node_locator.rs` (a test compares them, as for the air-gap resolver). The desktop app has no copy of its own: its TypeScript port, `desktop/electron/src/node_locator.ts`, went with the app's own node discovery on 2026-10-08, and `tests/test_node.py` checks it stays gone.
 
 ## Advertising a node
 

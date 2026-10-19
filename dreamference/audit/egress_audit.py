@@ -675,7 +675,9 @@ class EgressAudit:
 
         Args:
             prompt (Optional[str]): The prompt for the traced session; a one-word reply by default.
-            write_json (bool): Also write the full result to `$CODEX_HOME/audit/<timestamp>.json`.
+            write_json (bool): Also write the full result to
+                `$CODEX_HOME/audit/<timestamp>-<session>.json`, the session being `exec`, `tui`,
+                `app` or `web`.
             tui (bool): Trace the full-screen interface on a pseudo-terminal instead of
                 `ling exec`. Codex starts things there that `exec` never does.
             app (bool): Trace the desktop app in its hidden audit session instead (needs a
