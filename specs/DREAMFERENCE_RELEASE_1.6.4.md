@@ -1,9 +1,8 @@
 # Mightling 1.6.4 — release notes
 
-**Status:** prepared 2026-10-15 on the branch `release/1.6.4` (origin/main at `49aee37`, 1.6.3 as
+**Status:** published 2026-10-15 as `v1.6.4`, the current release (tag on `61dd081`; this line updated 2026-10-19). Prepared 2026-10-15 on the branch `release/1.6.4` (origin/main at `49aee37`, 1.6.3 as
 published, plus three commits and the version set to 1.6.4 in `setup.py`, `dreamference/__init__.py`,
-the MCP server's `serverInfo` and `desktop/electron/package.json`, and these notes); not yet
-published. It carries what was prepared on 2026-10-14 as 1.6.2 on the branch `release/1.6.2` and
+the MCP server's `serverInfo` and `desktop/electron/package.json`, and these notes). It carries what was prepared on 2026-10-14 as 1.6.2 on the branch `release/1.6.2` and
 never released: 1.6.3 was cut from `main` the next night, without that branch, so the number 1.6.2
 is skipped and its content ships here, rebased onto 1.6.3 (the SGLang pin `84b9c16` as `63b448e`,
 the Windows default `b352101` as `60c325a`; the branch's version commit `69632b6` is dropped). The

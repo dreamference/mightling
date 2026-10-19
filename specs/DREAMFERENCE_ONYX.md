@@ -1,9 +1,10 @@
 # Mightling Onyx Integration & Branding (the web UI)
 
 > **Version:** 1.5.1
-> **Status:** **retired** (2026-10-09, [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10, Phase C, built as §19 there; decided 2026-10-07, with no history export). The code this spec describes (`onyx_runner.py`, `onyx_installer.py`, the brand assets, the four UI patch modules, `chat_admin_credentials.py`) is deleted and `ling-admin chat` only removes what an older install left (`ling-admin chat remove`). **Kept as history:** nothing below describes the current product.
+> **Status:** **retired** ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10, Phase C, built as §19 there; decided 2026-10-07, with no history export; built on the branch `chat/onyx-phase-c` 2026-10-09 and merged into `main` on 2026-10-18 in `dd2fb78` (`eb42c76`, specs `77ea500`, `a45fa85`); ships in 1.7.0, so 1.6.4 still has it). The code this spec describes (`onyx_runner.py`, `onyx_installer.py`, the brand assets, the four UI patch modules, `chat_admin_credentials.py`), its tests and the developer notes `docs/dev/onyx.md` and `docs/dev/onyx-ui-patches.md` are deleted. **Kept as history:** nothing below describes the current product.
+> **What is left** (`dreamference/chat/retired_web_chat.py`, `RetiredWebChat`): `ling-admin chat {remove,status}` (alias `onyx`). Every former subcommand (`start`, `configure`, `password`, …) prints where its job went (`ling web`, `ling app`, `ling-admin images start`, `ling-admin voice start`) and exits 2. `chat status` lists what an older install left: containers, volumes, sidecars still on Onyx's network, `onyxdotapp/*` images, networks and the deployment folder. `chat remove [--yes] [--delete-data]` asks twice: first it stops and removes the compose project's containers (`docker compose -p onyx … down --remove-orphans`, never `-v`; `--yes` skips the question), then, asked again (`--delete-data` skips it), deletes the volumes (saved chats and accounts, which cannot be recovered), Onyx's own images, its networks and the image search, SigLIP and speech-to-text sidecars still on its network, after taking SearXNG and the Google service off it. The deployment folder `~/.config/onyx/deployment` is never touched. An interactive `ling-admin` run on a machine with that folder and Onyx's containers makes the same offer once; a no is remembered in `~/.config/dreamference/web-chat-retired.json`.
 > **Subject:** Onyx Lite deployment; provider registration; Mightling branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
-> **Checked against the code:** 2026-09-29 (`dreamference/chat/`); §1 and §2 again on 2026-10-09
+> **Checked against the code:** 2026-09-29 (`dreamference/chat/`); §1 and §2 again on 2026-10-09; the status lines against `retired_web_chat.py` on 2026-10-19
 
 ---
 
@@ -45,6 +46,10 @@ Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 | `chat/chat_admin_credentials.py` (`ChatAdminCredentials`) | The admin account's per-install password (§2 step 2) |
 | `chat/gmail_*`, `chat/google_*`, `chat/image_search_service.py` | Sidecar services (§7, §8); the Google service can also run without Onyx (`ling-admin google`, [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md) §5.1) |
 
+**Removed 2026-10-18 (`eb42c76`):** every row above but the last (`onyx_runner.py`, `onyx_installer.py`, `onyx_brand_assets.py`, the four `onyx_ui_*.py` modules, `chat_admin_credentials.py`). The last row's services remain, outside Onyx: `ling-admin gmail`, `ling-admin google`, `ling-admin images`.
+
+> **Out of date (2026-10-19):** the subcommands in the next table are gone; each now prints where its job went and exits 2, and only `remove` and `status` do anything (see the status lines at the top). The current source is `dreamference/chat/retired_web_chat.py`.
+
 Mightling never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
 | Command (`ling-admin chat …`, alias `onyx`) | Does |
@@ -64,7 +69,7 @@ Mightling never writes Onyx's compose files. Everything goes through `onyx-cli`:
 Onyx has **no environment variable for the LLM provider**. Providers live in its database, so `configure` drives the admin API that the Admin panel uses. In order:
 
 1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`), except on a node advertised with `ling-admin node enable`, where port 3000 is published on every interface for clients' `ling-app` and port 80 stays on loopback (`web_bind_env()`; [MIGHTLING_NODE §4](./DREAMFERENCE_MIGHTLING_NODE.md)): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
-2. **Authenticate as the admin account** (`ChatAdminCredentials`, `dreamference/chat/chat_admin_credentials.py`):
+2. **Authenticate as the admin account** (`ChatAdminCredentials`, `dreamference/chat/chat_admin_credentials.py`, removed 2026-10-18 in `eb42c76`):
    - **The password is generated per install** (40 random URL-safe characters plus one each of upper case, lower case, digit and symbol, so any password rule Onyx can enforce passes) and kept in `~/.config/dreamference/chat-admin.json`, mode 0600 in a 0700 folder. The e-mail is `admin@dreamference.dev`, which is not a secret.
    - **A fresh deployment** registers that account (the first account becomes admin) and stores the password.
    - **An install made before 2026-10-07** still has the old published password; `configure` signs in with it once, changes it through Onyx's own `POST /api/password/change-password` (`{old_password, new_password}`), confirms the new one by signing in, and stores it. The new password is stored before the change is requested, and removed again if Onyx refuses, so no outcome leaves an account whose password is nowhere.
@@ -156,7 +161,7 @@ A CSS `content` swap would leave the original in the accessibility tree and in f
 
 The block is appended to **every** stylesheet under `/app/.next`, because Next.js splits CSS per route. It opens with `/*dreamference-ui-overrides*/`, and a re-run cuts at the marker and rewrites, so later edits apply.
 
-**Rules of the craft** (details in `docs/dev/onyx-ui-patches.md`):
+**Rules of the craft** (details were in `docs/dev/onyx-ui-patches.md`, removed 2026-10-18 in `77ea500`; read it in the history):
 - **Match Onyx's specificity exactly.** The selected sidebar row is `.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"]` → `#0ABAB5`, and on hover `#09A19C`.
 - **Redefine tokens instead of repainting.** Message text is black because `--text-04`/`--text-05` are redefined.
 - **Anchor to things a build cannot renumber:** `data-testid`, `data-*`, `aria-label`, `opal-…` BEM classes and SVG viewBoxes. Never Tailwind utilities.
@@ -179,7 +184,7 @@ Two traps are handled:
 - Turbopack ends each chunk with `//# debugId=…` and **no trailing newline**, so a block appended directly would sit inside the comment and never run. Newlines are trimmed, and exactly one is written.
 - The webview caches chunks, so verify with a fresh cache.
 
-The tests execute the real script under node against a stub DOM (`tests/test_onyx_ui_scripts.py`).
+The tests executed the real script under node against a stub DOM (`tests/test_onyx_ui_scripts.py`, removed 2026-10-18 in `eb42c76`).
 
 ---
 

@@ -12,13 +12,13 @@ The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The sur
 
 | # | Item | Area | Status |
 |---|---|---|---|
-| 1 | The chooser test on disk | SWE-bench | v1 run 2026-10-13 (33/44); **v2 built 2026-10-14**, not run |
+| 1 | The chooser test on disk | SWE-bench | v1 run 2026-10-13 (33/44); v2 run 2026-10-15 (32.33/44), not adopted; v3 built on branch `chooser/v3` (2026-10-18), **NO GO, not merged** (updated 2026-10-19) |
 | 2 | Broken passing tests counted apart | SWE-bench | **Built 2026-10-13** |
 | 3 | `docs_ask` over long documents | `ling-docs` | Not scheduled |
 | 4 | A local deep-research skill | Skills | Not scheduled |
 | 5 | Cost saved per session | Launcher, desktop | Not scheduled |
 | 6 | Best-of-N in Night Shift | Night Shift | **Merged 2026-10-18** (chooser v1, N = 1 by default, more on request); night 11: best-of-3 18/30 against 15/30, p = 0.375 |
-| 7 | Drop old tool outputs first, then summarise | Compaction | **First night arm after the pause** |
+| 7 | Drop old tool outputs first, then summarise | Compaction | **Built and off** (patch 0026, merged 2026-10-15 in `730a93e`; the bench kept it off) |
 | 8 | Delayed tail trim (AgentDiet) | Compaction | Not scheduled; after item 7 |
 | 9 | Long tool outputs offloaded to a file | Launcher, compaction | Not scheduled |
 | 10 | The compaction prompt tuned on our failures (ACON) | Compaction, SWE-bench | Not scheduled |
@@ -77,7 +77,7 @@ The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The sur
 - **Acceptance:** `summary.json` gives the chooser's expected resolved count on the 13 tasks against the filter alone, a random run (about 6.3) and the oracle (13).
   - Item 6 goes ahead if the chooser is clearly above the random run.
   - The survey's estimate to beat is +3 to +4 tasks.
-- **Status:** approved by the owner 2026-10-13, not scheduled. The script is on main; it has never been run against a server.
+- **Status (updated 2026-10-19):** approved by the owner 2026-10-13; v1 run 2026-10-13 (33/44, above). v2 run 2026-10-15 on the same trio: 32.33/44 against v1's 33.0, not adopted (MIGHTLING_NIGHT_SHIFT §11.9). v3 (chooser v1 with a differential search before its judge; design note [research/chooser-v3-moonshot-2026-10-14.md](./research/chooser-v3-moonshot-2026-10-14.md)) built on branch `chooser/v3` (`scripts/swe_bench_chooser_v3.py`, head `05f714f`, 2026-10-18): NO GO, not merged. Chooser v1 stays the one in use (`dreamference/night_shift/night_shift_chooser.py`).
 
 ### 2. Broken passing tests counted apart from unfixed issues
 
@@ -189,7 +189,7 @@ On nights 1–4, sessions that compacted three or more times resolved 38%, again
   - resolved not lower;
   - compaction time down;
   - compactions, compaction seconds and re-reads recorded.
-- **Status:** approved by the owner 2026-10-13. **The first night arm after the nights' pause.** Being built on a branch.
+- **Status:** approved by the owner 2026-10-13. **Built and merged off by default on 2026-10-15** (`730a93e`, patch `0026`; updated 2026-10-19): the turn-end compaction bench v2's `drop` arm did not earn it the default ([MIGHTLING_COMPACTION](./DREAMFERENCE_MIGHTLING_COMPACTION.md) §14.3), and 1.6.4 shipped it off.
 
 ### 8. Delayed tail trim (AgentDiet)
 
