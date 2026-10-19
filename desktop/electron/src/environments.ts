@@ -7,10 +7,12 @@
 // per-platform overrides, actions with a name, an icon and a script with per-platform overrides)
 // under the obvious names, and writes Mightling's own. No Electron here.
 
-import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { parse, stringify } from "smol-toml";
+
+import * as userFs from "./userfs";
 
 export const ICONS = ["play", "test", "build", "debug", "terminal", "globe", "tool"] as const;
 export type ActionIcon = (typeof ICONS)[number];
@@ -74,24 +76,25 @@ export function readEnvironment(text: string, file: string, platform: NodeJS.Pla
 }
 
 /** Every environment of `project`, `.mightling/` first; a file that does not parse is reported, not fatal. */
-export function environments(project: string, platform: NodeJS.Platform = process.platform): { found: Environment[]; problems: string[] } {
+export async function environments(project: string, platform: NodeJS.Platform = process.platform): Promise<{ found: Environment[]; problems: string[] }> {
   const found: Environment[] = [];
   const problems: string[] = [];
   for (const folder of FOLDERS) {
     const candidates = [path.posix.join(folder, "environment.toml")];
     try {
-      for (const name of fs.readdirSync(path.join(project, folder, "environments")).sort()) {
-        if (name.endsWith(".toml")) candidates.push(path.posix.join(folder, "environments", name));
+      for (const entry of (await userFs.readdir(path.join(project, folder, "environments"))).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (entry.name.endsWith(".toml")) candidates.push(path.posix.join(folder, "environments", entry.name));
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof userFs.UserFsTimeout) throw error;
       // No environments folder.
     }
     for (const file of candidates) {
       const full = path.join(project, file);
-      const stat = fs.statSync(full, { throwIfNoEntry: false });
+      const stat = await userFs.statOrNull(full);
       if (!stat?.isFile() || stat.size > 256 * 1024) continue;
       try {
-        found.push(readEnvironment(fs.readFileSync(full, "utf8"), file, platform));
+        found.push(readEnvironment(await userFs.readText(full), file, platform));
       } catch (error) {
         problems.push(`${file}: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
       }
@@ -107,7 +110,7 @@ export interface EnvironmentEdit {
 }
 
 /** Writes Mightling's environment file, `.mightling/environments/default.toml`; never `.codex/`. */
-export function writeEnvironment(project: string, edit: unknown): string {
+export async function writeEnvironment(project: string, edit: unknown): Promise<string> {
   if (!isTable(edit)) throw new Error("an environment is an object");
   const name = typeof edit.name === "string" && edit.name.trim() ? edit.name.trim().slice(0, 100) : "Default";
   const setup = typeof edit.setup === "string" ? edit.setup.slice(0, 64 * 1024) : "";
@@ -123,8 +126,8 @@ export function writeEnvironment(project: string, edit: unknown): string {
   if (setup.trim()) document.setup = { script: setup };
   if (actions.length) document.actions = actions;
   const target = path.join(project, WRITE_FILE);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await userFs.mkdir(path.dirname(target));
   const header = "# Mightling's local environment for this project (setup when a worktree is made; actions in the\n# app's top bar). Read by the Mightling desktop app; .codex/ environments are read too.\n";
-  fs.writeFileSync(target, header + stringify(document) + "\n");
+  await fsp.writeFile(target, header + stringify(document) + "\n");
   return WRITE_FILE;
 }

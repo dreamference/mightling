@@ -8,8 +8,9 @@
 
 import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
-import { realPath, samePath } from "./platform";
 import path from "node:path";
+
+import * as userFs from "./userfs";
 
 /** The most a diff or log may weigh: the pane is for reading, and this machine's memory is shared with a model. */
 export const MAX_OUTPUT = 16 * 1024 * 1024;
@@ -100,8 +101,8 @@ export async function checkRoot(root: unknown): Promise<string> {
     throw new GitError(`${root} is not a git repository`);
   }
   // git answers with forward slashes and long names; Windows may hand us a short (8.3) name.
-  if (!samePath(top, root)) throw new GitError(`${root} is not the top of its repository (${top} is)`);
-  return realPath(top);
+  if (!(await userFs.samePath(top, root))) throw new GitError(`${root} is not the top of its repository (${top} is)`);
+  return userFs.realPath(top);
 }
 
 /** A path inside the repository, relative to its root; anything that would leave it is refused. */
@@ -123,32 +124,42 @@ const paths = (root: string, files: unknown): string[] => {
  * itself in one, the repositories directly below it (two levels), for the pane's selector.
  */
 export async function repositories(cwd: unknown): Promise<string[]> {
-  if (typeof cwd !== "string" || !path.isAbsolute(cwd) || !fs.existsSync(cwd)) return [];
-  // Without a git to run, there is no repository to show (the page shows why: `gitToolsMissing`).
-  if (gitToolsMissing()) return [];
+  // Every look at the folder is asynchronous and bounded (userfs.ts): a folder macOS guards (under
+  // ~/Downloads, say) waits on the access prompt, which froze the app when this walk was synchronous.
   try {
-    return [realPath((await git(cwd, ["rev-parse", "--show-toplevel"])).trim())];
-  } catch {
-    // Not inside a repository: look a little way down.
-  }
-  const found: string[] = [];
-  const look = (folder: string, depth: number) => {
-    let entries: fs.Dirent[];
+    if (typeof cwd !== "string" || !path.isAbsolute(cwd) || !(await userFs.exists(cwd))) return [];
+    // Without a git to run, there is no repository to show (the page shows why: `gitToolsMissing`).
+    if (gitToolsMissing()) return [];
     try {
-      entries = fs.readdirSync(folder, { withFileTypes: true });
-    } catch {
-      return;
+      return [await userFs.realPath((await git(cwd, ["rev-parse", "--show-toplevel"])).trim())];
+    } catch (error) {
+      if (error instanceof userFs.UserFsTimeout) throw error;
+      // Not inside a repository: look a little way down.
     }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-      const child = path.join(folder, entry.name);
-      if (fs.existsSync(path.join(child, ".git"))) found.push(child);
-      else if (depth > 1) look(child, depth - 1);
-      if (found.length >= 20) return;
-    }
-  };
-  look(cwd, 2);
-  return found.sort();
+    const found: string[] = [];
+    const look = async (folder: string, depth: number): Promise<void> => {
+      let entries: fs.Dirent[];
+      try {
+        entries = await userFs.readdir(folder);
+      } catch (error) {
+        if (error instanceof userFs.UserFsTimeout) throw error;
+        return;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+        const child = path.join(folder, entry.name);
+        if (await userFs.exists(path.join(child, ".git"))) found.push(child);
+        else if (depth > 1) await look(child, depth - 1);
+        if (found.length >= 20) return;
+      }
+    };
+    await look(cwd, 2);
+    return found.sort();
+  } catch (error) {
+    // A folder that does not answer has no repository to show yet; the pane asks again later.
+    if (error instanceof userFs.UserFsTimeout) return [];
+    throw error;
+  }
 }
 
 export interface FileStatus {
@@ -255,7 +266,7 @@ export async function diff(root: string, scope: Scope, commit?: string | null): 
       const untracked = (await status(root)).files.filter((file) => file.unstaged === "?").slice(0, 200);
       const added: string[] = [];
       for (const file of untracked) {
-        const stat = fs.statSync(path.join(root, file.path), { throwIfNoEntry: false });
+        const stat = await userFs.statOrNull(path.join(root, file.path));
         if (!stat || !stat.isFile()) added.push(notShown(file.path, "not a regular file"));
         else if (stat.size > 1024 * 1024) added.push(notShown(file.path, "larger than 1 MB"));
         else added.push(await diffNoIndex(root, file.path));
