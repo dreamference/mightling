@@ -2,7 +2,7 @@ diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
 index 4d7984d..003136b 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
-@@ -121,4 +121,5 @@ use codex_terminal_detection::TerminalName;
+@@ -121,4 +121,5 @@
      // the generic `codex` command name that users run.
 -    bin_name = "codex",
 -    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
@@ -10,7 +10,12 @@ index 4d7984d..003136b 100644
 +    bin_name = "ling",
 +    override_usage = "ling [OPTIONS] [PROMPT]\n       ling [OPTIONS] <COMMAND> [ARGS]"
  )]
-@@ -2693,3 +2694,3 @@ fn print_completion(cmd: CompletionCommand) {
+@@ -757,3 +758,3 @@
+         for line in exit_info.format_exit_messages(color_enabled) {
+-            println!("{line}");
++            println!("{}", line.replace("codex resume", "ling resume"));
+         }
+@@ -2693,3 +2694,3 @@
      let mut app = MultitoolCli::command();
 -    let name = "codex";
 +    let name = "ling";

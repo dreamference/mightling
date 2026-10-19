@@ -34,6 +34,10 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert 'ling-launcher = { path = "../ling" }' in cli_manifest
     cli_main = (tmp_path / "src" / "codex-rs" / "cli" / "src" / "main.rs").read_text()
     assert "ling_launcher::parse::<MultitoolCli>().await?" in cli_main
+    # The exit summary's "To continue this session, run: codex resume <id>" names ling (1.7.1:
+    # found by a capture of a session's end); `codex/` itself is never changed.
+    assert 'println!("{}", line.replace("codex resume", "ling resume"));' in cli_main
+    assert 'println!("{line}");\n        }\n    }\n    if is_fatal' not in cli_main
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
     )
@@ -95,6 +99,9 @@ def test_the_patches_stay_small():
     # Not raised for /import (2026-10-19): two lines in 0012's hunk hide it (163 bytes; a patch of
     # its own would have cost ~550 and crossed the cap), since its plugin step clones a marketplace
     # hosted on GitHub, which the egress audit does not cover; 44,835 after.
+    # Not raised for the exit summary's resume line (2026-10-20, 1.7.1): one hunk in 0001's
+    # cli/src/main.rs (`codex resume` -> `ling resume` where the lines are printed), paid for by
+    # dropping two of 0001's optional hunk-header section names; 44,952 after.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 45_000
 
 
