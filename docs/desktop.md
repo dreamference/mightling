@@ -93,6 +93,17 @@ What the preview does not do yet: `ling app` in a Mac terminal does not open it 
 Applications or Spotlight), it does not update itself (download the new dmg), and closing its
 window quits it, as on Linux.
 
+## On Windows (preview)
+
+From 1.7.0 a release carries `Mightling-Setup-<version>-arm64.exe` (Windows on Arm) and
+`Mightling-Setup-<version>-x64.exe` (x86-64) for Windows 11, with `ling.exe` inside, a client of a
+Mightling node on your network. Check the installer against the release's `SHA256SUMS`, then run it:
+it installs for you alone, with no administrator, under `%LOCALAPPDATA%\Programs\Mightling\App`,
+and adds a Start menu entry. The installers are not signed: SmartScreen warns the first time (More
+info, then Run anyway), and Smart App Control must be off. To update, run the next release's
+installer over it; to remove it, use Settings → Apps → Installed apps. `ling update` and
+`install.ps1` update the command-line client only, not the app.
+
 ## Ask and Work in the app window
 
 The app window talks to one `ling app-server` of its own, the `ling` bundled in the app. Its
