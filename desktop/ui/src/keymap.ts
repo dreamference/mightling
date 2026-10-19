@@ -22,7 +22,7 @@ const BY_ID = new Map(KEYMAP.map((action) => [action.id, action]));
 /**
  * On a Mac the table's `Ctrl` is the Command key (⌘) and its `Super` the Control key, as in the
  * Codex app and every Mac program: Cmd+P searches files there, not Control+P. Two kinds of binding
- * keep the literal Control key on a Mac, as Mac programs do: those on Tab (Control+Tab cycles) and
+ * keep the literal Control key on a Mac, as Mac programs do: those on Tab and Page Up/Down (they cycle) and
  * the terminal's own (Control+L clears it). The table and the user's bindings stay one, written for
  * Linux and Windows.
  */
@@ -35,9 +35,12 @@ export function setMacKeys(value: boolean): void {
   mac = value;
 }
 
+/** Keys whose Ctrl bindings keep the Control key on a Mac too: Control+Tab and Control+Page Up/Down cycle. */
+const CONTROL_KEYS = new Set(["Tab", "PageUp", "PageDown"]);
+
 /** Whether `Ctrl` in a binding on `key` in `context` means ⌘ here. */
 function commandIsCtrl(key: string, context?: KeyContext): boolean {
-  return mac && key !== "Tab" && context !== "terminal";
+  return mac && !CONTROL_KEYS.has(key) && context !== "terminal";
 }
 
 /** Bindings the user chose in Settings › Keyboard shortcuts (kept in the window's preferences). */

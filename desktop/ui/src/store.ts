@@ -298,6 +298,18 @@ function removeThread(state: WorkState, threadId: string): WorkState {
   return { ...state, threads, selected: state.selected === threadId ? null : state.selected };
 }
 
+/**
+ * A thread as the server answers `thread/resume`, its times those of its last activity: resuming
+ * touches the thread, and its answer says it was updated now, so opening a thread showed "now" in
+ * the sidebar. The latest turn's time stands when there is one, else the time the window had.
+ */
+export function withLastActivity(resumed: Thread, known: Thread | null): Thread {
+  const turnTimes = resumed.turns.map((turn) => turn.completedAt ?? turn.startedAt ?? 0).filter((time) => time > 0);
+  const last = turnTimes.length ? Math.max(...turnTimes) : known ? known.updatedAt : resumed.updatedAt;
+  if (last >= resumed.updatedAt) return resumed;
+  return { ...resumed, updatedAt: last, recencyAt: known?.recencyAt ?? (resumed.recencyAt !== null ? Math.min(resumed.recencyAt, last) : null) };
+}
+
 export function reduce(state: WorkState, action: Action): WorkState {
   switch (action.type) {
     case "server":
@@ -326,12 +338,14 @@ export function reduce(state: WorkState, action: Action): WorkState {
       }
       return { ...state, threads };
     }
-    case "opened":
+    case "opened": {
+      const thread = withLastActivity(action.thread, state.threads[action.thread.id]?.thread ?? null);
       return {
         ...state,
-        threads: { ...state.threads, [action.thread.id]: { ...emptyView(action.thread), usage: state.threads[action.thread.id]?.usage ?? null } },
-        selected: action.thread.id,
+        threads: { ...state.threads, [thread.id]: { ...emptyView(thread), usage: state.threads[thread.id]?.usage ?? null } },
+        selected: thread.id,
       };
+    }
     case "select":
       return { ...state, selected: action.threadId };
     case "notification":

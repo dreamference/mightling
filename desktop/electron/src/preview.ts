@@ -52,6 +52,8 @@ interface Preview {
 
 export class Previews {
   private readonly previews = new Map<string, Preview>();
+  /** Where the page last asked a tab's view to be, before the view existed (an empty tab's first address). */
+  private readonly placements = new Map<string, { bounds: { x: number; y: number; width: number; height: number }; visible: boolean }>();
   /** Sites allowed for this run of the app only (Allow once). */
   private readonly once = new Set<string>();
   /** The last site a tab asked about, so one blocked page asks once, not once per image. */
@@ -143,6 +145,9 @@ export class Previews {
     this.previews.set(id, preview);
     view.setVisible(false);
     window.contentView.addChildView(view);
+    // The tab's body is already laid out: the view goes there at once, not at the next layout change.
+    const placed = this.placements.get(id);
+    if (placed) this.place(id, placed.bounds, placed.visible);
     const contents = view.webContents;
     // A page's new window opens in the same tab, if the rules let it.
     contents.setWindowOpenHandler(({ url: target }) => {
@@ -219,6 +224,7 @@ export class Previews {
 
   /** Where the tab's body is in the window, in the page's pixels; hidden when another tab, a dialog or the layout covers it. */
   place(id: string, bounds: { x: number; y: number; width: number; height: number }, visible: boolean): void {
+    this.placements.set(id, { bounds, visible });
     const preview = this.previews.get(id);
     if (!preview) return;
     preview.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.max(0, Math.round(bounds.width)), height: Math.max(0, Math.round(bounds.height)) });
@@ -240,6 +246,7 @@ export class Previews {
   }
 
   close(id: string): void {
+    this.placements.delete(id);
     const preview = this.previews.get(id);
     if (!preview) return;
     this.previews.delete(id);

@@ -751,6 +751,10 @@ test("8 terminal: a tab in the thread's folder under its permissions, typing, an
     await page.keyboard.press("Control+`");
     const panel = page.getByRole("region", { name: "Bottom panel" });
     await expect(panel.locator(".xterm-rows")).toContainText("stand-in shell in");
+    // The panel fits in the window: the page never grows past it (it did, to 924 px in 860), and Settings stays on screen.
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
+    const settings = await page.getByRole("button", { name: "Settings" }).boundingBox();
+    expect(settings && settings.y + settings.height <= (await page.evaluate(() => innerHeight))).toBe(true);
     const exec = received(home).find((m) => m.method === "command/exec");
     expect(exec?.params).toMatchObject({ tty: true, cwd: projectFolders(home).fetcher, permissionProfile: ":workspace", disableTimeout: true });
     await page.keyboard.type("echo hello from the tab");

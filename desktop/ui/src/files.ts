@@ -74,6 +74,11 @@ export function relativeTo(root: string | null, path: string): string {
 /** Names the tree leaves out: the repository's own database, which nobody reads by hand. */
 const HIDDEN = new Set([".git"]);
 
+/** Whether a path the server's file search found is inside a `.git` folder (refs, hooks, worktrees): never a file to open or mention. */
+export function inGitInternals(path: string): boolean {
+  return /(^|[\\/])\.git([\\/]|$)/.test(path);
+}
+
 /** A folder's entries as the tree shows them: folders first, then files, each by name ignoring case. */
 export function treeEntries(entries: FsReadDirectoryEntry[]): FsReadDirectoryEntry[] {
   return entries.filter((entry) => !HIDDEN.has(entry.fileName))

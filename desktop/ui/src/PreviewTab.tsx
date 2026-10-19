@@ -42,6 +42,8 @@ export function PreviewTab(props: PreviewTabProps) {
   const [comment, setComment] = useState("");
   const opened = useRef(false);
   const available = bridge.preview.available();
+  /** Puts the view over the tab's body (set by the layout effect below). */
+  const placeView = useRef<() => void>(() => {});
 
   const go = useCallback((target: string) => {
     const url = addressOf(target);
@@ -49,7 +51,12 @@ export function PreviewTab(props: PreviewTabProps) {
     setAsk(null);
     setBlocked(null);
     setTyped(url);
-    (opened.current ? bridge.preview.navigate(id, url, props.thread) : bridge.preview.open(id, url, props.thread)).catch(notice);
+    // A tab opened empty (Ctrl+T) has no view until its first address; placed when the view exists,
+    // or it stayed 0×0 and hidden until the layout changed (a Mac, where the view took longer to come
+    // than the layout effect's one late placement).
+    (opened.current ? bridge.preview.navigate(id, url, props.thread) : bridge.preview.open(id, url, props.thread))
+      .then(() => placeView.current())
+      .catch(notice);
     opened.current = true;
   }, [id, props.thread, notice]);
 
@@ -94,6 +101,7 @@ export function PreviewTab(props: PreviewTabProps) {
       const rect = element.getBoundingClientRect();
       bridge.preview.place(id, { x: rect.left * zoom, y: rect.top * zoom, width: rect.width * zoom, height: rect.height * zoom }, !covered && rect.width > 0 && rect.height > 0).catch(() => {});
     };
+    placeView.current = place;
     place();
     const observer = new ResizeObserver(place);
     observer.observe(element);
