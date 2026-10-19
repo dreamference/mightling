@@ -79,6 +79,7 @@ Anything that would need a vendor's cloud or an account is hidden or refused:
 | `/feedback` | Removed. It uploaded session logs. |
 | `/voice` | Hidden. It needs a cloud voice service. |
 | `/approve` (auto-review) | Hidden. It needs a cloud review model. |
+| `/import` | Refused. Its plugin step can fetch a plugin marketplace from GitHub. |
 | Update check | Mightling's own: `ling update`. |
 
 ## Skills

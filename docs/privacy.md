@@ -37,6 +37,7 @@ a URL, a mailbox read.
     refused.
   - `/feedback`, which uploaded session logs, is removed.
   - `/voice` and `/approve`, which depend on cloud models, are hidden.
+  - `/import`, whose plugin step can fetch a plugin marketplace from GitHub, is refused.
   - The only update check is Mightling's own, `ling update`.
   - Usage analytics are disabled in the code (patch `0013`), and `ling` never reads `~/.codex`,
     where another tool may keep a cloud sign-in.
