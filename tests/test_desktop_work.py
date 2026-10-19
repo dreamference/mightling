@@ -128,9 +128,12 @@ def test_the_packages_are_installed_before_every_make():
         return path.name != "node_modules" and real_is_dir(path)
 
     commands = []
+    # The stamp a real install leaves (desktop_runner.LOCK_STAMP) is not written into the checkout.
     with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
          patch.object(DesktopRunner, "copy_bundled_binaries", return_value=True), \
          patch.object(DesktopRunner, "install_desktop_entry"), \
+         patch.object(DesktopRunner, "mark_installed"), \
+         patch.object(DesktopRunner, "packages_current", return_value=False), \
          patch.object(Path, "is_dir", autospec=True, side_effect=no_node_modules), \
          patch("shutil.which", return_value=NPM), \
          patch("subprocess.call", side_effect=lambda command, **kw: commands.append((command, kw.get("cwd"))) or 0):

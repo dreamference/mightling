@@ -153,9 +153,10 @@ class DesktopRunner:
         Args:
             directory (Path): The npm project.
         """
-        modules = Path(directory) / "node_modules"
-        modules.mkdir(exist_ok=True)
-        (modules / LOCK_STAMP).write_text(cls.lock_hash(directory) + "\n")
+        modules = os.path.join(directory, "node_modules")
+        if os.path.isdir(modules):
+            with open(os.path.join(modules, LOCK_STAMP), "w") as stamp:
+                stamp.write(cls.lock_hash(directory) + "\n")
 
     @classmethod
     def install_packages(cls) -> bool:
