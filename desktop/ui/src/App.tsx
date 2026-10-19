@@ -17,7 +17,7 @@ import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
 import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
-import { underDirectory } from "./diff";
+import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
 import { ThreadLoader } from "./loader";
 import { inGitInternals } from "./files";
@@ -511,16 +511,15 @@ export function App() {
    * Revert: the turn's file changes undone (its diff applied in reverse, in the thread's repository),
    * then the turn and every later one removed from the thread (`thread/revert`, which changes the
    * history only). Asked first: one click on the first turn's Revert emptied a thread on a Mac, its
-   * files untouched. If the files cannot be undone, the history stays as it is.
+   * files untouched. If the files cannot be undone, the history stays as it is. What shell commands
+   * changed is not in the diff and is not undone; the question says so (`revertQuestion`).
    */
   const revertTurn = async (turn: TurnView) => {
     if (!selected) return;
     const thread = selected.thread;
-    const later = selected.turns.length - 1 - selected.turns.findIndex((entry) => entry.id === turn.id);
     const diff = turn.diff?.trim() ? turn.diff : null;
-    const what = `${later > 0 ? `this turn and the ${later} after it` : "this turn"} from the thread`;
-    const files = diff ? " and undo the file changes it made" : "; it made no file changes this window knows of, so files stay as they are";
-    if (!window.confirm(`Remove ${what}${files}? The conversation cannot be brought back from here.`)) return;
+    // What shell commands changed is in no diff: the question says so when the turns ran any.
+    if (!window.confirm(revertQuestion(selected.turns, selected.turns.findIndex((entry) => entry.id === turn.id)))) return;
     if (diff) {
       const [root] = bridge.git.available() ? await bridge.git.repos(thread.cwd) : [];
       if (!root) throw new Error("Undoing a turn's file changes needs its folder in a git repository: nothing was changed.");
