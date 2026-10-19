@@ -1,11 +1,14 @@
 // The shell (DESKTOP_PARITY §2.1, §2.19): back and forward, undo and redo of app actions, the font
 // size steps, the surfaces Ctrl+W closes and Ctrl+Shift+T reopens, the command menu's filter, and
 // shortcuts the user rebinds.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { chordOf, conflicts, effectiveKeymap, keyAction, matches, setOverrides } from "./keymap";
+import { chordOf, conflicts, effectiveKeymap, keyAction, matches, setMacKeys, setOverrides } from "./keymap";
 import { ClosedSurfaces, History, UndoStack, filterEntries, nextScale, type MenuEntry } from "./shell";
 
+
+// The table as Linux and Windows read it, whatever machine runs the tests (keymap.test.ts has the Mac's).
+beforeEach(() => setMacKeys(false));
 const key = (k: string, mods: Partial<{ ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }> = {}) =>
   ({ key: k, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
 

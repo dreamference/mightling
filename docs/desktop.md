@@ -109,11 +109,15 @@ ling app --thread <id>        # Work, on an existing thread
 ling app                      # the app window on Ask
 ```
 
-There is one window. The menu's **Ask** and **Work** entries (Ctrl+1 and Ctrl+2), the tray icon's
+There is one window. The menu's **Ask** and **Work** entries (Alt+1 and Alt+2), the tray icon's
 and `ling app` bring it forward on the view asked for; none opens a second window. In 1.5 the
 menu's Ask opened a separate window on [`ling web`](web.md#ling-web-ask-and-work-in-a-browser),
 which ran a second agent server on the same `~/.mightling`; the app no longer starts or uses
 `ling web`. `ling web` itself is unchanged, for browsers and phones.
+
+Shortcuts are written here as on Linux and Windows. On a Mac, Ctrl is the Command key (Cmd+P
+searches files, Cmd+T opens a preview) and Alt is Option; Control+Tab still cycles threads and
+Control+L still clears a terminal tab. Settings › Keyboard shortcuts shows each one with the Mac's keys.
 
 ### Work
 
