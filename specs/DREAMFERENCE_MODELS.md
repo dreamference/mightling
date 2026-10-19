@@ -6,12 +6,14 @@
 
 > **2026-10-09: one candidate added.** `qwen3.8-27b-minima-nvfp4-dflash2` (Minima, the all-NVFP4 Qwen3.8-27B) is in `MATRIX` for night 2's A/B (§2.2). It is not the default and is served only when named (`server start --model …`).
 
+> **2026-10-19: a trial candidate added, on branch `models/flash-next` (not merged).** `qwen3.8-flash-next-nvfp4-mtp` (Qwen3.8-Flash-Next, local-inference-lab's QAD NVFP4 export, on a pinned vLLM nightly with MTP) is in `MATRIX` for a smoke boot and then a SWE-bench A/B (§2.3). It is not the default. It carries the first per-model start-gate figure (`load_transient_gb`) and the first per-model SWE-bench cap (`swe_bench_max_parallel`).
+
 ---
 
 ## Table of Contents
 
 - [1. Supported NVIDIA GB10 Model Matrix](#1-supported-nvidia-gb10-model-matrix)
-- [2. Default Model Rationale](#2-default-model-rationale) (§2.2: the Minima candidate and night 2)
+- [2. Default Model Rationale](#2-default-model-rationale) (§2.2: the Minima candidate and night 2; §2.3: the Flash-Next trial)
 - [3. NVIDIA GB10 Hardware Specification](#3-nvidia-gb10-hardware-specification)
 - [4. Hardware Detection & Qualification](#4-hardware-detection--qualification)
 
@@ -19,12 +21,13 @@
 
 ## 1. Supported NVIDIA GB10 Model Matrix
 
-Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`. Each entry is a `ModelSpec`, and its `notes` field carries the full history of the recipe; read it before retuning one. All four entries are `compatible_gb10` (Minima, the fourth, since 2026-10-09), and Mightling serves one main model.
+Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`. Each entry is a `ModelSpec`, and its `notes` field carries the full history of the recipe; read it before retuning one. All five entries are `compatible_gb10` (Minima since 2026-10-09, Flash-Next since 2026-10-19), and Mightling serves one main model.
 
 | Alias | Model | Params | Format | Memory (min–max GB) | Vision | Role |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `qwen3.8-27b-nvfp4-dflash2` | Qwen 3.8 27B (NVFP4 + DFlash2, SGLang) | 27B | NVFP4 | 20–70 | ✅ | **The** main model (`DEFAULT_MODEL_ALIAS`, since 2026-09-29). Served by **SGLang**, not vLLM (`launch_overrides['engine']`) |
 | `qwen3.8-27b-minima-nvfp4-dflash2` | Qwen 3.8 27B Minima (all-NVFP4 + DFlash2, SGLang) | 27B | NVFP4 (compressed-tensors) | 19–70 | — | Candidate for night 2's A/B (§2.2); production's recipe with the checkpoint swapped. Added 2026-10-09 |
+| `qwen3.8-flash-next-nvfp4-mtp` | Qwen 3.8 Flash-Next (QAD NVFP4 + MTP, vLLM) | 125B (6B active) + 51B n-gram table + 4B MTP | NVFP4 / MXFP8 (QAD) | 100–115 | ✅ | **Trial candidate** (§2.3), status: registry entry ready, not yet booted. Served by **vLLM** nightly. Added 2026-10-19 |
 | `qwen3.8-27b-dflash2-draft` | Qwen 3.8 27B DFlash2 drafter (NVFP4) | 1B | NVFP4 | 1–2 | — | Drafter named by the main recipe's `speculative_config`; not served on its own. Listed so the memory gates have a size before the snapshot is on disk |
 | `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion) | 0.6B | BF16 | 1.5–3 | — | Default diffusion model (`DEFAULT_DIFFUSION_MODEL_ALIAS`); **not offered while diffusion is switched off** (`DIFFUSION_ENABLED = False` since 2026-10-03: never started, downloaded or listed). `is_diffusion`: **not** servable by vLLM; runs in the diffusion sidecar |
 
@@ -32,6 +35,7 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 - `RadixArk/Qwen3.8-27B-NVFP4`: the main model, pinned to revision `52d1adc5…`;
 - `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`: its drafter, pinned to revision `bd7a9342…`;
 - `minima-ai/mnma_qwen3.8_27b_nvfp4`: the night-2 candidate, pinned to revision `16e768e7…`;
+- `local-inference-lab/Qwen3.8-Flash-Next-NVFP4`: the Flash-Next trial, pinned to revision `6c01ac37…`;
 - `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1`: the diffusion model.
 
 **The recipe (`qwen3.8-27b-nvfp4-dflash2`)** runs on SGLang from `lmsysorg/sglang` pinned by digest (v0.5.21 since 1.6.4, which carries the unpublished 1.6.2's pin, after `docs/dev/sglang-probe-2026-10-14.md`; v0.5.19 before, from github.com/hasso5703/dgx-spark-qwen38 v1.18):
@@ -142,6 +146,34 @@ A start that fails or fails the canary skips arm B and serves production again.
 - **Dry runs.** `DRY_RUN=1 … run` prints every step and executes none. `DRY_FAIL=<key>` plays a failed start of that model. Both were run, along with the normal path and the paths where Minima, or production's restore, fails.
 
 **Not done, by instruction:** no quantizing or converting, no model server started or stopped, and no request to the model server.
+
+### 2.3. Trial candidate: Qwen3.8-Flash-Next (approved 2026-10-19; registry entry ready, not yet booted)
+
+**Status.** The owner approved the trial on 2026-10-19, together with a per-model memory-headroom override in place of the global start-gate estimate. The entry is on branch `models/flash-next` and is not merged. Its go comes after a day-time smoke boot on a free GB10, planned in `docs/dev/flash-next-smoke-boot.md` and not yet run. Production stays the default. The research, with checkpoints, engines and expected speed, is `docs/dev/flash-next-feasibility-2026-10-19.md`.
+
+**The checkpoint.** `local-inference-lab/Qwen3.8-Flash-Next-NVFP4` at `6c01ac378d22f6652c9f392c87700496eca8e5dc` (106.4 GB on disk, about 97.5 GiB loaded). It is quantization-aware distilled: experts and the 51B n-gram table in NVFP4 (the table at 26.8 GiB), attention and shared experts in MXFP8. It is the only export that both fits resident on one GB10 and loads on upstream vLLM. It has a vision tower. The licence is the Qwen Community License 1.0, to be checked before shipping.
+
+**The recipe** (`qwen3.8-flash-next-nvfp4-mtp`):
+- **Engine.** vLLM from `vllm/vllm-openai@sha256:1ff6716fe240a922d0d518b8884261e25b0c02eda8e2ce90888e364978249cad`, the 2026-10-19 nightly and the first image with #56273 (packed NVFP4 n-gram tables). No SGLang release loads this checkpoint (#41624).
+- **Speculation.** MTP at 3 draft tokens, `{"method": "mtp", "num_speculative_tokens": 3}`, passed through `resolve_speculative_config()`. The head ships inside the checkpoint, so there is no drafter to fetch.
+- **Context and memory.** Context 131,072, raised to the native 262,144 once the smoke boot's KV pool holds it. `gpu_memory_utilization` 0.86, FP8 KV cache, `--max-num-batched-tokens` 4096, `--mamba-cache-mode align`, `--max-num-seqs 4`.
+- **Parsers.** Tool calls `qwen3_coder`, reasoning parser `qwen3`.
+- **Chat template.** Production's two `chat_template_patches`, unchanged, because Qwen's template is byte-identical. vLLM launches now receive `--revision`, `--tokenizer-revision` and the patched `--chat-template` whenever a recipe pins a revision, as SGLang launches already did.
+
+**Why 0.86 and not 0.90.** The container's cgroup cap is the arena plus `container_headroom_gb`, clamped to total − `HOST_MEMORY_RESERVE_GB` (109.6 GiB on a 121.6 GiB GB10). A 0.90 arena (109.4 GiB) would therefore have left the process 0.2 GiB outside it. At 0.86 the arena is 104.6 GiB: 97.5 of weights and about 7 for KV, mamba state and graphs. That leaves 5 GiB under the cap.
+
+**The start gate's per-model figure.** `start_server()` refuses a load unless MemAvailable covers the arena plus a load transient. The transient was `max(4, 0.15 × weights)` for every model, calibrated on the 2026-08-14 freeze. For Flash-Next that is 104.6 + 14.9 = 119.5 GiB, more than any GB10 has free.
+- **The override.** A recipe may now carry `load_transient_gb`, which replaces the estimate for that model alone (`VLLMServerManager.load_transient_gb()`), still floored at 4 GiB.
+- **Flash-Next's figure.** It is 8.0 GiB, provisional, so the guarded first load needs 112.6 GiB free. The smoke boot measures the real transient, and its value plus 2 GiB replaces it.
+- **What does not change.** The gate still refuses a host that cannot meet the model's own figure. The refusal names the figure's source. `check_host_safety()` and the PSI watchdog are unchanged and on.
+
+**SWE-bench.** About 15 GiB stays free while serving, and each task container may take `task_memory` (8G) beside the 8 GiB reserve. The entry therefore sets `swe_bench_max_parallel=1`. `SweBenchRunner.max_parallel()` lowers `[swe_bench] max_parallel` to the served model's cap, found from `/v1/models` through the registry. This applies to this machine's lane and to the lanes of paired replicas, and the run says so when it applies. Two at once would need the smoke boot to show at least 24 GiB free. The A/B compares engine and checkpoint together (SGLang against vLLM), so night 2's "only the weights differ" argument does not hold, and its report must say so.
+
+**Risks the smoke boot checks.**
+- vLLM #54521: greedy output is nondeterministic and corrupted past the 2,048-token indexer budget. `scripts/long_prompt_probe.py determinism` checks it under and over the budget.
+- Silent long-context corruption, which a community build saw on GB10. `scripts/long_prompt_probe.py needle` checks it at 120K, and at 200K if the pool allows.
+- The SM121 NVFP4 path: the NVFP4 canary.
+- MTP on upstream vLLM with this checkpoint, which no one has measured.
 
 ---
 

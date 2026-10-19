@@ -14,6 +14,8 @@ Developer notes behind the host-safety rules in `AGENTS.md`. Specs: `specs/DREAM
 
   `_kill()` returns whether anything died, and the trip callback only fires when something did.
 
+Between the two, `start_server()` runs the memory gates. The weights must fit beside the host reserve and inside the arena, and the arena must leave the reserve. MemAvailable must then cover the arena plus a load transient. The transient is `max(MIN_LOAD_TRANSIENT_GB, LOAD_TRANSIENT_FRACTION × weights)`, unless the model's recipe carries a measured `load_transient_gb`, which replaces it for that model alone (`VLLMServerManager.load_transient_gb()`; approved 2026-10-19 for Qwen3.8-Flash-Next, whose global estimate no GB10 can meet). The floor still applies, the gate still refuses a host that cannot meet the model's own figure, and its message names where the figure came from. The watchdog does not read it.
+
 Host RAM exhaustion and GPU VRAM exhaustion are indistinguishable on GB10; the watchdog exists to make that distinction. Preserve both layers when touching `start_server()`. The SGLang engine runs from the same `docker run` prefix (`_docker_run_prefix`), so the layer is engine-independent.
 
 Other memory-safety rules elsewhere: `server start` stops the code index's scopes before its pre-flight ([code-index.md](code-index.md)), the context engine's indexing is bounded because it runs beside a resident model server ([context-engine.md](context-engine.md)), and the diffusion sidecar starts before vLLM when it is switched on ([diffusion.md](diffusion.md)).

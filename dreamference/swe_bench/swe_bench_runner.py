@@ -551,7 +551,11 @@ class SweBenchRunner:
                     print(f"⚠️  Not run: the model server at {vllm_host} is not answering.")
                     return 1
                 metrics = cls.host.metrics(vllm_host) or {}
-                parallel = cls.host.parallelism(settings.max_parallel, metrics.get("kv_pool", 0.0), settings.task_context)
+                max_parallel = cls.max_parallel(settings, served)
+                if max_parallel < settings.max_parallel:
+                    print(f"💡 At most {max_parallel} instance(s) at once: the cap of {served[0]}'s registry entry "
+                          f"(max_parallel is {settings.max_parallel}).", flush=True)
+                parallel = cls.host.parallelism(max_parallel, metrics.get("kv_pool", 0.0), settings.task_context)
                 runtime_hash = SweBenchRuntime.ensure(mightling_bin, SweBenchHarness.tool("patchelf"))
                 if runtime_hash is None:
                     return 1
@@ -703,6 +707,24 @@ class SweBenchRunner:
         raise KeyboardInterrupt
 
     @classmethod
+    def max_parallel(cls, settings: "swe_bench_settings.SweBenchSettings", served: Any) -> int:
+        """
+        The configured `max_parallel`, lowered to the served model's own cap if its registry entry
+        has one (`swe_bench_max_parallel`: a model that leaves the host too little memory for the
+        task containers).
+
+        Args:
+            settings: The benchmark's settings.
+            served: What the model server serves, `(model id, context length)`.
+
+        Returns:
+            int: At least 1.
+        """
+        from dreamference.hardware import ModelMatrixRegistry
+        cap = ModelMatrixRegistry.swe_bench_max_parallel(served[0] if served else None)
+        return max(1, min(settings.max_parallel, cap) if cap else settings.max_parallel)
+
+    @classmethod
     def lanes(cls, vllm_host: str, served: Any, settings: "swe_bench_settings.SweBenchSettings",
               parallel: int) -> Any:
         """
@@ -725,7 +747,8 @@ class SweBenchRunner:
         local = {"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel, "budget": None}
         if NodeLanes.wanted(settings.nodes) == [] or not NodePairing.paired():
             return [local], []
-        budget = lambda pool: (cls.host.parallelism(settings.max_parallel, pool, settings.task_context), None)
+        max_parallel = cls.max_parallel(settings, served)
+        budget = lambda pool: (cls.host.parallelism(max_parallel, pool, settings.task_context), None)
         lanes, skipped = NodeLanes.lanes(vllm_host, served, settings.nodes, cls.host, budget)
         lanes[0]["parallel"] = parallel
         notes = [f"Also using {lane['name']}'s model server ({lane['host']}): up to {lane['parallel']} instance(s) "
