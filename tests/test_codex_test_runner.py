@@ -226,6 +226,51 @@ def test_the_overlay_replaces_upstream_snapshots_and_applies_the_test_patches(tm
     assert "Ask Mightling" in test_file.read_text()
 
 
+def _cells(text: str) -> int:
+    """How many terminal cells a line takes: two for a wide character, one for any other."""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
+
+
+def _box_widths(lines: list[str]) -> list[list[int]]:
+    """The widths of each ╭…╰ box's rows, up to and including its right border."""
+    boxes = []
+    for index, line in enumerate(lines):
+        if "╭" not in line:
+            continue
+        start, widths = line.index("╭"), []
+        for row in lines[index:]:
+            if len(row) <= start or row[start] not in "╭│╰":
+                break
+            segment = row[start:]
+            end = max(segment.rfind("╮"), segment.rfind("│"), segment.rfind("╯"))
+            widths.append(_cells(segment[:end + 1]))
+            if row[start] == "╰":
+                break
+        boxes.append(widths)
+    return boxes
+
+
+@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
+def test_the_overlay_snapshots_keep_upstreams_widths():
+    # The Puffin -> Mightling rename replaced the name in place and left Puffin's padding: 68
+    # snapshots had a row three cells wider than the terminal or a box with one row sticking out,
+    # and `slash_side_requests_forked_side_question_while_task_running` failed on it (1.7.0 tests).
+    wrong = []
+    for path in glob.glob(os.path.join(runner_module.SNAPSHOT_OVERLAY_DIR, "**", "*.snap"), recursive=True):
+        relative = os.path.relpath(path, runner_module.SNAPSHOT_OVERLAY_DIR)
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().split("\n")
+        with open(os.path.join(CODEX_SUBMODULE_DIR, "codex-rs", relative), encoding="utf-8") as handle:
+            upstream = handle.read().split("\n")
+        rows = {_cells(line) for line in lines if len(line) > 1 and line[0] == line[-1] == '"'}
+        upstream_rows = {_cells(line) for line in upstream if len(line) > 1 and line[0] == line[-1] == '"'}
+        if rows != upstream_rows:
+            wrong.append(f"{relative}: rows {sorted(rows)}, upstream {sorted(upstream_rows)}")
+        wrong += [f"{relative}: box rows {widths}" for widths in _box_widths(lines) if len(set(widths)) > 1]
+    assert wrong == []
+
+
 def test_an_overlay_snapshot_with_no_upstream_original_stops_the_run(tmp_path, monkeypatch):
     (tmp_path / "export" / "codex-rs").mkdir(parents=True)
     overlay = tmp_path / "snapshots"
