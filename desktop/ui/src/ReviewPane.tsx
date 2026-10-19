@@ -72,6 +72,7 @@ export function ReviewPane(props: ReviewPaneProps) {
   const [forcePush, setForcePush] = useState(props.forcePushDefault);
   const [editors, setEditors] = useState<bridge.Editor[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [gitMissing, setGitMissing] = useState<string | null>(null);
   const { notice } = props;
 
   // The repositories of the thread's folder.
@@ -82,6 +83,7 @@ export function ReviewPane(props: ReviewPaneProps) {
       return;
     }
     let current = true;
+    bridge.git.missing().then((why) => current && setGitMissing(why)).catch(() => {});
     bridge.git.repos(props.cwd).then((found) => {
       if (!current) return;
       setRepos(found);
@@ -349,9 +351,9 @@ export function ReviewPane(props: ReviewPaneProps) {
             {status.upstream ? <span>{status.ahead ? ` ↑${status.ahead}` : ""}{status.behind ? ` ↓${status.behind}` : ""}{!status.ahead && !status.behind ? " up to date" : ""} with {status.upstream}</span> : null}
             {against ? <span className="against">against {against}</span> : null}
           </>
-        ) : !windowGit ? null : root ? "…" : "This folder is not in a git repository."}
+        ) : !windowGit ? null : root ? "…" : gitMissing ? "Git is unavailable on this machine." : "This folder is not in a git repository."}
       </div>
-      {error ? <div className="notice">{error}</div> : null}
+      {gitMissing && scope !== "turn" ? <div className="notice">{gitMissing}</div> : error ? <div className="notice">{error}</div> : null}
       {files.length > 0 && root && (scope === "unstaged" || scope === "staged") ? (
         <div className="review-all">
           {scope === "unstaged" ? (
