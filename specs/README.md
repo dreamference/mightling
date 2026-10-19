@@ -101,6 +101,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_RELEASE_1.6.0.md](./DREAMFERENCE_RELEASE_1.6.0.md) | *Published 2026-10-12:* `ling-docs`, the Mac preview, the new web UI, the messengers off by default |
 | [DREAMFERENCE_RELEASE_1.6.1.md](./DREAMFERENCE_RELEASE_1.6.1.md) | *Published 2026-10-14, cut after night 5:* the `offline` prompt, `apply_patch` on ling-engine, the nights' script and lists, the suite offline by construction, the results of nights 4–6 |
 | [DREAMFERENCE_RELEASE_1.6.3.md](./DREAMFERENCE_RELEASE_1.6.3.md) | *Published 2026-10-15:* turn-end compaction on by default at 20% of the usable window, the compaction request cache-hot (patch 0027), the 800-word summary cap, drop-first compaction built and off; there is no 1.6.2 |
+| [DREAMFERENCE_RELEASE_1.7.0.md](./DREAMFERENCE_RELEASE_1.7.0.md) | *Prepared 2026-10-19 on `release/1.7.0`, not yet published:* the desktop app's Work at parity with the Codex app, the Windows desktop installer, the Mac preview's fixes, the Onyx web chat retired, Night Shift best-of-N, several Signal bridges |
 | [DREAMFERENCE_RELEASE_1.6.4.md](./DREAMFERENCE_RELEASE_1.6.4.md) | *Published 2026-10-15, the current release:* the SGLang pin moved to v0.5.21 (`b1259f3e…`) and the Windows client built again; carries the unpublished 1.6.2 |
 
 ---
