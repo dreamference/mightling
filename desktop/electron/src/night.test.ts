@@ -26,7 +26,8 @@ describe("Night Shift for the Scheduled view", () => {
   });
 
   it("queues and drops through ling night, never writing a task itself", async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-cli-"));
+    // Real path: on macOS the temporary folder is a link (/var → /private/var), and ling reports where it runs.
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-cli-")));
     const log = path.join(home, "calls.txt");
     const ling = path.join(home, "ling");
     fs.writeFileSync(ling, `#!/bin/sh\necho "$PWD|$*" >> ${log}\necho "Queued 20261017-0900 on branch night/20261017-0900."\n`);
