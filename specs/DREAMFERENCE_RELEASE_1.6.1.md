@@ -1,8 +1,8 @@
 # Mightling 1.6.1 — release notes
 
-**Status:** prepared 2026-10-14 on the branch `release/1.6.1` (origin/main at `ad40db7`, the version
+**Status:** published 2026-10-14 as `v1.6.1` (tag on `3ade766`; this line updated 2026-10-19). Prepared 2026-10-14 on the branch `release/1.6.1` (origin/main at `ad40db7`, the version
 set to 1.6.1 in `setup.py`, `dreamference/__init__.py`, the MCP server's `serverInfo` and
-`desktop/electron/package.json`, and these notes); not yet published. Cut after night 5, as decided
+`desktop/electron/package.json`, and these notes). Cut after night 5, as decided
 on 2026-10-10, with the results of nights 4, 5 and 6 below. Built from `git log v1.6.0..origin/main`
 (the commits that are not board, chat or sessions lines; 5630dff, 0cf297a and 556b126 are left out
 because 1.6.0 already carries them as 6d7030b, b645195 and aef45a2). The text between the two rules
