@@ -1,0 +1,11 @@
+# `ling-admin`'s commands
+
+Developer notes behind the command lines in `AGENTS.md`. `ling-admin` is `dreamference.cli:main`; its parser and dispatch are `dreamference/cli/dreamference_cli_controller.py`.
+
+## Every subcommand
+
+`init`, `run`, `status`, `index`, `mcp`, `web`, `endpoints`, `searxng {start}`, `codex {build,start,stop,test}`, `code {setup}`, `docs {setup}`, `gmail {search,read,status}`, `google {start,stop,status}`, `night {enable,disable,status,run,pause,resume}`, `host {check,setup}`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}` (plus `authorize`, `serve-job` and `job-exec`, which no person types), `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}` (`--tui`, `--app`, `--web`, `--docs`), `logs {server,mcp}`, `benchmark_server`, `server {start,stop,remove,logs}`, `images {start,stop,status,mcp}`, `voice {start,stop,status}`, `chat {remove,status}` (alias: `onyx`; what is left of the retired Onyx web chat: every former subcommand says where its job went), `matrix {start,stop,status,add-user,push,remove}` (the private homeserver behind `ling chat`; unrelated to `ling-admin chat`), `desktop {install,run,build,status}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off), `clear {model-cache,tensorize-cache}`. Every command rejects unknown arguments.
+
+## Sidecars behind `ling web` and the app
+
+Image search is `ling-admin images start` (sidecar on `dreamference-sidecars`) and the `image_search` tool (`ling-admin images mcp`, declared by the launcher's `ling-rs/src/images.rs` on a node with image search set up, never at a configured `/airgapped on`); `ling web` and the app serve `/images/<id>.jpg`. Voice is `ling-admin voice start` (speaches, `127.0.0.1:8100`), behind `ling web`'s `/api/transcribe` and the app's `voice/transcribe`. `server start` on a node starts both and the Google service when absent, a failure only a warning. `ling-admin chat remove` takes Onyx's containers away (no `-v`) and, on a second yes, its data.
