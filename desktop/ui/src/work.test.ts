@@ -8,7 +8,7 @@ import { RpcClient, RpcError, type Transport } from "./rpc";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { ServerRequest } from "./protocol/ServerRequest";
 import type { Thread } from "./protocol/v2/Thread";
-import { contextUse, initialState, permissionChoices, projects, reduce, type Action, type WorkState } from "./store";
+import { contextUse, initialState, permissionChoices, projects, reduce, SERVER_EXITED, type Action, type WorkState } from "./store";
 
 function thread(id: string, cwd: string, updatedAt: number, extra: Partial<Thread> = {}): Thread {
   return {
@@ -201,6 +201,17 @@ describe("a scripted session", () => {
     const named = run([{ type: "dropNotice", message: "Name the project folder for the new thread." }], told);
     expect(named.notices).toEqual(["the model server stopped"]);
     expect(run([{ type: "dropNotice", message: "Name the project folder for the new thread." }], named)).toBe(named);
+  });
+
+  it("a server that is ready again takes back the notices of its exit, and only those", () => {
+    const exited = run([
+      { type: "notice", message: "the model server stopped" },
+      { type: "notice", message: `${SERVER_EXITED} with code 1` },
+      { type: "server", status: "exited" },
+      { type: "notice", message: SERVER_EXITED },
+    ], opened);
+    expect(run([{ type: "server", status: "starting" }], exited).notices).toEqual(exited.notices);
+    expect(run([{ type: "server", status: "starting" }, { type: "server", status: "ready" }], exited).notices).toEqual(["the model server stopped"]);
   });
 
   it("the server exiting drops the questions it can no longer take answers to", () => {

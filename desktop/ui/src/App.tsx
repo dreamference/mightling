@@ -33,7 +33,7 @@ import type { ThreadGoal } from "./protocol/v2/ThreadGoal";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
 import {
-  contextUse, initialState, isWorking, permissionChoices, projects, reduce, subagents, workingCount,
+  contextUse, initialState, isWorking, permissionChoices, projects, reduce, SERVER_EXITED, subagents, workingCount,
   type PendingRequest, type ThreadView, type TurnView,
 } from "./store";
 import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./BottomPanel";
@@ -362,7 +362,7 @@ export function App() {
       stderr: (line) => dispatch({ type: "stderr", line }),
       protocolError: (line) => dispatch({ type: "protocolError", line }),
       exit: (code) => {
-        client.fail(`the agent's server exited${code === null ? "" : ` with code ${code}`}`);
+        client.fail(`${SERVER_EXITED}${code === null ? "" : ` with code ${code}`}`);
         dispatch({ type: "server", status: "exited" });
       },
     }).then((unlisten) => {
