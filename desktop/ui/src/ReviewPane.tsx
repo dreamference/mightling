@@ -74,7 +74,13 @@ export function ReviewPane(props: ReviewPaneProps) {
   const [editors, setEditors] = useState<bridge.Editor[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [gitMissing, setGitMissing] = useState<string | null>(null);
+  /** The folder whose repositories `repos` and `root` are. */
+  const [resolvedCwd, setResolvedCwd] = useState<string | null>(null);
+  /** The folder and repository the diff and status on screen were read for. */
+  const [shown, setShown] = useState<{ cwd: string | null; root: string | null } | null>(null);
   const { notice } = props;
+  const cwdRef = useRef(props.cwd);
+  cwdRef.current = props.cwd;
 
   // The repositories of the thread's folder.
   useEffect(() => {
@@ -84,15 +90,23 @@ export function ReviewPane(props: ReviewPaneProps) {
       return;
     }
     let current = true;
-    // Another thread's folder: what the last repository showed goes at once, not when the new one answers.
+    // Another thread's folder: nothing of the last repository stays, not even its root, until this
+    // folder's own repositories answer (they took 20-45 s on a Mac waiting on a folder-access prompt,
+    // and the pane showed the last repository's diff with its Revert buttons live meanwhile).
+    setRepos([]);
+    setRoot(null);
+    setResolvedCwd(null);
+    setDiff("");
     setStatus(null);
     setAgainst(null);
     setCommits([]);
+    const cwd = props.cwd;
     bridge.git.missing().then((why) => current && setGitMissing(why)).catch(() => {});
-    bridge.git.repos(props.cwd).then((found) => {
-      if (!current) return;
+    bridge.git.repos(cwd).then((found) => {
+      if (!current || cwdRef.current !== cwd) return;
       setRepos(found);
       setRoot((chosen) => (chosen && found.includes(chosen) ? chosen : found[0] ?? null));
+      setResolvedCwd(cwd);
     }).catch(notice);
     bridge.listEditors().then((found) => current && setEditors(found)).catch(() => {});
     return () => {
@@ -109,21 +123,24 @@ export function ReviewPane(props: ReviewPaneProps) {
       setAgainst(null);
       return;
     }
+    const cwd = cwdRef.current;
     if (!root) {
       // Nothing of the last repository's carries over to a folder outside any (it showed "main, against the index").
       setDiff("");
       setStatus(null);
       setAgainst(null);
       setCommits([]);
+      setShown({ cwd, root: null });
       return;
     }
     try {
       const [answer, now] = await Promise.all([bridge.git.diff(root, scope, scope === "commit" ? commit : null), bridge.git.status(root)]);
-      // An answer for a repository the pane has since left is dropped.
-      if (rootRef.current !== root) return;
+      // An answer for a repository, or a folder, the pane has since left is dropped.
+      if (rootRef.current !== root || cwdRef.current !== cwd) return;
       setDiff(answer.diff);
       setAgainst(answer.against);
       setStatus(now);
+      setShown({ cwd, root });
       if (scope === "commit" && commits.length === 0) setCommits(await bridge.git.log(root));
     } catch (failure) {
       setDiff("");
@@ -135,7 +152,11 @@ export function ReviewPane(props: ReviewPaneProps) {
     void load();
   }, [load, props.refreshKey]);
 
-  const files = useMemo(() => parseDiff(diff), [diff]);
+  // What is on screen belongs to this thread's folder and the repository chosen in it, or nothing is
+  // shown: no diff, no Stage or Revert, no commit box (decided during the render, so not even one
+  // frame of the last thread's repository with live buttons). Last turn is the thread's own diff.
+  const ready = !windowGit || (resolvedCwd === props.cwd && shown !== null && shown.cwd === props.cwd && shown.root === root);
+  const files = useMemo(() => (scope === "turn" ? parseDiff(props.turnDiff ?? "") : ready ? parseDiff(diff) : []), [scope, props.turnDiff, ready, diff]);
 
   /** Runs a git step, then reads the repository again. */
   const step = async (label: string, action: () => Promise<unknown>) => {
@@ -358,7 +379,7 @@ export function ReviewPane(props: ReviewPaneProps) {
         </select>
       ) : null}
       <div className="review-status">
-        {scope === "turn" ? "What the last turn changed, from the agent." : status ? (
+        {scope === "turn" ? "What the last turn changed, from the agent." : !ready ? "Reading this folder's repository…" : status ? (
           <>
             {status.branch ? <span><Icon name="gitFork" size={12} /> {status.branch}</span> : <span>detached at {status.head?.slice(0, 8) ?? "nothing yet"}</span>}
             {status.upstream ? <span>{status.ahead ? ` ↑${status.ahead}` : ""}{status.behind ? ` ↓${status.behind}` : ""}{!status.ahead && !status.behind ? " up to date" : ""} with {status.upstream}</span> : null}
@@ -367,7 +388,7 @@ export function ReviewPane(props: ReviewPaneProps) {
         ) : !windowGit ? null : root ? "…" : gitMissing ? "Git is unavailable on this machine." : "This folder is not in a git repository."}
       </div>
       {gitMissing && scope !== "turn" ? <div className="notice">{gitMissing}</div> : error ? <div className="notice">{error}</div> : null}
-      {files.length > 0 && root && (scope === "unstaged" || scope === "staged") ? (
+      {files.length > 0 && root && ready && (scope === "unstaged" || scope === "staged") ? (
         <div className="review-all">
           {scope === "unstaged" ? (
             <>
@@ -381,7 +402,7 @@ export function ReviewPane(props: ReviewPaneProps) {
         <div className="review-all"><button className="link-button danger" onClick={props.onRevertTurn}>Revert the turn</button></div>
       ) : null}
       <div className="review-files">
-        {files.length === 0 ? <p className="empty small">{scope === "turn" ? "The last turn changed no files." : "No changes."}</p> : files.map(fileBlock)}
+        {files.length === 0 ? (scope === "turn" || ready ? <p className="empty small">{scope === "turn" ? "The last turn changed no files." : "No changes."}</p> : null) : files.map(fileBlock)}
       </div>
       {comments.length > 0 ? (
         <div className="review-send">
@@ -390,7 +411,7 @@ export function ReviewPane(props: ReviewPaneProps) {
           <button className="link-button" onClick={() => setComments([])}>Discard</button>
         </div>
       ) : null}
-      {windowGit && root && (scope === "unstaged" || scope === "staged") ? (
+      {windowGit && root && ready && (scope === "unstaged" || scope === "staged") ? (
         <footer className="commit-box">
           <textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Commit message" aria-label="Commit message" />
           <div className="commit-actions">

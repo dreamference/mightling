@@ -337,8 +337,12 @@ export async function main(options: MainOptions): Promise<void> {
       case "context-menu":
         showContextMenu(own, message);
         return null;
-      case "git/repos":
+      case "git/repos": {
+        // The e2e's stand-in for a folder that answers slowly (a macOS access prompt): phase2.e2e.ts, "6 review pane".
+        const delay = Number(process.env.MIGHTLING_TEST_GIT_REPOS_DELAY_MS ?? 0);
+        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         return git.repositories(message.cwd);
+      }
       case "git/missing":
         return git.gitToolsMissing();
       case "git/status":
