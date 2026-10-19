@@ -17,6 +17,7 @@ import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
 import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
+import { draftKeyOf, withDraft } from "./drafts";
 import { inGitInternals } from "./files";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
@@ -126,8 +127,15 @@ export function App() {
   useEffect(() => {
     if (newCwd.trim()) dispatch({ type: "dropNotice", message: NAME_THE_FOLDER });
   }, [newCwd]);
-  const [draft, setDraft] = useState("");
   const [view, setView] = useState<View>(initialView);
+  // One draft per thread (drafts.ts); `setDraft` writes the one in front, `setDraftFor` a named one.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftKey = draftKeyOf(view, state.selected);
+  const draft = drafts[draftKey] ?? "";
+  const draftKeyRef = useRef(draftKey);
+  draftKeyRef.current = draftKey;
+  const setDraftFor = useCallback((key: string, value: string | ((current: string) => string)) => setDrafts((all) => withDraft(all, key, value)), []);
+  const setDraft = useCallback((value: string | ((current: string) => string)) => setDraftFor(draftKeyRef.current, value), [setDraftFor]);
   const [search, setSearch] = useState("");
   const [found, setFound] = useState<{ thread: Thread; snippet: string }[] | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -681,12 +689,14 @@ export function App() {
   });
 
   const sendWork = async (message: string, mode: "default" | "steer" | "queue") => {
+    // The draft this message came from: a new thread's is cleared, not the thread's it starts.
+    const from = draftKeyRef.current;
     const target = selected?.thread ?? (await startThread());
     if (!target) return;
     const images = pending.filter((item) => item.kind === "image" && item.path).map((item) => item.path as string);
     const input = composeInput(message, rootSkills, images);
     if (input.length === 0) return;
-    setDraft("");
+    setDraftFor(from, "");
     const files = pending;
     setPending([]);
     const shown = selected?.thread.id === target.id ? selected : null;
@@ -705,7 +715,7 @@ export function App() {
       promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
     } catch (error) {
-      setDraft(message);
+      setDraftFor(from, message);
       setPending(files);
       notice(error);
     }
@@ -713,8 +723,9 @@ export function App() {
 
   const sendAsk = async (message: string, mode: "default" | "steer" | "queue") => {
     const files = pending;
+    const from = draftKeyRef.current;
     setSending(true);
-    setDraft("");
+    setDraftFor(from, "");
     setPending([]);
     try {
       const thread = selected?.thread ?? (await startAsk());
@@ -728,7 +739,7 @@ export function App() {
       promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
     } catch (error) {
-      setDraft(message);
+      setDraftFor(from, message);
       setPending(files);
       notice(error);
     } finally {
