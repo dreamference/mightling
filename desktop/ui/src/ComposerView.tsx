@@ -323,7 +323,7 @@ function ModelPicker(props: ComposerProps) {
     <span className="picker-anchor">
       <button className="chip model-chip" title={`Model and effort (${shortcutLabel("modelPicker")})`} aria-haspopup="menu" aria-expanded={props.picker !== "closed"}
         onClick={() => props.setPicker(props.picker === "closed" ? "open" : "closed")}>
-        {label}<Icon name="chevronDown" size={12} />
+        <span className="chip-label">{label}</span><Icon name="chevronDown" size={12} />
       </button>
       {props.picker !== "closed" ? (
         <div className="picker" role="menu" aria-label="Model and effort" onKeyDown={(event) => event.key === "Escape" && props.setPicker("closed")}>

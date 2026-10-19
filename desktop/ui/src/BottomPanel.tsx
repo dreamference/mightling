@@ -107,7 +107,7 @@ export function BottomPanel(props: BottomPanelProps) {
         ) : null}
         {!task && !terminal ? (
           <p className="empty small panel-empty">{props.environment
-            ? `${props.environment.name}: its actions run here (Super+Shift+D runs the first); + opens a terminal.`
+            ? `${props.environment.name}: its actions run here (${shortcutLabel("environmentAction1")} runs the first); + opens a terminal.`
             : props.project ? "+ opens a terminal in this thread's folder. This project has no local environment yet: Environment… makes one in .mightling/." : "Open a thread in a project to run a terminal here."}</p>
         ) : null}
       </div>
