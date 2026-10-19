@@ -318,6 +318,7 @@ jobs:
           if (-not (Test-Path $shortcut)) { throw "no Start menu entry at $shortcut" }
           $scratch = Join-Path $env:RUNNER_TEMP "mightling-app-home"
           New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          $ownProfile = $env:USERPROFILE
           $env:USERPROFILE = $scratch
           $env:CODEX_HOME = Join-Path $scratch ".mightling"
           $env:MIGHTLING_APP_AUDIT = "8"
@@ -326,6 +327,8 @@ jobs:
           $null = $started.Handle  # kept, so ExitCode is there after the app has gone
           if (-not $started.WaitForExit(90000)) { Stop-Process -Id $started.Id -Force; throw "the app did not quit by itself" }
           if ($started.ExitCode -ne 0) { throw "the app exited with $($started.ExitCode)" }
+          # The uninstaller with the runner's own profile: Windows finds the Start menu from USERPROFILE.
+          $env:USERPROFILE = $ownProfile
           # An NSIS uninstaller copies itself to the temporary folder and runs from there, so -Wait
           # returns at once: wait for the folder to go.
           Start-Process -FilePath (Join-Path $installed "Uninstall Mightling.exe") -ArgumentList "/S" -Wait
