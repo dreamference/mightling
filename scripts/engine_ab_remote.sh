@@ -14,15 +14,27 @@
 # tokens; engine bench/sglang/serve.py, whose flag list is production's, with 1.6.4's renamed CUDA-graph flag),
 # ling-serve the engine's A/B recipe (engine MILESTONES §14). Files under AB_DIR (default ~/ab-n12): ling-serve (the
 # engine binary, pinned by sha256 in its .sha256), serve.py, and the logs.
+#
+# The GPU lock: the engine's agents share second-puffin's GPU under `flock ~/.ling-gpu.lock`. The night holds that
+# same lock for the whole time an arm runs, not only while it starts: the first `serve` waits for it (GPU_LOCK_WAIT,
+# 14 h by default, since day-time engine work ends by 20:00 UTC) and hands it to a detached lease process
+# (`ab-n12-gpu-lease`, its pid in AB_DIR/gpu-lease.pid), which later `serve`s reuse and `restore` ends once
+# production is started again. The lease ends by itself after HOLD_MAX (30 h) in case no `restore` ever comes.
+# ~/gpu.lock stays the inner lock between this helper's own `serve` and `restore`; the GPU lock is always taken first.
 set -u
 AB_DIR=${AB_DIR:-$HOME/ab-n12}
 SG_NAME=ab-n12-sglang
 SG_PORT=${SG_PORT:-30000}
 ENGINE_PORT=${ENGINE_PORT:-8300}
 SG_IMAGE=lmsysorg/sglang@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469
-MODEL=$(ls -d "$HOME"/.cache/huggingface/hub/models--RadixArk--Qwen3.8-27B-NVFP4/snapshots/52d1adc5f38aa5ebf099c29ed7025ba34cfbb854 2>/dev/null)
-DRAFT=$HOME/.cache/dreamference/drafters/dflash2-nvfp4-scalesearch
-DRAFT_SHA256=5ec78f26b5254d46bd376b2127ce87d6dfb0b6653e01d6f36983cfd3fdc35f4b
+MODEL=$(ls -d "${MODEL_DIR:-$HOME/.cache/huggingface/hub/models--RadixArk--Qwen3.8-27B-NVFP4/snapshots/52d1adc5f38aa5ebf099c29ed7025ba34cfbb854}" 2>/dev/null)
+DRAFT=${DRAFT:-$HOME/.cache/dreamference/drafters/dflash2-nvfp4-scalesearch}
+DRAFT_SHA256=${DRAFT_SHA256:-5ec78f26b5254d46bd376b2127ce87d6dfb0b6653e01d6f36983cfd3fdc35f4b}
+GPU_LOCK=${GPU_LOCK:-$HOME/.ling-gpu.lock}
+GPU_LOCK_WAIT=${GPU_LOCK_WAIT:-50400}
+HOLD_MAX=${HOLD_MAX:-30h}
+SETTLE_S=${SETTLE_S:-20}
+HOLDER=ab-n12-gpu-lease
 
 log() { echo "$(date -Is) $*" | tee -a "$AB_DIR/remote.log" >&2; }
 answers() {  # port -> owned_by of /v1/models, empty when nothing answers
@@ -63,6 +75,25 @@ port_free() {  # port, seconds: waits until nothing listens on it; names the hol
 keep_logs() {  # the SGLang arm's container log, kept before the container goes
     docker logs "$SG_NAME" > "$AB_DIR/sglang-$(date +%Y%m%d-%H%M%S).log" 2>&1
 }
+lease_pid() {  # the live lease process holding the GPU lock for the night, or nothing
+    local p
+    p=$(cat "$AB_DIR/gpu-lease.pid" 2>/dev/null)
+    [ -n "$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q "^$HOLDER " && echo "$p"
+}
+take_lease() {  # the GPU lock, held from now until `restore` by a detached lease process
+    local p
+    if p=$(lease_pid); then log "the GPU lock is already the night's (lease $p)"; return 0; fi
+    rm -f "$AB_DIR/gpu-lease.pid"
+    log "waiting for the GPU lock $GPU_LOCK (at most $GPU_LOCK_WAIT s)"
+    exec 8> "$GPU_LOCK"
+    flock -w "$GPU_LOCK_WAIT" 8 || { exec 8>&-; log "the GPU lock was not free within $GPU_LOCK_WAIT s"; return 1; }
+    # The lease inherits fd 8, so the lock stays taken after this ssh session ends; nothing else started here does.
+    setsid nohup bash -c "exec -a $HOLDER sleep $HOLD_MAX" > /dev/null 2>&1 < /dev/null 9>&- &
+    p=$!
+    exec 8>&-
+    echo "$p" > "$AB_DIR/gpu-lease.pid"
+    log "GPU lock taken ($GPU_LOCK, lease $p)"
+}
 
 mkdir -p "$AB_DIR"
 case "${1:-}" in
@@ -70,13 +101,14 @@ serve)
     arm=${2:-}
     [ -n "$MODEL" ] || { log "the target's snapshot is missing"; exit 1; }
     [ "$(sha256sum "$DRAFT/model.safetensors" | cut -d' ' -f1)" = "$DRAFT_SHA256" ] || { log "the ScaleSearch drafter is missing or changed"; exit 1; }
-    exec 9> "$HOME/gpu.lock"; flock -w 1800 9 || { log "the GPU lock was not free within 30 min"; exit 1; }
+    take_lease || exit 1
+    exec 9> "$HOME/gpu.lock"; flock -w 1800 9 || { log "the helper's own lock was not free within 30 min"; exit 1; }
     stop_prod
     stop_arms
     # The night of 2026-10-18 lost its SGLang arm: the container exited (status 0) at about the time it binds its
     # port, 6.5 min into the start, and its log went with it. So: production gets a moment to let go of the GPU,
     # the arm's port must be free, the log is kept, and an arm that exits before it answers is started once more.
-    sleep 20
+    sleep "$SETTLE_S"
     case "$arm" in sglang) port=$SG_PORT; container=$SG_NAME ;; engine) port=$ENGINE_PORT; container= ;;
         *) log "serve: no arm $arm (sglang or engine)"; exit 2 ;; esac
     port_free "$port" 120 || { stop_arms; exit 1; }
@@ -100,7 +132,7 @@ serve)
         [ -n "$container" ] && keep_logs
         stop_arms
         own=
-        [ "$attempt" = 1 ] && { sleep 20; port_free "$port" 120 || exit 1; }
+        [ "$attempt" = 1 ] && { sleep "$SETTLE_S"; port_free "$port" 120 || exit 1; }
     done
     [ -n "$own" ] || exit 1
     [ -n "$container" ] && keep_logs
@@ -109,16 +141,26 @@ serve)
     ;;
 restore)
     # The stop and the start run detached from this ssh session, so production comes back even when the caller
-    # is stopped or its connection drops halfway (a stopped night unit has 90 s before systemd kills it).
-    export AB_DIR SG_NAME
-    export -f log engine_pids stop_arms
-    setsid nohup bash -c 'exec 9> "$HOME/gpu.lock"; flock -w 1800 9; stop_arms; docker start m0-prod8000 > /dev/null 2>&1' \
+    # is stopped or its connection drops halfway (a stopped night unit has 90 s before systemd kills it). The night's
+    # lease on the GPU lock ends only after production is started; with no lease, the GPU lock is taken for the
+    # restore, and when someone else holds it production is theirs to bring back (their own protocol).
+    export AB_DIR SG_NAME GPU_LOCK HOLDER
+    export -f log engine_pids stop_arms lease_pid
+    setsid nohup bash -c '
+        lease=$(lease_pid)
+        if [ -z "$lease" ]; then
+            exec 8> "$GPU_LOCK"
+            flock -w 1800 8 || { log "the GPU lock is held by other work; m0-prod8000 left to it"; stop_arms; exit 1; }
+        fi
+        exec 9> "$HOME/gpu.lock"; flock -w 1800 9
+        stop_arms; docker start m0-prod8000 > /dev/null 2>&1
+        if [ -n "$lease" ]; then kill "$lease"; rm -f "$AB_DIR/gpu-lease.pid"; log "GPU lock released (lease $lease)"; fi' \
         >> "$AB_DIR/remote.log" 2>&1 < /dev/null &
     own=$(wait_ready 8000 900) && log "m0-prod8000 back ($own)" || { log "m0-prod8000 did not answer within 15 min"; exit 1; }
     echo "restored"
     ;;
 status)
-    echo "sglang: $(answers "$SG_PORT") engine: $(answers "$ENGINE_PORT") m0-prod8000: $(answers 8000)"
+    echo "sglang: $(answers "$SG_PORT") engine: $(answers "$ENGINE_PORT") m0-prod8000: $(answers 8000) lease: $(lease_pid)"
     ;;
 *) echo "usage: engine_ab_remote.sh serve sglang|engine | restore | status" >&2; exit 2 ;;
 esac
