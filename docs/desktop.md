@@ -28,6 +28,41 @@ ling app
 
 `ling-admin desktop status` reports whether everything needed to build and run it is present.
 
+### From a zip or an unpacked folder (Linux)
+
+Ubuntu 24.04 and later let a program create the user namespace Chromium's sandbox needs only if
+an AppArmor profile names it, and the app ships no setuid sandbox helper. The `.deb` writes that
+profile for `/usr/lib/mightling/Mightling`, and `ling-admin desktop install` writes one for a
+checkout's build. Nothing installs a zip or a copied `Mightling-linux-<arch>/` folder, so without
+a profile the app dies at start with **`No usable sandbox!`** (opened with `ling app`, nothing
+appears at all). Before the first start, run the script beside the binary once:
+
+```bash
+cd ~/Mightling-linux-arm64          # wherever you unpacked it
+./install-sandbox-profile.sh        # prints the two sudo commands, then runs them (sudo asks once)
+./Mightling
+```
+
+The profile names the binary's path, so moving the folder needs the script run again (from the
+new place; one unpacked copy at a time). `./install-sandbox-profile.sh --print` shows the profile
+and changes nothing. A build older than the script needs the same profile written by hand, with
+`APP` set to the binary's absolute path:
+
+```bash
+APP="$HOME/Mightling-linux-arm64/Mightling"
+sudo tee /etc/apparmor.d/mightling-unpacked >/dev/null <<EOF
+abi <abi/4.0>,
+include <tunables/global>
+profile mightling-unpacked "$APP" flags=(unconfined) {
+  userns,
+}
+EOF
+sudo apparmor_parser -r -T -W /etc/apparmor.d/mightling-unpacked
+```
+
+Never start it with `--no-sandbox` instead: that turns off the sandbox around every page the app
+shows.
+
 ## On a Mac (preview)
 
 The release page carries the app for macOS as a preview: `Mightling-<version>-arm64-preview.dmg`
