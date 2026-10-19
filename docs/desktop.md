@@ -83,6 +83,12 @@ instead. Install the tools once in Terminal:
 xcode-select --install
 ```
 
+The preview never asks for your keychain: it starts without the "Mightling Safe Storage" entry
+that Chromium apps keep there (each unsigned build would ask again, and a start could wait on the
+prompt with no window). The app keeps no password or token; the one thing that entry would protect
+is the cookies of pages opened in the preview tab, which are stored without it. This will change
+once the app is signed with a Developer ID.
+
 What the preview does not do yet: `ling app` in a Mac terminal does not open it (open it from
 Applications or Spotlight), it does not update itself (download the new dmg), and closing its
 window quits it, as on Linux.
