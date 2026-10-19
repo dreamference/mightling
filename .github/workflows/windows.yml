@@ -314,6 +314,8 @@ jobs:
           if (-not (Test-Path (Join-Path $installed "resources\ling.exe"))) { throw "the installed app has no ling.exe" }
           $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Mightling"
           if ((Get-ItemProperty $key).DisplayVersion -ne $env:MIGHTLING_VERSION) { throw "the uninstall entry does not say $env:MIGHTLING_VERSION" }
+          $shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Mightling.lnk"
+          if (-not (Test-Path $shortcut)) { throw "no Start menu entry at $shortcut" }
           $scratch = Join-Path $env:RUNNER_TEMP "mightling-app-home"
           New-Item -ItemType Directory -Force -Path $scratch | Out-Null
           $env:USERPROFILE = $scratch
@@ -321,11 +323,16 @@ jobs:
           $env:MIGHTLING_APP_AUDIT = "8"
           $env:ELECTRON_ENABLE_LOGGING = "1"
           $started = Start-Process -FilePath $app -PassThru
+          $null = $started.Handle  # kept, so ExitCode is there after the app has gone
           if (-not $started.WaitForExit(90000)) { Stop-Process -Id $started.Id -Force; throw "the app did not quit by itself" }
           if ($started.ExitCode -ne 0) { throw "the app exited with $($started.ExitCode)" }
+          # An NSIS uninstaller copies itself to the temporary folder and runs from there, so -Wait
+          # returns at once: wait for the folder to go.
           Start-Process -FilePath (Join-Path $installed "Uninstall Mightling.exe") -ArgumentList "/S" -Wait
-          Start-Sleep -Seconds 5
+          $deadline = (Get-Date).AddSeconds(120)
+          while ((Test-Path $installed) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
           if (Test-Path $app) { throw "the uninstaller left Mightling.exe" }
+          if (Test-Path $shortcut) { throw "the uninstaller left the Start menu entry" }
           if (Test-Path $key) { throw "the uninstaller left its Apps entry" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
