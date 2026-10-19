@@ -34,7 +34,8 @@ export interface Environment {
 }
 
 const FOLDERS = [".mightling", ".codex"];
-export const WRITE_FILE = path.join(".mightling", "environments", "default.toml");
+// Forward slashes on every platform: the page shows these names and sends them back (path.join accepts them on Windows).
+export const WRITE_FILE = path.posix.join(".mightling", "environments", "default.toml");
 
 type Table = Record<string, unknown>;
 const isTable = (value: unknown): value is Table => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -77,10 +78,10 @@ export function environments(project: string, platform: NodeJS.Platform = proces
   const found: Environment[] = [];
   const problems: string[] = [];
   for (const folder of FOLDERS) {
-    const candidates = [path.join(folder, "environment.toml")];
+    const candidates = [path.posix.join(folder, "environment.toml")];
     try {
       for (const name of fs.readdirSync(path.join(project, folder, "environments")).sort()) {
-        if (name.endsWith(".toml")) candidates.push(path.join(folder, "environments", name));
+        if (name.endsWith(".toml")) candidates.push(path.posix.join(folder, "environments", name));
       }
     } catch {
       // No environments folder.

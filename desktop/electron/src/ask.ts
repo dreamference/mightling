@@ -9,6 +9,7 @@
 // page asks for, and attachments for it land there. No Electron here, so this tests on its own.
 
 import { spawn } from "node:child_process";
+import { command } from "./platform";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -125,7 +126,8 @@ export class MessagePrompts implements PromptSource {
 export function composePrompt(ling: string, name: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs = COMPOSE_TIMEOUT_MS): Promise<string> {
   privateDir(cwd);
   return new Promise((resolve, reject) => {
-    const child = spawn(ling, ["prompt", "show", name, "--composed"], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const run = command(ling, ["prompt", "show", name, "--composed"]);
+    const child = spawn(run.file, run.args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], shell: run.shell, windowsHide: true });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
