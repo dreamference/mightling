@@ -373,6 +373,7 @@ def test_packages_are_installed_again_when_the_lock_file_changes(tmp_path):
 
     def fake_npm(args, cwd):
         calls.append(Path(cwd).name)
+        (Path(cwd) / "node_modules").mkdir(exist_ok=True)
         return True
 
     with patch.object(runner_module, "UI_DIR", ui), patch.object(runner_module, "ELECTRON_DIR", electron), \
