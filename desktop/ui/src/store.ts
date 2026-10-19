@@ -85,7 +85,9 @@ export type Action =
   | { type: "notice"; message: string }
   | { type: "queue"; threadId: string; items: QueuedSubmission[] }
   | { type: "goal"; threadId: string; goal: ThreadGoal | null }
-  | { type: "dismissNotice"; index: number };
+  | { type: "dismissNotice"; index: number }
+  /** Takes back a notice whose cause is gone (a folder now named), wherever it is in the list. */
+  | { type: "dropNotice"; message: string };
 
 const STDERR_KEPT = 200;
 
@@ -335,7 +337,10 @@ export function reduce(state: WorkState, action: Action): WorkState {
     case "archived":
       return removeThread(state, action.threadId);
     case "notice":
-      return { ...state, notices: [...state.notices, action.message].slice(-5) };
+      // The same notice again moves to the end rather than stacking up.
+      return { ...state, notices: [...state.notices.filter((message) => message !== action.message), action.message].slice(-5) };
+    case "dropNotice":
+      return state.notices.includes(action.message) ? { ...state, notices: state.notices.filter((message) => message !== action.message) } : state;
     case "dismissNotice":
       return { ...state, notices: state.notices.filter((_, index) => index !== action.index) };
     case "queue":

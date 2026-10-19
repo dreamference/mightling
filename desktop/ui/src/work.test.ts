@@ -191,6 +191,18 @@ describe("a scripted session", () => {
     expect(state).toBe(opened);
   });
 
+  it("a notice whose cause is gone is taken back, and the same notice does not stack up", () => {
+    const told = run([
+      { type: "notice", message: "Name the project folder for the new thread." },
+      { type: "notice", message: "the model server stopped" },
+      { type: "notice", message: "Name the project folder for the new thread." },
+    ], opened);
+    expect(told.notices).toEqual(["the model server stopped", "Name the project folder for the new thread."]);
+    const named = run([{ type: "dropNotice", message: "Name the project folder for the new thread." }], told);
+    expect(named.notices).toEqual(["the model server stopped"]);
+    expect(run([{ type: "dropNotice", message: "Name the project folder for the new thread." }], named)).toBe(named);
+  });
+
   it("the server exiting drops the questions it can no longer take answers to", () => {
     const asked = run([{ type: "serverRequest", request: { id: 1, method: "item/fileChange/requestApproval", params: { threadId: "t1" } } as unknown as ServerRequest }], opened);
     expect(run([{ type: "server", status: "exited" }], asked).requests).toEqual([]);
