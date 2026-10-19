@@ -2,8 +2,10 @@ diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.
 index 93c12fc..09820e8 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
-@@ -313,2 +313,4 @@ impl SlashCommand {
+@@ -313,2 +313,6 @@ impl SlashCommand {
              SlashCommand::Feedback => false,
 +            // Mightling: hidden, not removed -- auto-review defaults to OpenAI's codex-auto-review model, which ling lacks.
 +            SlashCommand::AutoReview => false,
++            // Mightling: hidden, so typed /import is not found either -- its plugin step clones GitHub marketplaces.
++            SlashCommand::Import => false,
              SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),
