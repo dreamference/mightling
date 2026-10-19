@@ -1,6 +1,6 @@
 # Mightling Adapters — signed LoRA specialists on the served base
 
-> - **Status:** proposed, nothing built. The design was decided by the owner on 2026-10-19 (§2); everything else here is the specification of that design, with the points it leaves open in §17.
+> - **Status:** proposed, nothing built. The design was decided by the owner on 2026-10-19 (§2), and four of this document's open questions were answered the same day (§2.1: signing in CI, the publishing bar, the Rust benchmark, adapters on paired nodes); everything else here is the specification of that design, with the points still open in §17.
 > - **Serving on SGLang is not yet known to work with DFlash2.** It is being tested on branch `research/lora-serving-probe` (2026-10-19). That branch was on neither `origin` nor this checkout when this document was written, so none of its results are reflected here; §8.4 lists what the probe must answer and what each answer changes.
 > - **Builds on:** the model registry and the served checkpoint ([MODELS](./DREAMFERENCE_MODELS.md)), the SGLang recipe, the model gate and host safety ([INFERENCE](./DREAMFERENCE_INFERENCE.md), `docs/dev/swe-bench.md`), the release key and SSHSIG format ([RELEASE_SIGNING](./DREAMFERENCE_RELEASE_SIGNING.md)), the launcher and the patch budget ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md) §3–§4), the desktop app's model chip ([MIGHTLING_DESKTOP_PARITY](./DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md) §2.3), the egress audit ([MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md)), and the drafter work of [SELF_SPEEDING](./DREAMFERENCE_SELF_SPEEDING.md).
 
@@ -51,6 +51,15 @@ Make the one served model better at specific languages without serving a second 
 3. **Switching.** Per session: `/adapter <name>` in `ling`, and a picker in the desktop app. Concurrent sessions may use different adapters.
 4. **First adapters.** Per-language specialists, for example Rust, C++/CUDA and TypeScript.
 
+### 2.1 Answers to this document's questions (2026-10-19)
+
+The first draft's open questions 5, 7, 8 and 11 (§17) were answered by the owner on the day:
+
+- **Signing is a CI job** in the GitHub `release` environment, with the release Ed25519 key, under the `mightling-adapter` namespace, and automatic, like releases (RELEASE_SIGNING §4, changed 2026-10-12). §5.1 specifies the job.
+- **The publishing bar:** a clear gain on the adapter's language; at most **1 task lost** on a Python control night; at most **5% tok/s lost**, measured with its drafter adapter (§7.3).
+- **The Rust benchmark** is the Rust subset of SWE-bench Multilingual (§7.3). The C++/CUDA and TypeScript sets are not chosen yet.
+- **Paired nodes:** `ling-admin node sync-model` copies the installed **signed** adapters to paired nodes (§6.4).
+
 The constraints set with them, each specified below: air-gapped by default, with downloading an explicit command (§6, §14); a signed manifest (§4); training against the exact served NVFP4 checkpoint, with a drafter adapter per adapter (§7); unmerged serving, SGLang multi-LoRA first and ling-engine second (§8, §9); the model id `base+<adapter>` (§10); and four security rules (§13).
 
 ---
@@ -64,6 +73,7 @@ The constraints set with them, each specified below: air-gapped by default, with
 | `ling-admin adapter download --repo <org>/<repo>@<commit>` | node | An adapter signed by Dreamference but not in this release's catalogue (published after it). The commit is required: a branch name is refused |
 | `ling-admin adapter download --third-party --repo <org>/<repo>@<commit>` | node | A third-party adapter (§5.4): prints the warning, asks for the typed confirmation, installs with `trust = third-party` |
 | `ling-admin adapter remove <name> [--version <v>]` | node | Unloads it if loaded (§8.3), deletes its snapshot and its entry. A running session on it has its next request refused with the reason, never silently answered by another model; `/adapter off` or a new session returns to the base (§10.3) |
+| `ling-admin node sync-model <node>` | node | Also copies the installed signed adapters to the paired node, which verifies them itself; third-party adapters are never copied (§6.4) |
 | `/adapter`, `/adapter <name>`, `/adapter off` | `ling` TUI | Shows the session's adapter and the installed ones; switches this session (§11.1) |
 | `ling --adapter <name> …` | `ling` | Starts or resumes a session with that adapter; the launcher handles the flag before Codex parses its arguments, like `ling app` (§10.3) |
 | `mightling_adapter = "<name>"` / `DREAMFERENCE_MIGHTLING_ADAPTER` | config / env | The adapter a new session starts with; unset means the base. The tier order is cave mode's: the session's own file, the variable, the TOML file, then the base |
@@ -176,6 +186,15 @@ release key (Ed25519)
             └─ drafter/adapter_model.safetensors, drafter/adapter_config.json
 ```
 
+**Signing in CI (decided 2026-10-19).** Manifests are signed by a job of the release workflow's kind, never by hand:
+
+- **Where:** a workflow job that declares `environment: release`, so it can read `RELEASE_SIGNING_KEY` only from `main` and `release/*` (RELEASE_SIGNING §4's branch policy). Like releases since 2026-10-12, it asks for no approval: a push of a manifest to `main` ends in a signed, published adapter.
+- **Input:** a manifest committed to this repository (`adapters/<name>/<version>/manifest.json`) whose `files` name weights already uploaded to the adapter's Hugging Face repository at a named commit. The weights come from training (§7), not from the workflow.
+- **Steps:** check that each file's sha256 in the manifest equals the Hugging Face repository's recorded hash for that file at that commit (from repository metadata, without downloading the weights); check `base.digest` and `drafter_base.digest` against the registry's pinned revisions; sign with `ssh-keygen -Y sign -n mightling-adapter`, the key written to a 0600 temporary file only for that call; verify the signature against `ling-rs/release-signing.pub` before publishing, as the release job checks its own (a key that does not match stops the job); upload `manifest.json` and `manifest.json.sig` to the adapter's repository as a new commit; attach a build-provenance attestation to both files, as releases do.
+- **Output:** the new commit and the manifest's sha256, written back as the catalogue entry (§6.1) by a pull request the job opens, so the next release carries the pin.
+- **Upload credential:** a Hugging Face write token for the organisation, a secret of the same `release` environment, used by this job alone.
+- A manifest missing a required field, a hash that does not match, or a base that is not the registry's stops the job before anything is signed.
+
 **Verifying in `ling-admin`.** Python's standard library has no Ed25519 (RELEASE_SIGNING §3), and the package has no cryptography dependency. `ling-admin` verifies with `ssh-keygen -Y verify`, exactly as install.sh does, against an `allowed_signers` file built from the public keys the package carries (`dreamference/hardware/release-signing.pub`, package data, so a release install has it too). A test keeps that file equal to `ling-rs/release-signing.pub`, as one already keeps install.sh's `RELEASE_KEYS` equal to it. A missing `ssh-keygen` stops `download` and names the package (`openssh-client`); there is no opt-out (the same reasoning as RELEASE_SIGNING §3). The alternative, a `ling adapter verify` subcommand backed by `release_signature.rs`, is §17's question 6.
 
 **When it is checked.** At `download`, before the adapter is recorded as installed; at every `server start`, for every installed adapter, before the engine is told about it; and at every load (§8.3), where the files are hashed again against the manifest. A file changed on disk after installation is caught at its next load, and the adapter is refused, not served.
@@ -250,6 +269,15 @@ The token is the model download's (INFERENCE §2.1): `--hf-token`, `HF_TOKEN`, `
 - **Never in a repository.** Which adapters a person installed, and which one a session uses, are the user's choices, and live under the user's home (AGENTS.md's rule), never in a workspace a clone or the agent can write.
 - **A library of 100** at rank 16 is about 22 GB on disk (§12). `remove` deletes the adapter's snapshot from the hub cache through `huggingface_hub`'s cache API, never a parent folder (the lesson of `clear model-cache`, README "Fixed on 2026-09-29").
 
+### 6.4 Paired nodes (decided 2026-10-19)
+
+`ling-admin node sync-model` (MIGHTLING_NODE) also copies the installed **signed** adapters to the paired node, over the same SSH forced command as the model, after the model itself:
+
+- **Only `trust = dreamference` adapters are copied.** A third-party adapter is never copied: its install needs the typed confirmation of §5.4 on each node, by a person.
+- **The receiving node verifies on its own** before recording anything: the signature against its own key list, every file's hash against the manifest, and the base digest against the model *it* serves. A node that serves another base receives the files but lists them as `base mismatch`, as a download would.
+- **Nothing is removed on the other side.** An adapter removed here stays installed on the paired node until `adapter remove` runs there.
+- Copying adds no destination outside the LAN: it is the node-to-node path the model already takes.
+
 ---
 
 ## 7. Training against the served base
@@ -275,11 +303,19 @@ Speculation stays exact whatever the drafter does: the target verifies every dra
 
 Each adapter's `evals` (§4.2) record one run on this machine's serving stack, with these numbers for the base, the adapter with its drafter adapter, and the adapter with the base drafter:
 
-- **its language's score** on a task set in that language (which set is §17's question 7: SWE-bench Verified, the benchmark this project keeps, is Python only);
-- **a Python control** on a fixed SWE-bench Verified subset, to show the adapter costs nothing outside its language beyond a margin;
+- **its language's score** on a task set in that language. For Rust it is the **Rust subset of SWE-bench Multilingual** (decided 2026-10-19). C++/CUDA and TypeScript sets are still to be chosen (§17, question 7); SWE-bench Verified, the benchmark this project keeps, is Python only;
+- **a Python control night**: the night's fixed SWE-bench Verified task list, base against adapter, to show the adapter costs nothing outside its language;
 - **decode speed and accepted tokens per step**, single stream, `scripts/decode_speed.py` (INFERENCE §5.3), and the egress audit's `exec` pass with the adapter on (§14).
 
-Publishing needs a gain on its language, a Python control within the margin, and decode with the drafter adapter within a margin of the base. The margins are the owner's to set (§17, question 8). On a user's machine the same comparison is a `swe-bench run --adapter` arm; its result is the user's, and nothing is sent anywhere.
+**The publishing bar (decided 2026-10-19).** An adapter is published only when all three hold:
+
+| Condition | Bar |
+|---|---|
+| Its language | a clear gain over the base on its language's task set |
+| The Python control night | at most **1 task** lost against the base |
+| Speed | at most **5% tok/s** lost against the base, measured with its drafter adapter (single stream, `scripts/decode_speed.py`) |
+
+Losing more than 5% only with the base drafter does not block publishing, but it is recorded in `evals`, because it is what Phase 1 serves if SGLang's drafter cannot take an adapter (§8.4). On a user's machine the same comparison is a `swe-bench run --adapter` arm; its result is the user's, and nothing is sent anywhere.
 
 ### 7.4 When the base moves
 
@@ -490,7 +526,7 @@ Further:
 | **1a** | Manifest, signing (`mightling-adapter`), the catalogue, `ling-admin adapter list/download/remove`, the installed set; no serving | A test adapter signed with a session key installs, refuses a tampered file, a wrong base digest, a release-namespace signature and an unsigned manifest without `--third-party`; a real download of a published adapter from the organisation verifies |
 | **1b** | The recipe's `lora` key, the gate's loader, id rewrite and model list, `model_key_for_served_id`'s strip, host-safety accounting | Base decode unchanged within noise with LoRA enabled; one adapter's output identical with speculation on and off at temperature 0; two concurrent `ling exec` sessions on two adapters and one on the base all complete; a ninth distinct adapter evicts the least recently used; `/load_lora_adapter` refused on the public port and without the key on the engine's |
 | **1c** | The launcher's catalog entries and `--adapter`, `/adapter`, the desktop chip's grouping, the audit's `--adapter` and listing | A resumed thread keeps its adapter; a removed adapter falls back with the notice; the egress audit passes with an adapter on and lists it; the desktop app runs two threads on two adapters |
-| **2** | First adapters: Rust, C++/CUDA, TypeScript, each with a drafter adapter, published, signed and catalogued in a release | Each meets §7.3's bar on this machine, its numbers in its manifest |
+| **2** | The signing job (§5.1); first adapters: Rust, C++/CUDA, TypeScript, each with a drafter adapter, published, signed in CI and catalogued in a release; `node sync-model` carrying signed adapters (§6.4) | Each meets §7.3's bar on this machine (a clear gain on its language, Rust on SWE-bench Multilingual's Rust subset; at most 1 task lost on the Python control night; at most 5% tok/s lost with its drafter adapter), its numbers in its manifest; a synced node verifies and serves the same adapters, and skips a third-party one |
 | **3** | LoRA in ling-engine (its spec), drafter adapters per request, GDN target modules | The same contract as Phase 1, the per-adapter cost at or under 0.5–1 ms per step, acceptance with drafter adapters within the margin of the base |
 
 ---
@@ -507,23 +543,27 @@ No test touches the real machine (AGENTS.md, `docs/dev/testing.md`): no real Hug
 - **Recipe:** the `lora` key becomes the SGLang flags; an adapter beyond the rank ceiling is refused at download; host safety counts the pool and the loaded cache.
 - **Launcher** (`cargo test -p ling-launcher` in an export): one catalog entry per listed id; `--adapter` removed and turned into `--model`; the tier order; resume reads the thread's file; an unlisted adapter falls back with the notice.
 - **Desktop:** the chip groups the base and adapters and marks a third-party one; a policy vector for `turn/start` with an adapter id.
+- **Signing job:** `bash -n` on its `run:` blocks and a dry run with a session key against a fixture manifest; a hash that differs from the repository's metadata, a wrong base digest and a signature that does not verify against `release-signing.pub` each stop it before upload.
+- **Sync:** `node sync-model` (with the SSH call replaced) sends signed adapters and never a third-party one; the receiving side refuses a tampered file and lists a base it does not serve as `base mismatch`.
 - **Egress audit:** records list the installed adapters and the one used; `--adapter` traces a session on it.
 
 ---
 
 ## 17. Open questions
 
+Questions 1–4 wait on the LoRA serving probe (`research/lora-serving-probe`, running on 2026-10-19). Questions 5, 8 and 11, and 7 for Rust, were answered by the owner on 2026-10-19 (§2.1) and are kept here, struck through, so their numbers stay stable.
+
 1. **`/v1/responses` with an adapter.** SGLang documents `<base>:<adapter>` for chat and completions only; `ling` speaks the Responses API alone. The probe answers it; if it fails, is the gate carrying the adapter some other way acceptable, or should Phase 1 wait for ling-engine?
 2. **DFlash2 with LoRA, and drafter adapters under SGLang** (§8.4). If the drafter cannot take a per-request LoRA, is Phase 1 acceptable with the base drafter, given the speed it loses (measured by the probe)?
 3. **Target modules on the hybrid layers.** Does SGLang's LoRA cover the Gated DeltaNet projections (`in_proj_*`, `out_proj`), or only attention and the MLPs? The first adapters assume the latter.
 4. **The engine's loopback port.** Does `--api-key` on the pinned SGLang cover `/load_lora_adapter` and `/unload_lora_adapter`? If not: a unix socket, or a network namespace shared with the gate?
-5. **Who signs, and where.** The release key is in the `release` environment and on the maintainer's machine (RELEASE_SIGNING §4). Adapters are published to Hugging Face, not as GitHub release assets. Proposed: manifests are committed to this repository, signed by a workflow job in the `release` environment, and uploaded with an HF token held in the same environment. Or signed on the maintainer's machine by hand?
+5. ~~**Who signs, and where.**~~ **Decided 2026-10-19:** a CI job in the `release` environment, with the release key, under `mightling-adapter`, automatic like releases (§5.1).
 6. **The verifier in `ling-admin`.** `ssh-keygen -Y verify`, as install.sh does (proposed), or a `ling adapter verify` subcommand on `release_signature.rs`, which would follow key transitions exactly as `ling update` does but makes `ling-admin` depend on the installed `ling`?
-7. **Which evaluation for a language adapter.** SWE-bench Verified is Python only. A multilingual set (SWE-bench Multilingual, Multi-SWE-bench, or tasks of our own) for Rust, C++/CUDA and TypeScript has to be chosen, inside the benchmark decision of 2026-10-09 (keep SWE-bench Verified; investigate multilingual sets only).
-8. **The publishing bar.** How much gain on its language, how much loss on the Python control, and how much decode speed an adapter may give up (§7.3).
+7. **Which evaluation for a language adapter.** **Rust decided 2026-10-19:** the Rust subset of SWE-bench Multilingual (§7.3). Still open: the sets for C++/CUDA and TypeScript (SWE-bench Multilingual's other subsets, Multi-SWE-bench, or tasks of our own), inside the benchmark decision of 2026-10-09 (keep SWE-bench Verified; investigate multilingual sets only).
+8. ~~**The publishing bar.**~~ **Decided 2026-10-19:** a clear gain on its language, at most 1 task lost on a Python control night, at most 5% tok/s lost with its drafter adapter (§7.3).
 9. **The organisation's slug on Hugging Face.** Not named anywhere in the tree; `dreamference` is assumed in the examples' shape (`<org>/mightling-<name>`).
 10. **Rank and modules of the first adapters**, and the recipe's ceilings (§8.2): fixed ceilings mean a later, larger adapter needs a restart.
-11. **Second nodes.** Should `ling-admin node sync-model` carry the installed adapters to a paired node (each node verifies on its own), or does each node download its own?
+11. ~~**Second nodes.**~~ **Decided 2026-10-19:** `node sync-model` copies installed signed adapters to paired nodes, and each verifies on its own (§6.4).
 
 ---
 
