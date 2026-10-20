@@ -175,6 +175,18 @@ export const runTask = (project: string, file: string, action: number | "setup",
 export const stopTask = (id: string) => send<null>({ type: "task/stop", id });
 export const openTerminal = (dir: string) => send<null>({ type: "open/terminal", dir });
 export const openFolder = (dir: string) => send<null>({ type: "open/folder", dir });
+
+/**
+ * Opens a document the local file index cited (`docs:documents/42`): in the app with the system's
+ * handler, through the main process, which asks `ling docs locate` for the file inside its
+ * collection; in a browser from `ling web`'s `/docs/` route, in a new tab (a PDF at its page).
+ */
+export function openDocument(doc: string, page: number | null): Promise<null> {
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}\/\d{1,18}$/.test(doc)) return Promise.reject(new Error("not a document"));
+  if (host() === "electron") return send<null>({ type: "docs/open", doc });
+  window.open(`/docs/${doc}${page === null ? "" : `#page=${page}`}`, "_blank", "noopener");
+  return Promise.resolve(null);
+}
 export const openEditorAt = (dir: string, editor: string | null) => send<null>({ type: "open/editor", dir, editor });
 
 export interface TaskEvent {

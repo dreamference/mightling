@@ -292,6 +292,15 @@ describe("the agent's markdown", async () => {
     expect(html).toContain('title="https://example.com"');
   });
 
+  it("makes a citation of the user's documents a link to open, and no other link", async () => {
+    const { docLink } = await import("./markdown");
+    const html = renderMarkdown("See [acme-msa.pdf, p.7](docs:documents/42#page=7) and [notes](docs:documents/../1) and [x](docs:/etc/passwd).");
+    expect(html).toContain('<span class="link doc-link" role="link" tabindex="0" data-doc="documents/42" data-page="7" title="Open documents/42">acme-msa.pdf, p.7</span>');
+    expect(html.match(/doc-link/g)?.length).toBe(1);
+    expect(docLink("docs:design-notes/3")).toEqual({ doc: "design-notes/3", page: null });
+    expect(docLink("docs:documents/3#page=x")).toBeNull();
+  });
+
   it("shows the pictures the image_search tool stored, and no other image", () => {
     const html = renderMarkdown('![A "puffin"](/images/0123456789abcdef.jpg) ![x](/images/../secret.jpg) ![y](//example.com/0123456789abcdef.jpg)');
     expect(html).toContain('<img class="found-image" src="/images/0123456789abcdef.jpg" alt="A &quot;puffin&quot;"');

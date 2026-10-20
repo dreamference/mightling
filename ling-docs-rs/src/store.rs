@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(std::fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         conn.execute("INSERT INTO documents(path, kind, size, mtime_ns, status) VALUES ('a.md', 'markdown', 1, 1, 'pending')", []).unwrap();
         let id = conn.last_insert_rowid();
-        let unit = Unit { loc: "lines 1-1".into(), page: None, line_first: Some(1), line_last: Some(1), heading: String::new(), text: "咖啡 coffee beans".into() };
+        let unit = Unit { loc: "lines 1-1".into(), page: None, line_first: Some(1), line_last: Some(1), heading: String::new(), group: None, text: "咖啡 coffee beans".into() };
         let chunk = Chunk { loc: "lines 1-1".into(), page_first: None, page_last: None, line_first: Some(1), line_last: Some(1), heading: String::new(), text: unit.text.clone() };
         write_document(&mut conn, id, "a", None, &[], &[unit], &[chunk], 0).unwrap();
         let n = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();

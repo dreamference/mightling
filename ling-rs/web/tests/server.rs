@@ -47,7 +47,14 @@ fn fake_ling(dir: &Path) -> PathBuf {
     let path = dir.join("ling");
     std::fs::write(
         &path,
-        "#!/bin/sh\nif [ \"$1\" = prompt ] && [ \"$2\" = show ] && [ \"$4\" = --composed ]; then printf 'COMPOSED:%s:%s' \"$3\" \"$(pwd)\"; exit 0; fi\necho \"unexpected: $*\" >&2\nexit 7\n",
+        "#!/bin/sh\nif [ \"$1\" = prompt ] && [ \"$2\" = show ] && [ \"$4\" = --composed ]; then printf 'COMPOSED:%s:%s' \"$3\" \"$(pwd)\"; exit 0; fi\n\
+         d=$(dirname \"$0\")/docs\n\
+         if [ \"$1\" = docs ] && [ \"$2\" = locate ] && [ \"$4\" = --json ]; then case \"$3\" in\n\
+         documents/1) printf '{\"path\":\"%s/report.pdf\",\"rel\":\"report.pdf\",\"kind\":\"pdf\",\"size\":9}' \"$d\" ;;\n\
+         documents/2) printf '{\"path\":\"%s/notes.md\",\"rel\":\"sub/notes.md\",\"kind\":\"markdown\",\"size\":7}' \"$d\" ;;\n\
+         documents/3) printf '{\"path\":\"%s/page.html\",\"rel\":\"page.html\",\"kind\":\"html\",\"size\":30}' \"$d\" ;;\n\
+         *) echo 'ling-docs: no document' >&2; exit 1 ;; esac; exit 0; fi\n\
+         echo \"unexpected: $*\" >&2\nexit 7\n",
     )
     .unwrap();
     #[cfg(unix)]
@@ -114,6 +121,7 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/apps"),
     ("GET", "/api/airgapped"),
     ("GET", "/images/0123456789abcdef.jpg"),
+    ("GET", "/docs/documents/1"),
     ("GET", "/devices"),
     ("POST", "/devices/pair"),
     ("POST", "/devices/revoke"),
@@ -726,6 +734,38 @@ async fn ling_web_ask_signs_in_like_a_browser_and_runs_one_ask_thread() {
     assert!(seen.iter().any(|frame| frame["method"] == "initialized"));
     let _ = stop.send(());
     serving.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn a_cited_document_is_served_by_its_id_and_never_runs_on_this_origin() {
+    let scratch = scratch("docs");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let docs = scratch.dir.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("report.pdf"), b"%PDF-1.4\n").unwrap();
+    std::fs::write(docs.join("notes.md"), b"# Notes").unwrap();
+    std::fs::write(docs.join("page.html"), b"<script>steal()</script>hello").unwrap();
+    let cookie = sign_in(&server).await;
+    let get = |uri: &str| request("GET", uri).header(header::COOKIE, &cookie).body(Body::empty()).unwrap();
+    let (status, headers, body) = call(&server, get("/docs/documents/1")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "application/pdf");
+    assert!(headers[header::CONTENT_DISPOSITION].to_str().unwrap().starts_with("inline"));
+    assert!(!headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap().contains("script-src"), "no scripts of this origin");
+    assert!(body.starts_with("%PDF"));
+    let (status, headers, body) = call(&server, get("/docs/documents/2")).await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "# Notes"));
+    assert_eq!(headers[header::CONTENT_TYPE], "text/plain; charset=utf-8");
+    assert!(headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap().starts_with("sandbox"));
+    assert!(headers[header::CONTENT_DISPOSITION].to_str().unwrap().contains("filename=\"notes.md\""));
+    // A saved page is a download, never a page of this origin.
+    let (status, headers, _) = call(&server, get("/docs/documents/3")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers[header::CONTENT_DISPOSITION].to_str().unwrap().starts_with("attachment"));
+    assert_eq!(headers[header::CONTENT_TYPE], "application/octet-stream");
+    for uri in ["/docs/documents/9", "/docs/../1", "/docs/documents/1.pdf", "/docs/%2e%2e/1", "/docs/documents"] {
+        assert_eq!(call(&server, get(uri)).await.0, StatusCode::NOT_FOUND, "{uri}");
+    }
 }
 
 #[tokio::test]
