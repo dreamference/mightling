@@ -429,3 +429,7 @@ A message after `new_thread_after_hours` (default 4) without the conversation mo
 - **The phone prompt:** threads start with `prompt: "chat"` (falling back to `ask` on a `ling web` that refuses it), in a scratch folder named `ask/chat-<hex>`.
 - **The answer:** the turn's final message, or its last; a short last word after a longer earlier message ("The answer above stands.") brings that message with it, because the phone shows only the answer (2 of 56 Ask turns on 2026-10-20 ended so).
 
+### 16.4 Quick follow-ups (branch `chat/merge-quick`)
+
+The hub already steered a message into a running turn and merged the ones that could not steer into one turn when it ended (§3). Two changes: queued inputs keep their images (§16.1), and the final turn after a time-out (§16.3) is never steered into: a message then waits for the next turn.
+

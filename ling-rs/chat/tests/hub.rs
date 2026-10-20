@@ -269,6 +269,15 @@ async fn a_message_during_a_turn_steers_it_or_waits_for_the_next() {
     let starts = rig.log.params("turn/start");
     assert_eq!(starts.len(), 2);
     assert_eq!(starts[1]["input"][0]["text"], "make it short");
+    // Several that waited are one turn, not one each (the morning of 2026-10-20).
+    rig.inbound.send(text(CHAT, "in French")).unwrap();
+    rig.inbound.send(text(CHAT, "and rhyming")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed" } }))).unwrap();
+    settle().await;
+    let starts = rig.log.params("turn/start");
+    assert_eq!(starts.len(), 3);
+    assert_eq!(starts[2]["input"][0]["text"], "in French\n\nand rhyming");
     while let Ok(out) = rig.telegram.try_recv() {
         let _ = out;
     }

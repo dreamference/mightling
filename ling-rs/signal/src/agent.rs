@@ -41,6 +41,8 @@ pub fn device_name(instance: &str) -> String {
 pub enum Pending {
     OpenThread,
     StartTurn { thread: String },
+    /// The owner's follow-up steered into a turn: refused, it is asked next (§19.4).
+    Steer { thread: String, text: String },
     Other,
 }
 
@@ -85,6 +87,7 @@ impl Translator {
                     },
                     (Pending::OpenThread, Some(error)) => vec![Translated::Event(AgentEvent::ThreadFailed { error })],
                     (Pending::StartTurn { thread }, Some(error)) => vec![Translated::Event(AgentEvent::TurnCompleted { thread, error: Some(error) })],
+                    (Pending::Steer { thread, text }, Some(_)) => vec![Translated::Event(AgentEvent::SteerFailed { thread, text })],
                     _ => Vec::new(),
                 }
             }
@@ -472,6 +475,13 @@ mod tests {
         assert_eq!(events(&mut t, json!({"id": 102, "error": {"message": "no rollout"}})), vec![AgentEvent::ThreadFailed { error: "no rollout".to_string() }]);
         // A response nobody waits for is nothing.
         assert!(events(&mut t, json!({"id": 999, "result": {}})).is_empty());
+        t.expect(&json!(104), Pending::Steer { thread: "th-1".to_string(), text: "more".to_string() });
+        assert_eq!(
+            events(&mut t, json!({"id": 104, "error": {"message": "no active turn"}})),
+            vec![AgentEvent::SteerFailed { thread: "th-1".to_string(), text: "more".to_string() }]
+        );
+        t.expect(&json!(105), Pending::Steer { thread: "th-1".to_string(), text: "ok".to_string() });
+        assert!(events(&mut t, json!({"id": 105, "result": {}})).is_empty());
         t.expect(&json!(103), Pending::StartTurn { thread: "th-1".to_string() });
         assert_eq!(
             events(&mut t, json!({"id": 103, "error": {"message": "busy"}})),
