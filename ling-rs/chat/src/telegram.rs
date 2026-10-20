@@ -430,7 +430,8 @@ fn in_topic(mut params: Value, topic: Option<i64>) -> Value {
     params
 }
 
-/// An approval's keyboard: the first option green, a last "Decline" red (Bot API 9.4 `style`).
+/// An approval's keyboard: an "Approve…" first option green, a last "Decline" red (Bot API 9.4
+/// `style`); a question's own options keep the app's style.
 fn approval_keyboard(id: &str, options: &[String]) -> Value {
     let last = options.len().saturating_sub(1);
     let rows: Vec<Value> = options
@@ -438,7 +439,7 @@ fn approval_keyboard(id: &str, options: &[String]) -> Value {
         .enumerate()
         .map(|(n, label)| {
             let mut button = json!({ "text": label, "callback_data": format!("a:{id}:{n}") });
-            if n == 0 && options.len() > 1 {
+            if n == 0 && options.len() > 1 && label.starts_with("Approve") {
                 button["style"] = json!("success");
             } else if n == last && label == "Decline" {
                 button["style"] = json!("danger");

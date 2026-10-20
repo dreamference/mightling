@@ -534,7 +534,9 @@ async fn an_answer_past_its_time_is_steered_then_interrupted_then_given_a_final_
         config.final_budget = Duration::from_millis(600);
     });
     rig.inbound.send(text(CHAT, "compare these two purifiers")).unwrap();
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    settle().await;
+    rig.events.send(event("item/agentMessage/delta", json!({ "threadId": "th1", "turnId": "tu1", "itemId": "w", "delta": "Checking the pages" }))).unwrap();
+    tokio::time::sleep(Duration::from_millis(620)).await;
     let steer = rig.log.params("turn/steer");
     assert_eq!(steer.len(), 1, "{:?}", rig.log.methods());
     assert!(steer[0]["input"][0]["text"].as_str().unwrap().contains("Stop now: run no more tools"));
@@ -543,8 +545,14 @@ async fn an_answer_past_its_time_is_steered_then_interrupted_then_given_a_final_
     assert_eq!(rig.log.params("turn/interrupt").len(), 1);
     let Outbound::Notice { text: line, .. } = next_settled(&mut rig.telegram).await else { panic!() };
     assert!(line.starts_with("This is taking too long (this answer has taken"), "{line}");
-    // The interrupted turn ends: a final turn, no "Stopped.", no partial answer yet.
+    // The interrupted turn ends: what it wrote is kept, marked, then a final turn; no "Stopped.".
     rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "interrupted", "items": [] } }))).unwrap();
+    let cut = loop {
+        if let Outbound::Message { markdown, .. } = next_settled(&mut rig.telegram).await {
+            break markdown;
+        }
+    };
+    assert!(cut.starts_with("Checking the pages\n\n_(cut off: this answer has taken"), "{cut}");
     settle().await;
     let starts = rig.log.params("turn/start");
     assert_eq!(starts.len(), 2);
