@@ -78,8 +78,13 @@ export function keepAwake(busy: boolean): void {
 }
 
 /** A desktop notification, silent, when the window is not in front (or always when asked); a click runs `onClick`. */
-export function notify(window: BrowserWindow | null, notice: { title: string; body: string; always: boolean }, onClick: () => void): void {
-  if ((!notice.always && window?.isFocused()) || !Notification.isSupported()) return;
+/**
+ * Shows a notification unless the app is in front: "in front" is any of its windows focused, a
+ * pop-out as much as the main window (Settings › Notifications' "when the window is not in front").
+ */
+export function notify(windows: BrowserWindow[], notice: { title: string; body: string; always: boolean }, onClick: () => void): void {
+  const inFront = windows.some((each) => !each.isDestroyed() && each.isFocused());
+  if ((!notice.always && inFront) || !Notification.isSupported()) return;
   const notification = new Notification({ title: notice.title, body: notice.body, silent: true });
   notification.on("click", onClick);
   notification.show();
