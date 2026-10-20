@@ -9,6 +9,8 @@ use std::process::Output;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use ling_web::share_links;
+
 /// A server that answers every connection with `respond(request line)` and records the lines.
 struct Server {
     base: String,
@@ -338,6 +340,93 @@ fn fetch_prints_title_and_text_and_follows_redirects() {
     assert_eq!(printed["final_url"], format!("{}/page", server.base));
     assert_eq!(printed["status"], 200);
     assert_eq!(printed["truncated"], false);
+}
+
+/// An agent like a share link's walk uses, which resolves only loopback addresses: a walk that
+/// requested the Google URL it should only have read fails here instead of leaving the machine.
+fn loopback_only_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .redirects(0)
+        .resolver(|address: &str| -> std::io::Result<Vec<std::net::SocketAddr>> {
+            match address.parse::<std::net::SocketAddr>() {
+                Ok(socket) if socket.ip().is_loopback() => Ok(vec![socket]),
+                _ => Err(std::io::Error::other(format!("not resolved in a test: {address}"))),
+            }
+        })
+        .build()
+}
+
+fn walk(server: &Server, path: &str) -> Result<share_links::Walked, String> {
+    share_links::walk(&loopback_only_agent(), &format!("{}{path}", server.base), share_links::classify)
+}
+
+#[test]
+fn a_share_link_walk_stops_at_the_google_search_without_requesting_it() {
+    let server = Server::start(|line| {
+        if line.starts_with("GET /s/AbC123 ") {
+            response("302 Found", "text/html", b"", "Location: /hop\r\n")
+        } else {
+            let to = "https://www.google.com/search?kgmid=/g/11synth01&hl=pt-PT&q=Some+Synthetic+Song&shem=x";
+            response("301 Moved Permanently", "text/html", b"", &format!("Location: {to}\r\n"))
+        }
+    });
+    let Ok(share_links::Walked::Target { final_url, status, target }) = walk(&server, "/s/AbC123") else {
+        panic!("the walk did not end at the search");
+    };
+    assert_eq!(
+        target,
+        share_links::Target::Search { query: "Some Synthetic Song".into(), kgmid: Some("/g/11synth01".into()) }
+    );
+    assert!(final_url.starts_with("https://www.google.com/search?"), "{final_url}");
+    assert_eq!(status, 301);
+    assert_eq!(server.requests().len(), 2, "only the two local hops were requested");
+    let page = share_links::page("https://share.google/AbC123", final_url, status, &target);
+    let printed = ling_web::fetch::render_text(&page, 8000);
+    assert!(printed.starts_with("# Some Synthetic Song\n\n"), "{printed}");
+    assert!(printed.contains("ling-search \"Some Synthetic Song\""), "{printed}");
+}
+
+#[test]
+fn a_maps_share_link_walk_stops_at_the_place() {
+    let server = Server::start(|_| {
+        let to = "https://www.google.com/maps/place/Synthetic+Caf%C3%A9/@38.7001,-9.1002,17z/data=!3m1";
+        response("302 Found", "text/html", b"", &format!("Location: {to}\r\n"))
+    });
+    let Ok(share_links::Walked::Target { target, .. }) = walk(&server, "/XyZ987") else {
+        panic!("the walk did not end at the place");
+    };
+    assert_eq!(
+        target,
+        share_links::Target::Place { name: "Synthetic Café".into(), coordinates: Some("38.7001, -9.1002".into()) }
+    );
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn a_share_link_that_leads_elsewhere_is_read_as_a_page() {
+    let server = Server::start(|line| {
+        if line.starts_with("GET /s ") {
+            response("302 Found", "text/html", b"", "Location: /page\r\n")
+        } else {
+            response("200 OK", "text/html; charset=utf-8", b"<title>Shared</title><p>Body</p>", "")
+        }
+    });
+    let Ok(share_links::Walked::Response(response)) = walk(&server, "/s") else {
+        panic!("the walk did not end at the page");
+    };
+    assert_eq!(response.get_url(), format!("{}/page", server.base));
+    assert_eq!(response.status(), 200);
+    let body = response.into_string().unwrap();
+    let page = ling_web::fetch::page("u", "f".into(), 200, "text/html".into(), body.as_bytes(), 100);
+    assert_eq!((page.title.as_str(), page.text.as_str()), ("Shared", "Shared\nBody"));
+}
+
+#[test]
+fn a_share_link_walk_gives_up_after_ten_redirects() {
+    let server = Server::start(|_| response("302 Found", "text/html", b"", "Location: /again\r\n"));
+    let error = walk(&server, "/again").err().unwrap();
+    assert!(error.contains("more than 10 redirects"), "{error}");
+    assert_eq!(server.requests().len(), 11);
 }
 
 #[test]
