@@ -136,10 +136,34 @@ fn search_asks_searxng_for_json_and_prints_results() {
     let request = &server.requests()[0];
     assert!(
         request.starts_with(
-            "GET /search?q=lisbon+weather&format=json&categories=general&language=en "
+            "GET /search?q=lisbon+weather&format=json&categories=general&language=auto "
         ),
         "{request}"
     );
+}
+
+#[test]
+fn a_category_a_time_range_and_a_language_reach_searxng() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let output = search(
+        &["--category", "social", "--time", "week", "--lang", "pt", "elétrico", "28"],
+        &[("DREAMFERENCE_SEARXNG_URL", &server.base)],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    let request = &server.requests()[0];
+    assert!(
+        request.starts_with(
+            "GET /search?q=el%C3%A9trico+28&format=json&categories=social+media&language=pt&time_range=week "
+        ),
+        "{request}"
+    );
+
+    // Anything else is refused before a request is sent.
+    let output = search(&["-c", "shopping", "q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base)]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stdout(&output).contains("unknown category"));
+    assert_eq!(server.requests().len(), 1);
 }
 
 #[test]
@@ -157,7 +181,7 @@ fn the_removed_duckduckgo_level_searches_every_general_engine() {
     assert!(output.status.success());
     let request = &server.requests()[0];
     assert!(
-        request.starts_with("GET /search?q=lisbon&format=json&categories=general&language=en "),
+        request.starts_with("GET /search?q=lisbon&format=json&categories=general&language=auto "),
         "{request}"
     );
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();

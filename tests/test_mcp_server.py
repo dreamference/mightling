@@ -141,3 +141,19 @@ def test_code_search_falls_back_to_the_context_engine(tmp_path, monkeypatch):
         assert CodeIndexSearch.search("x") is None
         assert MCPServer().execute_tool("workspace_search_code", {"query": "x"}) == [{"rel_path": "x.py", "score": 1.0}]
     assert engine.index_workspace.call_count == 4
+
+
+def test_web_search_sends_the_category_time_range_and_detected_language():
+    from unittest.mock import MagicMock, patch
+
+    from dreamference.mcp_server.web_tools import WebTools
+
+    response = MagicMock()
+    response.json.return_value = {"results": [], "answers": [], "unresponsive_engines": []}
+    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+        WebTools.search("climate summit", categories="social", time_range="week")
+        WebTools.search("climate summit", time_range="fortnight")
+    first, second = (call.kwargs["params"] for call in get.call_args_list)
+    assert first["categories"] == "social media" and first["time_range"] == "week"
+    assert first["language"] == "auto"
+    assert "time_range" not in second

@@ -35,6 +35,19 @@ struct Args {
     /// With --read: pages to read (1 to 5)
     #[arg(long, default_value_t = read::DEFAULT_PAGES as i64, allow_negative_numbers = true, requires = "read")]
     pages: i64,
+
+    /// What to search: general (the default), news, science, it, map, images, videos, music,
+    /// files, social, books, dictionaries, wikimedia, movies, weather
+    #[arg(long, short = 'c')]
+    category: Option<String>,
+
+    /// Only results from the last day, week, month or year (engines that cannot filter are skipped)
+    #[arg(long, short = 't')]
+    time: Option<String>,
+
+    /// Result language: a code such as en, pt, uk, fr, de, es (default: detected from the query)
+    #[arg(long, short = 'l')]
+    lang: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -51,12 +64,20 @@ fn main() -> ExitCode {
         }
         return ExitCode::FAILURE;
     }
+    let options = match search::SearchOptions::new(args.category.as_deref(), args.time.as_deref(), args.lang.as_deref()) {
+        Ok(options) => options,
+        Err(message) => {
+            println!("❌ {message}");
+            return ExitCode::from(2);
+        }
+    };
     if args.read {
-        return match read::search_and_read(
+        return match read::search_and_read_with(
             &search::searxng_url(),
             &args.query.join(" "),
             read::pages_wanted(args.pages),
             level,
+            &options,
         ) {
             Ok(payload) => {
                 if args.json {
@@ -75,11 +96,13 @@ fn main() -> ExitCode {
             }
         };
     }
-    match search::search(
+    match search::search_with(
         &search::searxng_url(),
         &args.query.join(" "),
         args.max_results,
         level,
+        ling_web::node_locator::remote_node().as_ref(),
+        &options,
     ) {
         Ok(payload) => {
             if args.json {
