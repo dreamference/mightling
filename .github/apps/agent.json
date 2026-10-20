@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-agent",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Agent team's bot: commits, pull requests and reviews for ling itself: the launcher, the Codex patches and build, prompts, skills and ling-admin's core. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

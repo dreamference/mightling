@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-night-shift",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Night Shift team's bot: commits, pull requests and reviews for the overnight queue, its runner, report and timer. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}
