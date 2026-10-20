@@ -56,6 +56,37 @@ def test_codex_runner_hands_arguments_and_host_to_mightling(tmp_path, monkeypatc
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://gb10:9000"
 
 
+
+def test_codex_runner_passes_the_compatibility_mode_in_the_launchers_variable(tmp_path, monkeypatch):
+    """`ling-admin run --compat claude` sets DREAMFERENCE_MIGHTLING_COMPAT for that session only."""
+    from dreamference.runner import CodexInstaller, CodexRunner
+
+    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
+    monkeypatch.setattr(CodexInstaller, "install_if_missing", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/opt/ling"))
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_COMPAT", raising=False)
+    calls = []
+    monkeypatch.setattr("subprocess.call", lambda cmd, env=None, **k: calls.append(env) or 0)
+
+    assert runner.run_session(prompt="fix it", compat="claude") == 0
+    assert runner.run_session(prompt="fix it") == 0
+    assert calls[0]["DREAMFERENCE_MIGHTLING_COMPAT"] == "claude"
+    assert "DREAMFERENCE_MIGHTLING_COMPAT" not in calls[1]
+    assert len(calls) == 2
+
+
+def test_run_compat_is_refused_for_the_other_runners(tmp_path, monkeypatch, capsys):
+    import pytest
+
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: pytest.fail("no runner may start"))
+    with pytest.raises(SystemExit) as exited:
+        DreamferenceCLIController.run_cli(["run", "x", "--agent", "cline", "--compat", "claude"])
+    assert exited.value.code == 2
+    assert "a mode of ling" in capsys.readouterr().out
+
+
 def test_openhands_stays_on_this_machine_and_off_port_3000(monkeypatch):
     # It mounts the Docker socket, so its UI must not be published on the network; it stays on
     # 3001, as since Onyx had 3000; and from inside the container a loopback vLLM URL would point
