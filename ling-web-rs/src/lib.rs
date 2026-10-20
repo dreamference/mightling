@@ -21,6 +21,7 @@ pub mod html_text;
 pub mod node_locator;
 pub mod read;
 pub mod search;
+pub mod share_links;
 
 use std::time::Duration;
 
@@ -76,11 +77,17 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 /// a redirect chain. Without it theweathernetwork.com ended on a `?_guid_iss_=1` bounce URL.
 /// Nothing is written to disk.
 pub fn agent(proxy: Option<ureq::Proxy>) -> ureq::Agent {
+    agent_with_redirects(proxy, 10)
+}
+
+/// [`agent`], following at most `redirects` redirects; with 0 a redirect is returned as the
+/// response it is, which is how `share_links` reads each `Location` before requesting it.
+pub fn agent_with_redirects(proxy: Option<ureq::Proxy>, redirects: u32) -> ureq::Agent {
     let builder = ureq::AgentBuilder::new()
         .user_agent(USER_AGENT)
         .timeout_connect(REQUEST_TIMEOUT)
         .timeout_read(REQUEST_TIMEOUT)
-        .redirects(10);
+        .redirects(redirects);
     match proxy {
         Some(proxy) => builder.proxy(proxy),
         None => builder,

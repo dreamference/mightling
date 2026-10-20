@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::agent;
 use crate::html_text::html_to_text;
+use crate::share_links::{self, Walked};
 use crate::take_chars;
 
 /// Hard ceiling on what a single fetch pulls down, before any text extraction. A model cannot use
@@ -72,20 +73,38 @@ pub fn require_http_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The error the agent sees for a failed request.
+pub fn request_error(error: ureq::Error) -> String {
+    match error {
+        ureq::Error::Status(status, response) => format!(
+            "request failed: HTTP {status} {} for url: {}",
+            response.status_text(),
+            response.get_url()
+        ),
+        error => format!("request failed: {error}"),
+    }
+}
+
 /// Retrieves a page and returns its readable text, or the error the agent should see.
+///
+/// A Google share link is resolved to the search or place it opens, without requesting Google's
+/// page (`share_links`); where its redirects lead anywhere else, that page is read as any other.
 pub fn fetch(url: &str, max_chars: i64) -> Result<FetchedPage, String> {
     require_http_url(url)?;
     let proxy = crate::proxy_for(url, |name| std::env::var(name).ok());
-    let response = match agent(proxy).get(url).set("Accept-Language", "en").call() {
-        Ok(response) => response,
-        Err(ureq::Error::Status(status, response)) => {
-            return Err(format!(
-                "request failed: HTTP {status} {} for url: {}",
-                response.status_text(),
-                response.get_url()
-            ));
+    let response = if share_links::is_share_link(url) {
+        match share_links::walk(&crate::agent_with_redirects(proxy, 0), url, share_links::classify)? {
+            Walked::Target { final_url, status, target } => {
+                return Ok(share_links::page(url, final_url, status, &target));
+            }
+            Walked::Response(response) => response,
         }
-        Err(error) => return Err(format!("request failed: {error}")),
+    } else {
+        agent(proxy)
+            .get(url)
+            .set("Accept-Language", "en")
+            .call()
+            .map_err(request_error)?
     };
     let final_url = response.get_url().to_string();
     let status = response.status();
