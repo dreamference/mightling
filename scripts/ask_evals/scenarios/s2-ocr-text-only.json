@@ -1,0 +1,37 @@
+{
+  "id": "s2-ocr-text-only",
+  "family": "S2",
+  "failure": [
+    1
+  ],
+  "turns": [
+    {
+      "text": "Is this a good price?\n\n[Screenshot text: Example Cycles  Trailhead 2 Bike Lock  €39.90  In stock  Free delivery over €50]"
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "Trailhead",
+        "lock"
+      ],
+      [
+        "39.90",
+        "39,90",
+        "€39"
+      ]
+    ],
+    "max_tool_calls": 6
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}
