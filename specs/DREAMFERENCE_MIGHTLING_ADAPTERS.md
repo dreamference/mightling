@@ -70,9 +70,10 @@ The constraints set with them, each specified below: air-gapped by default, with
 | Command | Where | Effect |
 |---|---|---|
 | `ling-admin adapter list [--available] [--json]` | node | Installed adapters: name, version, base it is pinned to, rank, size, trust (`dreamference` or `third-party`), whether the served base matches it, and whether it is loaded now. `--available` adds the catalogue this release ships (§6.1), marking which are installed. **No network** either way |
-| `ling-admin adapter download <name>[@<version>]` | node | Fetches a catalogued adapter at its pinned revision, verifies it (§5) and installs it. The only adapter command that reaches the network |
-| `ling-admin adapter download --repo <org>/<repo>@<commit>` | node | An adapter signed by Dreamference but not in this release's catalogue (published after it). The commit is required: a branch name is refused |
-| `ling-admin adapter download --third-party --repo <org>/<repo>@<commit>` | node | A third-party adapter (§5.4): prints the warning, asks for the typed confirmation, installs with `trust = third-party` |
+| `ling-admin adapter install <name>[@<version>]` | node | Fetches a catalogued adapter at its pinned revision, verifies it (§5) and installs it. The only adapter command that reaches the network |
+| `ling-admin adapter install --repo <org>/<repo>@<commit>` | node | An adapter signed by Dreamference but not in this release's catalogue (published after it). The commit is required: a branch name is refused |
+| `ling-admin adapter install --third-party --repo <org>/<repo>@<commit>` | node | A third-party adapter (§5.4): prints the warning, asks for the typed confirmation, installs with `trust = third-party` |
+| `ling-admin adapter verify [<name>]` | node | Checks each installed adapter again (signature, every file's hash, the served base) and says which pass; no network. `server start` runs the same check |
 | `ling-admin adapter remove <name> [--version <v>]` | node | Unloads it if loaded (§8.3), deletes its snapshot and its entry. A running session on it has its next request refused with the reason, never silently answered by another model; `/adapter off` or a new session returns to the base (§10.3) |
 | `ling-admin node sync-model <node>` | node | Also copies the installed signed adapters to the paired node, which verifies them itself; third-party adapters are never copied (§6.4) |
 | `/adapter`, `/adapter <name>`, `/adapter off` | `ling` TUI | Shows the session's adapter and the installed ones; switches this session (§11.1) |
@@ -426,6 +427,14 @@ The switch from Phase 1 to Phase 2 is the engine's switch; nothing in the adapte
 - **The gate rewrites the id on the way in.** A request for `<base>+<name>` reaches SGLang as `<base>:<name>`; on ling-engine, as whatever its API says. The `+` form is Mightling's and stays stable across engines; `:` is SGLang's. If the probe finds that SGLang's `/v1/responses` ignores the suffix (§8.4), this rewrite is also where the adapter is carried some other way, and nothing above the gate notices.
 - **The gate rewrites it back** in the response's `model` field, so a client sees the id it asked for.
 - **`model_key_for_served_id` strips `+<adapter>`** before it looks the registry up, so the tool-call check, SWE-bench's model lookup and everything else that asks "which model is this" still finds the base's entry, and `main-model inspect` reports the adapter separately.
+
+**The contract, as built (2026-10-20).** The gate and the launcher implement the two ends of this, so it is fixed here:
+
+- An adapter's entry in the gate's `/v1/models` is `{"id": "<base>+<name>", "object": "model", "created": <base's>, "owned_by": <base's>, "root": "<base>", "parent": "<base>", "max_model_len": <base's>, "mightling_adapter": {"name", "version", "display_name", "description", "trust"}}`, appended after the base's own entry, one per adapter that `server start` verified for the served base (`trust` is `dreamference` or `third-party`). An entry with a `parent` is an adapter; the base is the entry without one.
+- The engine's own adapter entries (SGLang lists every loaded adapter by its bare name) are dropped from the list the gate passes on, so a client never sees `rust` as a model of its own.
+- The name the engine knows an adapter by is its installed name, verbatim (`[a-z0-9][a-z0-9-]{0,39}`), so `<base>+<name>` and SGLang's `<base>:<name>` have the same length and the gate rewrites them in place in a streamed body, both ways.
+- A client may not name an engine-side adapter itself: a request whose `model` carries a `:` suffix, or that has a `lora_path` field, is refused with 400; `/load_lora_adapter`, `/load_lora_adapter_from_tensors` and `/unload_lora_adapter` are refused on the public port with 403.
+- An unknown or removed `<base>+<name>` is answered 404 with `code: "adapter_not_installed"` (or `"adapter_base_mismatch"`) in the API's error shape.
 
 ### 10.2 The model catalog
 
