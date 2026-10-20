@@ -5,12 +5,20 @@
 //! programs read `$CODEX_HOME/node.json`, which the launcher writes after finding a node on the
 //! network, so only the launcher ever browses and everything else works inside a sandbox.
 //!
+//! A client enrolled for remote access (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §5) also
+//! remembers the node's overlay name, `remote`: a name, never an address. A program that finds the
+//! node's LAN address silent uses that name instead, if NetBird's client reports its management
+//! connected: with the overlay down the name is never handed to the system's resolver.
+//!
 //! Standard library only: this file is compiled into the launcher and the web commands.
 //!
 //! It also reads whether this machine's Wi-Fi saves power ([`wifi_power_save_hint`]), which loses
 //! the multicast a browse depends on. Only the launcher calls that, after a browse found nothing;
 //! the rest of this file runs nothing.
 
+use std::net::SocketAddr;
+use std::net::TcpStream;
+use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -31,6 +39,12 @@ pub const NODE_FILE: &str = "node.json";
 /// The model server's port when an address is given without one.
 pub const DEFAULT_MODEL_PORT: u16 = 8000;
 
+/// The prefix of a node's peer name in the overlay: `mightling-<node id>`.
+pub const OVERLAY_PREFIX: &str = "mightling-";
+
+/// How long the LAN address may take to accept a connection before the overlay name is tried.
+const LAN_PROBE: Duration = Duration::from_millis(300);
+
 /// A node as a client remembers it.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Node {
@@ -44,6 +58,9 @@ pub struct Node {
     pub search_port: Option<u16>,
     pub version: String,
     pub last_seen: String,
+    /// The node's overlay name (`mightling-<id>.<domain>`), learnt from its advert or at
+    /// enrolment; empty without remote access.
+    pub remote: String,
 }
 
 impl Node {
@@ -78,6 +95,9 @@ impl Node {
         }
         fields.push(format!("  \"version\": {}", quote(&self.version)));
         fields.push(format!("  \"last_seen\": {}", quote(&self.last_seen)));
+        if !self.remote.is_empty() {
+            fields.push(format!("  \"remote\": {}", quote(&self.remote)));
+        }
         format!("{{\n{}\n}}\n", fields.join(",\n"))
     }
 
@@ -99,7 +119,23 @@ impl Node {
             search_port: port("search_port"),
             version: get("version").unwrap_or_default().to_string(),
             last_seen: get("last_seen").unwrap_or_default().to_string(),
+            remote: get("remote").unwrap_or_default().to_string(),
         })
+    }
+
+    /// Whether `remote` is this node's own overlay name: `mightling-<its id>.` and a domain. The
+    /// name carries the id, so a client that resolves it has found this node and no other.
+    pub fn overlay_name_is_its_own(&self) -> bool {
+        let remote = self.remote.to_ascii_lowercase();
+        !self.node.is_empty()
+            && remote.len() > OVERLAY_PREFIX.len() + self.node.len() + 1
+            && remote.starts_with(&format!("{OVERLAY_PREFIX}{}.", self.node.to_ascii_lowercase()))
+            && remote.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+    }
+
+    /// This node at its overlay name instead of its LAN address.
+    pub fn via_overlay(&self) -> Node {
+        Node { address: self.remote.clone(), ..self.clone() }
     }
 }
 
@@ -258,9 +294,56 @@ pub fn remembered_at(path: &Path) -> Option<Node> {
 
 /// What a program that is not the launcher should use for a service that defaults to loopback:
 /// `None` on a node, or on a client that remembers no node (loopback, as before the split), and
-/// the remembered node otherwise.
+/// the remembered node otherwise: at its LAN address, or at its overlay name when the LAN
+/// address does not accept a connection, the node has one and the overlay is up.
 pub fn remote_node() -> Option<Node> {
-    remote_node_from(is_node(), remembered())
+    remote_node_from(is_node(), remembered()).map(|node| reachable(node, lan_answers, overlay_up))
+}
+
+/// [`remote_node`]'s choice of address, with the LAN probe and NetBird's state given.
+pub fn reachable(node: Node, lan_answers: fn(&Node) -> bool, overlay_up: fn() -> bool) -> Node {
+    if !node.overlay_name_is_its_own() || lan_answers(&node) || !overlay_up() {
+        node
+    } else {
+        node.via_overlay()
+    }
+}
+
+/// Whether NetBird's client reports its management connected (`netbird status --json`; the
+/// daemon's socket is open to local users). False when NetBird is absent or says otherwise.
+pub fn overlay_up() -> bool {
+    Command::new("netbird")
+        .args(["status", "--json"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| management_connected(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Reads `"management": {..., "connected": true, ...}` out of `netbird status --json` without a
+/// JSON library: the management object holds no nested object, and the peers' own `connected`
+/// (a count) is outside it.
+pub fn management_connected(status: &str) -> bool {
+    let Some(start) = status.find("\"management\"") else { return false };
+    let rest = &status[start..];
+    let (Some(open), Some(close)) = (rest.find('{'), rest.find('}')) else { return false };
+    if close < open {
+        return false;
+    }
+    let object = &rest[open..close];
+    let Some(key) = object.find("\"connected\"") else { return false };
+    object[key + "\"connected\"".len()..].trim_start().trim_start_matches(':').trim_start().starts_with("true")
+}
+
+/// Whether the node's LAN address accepts a connection on the model port, within a moment.
+fn lan_answers(node: &Node) -> bool {
+    let addresses: Vec<SocketAddr> = match (node.address.as_str(), node.model_port).to_socket_addrs() {
+        Ok(addresses) => addresses.collect(),
+        Err(_) => return false,
+    };
+    addresses.iter().any(|address| TcpStream::connect_timeout(address, LAN_PROBE).is_ok())
 }
 
 /// [`remote_node`] with its two inputs given.
@@ -470,7 +553,56 @@ mod tests {
             search_port: Some(8888),
             version: "1.3.0".to_string(),
             last_seen: "2026-10-02T09:10:04+01:00".to_string(),
+            remote: String::new(),
         }
+    }
+
+    fn enrolled() -> Node {
+        Node { remote: "mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted".to_string(), ..node() }
+    }
+
+    #[test]
+    fn the_overlay_name_is_remembered_and_absent_without_remote_access() {
+        assert!(!node().render().contains("remote"));
+        let text = enrolled().render();
+        assert!(text.contains("\"remote\": \"mightling-7c1e0c7a-"));
+        assert_eq!(Node::parse(&text), Some(enrolled()));
+    }
+
+    #[test]
+    fn only_the_nodes_own_overlay_name_is_trusted() {
+        assert!(enrolled().overlay_name_is_its_own());
+        assert!(!node().overlay_name_is_its_own());
+        for remote in [
+            "mightling-0000.netbird.selfhosted",
+            "mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001",
+            "evil.example/mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.x",
+            "laptop.netbird.selfhosted",
+        ] {
+            assert!(!Node { remote: remote.to_string(), ..node() }.overlay_name_is_its_own(), "{remote}");
+        }
+        assert!(!Node { node: String::new(), ..enrolled() }.overlay_name_is_its_own());
+    }
+
+    #[test]
+    fn a_silent_lan_address_falls_back_to_the_overlay_name_only_while_the_overlay_is_up() {
+        assert_eq!(reachable(enrolled(), |_| true, || true).address, "192.168.50.105");
+        assert_eq!(
+            reachable(enrolled(), |_| false, || true).model_url(),
+            "http://mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted:8000"
+        );
+        assert_eq!(reachable(enrolled(), |_| false, || false).address, "192.168.50.105", "overlay down: the name is never resolved");
+        assert_eq!(reachable(node(), |_| false, || true).address, "192.168.50.105", "no overlay name, no fallback");
+    }
+
+    #[test]
+    fn management_connected_is_read_from_its_own_object() {
+        let up = r#"{"peers": {"total": 2, "connected": 0}, "management": {"url": "https://b:443", "connected": true, "error": ""}}"#;
+        assert!(management_connected(up));
+        let down = r#"{"peers": {"connected": 2}, "management": {"url": "https://b:443", "connected": false}}"#;
+        assert!(!management_connected(down));
+        assert!(!management_connected(r#"{"daemonStatus": "NeedsLogin"}"#));
+        assert!(!management_connected(""));
     }
 
     #[test]

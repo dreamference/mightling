@@ -665,6 +665,10 @@ Manage the local SearXNG search container.
 
 Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge).
 
+#### `ling-admin searxng status`
+
+Show each search engine's state (ok, failing, suspended).
+
 ### `ling-admin google`
 
 Manage the local Google service (Gmail, Drive, Calendar).
@@ -800,6 +804,51 @@ Delete the homeserver, every account and every message.
 | Option | Description |
 |---|---|
 | `--yes` | Confirm the deletion. |
+
+### `ling-admin remote`
+
+Reach this node from outside the LAN: a NetBird overlay run here, one rented relay box.
+
+#### `ling-admin remote setup`
+
+Set up (or update) the control plane here, the box over SSH, the tunnel, and this node's peer.
+
+| Option | Description |
+|---|---|
+| `dns_name` | The box's public DNS name; `ssh <name>` must log in. |
+| `--yes` | Do not ask; never wait for a sudo password. |
+| `--ssh` | Your SSH Host alias for the box, when `ssh <dns_name>` itself does not log in (remembered; never an address) |
+| `--ca-scope` | The domain the node's new CA may sign under (default: the parent of the box's name) |
+| `--box-only` | Deploy the box and stop: nothing runs on this node (no container, tunnel or sudo) |
+
+#### `ling-admin remote status`
+
+Show the tunnel, the box's units, the certificates and the peers.
+
+#### `ling-admin remote remove`
+
+Remove the box's relay and haproxy and the tunnel; keep the CA and the enrolments.
+
+| Option | Description |
+|---|---|
+| `--purge` | Also delete the control plane, the CA and every enrolment. |
+| `--yes` | Do not ask. |
+
+#### `ling-admin remote code`
+
+Print a one-time code and wait for one client to enrol with it on this LAN.
+
+#### `ling-admin remote peers`
+
+List the enrolled peers.
+
+#### `ling-admin remote revoke`
+
+Delete a peer: its key is forgotten; it can rejoin only on the LAN.
+
+| Option | Description |
+|---|---|
+| `peer` | The peer's name or overlay name (or a prefix) |
 
 ### `ling-admin web`
 

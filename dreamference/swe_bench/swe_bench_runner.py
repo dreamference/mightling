@@ -358,7 +358,7 @@ class SweBenchRunner:
             "puffin_version": cls._output([mightling_bin, "--version"]),
             "codex_tag": CODEX_RELEASE_TAG,
             "runtime_hash": runtime_hash,
-            "cave_mode": config.mightling_cave_mode,
+            "cave_mode": swe_bench_settings.SWE_BENCH_CAVE_MODE,
             "prompt": prompt or config.mightling_prompt,
             "prompt_sha256": cls.prompt_digest(prompt or config.mightling_prompt),
             "airgapped": "off (the container has no network; see the spec's §12)",
@@ -735,8 +735,9 @@ class SweBenchRunner:
                 relays = cls.open_relays(gateway, lanes[1:])
                 for note in lane_notes:
                     print(f"   {note}")
+                cave = manifest.get("cave_mode") or swe_bench_settings.SWE_BENCH_CAVE_MODE
                 extra_env = {
-                    "DREAMFERENCE_MIGHTLING_CAVE_MODE": str(manifest.get("cave_mode") or "ultra"),
+                    "DREAMFERENCE_MIGHTLING_CAVE_MODE": str(cave),
                     "DREAMFERENCE_MIGHTLING_AIRGAPPED": "off",
                     "DREAMFERENCE_MIGHTLING_PROMPT": run_prompt,
                     # A run made before masking existed has no key: it ran unmasked.

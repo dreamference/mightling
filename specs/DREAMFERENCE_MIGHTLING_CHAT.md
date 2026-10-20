@@ -32,6 +32,7 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 | `/threads` | The last 10 threads started from this chat, numbered, with their names. |
 | `/use <n>` | Continues thread `n` from that list. |
 | `/status` | Model server, air-gap level, the current thread, and whether a turn is running. |
+| `/cavemode [level]` | How terse this thread's answers are, as on Signal (CAVE_MODE §11.7): the level in force, a level for this thread, or `default <level|built-in>` for new ones. |
 | `/help` | This table. |
 | `/pair <code>` | Telegram only: pairs this Telegram account (§4.1). |
 
@@ -253,6 +254,7 @@ ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 | `approval_timeout_s` | 600 | when an unanswered approval is declined |
 | `telegram_draft_interval_ms` | 1000 | minimum gap between draft updates |
 | `max_threads_listed` | 10 | `/threads` |
+| `new_thread_after_hours` | 4 | a message after this long a silence starts a new thread; 0: never (§16.2; Signal reads it too, through `ling web`) |
 
 ## 11. Phase 0, measured before relying on it
 
@@ -413,4 +415,8 @@ The owner's Signal thread of 2026-10-20 (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md 
 - **Matrix:** `m.image` and `m.file` are downloaded from the homeserver's authenticated media endpoint (`/_matrix/client/v1/media/download`, then the older `/_matrix/media/v3/download`), with the Matrix 1.10 caption (`body` beside a `filename`) as the text; `m.audio`, `m.video`, `m.location` and anything else are named as dropped.
 - **The hub** (`attachments.rs`) uploads each file into the thread's Ask folder through the link (`AgentCommand::Upload`, `/api/upload?read=1` with the link's cookie, over HTTP beside the socket), then builds the turn as the Signal bridge does: an image as `localImage` when the served model takes images, its text as `[Screenshot text: …]`, a file named; with nothing usable, "I can't read this image; describe it or paste the text." and no turn. Queued inputs are merged into one turn (their texts joined, then their images).
 - **`ling web`** reads an image's text with Tesseract (`ocr.rs`) and says whether the served model takes images (`vision`, from the catalog's `input_modalities`, which the launcher writes from the model server's `/model_info`). `ling chat start` says how to install Tesseract when it is missing.
+
+### 16.2 A new thread after a long silence (branch `chat/fresh-thread`)
+
+A message after `new_thread_after_hours` (default 4) without the conversation moving (the user's last message or the last answer, `last` per chat in `threads.json`) starts a new thread, with one line: "New thread (the last message was … ago); /use 2 to go back." Never while a turn runs or messages wait for one; `/use` counts as moving. The `[chat]` settings are read again every minute (`ling_web_server::chat_settings`, shared with `ling web`'s `/api/chat/settings`, which the Signal bridge asks).
 

@@ -26,6 +26,8 @@ serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
+# The `[chat]` table of the user's configuration (chat_settings.rs); the Codex workspace's version.
+toml = "0.9.5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.182"

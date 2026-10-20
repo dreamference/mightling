@@ -19,6 +19,10 @@ ling docs reindex contracts      # rebuild from the files
 ling docs remove contracts       # deletes the index (which holds the text), never the files
 ```
 
+The same is in **Settings › Your documents**, in the desktop app (with a folder chooser) and in
+`ling web`: each folder with its documents, passages, what could not be read, when it was last
+indexed and the disk its index takes, and buttons to add a folder, rebuild or remove one.
+
 Hidden files, `~/.ssh`, `~/.gnupg`, `~/.config`, `~/.mightling`, package and build folders and files
 named like secrets (`.env`, `*.pem`, `*.key`, `id_*`, `credentials*`) are never indexed, whatever
 you add. A `.lingignore` file (gitignore syntax) in a folder can leave out more.
@@ -33,9 +37,12 @@ you add. A `.lingignore` file (gitignore syntax) in a folder can leave out more.
 | Web pages | `.html` `.htm` `.xhtml` | `para 3-9` |
 | E-mail | `.eml`, `.mbox` | `msg 3` (and `msg 3 · invoice.pdf p.2` for an attachment) |
 | Tables | `.csv` `.tsv` | `rows 2-21` |
+| Spreadsheets | `.xlsx` `.xlsm` `.xlsb` `.xls` `.ods` | `sheet Budget, rows 2-21` (the sheet's own rows) |
+| Presentations | `.pptx` `.odp` | `slide 4` (its speaker notes included) |
 
-Headings give each passage its section (`Delivery > Rates`), a message its subject, a table its
-columns. An e-mail's readable attachments (PDF, Word, OpenDocument, HTML, text, CSV) are indexed with
+Headings give each passage its section (`Delivery > Rates`), a message its subject, a table or a
+sheet its columns, a slide its title. A spreadsheet is read by its stored values (a formula's last
+result). An e-mail's readable attachments (PDF, Word, OpenDocument, HTML, text, CSV) are indexed with
 their message. Other files, such as installers, archives, pictures and videos, are left out without
 being opened. A scanned PDF page with no text layer is counted as needing OCR, which is not built
 yet.

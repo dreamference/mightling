@@ -247,13 +247,16 @@ CASES: Dict[str, Case] = {
 
 # Commands the patch series adds. The pinned source does not list them, so until 2026-10-02 no
 # live test typed them: each was checked once by hand in tmux when it was built. All of them answer
-# from the launcher without a model turn; `/night` reads the throwaway CODEX_HOME's empty queue, and
-# `/node` alone prints its help (with a subcommand it suspends the TUI, which pyte cannot follow).
+# from the launcher without a model turn; `/night` reads the throwaway CODEX_HOME's empty queue,
+# `/adapter` alone reads the catalog, and `/node` alone prints its help (with a subcommand it
+# suspends the TUI, which pyte cannot follow).
 MIGHTLING_CASES: Dict[str, Case] = {
     "cavemode": Case("inline", expect=("Cave mode:",)),
     "night": Case("inline", expect=("No Night Shift tasks for this repository",)),
     "airgapped": Case("inline", expect=("Airgapped:", "← in force")),
     "node": Case("inline", expect=("/node: manage Mightling nodes", "/node provision")),
+    # Alone it lists the base and the installed adapters from the catalog the launcher wrote.
+    "adapter": Case("inline", expect=("Base model:",)),
 }
 CASES.update(MIGHTLING_CASES)
 

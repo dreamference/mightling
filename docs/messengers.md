@@ -31,9 +31,23 @@ is not a preview.
   or paste the text.") instead of asking Mightling about nothing. A file is saved in the thread's
   folder. What a bridge cannot take (a voice message, a sticker) is named in one line, never
   dropped silently.
+- **A new thread after a pause.** A message after four hours of silence starts a new thread, and
+  the bridge says so: "New thread (the last message was 16h00m ago); /use 2 to go back." Change
+  the pause, or switch it off with 0, in `~/.config/dreamference/config.toml`:
+
+  ```toml
+  [chat]
+  new_thread_after_hours = 4
+  ```
 - **Reading text in images needs Tesseract** on the node, offline: `ling signal setup` installs it;
   otherwise `sudo apt install tesseract-ocr`. It reads every installed language; add one with
   `sudo apt install tesseract-ocr-<code>` (for example `tesseract-ocr-por`).
+
+- **Signal and attachments.** For images in Note to Self to reach Mightling, the bridge lets
+  signal-cli download the attachments your account receives (Signal offers no way to fetch one
+  later). Every attachment that is not yours in Note to Self is deleted as it arrives, and the
+  folder is swept every minute, so nothing from your other conversations is kept; it does touch
+  the bridge's private folder on the node for a moment.
 
 ## Signal, in Note to Self
 
@@ -65,7 +79,8 @@ Setup lists what it will change and asks for your password once (sudo). It then 
   so this applies to your own notes as well as to Mightling's replies.
 
 When setup has finished, open Note to Self and write `/help`. The commands are `/new` (start a new
-thread), `/threads`, `/use N`, `/stop` and `/status`. When Mightling asks to run something, you
+thread), `/threads`, `/use N`, `/stop`, `/status` and `/cavemode` (how terse the answers are: `/cavemode full` for
+this thread, `/cavemode default lite` for new ones). When Mightling asks to run something, you
 answer `YES` or `NO`.
 
 **What linking means.** A linked device can read every message your account receives from now on,

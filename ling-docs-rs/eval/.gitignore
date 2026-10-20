@@ -17,3 +17,4 @@ results/pdf-*.json
 !results/pdf-summary.json
 results/ocr-*.json
 !results/ocr-summary.json
+questions-xlsx.jsonl

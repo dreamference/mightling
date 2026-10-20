@@ -1176,6 +1176,8 @@ def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
     assert any(mount.endswith(":/opt/ling:ro") for mount in created)
     env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://172.30.0.1:8000"
+    # The base, set explicitly: a user's `mightling_adapter` default never reaches a run (adapters §10.4).
+    assert env["DREAMFERENCE_MIGHTLING_ADAPTER"] == ""
     # Neither a proxy in the host's environment nor one Docker puts into containers sees the model.
     for key in ("NO_PROXY", "no_proxy"):
         assert {"localhost", "127.0.0.1", "::1", "172.30.0.1"} <= set(env[key].split(","))
@@ -1610,6 +1612,14 @@ def test_the_manifest_records_what_was_measured(bench):
     assert manifest["images"]["acme__widget-1"]["image"] == f"{REPOSITORY}:acme-widget-1"
     with pytest.raises(FileExistsError):
         SweBenchRunStore("r1").write_manifest({})
+
+
+def test_the_cave_level_is_pinned_not_the_products_default(bench, monkeypatch):
+    # Cave-mode spec §11.5: the nights keep `ultra` whatever the product's default or the user's
+    # variable says, so a change of default cannot move their baseline.
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_CAVE_MODE", "off")
+    run(bench, instances=["acme__widget-1"])
+    assert SweBenchRunStore("r1").manifest()["cave_mode"] == "ultra"
 
 
 def test_the_report_counts_add_up_and_says_what_the_number_is_not(bench):
