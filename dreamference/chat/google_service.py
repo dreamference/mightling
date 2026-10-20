@@ -32,6 +32,8 @@ RUNNING: Final[str] = "running"
 GMAIL_AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
 # The shared secret's file, inside the credentials folder; created once, mode 0600.
 SECRET_FILE_NAME: Final[str] = "service-secret"
+# The variable the container hands the secret to the service in (`gmail_search_service.serve`).
+SECRET_ENV: Final[str] = "MIGHTLING_GMAIL_SECRET"
 
 # The files staged into the mounted credentials folder; the service imports the reader from
 # beside itself.
@@ -44,6 +46,8 @@ class GoogleService:
 
     # Why the last start failed, for the CLI to print; empty after a success.
     problem: ClassVar[str] = ""
+    # Whether the last `stage` changed a staged file, so a running service must restart to use it.
+    restaged: ClassVar[bool] = False
 
     @classmethod
     def state(cls) -> str:
@@ -100,14 +104,50 @@ class GoogleService:
         from dreamference.chat import gmail_search_service, google_workspace_reader
 
         folder = pathlib.Path(directory)
+        cls.restaged = False
         try:
             folder.mkdir(mode=0o700, exist_ok=True, parents=True)
-            shutil.copyfile(gmail_search_service.__file__, folder / STAGED_SERVICE)
-            shutil.copyfile(google_workspace_reader.__file__, folder / STAGED_READER)
+            for source, name in (
+                (gmail_search_service.__file__, STAGED_SERVICE),
+                (google_workspace_reader.__file__, STAGED_READER),
+            ):
+                target = folder / name
+                if not target.is_file() or target.read_bytes() != pathlib.Path(source).read_bytes():
+                    shutil.copyfile(source, target)
+                    cls.restaged = True
         except OSError as exc:
             cls.problem = f"Could not stage the Google service: {exc}"
             return False
         return True
+
+    @classmethod
+    def carries_secret(cls, secret: str) -> bool:
+        """Tells whether the existing container was created with today's shared secret.
+
+        A container made before the rename to Mightling (or by the retired web chat) hands the
+        service the secret as `PUFFIN_GMAIL_SECRET`, which the current service does not read: the
+        old code in it answers every client `unauthorised`, and the current code would check none.
+
+        Args:
+            secret (str): The shared secret clients send.
+
+        Returns:
+            bool: True when the container's environment hands the service this secret.
+        """
+        result = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                GOOGLE_CONTAINER_NAME,
+                "--format",
+                "{{range .Config.Env}}{{println .}}{{end}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return f"{SECRET_ENV}={secret}" in result.stdout.splitlines()
 
     @classmethod
     def run_command(cls, directory: str, secret: str) -> list[str]:
@@ -128,7 +168,7 @@ class GoogleService:
             "--user", f"{os.getuid()}:{os.getgid()}",
             "-v", f"{directory}:/config",
             "-p", f"127.0.0.1:{GOOGLE_HOST_PORT}:8000",
-            "-e", f"MIGHTLING_GMAIL_SECRET={secret}",
+            "-e", f"{SECRET_ENV}={secret}",
             GOOGLE_SERVICE_IMAGE, "python3", f"/config/{STAGED_SERVICE}",
         ]  # fmt: skip
 
@@ -164,8 +204,10 @@ class GoogleService:
     def start(cls) -> bool:
         """Makes the service run.
 
-        One that exists (the retired web chat's included) is restaged and started, not replaced; otherwise
-        one is created on the sidecar network. Restaged files take effect at its next restart.
+        One that exists (the retired web chat's included) is restaged and started, not replaced, and
+        restarted when running if a staged file changed, so it serves the installed code. One made
+        without today's shared secret (before the rename to Mightling) is replaced; the tokens stay
+        in the mounted folder. Otherwise one is created on the sidecar network.
 
         Returns:
             bool: True if the container is running once this returns.
@@ -176,12 +218,23 @@ class GoogleService:
         if not cls.stage(CREDENTIALS_DIR):
             return False
         state = cls.state()
-        if state == RUNNING:
-            return True
+        if state:
+            secret = cls.secret()
+            if not secret:
+                return False
+            if not cls.carries_secret(secret):
+                if not cls.stop():
+                    cls.problem = (
+                        f"Could not replace {GOOGLE_CONTAINER_NAME}, made before the rename."
+                    )
+                    return False
+                state = ""
         if not state:
             return cls._create(CREDENTIALS_DIR)
+        if state == RUNNING and not cls.restaged:
+            return True
         started = subprocess.run(
-            ["docker", "start", GOOGLE_CONTAINER_NAME],
+            ["docker", "restart" if state == RUNNING else "start", GOOGLE_CONTAINER_NAME],
             capture_output=True,
             text=True,
             timeout=60,

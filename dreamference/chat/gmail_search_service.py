@@ -121,6 +121,8 @@ GNOME_HINT_NAME: Final[str] = "gnome-accounts.json"
 # Every client sends this: `/apps`' tools and `ling-admin gmail`. A private network and a loopback
 # port are not an authorisation boundary -- the shared secret is.
 AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
+# The answer to every authenticated request when the service was started without a secret.
+NO_SECRET_ERROR: Final[str] = "No shared secret: recreate it with ling-admin google stop, then google start"
 
 IMAP_HOST: Final[str] = "imap.gmail.com"
 IMAP_PORT: Final[int] = 993
@@ -1317,7 +1319,12 @@ class GmailSearchService:
                     app = (urllib.parse.parse_qs(parsed.query).get("app") or ["gmail"])[0]
                     self._setup_page(app if app in APP_SCOPES else "gmail")
                     return
-                if expected and self.headers.get(AUTH_HEADER) != expected:
+                # Fails closed: started without a secret (a container made before the rename
+                # hands over PUFFIN_GMAIL_SECRET), it would otherwise serve mail to anyone.
+                if not expected:
+                    self._reply(401, {"error": NO_SECRET_ERROR})
+                    return
+                if self.headers.get(AUTH_HEADER) != expected:
                     self._reply(401, {"error": "unauthorised"})
                     return
 
