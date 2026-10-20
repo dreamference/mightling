@@ -10,7 +10,8 @@ use ling_web::fetch;
 #[derive(Parser)]
 #[command(name = "ling-fetch", version)]
 struct Args {
-    /// Absolute http(s) URL
+    /// Absolute http(s) URL. A Google share link (share.google, maps.app.goo.gl, goo.gl/maps) is
+    /// resolved to the search or place it opens, without loading Google's page
     url: String,
 
     /// Characters to return (at most 100000)
