@@ -4,7 +4,16 @@
 //! root read-only, the home folder hidden, inside a scope capped at 1 GiB, with a per-file time
 //! limit enforced from outside (`index::extract_all`). PDF parsers are attack surface; a file that
 //! crashes or hangs the worker is recorded `failed` and the worker is started again on the rest.
+//!
+//! Every kind but PDF numbers its text by lines, so `read` can serve any range: the lines of a
+//! text file, the paragraphs of a DOCX, ODT or HTML page (`para 12-30`), the rows of a CSV
+//! (`rows 2-21`), and the lines of a mail file's messages and attachments (`msg 3`). PDFs are
+//! read by page.
 
+pub mod csv;
+pub mod html;
+pub mod mail;
+pub mod office;
 pub mod pdf;
 pub mod text;
 
@@ -29,7 +38,85 @@ pub struct Unit {
     pub line_last: Option<u32>,
     #[serde(default)]
     pub heading: String,
+    /// Units of one group (a message and its attachments) are chunked together and never with
+    /// another group's (§7.2: messages are chunks of their own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<u32>,
     pub text: String,
+}
+
+/// A paragraph of a structured document, and its heading level when it is a heading.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Para {
+    pub text: String,
+    pub level: Option<usize>,
+}
+
+/// Paragraphs (one line each, numbered from 1) cut into a unit per section: a heading starts
+/// one and gives its heading path, as Markdown's sections do. `word` names the lines in the
+/// locator (`para`).
+pub fn sections(paras: Vec<Para>, word: &str) -> Vec<Unit> {
+    let mut units = Vec::new();
+    let mut path: Vec<(usize, String)> = Vec::new();
+    let mut buf: Vec<String> = Vec::new();
+    let mut start = 1;
+    let heading = |path: &[(usize, String)]| path.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join(" > ");
+    let unit = |first: usize, last: usize, heading: String, buf: &[String]| Unit {
+        loc: format!("{word} {first}-{last}"),
+        page: None,
+        line_first: Some(first as u32),
+        line_last: Some(last as u32),
+        heading,
+        group: None,
+        text: buf.join("\n"),
+    };
+    let count = paras.len();
+    for (i, para) in paras.into_iter().enumerate() {
+        let n = i + 1;
+        if let Some(level) = para.level {
+            if !buf.is_empty() {
+                units.push(unit(start, n - 1, heading(&path), &buf));
+            }
+            while path.last().is_some_and(|(l, _)| *l >= level) {
+                path.pop();
+            }
+            path.push((level, para.text.clone()));
+            start = n;
+            buf = vec![para.text];
+            continue;
+        }
+        buf.push(para.text);
+    }
+    if !buf.is_empty() {
+        units.push(unit(start, count, heading(&path), &buf));
+    }
+    units
+}
+
+/// What the extractors need besides the file: PDFium, bound on the first PDF (a mailbox's
+/// attachment included), so a run without PDFs never loads it.
+pub struct Readers {
+    lib_dir: Option<PathBuf>,
+    pdfium: std::cell::OnceCell<std::result::Result<pdf::Pdf, String>>,
+}
+
+impl Readers {
+    pub fn new(lib_dir: &Path) -> Readers {
+        Readers { lib_dir: Some(lib_dir.to_path_buf()), pdfium: std::cell::OnceCell::new() }
+    }
+
+    /// No PDFium: PDFs fail, everything else reads.
+    pub fn none() -> Readers {
+        Readers { lib_dir: None, pdfium: std::cell::OnceCell::new() }
+    }
+
+    pub fn pdf(&self) -> Result<&pdf::Pdf> {
+        let loaded = self.pdfium.get_or_init(|| match &self.lib_dir {
+            Some(dir) => pdf::Pdf::load(dir).map_err(|e| format!("{e:#}")),
+            None => Err("PDFium is not available".to_string()),
+        });
+        loaded.as_ref().map_err(|why| anyhow::anyhow!("{why}"))
+    }
 }
 
 /// One file's extraction.
@@ -61,10 +148,37 @@ pub fn decode(bytes: &[u8]) -> String {
 }
 
 /// Extracts one file; of a PDF, at most `max_pages` pages from the first.
-pub fn extract_file(path: &Path, kind: Kind, pdfium: Option<&pdf::Pdf>, max_pages: Option<u32>) -> Result<Extracted> {
+pub fn extract_file(path: &Path, kind: Kind, readers: &Readers, max_pages: Option<u32>) -> Result<Extracted> {
     if kind == Kind::Pdf {
-        let Some(pdfium) = pdfium else { anyhow::bail!("PDFium is not available") };
-        let text = pdfium.extract(path, max_pages)?;
+        return Ok(pdf_extracted(readers.pdf()?.extract(path, max_pages)?));
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    extract_bytes(&name, kind, &std::fs::read(path)?, readers, max_pages)
+}
+
+/// Extracts a file's bytes (an attachment's, or a file read whole); `name` decides between CSV
+/// and TSV.
+pub fn extract_bytes(name: &str, kind: Kind, bytes: &[u8], readers: &Readers, max_pages: Option<u32>) -> Result<Extracted> {
+    let units = match kind {
+        Kind::Pdf => return Ok(pdf_extracted(readers.pdf()?.extract_bytes(bytes, max_pages)?)),
+        Kind::Docx => office::docx(bytes)?,
+        Kind::Odt => office::odt(bytes)?,
+        Kind::Html => html::html(bytes),
+        Kind::Eml => mail::eml(bytes, readers),
+        Kind::Mbox => mail::mbox(bytes, readers),
+        Kind::Csv => csv::csv(&decode(bytes), name.to_ascii_lowercase().ends_with(".tsv")),
+        Kind::Markdown => text::markdown(&decode(bytes)),
+        Kind::Rst => text::rst(&decode(bytes)),
+        Kind::Org => text::org(&decode(bytes)),
+        Kind::Tex => text::tex(&decode(bytes)),
+        Kind::Text => text::plain(&decode(bytes)),
+    };
+    Ok(Extracted { units, ..Extracted::default() })
+}
+
+/// A PDF's pages as units; pages without text are recorded as needing OCR.
+fn pdf_extracted(text: pdf::PdfText) -> Extracted {
+    {
         let read = text.pages.len() as u32;
         let mut out = Extracted { pages: Some(text.page_count), pages_read: (read < text.page_count).then_some(read), title: text.title, ..Extracted::default() };
         for (i, page) in text.pages.into_iter().enumerate() {
@@ -73,19 +187,10 @@ pub fn extract_file(path: &Path, kind: Kind, pdfium: Option<&pdf::Pdf>, max_page
                 out.needs_ocr.push(number);
                 continue;
             }
-            out.units.push(Unit { loc: format!("p.{number}"), page: Some(number), line_first: None, line_last: None, heading: String::new(), text: page });
+            out.units.push(Unit { loc: format!("p.{number}"), page: Some(number), line_first: None, line_last: None, heading: String::new(), group: None, text: page });
         }
-        return Ok(out);
+        out
     }
-    let text = decode(&std::fs::read(path)?);
-    let units = match kind {
-        Kind::Markdown => text::markdown(&text),
-        Kind::Rst => text::rst(&text),
-        Kind::Org => text::org(&text),
-        Kind::Tex => text::tex(&text),
-        _ => text::plain(&text),
-    };
-    Ok(Extracted { units, ..Extracted::default() })
 }
 
 /// One file the worker is asked to read.
@@ -117,8 +222,7 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path) -> Result<()> {
         .filter_map(|l| serde_json::from_str(&l).ok())
         .collect();
     let mut sink = std::fs::OpenOptions::new().create(true).append(true).open(out)?;
-    let needs_pdf = jobs.iter().any(|j| j.kind == Kind::Pdf);
-    let pdfium = if needs_pdf { pdf::Pdf::load(lib_dir).map_err(|e| e.to_string()) } else { Err(String::new()) };
+    let readers = Readers::new(lib_dir);
     let mut emit = |event: &Event| -> Result<()> {
         writeln!(sink, "{}", serde_json::to_string(event)?)?;
         sink.flush()?;
@@ -126,10 +230,7 @@ pub fn worker(jobs: &Path, out: &Path, lib_dir: &Path) -> Result<()> {
     };
     for job in jobs {
         emit(&Event::Start { id: job.id })?;
-        let result = match (&pdfium, job.kind) {
-            (Err(why), Kind::Pdf) => Err(anyhow::anyhow!("{why}")),
-            (pdfium, kind) => extract_file(&job.path, kind, pdfium.as_ref().ok(), job.max_pages),
-        };
+        let result = extract_file(&job.path, job.kind, &readers, job.max_pages);
         match result {
             Ok(result) => emit(&Event::Done { id: job.id, result })?,
             Err(error) => emit(&Event::Failed { id: job.id, error: format!("{error:#}") })?,
@@ -147,7 +248,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.md");
         std::fs::write(&path, b"\xEF\xBB\xBF# Hello\nworld\n").unwrap();
-        let out = extract_file(&path, Kind::Markdown, None, None).unwrap();
+        let out = extract_file(&path, Kind::Markdown, &Readers::none(), None).unwrap();
         assert_eq!(out.units.len(), 1);
         assert_eq!(out.units[0].heading, "Hello");
         assert!(out.units[0].text.starts_with("# Hello"));

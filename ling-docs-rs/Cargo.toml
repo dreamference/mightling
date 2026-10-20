@@ -23,14 +23,27 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# CSV and TSV files (Phase 2, §7.1). MIT OR Unlicense.
+csv = "=1.4.0"
+# Legacy charsets of HTML pages (`<meta charset>`), as ling-fetch decodes them. (Apache-2.0 OR MIT) AND BSD-3-Clause.
+encoding_rs = "=0.8.42"
 globset = "0.4"
 ignore = "0.4"
 libc = "0.2"
+# E-mail (`.eml`, `.mbox`): headers, the text body, attachments (Phase 2, §7.1). Apache-2.0 OR MIT.
+mail-parser = { version = "=0.11.9", default-features = false, features = ["full_encoding"] }
 # ONNX Runtime, loaded with dlopen from the lib directory: no build-time download, no network.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-22"] }
 # PDFium bound at run time to the pdfium-binaries build (§7.1); no image support needed.
 pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+# The XML inside Office and OpenDocument files, read as a stream (Phase 2, §7.1). MIT.
+quick-xml = "=0.42.0"
 rusqlite = { version = "0.37", features = ["bundled"] }
+# HTML through html5ever, the parser ling-fetch reads pages with (Phase 2, §7.1). ISC (html5ever
+# MIT OR Apache-2.0; selectors and cssparser MPL-2.0).
+scraper = { version = "=0.27.0", default-features = false }
+# The tree scraper parses into, walked without recursion as ling-fetch does. MIT.
+ego-tree = "=0.11.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -39,6 +52,8 @@ tokenizers = { version = "0.22", default-features = false, features = ["fancy-re
 toml = "0.8"
 unicode-bidi = "0.3"
 unicode-normalization = "0.1"
+# DOCX and ODT are ZIP archives; only stored and deflated entries are read (Phase 2, §7.1). MIT.
+zip = { version = "=9.0.5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"
