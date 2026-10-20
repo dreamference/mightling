@@ -227,6 +227,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/apps", get(not_built))
         .route("/images/{*path}", get(image))
         .route("/docs/{collection}/{id}", get(document))
+        .route("/api/docs", get(docs_status))
+        .route("/api/docs/{action}", post(docs_change))
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
         .route("/login", get(login))
@@ -360,6 +362,46 @@ async fn document(State(server): State<Arc<Server>>, axum::extract::Path((collec
         headers.insert(header::CONTENT_DISPOSITION, value);
     }
     response
+}
+
+/// Settings › Your documents: the collections and their state (`ling docs status --json`).
+async fn docs_status(State(server): State<Arc<Server>>) -> Response {
+    match documents::docs_cli(&server.config.launch, &["status", "--json"]).await {
+        Ok(said) => match serde_json::from_str::<serde_json::Value>(&said) {
+            Ok(value) => json_response(StatusCode::OK, value),
+            Err(_) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": "the local file index gave no answer" })),
+        },
+        Err(reason) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": reason })),
+    }
+}
+
+/// Settings › Your documents: add a folder (`{"folder": "/abs/path"}`), remove or rebuild a
+/// collection (`{"name": "notes"}`), each through `ling docs`.
+async fn docs_change(State(server): State<Arc<Server>>, axum::extract::Path(action): axum::extract::Path<String>, body: axum::body::Bytes) -> Response {
+    let bad = |why: &str| json_response(StatusCode::BAD_REQUEST, json!({ "error": why }));
+    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else { return bad("send JSON") };
+    let field = |key: &str| request.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let (args, value) = match action.as_str() {
+        "add" => {
+            let folder = field("folder");
+            if !folder.starts_with('/') || folder.len() > 4096 {
+                return bad("name a folder by its full path");
+            }
+            ("add", folder)
+        }
+        "remove" | "reindex" => {
+            let name = field("name");
+            if !documents::valid_collection(&name) {
+                return bad("not a collection");
+            }
+            (if action == "remove" { "remove" } else { "reindex" }, name)
+        }
+        _ => return not_found().await,
+    };
+    match documents::docs_cli(&server.config.launch, &[args, &value]).await {
+        Ok(said) => json_response(StatusCode::OK, json!({ "said": said })),
+        Err(reason) => json_response(StatusCode::UNPROCESSABLE_ENTITY, json!({ "error": reason })),
+    }
 }
 
 /// The microphone's recording, turned into text by the speech-to-text service on this machine

@@ -72,6 +72,11 @@ export type FromView =
   | { type: "open/folder"; dir: string }
   /** A citation of the user's documents (`documents/42`), opened with the system's handler (docs.ts). */
   | { type: "docs/open"; doc: string }
+  /** Settings › Your documents: the collections' state, and adding, removing or rebuilding one (docs.ts). */
+  | { type: "docs/status" }
+  | { type: "docs/add"; folder: string }
+  | { type: "docs/remove"; name: string }
+  | { type: "docs/reindex"; name: string }
   | { type: "open/editor"; dir: string; editor: string | null }
   /** The editors found on this machine (editors.ts), and opening a file in one at a line. */
   | { type: "editors/list" }
