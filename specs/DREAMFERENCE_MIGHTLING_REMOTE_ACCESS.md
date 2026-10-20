@@ -1,6 +1,6 @@
 # Mightling from outside the LAN: remote access (MVP)
 
-**Status:** proposed 2026-10-10, the user's design, nothing built. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. Phones are documented, not built. §12 lists what was checked against NetBird's own documentation on 2026-10-10 and what remains open.
+**Status:** proposed 2026-10-10, the user's design; the build was decided on 2026-10-20 (§13, phases) and Phase 0 was done at the desk that day (§14: pins, what the source confirms, the open points decided). Nothing else built yet. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. Phones are documented, not built. §12 lists what was checked against NetBird's own documentation on 2026-10-10 and what remains open.
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 
@@ -61,7 +61,7 @@ NetBird has four components: the client on every machine, and three services. Th
 
 **One port, one or two server names.** A pass-through routes by server name, so management and signal need either two names at the box (`mgmt.<dns-name>` and `signal.<dns-name>`, both resolving to the box, both in the certificate) or one listener on the node that serves both. The recommendation is the second: the combined `netbird-server` container of recent releases multiplexes management, signal and relay on one port (§12), which makes the pass-through a single rule and removes the h2c question at the same time; the relay part of it is switched off on the node, since the relay runs on the box. Open question 1 records what Phase 0 must confirm about it.
 
-**The relay's certificate.** The relay terminates its own TLS (NetBird's documentation says so, and advises against a proxy in front of it since that costs QUIC). Its certificate comes from the node's CA too, issued for the box's DNS name and copied to the box by `remote setup`; clients trust the CA, so no public certificate is needed. Whether NetBird's client accepts a relay certificate from a private CA installed in the system trust store is verified for the relay (§12) and assumed for management and signal (§11).
+**The relay's certificate.** The relay terminates its own TLS (NetBird's documentation says so, and advises against a proxy in front of it since that costs QUIC). Its certificate comes from the node's CA too, issued for the box's relay name (`relay.<dns-name>`, since the control plane holds `<dns-name>` on the same port: §14.3, item 1) and copied to the box by `remote setup`; clients trust the CA, so no public certificate is needed. Whether NetBird's client accepts a relay certificate from a private CA installed in the system trust store is verified for the relay (§12) and assumed for management and signal (§11).
 
 **Naming.** The box has a public DNS name the user owns (`<dns-name>`, the argument of `remote setup`). The overlay's domain is NetBird's `netbird.selfhosted` by default; the node's name in it is derived from its hostname, as NetBird does. No address of any kind is written down by Mightling: not the box's, not the node's overlay address, not a client's.
 
@@ -172,9 +172,11 @@ CHAT §2 and §5 are rewritten when this is built: the Tailscale paragraphs beco
 
 ## 11. Open questions
 
+*Answered at the desk on 2026-10-20 where the source can answer: §14. What is left is §14.5.*
+
 1. **Management and signal behind a TCP pass-through with their own certificates, on one server name.** NetBird documents `NB_CERT_FILE`/`NB_CERT_KEY` for both services and documents proxies that terminate TLS for them; it does not document the combination used here (TLS served by the services themselves, a pass-through that terminates nothing). A pass-through routes by server name, so the two services need either two names at the box (`mgmt.<dns-name>`, `signal.<dns-name>`) or one listener serving both. **Recommendation:** the combined `netbird-server` container on the node, which multiplexes management and signal on one port, makes the pass-through a single rule and removes the h2c question (§2); Phase 0 confirms that it serves its own TLS from certificate files, with a `socat`-style pass-through on a scratch box, before the command is written. If it cannot, the MVP runs the separate services under two names.
 2. **A private CA for management and signal in the client.** Verified for the relay (§12); the client's gRPC connections to management and signal are assumed to use the same system trust store. Phase 0 confirms it on Linux and macOS before §4.1's bundle is designed around it.
-3. **The pass-through on the box:** a pinned release of a small SNI router, or the distribution's `haproxy`. The former keeps "nothing else on the box" literal; the latter is signed by the distribution. Decided after the Phase 0 measurement of both.
+3. **The pass-through on the box:** a pinned release of a small SNI router, or the distribution's `haproxy`. The former keeps "nothing else on the box" literal; the latter is signed by the distribution. *Decided 2026-10-20: gost, pinned, with a second name for the relay (§14.3, item 1).*
 4. **The relay's certificate:** from the node's CA (the design) or a public one on the box. If NetBird's mobile clients cannot be made to trust a private CA for the relay, the relay alone gets a public certificate; the control plane does not.
 5. **TURN:** whether any client of the user's needs `coturn` beside NetBird's relay. Deployed only on evidence.
 6. **The overlay's DNS domain:** NetBird's default or a Mightling one. The default is verified to work; a custom one costs one setting.
@@ -197,3 +199,73 @@ Read on the day from `docs.netbird.io` and NetBird's GitHub, not from memory:
 - **Signal's privacy:** messages through signal are end-to-end encrypted between the peers; signal sees the two public keys and never the contents ("How NetBird Works").
 
 Not verified, and marked open above: the pass-through combination (11.1), the private CA for management and signal in the client (11.2), the mobile clients' trust store (11.4).
+
+---
+
+## 13. Phases (decided 2026-10-20)
+
+The owner's decision of 2026-10-20 was to build the MVP. Each phase is a branch off `main`, merged after the full gate (the Python suite; the launcher's `cargo test` in a scratch export, never in `codex/`; the locator's byte-identical copies changed together), and reported before the next starts. No phase deploys anything to a rented box or turns NetBird on on a real machine: the live tests wait for the owner (`docs/dev/remote-access.md`, *Live-test plan*).
+
+- **Phase 0, desk (branch `remote/phase0-verification`):** NetBird's documentation and source read again on the day, the pins chosen from published checksum files, and the conflicts this document left open decided (§14). The live half of the original Phase 0 (a scratch box, §11.1 and §11.2 measured) is step 1 of the live-test plan.
+- **Phase 1, the node:** the CA and the certificates (`openssl`, no new Python dependency); the control-plane container, pinned by digest, on loopback, memory-capped; the relay's secret; the node enrolled as the first peer; the tunnel's user unit; `ling-admin remote setup|status|remove` for the node's half; `ling-admin node remote code|peers|revoke`; the gate's probe answer carrying the node id (§14.3).
+- **Phase 2, the box:** the box's half of `remote setup|status|remove` over SSH, as a printed plan of steps the tests check (the pattern of `ling signal setup`): the pinned relay, the pass-through, the units, the firewall, the host key pinned on first use, a tunnel account that can forward one port and nothing else. Built and tested, never run against a box by an agent.
+- **Phase 3, the client:** `ling node remote join` in the launcher (`prepare_args` already intercepts `node`, so no Codex patch); the name tier of §5 in both copies of the locator; `node.json`'s `remote_name` and `remote_domain`, written only when set; `ling node list` and `forget`; the advertisement's `remote` TXT key (§7).
+- **Phase 4, the audit and the air gap:** the declared exception, `audit egress --remote`, and the `/airgapped` line (§6).
+- **Phase 5, Matrix on either overlay** (owner's decision of 2026-10-20, replacing §8's "Tailscale is no longer named"): the homeserver reachable by name on the NetBird overlay, which is the default once it is set up, with Tailscale kept as the option for a user who already has a tailnet; `ling-admin matrix start` chooses the overlay; MIGHTLING_CHAT §2 and §5 and `docs/dev/messengers.md` rewritten. A homeserver's server name is permanent (every account id ends in it), so the choice is made when a homeserver is created: an existing Tailscale homeserver keeps its name and its overlay until `matrix remove`.
+
+---
+
+## 14. Phase 0, at the desk (2026-10-20)
+
+NetBird's documentation and its source at tag `v0.81.3` were read on the day (`docs.netbird.io`; `github.com/netbirdio/netbird`, the release's checksums file and Docker Hub's tag records), not from memory. Nothing was installed or run. What only a live test can show stays open and is step 1 of the live-test plan (`docs/dev/remote-access.md`).
+
+### 14.1 Pins
+
+NetBird **0.81.3** (released 2026-10-19, the latest stable on the day). Each value was read from the release's `netbird_0.81.3_checksums.txt` or from Docker Hub's record of the tag, and the client archives also match the GitHub release's own asset digests (linux arm64 from the checksums file only). Phase 1 may move to a later release; a pin is changed only with a value read from a published checksum or digest.
+
+| What | Where it runs | Pinned file or image | SHA-256 |
+|---|---|---|---|
+| Client, linux amd64 | clients, the node | `netbird_0.81.3_linux_amd64.tar.gz` | `cbdea310068e35449f034544d5137fefee8f6d948fffd020883ffc8b3bab63b1` |
+| Client, linux arm64 | the GB10 node, clients | `netbird_0.81.3_linux_arm64.tar.gz` | `980eef938177108bdfa7d802566b6309123592a58631349a78f11cd97c76c22d` |
+| Client, macOS amd64 | clients | `netbird_0.81.3_darwin_amd64.tar.gz` | `95ef6a3f3c56d7d7d96e66fdf2523a6ee8c719b8beb959e9f15c6a101e4cac1f` |
+| Client, macOS arm64 | clients | `netbird_0.81.3_darwin_arm64.tar.gz` | `bc37108ee88cbc0a998031231570a2c62f03c0937867a0114b8d137e7840fe71` |
+| Combined server (management, signal) | the node, Docker | `netbirdio/netbird-server:0.81.3`, multi-architecture index | `541ecef7e98a66b17411d44e9d4dcfdb65913415f39b3b944b8e7e748f997f1d` |
+| Relay | the box, as a binary (§14.2, item 3) | `netbirdio/relay:0.81.3`, index; amd64 manifest; arm64 manifest | `721a15a9de4817b142134b5e039bfc3559b0c80db8054408d3723bc52ccba4ec`; `de516151c3d90f8bdc8e55af34eb14a727dac6b167308cb6d771232a9a970324`; `f5f7bba04394051a67e5c6ed57c4ce5d4ee0b4fb77804ce317cb0b894cba41c7` |
+| SNI router (gost) | the box | `gost_3.3.0_linux_amd64.tar.gz`; `gost_3.3.0_linux_arm64.tar.gz` (go-gost/gost v3.3.0, `checksums.txt`) | `676fb7f78d267b6ae73df719c0c7f2b565dde7147da935cfafbc1e1da558b6d5`; `d03699e3f385d4ff5dad68046712adfcc7515325a064d2ab046e0bece30f8f8f` |
+
+### 14.2 Confirmed from the source
+
+1. **The combined server serves its own TLS from files** (`server.tls.certFile`, `server.tls.keyFile` in its YAML configuration; `combined/cmd/root.go`), and one `listenAddress` carries management's gRPC, the REST API and signal (over WebSocket). §11.1's recommendation holds: one server name for the control plane, one route at the box. What remains for the live test is the path itself (gRPC and WebSocket through a TCP pass-through and an SSH tunnel), which nothing in the code argues against.
+2. **The client trusts the system store and nothing else.** Management and signal (`client/grpc/dialer.go`), the relay's WebSocket (`shared/relay/client/dialer/ws/ws.go`) and its QUIC (`shared/relay/tls/client_prod.go`) all dial with `x509.SystemCertPool()`; there is no flag or variable for another CA. §11.2 is answered for the code: the CA goes into the system store (`update-ca-certificates` on Debian and Ubuntu; the System keychain, trusted for SSL, on macOS, where NetBird's daemon runs as root). macOS is still measured live.
+3. **The relay ships only as an image.** The release has no relay or server archive (`.goreleaser.yaml` packages the client and some tools). The relay image's binary, `/go/bin/netbird-relay`, is built with `CGO_ENABLED=0`, so it is static. Since the box gets no Docker, `remote setup` takes the binary out of the image **pinned by its per-architecture manifest digest** on the node (`docker create`, `docker cp`), records its SHA-256, copies it to the box and checks it there. The digest is the pin; the binary's own SHA-256 is written into the code in Phase 2 from the first extraction.
+4. **An administrator token without an identity provider or a dashboard.** With `NB_SETUP_PAT_ENABLED=true`, an unauthenticated `POST /api/setup` creates the owner account and returns a personal access token (`create_pat`, `pat_expire_in` at most 365 days), and works only while no account exists (`docs.netbird.io/selfhosted/automated-setup`). `remote setup` calls it **on loopback, before the tunnel exists**, so nothing outside the node can reach the endpoint in that window. The token is kept in the remote state (0600, never leaves the node), rotated by `remote setup` before it expires (`POST /api/users/{id}/tokens`), and `remote status` warns 30 days ahead. The calls: `POST /api/setup-keys`, `GET /api/peers`, `DELETE /api/peers/{id}`, header `Authorization: Token <token>`.
+5. **Setup keys live at least a day.** `expires_in` is 86,400 s at the least, so §4.1's ten minutes is the enrolment code's, not the key's: `node remote code` mints a one-off, non-ephemeral key with `usage_limit` 1 and revokes it in management when its ten minutes end unused. (An ephemeral key would give the peer an address-derived name suffix, which this design avoids.)
+6. **Peer names** are the hostname's first label, lowercased (`gx10-9428` → `gx10-9428.netbird.selfhosted`); a taken label gets a suffix derived from the peer's overlay address. The bundle therefore carries the node's label as management reports it, never one guessed from the hostname.
+7. **The DNS domain is not a configuration key** of the combined server: a fresh account gets `netbird.selfhosted` and the API's account setting `dns_domain` changes it. §11.6: the default is kept.
+8. **The server's STUN must be pointed at the box** (`server.stuns`), or peers are handed STUN on the node, where nothing forwards UDP; **`server.relays.addresses` switches the local relay off**; **`server.store.encryptionKey` must be set before the first start** (otherwise a new key is generated on every start). Relay variables: `NB_LISTEN_ADDRESS`, `NB_EXPOSED_ADDRESS`, `NB_AUTH_SECRET`, `NB_TLS_CERT_FILE`, `NB_TLS_KEY_FILE`, `NB_ENABLE_STUN`, `NB_STUN_PORTS` (3478), health at `/health` on `NB_HEALTH_LISTEN_ADDRESS` (`:9000`). The relay's WebSocket (TCP) and QUIC (UDP) bind the same address; QUIC only with TLS.
+9. **Peer names on the client:** on Linux with systemd-resolved, NetBird's client configures resolved over D-Bus; on macOS 0.81.3 installs a scoped resolver for the peer zone (`host_darwin.go`), while the DNS page says peer names may not resolve on macOS without a nameserver group. The system resolver path (`getaddrinfo`) is what the locator's tier uses; macOS is measured live.
+
+### 14.3 Decisions this document left open
+
+1. **Port 443 under two names (§2, §11.3).** The design put the relay, which terminates its own TLS, at `rels://<dns-name>:443` *and* the pass-through on the same 443 with the same server name; a router reading the server name cannot tell the two apart. **Decided:** the box answers two names, both the user's: `<dns-name>` for the control plane (passed through to the node) and `relay.<dns-name>` for the relay (`remote setup --relay-name` names another). The SNI router is **gost 3.3.0, pinned** (§14.1), not the distribution's haproxy: it is one static binary like the relay, needs no package manager (so any distribution with systemd will do), and keeps "nothing else is installed" literal. The relay listens on port 8443, TCP and UDP (it binds one address for both); the box's firewall admits TCP 8443 only from the router on loopback and UDP only through a redirect of UDP 443, and the relay announces `rels://relay.<dns-name>:443`; STUN on 3478/udp. The certificates follow: management's lists `<dns-name>`, the relay's `relay.<dns-name>`. The fallback, if the owner wants one name only: the relay on a port of its own (TCP and UDP), the pass-through a plain forward with no router at all.
+2. **The node id behind the name (§5).** `GET /v1/models` carries no node id, and no service of the node returns it over HTTP today. **Decided:** the gate's probe answer (`/mightling-gate`, answered even during a benchmark run, before the refusal) gains `node`, read from a file the host writes beside the gate's state; the locator's name tier reads it and uses the node only when it is the remembered id. The overlay name stays the hostname's label, readable on a phone (Matrix, `ling web`), rather than the id.
+3. **Leaf certificates live 397 days, the CA ten years.** macOS refuses a server certificate valid for more than 825 days even under a private root it trusts; 397 keeps every browser quiet as well. `remote setup` reissues a leaf with less than 30 days left (§3's reconcile), and `remote status` says when.
+4. **The tunnel account on the box** forwards one port and nothing else: `remote setup` makes a system user `mightling-tunnel` whose only key is one the node generated for the tunnel, with `restrict,port-forwarding,permitlisten="127.0.0.1:10443",command="/bin/false"`. The owner's own key is used for the setup over SSH and never by the unit.
+5. **Matrix on either overlay** (§13, Phase 5): the homeserver's TLS on the NetBird overlay needs a TLS-terminating piece, which `systemd-socket-proxyd` is not; tuwunel's own TLS settings are the first candidate, decided in that phase.
+
+### 14.4 What the rented box needs (the owner's decision)
+
+- **A small Linux VM**, amd64 or arm64, with systemd and OpenSSH (any current Debian or Ubuntu; no Docker, no package installed by `remote setup`), about 256 MB of memory free. A dedicated box: `remote setup` changes its firewall (an nftables table of its own) and `remote remove` takes back only what setup installed.
+- **Two DNS names the owner controls**, both pointing at it: `<dns-name>` and `relay.<dns-name>` (an A or AAAA record each, or a wildcard).
+- **The provider's firewall open** for TCP 443, UDP 443 and UDP 3478 inbound, and TCP 22 from wherever the node is (the node dials out; nothing dials the node).
+- **`ssh <dns-name>` working from the node** with the owner's key, as root or a passwordless sudoer, for `remote setup` and `remote remove` only.
+- **The existing `vpn-box` is not assumed.** It runs the owner's own services and nothing of this design is put there unless the owner decides so; the requirements above are what that decision needs to know (port 443 and UDP 443 would be taken by the relay and the router).
+
+### 14.5 Still open, for the live test
+
+- §11.1's path through a pass-through and an SSH tunnel (14.2, item 1).
+- §11.2 on macOS: the CA in the System keychain trusted by NetBird's root daemon (14.2, item 2).
+- §11.4: whether the mobile clients trust a private CA for the relay (phones are not built in the MVP).
+- §11.5 (TURN): on evidence only, as before.
+- Peer names through the system resolver on macOS (14.2, item 9).
+- Whether a peer that dials `rels://…:443` uses QUIC through the UDP redirect, or falls back to the WebSocket (either works; the redirect is there so the first can).
