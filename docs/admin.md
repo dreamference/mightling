@@ -377,6 +377,7 @@ Split a task list into K balanced shards, written as lists of their own.
 | `--shards` | How many shards. |
 | `--out-dir` | Where to write <list>-<I>of<K>.txt (default: beside the list) |
 | `--dataset` | The dataset the ids are from (default verified) |
+| `--balance-by` | Also spread the tasks of this other list evenly over the shards (repeatable), e.g. the fresh ones; the shards are then not those run --shard makes, and say so. |
 
 #### `ling-admin swe-bench merge`
 

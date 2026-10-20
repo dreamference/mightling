@@ -92,3 +92,43 @@ def test_shard_lists_are_written_with_a_header_and_the_same_tasks_as_pick(tmp_pa
         assert f"--subset fresh-150k.txt --shard {index}/3" in "\n".join(header)
         assert any(line.startswith("# Mix: easy/medium/hard ") for line in header)
         assert [line for line in lines if not line.startswith("#")] == SweBenchShards.pick(ids, repos, index, 3)
+
+
+def test_balance_by_spreads_another_lists_tasks_evenly_and_keeps_tier_and_repository_balanced():
+    ids = verified_list()
+    repos = {i: repo_of(i) for i in ids}
+    # A "fresh" part concentrated in a few repositories and the easy tier, as fresh-61j is in fresh-150k.
+    fresh = [i for i in ids if SweBenchDifficulty.tier(i) == "easy"][:45] + sorted(MEDIUM)[:7] + sorted(HARD)[:9]
+    plain = SweBenchShards.split(ids, repos, 3)
+    groups = SweBenchShards.groups(ids, {"fresh.txt": fresh})
+    balanced = SweBenchShards.split(ids, repos, 3, groups)
+    assert sorted(i for shard in balanced for i in shard) == sorted(ids)
+    held = [len(set(shard) & set(fresh)) for shard in balanced]
+    assert max(held) - min(held) <= 1, held
+    assert max(map(len, balanced)) - min(map(len, balanced)) <= 1
+    assert spread(balanced, SweBenchDifficulty.tier) <= 1
+    assert spread(balanced, repos.get) <= 2
+    # Without a stratum the split is `run --shard`'s, unchanged.
+    assert SweBenchShards.split(ids, repos, 3, None) == plain
+
+
+def test_groups_name_the_lists_that_hold_each_task():
+    groups = SweBenchShards.groups(["a", "b", "c"], {"x.txt": ["a", "b"], "y.txt": ["b"]})
+    assert groups == {"a": "x.txt", "b": "x.txt+y.txt", "c": ""}
+
+
+def test_balanced_shard_lists_say_they_are_not_run_shards(tmp_path):
+    ids = verified_list()
+    repos = {i: repo_of(i) for i in ids}
+    fresh = ids[:61]
+    source = tmp_path / "fresh-150k.txt"
+    source.write_text("".join(f"{i}\n" for i in ids))
+    written = SweBenchShards.write(source, ids, repos, 3, tmp_path, {"fresh-61j.txt": fresh})
+    groups = SweBenchShards.groups(ids, {"fresh-61j.txt": fresh})
+    for index, path in enumerate(written, start=1):
+        text = path.read_text()
+        header = "\n".join(line for line in text.splitlines() if line.startswith("#"))
+        assert "--balance-by fresh-61j.txt" in header and "NOT the tasks of" in header
+        assert f"--shard {index}/3" in header and "of fresh-61j.txt's 61" in header
+        assert [line for line in text.splitlines() if not line.startswith("#")] == \
+            SweBenchShards.split(ids, repos, 3, groups)[index - 1]
