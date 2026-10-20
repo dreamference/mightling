@@ -1,6 +1,6 @@
 """
 SWE-rebench's instance images for this machine's architecture, built from the SWE-rebench fork's
-recipes (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §27).
+recipes (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §28).
 
 SWE-rebench publishes `swerebench/sweb.eval.x86_64.*` images only. The fork of the harness that
 built them (`SWE-rebench/SWE-bench-fork`, `dockerfiles/python.py`, `test_spec/python.py`) takes

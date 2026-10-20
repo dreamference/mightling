@@ -1,4 +1,4 @@
-"""SWE-rebench as a second task pool (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §27).
+"""SWE-rebench as a second task pool (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §28).
 
 The dataset names, the rows the pinned harness grades, the arm64 image builder and its archives.
 `docker` is a stand-in that records every call and plays the few that write files (`save`), so
