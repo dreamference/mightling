@@ -148,6 +148,8 @@ def test_searxng_is_recreated_when_its_address_no_longer_matches(monkeypatch):
     monkeypatch.setattr(SidecarNetwork, "ensure", classmethod(lambda cls: True))
     monkeypatch.setattr(SearxngSidecar, "extra_networks", classmethod(lambda cls: ["onyx_default"]))
     monkeypatch.setattr(SearxngSidecar, "published_address", classmethod(lambda cls: "127.0.0.1"))
+    from dreamference.chat.searxng_settings import SearxngSettings
+    SearxngSettings.ensure(SearxngSidecar.config_dir())  # current settings: no restart for them
 
     assert SearxngSidecar.start() is True              # on loopback, wanted on loopback: only started
     assert [c[:2] for c in commands] == [["docker", "start"]]

@@ -19,6 +19,10 @@ use crate::envelope::Attachment;
 use crate::format;
 use crate::format::Reply;
 use crate::gate::OwnerMessage;
+use crate::limits;
+use crate::limits::Limits;
+use crate::limits::Verdict;
+use crate::limits::Watch;
 
 /// Questions held while another is answered.
 pub const QUEUE_LIMIT: usize = 5;
@@ -33,6 +37,9 @@ pub const PROGRESS_EVERY_MS: u64 = 300_000;
 pub const APPROVAL_MS: u64 = 10 * 60_000;
 /// The owner is told the web server is down once it has been down this long.
 pub const DOWN_NOTICE_MS: u64 = 10_000;
+/// A question after this long a silence starts a new thread, unless `[chat]
+/// new_thread_after_hours` says otherwise (§19.2).
+pub const NEW_THREAD_AFTER_MS: u64 = 4 * 3600 * 1000;
 
 /// What the agent side reports, read from `ling web`'s relay.
 #[derive(Clone, Debug, PartialEq)]
@@ -50,6 +57,9 @@ pub enum AgentEvent {
     Approval { id: Value, thread: String, kind: ApprovalKind, command: Option<String>, cwd: Option<String>, reason: Option<String> },
     /// The owner's attachments for this thread's next turn, after [`Action::Upload`].
     Uploaded { thread: String, uploads: Vec<Uploaded> },
+    /// A tool call started (a command's text with it) or ended, for the answer's bounds (§19.3).
+    ToolStarted { thread: String, item: String, command: Option<String> },
+    ToolCompleted { thread: String, item: String },
 }
 
 /// One attachment after the driver handed it to `ling web` (or failed to).
@@ -146,8 +156,13 @@ pub enum Action {
     Typing(bool),
     /// A read receipt for the owner's message with this timestamp.
     Receipt(u64),
+    /// `thread/start` with the `chat` prompt (Ask with the phone block, §19.3).
     StartThread,
+    /// The same with `ask`, for a `ling web` that does not know `chat`.
+    StartAskThread,
     ResumeThread(String),
+    /// Tell the running turn something (`turn/steer`): the bounds' "answer now".
+    Steer { thread: String, turn: String, text: String },
     /// Upload the attachments into the thread's Ask folder and report [`AgentEvent::Uploaded`].
     Upload { thread: String, attachments: Vec<Attachment> },
     /// Start a turn: the text, and each image the model is shown (`localImage`).
@@ -157,6 +172,9 @@ pub enum Action {
     AnswerApproval { id: Value, result: Value },
     /// The persistent part of the state changed.
     Save,
+    /// `/cavemode <text>` for the current thread (None before the first question), through `ling
+    /// web`; what it answers goes back as a notice.
+    Cavemode { thread: Option<String>, text: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -189,6 +207,9 @@ enum Phase {
         stopping: bool,
         /// The owner's text while their attachments are uploaded; the turn starts after.
         uploading: Option<String>,
+        /// The answer's bounds (limits.rs), and why the bridge interrupted it, when it did.
+        watch: Watch,
+        limit_reason: Option<String>,
     },
 }
 
@@ -204,6 +225,13 @@ pub struct Bridge {
     pub current: Option<String>,
     pub recent: Vec<ThreadRef>,
     pub info: Info,
+    /// When the conversation last moved: the owner's last question or the last answer. None for a
+    /// conversation saved before this was kept, taken as long ago.
+    pub last_activity_ms: Option<u64>,
+    /// A question after this long a silence starts a new thread; None: never.
+    pub new_thread_after_ms: Option<u64>,
+    /// An answer's bounds, from the user's `[chat]` settings (§19.3).
+    pub limits: Limits,
     loaded: HashSet<String>,
     connected: bool,
     phase: Phase,
@@ -263,6 +291,9 @@ impl Bridge {
             current,
             recent,
             info,
+            last_activity_ms: None,
+            new_thread_after_ms: Some(NEW_THREAD_AFTER_MS),
+            limits: Limits::default(),
             loaded: HashSet::new(),
             connected: false,
             phase: Phase::Idle,
@@ -320,13 +351,19 @@ impl Bridge {
             Input::Use(n) => match self.recent.get(n - 1).cloned() {
                 Some(thread) => {
                     self.current = Some(thread.id.clone());
+                    self.last_activity_ms = Some(now);
                     actions.push(Action::Notice(format!("Continuing: {}", thread.title)));
                     actions.push(Action::Save);
                 }
                 None => actions.push(Action::Notice(format!("There is no thread {n}. /threads lists them."))),
             },
             Input::Help => actions.push(Action::Notice(command::HELP.to_string())),
+            Input::Cavemode(text) => actions.push(Action::Cavemode { thread: self.current.clone(), text }),
             Input::Question(_) => {
+                if !self.is_busy() && self.queue.is_empty() {
+                    actions.extend(self.fresh_after_silence(now));
+                }
+                self.last_activity_ms = Some(now);
                 if self.is_busy() || !self.connected {
                     if self.queue.len() >= QUEUE_LIMIT {
                         actions.push(Action::Notice(format!("{QUEUE_LIMIT} questions are already waiting; send this again once they're answered.")));
@@ -341,6 +378,19 @@ impl Bridge {
             }
         }
         actions
+    }
+
+    /// A question after a long silence goes to a new thread, said in one line (§19.2): the morning
+    /// of 2026-10-20, a screenshot was read as part of a two-day-old thread about songs.
+    fn fresh_after_silence(&mut self, now: u64) -> Vec<Action> {
+        let (Some(_), Some(gap)) = (&self.current, self.new_thread_after_ms) else { return Vec::new() };
+        let silence = self.last_activity_ms.map(|last| now.saturating_sub(last));
+        if silence.is_some_and(|silence| silence < gap) {
+            return Vec::new();
+        }
+        self.current = None;
+        let since = silence.map(|ms| format!(" (the last message was {} ago)", duration(ms))).unwrap_or_default();
+        vec![Action::Notice(format!("New thread{since}; /use 2 to go back.")), Action::Save]
     }
 
     /// Starts work on one question: opens its thread if needed, else starts the turn.
@@ -375,6 +425,8 @@ impl Bridge {
             activity: None,
             stopping: false,
             uploading: with_attachments.then(|| message.text.clone()),
+            watch: Watch::new(now),
+            limit_reason: None,
         };
         if with_attachments {
             vec![Action::Typing(true), Action::Upload { thread, attachments: message.attachments }]
@@ -468,6 +520,10 @@ impl Bridge {
                     actions.extend(self.run(thread, message, now));
                 }
             }
+            AgentEvent::ThreadFailed { error } if error.contains("no prompt named \"chat\"") && matches!(self.phase, Phase::Opening { fresh: true, .. }) => {
+                // A `ling web` from before the phone prompt: an Ask thread, as before.
+                actions.push(Action::StartAskThread);
+            }
             AgentEvent::ThreadFailed { error } => {
                 if let Phase::Opening { fresh, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
                     if !fresh {
@@ -505,8 +561,37 @@ impl Bridge {
             }
             AgentEvent::TurnCompleted { thread, error } => {
                 let running = matches!(&self.phase, Phase::Running { thread: t, .. } if *t == thread);
-                if running && let Phase::Running { answer, stopping, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
+                if running && let Phase::Running { answer, stopping, watch, limit_reason, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
                     self.approvals.clear();
+                    self.last_activity_ms = Some(now);
+                    // Interrupted by its bounds (limits.rs): a final turn asks for the answer from what
+                    // was found; the final turn out of time too ends with what it wrote.
+                    if let Some(reason) = limit_reason.filter(|_| error.is_some() && !stopping && !self.airgapped()) {
+                        if !watch.final_turn {
+                            self.phase = Phase::Running {
+                                thread: thread.clone(),
+                                turn: None,
+                                started_ms: now,
+                                last_typing_ms: now,
+                                next_progress_ms: now + FIRST_PROGRESS_MS,
+                                answer: String::new(),
+                                activity: None,
+                                stopping: false,
+                                uploading: None,
+                                watch: Watch::final_turn(now),
+                                limit_reason: None,
+                            };
+                            actions.push(Action::StartTurn { thread, text: limits::final_text(&reason), images: Vec::new() });
+                            return actions;
+                        }
+                        actions.push(Action::Typing(false));
+                        if !answer.trim().is_empty() {
+                            actions.push(Action::Reply(format::reply(answer.trim())));
+                        }
+                        actions.push(Action::Notice(limits::GAVE_UP.to_string()));
+                        actions.extend(self.next(now));
+                        return actions;
+                    }
                     if !self.airgapped() && !stopping {
                         actions.push(Action::Typing(false));
                         match error {
@@ -527,6 +612,20 @@ impl Bridge {
                         }
                     }
                     actions.extend(self.next(now));
+                }
+            }
+            AgentEvent::ToolStarted { thread, item, command } => {
+                if let Phase::Running { thread: running, watch, .. } = &mut self.phase
+                    && *running == thread
+                {
+                    watch.tool_started(&item, command.as_deref(), now);
+                }
+            }
+            AgentEvent::ToolCompleted { thread, item } => {
+                if let Phase::Running { thread: running, watch, .. } = &mut self.phase
+                    && *running == thread
+                {
+                    watch.tool_completed(&item);
                 }
             }
             AgentEvent::Uploaded { thread, uploads } => {
@@ -618,6 +717,19 @@ impl Bridge {
         let mut actions = Vec::new();
         if self.airgapped() {
             return actions;
+        }
+        if let Phase::Running { thread, turn: Some(turn), watch, limit_reason, stopping: false, .. } = &mut self.phase {
+            match watch.check(now, &self.limits) {
+                Some(Verdict::Steer(text)) => actions.push(Action::Steer { thread: thread.clone(), turn: turn.clone(), text }),
+                Some(Verdict::Interrupt(reason)) => {
+                    if !watch.final_turn {
+                        actions.push(Action::Notice(limits::interrupted_notice(&reason)));
+                    }
+                    *limit_reason = Some(reason);
+                    actions.push(Action::Interrupt { thread: thread.clone(), turn: turn.clone() });
+                }
+                None => {}
+            }
         }
         if let Phase::Running { started_ms, last_typing_ms, next_progress_ms, activity, stopping: false, .. } = &mut self.phase {
             if now >= *last_typing_ms + TYPING_EVERY_MS {
@@ -756,6 +868,16 @@ mod tests {
     }
 
     #[test]
+    fn cavemode_names_the_current_thread_and_passes_the_rest_on() {
+        let mut b = connected();
+        assert_eq!(b.on_message(msg("/cavemode default full", 1), 0), vec![Action::Receipt(1), Action::Cavemode { thread: None, text: "default full".to_string() }]);
+        answered(&mut b, "first", "ok", 2);
+        let set = b.on_message(msg("/cavemode off", 3), 3);
+        assert_eq!(set, vec![Action::Receipt(3), Action::Cavemode { thread: Some("t1".to_string()), text: "off".to_string() }]);
+        assert!(!b.is_busy());
+    }
+
+    #[test]
     fn a_question_during_a_turn_is_queued_then_taken() {
         let mut b = connected();
         b.on_message(msg("first", 1), 0);
@@ -809,8 +931,45 @@ mod tests {
     }
 
     #[test]
+    fn a_question_after_a_long_silence_starts_a_new_thread_and_says_how_to_go_back() {
+        let mut b = connected();
+        let hour = 3_600_000;
+        answered(&mut b, "a song", "about falling", 0);
+        assert_eq!(b.current.as_deref(), Some("t1"));
+        // Within the gap: the same thread.
+        let soon = b.on_message(msg("and the chorus?", 2), 3 * hour);
+        assert!(notices(&soon).is_empty() && soon.iter().any(|a| matches!(a, Action::StartTurn { thread, .. } if thread == "t1")), "{soon:?}");
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 3 * hour);
+        // Sixteen hours later: a new thread, in one line.
+        let later = b.on_message(msg("compare it with a Dyson", 3), 19 * hour);
+        assert_eq!(notices(&later), vec!["New thread (the last message was 16h00m ago); /use 2 to go back."]);
+        assert!(later.contains(&Action::StartThread) && later.contains(&Action::Save), "{later:?}");
+        b.on_agent(AgentEvent::ThreadReady { thread: "t2".to_string() }, 19 * hour);
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t2".to_string(), error: None }, 19 * hour);
+        // /use 2 goes back, and is not undone by the next question.
+        b.on_message(msg("/use 2", 4), 19 * hour + 1);
+        assert_eq!(b.current.as_deref(), Some("t1"));
+        let back = b.on_message(msg("more about the song", 5), 19 * hour + 2);
+        assert!(notices(&back).is_empty() && back.iter().any(|a| matches!(a, Action::StartTurn { thread, .. } if thread == "t1")), "{back:?}");
+        // Switched off: never.
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 19 * hour + 2);
+        b.new_thread_after_ms = None;
+        assert!(notices(&b.on_message(msg("a week later", 6), 200 * hour)).is_empty());
+    }
+
+    #[test]
+    fn a_conversation_saved_before_activity_was_kept_starts_fresh() {
+        let mut b = Bridge::new(Some("t9".to_string()), vec![ThreadRef { id: "t9".to_string(), title: "old".to_string() }], Info::default());
+        b.on_agent(AgentEvent::Connected, 0);
+        let first = b.on_message(msg("hello", 1), 5);
+        assert_eq!(notices(&first), vec!["New thread; /use 2 to go back."]);
+        assert!(first.contains(&Action::StartThread));
+    }
+
+    #[test]
     fn a_saved_thread_is_resumed_after_a_restart() {
         let mut b = Bridge::new(Some("t9".to_string()), vec![ThreadRef { id: "t9".to_string(), title: "old".to_string() }], Info::default());
+        b.last_activity_ms = Some(0);
         b.on_agent(AgentEvent::Connected, 0);
         assert_eq!(b.on_message(msg("continue", 1), 0)[1], Action::ResumeThread("t9".to_string()));
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t9".to_string() }, 0);
@@ -821,6 +980,7 @@ mod tests {
     #[test]
     fn a_thread_that_will_not_resume_is_left_for_a_new_one() {
         let mut b = Bridge::new(Some("gone".to_string()), vec![], Info::default());
+        b.last_activity_ms = Some(0);
         b.on_agent(AgentEvent::Connected, 0);
         b.on_message(msg("hello", 1), 0);
         let failed = b.on_agent(AgentEvent::ThreadFailed { error: "no such thread".to_string() }, 0);
@@ -1031,6 +1191,63 @@ mod tests {
         let done = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads: vec![shot(Some("/p.jpg"), Some("text"), true)] }, 0);
         assert!(!done.iter().any(|a| matches!(a, Action::StartTurn { .. })), "{done:?}");
         assert!(!b.is_busy());
+    }
+
+    /// The morning of 2026-10-20: one answer ran sixteen minutes. Past its time the agent is told
+    /// to answer now; still running, interrupted, and a final turn asks for the answer with no
+    /// tools; that one out of time too, the owner gets what it wrote and a line saying so.
+    #[test]
+    fn an_answer_past_its_time_is_steered_then_interrupted_then_given_a_final_turn() {
+        let mut b = connected();
+        b.on_message(msg("compare these two purifiers", 1), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 0);
+        let budget = b.limits.answer_ms.unwrap();
+        let steer = b.on_tick(budget);
+        assert!(steer.iter().any(|a| matches!(a, Action::Steer { text, .. } if text.contains("Stop now: run no more tools"))), "{steer:?}");
+        let interrupt = b.on_tick(budget + limits::GRACE_MS);
+        assert!(interrupt.contains(&Action::Interrupt { thread: "t1".to_string(), turn: "u1".to_string() }));
+        assert!(notices(&interrupt)[0].starts_with("This is taking too long (this answer has taken 3 min)"), "{interrupt:?}");
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "half a sent".to_string() }, budget + limits::GRACE_MS);
+        let ended = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: Some("interrupted".to_string()) }, budget + limits::GRACE_MS + 1);
+        assert!(replies(&ended).is_empty() && notices(&ended).is_empty(), "no partial answer, no error: {ended:?}");
+        let Some(Action::StartTurn { text, .. }) = ended.iter().find(|a| matches!(a, Action::StartTurn { .. })) else { panic!("{ended:?}") };
+        assert!(text.contains("without running any tool"));
+        let start = budget + limits::GRACE_MS + 1;
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u2".to_string() }, start);
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "The first one is quieter".to_string() }, start);
+        let late = b.on_tick(start + limits::FINAL_BUDGET_MS);
+        assert!(late.contains(&Action::Interrupt { thread: "t1".to_string(), turn: "u2".to_string() }), "{late:?}");
+        assert!(!notices(&late).iter().any(|n| n.contains("taking too long")), "said once: {late:?}");
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: Some("interrupted".to_string()) }, start + limits::FINAL_BUDGET_MS);
+        assert_eq!(replies(&done), vec!["The first one is quieter"]);
+        assert_eq!(notices(&done), vec![limits::GAVE_UP]);
+        assert!(!b.is_busy());
+    }
+
+    #[test]
+    fn the_tool_cap_and_a_long_command_steer_too_and_the_owners_stop_wins() {
+        let mut b = connected();
+        b.on_message(msg("look it up", 1), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 0);
+        b.on_agent(AgentEvent::ToolStarted { thread: "t1".to_string(), item: "c1".to_string(), command: Some("sleep 60; curl https://www.google.com/search?q=x".to_string()) }, 1_000);
+        let steer = b.on_tick(61_000);
+        assert!(steer.iter().any(|a| matches!(a, Action::Steer { text, .. } if text.contains("the command `sleep 60; curl"))), "{steer:?}");
+        // The owner's /stop: no final turn.
+        b.on_message(msg("/stop", 2), 62_000);
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: Some("interrupted".to_string()) }, 63_000);
+        assert!(!done.iter().any(|a| matches!(a, Action::StartTurn { .. })), "{done:?}");
+    }
+
+    #[test]
+    fn a_ling_web_without_the_chat_prompt_gets_an_ask_thread() {
+        let mut b = connected();
+        assert_eq!(b.on_message(msg("hi", 1), 0)[1], Action::StartThread);
+        let fallback = b.on_agent(AgentEvent::ThreadFailed { error: "no prompt named \"chat\" may be chosen here; named prompts: ask, default".to_string() }, 0);
+        assert_eq!(fallback, vec![Action::StartAskThread]);
+        let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        assert!(ready.iter().any(|a| matches!(a, Action::StartTurn { .. })));
     }
 
     #[test]

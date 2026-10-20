@@ -13,9 +13,10 @@ keeps the search side on the same footing as everything else here — a containe
 with no account, no API key, and no third party seeing the query. SearXNG aggregates the upstream
 engines itself, so switching or adding engines is its configuration rather than this module's code.
 
-Its JSON API has two prerequisites, both set in ~/.config/searxng/settings.yml: `search.formats`
-must include `json` (SearXNG serves HTML only by default) and `server.limiter` must be off (the
-limiter is bot protection, and a local tool calling its own instance trips it). If the instance is
+Its JSON API has two prerequisites, both set in ~/.config/searxng/settings.yml, which `ling-admin
+searxng start` writes (`SearxngSettings`): `search.formats` must include `json` (SearXNG serves HTML
+only by default) and `server.limiter` must be off (the limiter is bot protection, and a local tool
+calling its own instance trips it). If the instance is
 down this tool reports that plainly instead of falling back to a public engine — a silent fallback
 would send queries somewhere the operator did not choose.
 
@@ -49,6 +50,23 @@ SEARXNG_URL: Final[str] = os.getenv("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.
 # The command, not a `docker run` line: a container started by hand lands on Docker's default
 # bridge, whose DNS is a copy taken at start (dreamference/chat/sidecar_network.py).
 SEARXNG_START_HINT: Final[str] = "ling-admin searxng start"
+
+# The time ranges SearXNG filters by, and the categories named differently there than in
+# `ling-search --category` (ling-web-rs/src/search.rs).
+TIME_RANGES: Final[frozenset[str]] = frozenset({"day", "week", "month", "year"})
+SEARXNG_CATEGORY_NAMES: Final[dict[str, str]] = {"social": "social media"}
+
+# Said when SearXNG answers but no engine does. It must not send the model to repair anything:
+# until 2026-10-20 it named `docker restart dreamference-searxng`, an agent ran it, and nothing
+# changed, because the engines were refusing this machine's address upstream. `ling-search` says
+# the same with `ling-fetch` (UNAVAILABLE_HINT in ling-web-rs/src/search.rs).
+SEARCH_UNAVAILABLE_HINT: Final[str] = (
+    "Web search is unavailable for now: the search engines are refusing this machine's queries, "
+    "which usually passes within hours. Do not try to fix it or restart anything. If you know a "
+    "page that answers the question, read it with web_fetch (for example "
+    "https://en.wikipedia.org/wiki/Lisbon); otherwise tell the user that web search is "
+    "unavailable at the moment."
+)
 REQUEST_TIMEOUT_S: Final[float] = 25.0
 # Hard ceiling on what a single fetch will pull down, before any text extraction. A model cannot
 # use more than this anyway, and without it one link to a large binary stalls the whole session.
@@ -225,7 +243,8 @@ class WebTools:
         query: str,
         max_results: int = 8,
         categories: str = "general",
-        language: str = "en",
+        language: str = "auto",
+        time_range: str = "",
     ) -> Dict[str, Any]:
         """
         Searches the web through the configured SearXNG instance.
@@ -238,8 +257,10 @@ class WebTools:
         Args:
             query (str): Search terms.
             max_results (int): Maximum results to return.
-            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'.
-            language (str): Result language code.
+            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'
+                ('social' is sent as SearXNG's 'social media').
+            language (str): Result language code, or 'auto' to detect it from the query.
+            time_range (str): 'day', 'week', 'month' or 'year' for recent results only; '' for any.
 
         Returns:
             Dict[str, Any]: {'query', 'result_count', 'results': [{'title', 'url', 'snippet',
@@ -259,8 +280,9 @@ class WebTools:
                 params={
                     "q": query,
                     "format": "json",
-                    "categories": categories,
+                    "categories": SEARXNG_CATEGORY_NAMES.get(categories, categories),
                     "language": language,
+                    **({"time_range": time_range} if time_range in TIME_RANGES else {}),
                 },
                 headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
                 timeout=REQUEST_TIMEOUT_S,
@@ -278,7 +300,10 @@ class WebTools:
             return {
                 "query": query,
                 "error": f"SearXNG at {SEARXNG_URL} did not return JSON",
-                "hint": "Add 'json' to search.formats in ~/.config/searxng/settings.yml and restart it",
+                "hint": (
+                    "SearXNG's settings do not enable its JSON API (no json in search.formats): "
+                    f"{SEARXNG_START_HINT} writes ones that do"
+                ),
             }
 
         limit = max(1, int(max_results))
@@ -302,7 +327,7 @@ class WebTools:
             return {
                 "query": query,
                 "error": f"SearXNG could not reach any search engine: {reasons}",
-                "hint": "If this machine is online, restart the container: docker restart dreamference-searxng",
+                "hint": SEARCH_UNAVAILABLE_HINT,
             }
         return {
             "query": query,

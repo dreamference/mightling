@@ -55,6 +55,10 @@ venv/bin/python phase1_acceptance.py <wrapper> results/phase1-acceptance.json [-
 # MIGHTLING_DOCS_TEST_HOST=direct in the wrapper runs the workers as plain children, so the whole
 # index can run inside a CPU-capped `systemd-run --user --scope` of its own.
 venv/bin/python phase2_acceptance.py <wrapper> results/phase2-acceptance.json
+# Phase 3 (spec §19): the five CSV tables as one workbook, standing in for them (csv/ added to
+# corpus/.lingignore before the run, so the index swaps the CSV files for the workbook).
+venv/bin/python make_xlsx.py corpus && echo csv/ >> corpus/.lingignore
+venv/bin/python phase3_acceptance.py <wrapper> results/phase3-acceptance.json
 ```
 
 Every extraction runs in `bwrap --unshare-all` (no network, home hidden) inside a

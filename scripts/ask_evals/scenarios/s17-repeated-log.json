@@ -1,0 +1,28 @@
+{
+  "id": "s17-repeated-log",
+  "family": "S17",
+  "failure": [
+    4
+  ],
+  "turns": [
+    {
+      "text": "Summarise this log in two sentences:\n\n2026-10-01 12:00:00 WARN cache miss key=42\n2026-10-01 12:00:01 WARN cache miss key=42\n2026-10-01 12:00:02 WARN cache miss key=42\n2026-10-01 12:00:03 WARN cache miss key=42\n2026-10-01 12:00:04 WARN cache miss key=42\n2026-10-01 12:00:05 WARN cache miss key=42\n2026-10-01 12:00:06 WARN cache miss key=42\n2026-10-01 12:00:07 WARN cache miss key=42\n2026-10-01 12:00:08 WARN cache miss key=42\n2026-10-01 12:00:09 WARN cache miss key=42\n2026-10-01 12:00:10 WARN cache miss key=42\n2026-10-01 12:00:11 WARN cache miss key=42\n2026-10-01 12:00:12 WARN cache miss key=42\n2026-10-01 12:00:13 WARN cache miss key=42\n2026-10-01 12:00:14 WARN cache miss key=42\n2026-10-01 12:00:15 WARN cache miss key=42\n2026-10-01 12:00:16 WARN cache miss key=42\n2026-10-01 12:00:17 WARN cache miss key=42\n2026-10-01 12:00:18 WARN cache miss key=42\n2026-10-01 12:00:19 WARN cache miss key=42\n2026-10-01 12:00:20 WARN cache miss key=42\n2026-10-01 12:00:21 WARN cache miss key=42\n2026-10-01 12:00:22 WARN cache miss key=42\n2026-10-01 12:00:23 WARN cache miss key=42\n2026-10-01 12:00:24 WARN cache miss key=42\n2026-10-01 12:00:25 WARN cache miss key=42\n2026-10-01 12:00:26 WARN cache miss key=42\n2026-10-01 12:00:27 WARN cache miss key=42\n2026-10-01 12:00:28 WARN cache miss key=42\n2026-10-01 12:00:29 WARN cache miss key=42\n2026-10-01 12:00:30 WARN cache miss key=42\n2026-10-01 12:00:31 WARN cache miss key=42\n2026-10-01 12:00:32 WARN cache miss key=42\n2026-10-01 12:00:33 WARN cache miss key=42\n2026-10-01 12:00:34 WARN cache miss key=42\n2026-10-01 12:00:35 WARN cache miss key=42\n2026-10-01 12:00:36 WARN cache miss key=42\n2026-10-01 12:00:37 WARN cache miss key=42\n2026-10-01 12:00:38 WARN cache miss key=42\n2026-10-01 12:00:39 WARN cache miss key=42\n2026-10-01 12:00:40 WARN cache miss key=42\n2026-10-01 12:00:41 WARN cache miss key=42\n2026-10-01 12:00:42 WARN cache miss key=42\n2026-10-01 12:00:43 WARN cache miss key=42\n2026-10-01 12:00:44 WARN cache miss key=42\n2026-10-01 12:00:45 WARN cache miss key=42\n2026-10-01 12:00:46 WARN cache miss key=42\n2026-10-01 12:00:47 WARN cache miss key=42\n2026-10-01 12:00:48 WARN cache miss key=42\n2026-10-01 12:00:49 WARN cache miss key=42"
+    }
+  ],
+  "expect": {
+    "no_loop": true,
+    "max_answer_tokens": 300,
+    "max_tool_calls": 2
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}

@@ -21,7 +21,7 @@
 | ~~`duckduckgo`~~ | DuckDuckGo only | Any page | Yes | Yes | The web commands (§4). A preference, not a barrier. **Removed 2026-10-03** (§14.6) |
 | `on` | None | None | None | None | The kernel (§5) |
 
-**`off` is today's `ling`.** On this machine a general search currently goes to Brave, DuckDuckGo, Google (through `google cse`), Startpage (which serves Google's results), Wikipedia and Wikidata, plus four small answer engines. SearXNG sends them the query text; they see SearXNG's address, not an account.
+**`off` is today's `ling`.** A general search goes to the general engines listed in §14.10 (since 2026-10-20: Brave, Google through `google cse`, Startpage, DuckDuckGo's API endpoint, Mwmbl, Yep, Seznam, GMX, search.ch, Wikipedia and Wikidata, plus small answer engines); `ling-search --category` sends a search to one of the other categories there instead. Before 2026-10-20 the list was Brave, DuckDuckGo, Google, Startpage, Wikipedia and Wikidata, and that day all four web engines among them refused this machine. SearXNG sends the engines the query text; they see SearXNG's address, not an account. A query repeated within the hour is answered from `ling-search`'s cache and sent nowhere.
 
 **`duckduckgo` changed who read the queries, and nothing else** (removed, §14.6). Search goes to DuckDuckGo alone. Fetching a page, Gmail and the agent's own commands (`git`, `pip`, `cargo`, `curl`) work as at `off`: the level is about which search company sees what the session is looking for.
 
@@ -428,4 +428,26 @@ Each later surface follows the same resolver (`ling-airgapped`, the strictest of
 | `ling chat` | the Telegram adapter stops relaying and answers with one line saying why; Matrix keeps working (the whole path stays on the machine) | [MIGHTLING_CHAT §3](./DREAMFERENCE_MIGHTLING_CHAT.md) |
 | `ling signal` | the bridge runs only at `off`, because Signal needs the internet | [MIGHTLING_SIGNAL](./DREAMFERENCE_MIGHTLING_SIGNAL.md) |
 | `/node` | runs, after a line saying it talks to the local network only (§14.8) | [MIGHTLING_NODE §18.9](./DREAMFERENCE_MIGHTLING_NODE.md) |
+
+### 14.10 Who sees a search (2026-10-20)
+
+`ling-admin searxng start` writes SearXNG's settings (`dreamference/chat/searxng_settings.py`, version 3). Every engine of SearXNG's list was tried from this machine that day with one query; an engine is on when it answered, needs no key and is not run by a Russian or Chinese company. Those are removed from SearXNG outright, so not even a bang reaches them: Yandex (Russia); Baidu, Qihoo 360 (`360search`), Alibaba's Quark, Tencent's Sogou, Bilibili, AcFun, iQIYI (China); Habr (founded in Russia). Off for other reasons: DuckDuckGo's HTML endpoint (a CAPTCHA with a zero-second suspension, so it was asked on every search), Bing's web search (unrelated results, such as speed-test sites for a song question), engines that refused or failed that day (Qwant, Mojeek, Yahoo, TMDB, Vimeo, Rumble, Geizhals, Wolfram Alpha, PrivacyWall, TuskSearch and others), engines whose owner could not be established (fynd, ZapMeta, reloado; Gitea's `gitea.com`), Naver (Korean-language results) and the torrent indexes SearXNG ships on.
+
+A search asks only the engines of its category. Each sees the query text and SearXNG's address:
+
+| Category (`ling-search -c`) | Engines on, and who runs them |
+| --- | --- |
+| `general` (default) | Brave (Brave Software, US); Google CSE (Google, US); Startpage (Startpage/System1, Netherlands and US); DuckDuckGo web (DuckDuckGo, US); Mwmbl (non-profit, UK); Yep (Ahrefs, Singapore); Seznam (Seznam.cz, Czech Republic); GMX (United Internet, Germany); search.ch (Switzerland); Wikipedia and Wikidata (Wikimedia Foundation, US); DuckDuckGo definitions; Lingva, MyMemory (Translated, Italy) and DictZone for translations; the currency converter |
+| `news` | Bing News (Microsoft, US); DuckDuckGo News; Google News; Startpage News; Brave News; Reuters (Thomson Reuters, Canada); Wikinews (Wikimedia); ANSA and Il Post (Italy); Tagesschau (ARD, Germany) |
+| `science` | arXiv (Cornell, US); PubMed (NIH, US); Semantic Scholar (Allen Institute for AI, US); OpenAlex (OurResearch, US); Crossref (non-profit, US and UK); Google Scholar; OpenAIRE publications and datasets (EU); PDBe (EMBL-EBI, UK); Wikispecies |
+| `it` | GitHub and npm (GitHub/Microsoft, US); GitLab (US); Codeberg (Codeberg e.V., Germany); SourceHut (Netherlands); Stack Overflow, Ask Ubuntu, Super User (Stack Exchange, US); MDN (Mozilla, US); Microsoft Learn; PyPI and discuss.python.org (Python Software Foundation, US); crates.io (Rust Foundation, US); lib.rs (UK); Hex (Elixir); Packagist (Netherlands); pub.dev (Google); Hoogle (Haskell); Hugging Face models, datasets and spaces (Hugging Face, US and France); Docker Hub (Docker, US); Hacker News (Y Combinator, US); the National Vulnerability Database (NIST, US); the Arch, Gentoo and NixOS wikis and the Alpine, CachyOS and Void package indexes (their projects); ManKier; the Caddy and Pi-hole forums |
+| `map` | OpenStreetMap (OSM Foundation, UK); Photon (komoot, owned by Bending Spoons, Italy); Apple Maps (Apple, US) |
+| `images` (also image search) | Bing, DuckDuckGo, Google CSE, Startpage and Brave images; Wikimedia Commons; Flickr (SmugMug, US); Openverse (WordPress, US); Unsplash, Pexels and Pixabay (Getty, Canva); DeviantArt (Wix, Israel); Pinterest (US); Imgur (US); 1x (Sweden); ipernity (France); Magnific (Freepik, Spain); Shopify Stock; StockSnap; picjumbo; the Art Institute of Chicago; Devicons, Lucide |
+| `videos` | YouTube (Google); Bing, DuckDuckGo and Brave videos; Dailymotion (Canal+, France); PeerTube and SepiaSearch (Framasoft, France); media.ccc.de (CCC, Germany); Odysee (US); Pixabay videos; INA (France); MediathekViewWeb (Germany); Vimeo; Wikimedia Commons |
+| `music` | Genius (US); Deezer (France); SoundCloud (Germany); Mixcloud (UK); Bandcamp (Songtradr, US); Radio Browser (community); Podchaser (US); Wikimedia Commons audio |
+| `files` | F-Droid (UK); Google Play (Google); the App Store (Apple); APKMirror (US); OpenRepos; Wikimedia Commons files |
+| `social` | Mastodon and Lemmy instances (the fediverse); Tootfinder; Boardreader (forums, US) |
+| `books`, `movies`, `dictionaries`, `wikimedia`, `weather` | Open Library (Internet Archive, US), Goodreads (Amazon); IMDb (Amazon), Rotten Tomatoes (Fandango, US), Moviepilot (Webedia, France), SensCritique (France); Wiktionary (Wikimedia), Wordnik (US), Duden (Germany), Etymonline, Jisho (Japan); Wikivoyage, Wikiquote, Wikibooks, Wikisource, Wikiversity; DuckDuckGo weather, Open-Meteo (Switzerland), wttr.in |
+
+Ownership is as published by each company on 2026-10-20 and is not re-checked automatically; an engine whose owner changes hands to a Russian or Chinese company belongs in `REMOVED_ENGINES`.
 

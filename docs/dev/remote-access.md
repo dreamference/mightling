@@ -1,43 +1,59 @@
 # Remote access: the NetBird overlay
 
-Developer notes behind the remote-access line in `AGENTS.md`. Spec: `specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md` (the owner's design of 2026-10-10; the build began on 2026-10-20). §13 of the spec is the phase plan, §14 the desk verification that stands in for Phase 0.
+Developer notes behind the remote-access line in `AGENTS.md`. Spec: `specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md` (the owner's design of 2026-10-10, built that week on `remote/vpn-mvp`, reconciled with main on 2026-10-20 as `remote/overlay`; spec §14).
 
 ## What it is
 
-A client off the LAN reaches its node **by name** over a NetBird overlay whose management, signal and private DNS run on the node, under the node's own certificate authority. One rented box runs only NetBird's relay and a pinned SNI router on port 443: the box's own name passes through, as plain TCP, to the node's control plane over an SSH tunnel the node dials out; `relay.<dns-name>` goes to the relay. The box terminates no TLS for the control plane and holds no key of the network.
+A client off the LAN reaches its node **by name** over a NetBird overlay whose management, signal and private DNS run on the node, under the node's own name-constrained CA. One rented box runs only NetBird's relay (with STUN) and haproxy on port 443, which routes the box's own server name, unopened, to an SSH tunnel the node dials out. The box terminates no TLS for the control plane and holds no key of the overlay.
 
-**Pieces and pins** (spec §14.1): NetBird 0.81.3. On the node, the combined `netbirdio/netbird-server` image (management, signal; pinned by index digest) on loopback, and NetBird's client from the release archive; on the box, the relay's static binary taken out of `netbirdio/relay` pinned by per-architecture digest (the release ships no relay archive), and gost 3.3.0 as the SNI router. No Docker and no package manager on the box.
+- **The box name:** `remote.dreamference.ai` (one name). Control plane at `https://remote.dreamference.ai:443` through haproxy and the tunnel; relay at `rels://remote.dreamference.ai:33080` (TCP and UDP), STUN on 3478/udp.
+- **The node's name in the overlay:** `mightling-<node id>.netbird.selfhosted`, so the name carries the node's id.
+- **Pins:** NetBird 0.80.0, the release Phase 0 ran live on (2026-10-12/13). The 0.81.3 values read on 2026-10-20 are in spec §14.3 for the next bump, which also needs one relay extraction on the node to pin the binary's SHA-256.
 
-**Traps found at the desk** (spec §14.2): the admin token exists only through `POST /api/setup` while no account does, so it is called on loopback before the tunnel is up; setup keys live at least a day, so the enrolment code revokes its unused key itself; `server.stuns` must name the box and `server.store.encryptionKey` must be set before the first start; NetBird's client trusts only the system store; an ephemeral key renames the peer.
+## The code
 
-## Status
+- **Node** (`dreamference/remote/`): `RemoteSettings` (paths, pins, `remote.json`), `RemoteCertificateAuthority` (`openssl`, name-constrained to the CA scope and `netbird.selfhosted`), `RemoteControlPlane` (the container, its configuration, the loopback proxy, the management API), `RemoteBox` (probe, relay extraction, haproxy and the relay over SSH, the port-443 check), `RemoteTunnel`, `RemoteNodePeer`, `RemoteEnrolment` (the code, HMAC both ways, the LAN listener on 3190), `RemoteAccess` (the commands). Only `RemoteAccess` prints (a per-file `T201` ignore, console-facing); the others report failures through their module logger, which prints the bare line to standard error.
+- **Launcher** (`ling-rs/`): `remote_join.rs` (`ling node remote join`), the overlay tier in `node.rs`, the overlay name in `NO_PROXY`, and the `remote` field in both byte-identical locator copies.
+- **Commands:** `ling-admin remote setup <dns-name> [--ssh <alias>] [--ca-scope <domain>] [--box-only] [--yes]`, `status`, `remove [--purge]`, `code`, `peers`, `revoke <peer>`.
 
-- **Phase 0 (desk, 2026-10-20):** done on branch `remote/phase0-verification`; NetBird's documentation and source read, the pins chosen, the design conflicts of the spec decided (spec §14). The live half of Phase 0 (a scratch box, NetBird on real machines) waits for the owner: see *Live-test plan* below.
-- **Phases 1 to 5:** not built. Spec §13: 1 the node, 2 the box (code and tests only), 3 the client, 4 the audit and `/airgapped`, 5 Matrix on either overlay (NetBird by default once it exists, Tailscale kept as the option).
+## Fixed on 2026-10-20 (ported from the Phase 1 that was reverted)
 
-## Hard limits while this is built
+- **`server.store.encryptionKey`** is generated once (`remote/store-key`, 0600) and written into the configuration. The 10-13 build left it out; the server then made a new key at every start, and after the node's restart of 2026-10-14 management answered the saved token with `401 token invalid`.
+- **`NB_SETUP_PAT_ENABLED`** is set only for the one start that creates the owner (`_control_plane_token`); the container is started plainly, restarted with it for `/api/setup`, and plainly again.
+- **The owner's password** is kept (`remote/owner-password`, 0600): the way back into the API if the token is ever lost. The 10-13 build discarded it, so today's lockout had no recovery.
+- **No route out:** the container is on the internal Docker network `dreamference-remote` (172.31.232.10), reached through the user units `mightling-remote-control.socket`/`.service` (`systemd-socket-proxyd`) on `127.0.0.1:33443`, the port the tunnel already forwards to; the tunnel unit is unchanged.
+- **Setup keys in files:** the node's `netbird up` and the client's use `--setup-key-file` (0600, deleted after), never `--setup-key` on a command line.
+- **The CA scope is a setting:** `--ca-scope`, by default the parent of the box's name (`remote.dreamference.ai` → `dreamference.ai`), recorded in `remote.json`. A later box under the same domain needs no new CA.
 
-- Nothing is deployed to a rented box by an agent. `relay-box` (the owner's GCP relay) runs the owner's own services and is never touched; which box the relay goes on is the owner's decision.
-- NetBird is not started and no networking is changed on gx10-1a2b, node-b, the Mac or the MSI desktop until the owner says go.
-- No address is stored for a node: the overlay's DNS name is the point. The last-address fallback of `node.json` stays as it is (the owner kept it).
-- The suite stays offline: SSH, sudo, Docker and systemd are behind `_run` seams the tests replace, conftest refuses the real ones, and NetBird's client in a test is a stand-in `netbird` under `tmp_path`.
+## DNS the owner creates (Cloudflare, zone `dreamference.ai`)
 
-## What the rented box needs (for the owner's decision)
+| Name | Type | Content | Proxy |
+|---|---|---|---|
+| `remote.dreamference.ai` | A | the box's external IPv4 address (the provider's console) | **DNS only** (grey cloud) |
 
-Spec §14.4. In short: a small Linux VM (amd64 or arm64) with systemd and OpenSSH; two DNS names the owner controls pointing at it, `<dns-name>` and `relay.<dns-name>`; TCP 443, UDP 443 and UDP 3478 open inbound at the provider; `ssh <dns-name>` working from the node with the owner's key as root or a passwordless sudoer. Nothing else of the owner's should run on it: `remote remove` takes away what `remote setup` installed, but the box is treated as hostile and disposable.
+Cloudflare's proxy must stay off: it would terminate TLS (the node's CA would never be seen) and it does not carry 33080 or UDP. No second name is needed while the relay is on its own port; `relay.remote.dreamference.ai` would only matter if the relay ever moved to 443 under a name of its own. The address must be a **reserved static** address at the provider, or a stop and start of the VM moves it and the record points nowhere (an ephemeral address can be promoted to static in place, keeping its value).
 
-## Live-test plan (waits for the owner's go)
+## Hard limits
 
-Run in this order; each step needs the one before it, and each can be stopped and undone with `ling-admin remote remove` on the node.
+- No agent changes the box or the node's networking without the owner's go. On the box, services that are not remote access's are never touched; remote access owns only `/opt/mightling-relay`, `mightling-relay.service`, haproxy's configuration (and the package if its manifest says it installed it), the sshd drop-in and the account `mightling-tunnel`.
+- No address is stored for a node: the overlay's name is the point. The last-address fallback of `node.json` stays (the owner kept it).
+- The suite stays offline: SSH, sudo, Docker and systemd are behind `_run` seams, conftest refuses the real ones and a real `netbird`.
 
-1. **Phase 0, live, on the chosen box** (spec §14.5): after Phases 1 and 2, `ling-admin remote setup <dns-name>` on gx10-1a2b (it prints its plan before any sudo or SSH change), then one Linux client off the LAN (a phone hotspot) enrolled by hand with `netbird up --management-url https://<dns-name> --setup-key …`, the CA in its system store only; then the same from the Mac. Record: management and signal on one port through the router and the SSH tunnel; macOS's daemon trusting the CA from the System keychain; peer names through macOS's resolver; QUIC through the UDP redirect or the WebSocket fallback.
-2. **The setup's own checks:** the units on the box (`systemctl status mightling-relay mightling-sni` over SSH); `ling-admin remote status`; on the node, nothing new listening beyond loopback (`ss -ltnu`); `POST /api/setup` refused once the account exists.
-3. **Enrol the laptop on the LAN:** `ling-admin node remote code` on the node, `ling node remote join --code …` on the laptop; `node.json` gains `remote_name` and `remote_domain` and no address.
-4. **Acceptance 1 (by name, from outside):** the laptop on a phone hotspot runs `ling exec "Reply with exactly one word: pong"` with nothing configured.
-5. **Acceptance 2 (the box reads nothing):** `tcpdump -w` on the box during step 4, read afterwards: only TLS on 443 (server name = the box's name), relayed WireGuard if any, SSH on the tunnel.
-6. **Acceptance 3 (revocation):** `ling-admin node remote revoke <laptop>`; the laptop's next `ling exec` fails within NetBird's keepalive; `ling node remote join` off the LAN is refused.
-7. **Acceptance 4 (the audit):** `ling-admin audit egress` on the node passes with the declared exception named; `audit egress --remote` passes.
-8. **Acceptance 6 (nothing for the others):** node-b, never set up, shows no new unit, no `remote` TXT key, the same audit verdict.
-9. **Matrix on the overlay** (the last phase): a fresh homeserver created with the NetBird overlay, Element X on a phone enrolled by hand, sign-in at `https://<overlay name>`; an existing Tailscale homeserver keeps working unchanged.
+## Migration of the 10-13 deployment (approved to run automatically, 2026-10-20)
 
-A SWE-bench night must not be running during steps 2 to 8 on the node that serves it (the gate admits the run's network only; spec §6).
+The live state on the node and the box dates from 10-13: CA constrained to the provider's name for the box, the control plane's store encrypted with a key that is gone, no client enrolled. Moving to `remote.dreamference.ai` therefore costs nothing but the node's own peer. Conditions: the merged build passes its gate and is on main; no SWE-bench night runs on gx10-1a2b (`systemctl --user list-units 'ling-swe-*'` empty); the DNS record exists and resolves to the box; pins stay 0.80.0. Steps, each reported to main:
+
+1. **Back up:** on the node, `~/.config/dreamference/remote/` and the tunnel unit into a dated 0600 archive under `~/.local/state/dreamference/remote-backups/`; on the box, read as root into a dated archive in `/root/`: `/opt/mightling-relay/`, `/etc/haproxy/haproxy.cfg`, `/etc/systemd/system/mightling-relay.service`, `/etc/ssh/sshd_config.d/mightling-tunnel.conf`, `~mightling-tunnel/.ssh/`.
+2. **Node, start afresh:** stop the tunnel unit; the node's peer leaves (`netbird down`); the old control plane container and its data are removed; the old remote folder is moved into the backup (nothing deleted). The old CA leaves the system trust store with `remote setup`'s replacement in step 3.
+3. **`ling-admin remote setup remote.dreamference.ai --ssh <box> --yes`** from main: a new CA scoped to `dreamference.ai`, the control plane on its internal network, the box reconciled under the new name (haproxy's server name, the relay's certificate and exposed name), the tunnel, the node as `mightling-<id>` again. The node's half needs root once (the new CA into the system trust store, NetBird's client brought up by the root script), and sudo on gx10-1a2b asks for a password (checked 2026-10-20), so this step is the owner's to run at a terminal, or `setup --yes` stops at the node's peer and says so. Everything before it (backups, the box, the control plane, the tunnel) needs no sudo.
+4. **Check:** `ling-admin remote status` all green (box units, port 443 under the new name, certificates, tunnel, control plane, peers 1/1); `openssl s_client` on 443 and 33080 under the new CA.
+
+## Live-test plan after the migration (needs a client)
+
+1. Enrol the laptop on the LAN: `ling-admin remote code` on the node, `ling node remote join --code …` on the laptop; `node.json` gains `remote` and no address.
+2. Acceptance 1: the laptop on a phone hotspot, `ling exec "Reply with exactly one word: pong"`.
+3. Acceptance 2: `tcpdump` on the box during step 2 (TLS on 443 under `remote.dreamference.ai`, WireGuard if relayed, SSH).
+4. Acceptance 3: `remote revoke <laptop>`; the laptop's next `ling exec` fails; `join` off the LAN refused.
+5. Acceptance 4: `ling-admin audit egress` with the declared exception named.
+6. The Mac, then phones by hand (spec §4.2).
+7. Matrix on either overlay (the last phase): NetBird by default for a new homeserver, Tailscale kept as the option.

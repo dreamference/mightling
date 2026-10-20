@@ -39,6 +39,8 @@ console: Final[Console] = Console()
 # where they keep it and this project is meant to work without a network.
 SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
 SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
+# `ling-admin remote` (dreamference/remote/).
+REMOTE_COMMAND: Final[str] = "remote"
 
 class DreamferenceCLIController:
     """
@@ -1382,6 +1384,7 @@ class DreamferenceCLIController:
         searxng_parser = subparsers.add_parser("searxng", help="Manage the local SearXNG search container")
         searxng_subparsers = searxng_parser.add_subparsers(dest="searxng_command")
         searxng_subparsers.add_parser("start", help="Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge)")
+        searxng_subparsers.add_parser("status", help="Show each search engine's state (ok, failing, suspended)")
 
         # Command: ling-admin google (the service behind Gmail, Drive and Calendar in /apps)
         google_parser = subparsers.add_parser("google", help="Manage the local Google service (Gmail, Drive, Calendar)")
@@ -1443,6 +1446,44 @@ class DreamferenceCLIController:
         )
         matrix_remove_parser.add_argument("--yes", action="store_true", help="Confirm the deletion")
 
+        # Command: ling-admin remote (reaching the node from outside the LAN, REMOTE_ACCESS spec)
+        remote_parser = subparsers.add_parser(
+            "remote", help="Reach this node from outside the LAN: a NetBird overlay run here, one rented relay box"
+        )
+        remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
+        remote_setup_parser = remote_subparsers.add_parser(
+            "setup",
+            help="Set up (or update) the control plane here, the box over SSH, the tunnel, and this node's peer"
+        )
+        remote_setup_parser.add_argument("dns_name", help="The box's public DNS name; `ssh <name>` must log in")
+        remote_setup_parser.add_argument("--yes", action="store_true",
+                                         help="Do not ask; never wait for a sudo password")
+        remote_setup_parser.add_argument("--ssh", dest="ssh_to", metavar="DESTINATION",
+                                         help="Your SSH Host alias for the box, when `ssh <dns_name>` itself "
+                                              "does not log in "
+                                              "(remembered; never an address)")
+        remote_setup_parser.add_argument("--ca-scope", default=None, metavar="DOMAIN",
+                                         help="The domain the node's new CA may sign under "
+                                              "(default: the parent of the box's name)")
+        remote_setup_parser.add_argument("--box-only", action="store_true",
+                                         help="Deploy the box and stop: nothing runs on this node "
+                                              "(no container, tunnel or sudo)")
+        remote_subparsers.add_parser("status", help="Show the tunnel, the box's units, the certificates and the peers")
+        remote_remove_parser = remote_subparsers.add_parser(
+            "remove", help="Remove the box's relay and haproxy and the tunnel; keep the CA and the enrolments"
+        )
+        remote_remove_parser.add_argument("--purge", action="store_true",
+                                          help="Also delete the control plane, the CA and every enrolment")
+        remote_remove_parser.add_argument("--yes", action="store_true", help="Do not ask")
+        remote_subparsers.add_parser(
+            "code", help="Print a one-time code and wait for one client to enrol with it on this LAN"
+        )
+        remote_subparsers.add_parser("peers", help="List the enrolled peers")
+        remote_revoke_parser = remote_subparsers.add_parser(
+            "revoke", help="Delete a peer: its key is forgotten; it can rejoin only on the LAN"
+        )
+        remote_revoke_parser.add_argument("peer", help="The peer's name or overlay name (or a prefix)")
+
         # Command: ling-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -1463,6 +1504,7 @@ class DreamferenceCLIController:
             ADAPTER_COMMAND: (adapter_parser, "adapter_command"),
             "voice": (voice_parser, "voice_command"),
             "matrix": (matrix_parser, "matrix_command"),
+            "remote": (remote_parser, "remote_command"),
         }
         if diffusion_model_parser is not None:
             parser.command_groups["diffusion-model"] = (diffusion_model_parser, "diffusion_model_command")
@@ -2779,18 +2821,8 @@ class DreamferenceCLIController:
             sys.exit(2)
 
         elif args.command == "searxng":
-            if args.searxng_command == "start":
-                from dreamference.chat.searxng_sidecar import SEARXNG_HOST_PORT, SearxngSidecar
-                if not SearxngSidecar.start():
-                    print("❌ SearXNG did not start.")
-                    sys.exit(1)
-                print(f"✅ SearXNG is running on http://127.0.0.1:{SEARXNG_HOST_PORT}")
-                # An advertised node offers it to clients from now on.
-                from dreamference.node import NodeAdvertiser
-                NodeAdvertiser.on_searxng_started()
-                sys.exit(0)
-            print("usage: ling-admin searxng {start}")
-            sys.exit(2)
+            from dreamference.cli.searxng_command import SearxngCommand
+            sys.exit(SearxngCommand.run(args.searxng_command))
 
         elif args.command == "google":
             cls._run_google(args.google_command)
@@ -2817,6 +2849,23 @@ class DreamferenceCLIController:
             action = actions.get(args.matrix_command or "")
             if action is None:
                 print("usage: ling-admin matrix {start,stop,status,add-user,push,remove}")
+                sys.exit(2)
+            sys.exit(action())
+
+        elif args.command == REMOTE_COMMAND:
+            from dreamference.remote.remote_access import RemoteAccess
+            actions = {
+                "setup": lambda: RemoteAccess.setup(args.dns_name, yes=args.yes, ssh_to=args.ssh_to,
+                                                    box_only=args.box_only, ca_scope=args.ca_scope),
+                "status": RemoteAccess.status,
+                "remove": lambda: RemoteAccess.remove(purge=args.purge, yes=args.yes),
+                "code": RemoteAccess.code,
+                "peers": RemoteAccess.peers,
+                "revoke": lambda: RemoteAccess.revoke(args.peer),
+            }
+            action = actions.get(args.remote_command or "")
+            if action is None:
+                print("usage: ling-admin remote {setup,status,remove,code,peers,revoke}")
                 sys.exit(2)
             sys.exit(action())
 

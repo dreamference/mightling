@@ -10,8 +10,10 @@ and a container found on the default bridge is replaced.
 
 import os
 import subprocess
+from collections.abc import Callable
 from typing import Final, List
 
+from dreamference.chat.searxng_settings import OWN, UNWRITTEN, WRITTEN, SearxngSettings
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
 # The name other sidecars (image search) resolve SearXNG by on the sidecar network. SearXNG publishes
@@ -30,7 +32,8 @@ class SearxngSidecar:
         """
         Returns:
             str: `~/.config/searxng`, mounted as the container's `/etc/searxng`. Its
-            `settings.yml` is what enables the JSON API (`web_tools.py` documents the two keys).
+            `settings.yml`, written by `SearxngSettings`, enables the JSON API and picks the
+            engines.
         """
         return os.path.expanduser("~/.config/searxng")
 
@@ -51,6 +54,53 @@ class SearxngSidecar:
                 "-p", f"{NodeSettings.search_bind_address()}:{SEARXNG_HOST_PORT}:8080",
                 "-v", f"{cls.config_dir()}:/etc/searxng",
                 SEARXNG_IMAGE]
+
+    @classmethod
+    def apply_settings(cls, say: Callable[[str], None] | None = None) -> str:
+        """Makes the settings file this version's (`SearxngSettings.ensure`) and says what it did.
+
+        Args:
+            say (Callable[[str], None] | None): Told when the settings were written, kept because
+                they are the user's own, or could not be written.
+
+        Returns:
+            str: What `SearxngSettings.ensure` returned.
+        """
+        settings = SearxngSettings.ensure(cls.config_dir(), cls.write_settings_as_owner)
+        messages = {
+            WRITTEN: f"📝 Wrote SearXNG's settings: {cls.config_dir()}/settings.yml",
+            OWN: "💡 Keeping your own SearXNG settings.yml (it has no ling-admin version line).",
+            UNWRITTEN: f"⚠️  Could not write {cls.config_dir()}/settings.yml; SearXNG keeps its old settings.",
+        }
+        if say and settings in messages:
+            say(messages[settings])
+        return settings
+
+    @classmethod
+    def write_settings_as_owner(cls, config_dir: str, text: str) -> bool:
+        """Writes `settings.yml` as the user SearXNG's image gives its configuration folder to.
+
+        The image's start script hands `/etc/searxng` to its `searxng` user, so once the container
+        has started, the folder on the host belongs to that user and this one cannot write in it.
+        A throwaway container of the same image, as root and with no network, writes the file
+        and gives it to the folder's owner.
+
+        Args:
+            config_dir (str): The folder mounted as `/etc/searxng`.
+            text (str): The settings file.
+
+        Returns:
+            bool: True if the file was written.
+        """
+        script = ("cat > /etc/searxng/settings.yml.new && chmod 644 /etc/searxng/settings.yml.new && "
+                  "chown \"$(stat -c %u:%g /etc/searxng)\" /etc/searxng/settings.yml.new && "
+                  "mv /etc/searxng/settings.yml.new /etc/searxng/settings.yml")
+        result = subprocess.run(
+            ["docker", "run", "--rm", "-i", "--network", "none", "--user", "0", "--entrypoint", "sh",
+             "-v", f"{config_dir}:/etc/searxng", SEARXNG_IMAGE, "-c", script],
+            input=text, capture_output=True, text=True, timeout=300, check=False,
+        )
+        return result.returncode == 0
 
     @classmethod
     def extra_networks(cls) -> List[str]:
@@ -88,24 +138,32 @@ class SearxngSidecar:
         return addresses[0] if addresses else ""
 
     @classmethod
-    def start(cls) -> bool:
+    def start(cls, say: Callable[[str], None] | None = None) -> bool:
         """
         Makes SearXNG run on the sidecar network, published where the node's settings say.
 
-        A container already created on a user-defined network and published on the right address
-        is only started. One created on the default bridge, or published on the other address
+        The settings file is made this version's first (`SearxngSettings.ensure`, which leaves a
+        file of the user's own alone). A container already created on a user-defined network and
+        published on the right address is only started, or restarted when the settings changed:
+        SearXNG reads them once, at start. One created on the default bridge, or published on the other address
         (the node was enabled or disabled since), is removed and created again, and rejoins the
         other networks it was on; it holds no state outside the mounted configuration folder.
+
+        Args:
+            say (Callable[[str], None] | None): Told when the settings were written, or kept
+                because they are the user's own; nothing is said without it.
 
         Returns:
             bool: True if the container is running once this returns.
         """
         from dreamference.node.node_settings import NodeSettings
+        settings = cls.apply_settings(say)
         mode = SidecarNetwork.network_mode(SEARXNG_CONTAINER_NAME)
         on_bridge = bool(mode) and SidecarNetwork.created_on_default_bridge(SEARXNG_CONTAINER_NAME)
         published = cls.published_address() if mode and not on_bridge else ""
         if mode and not on_bridge and published in ("", NodeSettings.search_bind_address()):
-            started = subprocess.run(["docker", "start", SEARXNG_CONTAINER_NAME],
+            verb = "restart" if settings == WRITTEN else "start"
+            started = subprocess.run(["docker", verb, SEARXNG_CONTAINER_NAME],
                                      capture_output=True, text=True, timeout=60, check=False)
             return started.returncode == 0
 
@@ -120,7 +178,6 @@ class SearxngSidecar:
         if mode:
             subprocess.run(["docker", "rm", "-f", SEARXNG_CONTAINER_NAME],
                            capture_output=True, text=True, timeout=60, check=False)
-        os.makedirs(cls.config_dir(), exist_ok=True)
         result = subprocess.run(cls.run_command(), capture_output=True, text=True, timeout=600, check=False)
         if result.returncode != 0:
             print(f"⚠️  {result.stderr.strip()[:200]}")

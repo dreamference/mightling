@@ -32,6 +32,25 @@ SECRET = "correct horse battery staple"
 
 # -- the session ---------------------------------------------------------------------------------
 
+def test_the_host_key_is_filed_under_the_name_given_whatever_ssh_config_says(tmp_path):
+    # node-b's ~/.ssh/config entry sets `HostKeyAlias gx10-3c4d`; without this option the
+    # run's known-hosts file filed the key under that alias, the fingerprint printed `?` and the
+    # pairing found no key to pin (the first dry run against a real machine, 2026-10-20).
+    session = FleetSession("node-b", "owner", tmp_path)
+    for options in (session.options(first_contact=True), session.options()):
+        assert "HostKeyAlias=node-b" in options
+    other_port = FleetSession("spark-1a2b.local", "owner", tmp_path, ssh_port=2222)
+    assert "HostKeyAlias=spark-1a2b.local-port-2222" in other_port.options()
+    assert other_port._known_host_name() == "spark-1a2b.local-port-2222"
+
+
+def test_the_session_offers_only_the_keys_named_for_the_host_never_the_whole_agent(tmp_path):
+    # Seven keys in an agent end a login at sshd's MaxAuthTries before its password prompt.
+    for options in (FleetSession("spark-1a2b", "owner", tmp_path).options(first_contact=True),
+                    FleetSession("spark-1a2b", "owner", tmp_path).options()):
+        assert "IdentitiesOnly=yes" in options
+
+
 def test_session_options_keep_the_socket_private_and_forward_nothing(tmp_path):
     run_dir = FleetSession.new_run_dir()
     try:
@@ -374,6 +393,9 @@ class FakeSession:
     def sudo(self, line, password):
         self.machine.commands.append(f"sudo {line}")
         FakeSession.order.append(("sudo", self.host, password))
+        if "python3-venv" in line:
+            self.machine.state["venv"] = "1"
+            return subprocess.CompletedProcess(line, 0, "", "")
         if self.machine.prepare_fails:
             return subprocess.CompletedProcess(line, 1, "boom", "")
         self.machine.become_ready()
@@ -423,6 +445,8 @@ def fleet(tmp_path, monkeypatch):
     monkeypatch.setattr(NodeProvisioner, "configured_model", classmethod(lambda cls: "qwen3.8-27b-nvfp4-dflash2"))
     monkeypatch.setattr(NodeProvisioner, "_admin_executable", classmethod(lambda cls: "/usr/bin/false"))
     monkeypatch.setattr(NodeProvisioner, "print_summary", lambda self: None)
+    # A stand-in's name resolves as given; no real lookup (mDNS) from a test.
+    monkeypatch.setattr(NodeProvisioner, "_resolves", classmethod(lambda cls, name: name in FakeSession.machines))
     asked = []
     monkeypatch.setattr(node_provisioner.getpass, "getpass", lambda prompt: asked.append(prompt) or SECRET)
     monkeypatch.setattr(node_provisioner.getpass, "getuser", lambda: "owner")
@@ -534,6 +558,76 @@ def test_a_dry_run_with_web_names_ling_web(fleet, capsys):
     assert provision(["spark-1"], dry_run=True, web=True) == 0
     out = capsys.readouterr().out
     assert "ling web" in out and "--no-web" not in out and "chat start" not in out
+
+
+def test_python3_venv_is_installed_as_root_before_the_install_needs_it(fleet):
+    machine = StandIn()
+    machine.state["venv"] = "0"
+    FakeSession.machines = {"spark-1": machine}
+    assert provision(["spark-1"]) == 0
+    venv = next(i for i, c in enumerate(machine.commands) if "apt-get" in c and "python3-venv" in c)
+    install = next(i for i, c in enumerate(machine.commands) if "install.sh --from" in c)
+    prepare = next(i for i, c in enumerate(machine.commands) if "node prepare" in c)
+    assert machine.commands[venv].startswith("sudo ") and venv < install < prepare
+    FakeSession.machines["spark-1"].commands.clear()
+    assert provision(["spark-1"]) == 0
+    assert not any("python3-venv" in c for c in machine.commands)
+
+
+def test_a_bare_name_that_does_not_resolve_is_reached_by_mdns(fleet):
+    FakeSession.machines = {"spark-1a2b.local": StandIn()}
+    assert provision(["spark-1a2b"]) == 0
+    assert any("install.sh --from" in c for c in FakeSession.machines["spark-1a2b.local"].commands)
+
+
+def test_all_reaches_each_paired_node_by_its_id_never_by_its_remembered_address(fleet, monkeypatch, capsys):
+    records = [{"node": "aaaa1111", "name": "spark-old", "address": "192.0.2.7", "user": "engine"},
+               {"node": "bbbb2222", "name": "spark-gone", "address": "192.0.2.8", "user": "owner"}]
+    monkeypatch.setattr(NodePairing, "paired", classmethod(lambda cls: records))
+    resolved = []
+    found = {"aaaa1111": "198.51.100.4"}
+    monkeypatch.setattr(NodePairing, "resolve", classmethod(
+        lambda cls, record: resolved.append(record["node"]) or found.get(record["node"])))
+    FakeSession.machines = {"198.51.100.4": StandIn(), "192.0.2.7": StandIn(), "192.0.2.8": StandIn()}
+    sessions = []
+    original = FakeSession.__init__
+
+    def record_init(self, host, user, run_dir, ssh_port=22, log_path=None):
+        sessions.append((host, user))
+        original(self, host, user, run_dir, ssh_port, log_path)
+    monkeypatch.setattr(FakeSession, "__init__", record_init)
+    assert provision([], all=True) == 1
+    assert resolved == ["aaaa1111", "bbbb2222"]
+    assert sessions == [("198.51.100.4", "engine")]
+    assert FakeSession.machines["192.0.2.7"].commands == [] and FakeSession.machines["192.0.2.8"].commands == []
+    assert "spark-gone: connect: off the network" in capsys.readouterr().out
+
+
+def test_a_dry_run_of_a_finished_paired_node_names_only_what_differs(fleet, capsys):
+    machine = StandIn(ready=True)
+    machine.state["searxng"] = "true"
+    FakeSession.machines = {"spark-1": machine}
+    fleet["paired"][machine.state["node_id"]] = {"node": machine.state["node_id"]}
+    assert provision(["spark-1"], dry_run=True, no_start=True) == 0
+    out = capsys.readouterr().out
+    assert machine.commands == []
+    absent_words = ("install Mightling", "python3-venv", "main-model set", "pair (", "copy models",
+                    "image ", "start the")
+    for absent in absent_words:
+        assert absent not in out
+    assert "replace Mightling this-test" in out
+
+
+def test_the_bundle_carries_every_binary_install_sh_installs():
+    from dreamference.node.fleet_bundle import OPTIONAL_BINARIES, REQUIRED_BINARIES
+    script = (ROOT / "install.sh").read_text()
+    names = set()
+    for line in script.splitlines():
+        line = line.strip()
+        for prefix in ('REQUIRED="', 'OPTIONAL="', '[ "$(uname -s)" = Linux ] && OPTIONAL="$OPTIONAL '):
+            if line.startswith(prefix):
+                names |= set(line[len(prefix):].rstrip('"').split())
+    assert names and names == set(REQUIRED_BINARIES) | set(OPTIONAL_BINARIES)
 
 
 def test_an_unknown_model_is_refused_before_connecting(fleet):

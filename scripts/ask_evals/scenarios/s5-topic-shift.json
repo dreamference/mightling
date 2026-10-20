@@ -1,0 +1,46 @@
+{
+  "id": "s5-topic-shift",
+  "family": "S5",
+  "failure": [
+    2
+  ],
+  "turns": [
+    {
+      "text": "At what temperature does water boil at 2000 m altitude?"
+    },
+    {
+      "text": "OK, something else: I want to grow tomatoes on a balcony in Lisbon."
+    },
+    {
+      "text": "When should I start?"
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "tomato",
+        "seed",
+        "sow",
+        "plant",
+        "seedling"
+      ]
+    ],
+    "not_mention": [
+      "altitude",
+      "boiling",
+      "°C at"
+    ],
+    "max_tool_calls": 6
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}

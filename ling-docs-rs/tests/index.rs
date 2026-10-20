@@ -355,6 +355,68 @@ fn office_files_pages_mail_and_tables_are_indexed_searched_and_read() {
     assert_eq!(searcher.search("gripper", 3, &only, Some(&embedder), 0.25).unwrap().hits[0].rel, "inbox.mbox");
 }
 
+#[test]
+fn spreadsheets_and_presentations_are_indexed_and_read_in_their_own_parts() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let root = home.join("Documents");
+    std::fs::create_dir_all(&root).unwrap();
+    let main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let workbook = format!(r#"<workbook xmlns="{main}" xmlns:r="{rel}"><sheets><sheet name="Notes" sheetId="1" r:id="rId1"/><sheet name="Fleet" sheetId="2" r:id="rId2"/></sheets></workbook>"#);
+    let rels = format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{rel}/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#);
+    let notes = format!(r#"<worksheet xmlns="{main}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Remark</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Nothing to see</t></is></c></row></sheetData></worksheet>"#);
+    let mut rows = String::from(r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Robot</t></is></c><c r="B1" t="inlineStr"><is><t>Site</t></is></c></row>"#);
+    for i in 2..=40 {
+        let site = if i == 33 { "Volvo Cars Torslanda" } else { "Depot" };
+        rows.push_str(&format!(r#"<row r="{i}"><c r="A{i}" t="inlineStr"><is><t>RX-{i}</t></is></c><c r="B{i}" t="inlineStr"><is><t>{site}</t></is></c></row>"#));
+    }
+    let fleet = format!(r#"<worksheet xmlns="{main}"><sheetData>{rows}</sheetData></worksheet>"#);
+    let root_rels = format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#);
+    std::fs::write(
+        root.join("fleet.xlsx"),
+        zip_of(&[("_rels/.rels", &root_rels), ("xl/workbook.xml", &workbook), ("xl/_rels/workbook.xml.rels", &rels), ("xl/worksheets/sheet1.xml", &notes), ("xl/worksheets/sheet2.xml", &fleet)]),
+    )
+    .unwrap();
+    let ns = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#;
+    let slide = |title: &str, body: &str| format!(r#"<p:sld {ns}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>{title}</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>{body}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#);
+    std::fs::write(
+        root.join("roadmap.pptx"),
+        zip_of(&[
+            ("ppt/presentation.xml", &format!("<p:presentation {ns}/>")),
+            ("ppt/slides/slide1.xml", &slide("Roadmap", "Three releases this year.")),
+            ("ppt/slides/slide2.xml", &slide("Risks", "The motion controller software is late because of the safety audit.")),
+        ]),
+    )
+    .unwrap();
+    std::fs::write(root.join("old.xls"), "not an OLE file").unwrap();
+
+    let mut docs = DocsToml::default();
+    docs.ensure_defaults(&home);
+    docs.save().unwrap();
+    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let env = env(&host, &home, exe());
+    assert_eq!(index::run(&env, &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    let collections: Vec<_> = docs.enabled().cloned().collect();
+    let mut searcher = Searcher::default();
+    searcher.refresh(&collections).unwrap();
+    let embedder = HashEmbedder { dim: 64 };
+    let mut top = |query: &str| searcher.search(query, 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
+    let hit = top("RX-33 Volvo Cars Torslanda");
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("fleet.xlsx", "sheet Fleet, rows 1-40", "Fleet > Robot, Site"));
+    let read = ling_docs::read::read(&collections, &hit.doc_id, Some("sheet Fleet, rows 33-33"), 6000).unwrap();
+    assert_eq!(read.text.trim_end(), "Robot: RX-33, Site: Volvo Cars Torslanda");
+    let read = ling_docs::read::read(&collections, &hit.doc_id, Some("sheet Notes"), 6000).unwrap();
+    assert_eq!(read.text.trim_end(), "Remark\nRemark: Nothing to see");
+    let hit = top("motion controller late safety audit");
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("roadmap.pptx", "slide 2", "Risks"));
+    let read = ling_docs::read::read(&collections, &hit.doc_id, Some("slide 1"), 6000).unwrap();
+    assert_eq!(read.text.trim_end(), "Roadmap\nThree releases this year.");
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
+    let counts = ling_docs::store::counts(&conn).unwrap();
+    assert_eq!((counts.indexed, counts.skipped), (2, 1), "the .xls that is no workbook is skipped by its sniff");
+}
+
 /// A stand-in extractor: hangs on files named `hang*`, dies as the kernel's OOM kill would on
 /// `crash*`, and reads the rest with the real worker; every other command is the real binary.
 fn fake_worker(dir: &Path) -> PathBuf {

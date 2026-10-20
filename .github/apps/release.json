@@ -1,0 +1,15 @@
+{
+  "name": "dreamference-release",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Release & Infra team's bot: commits, pull requests and reviews for CI, the release workflow and its signing, the installers and the updater. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "actions": "write",
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write",
+    "workflows": "write"
+  },
+  "default_events": []
+}
