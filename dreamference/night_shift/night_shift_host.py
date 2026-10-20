@@ -32,7 +32,7 @@ NON_INTERACTIVE: Final[frozenset] = frozenset({
     "debug", "features", "doctor", "night", "node", "airgapped", "skill", "prompt", "update", "app", "apps", "web", "help",
     "review", "plugin", "remote-control", "exec-server", "queue", "archive", "unarchive", "delete", "execpolicy",
     "migrate-rollouts", "responses-api-proxy", "stdio-to-uds", "tcp-tunnel",
-    "audit", "docs", "chat", "signal", "ledger", "notice", "refine", "compat",
+    "audit", "docs", "chat", "signal", "ledger", "notice", "refine", "compat", "cavemode",
 })
 
 # Options that print and exit wherever they stand on the command line.

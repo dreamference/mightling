@@ -160,6 +160,9 @@ pub enum Action {
     AnswerApproval { id: Value, result: Value },
     /// The persistent part of the state changed.
     Save,
+    /// `/cavemode <text>` for the current thread (None before the first question), through `ling
+    /// web`; what it answers goes back as a notice.
+    Cavemode { thread: Option<String>, text: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -337,6 +340,7 @@ impl Bridge {
                 None => actions.push(Action::Notice(format!("There is no thread {n}. /threads lists them."))),
             },
             Input::Help => actions.push(Action::Notice(command::HELP.to_string())),
+            Input::Cavemode(text) => actions.push(Action::Cavemode { thread: self.current.clone(), text }),
             Input::Question(_) => {
                 if !self.is_busy() && self.queue.is_empty() {
                     actions.extend(self.fresh_after_silence(now));
@@ -782,6 +786,16 @@ mod tests {
         let again = b.on_message(msg("and 3+3?", 8), 1);
         assert_eq!(again[1], Action::Typing(true));
         assert!(matches!(&again[2], Action::StartTurn { thread, .. } if thread == "t1"));
+    }
+
+    #[test]
+    fn cavemode_names_the_current_thread_and_passes_the_rest_on() {
+        let mut b = connected();
+        assert_eq!(b.on_message(msg("/cavemode default full", 1), 0), vec![Action::Receipt(1), Action::Cavemode { thread: None, text: "default full".to_string() }]);
+        answered(&mut b, "first", "ok", 2);
+        let set = b.on_message(msg("/cavemode off", 3), 3);
+        assert_eq!(set, vec![Action::Receipt(3), Action::Cavemode { thread: Some("t1".to_string()), text: "off".to_string() }]);
+        assert!(!b.is_busy());
     }
 
     #[test]

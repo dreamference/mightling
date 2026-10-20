@@ -418,6 +418,12 @@ impl Daemon {
                 }
             }
             Action::Notice(text) => self.send_text(&Styled::plain(&text)).await,
+            Action::Cavemode { thread, text } => {
+                let said = match agent::cavemode(self.config.port, &self.cookie, thread.as_deref(), &text).await {
+                    Ok(said) | Err(said) => said,
+                };
+                self.send_text(&Styled::plain(&said)).await;
+            }
             // Note to Self shows neither typing nor receipts, and a receipt there would mark the
             // owner's note read on every device; linked mode sends neither.
             Action::Typing(_) | Action::Receipt(_) if self.linked() => {}
