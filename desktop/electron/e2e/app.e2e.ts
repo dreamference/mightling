@@ -32,13 +32,20 @@ if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); 
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
 const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
 const rl = require("readline").createInterface({ input: process.stdin });
+let started = null;
 rl.on("line", (line) => {
   fs.appendFileSync(log, line + "\\n");
   const m = JSON.parse(line);
   if (m.method === "initialize") console.log(JSON.stringify({ id: m.id, result: { userAgent: "stand-in" } }));
-  else if (m.method === "thread/start") console.log(JSON.stringify({ id: m.id, result: { thread: {
-    id: "thread-1", cwd: m.params.cwd, preview: "", name: null, turns: [], status: { type: "idle" }, ephemeral: false,
-    parentThreadId: null, createdAt: 1, updatedAt: 1, recencyAt: null, model: "m", modelProvider: "p" } } }));
+  else if (m.method === "thread/start") {
+    started = { id: "thread-1", cwd: m.params.cwd, preview: "", name: null, turns: [], status: { type: "idle" }, ephemeral: false,
+      parentThreadId: null, createdAt: 1, updatedAt: 1, recencyAt: null, model: "m", modelProvider: "p" };
+    console.log(JSON.stringify({ id: m.id, result: { thread: started } }));
+  }
+  // Reopening the thread it started (its title in the sidebar) reads or resumes that thread, as the server would.
+  else if ((m.method === "thread/resume" || m.method === "thread/read") && started && m.params.threadId === started.id) {
+    console.log(JSON.stringify({ id: m.id, result: { thread: started } }));
+  }
   else if (m.method === "turn/start") console.log(JSON.stringify({ id: m.id, result: { turn: { id: "turn-1", items: [], status: "inProgress", error: null } } }));
   else if (m.id !== undefined && m.method) console.log(JSON.stringify({ id: m.id, result: { data: [] } }));
 });
