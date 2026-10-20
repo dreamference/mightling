@@ -60,6 +60,29 @@ fn attachments(message: &Value) -> Vec<Attachment> {
         .unwrap_or_default()
 }
 
+/// The id of every attachment a `receive` notification names, wherever it sits (the message's own,
+/// a quote's thumbnail, a link preview's image): each is a file signal-cli has downloaded into its
+/// attachment folder, which the bridge deletes unless the owner sent it to be read (§19.1).
+pub fn attachment_ids(params: &Value) -> Vec<String> {
+    fn walk(value: &Value, ids: &mut Vec<String>) {
+        match value {
+            Value::Object(object) => {
+                if let (Some(Value::String(id)), Some(Value::String(_))) = (object.get("id"), object.get("contentType")) {
+                    ids.push(id.clone());
+                }
+                object.values().for_each(|v| walk(v, ids));
+            }
+            Value::Array(items) => items.iter().for_each(|v| walk(v, ids)),
+            _ => {}
+        }
+    }
+    let mut ids = Vec::new();
+    walk(params, &mut ids);
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 fn is_group(message: &Value) -> bool {
     message.get("groupInfo").is_some_and(|g| !g.is_null()) || message.get("groupV2").is_some_and(|g| !g.is_null())
 }
@@ -137,6 +160,17 @@ mod tests {
         assert_eq!(text, "hello");
         assert_eq!(attachments.len(), 1);
         assert!(attachments[0].is_image());
+    }
+
+    #[test]
+    fn every_downloaded_attachment_is_named_wherever_it_sits() {
+        let params = json!({"envelope": {"sourceUuid": "friend", "timestamp": 3, "dataMessage": {
+            "message": "look", "attachments": [{"contentType": "image/jpeg", "id": "a.jpg"}],
+            "quote": {"id": 1, "attachments": [{"contentType": "image/png", "thumbnail": {"contentType": "image/png", "id": "t.png"}}]},
+            "previews": [{"url": "https://example.com", "image": {"contentType": "image/webp", "id": "p.webp"}}]
+        }}});
+        assert_eq!(attachment_ids(&params), ["a.jpg", "p.webp", "t.png"]);
+        assert!(attachment_ids(&json!({"envelope": {"timestamp": 1, "dataMessage": {"message": "hi"}}})).is_empty());
     }
 
     #[test]

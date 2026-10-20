@@ -254,6 +254,24 @@ pub fn install_plan(
 /// the node; then, for every instance, points its settings at the runtime (`retool`, as that
 /// instance's account), rewrites the unit files and restarts each instance that was running. The
 /// accounts, their keys and the pairings are left alone.
+/// The step that installs the offline text reader `ling web` reads screenshots with (its
+/// `ocr.rs`; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.1). The distribution's package, as for
+/// qrencode: signed by the archive, and updated with the system. Its English data comes with it;
+/// another language is `apt install tesseract-ocr-<code>`, read from then on.
+pub fn ocr_step() -> Step {
+    Step::root("Install Tesseract, which reads the text in the images you send (offline, on this machine)", &["apt-get", "install", "-y", "tesseract-ocr"])
+}
+
+/// Whether `tesseract` is on PATH.
+pub fn tesseract_present() -> bool {
+    std::process::Command::new("sh")
+        .args(["-c", "command -v tesseract"])
+        .stdout(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 pub fn refresh_plan(bridge: &Path, work: &Path, arch: &str, java_present: bool, signal_cli_present: bool, instances: &[Instance]) -> Vec<Step> {
     let mut steps = runtime_steps(bridge, work, arch, java_present, signal_cli_present);
     steps.push(Step::root("Install the current bridge where the system account can run it", &["install", "-D", "-m", "0755", &bridge.to_string_lossy(), unit::BRIDGE_PATH]));
@@ -539,6 +557,13 @@ mod tests {
         assert!(jre_check < jre_unpack);
         // Nothing is opened to everyone.
         assert!(!shown.iter().any(|s| s.contains("777") || s.contains("chmod")));
+    }
+
+    #[test]
+    fn the_text_reader_is_the_distributions_package() {
+        let step = ocr_step();
+        assert!(step.root);
+        assert_eq!(step.display(), "sudo apt-get install -y tesseract-ocr");
     }
 
     #[test]

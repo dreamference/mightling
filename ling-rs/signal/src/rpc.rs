@@ -34,10 +34,12 @@ pub struct Launch {
 
 impl Launch {
     /// The daemon's command line: its data under `config`, the account, keys trusted on first use
-    /// only (a changed key must be trusted by hand, §5.3), stories ignored. In linked mode
-    /// attachments are not downloaded at all; the owner's are fetched one by one.
-    pub fn json_rpc(program: std::path::PathBuf, config: &std::path::Path, account: &str, linked: bool, env: Vec<(String, String)>) -> Launch {
-        let mut args = vec![
+    /// only (a changed key must be trusted by hand, §5.3), stories, avatars and stickers ignored.
+    /// Attachments are downloaded in both modes: signal-cli cannot fetch one later
+    /// (`getAttachment` only reads what it already downloaded), so in linked mode the bridge
+    /// deletes every attachment but the owner's Note to Self ones as they arrive (§19.1).
+    pub fn json_rpc(program: std::path::PathBuf, config: &std::path::Path, account: &str, env: Vec<(String, String)>) -> Launch {
+        let args = vec![
             "--config".to_string(),
             config.to_string_lossy().into_owned(),
             "-a".to_string(),
@@ -51,11 +53,6 @@ impl Launch {
             "--ignore-avatars".to_string(),
             "--ignore-stickers".to_string(),
         ];
-        // Linked to the owner's account, every conversation's attachments would otherwise be
-        // downloaded into the bridge's state. None is: the owner's own are fetched one by one.
-        if linked {
-            args.push("--ignore-attachments".to_string());
-        }
         Launch { program, args, env }
     }
 }
@@ -358,14 +355,13 @@ done
 
     #[test]
     fn the_daemon_trusts_new_keys_on_first_use_only() {
-        let launch = Launch::json_rpc("/opt/signal-cli".into(), std::path::Path::new("/var/lib/m/signal-cli"), "+15550000", false, vec![]);
+        let launch = Launch::json_rpc("/opt/signal-cli".into(), std::path::Path::new("/var/lib/m/signal-cli"), "+15550000", vec![]);
         let args = launch.args.join(" ");
         assert!(args.contains("--trust-new-identities on-first-use"));
         assert!(args.contains("-a +15550000 "));
         assert!(args.contains("jsonRpc"));
+        // signal-cli cannot fetch an attachment later, so the owner's are downloaded (§19.1).
         assert!(!args.contains("--ignore-attachments"));
-        let linked = Launch::json_rpc("/x".into(), std::path::Path::new("/y"), "+1", true, vec![]);
-        assert!(linked.args.contains(&"--ignore-attachments".to_string()));
         assert!(args.contains("--ignore-avatars") && args.contains("--ignore-stickers"));
         assert!(!args.contains("--send-read-receipts"), "read receipts are never sent for every message");
     }
