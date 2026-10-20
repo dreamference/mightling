@@ -57,6 +57,9 @@ pub enum AgentEvent {
     Approval { id: Value, thread: String, kind: ApprovalKind, command: Option<String>, cwd: Option<String>, reason: Option<String> },
     /// The owner's attachments for this thread's next turn, after [`Action::Upload`].
     Uploaded { thread: String, uploads: Vec<Uploaded> },
+    /// A follow-up the bridge steered into the running turn was refused (the turn was ending): it
+    /// is asked as the next question instead.
+    SteerFailed { thread: String, text: String },
     /// A tool call started (a command's text with it) or ended, for the answer's bounds (§19.3).
     ToolStarted { thread: String, item: String, command: Option<String> },
     ToolCompleted { thread: String, item: String },
@@ -163,6 +166,9 @@ pub enum Action {
     ResumeThread(String),
     /// Tell the running turn something (`turn/steer`): the bounds' "answer now".
     Steer { thread: String, turn: String, text: String },
+    /// The owner's follow-up into the running turn (`turn/steer`); refused, it comes back as
+    /// [`AgentEvent::SteerFailed`] (§19.4).
+    AddToTurn { thread: String, turn: String, text: String },
     /// Upload the attachments into the thread's Ask folder and report [`AgentEvent::Uploaded`].
     Upload { thread: String, attachments: Vec<Attachment> },
     /// Start a turn: the text, and each image the model is shown (`localImage`).
@@ -210,6 +216,8 @@ enum Phase {
         /// The answer's bounds (limits.rs), and why the bridge interrupted it, when it did.
         watch: Watch,
         limit_reason: Option<String>,
+        /// The owner's quick follow-ups before the turn's id is known: steered in once it is (§19.4).
+        added: Vec<String>,
     },
 }
 
@@ -242,6 +250,18 @@ pub struct Bridge {
     down_since: Option<u64>,
     down_notified: bool,
     lost_answer: bool,
+}
+
+/// Appends a follow-up's text to a question's, a blank line between.
+fn join(text: &mut String, more: &str) {
+    let more = more.trim();
+    if more.is_empty() {
+        return;
+    }
+    if !text.trim().is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str(more);
 }
 
 fn title_of(text: &str) -> String {
@@ -364,7 +384,9 @@ impl Bridge {
                     actions.extend(self.fresh_after_silence(now));
                 }
                 self.last_activity_ms = Some(now);
-                if self.is_busy() || !self.connected {
+                if self.connected && self.is_busy() && let Some(merged) = self.merge(message.clone()) {
+                    actions.extend(merged);
+                } else if self.is_busy() || !self.connected {
                     if self.queue.len() >= QUEUE_LIMIT {
                         actions.push(Action::Notice(format!("{QUEUE_LIMIT} questions are already waiting; send this again once they're answered.")));
                     } else {
@@ -427,6 +449,7 @@ impl Bridge {
             uploading: with_attachments.then(|| message.text.clone()),
             watch: Watch::new(now),
             limit_reason: None,
+            added: Vec::new(),
         };
         if with_attachments {
             vec![Action::Typing(true), Action::Upload { thread, attachments: message.attachments }]
@@ -435,15 +458,49 @@ impl Bridge {
         }
     }
 
-    /// Takes the next queued question, if the bridge is free.
+    /// A quick follow-up joins the question in hand instead of waiting as a turn of its own
+    /// (§19.4): while its thread opens or its attachments upload, its text is added to the
+    /// question; while the answer runs, it is steered in (`turn/steer`), at once or as soon as the
+    /// turn's id is known. Returns None when it cannot join: an attachment after the question has
+    /// gone, an approval waiting, a stop under way, or the final turn after a time-out, so it waits
+    /// as the next question.
+    fn merge(&mut self, message: OwnerMessage) -> Option<Vec<Action>> {
+        if self.approval_pending() {
+            return None;
+        }
+        match &mut self.phase {
+            Phase::Idle => None,
+            Phase::Opening { message: opening, .. } => {
+                join(&mut opening.text, &message.text);
+                opening.attachments.extend(message.attachments);
+                Some(Vec::new())
+            }
+            Phase::Running { stopping: true, .. } => None,
+            Phase::Running { watch, .. } if watch.final_turn => None,
+            Phase::Running { .. } if !message.attachments.is_empty() => None,
+            Phase::Running { uploading: Some(text), .. } => {
+                join(text, &message.text);
+                Some(Vec::new())
+            }
+            Phase::Running { thread, turn: Some(turn), .. } => Some(vec![Action::AddToTurn { thread: thread.clone(), turn: turn.clone(), text: message.text }]),
+            Phase::Running { added, .. } => {
+                added.push(message.text);
+                Some(Vec::new())
+            }
+        }
+    }
+
+    /// Takes the queued questions, if the bridge is free: all of them, as one question (§19.4).
     fn next(&mut self, now: u64) -> Vec<Action> {
         if self.is_busy() || !self.connected || self.airgapped() {
             return Vec::new();
         }
-        match self.queue.pop_front() {
-            Some(message) => self.begin(message, now),
-            None => Vec::new(),
+        let Some(mut first) = self.queue.pop_front() else { return Vec::new() };
+        while let Some(more) = self.queue.pop_front() {
+            join(&mut first.text, &more.text);
+            first.attachments.extend(more.attachments);
         }
+        self.begin(first, now)
     }
 
     fn stop(&mut self) -> Vec<Action> {
@@ -536,12 +593,15 @@ impl Bridge {
                 }
             }
             AgentEvent::TurnStarted { thread, turn } => {
-                if let Phase::Running { thread: running, turn: slot, stopping, .. } = &mut self.phase
+                if let Phase::Running { thread: running, turn: slot, stopping, added, .. } = &mut self.phase
                     && *running == thread
                 {
                     *slot = Some(turn.clone());
                     if *stopping {
                         actions.push(Action::Interrupt { thread, turn });
+                    } else if !added.is_empty() {
+                        let text = std::mem::take(added).join("\n\n");
+                        actions.push(Action::AddToTurn { thread, turn, text });
                     }
                 }
             }
@@ -580,6 +640,7 @@ impl Bridge {
                                 uploading: None,
                                 watch: Watch::final_turn(now),
                                 limit_reason: None,
+                                added: Vec::new(),
                             };
                             actions.push(Action::StartTurn { thread, text: limits::final_text(&reason), images: Vec::new() });
                             return actions;
@@ -613,6 +674,11 @@ impl Bridge {
                     }
                     actions.extend(self.next(now));
                 }
+            }
+            AgentEvent::SteerFailed { thread: _, text } => {
+                // The turn was ending: the follow-up is the next question, taken when it ends.
+                self.queue.push_front(OwnerMessage { text, attachments: Vec::new(), timestamp: now });
+                actions.extend(self.next(now));
             }
             AgentEvent::ToolStarted { thread, item, command } => {
                 if let Phase::Running { thread: running, watch, .. } = &mut self.phase
@@ -877,20 +943,59 @@ mod tests {
         assert!(!b.is_busy());
     }
 
+    /// The morning of 2026-10-20: a quick second message became a separate turn of its own.
+    /// Now it joins the answer in hand: added to the question while it opens, steered into the
+    /// turn while it runs (at once, or once the turn's id is known).
     #[test]
-    fn a_question_during_a_turn_is_queued_then_taken() {
+    fn quick_follow_ups_join_the_question_in_hand() {
+        let mut b = connected();
+        b.on_message(msg("compare it with a Dyson", 1), 0);
+        // While the thread opens: added to the question, no notice.
+        let opening = b.on_message(msg("which is quieter?", 2), 1_000);
+        assert_eq!(opening, vec![Action::Receipt(2)]);
+        let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 1_000);
+        assert!(ready.iter().any(|a| matches!(a, Action::StartTurn { text, .. } if text == "compare it with a Dyson\n\nwhich is quieter?")), "{ready:?}");
+        // Before the turn's id: kept, and steered in once it comes.
+        assert_eq!(b.on_message(msg("and more reliable 24/7?", 3), 2_000), vec![Action::Receipt(3)]);
+        let started = b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 2_000);
+        assert_eq!(started, vec![Action::AddToTurn { thread: "t1".to_string(), turn: "u1".to_string(), text: "and more reliable 24/7?".to_string() }]);
+        // While it runs: steered in at once.
+        let running = b.on_message(msg("in Portugal", 4), 3_000);
+        assert_eq!(running, vec![Action::Receipt(4), Action::AddToTurn { thread: "t1".to_string(), turn: "u1".to_string(), text: "in Portugal".to_string() }]);
+        // Refused (the turn was ending): it is the next question.
+        assert!(b.on_agent(AgentEvent::SteerFailed { thread: "t1".to_string(), text: "in Portugal".to_string() }, 3_100).is_empty());
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 4_000);
+        assert!(done.iter().any(|a| matches!(a, Action::StartTurn { text, .. } if text == "in Portugal")), "{done:?}");
+    }
+
+    #[test]
+    fn what_cannot_join_waits_and_the_waiting_are_asked_as_one() {
         let mut b = connected();
         b.on_message(msg("first", 1), 0);
         b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
-        let queued = b.on_message(msg("second", 2), 0);
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 0);
+        // An image after the question has gone, or anything while an approval waits: queued.
+        let image = Attachment { id: "x.jpg".to_string(), content_type: "image/jpeg".to_string(), filename: None, size: None };
+        let queued = b.on_message(OwnerMessage { text: "this one".to_string(), attachments: vec![image], timestamp: 2 }, 0);
         assert_eq!(notices(&queued), vec!["Queued; I'll take it next. /stop to interrupt."]);
-        for i in 0..QUEUE_LIMIT - 1 {
+        let approval = AgentEvent::Approval { id: json!(1), thread: "t1".to_string(), kind: ApprovalKind::Command, command: Some("ls".to_string()), cwd: None, reason: None };
+        b.on_agent(approval, 0);
+        assert_eq!(notices(&b.on_message(msg("second", 3), 0)), vec!["Queued; I'll take it next. /stop to interrupt."]);
+        b.on_message(msg("yes", 4), 0);
+        for i in 0..QUEUE_LIMIT - 2 {
+            b.on_agent(AgentEvent::Approval { id: json!(10 + i), thread: "t1".to_string(), kind: ApprovalKind::Command, command: None, cwd: None, reason: None }, 0);
             b.on_message(msg("more", 10 + i as u64), 0);
+            b.on_message(msg("no", 20 + i as u64), 0);
         }
+        b.on_agent(AgentEvent::Approval { id: json!(99), thread: "t1".to_string(), kind: ApprovalKind::Command, command: None, cwd: None, reason: None }, 0);
         let full = b.on_message(msg("too many", 99), 0);
-        assert!(notices(&full)[0].contains("already waiting"));
+        assert!(notices(&full)[0].contains("already waiting"), "{full:?}");
+        // The answer ends: everything that waited is one question.
         let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 0);
-        assert!(done.iter().any(|a| matches!(a, Action::StartTurn { text, .. } if text == "second")));
+        let Some(Action::Upload { .. }) = done.iter().find(|a| matches!(a, Action::Upload { .. })) else { panic!("{done:?}") };
+        let uploaded = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads: vec![] }, 0);
+        let Some(Action::StartTurn { text, .. }) = uploaded.iter().find(|a| matches!(a, Action::StartTurn { .. })) else { panic!("{uploaded:?}") };
+        assert!(text.starts_with("this one\n\nsecond\n\nmore"), "{text}");
     }
 
     #[test]
@@ -1013,8 +1118,8 @@ mod tests {
         let late = b.on_tick(1 + APPROVAL_MS);
         assert!(late.contains(&Action::AnswerApproval { id: json!(6), result: json!({"decision": "decline"}) }));
         assert!(notices(&late).iter().any(|n| n.contains("declined")));
-        // With nothing pending, "yes" is a question again (queued behind the running turn).
-        assert!(notices(&b.on_message(msg("yes", 3), 2))[0].starts_with("Queued"));
+        // With nothing pending, "yes" is a question again (added to the running answer, §19.4).
+        assert_eq!(b.on_message(msg("yes", 3), 2), vec![Action::Receipt(3)]);
     }
 
     #[test]

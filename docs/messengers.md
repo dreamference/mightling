@@ -39,6 +39,8 @@ is not a preview.
   [chat]
   new_thread_after_hours = 4
   ```
+- **Quick follow-ups join the answer.** A message sent while Mightling is answering is added to
+  the question it is working on, not answered separately afterwards. `/stop` still stops the answer.
 - **Answers are bounded.** An answer that takes over three minutes, uses over 25 tool calls or
   runs one command over a minute is asked to finish with what it has; if it still runs, it is
   stopped and asked once more, without tools, and you are told. `/stop` stops it at once. Change the
