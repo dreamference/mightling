@@ -1,5 +1,4 @@
-"""
-Where remote access keeps its files, and what it pins (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §2, §3).
+"""Where remote access keeps its files, and what it pins (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §2, §3).
 
 Everything the node holds for the overlay lives under `~/.config/dreamference/remote/`: the node's
 certificate authority, the control plane's configuration and data, the relay's shared secret, the
@@ -15,7 +14,7 @@ SHA-256 on the node and again on the box), and the client's release archive for 
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Final, Optional
+from typing import Any, Final
 
 NETBIRD_VERSION: Final[str] = "0.80.0"
 
@@ -28,18 +27,18 @@ SERVER_IMAGE: Final[str] = (
 
 # The relay for the box, by architecture: the per-platform manifest of `netbirdio/relay:0.80.0`
 # (index sha256:1aff236d…) and the SHA-256 of `/go/bin/netbird-relay` inside it, a static binary.
-RELAY_IMAGES: Final[Dict[str, str]] = {
+RELAY_IMAGES: Final[dict[str, str]] = {
     "amd64": "netbirdio/relay@sha256:0ca78fc0d47d8534e3c23e679ba46d0d6dc95ac777a4ae3c3a56013799232fad",
     "arm64": "netbirdio/relay@sha256:fc86b094604812d8c97e082aa25c2bd959b25265582b75691f687b63eadb52ea",
 }
-RELAY_BINARY_SHA256: Final[Dict[str, str]] = {
+RELAY_BINARY_SHA256: Final[dict[str, str]] = {
     "amd64": "8fbaf4085cb98db91e5538b443941c3b097b56441c7d150e8c92618bf3b62c92",
     "arm64": "394997a910bb256d4f8f86f215a9ff086927fae6e69f8cdbdcf43d9e4382a3f7",
 }
 RELAY_BINARY_IN_IMAGE: Final[str] = "/go/bin/netbird-relay"
 
 # NetBird's client for the node's own peer, from netbird_0.80.0_checksums.txt.
-CLIENT_ARCHIVES: Final[Dict[str, str]] = {
+CLIENT_ARCHIVES: Final[dict[str, str]] = {
     "amd64": "47ffaba4fc3929f31795bd6c5232d6c29744d3169e2c93e6d9c84624f0ef6405",
     "arm64": "8cbd99fa068a7b0f3968b2d31dc341acc17dd1e97c3053e61ed5905dbdae7341",
 }
@@ -53,6 +52,19 @@ OVERLAY_DOMAIN: Final[str] = "netbird.selfhosted"
 # On the node: the control plane listens on loopback only; the reverse tunnel is its one way in.
 SERVER_CONTAINER: Final[str] = "dreamference-remote"
 CONTROL_PLANE_PORT: Final[int] = 33443
+# The container's network is internal, so the control plane has no route out of this machine: no
+# metrics, no GeoLite download, nothing, because nothing can be reached (merged 2026-10-20). The host
+# and the tunnel reach it through a loopback proxy on CONTROL_PLANE_PORT, as the Matrix homeserver.
+CONTROL_NETWORK: Final[str] = "dreamference-remote"
+CONTROL_SUBNET: Final[str] = "172.31.232.0/24"
+CONTROL_ADDRESS: Final[str] = "172.31.232.10"
+CONTROL_LISTEN_PORT: Final[int] = 443
+PROXY_SOCKET_UNIT: Final[str] = "mightling-remote-control.socket"
+PROXY_SERVICE_UNIT: Final[str] = "mightling-remote-control.service"
+SOCKET_PROXYD: Final[str] = "/usr/lib/systemd/systemd-socket-proxyd"
+# A box name of three labels or more is scoped to its parent (`remote.dreamference.ai` →
+# `dreamference.ai`), so a later box under the same domain needs no new CA; a shorter one to itself.
+SCOPE_PARENT_MIN_LABELS: Final[int] = 3
 # On the box: where the tunnel lands (loopback), the public port haproxy listens on, the relay's
 # port (TCP for WebSocket, UDP for QUIC) and STUN's.
 BOX_TUNNEL_PORT: Final[int] = 8443
@@ -81,15 +93,17 @@ class RemoteSettings:
 
     @classmethod
     def folder(cls) -> Path:
-        """
+        """The remote-access folder.
+
         Returns:
             Path: `~/.config/dreamference/remote`, computed at call time (tests move `HOME`).
         """
-        return Path(os.path.expanduser("~/.config/dreamference/remote"))
+        return Path("~/.config/dreamference/remote").expanduser()
 
     @classmethod
     def path(cls, *parts: str) -> Path:
-        """
+        """A path under the remote-access folder.
+
         Args:
             *parts: A path under the folder.
 
@@ -99,8 +113,9 @@ class RemoteSettings:
         return cls.folder().joinpath(*parts)
 
     @classmethod
-    def read(cls) -> Optional[Dict[str, Any]]:
-        """
+    def read(cls) -> dict[str, Any] | None:
+        """Reads `remote.json`.
+
         Returns:
             Optional[Dict[str, Any]]: `remote.json`, or None when remote access is not set up.
         """
@@ -111,9 +126,8 @@ class RemoteSettings:
         return value if isinstance(value, dict) and value.get("dns_name") else None
 
     @classmethod
-    def write(cls, record: Dict[str, Any]) -> None:
-        """
-        Writes `remote.json` whole, readable by this user only.
+    def write(cls, record: dict[str, Any]) -> None:
+        """Writes `remote.json` whole, readable by this user only.
 
         Args:
             record: The record.
@@ -122,8 +136,7 @@ class RemoteSettings:
 
     @classmethod
     def write_private(cls, name: str, text: str) -> Path:
-        """
-        Writes a file under the folder with mode 0600, the folder 0700.
+        """Writes a file under the folder with mode 0600, the folder 0700.
 
         Args:
             name: The path under the folder.
@@ -134,16 +147,17 @@ class RemoteSettings:
         """
         path = cls.path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(cls.folder(), 0o700)
+        Path(cls.folder()).chmod(0o700)
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as handle:
             handle.write(text)
-        os.chmod(path, 0o600)
+        Path(path).chmod(0o600)
         return path
 
     @classmethod
-    def read_private(cls, name: str) -> Optional[str]:
-        """
+    def read_private(cls, name: str) -> str | None:
+        """Reads a private file under the folder.
+
         Args:
             name: The path under the folder.
 
@@ -158,7 +172,8 @@ class RemoteSettings:
 
     @classmethod
     def node_peer_name(cls, node_id: str) -> str:
-        """
+        """The node's peer name in the overlay.
+
         Args:
             node_id: The node's id (`~/.config/dreamference/node-id`).
 
@@ -169,7 +184,8 @@ class RemoteSettings:
 
     @classmethod
     def overlay_name(cls, node_id: str) -> str:
-        """
+        """The node's full overlay name.
+
         Args:
             node_id: The node's id.
 
@@ -179,8 +195,36 @@ class RemoteSettings:
         return f"{cls.node_peer_name(node_id)}.{OVERLAY_DOMAIN}"
 
     @classmethod
-    def management_url(cls, dns_name: str) -> str:
+    def default_ca_scope(cls, dns_name: str) -> str:
+        """The domain a new CA may sign under, for a box name.
+
+        Args:
+            dns_name: The box's public DNS name.
+
+        Returns:
+            str: Its parent domain for a name of three labels or more, else the name itself.
         """
+        labels = dns_name.lower().strip(".").split(".")
+        return ".".join(labels[1:] if len(labels) >= SCOPE_PARENT_MIN_LABELS else labels)
+
+    @classmethod
+    def in_scope(cls, dns_name: str, scope: str) -> bool:
+        """Whether a name lies in a CA scope.
+
+        Args:
+            dns_name: A DNS name.
+            scope: A domain.
+
+        Returns:
+            bool: True for the domain itself or a name under it.
+        """
+        name, base = dns_name.lower().strip("."), scope.lower().strip(".")
+        return name == base or name.endswith("." + base)
+
+    @classmethod
+    def management_url(cls, dns_name: str) -> str:
+        """Where every peer reaches management and signal.
+
         Args:
             dns_name: The box's public DNS name.
 
@@ -191,7 +235,8 @@ class RemoteSettings:
 
     @classmethod
     def relay_address(cls, dns_name: str) -> str:
-        """
+        """The relay's address, as NetBird writes it.
+
         Args:
             dns_name: The box's public DNS name.
 

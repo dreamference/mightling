@@ -587,8 +587,8 @@ class EgressAudit:
         if cls._unit_enabled(REMOTE_TUNNEL_UNIT, user=True):
             from dreamference.remote.remote_settings import RemoteSettings
             box = (RemoteSettings.read() or {}).get("dns_name", "the box")
-            lines.append(f"Remote access enabled ({REMOTE_TUNNEL_UNIT}): the node keeps an SSH tunnel to {box}, and NetBird's "
-                         "client reaches its relay and the overlay's peers, outside this trace. "
+            lines.append(f"Remote access enabled ({REMOTE_TUNNEL_UNIT}): the node keeps an SSH tunnel to {box}, "
+                         "and NetBird's client reaches its relay and the overlay's peers, outside this trace. "
                          "`ling-admin remote remove` turns it off.")
         return lines
 

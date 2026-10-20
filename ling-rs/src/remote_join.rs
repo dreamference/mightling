@@ -266,15 +266,33 @@ fn windows_client_path() -> String {
 }
 
 /// The `netbird up` that joins the overlay. No sudo: the daemon's socket is open to local users.
-pub fn up_command(netbird: &str, bundle: &Bundle) -> Vec<String> {
+/// The one-time key is read from a file only this user can read, never given on the command line,
+/// where any process listing would show it.
+pub fn up_command(netbird: &str, bundle: &Bundle, key_file: &Path) -> Vec<String> {
     vec![
         netbird.to_string(),
         "up".to_string(),
         "--management-url".to_string(),
         bundle.management_url.clone(),
-        "--setup-key".to_string(),
-        bundle.setup_key.clone(),
+        "--setup-key-file".to_string(),
+        key_file.display().to_string(),
     ]
+}
+
+/// Writes the one-time key where only this user can read it (0600 on Unix).
+pub fn write_key_file(folder: &Path, key: &str) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    let path = folder.join("remote-setup-key");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&path).map_err(|error| error.to_string())?;
+    std::io::Write::write_all(&mut file, format!("{key}\n").as_bytes()).map_err(|error| error.to_string())?;
+    Ok(path)
 }
 
 /// The installed client, if any: on PATH, or where this command installs it.
@@ -472,8 +490,12 @@ async fn join(code: &str, named: Option<&str>) -> Result<Vec<String>, String> {
             installed_client().ok_or("NetBird's client is not where it was installed")?
         }
     };
-    run_steps("🌐 This machine joins the overlay with the one-time key", &[up_command(&netbird, &bundle)])
-        .map_err(|error| error.replace(&bundle.setup_key, "<setup key>"))?;
+    let home = ling_node_locator::codex_home().ok_or("could not resolve CODEX_HOME")?;
+    let key_file = write_key_file(&home, &bundle.setup_key)?;
+    let joined = run_steps("🌐 This machine joins the overlay with the one-time key", &[up_command(&netbird, &bundle, &key_file)])
+        .map_err(|error| error.replace(&bundle.setup_key, "<setup key>"));
+    let _ = std::fs::remove_file(&key_file);
+    joined?;
 
     let mut node = advert.node.clone();
     node.remote = bundle.overlay_name.clone();
@@ -647,7 +669,24 @@ mod tests {
     #[test]
     fn up_uses_the_box_and_the_one_time_key_without_sudo() {
         let bundle = Bundle { management_url: "https://relay.example.org:443".into(), setup_key: "K".into(), ..Default::default() };
-        assert_eq!(up_command("/usr/local/bin/netbird", &bundle), ["/usr/local/bin/netbird", "up", "--management-url", "https://relay.example.org:443", "--setup-key", "K"]);
+        let key_file = Path::new("/home/u/.mightling/remote-setup-key");
+        assert_eq!(
+            up_command("/usr/local/bin/netbird", &bundle, key_file),
+            ["/usr/local/bin/netbird", "up", "--management-url", "https://relay.example.org:443", "--setup-key-file", "/home/u/.mightling/remote-setup-key"]
+        );
+    }
+
+    #[test]
+    fn the_key_file_is_private_and_holds_only_the_key() {
+        let folder = std::env::temp_dir().join(format!("ling-remote-key-{}", std::process::id()));
+        let path = write_key_file(&folder, "K-1").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "K-1\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     fn advert(id: &str, name: &str, main: bool) -> Advert {

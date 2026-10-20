@@ -39,6 +39,8 @@ console: Final[Console] = Console()
 # where they keep it and this project is meant to work without a network.
 SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
 SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
+# `ling-admin remote` (dreamference/remote/).
+REMOTE_COMMAND: Final[str] = "remote"
 
 class DreamferenceCLIController:
     """
@@ -1450,15 +1452,22 @@ class DreamferenceCLIController:
         )
         remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
         remote_setup_parser = remote_subparsers.add_parser(
-            "setup", help="Set up (or update) the control plane here, the box over SSH, the tunnel, and this node's peer"
+            "setup",
+            help="Set up (or update) the control plane here, the box over SSH, the tunnel, and this node's peer"
         )
         remote_setup_parser.add_argument("dns_name", help="The box's public DNS name; `ssh <name>` must log in")
-        remote_setup_parser.add_argument("--yes", action="store_true", help="Do not ask; never wait for a sudo password")
+        remote_setup_parser.add_argument("--yes", action="store_true",
+                                         help="Do not ask; never wait for a sudo password")
         remote_setup_parser.add_argument("--ssh", dest="ssh_to", metavar="DESTINATION",
-                                         help="Your SSH Host alias for the box, when `ssh <dns_name>` itself does not log in "
+                                         help="Your SSH Host alias for the box, when `ssh <dns_name>` itself "
+                                              "does not log in "
                                               "(remembered; never an address)")
+        remote_setup_parser.add_argument("--ca-scope", default=None, metavar="DOMAIN",
+                                         help="The domain the node's new CA may sign under "
+                                              "(default: the parent of the box's name)")
         remote_setup_parser.add_argument("--box-only", action="store_true",
-                                         help="Deploy the box and stop: nothing runs on this node (no container, tunnel or sudo)")
+                                         help="Deploy the box and stop: nothing runs on this node "
+                                              "(no container, tunnel or sudo)")
         remote_subparsers.add_parser("status", help="Show the tunnel, the box's units, the certificates and the peers")
         remote_remove_parser = remote_subparsers.add_parser(
             "remove", help="Remove the box's relay and haproxy and the tunnel; keep the CA and the enrolments"
@@ -2843,11 +2852,11 @@ class DreamferenceCLIController:
                 sys.exit(2)
             sys.exit(action())
 
-        elif args.command == "remote":
+        elif args.command == REMOTE_COMMAND:
             from dreamference.remote.remote_access import RemoteAccess
             actions = {
                 "setup": lambda: RemoteAccess.setup(args.dns_name, yes=args.yes, ssh_to=args.ssh_to,
-                                                    box_only=args.box_only),
+                                                    box_only=args.box_only, ca_scope=args.ca_scope),
                 "status": RemoteAccess.status,
                 "remove": lambda: RemoteAccess.remove(purge=args.purge, yes=args.yes),
                 "code": RemoteAccess.code,

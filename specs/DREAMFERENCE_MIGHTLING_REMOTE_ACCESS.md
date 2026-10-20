@@ -1,6 +1,6 @@
 # Mightling from outside the LAN: remote access (MVP)
 
-**Status:** the user's design (2026-10-10); the open questions answered by the user the same evening (§11); **built** on branch `remote/vpn-mvp` (§13), tested offline and in a local rehearsal on Docker (§12.2). **Phase 0's first half is done on a real box** (2026-10-12, §12.3): the box deployed by `remote setup --box-only` and its port 443 checked from the node. **Phase 0's second half is done on the node** (2026-10-13, §12.4): control plane, tunnel and the node's peer up, `remote status` all green, the relay reachable. The live acceptance with a client (§9, §13.3 from step 2) waits for the laptop. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. MVP clients are Linux, macOS, Windows and a phone (§4).
+**Status:** the user's design (2026-10-10); **merged into main on 2026-10-20** as `remote/overlay`, with the fixes and the owner's decisions of that day (§14: one box name, `remote.dreamference.ai`, under a CA scoped to `dreamference.ai`; the store's encryption key fixed; no route out for the control plane; setup keys in files); the migration of the 10-13 deployment and Matrix on either overlay are §14.4 and §14.5; the open questions answered by the user the same evening (§11); **built** on branch `remote/vpn-mvp` (§13), tested offline and in a local rehearsal on Docker (§12.2). **Phase 0's first half is done on a real box** (2026-10-12, §12.3): the box deployed by `remote setup --box-only` and its port 443 checked from the node. **Phase 0's second half is done on the node** (2026-10-13, §12.4): control plane, tunnel and the node's peer up, `remote status` all green, the relay reachable. The live acceptance with a client (§9, §13.3 from step 2) waits for the laptop. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. MVP clients are Linux, macOS, Windows and a phone (§4).
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 
@@ -279,3 +279,39 @@ The provider's firewall now opens 33080/tcp+udp and 3478/udp. The owner ran `lin
 4. `remote revoke` for §9.3; `audit egress` for §9.4.
 5. A Mac and a Windows machine as in step 2; an iPhone and an Android phone by hand (§4.2), recording which trust the CA. Android's result goes to the user (§11.3).
 6. `remote remove`, then `setup` again: no client re-enrols; `remove --purge` leaves the node and the box as before setup.
+
+---
+
+## 14. Reconciled with main (2026-10-20)
+
+On 2026-10-20 a second build of this design was started on main without knowing of `remote/vpn-mvp` (its Phase 0 and 1, then reverted). The owner's decision that day: the branches of 2026-10-10 to 13 are the base, rebased onto main as `remote/overlay`, with the second build's fixes ported in; the deployed box layout stays (haproxy on 443 by server name, the relay on 33080 TCP and UDP, STUN on 3478, the provider's firewall).
+
+### 14.1 Found on the live node
+
+The control plane's container restarted with the node on 2026-10-14 08:02. Its configuration had no `server.store.encryptionKey`, so the server made a new key at that start (its log says so), and since then management answers the saved administrator token with `401 token invalid`: `remote status` shows "management did not answer", and `peers`, `revoke` and `code` cannot work. The owner's password had been discarded, so there was no way back into the API. The overlay itself kept running (the node's client: management and signal connected, relays 2/2).
+
+### 14.2 Ported fixes
+
+1. **The store's key** is made once (`remote/store-key`, 0600) and written into `config.yaml` before every start.
+2. **`NB_SETUP_PAT_ENABLED`** only for the one start that creates the owner: started plainly; if management needs its first setup, restarted with it for `/api/setup` on loopback, then plainly again. A wiped store behind a live tunnel can no longer hand the world an owner's token.
+3. **The owner's password** is kept beside the token (`remote/owner-password`, 0600), the way back if a token is lost.
+4. **No route out:** the container is on the internal Docker network `dreamference-remote`, reached through a loopback proxy (`mightling-remote-control.socket`, `systemd-socket-proxyd`) on the port the tunnel already forwards to, `127.0.0.1:33443`; the tunnel unit is unchanged.
+5. **Setup keys in files:** `netbird up --setup-key-file` on the node and on clients (0600, deleted after), never `--setup-key` on a command line. `--setup-key-file` is in 0.80.0's client (`client/cmd/root.go`), read by the CLI as the user who runs it.
+6. **The CA scope is a setting:** `remote setup --ca-scope <domain>`, by default the parent of the box's name for a name of three labels or more; the CA is constrained to the scope and `netbird.selfhosted`, and the scope is recorded in `remote.json`.
+
+The helpers report failures through their module loggers (the bare line on standard error), so that only the console-facing `RemoteAccess` prints (`T201`, the Python quality ratchet).
+
+### 14.3 The owner's decisions
+
+- **One name:** `remote.dreamference.ai`, a Cloudflare A record to the box, DNS only. The control plane at `https://remote.dreamference.ai:443`, the relay at `rels://remote.dreamference.ai:33080`. CA scope `dreamference.ai`.
+- **Pins stay 0.80.0** for the first live acceptance. For the next bump, read on 2026-10-20 from NetBird's published checksums and Docker Hub: 0.81.3 client archives (linux amd64 `cbdea310…b63b1`, linux arm64 `980eef93…c22d`, darwin amd64 `95ef6a3f…cac1f`, darwin arm64 `bc37108e…e71`), `netbirdio/netbird-server:0.81.3` index `sha256:541ecef7…7f1d`, `netbirdio/relay:0.81.3` amd64 `sha256:de516151…0324`, arm64 `sha256:f5f7bba0…41c7`; the relay binary's SHA-256 needs one extraction on the node.
+- **The box stays `relay-box`**, with its other services untouched.
+
+### 14.4 The migration of the 10-13 deployment
+
+No client was ever enrolled, and the CA (constrained to the provider's name for the box) and the store (its key lost) cannot carry on, so the node starts its overlay afresh under the new name and the box is reconciled in place. The steps, conditions and backups are in `docs/dev/remote-access.md`. The node's half needs root once (the CA into the trust store, NetBird's client brought up), and sudo on the node asks for a password, so that step is the owner's at a terminal.
+
+### 14.5 Matrix on either overlay
+
+The last phase (owner's decision, 2026-10-20): the homeserver reachable by name on this overlay, the default for a new homeserver once it exists, Tailscale kept as the option for a user who already has it. A homeserver's server name is permanent, so an existing Tailscale homeserver keeps its name and its overlay until `matrix remove`. §8 is rewritten when it is built.
+

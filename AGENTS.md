@@ -70,7 +70,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 
 ## Where things live
 
-Twelve packages under `dreamference/` (eleven subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
+Thirteen packages under `dreamference/` (twelve subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
 
 | Package | Role |
 | --- | --- |
@@ -85,6 +85,7 @@ Twelve packages under `dreamference/` (eleven subsystems and `cli/`), each with 
 | `node/` | The node half of the client/server split: the advertised service file, the node id, what is published to the LAN, pairing, jobs and model sync over SSH |
 | `swe_bench/` | `ling-admin swe-bench`: `ling` inside each SWE-bench instance's container, A/B runs and reports |
 | `audit/` | `ling-admin audit egress`: the strace-based network audit of a real `ling` session |
+| `remote/` | Remote access: the node's NetBird control plane, its CA, the relay box over SSH, LAN enrolment |
 | `cli/` | `ling-admin`'s parser and dispatch (`dreamference_cli_controller.py`) |
 
 Outside the package:
@@ -187,7 +188,7 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/code-index.md](docs/dev/code-index.md): `ling-code`
 - [docs/dev/local-file-index.md](docs/dev/local-file-index.md): `ling-docs`
 - [docs/dev/context-engine.md](docs/dev/context-engine.md): the Python context engine
-- [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay (being built)
+- [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay, its DNS and its migration
 - [docs/dev/adapters.md](docs/dev/adapters.md): LoRA adapters: `ling-admin adapter`, the signature, serving them
 - [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
 - [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree

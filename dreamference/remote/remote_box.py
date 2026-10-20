@@ -1,5 +1,4 @@
-"""
-The rented box, deployed and removed over SSH (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §3).
+"""The rented box, deployed and removed over SSH (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §3).
 
 The box is untrusted and does two jobs. NetBird's relay (with its embedded STUN) carries WireGuard
 packets between peers that cannot reach each other directly; it terminates TLS with a certificate
@@ -12,20 +11,22 @@ The relay binary comes from the relay image's per-architecture manifest, pinned 
 checked by SHA-256 on the node after extraction and again on the box before it is installed.
 
 Everything runs through the user's own `ssh <dns-name>` (their key, their configuration; or the
-`Host` alias they name with `--ssh`), as root or through passwordless sudo, in two steps: the staged files are copied, then one generated script
-installs them and leaves a manifest that `remove` reads. SSH and Docker go through `_run`, the seam
-the tests replace; the check of the public port goes through `_handshake`.
+`Host` alias they name with `--ssh`), as root or through passwordless sudo, in two steps: the
+staged files are copied, then one generated script installs them and leaves a manifest that
+`remove` reads. SSH and Docker go through `_run`, the seam the tests replace; the check of the
+public port goes through `_handshake`.
 """
 
 import hashlib
 import io
+import logging
 import shlex
 import socket
 import ssl
 import subprocess
 import tarfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Final
 
 from dreamference.remote.remote_settings import (
     BOX_PUBLIC_PORT,
@@ -40,33 +41,61 @@ from dreamference.remote.remote_settings import (
     RemoteSettings,
 )
 
+# Failures go to standard error through this logger; the console-facing `RemoteAccess` prints
+# the rest (specs/DREAMFERENCE_PYTHON_QUALITY.md §3.9).
+LOG: Final[logging.Logger] = logging.getLogger(__name__)
+
 STAGE: str = "/tmp/mightling-remote-stage.tgz"
 # A server name that is not the box's: haproxy must refuse it (`check_public_port`).
 OTHER_NAME: str = "not-this-box.invalid"
 RELAY_USER: str = "mightling-relay"
 RELAY_UNIT: str = "mightling-relay.service"
+BOX_UNITS: Final[tuple[str, str]] = ("haproxy", "relay")
+APT: Final[str] = "apt"
+# What the box's scripts print last, so a script that stopped half-way is not taken for done.
+READY_MARK: Final[str] = "mightling-box-ready"
+REMOVED_MARK: Final[str] = "mightling-box-removed"
+# The outcomes of one TLS handshake with the box's public port (`_handshake`).
+UNREACHABLE: Final[str] = "unreachable"
+VERIFIED: Final[str] = "verified"
+FOREIGN: Final[str] = "foreign"
+CLOSED: Final[str] = "closed"
 SSHD_DROP_IN: str = "/etc/ssh/sshd_config.d/mightling-tunnel.conf"
 HAPROXY_CONFIG: str = "/etc/haproxy/haproxy.cfg"
 # Runs the script on stdin as root: directly when the SSH user is root, through `sudo -n` otherwise.
 AS_ROOT: str = 'if [ "$(id -u)" -eq 0 ]; then exec bash -s; else exec sudo -n bash -s; fi'
-ARCHITECTURES: Dict[str, str] = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+ARCHITECTURES: dict[str, str] = {
+    "x86_64": "amd64",
+    "amd64": "amd64",
+    "aarch64": "arm64",
+    "arm64": "arm64",
+}
 
 
 class RemoteBox:
     """`remote setup`'s and `remote remove`'s work on the box."""
 
     @classmethod
-    def _run(cls, argv: List[str], input_bytes: Optional[bytes] = None, timeout: int = 600) -> subprocess.CompletedProcess:
+    def _run(
+        cls, argv: list[str], input_bytes: bytes | None = None, timeout: int = 600
+    ) -> subprocess.CompletedProcess:
         try:
-            result = subprocess.run(argv, capture_output=True, input=input_bytes, timeout=timeout, check=False)
+            result = subprocess.run(
+                argv, capture_output=True, input=input_bytes, timeout=timeout, check=False
+            )
         except (FileNotFoundError, subprocess.TimeoutExpired) as error:
             return subprocess.CompletedProcess(argv, 127, "", str(error))
-        return subprocess.CompletedProcess(argv, result.returncode,
-                                           result.stdout.decode(errors="replace"), result.stderr.decode(errors="replace"))
+        return subprocess.CompletedProcess(
+            argv,
+            result.returncode,
+            result.stdout.decode(errors="replace"),
+            result.stderr.decode(errors="replace"),
+        )
 
     @classmethod
-    def ssh(cls, dns_name: str, command: str) -> List[str]:
-        """
+    def ssh(cls, dns_name: str, command: str) -> list[str]:
+        """The SSH command to the box.
+
         Args:
             dns_name: The box's public DNS name, as the user's SSH configuration knows it.
             command: The remote command.
@@ -79,9 +108,8 @@ class RemoteBox:
     # -- preflight --------------------------------------------------------------------------------
 
     @classmethod
-    def probe(cls, dns_name: str, ssh_to: Optional[str] = None) -> Dict[str, str]:
-        """
-        Asks the box what it is.
+    def probe(cls, dns_name: str, ssh_to: str | None = None) -> dict[str, str]:
+        """Asks the box what it is.
 
         Args:
             dns_name: The box's public DNS name.
@@ -92,14 +120,20 @@ class RemoteBox:
             works), `packages` (`apt`, `dnf` or empty) and `host_key` (the ed25519 host key line);
             `error` instead when SSH failed.
         """
-        script = ("printf 'arch=%s\\n' \"$(uname -m)\"; "
-                  "if [ \"$(id -u)\" -eq 0 ] || sudo -n true 2>/dev/null; then echo root=yes; else echo root=no; fi; "
-                  "if command -v apt-get >/dev/null; then echo packages=apt; elif command -v dnf >/dev/null; then echo packages=dnf; else echo packages=; fi; "
-                  "printf 'host_key=%s\\n' \"$(cat /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null)\"")
+        script = (
+            "printf 'arch=%s\\n' \"$(uname -m)\"; "
+            'if [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then echo root=yes; else echo root=no; fi; '
+            "if command -v apt-get >/dev/null; then echo packages=apt; elif command -v dnf >/dev/null; then echo "
+            "packages=dnf; else echo packages=; fi; "
+            "printf 'host_key=%s\\n' \"$(cat /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null)\""
+        )
         result = cls._run(cls.ssh(ssh_to or dns_name, script), timeout=60)
         if result.returncode != 0:
-            return {"error": (result.stderr or result.stdout).strip()[:300] or f"ssh exited {result.returncode}"}
-        facts: Dict[str, str] = {}
+            return {
+                "error": (result.stderr or result.stdout).strip()[:300]
+                or f"ssh exited {result.returncode}"
+            }
+        facts: dict[str, str] = {}
         for line in result.stdout.splitlines():
             key, _, value = line.partition("=")
             facts[key.strip()] = value.strip()
@@ -109,9 +143,8 @@ class RemoteBox:
     # -- the relay binary -------------------------------------------------------------------------
 
     @classmethod
-    def relay_binary(cls, arch: str) -> Optional[bytes]:
-        """
-        Takes the relay binary out of the pinned image for the box's architecture and checks it.
+    def relay_binary(cls, arch: str) -> bytes | None:
+        """Takes the relay binary out of the pinned image for the box's architecture and checks it.
 
         Args:
             arch: `amd64` or `arm64`.
@@ -123,24 +156,27 @@ class RemoteBox:
         target = RemoteSettings.path("box", f"netbird-relay-{arch}")
         target.parent.mkdir(parents=True, exist_ok=True)
         if cls._run(["docker", "pull", "-q", image]).returncode != 0:
-            print(f"❌ Could not pull {image}.")
+            LOG.error(f"❌ Could not pull {image}.")
             return None
         created = cls._run(["docker", "create", image])
         container = created.stdout.strip()
         if created.returncode != 0 or not container:
-            print(f"❌ Could not open {image}: {created.stderr.strip()[:300]}")
+            LOG.error(f"❌ Could not open {image}: {created.stderr.strip()[:300]}")
             return None
         try:
             copied = cls._run(["docker", "cp", f"{container}:{RELAY_BINARY_IN_IMAGE}", str(target)])
         finally:
             cls._run(["docker", "rm", container])
         if copied.returncode != 0:
-            print(f"❌ Could not copy the relay out of {image}: {copied.stderr.strip()[:300]}")
+            LOG.error(f"❌ Could not copy the relay out of {image}: {copied.stderr.strip()[:300]}")
             return None
         data = target.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
         if digest != RELAY_BINARY_SHA256[arch]:
-            print(f"❌ The relay binary's SHA-256 is {digest}, not the pinned {RELAY_BINARY_SHA256[arch]}; nothing is installed.")
+            LOG.error(
+                f"❌ The relay binary's SHA-256 is {digest}, not the pinned {RELAY_BINARY_SHA256[arch]}; nothing is "
+                "installed."
+            )
             return None
         return data
 
@@ -148,7 +184,8 @@ class RemoteBox:
 
     @classmethod
     def haproxy_config(cls, dns_name: str) -> str:
-        """
+        """Haproxy's configuration on the box.
+
         Args:
             dns_name: The box's public DNS name.
 
@@ -156,90 +193,99 @@ class RemoteBox:
             str: haproxy's configuration: TCP on 443, the box's own server name to the tunnel,
             anything else refused.
         """
-        return "\n".join([
-            "# Written by `ling-admin remote setup` on the Mightling node (REMOTE_ACCESS §3).",
-            "# TCP only: TLS ends on the node; this box reads the server name and nothing else.",
-            "global",
-            "    log /dev/log local0",
-            "    maxconn 2000",
-            "    user haproxy",
-            "    group haproxy",
-            "defaults",
-            "    mode tcp",
-            "    log global",
-            "    option tcplog",
-            "    timeout connect 10s",
-            "    timeout client 1h",
-            "    timeout server 1h",
-            "frontend mightling_tls",
-            f"    bind :{BOX_PUBLIC_PORT}",
-            "    tcp-request inspect-delay 5s",
-            "    tcp-request content accept if { req.ssl_hello_type 1 }",
-            f"    use_backend node if {{ req.ssl_sni -i {dns_name} }}",
-            "    default_backend refuse",
-            "backend node",
-            f"    server tunnel 127.0.0.1:{BOX_TUNNEL_PORT}",
-            "backend refuse",
-            "    tcp-request content reject",
-            "",
-        ])
+        return "\n".join(
+            [
+                "# Written by `ling-admin remote setup` on the Mightling node (REMOTE_ACCESS §3).",
+                "# TCP only: TLS ends on the node; this box reads the server name and nothing else.",
+                "global",
+                "    log /dev/log local0",
+                "    maxconn 2000",
+                "    user haproxy",
+                "    group haproxy",
+                "defaults",
+                "    mode tcp",
+                "    log global",
+                "    option tcplog",
+                "    timeout connect 10s",
+                "    timeout client 1h",
+                "    timeout server 1h",
+                "frontend mightling_tls",
+                f"    bind :{BOX_PUBLIC_PORT}",
+                "    tcp-request inspect-delay 5s",
+                "    tcp-request content accept if { req.ssl_hello_type 1 }",
+                f"    use_backend node if {{ req.ssl_sni -i {dns_name} }}",
+                "    default_backend refuse",
+                "backend node",
+                f"    server tunnel 127.0.0.1:{BOX_TUNNEL_PORT}",
+                "backend refuse",
+                "    tcp-request content reject",
+                "",
+            ]
+        )
 
     @classmethod
     def relay_unit(cls, dns_name: str) -> str:
-        """
+        """The relay's systemd unit on the box.
+
         Args:
             dns_name: The box's public DNS name.
 
         Returns:
             str: The relay's system unit.
         """
-        return "\n".join([
-            "# Written by `ling-admin remote setup` on the Mightling node (REMOTE_ACCESS §3).",
-            "[Unit]",
-            "Description=Mightling remote access: NetBird relay and STUN",
-            "After=network-online.target",
-            "Wants=network-online.target",
-            "",
-            "[Service]",
-            f"User={RELAY_USER}",
-            f"EnvironmentFile={BOX_RELAY_DIR}/relay.env",
-            f"ExecStart={BOX_RELAY_DIR}/netbird-relay --listen-address :{RELAY_PORT}"
-            f" --exposed-address {RemoteSettings.relay_address(dns_name)}"
-            f" --tls-cert-file {BOX_RELAY_DIR}/relay.crt --tls-key-file {BOX_RELAY_DIR}/relay.key"
-            f" --enable-stun --stun-ports {STUN_PORT} --health-listen-address 127.0.0.1:9000",
-            "Restart=always",
-            "RestartSec=5",
-            "NoNewPrivileges=yes",
-            "ProtectSystem=strict",
-            "ProtectHome=yes",
-            "PrivateTmp=yes",
-            "",
-            "[Install]",
-            "WantedBy=multi-user.target",
-            "",
-        ])
+        return "\n".join(
+            [
+                "# Written by `ling-admin remote setup` on the Mightling node (REMOTE_ACCESS §3).",
+                "[Unit]",
+                "Description=Mightling remote access: NetBird relay and STUN",
+                "After=network-online.target",
+                "Wants=network-online.target",
+                "",
+                "[Service]",
+                f"User={RELAY_USER}",
+                f"EnvironmentFile={BOX_RELAY_DIR}/relay.env",
+                f"ExecStart={BOX_RELAY_DIR}/netbird-relay --listen-address :{RELAY_PORT}"
+                f" --exposed-address {RemoteSettings.relay_address(dns_name)}"
+                f" --tls-cert-file {BOX_RELAY_DIR}/relay.crt --tls-key-file {BOX_RELAY_DIR}/relay.key"
+                f" --enable-stun --stun-ports {STUN_PORT} --health-listen-address 127.0.0.1:9000",
+                "Restart=always",
+                "RestartSec=5",
+                "NoNewPrivileges=yes",
+                "ProtectSystem=strict",
+                "ProtectHome=yes",
+                "PrivateTmp=yes",
+                "",
+                "[Install]",
+                "WantedBy=multi-user.target",
+                "",
+            ]
+        )
 
     @classmethod
     def sshd_drop_in(cls) -> str:
-        """
+        """The SSH server's drop-in for the tunnel account.
+
         Returns:
             str: The SSH server's settings for the tunnel account: remote forwarding only.
         """
-        return "\n".join([
-            "# Written by `ling-admin remote setup` on the Mightling node (REMOTE_ACCESS §3).",
-            f"Match User {BOX_TUNNEL_USER}",
-            "    AllowTcpForwarding remote",
-            "    GatewayPorts no",
-            "    PermitTTY no",
-            "    X11Forwarding no",
-            "    AllowAgentForwarding no",
-            "    PermitTunnel no",
-            "",
-        ])
+        return "\n".join(
+            [
+                "# Written by `ling-admin remote setup` on the Mightling node (REMOTE_ACCESS §3).",
+                f"Match User {BOX_TUNNEL_USER}",
+                "    AllowTcpForwarding remote",
+                "    GatewayPorts no",
+                "    PermitTTY no",
+                "    X11Forwarding no",
+                "    AllowAgentForwarding no",
+                "    PermitTunnel no",
+                "",
+            ]
+        )
 
     @classmethod
     def install_script(cls, arch: str, packages: str) -> str:
-        """
+        """The root script that installs the box's half.
+
         Args:
             arch: The box's architecture.
             packages: `apt` or `dnf`.
@@ -247,101 +293,130 @@ class RemoteBox:
         Returns:
             str: The root script that installs the staged files. It fails at the first error.
         """
-        install_haproxy = ("DEBIAN_FRONTEND=noninteractive apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q haproxy"
-                           if packages == "apt" else "dnf install -y -q haproxy")
-        port_rules = [f"{BOX_PUBLIC_PORT}/tcp", f"{RELAY_PORT}/tcp", f"{RELAY_PORT}/udp", f"{STUN_PORT}/udp"]
-        return "\n".join([
-            "set -eu",
-            "stage=$(mktemp -d)",
-            f"tar -xzf {STAGE} -C \"$stage\" && rm -f {STAGE}",
-            f"echo '{RELAY_BINARY_SHA256[arch]}  '\"$stage\"/netbird-relay | sha256sum -c --quiet -",
-            f"install -d -m 0755 {BOX_RELAY_DIR}",
-            # A rerun (a redeploy, or `setup` after `--box-only`) finds haproxy installed by the
-            # first run; it must stay recorded as ours, or `remove` would leave the package behind.
-            f"manifest={BOX_RELAY_DIR}/MANIFEST",
-            "ours=$(grep -x 'haproxy=installed' \"$manifest\" 2>/dev/null || true); : > \"$manifest\"",
-            "if [ -n \"$ours\" ] && command -v haproxy >/dev/null; then echo 'haproxy=installed' >> \"$manifest\"",
-            "elif command -v haproxy >/dev/null; then echo 'haproxy=present' >> \"$manifest\"; else",
-            f"  {install_haproxy}",
-            "  echo 'haproxy=installed' >> \"$manifest\"",
-            "fi",
-            f"[ -f {HAPROXY_CONFIG}.mightling-orig ] || cp {HAPROXY_CONFIG} {HAPROXY_CONFIG}.mightling-orig 2>/dev/null || true",
-            f"install -m 0644 \"$stage\"/haproxy.cfg {HAPROXY_CONFIG}",
-            "haproxy -c -q -f /etc/haproxy/haproxy.cfg",
-            f"id -u {RELAY_USER} >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin {RELAY_USER}",
-            f"install -m 0755 \"$stage\"/netbird-relay {BOX_RELAY_DIR}/netbird-relay",
-            f"install -m 0644 -o {RELAY_USER} \"$stage\"/relay.crt {BOX_RELAY_DIR}/relay.crt",
-            f"install -m 0600 -o {RELAY_USER} \"$stage\"/relay.key {BOX_RELAY_DIR}/relay.key",
-            f"install -m 0600 -o root \"$stage\"/relay.env {BOX_RELAY_DIR}/relay.env",
-            f"install -m 0644 \"$stage\"/{RELAY_UNIT} /etc/systemd/system/{RELAY_UNIT}",
-            f"id -u {BOX_TUNNEL_USER} >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/{BOX_TUNNEL_USER} --shell /usr/sbin/nologin {BOX_TUNNEL_USER}",
-            f"install -d -m 0700 -o {BOX_TUNNEL_USER} /var/lib/{BOX_TUNNEL_USER}/.ssh",
-            f"install -m 0600 -o {BOX_TUNNEL_USER} \"$stage\"/authorized_keys /var/lib/{BOX_TUNNEL_USER}/.ssh/authorized_keys",
-            # The drop-in's Match block must change nothing for anyone else: the effective settings
-            # for root are compared before and after, and a difference undoes it.
-            "global_before=$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | sort)",
-            f"install -m 0644 \"$stage\"/sshd-tunnel.conf {SSHD_DROP_IN}",
-            "sshd -t",
-            "global_after=$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | sort)",
-            f"if [ \"$global_before\" != \"$global_after\" ]; then rm -f {SSHD_DROP_IN}; "
-            "echo 'the sshd drop-in changed settings beyond the tunnel account; undone' >&2; exit 1; fi",
-            "systemctl reload ssh 2>/dev/null || systemctl reload sshd",
-            "systemctl daemon-reload",
-            f"systemctl enable --now {RELAY_UNIT}",
-            f"systemctl restart {RELAY_UNIT}",
-            "systemctl enable haproxy",
-            "systemctl restart haproxy",
-            "if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then",
-            *[f"  ufw allow {rule} >/dev/null" for rule in port_rules],
-            "  echo 'firewall=ufw' >> \"$manifest\"",
-            "elif command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then",
-            *[f"  firewall-cmd --quiet --permanent --add-port={rule}" for rule in port_rules],
-            "  firewall-cmd --quiet --reload",
-            "  echo 'firewall=firewalld' >> \"$manifest\"",
-            "fi",
-            "rm -rf \"$stage\"",
-            "echo mightling-box-ready",
-            "",
-        ])
+        install_haproxy = (
+            "DEBIAN_FRONTEND=noninteractive apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q "
+            "haproxy"
+            if packages == APT
+            else "dnf install -y -q haproxy"
+        )
+        port_rules = [
+            f"{BOX_PUBLIC_PORT}/tcp",
+            f"{RELAY_PORT}/tcp",
+            f"{RELAY_PORT}/udp",
+            f"{STUN_PORT}/udp",
+        ]
+        return "\n".join(
+            [
+                "set -eu",
+                "stage=$(mktemp -d)",
+                f'tar -xzf {STAGE} -C "$stage" && rm -f {STAGE}',
+                f"echo '{RELAY_BINARY_SHA256[arch]}  '\"$stage\"/netbird-relay | sha256sum -c --quiet -",
+                f"install -d -m 0755 {BOX_RELAY_DIR}",
+                # A rerun (a redeploy, or `setup` after `--box-only`) finds haproxy installed by the
+                # first run; it must stay recorded as ours, or `remove` would leave the package behind.
+                f"manifest={BOX_RELAY_DIR}/MANIFEST",
+                'ours=$(grep -x \'haproxy=installed\' "$manifest" 2>/dev/null || true); : > "$manifest"',
+                'if [ -n "$ours" ] && command -v haproxy >/dev/null; then echo \'haproxy=installed\' >> "$manifest"',
+                "elif command -v haproxy >/dev/null; then echo 'haproxy=present' >> \"$manifest\"; else",
+                f"  {install_haproxy}",
+                "  echo 'haproxy=installed' >> \"$manifest\"",
+                "fi",
+                f"[ -f {HAPROXY_CONFIG}.mightling-orig ] || cp {HAPROXY_CONFIG} {HAPROXY_CONFIG}.mightling-orig "
+                "2>/dev/null || true",
+                f'install -m 0644 "$stage"/haproxy.cfg {HAPROXY_CONFIG}',
+                "haproxy -c -q -f /etc/haproxy/haproxy.cfg",
+                f"id -u {RELAY_USER} >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "
+                f"{RELAY_USER}",
+                f'install -m 0755 "$stage"/netbird-relay {BOX_RELAY_DIR}/netbird-relay',
+                f'install -m 0644 -o {RELAY_USER} "$stage"/relay.crt {BOX_RELAY_DIR}/relay.crt',
+                f'install -m 0600 -o {RELAY_USER} "$stage"/relay.key {BOX_RELAY_DIR}/relay.key',
+                f'install -m 0600 -o root "$stage"/relay.env {BOX_RELAY_DIR}/relay.env',
+                f'install -m 0644 "$stage"/{RELAY_UNIT} /etc/systemd/system/{RELAY_UNIT}',
+                f"id -u {BOX_TUNNEL_USER} >/dev/null 2>&1 || useradd --system --create-home --home-dir "
+                f"/var/lib/{BOX_TUNNEL_USER} --shell /usr/sbin/nologin {BOX_TUNNEL_USER}",
+                f"install -d -m 0700 -o {BOX_TUNNEL_USER} /var/lib/{BOX_TUNNEL_USER}/.ssh",
+                f'install -m 0600 -o {BOX_TUNNEL_USER} "$stage"/authorized_keys '
+                f"/var/lib/{BOX_TUNNEL_USER}/.ssh/authorized_keys",
+                # The drop-in's Match block must change nothing for anyone else: the effective settings
+                # for root are compared before and after, and a difference undoes it.
+                "global_before=$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | sort)",
+                f'install -m 0644 "$stage"/sshd-tunnel.conf {SSHD_DROP_IN}',
+                "sshd -t",
+                "global_after=$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | sort)",
+                f'if [ "$global_before" != "$global_after" ]; then rm -f {SSHD_DROP_IN}; '
+                "echo 'the sshd drop-in changed settings beyond the tunnel account; undone' >&2; exit 1; fi",
+                "systemctl reload ssh 2>/dev/null || systemctl reload sshd",
+                "systemctl daemon-reload",
+                f"systemctl enable --now {RELAY_UNIT}",
+                f"systemctl restart {RELAY_UNIT}",
+                "systemctl enable haproxy",
+                "systemctl restart haproxy",
+                "if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then",
+                *[f"  ufw allow {rule} >/dev/null" for rule in port_rules],
+                "  echo 'firewall=ufw' >> \"$manifest\"",
+                "elif command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then",
+                *[f"  firewall-cmd --quiet --permanent --add-port={rule}" for rule in port_rules],
+                "  firewall-cmd --quiet --reload",
+                "  echo 'firewall=firewalld' >> \"$manifest\"",
+                "fi",
+                'rm -rf "$stage"',
+                f"echo {READY_MARK}",
+                "",
+            ]
+        )
 
     @classmethod
     def remove_script(cls) -> str:
-        """
+        """The root script that removes the box's half.
+
         Returns:
             str: The root script that undoes `install_script`, reading its manifest. It carries on
             past a missing piece, so a half-installed box is cleaned too.
         """
-        port_rules = [f"{BOX_PUBLIC_PORT}/tcp", f"{RELAY_PORT}/tcp", f"{RELAY_PORT}/udp", f"{STUN_PORT}/udp"]
-        return "\n".join([
-            "set -u",
-            f"manifest={BOX_RELAY_DIR}/MANIFEST",
-            "has() { grep -qx \"$1\" \"$manifest\" 2>/dev/null; }",
-            f"systemctl disable --now {RELAY_UNIT} 2>/dev/null",
-            f"rm -f /etc/systemd/system/{RELAY_UNIT}",
-            "systemctl daemon-reload",
-            f"if [ -f {HAPROXY_CONFIG}.mightling-orig ]; then mv -f {HAPROXY_CONFIG}.mightling-orig {HAPROXY_CONFIG}; fi",
-            "if has haproxy=installed; then",
-            "  systemctl disable --now haproxy 2>/dev/null",
-            "  if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get purge -y -q haproxy >/dev/null; else dnf remove -y -q haproxy >/dev/null; fi",
-            "else systemctl restart haproxy 2>/dev/null; fi",
-            "if has firewall=ufw; then",
-            *[f"  ufw delete allow {rule} >/dev/null 2>&1" for rule in port_rules],
-            "elif has firewall=firewalld; then",
-            *[f"  firewall-cmd --quiet --permanent --remove-port={rule}" for rule in port_rules],
-            "  firewall-cmd --quiet --reload",
-            "fi",
-            f"rm -f {SSHD_DROP_IN}",
-            "sshd -t && { systemctl reload ssh 2>/dev/null || systemctl reload sshd; }",
-            f"pkill -u {BOX_TUNNEL_USER} 2>/dev/null; userdel -r {BOX_TUNNEL_USER} 2>/dev/null",
-            f"userdel {RELAY_USER} 2>/dev/null",
-            f"rm -rf {BOX_RELAY_DIR}",
-            "echo mightling-box-removed",
-            "",
-        ])
+        port_rules = [
+            f"{BOX_PUBLIC_PORT}/tcp",
+            f"{RELAY_PORT}/tcp",
+            f"{RELAY_PORT}/udp",
+            f"{STUN_PORT}/udp",
+        ]
+        return "\n".join(
+            [
+                "set -u",
+                f"manifest={BOX_RELAY_DIR}/MANIFEST",
+                'has() { grep -qx "$1" "$manifest" 2>/dev/null; }',
+                f"systemctl disable --now {RELAY_UNIT} 2>/dev/null",
+                f"rm -f /etc/systemd/system/{RELAY_UNIT}",
+                "systemctl daemon-reload",
+                f"if [ -f {HAPROXY_CONFIG}.mightling-orig ]; then mv -f {HAPROXY_CONFIG}.mightling-orig "
+                f"{HAPROXY_CONFIG}; fi",
+                "if has haproxy=installed; then",
+                "  systemctl disable --now haproxy 2>/dev/null",
+                "  if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get purge -y -q haproxy "
+                ">/dev/null; else dnf remove -y -q haproxy >/dev/null; fi",
+                "else systemctl restart haproxy 2>/dev/null; fi",
+                "if has firewall=ufw; then",
+                *[f"  ufw delete allow {rule} >/dev/null 2>&1" for rule in port_rules],
+                "elif has firewall=firewalld; then",
+                *[
+                    f"  firewall-cmd --quiet --permanent --remove-port={rule}"
+                    for rule in port_rules
+                ],
+                "  firewall-cmd --quiet --reload",
+                "fi",
+                f"rm -f {SSHD_DROP_IN}",
+                "sshd -t && { systemctl reload ssh 2>/dev/null || systemctl reload sshd; }",
+                f"pkill -u {BOX_TUNNEL_USER} 2>/dev/null; userdel -r {BOX_TUNNEL_USER} 2>/dev/null",
+                f"userdel {RELAY_USER} 2>/dev/null",
+                f"rm -rf {BOX_RELAY_DIR}",
+                f"echo {REMOVED_MARK}",
+                "",
+            ]
+        )
 
     @classmethod
-    def stage(cls, files: Dict[str, bytes]) -> bytes:
-        """
+    def stage(cls, files: dict[str, bytes]) -> bytes:
+        """The staged archive copied to the box.
+
         Args:
             files: Name to content.
 
@@ -360,10 +435,18 @@ class RemoteBox:
     # -- the two operations -----------------------------------------------------------------------
 
     @classmethod
-    def deploy(cls, dns_name: str, arch: str, packages: str, secret: str, relay_certificate: Path,
-               relay_key: Path, tunnel_public_key: str, ssh_to: Optional[str] = None) -> bool:
-        """
-        Installs the relay, haproxy and the tunnel account on the box.
+    def deploy(  # noqa: PLR0913 - every input of the box's half, named
+        cls,
+        dns_name: str,
+        arch: str,
+        packages: str,
+        secret: str,
+        relay_certificate: Path,
+        relay_key: Path,
+        tunnel_public_key: str,
+        ssh_to: str | None = None,
+    ) -> bool:
+        """Installs the relay, haproxy and the tunnel account on the box.
 
         Args:
             dns_name: The box's public DNS name.
@@ -380,33 +463,43 @@ class RemoteBox:
         """
         destination = ssh_to or dns_name
         from dreamference.remote.remote_tunnel import RemoteTunnel
+
         binary = cls.relay_binary(arch)
         if binary is None:
             return False
-        archive = cls.stage({
-            "netbird-relay": binary,
-            "relay.crt": relay_certificate.read_bytes(),
-            "relay.key": relay_key.read_bytes(),
-            "relay.env": f"NB_AUTH_SECRET={secret}\n".encode(),
-            "haproxy.cfg": cls.haproxy_config(dns_name).encode(),
-            RELAY_UNIT: cls.relay_unit(dns_name).encode(),
-            "authorized_keys": (RemoteTunnel.authorized_line(tunnel_public_key) + "\n").encode(),
-            "sshd-tunnel.conf": cls.sshd_drop_in().encode(),
-        })
-        copied = cls._run(cls.ssh(destination, f"umask 077; cat > {shlex.quote(STAGE)}"), input_bytes=archive)
+        archive = cls.stage(
+            {
+                "netbird-relay": binary,
+                "relay.crt": relay_certificate.read_bytes(),
+                "relay.key": relay_key.read_bytes(),
+                "relay.env": f"NB_AUTH_SECRET={secret}\n".encode(),
+                "haproxy.cfg": cls.haproxy_config(dns_name).encode(),
+                RELAY_UNIT: cls.relay_unit(dns_name).encode(),
+                "authorized_keys": (
+                    RemoteTunnel.authorized_line(tunnel_public_key) + "\n"
+                ).encode(),
+                "sshd-tunnel.conf": cls.sshd_drop_in().encode(),
+            }
+        )
+        copied = cls._run(
+            cls.ssh(destination, f"umask 077; cat > {shlex.quote(STAGE)}"), input_bytes=archive
+        )
         if copied.returncode != 0:
-            print(f"❌ Could not copy the files to {dns_name}: {copied.stderr.strip()[:300]}")
+            LOG.error(f"❌ Could not copy the files to {dns_name}: {copied.stderr.strip()[:300]}")
             return False
-        installed = cls._run(cls.ssh(destination, AS_ROOT), input_bytes=cls.install_script(arch, packages).encode())
-        if installed.returncode != 0 or "mightling-box-ready" not in installed.stdout:
-            print(f"❌ Installing on {dns_name} failed:\n{(installed.stderr or installed.stdout).strip()[-800:]}")
+        installed = cls._run(
+            cls.ssh(destination, AS_ROOT), input_bytes=cls.install_script(arch, packages).encode()
+        )
+        if installed.returncode != 0 or READY_MARK not in installed.stdout:
+            LOG.error(
+                f"❌ Installing on {dns_name} failed:\n{(installed.stderr or installed.stdout).strip()[-800:]}"
+            )
             return False
         return True
 
     @classmethod
-    def remove(cls, dns_name: str, ssh_to: Optional[str] = None) -> bool:
-        """
-        Removes everything `deploy` installed.
+    def remove(cls, dns_name: str, ssh_to: str | None = None) -> bool:
+        """Removes everything `deploy` installed.
 
         Args:
             dns_name: The box's public DNS name.
@@ -415,15 +508,20 @@ class RemoteBox:
         Returns:
             bool: True when the box reported itself clean.
         """
-        result = cls._run(cls.ssh(ssh_to or dns_name, AS_ROOT), input_bytes=cls.remove_script().encode())
-        if result.returncode != 0 or "mightling-box-removed" not in result.stdout:
-            print(f"⚠️  Removing from {dns_name} did not finish:\n{(result.stderr or result.stdout).strip()[-600:]}")
+        result = cls._run(
+            cls.ssh(ssh_to or dns_name, AS_ROOT), input_bytes=cls.remove_script().encode()
+        )
+        if result.returncode != 0 or REMOVED_MARK not in result.stdout:
+            LOG.error(
+                f"⚠️  Removing from {dns_name} did not finish:\n{(result.stderr or result.stdout).strip()[-600:]}"
+            )
             return False
         return True
 
     @classmethod
-    def unit_states(cls, dns_name: str, ssh_to: Optional[str] = None) -> Optional[Dict[str, str]]:
-        """
+    def unit_states(cls, dns_name: str, ssh_to: str | None = None) -> dict[str, str] | None:
+        """The box's units, as systemd reports them.
+
         Args:
             dns_name: The box's public DNS name.
             ssh_to: The user's SSH destination for the box, when not the DNS name.
@@ -431,22 +529,26 @@ class RemoteBox:
         Returns:
             Optional[Dict[str, str]]: haproxy's and the relay's states, or None when SSH failed.
         """
-        result = cls._run(cls.ssh(ssh_to or dns_name, f"systemctl is-active haproxy {RELAY_UNIT}"), timeout=60)
+        result = cls._run(
+            cls.ssh(ssh_to or dns_name, f"systemctl is-active haproxy {RELAY_UNIT}"), timeout=60
+        )
         lines = result.stdout.split()
-        if len(lines) != 2:
+        if len(lines) != len(BOX_UNITS):
             return None
-        return {"haproxy": lines[0], "relay": lines[1]}
+        return dict(zip(BOX_UNITS, lines, strict=True))
 
     # -- the public port, from the node -----------------------------------------------------------
 
     @classmethod
-    def _handshake(cls, host: str, port: int, server_name: str, ca_file: Optional[Path], timeout: int = 10) -> str:
-        """
-        One TLS handshake with the box's public port.
+    def _handshake(
+        cls, host: str, port: int, server_name: str, ca_file: Path | None, timeout: int = 10
+    ) -> str:
+        """One TLS handshake with the box's public port.
 
         Args:
             host: Where to connect: the box's public DNS name.
             port: Its public port.
+            timeout: Seconds for the connection and the handshake.
             server_name: The server name to send.
             ca_file: The node's CA certificate to verify against; None to verify nothing.
 
@@ -465,21 +567,22 @@ class RemoteBox:
         try:
             connection = socket.create_connection((host, port), timeout=timeout)
         except OSError:
-            return "unreachable"
+            return UNREACHABLE
         with connection:
             try:
                 with context.wrap_socket(connection, server_hostname=server_name):
-                    return "answered" if ca_file is None else "verified"
+                    return "answered" if ca_file is None else VERIFIED
             except ssl.SSLCertVerificationError:
-                return "foreign"
+                return FOREIGN
             except (ssl.SSLError, OSError):
-                return "closed"
+                return CLOSED
 
     @classmethod
-    def check_public_port(cls, dns_name: str, ca_file: Path) -> Dict[str, str]:
-        """
-        Checks port 443 the way a peer meets it: the box's own name must reach the node's control
-        plane, TLS and all, under the node's CA; any other name must be refused by the box.
+    def check_public_port(cls, dns_name: str, ca_file: Path) -> dict[str, str]:
+        """Checks port 443 the way a peer meets it.
+
+        The box's own name must reach the node's control plane, TLS and all, under the node's CA;
+        any other name must be refused by the box.
 
         Args:
             dns_name: The box's public DNS name.
@@ -490,12 +593,15 @@ class RemoteBox:
             (`closed` when refused, `answered` when something behind the box spoke TLS for it,
             or `unreachable`).
         """
-        return {"own": cls._handshake(dns_name, BOX_PUBLIC_PORT, dns_name, ca_file),
-                "other": cls._handshake(dns_name, BOX_PUBLIC_PORT, OTHER_NAME, None)}
+        return {
+            "own": cls._handshake(dns_name, BOX_PUBLIC_PORT, dns_name, ca_file),
+            "other": cls._handshake(dns_name, BOX_PUBLIC_PORT, OTHER_NAME, None),
+        }
 
     @classmethod
-    def public_port_line(cls, outcome: Dict[str, str]) -> str:
-        """
+    def public_port_line(cls, outcome: dict[str, str]) -> str:
+        """The port-443 line of `remote status`.
+
         Args:
             outcome: `check_public_port`'s answer.
 
@@ -503,11 +609,21 @@ class RemoteBox:
             str: One line for `remote status`.
         """
         own, other = outcome.get("own"), outcome.get("other")
-        if own == "unreachable":
-            return f"port {BOX_PUBLIC_PORT} does not take a connection (haproxy down, or a firewall in front of the box)"
-        refused = "other names refused" if other == "closed" else "⚠️ ANOTHER NAME GOT A TLS ANSWER: the box passes more than its own name"
-        if own == "verified":
+        if own == UNREACHABLE:
+            return (
+                f"port {BOX_PUBLIC_PORT} does not take a connection "
+                "(haproxy down, or a firewall in front of the box)"
+            )
+        refused = (
+            "other names refused"
+            if other == CLOSED
+            else "⚠️ ANOTHER NAME GOT A TLS ANSWER: the box passes more than its own name"
+        )
+        if own == VERIFIED:
             return f"the box's name reaches this node's control plane (TLS under the node's CA); {refused}"
-        if own == "foreign":
-            return "❌ something other than this node answers for the box's name (a certificate the node's CA did not sign)"
+        if own == FOREIGN:
+            return (
+                "❌ something other than this node answers for the box's name "
+                "(a certificate the node's CA did not sign)"
+            )
         return f"the box takes the connection and nothing answers behind it (the tunnel is not up); {refused}"

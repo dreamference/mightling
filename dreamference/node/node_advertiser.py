@@ -363,11 +363,11 @@ class NodeAdvertiser:
             return False
 
     @classmethod
-    def remote_name(cls) -> Optional[str]:
-        """
+    def remote_name(cls) -> str | None:
+        """The node's overlay name, for the advert's `remote` record (REMOTE_ACCESS §7).
+
         Returns:
-            Optional[str]: The node's overlay name when remote access is set up, else None
-            (REMOTE_ACCESS §7).
+            str | None: The name when remote access is set up, else None.
         """
         from dreamference.remote.remote_settings import RemoteSettings
         record = RemoteSettings.read()

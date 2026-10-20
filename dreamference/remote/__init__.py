@@ -1,6 +1,7 @@
-"""
-Remote access: a client off the LAN reaches its node by name, through a NetBird overlay whose
-control plane runs on the node and one rented box that sees only ciphertext
+"""Remote access.
+
+A client off the LAN reaches its node by name, through a NetBird overlay whose control plane runs on
+the node and one rented box that sees only ciphertext
 (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md).
 """
 
