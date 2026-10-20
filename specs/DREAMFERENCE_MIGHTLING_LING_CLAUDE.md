@@ -526,6 +526,13 @@ The patch series is at **44,952 of 45,000 bytes** (44,835 when this section was 
 
 About **3.5 KB** for items 1–4 and 250–350 bytes for item 5 (44,952 + about 3,850 = about 48,800 bytes), inside the **49,000** the owner set for the five together (D4, 2026-10-20).
 
+**Built** (2026-10-20) as `codex-patches/0029-compat-hooks.patch`, 3,464 bytes. The series is 50,642 bytes, under the 55,000 the owner set the same day for 1.7.1 and these hooks. Each hook is one call into `ling-rs/src/compat_keys.rs` that answers "Codex's own behaviour" outside the mode:
+
+1. `Enter` in the composer, ahead of the slash popup: a draft ending in `\` gets a newline. A name in §6.5.5's second group runs Codex's command (`/branch` → `/fork`, `/tasks` → `/ps`, `/context` → `/status`, …). The third group is answered with lines (`/help`, `/memory` lists the memory files, `/config` and `/doctor` print `ling compat doctor`'s report, `/rewind` points at `Esc Esc`, `/add-dir` at `--add-dir`, `/effort` at `Alt+,`/`Alt+.`). The fourth gets one line saying the command is not part of the mode.
+2. `Ctrl+C` and `Ctrl+D` on an empty prompt ask for a second press, with Codex's own hint. A draft is still cleared by the first `Ctrl+C`.
+3. `[` and `v` in the transcript overlay close it. `[` adds the whole conversation, rendered from the session's rollout file, to the session's history. In the classic renderer that history is the terminal's scrollback, which gives Claude Code's classic `Ctrl+O`. Text written to the terminal directly was tried first and lost, because Codex rebuilds the inline scrollback from its history when it redraws. `v` opens the conversation in `$VISUAL`/`$EDITOR` through `Tui::with_restored`. In a fullscreen session that owns its transcript there is no overlay to take the keys; that case is left as a difference.
+4. `Shift+Tab` (`BackTab`) is the approval-mode shortcut in the mode. A keymap binding cannot do it: a spec can only name `shift-tab`, which never matches `BackTab`, and the key is reserved anyway. The session also gets `features.guardian_approval=false`, because Codex's "Approve for me" asks a review model ling does not serve; so the cycle is Read Only and the default mode. Its test, `compat_shift_tab_cycles_approval_modes_and_never_full_access` (`codex-tests/patches/0004`), cycles from Full Access and asserts no step is Full Access and the plan mode is untouched.
+
 Not planned, each a visible difference stated in `ling compat doctor` and the documentation:
 
 6. **The look**: line glyphs, the spinner, the 3-line collapse with its "+N lines" row against Codex's 5-line exec cell, the one-row tool summaries of fullscreen, the paste chips' wording. These are presentation, and copying them is what §2.1 forbids.

@@ -112,6 +112,13 @@ def test_the_patches_stay_small():
     # The first: 0019's sandbox hunk denies the host's control sockets for every managed profile
     # (`ling_airgapped::host_sockets`, 377 bytes), after a sandboxed command ran `docker restart` on
     # the host; 47,178 after.
+    # The compatibility mode's five TUI hooks, 0029-compat-hooks (3,464 bytes; 50,642 after), each
+    # one call into ling-rs/src/compat_keys.rs that answers "Codex's own behaviour" outside the mode:
+    # Enter in the composer (a draft ending in `\` gets a newline; Claude Code's command names run
+    # Codex's command or are answered), Ctrl+C / Ctrl+D asking for a second press (three uses of
+    # DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED), `[` and `v` in the transcript overlay (the conversation into
+    # the session's history, or $EDITOR through Tui::with_restored), and Shift+Tab (BackTab) as the approval-
+    # mode shortcut.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 55_000
 
 
