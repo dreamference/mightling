@@ -1092,7 +1092,7 @@ def test_report_rows_carry_what_the_spec_lists():
 
 # -- several nodes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3, §13.3) --------------------------------
 
-REPLICA = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.0.106:8000", "kv_pool": 144870.0,
+REPLICA = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "kv_pool": 144870.0,
            "parallel": 1, "budget": 65536}
 
 
@@ -1118,7 +1118,7 @@ def test_a_session_here_holds_up_this_machines_lane_and_not_a_replicas(setup, fa
 def test_a_replica_counts_only_its_own_tasks_and_never_a_session_here(fake_host, monkeypatch):
     class Running:
         in_model = True
-        lane_host = "http://192.168.0.106:8000"
+        lane_host = "http://192.168.50.106:8000"
         current_unit = None
     settings = NightShiftSettings({})
     monkeypatch.setattr(FakeHost, "sessions", [4242])
@@ -1144,7 +1144,7 @@ def two_nodes(setup, fake_host, monkeypatch):
     import contextlib
     import io
     from dreamference.node import NodeJob, NodeJobSender, NodePairing, NodeServe
-    record = {"node": "2222-bbbb", "name": "spark-2", "address": "192.168.0.106", "user": "owner", "ssh_port": 22}
+    record = {"node": "2222-bbbb", "name": "spark-2", "address": "192.168.50.106", "user": "owner", "ssh_port": 22}
     NodePairing._save(record)
     monkeypatch.setattr(NodePairing, "find", classmethod(lambda cls, name, browse=True: dict(record)))
     requests = []

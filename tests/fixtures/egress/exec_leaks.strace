@@ -5,7 +5,7 @@
 394831 connect(9, {sa_family=AF_INET, sin_port=htons(8767), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
 394854 execve("/home/user/.local/share/dreamference/mightling/bin/ling-code", ["/home/user/.local/share/dreamference/mightling/bin/ling-code", "session", "--parent-pid", "394830"], 0xffffecec5170 /* 113 vars */) = 0
 394855 execve("/home/user/.local/share/dreamference/mightling/bin/ling-code", ["/home/user/.local/share/dreamference/mightling/bin/ling-code", "prompt-block"], 0xffffecec5170 /* 113 vars */) = 0
-394856 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394856 execve("/home/user/mightling/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394856 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394856 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394856 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -16,7 +16,7 @@
 394856 execve("/usr/local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394856 execve("/usr/sbin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394856 execve("/usr/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = 0
-394857 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394857 execve("/home/user/mightling/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394857 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394857 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394857 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -28,7 +28,7 @@
 394857 execve("/usr/sbin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394857 execve("/usr/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb5bedd04d460 /* 114 vars */) = 0
 394855 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394856, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394858 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394858 execve("/home/user/mightling/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394858 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394858 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394858 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -40,7 +40,7 @@
 394858 execve("/usr/sbin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394858 execve("/usr/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb97ebcd86fb0 /* 114 vars */) = 0
 394854 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394857, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394859 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394859 execve("/home/user/mightling/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394859 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394859 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394859 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--path-format=absolute", "--git-common-dir"], 0xb5bedd04d460 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -55,7 +55,7 @@
 394854 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394859, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394831 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394854, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394831 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394855, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394875 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
+394875 execve("/home/user/mightling/.venv/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394875 execve("/home/user/.nvm/versions/node/v24.19.0/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394875 execve("/home/user/.local/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394875 execve("/home/user/.local/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
@@ -87,7 +87,7 @@
 394887 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394889, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394875 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394887, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394830 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394875, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394890 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
+394890 execve("/home/user/mightling/.venv/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394890 execve("/home/user/.nvm/versions/node/v24.19.0/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394890 execve("/home/user/.local/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394890 execve("/home/user/.local/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
@@ -99,7 +99,7 @@
 394890 execve("/usr/sbin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394890 execve("/usr/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = 0
 394849 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394890, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394891 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
+394891 execve("/home/user/mightling/.venv/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394891 execve("/home/user/.nvm/versions/node/v24.19.0/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394891 execve("/home/user/.local/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394891 execve("/home/user/.local/bin/lsb_release", ["lsb_release", "-a"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
@@ -133,7 +133,7 @@
 394903 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394905, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394891 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394903, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394849 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394891, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394906 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
+394906 execve("/home/user/mightling/.venv/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394906 execve("/home/user/.nvm/versions/node/v24.19.0/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394906 execve("/home/user/.local/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394906 execve("/home/user/.local/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
@@ -145,7 +145,7 @@
 394906 execve("/usr/sbin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394906 execve("/usr/bin/getconf", ["getconf", "LONG_BIT"], 0xffffecec5170 /* 113 vars */) = 0
 394849 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394906, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394907 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee193802ee10 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394907 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee193802ee10 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394907 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee193802ee10 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394907 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee193802ee10 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394907 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee193802ee10 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -157,7 +157,7 @@
 394907 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee193802ee10 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394907 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee193802ee10 /* 114 vars */) = 0
 394850 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394907, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394908 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394908 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394908 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394908 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394908 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -168,7 +168,7 @@
 394908 execve("/usr/local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394908 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394908 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee199800ef70 /* 114 vars */) = 0
-394909 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394909 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394909 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394909 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394909 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -179,7 +179,7 @@
 394909 execve("/usr/local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394909 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394909 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee199800ef70 /* 114 vars */) = 0
-394910 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394910 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee199800ef70 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394910 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee199800ef70 /* 114 vars */ <unfinished ...>
 394830 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394908, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394910 <... execve resumed>)            = -1 ENOENT (No such file or directory)
@@ -228,7 +228,7 @@
 394934 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394935, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394912 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394934, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394940 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394941, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
-394943 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394943 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394943 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394943 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394943 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -239,7 +239,7 @@
 394943 execve("/usr/local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394943 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394943 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950002190 /* 114 vars */) = 0
-394945 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394945 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394945 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394945 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394945 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -250,7 +250,7 @@
 394945 execve("/usr/local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394945 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394945 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "-v"], 0xee1950002190 /* 114 vars */) = 0
-394946 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "config", "--null", "--get", "core.fsmonitor"], 0xee194004b490 /* 113 vars */) = -1 ENOENT (No such file or directory)
+394946 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "config", "--null", "--get", "core.fsmonitor"], 0xee194004b490 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394946 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "config", "--null", "--get", "core.fsmonitor"], 0xee194004b490 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394946 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "config", "--null", "--get", "core.fsmonitor"], 0xee194004b490 /* 113 vars */) = -1 ENOENT (No such file or directory)
 394946 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "config", "--null", "--get", "core.fsmonitor"], 0xee194004b490 /* 113 vars */) = -1 ENOENT (No such file or directory)
@@ -264,7 +264,7 @@
 394850 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394943, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394850 sendto(7, "\1", 1, MSG_NOSIGNAL, NULL, 0) = 1
 394946 <... execve resumed>)            = 0
-394947 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394947 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394947 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee1950002190 /* 114 vars */ <unfinished ...>
 394848 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394945, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394947 <... execve resumed>)            = -1 ENOENT (No such file or directory)
@@ -281,7 +281,7 @@
 394947 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--git-dir"], 0xee1950002190 /* 114 vars */) = 0
 394849 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394946, si_uid=1000, si_status=1, si_utime=0, si_stime=0} ---
 394849 sendto(7, "\1", 1, MSG_NOSIGNAL, NULL, 0) = 1
-394948 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394948 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394948 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394948 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394948 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -297,7 +297,7 @@
 394948 execve("/usr/local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394948 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394948 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], 0xee1950002190 /* 114 vars */) = 0
-394949 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394949 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394949 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394949 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394949 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -308,7 +308,7 @@
 394949 execve("/usr/local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394949 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394949 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"], 0xee1950004c50 /* 114 vars */) = 0
-394950 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394950 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394950 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394950 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394950 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -319,7 +319,7 @@
 394950 execve("/usr/local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394950 execve("/usr/sbin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394950 execve("/usr/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], 0xee1950004c50 /* 114 vars */) = 0
-394951 execve("/home/user/PycharmProjects/dgxcoder/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
+394951 execve("/home/user/mightling/.venv/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394951 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394951 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394951 execve("/home/user/.local/bin/git", ["git", "-c", "safe.bareRepository=explicit", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "remote", "get-url", "origin"], 0xee1950004c50 /* 114 vars */) = -1 ENOENT (No such file or directory)

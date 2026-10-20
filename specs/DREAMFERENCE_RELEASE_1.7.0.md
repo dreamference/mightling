@@ -35,7 +35,7 @@ binaries, the desktop builds and the installers' names (`Mightling-1.7.0-<arch>-
   run 39273226009, the Windows installer included).
 - **The egress audit** (`ling-admin audit egress`, with `--app` and `--docs`) passes on the release
   build against this machine's model server.
-- **The Mac preview** of the last `desktop/mac-1.7` build was tried on the Mac mini (macOS 12.3).
+- **The Mac preview** of the last `desktop/mac-1.7` build was tried on a Mac (macOS 12.3).
 
 ---
 

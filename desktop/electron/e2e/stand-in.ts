@@ -83,7 +83,7 @@ if (process.argv[2] === "node") {
   // ling node list --json and ling node use <name> (Settings › Node): two nodes, the chosen one remembered in a file.
   const chosen = ${JSON.stringify(path.join(home, "node-choice"))};
   const used = fs.existsSync(chosen) ? fs.readFileSync(chosen, "utf8") : "spark-1";
-  if (process.argv[3] === "use") { fs.writeFileSync(chosen, process.argv[4]); console.log("Using node " + process.argv[4] + " at http://192.168.0.106:8000/v1."); process.exit(0); }
+  if (process.argv[3] === "use") { fs.writeFileSync(chosen, process.argv[4]); console.log("Using node " + process.argv[4] + " at http://192.168.50.106:8000/v1."); process.exit(0); }
   const node = (name, id, model) => ({ name, id, choice: name, inUse: used === name, model, contextTokens: model ? 262144 : null, state: model ? "ready" : "stopped", version: "1.7.1", coding: true });
   console.log(JSON.stringify({ thisMachine: "client", nodes: [node("spark-1", "11111111-aaaa", "RadixArk/Qwen3.8-27B-NVFP4"), node("spark-2", "22222222-bbbb", null)], rememberedAway: null, hint: null }));
   process.exit(0);
@@ -229,6 +229,14 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           if (asked.includes("with a link")) {
             say({ id: "elicit-2", method: "mcpServer/elicitation/request", params: { threadId: p.threadId, turnId: id, serverName: "tickets", mode: "url", _meta: null,
               message: "Sign in to the ticket tracker.", url: "http://127.0.0.1:9/login", elicitationId: "e2" } });
+          }
+          if (asked.includes("with a report")) {
+            // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
+            const own = threads.find((t) => t.id === p.threadId);
+            const report = require("node:path").join((own && own.cwd) || "/tmp", "report.md");
+            require("node:fs").writeFileSync(report, "# Memory on the GB10\\n\\nOne pool of LPDDR5X, shared by the CPU and the GPU.\\n");
+            say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
+              changes: [{ path: report, kind: { type: "add" }, diff: "+# Memory on the GB10\\n" }] } } });
           }
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });

@@ -240,7 +240,7 @@ async fn host_and_origin_must_be_the_servers_own_even_with_a_credential() {
     let rebound = Request::builder().uri("/healthz").header(header::HOST, "evil.example:3100").header(header::COOKIE, &cookie);
     assert_eq!(call(&server, rebound.body(Body::empty()).unwrap()).await.0, StatusCode::MISDIRECTED_REQUEST);
     // The LAN address is not served by a loopback-only server.
-    let lan = Request::builder().uri("/healthz").header(header::HOST, "192.168.0.105:3100").header(header::COOKIE, &cookie);
+    let lan = Request::builder().uri("/healthz").header(header::HOST, "192.168.50.105:3100").header(header::COOKIE, &cookie);
     assert_eq!(call(&server, lan.body(Body::empty()).unwrap()).await.0, StatusCode::MISDIRECTED_REQUEST);
     // A POST or an upgrade from another site, or with no Origin at all.
     for origin in [Some("http://evil.example"), Some("null"), None] {
@@ -258,8 +258,8 @@ async fn host_and_origin_must_be_the_servers_own_even_with_a_credential() {
 #[tokio::test]
 async fn an_advertised_node_answers_to_its_lan_address() {
     let scratch = scratch("lan");
-    let server = Server::new(config(&scratch.dir, 3100, vec!["192.168.0.105".to_string()])).unwrap();
-    let lan = Request::builder().uri("/healthz").header(header::HOST, "192.168.0.105:3100");
+    let server = Server::new(config(&scratch.dir, 3100, vec!["192.168.50.105".to_string()])).unwrap();
+    let lan = Request::builder().uri("/healthz").header(header::HOST, "192.168.50.105:3100");
     // Reached, and still refused without a credential: the LAN gets no more than loopback.
     assert_eq!(call(&server, lan.body(Body::empty()).unwrap()).await.0, StatusCode::UNAUTHORIZED);
 }
@@ -326,7 +326,7 @@ fn devices_post(uri: &str, cookie: &str, body: &str) -> Request<Body> {
 #[tokio::test]
 async fn the_devices_page_pairs_a_phone_by_qr_code_and_only_this_machine_may_use_it() {
     let scratch = scratch("devices");
-    let lan = vec!["172.17.0.1".to_string(), "192.168.0.105".to_string()];
+    let lan = vec!["172.17.0.1".to_string(), "192.168.50.105".to_string()];
     let server = Server::new(config(&scratch.dir, 3100, lan)).unwrap();
     let get = |cookie: Option<&str>| {
         let builder = request("GET", "/devices");
@@ -347,7 +347,7 @@ async fn the_devices_page_pairs_a_phone_by_qr_code_and_only_this_machine_may_use
     assert_eq!(status, StatusCode::OK);
     let code = shown_code(&page);
     assert_eq!(code.len(), 8);
-    assert!(page.contains("<svg") && page.contains("This code is for 192.168.0.105."));
+    assert!(page.contains("<svg") && page.contains("This code is for 192.168.50.105."));
     let token = std::fs::read_to_string(server.config.state_dir.join("token")).unwrap();
     assert!(!page.contains(token.trim()) && !page.contains(owner.split('=').nth(1).unwrap()));
     // Changing something still needs the server's own origin.
@@ -355,7 +355,7 @@ async fn the_devices_page_pairs_a_phone_by_qr_code_and_only_this_machine_may_use
     assert_eq!(call(&server, foreign.body(Body::empty()).unwrap()).await.0, StatusCode::FORBIDDEN);
 
     // The QR code's link opens the pairing form with the code filled in, and pairs nothing by itself.
-    let link = request("GET", &format!("/pair?code={code}")).header(header::HOST, "192.168.0.105:3100");
+    let link = request("GET", &format!("/pair?code={code}")).header(header::HOST, "192.168.50.105:3100");
     let (status, _, form) = call(&server, link.body(Body::empty()).unwrap()).await;
     assert_eq!(status, StatusCode::OK);
     assert!(form.contains(&format!("value=\"{code}\"")));

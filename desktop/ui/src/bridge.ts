@@ -27,8 +27,10 @@ export interface WorkTarget {
 /** What a link names (desktop/electron/src/args.ts). */
 export interface LinkTarget extends WorkTarget {
   prompt?: string | null;
-  page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask";
+  page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask" | "quick";
   plugin?: string;
+  /** With `page: "ask"`: send the prompt as a new question at once (Quick Entry). */
+  send?: boolean;
 }
 
 export interface Airgapped {
@@ -213,6 +215,14 @@ export async function fileSize(path: string): Promise<number | null> {
 export const readPrefs = () => send<Record<string, unknown>>({ type: "prefs/read" });
 /** Writes some preferences; resolves with all of them. */
 export const writePrefs = (values: Record<string, unknown>) => send<Record<string, unknown>>({ type: "prefs/write", values });
+/** Quick Entry's shortcut as the main process holds it (DESKTOP_PARITY_CLAUDE §4.2); the desktop app's only. */
+export interface QuickStatus {
+  on: boolean;
+  shortcut: string;
+  registered: boolean;
+  problem: string | null;
+}
+export const quickStatus = () => send<QuickStatus>({ type: "quick/status" });
 
 /** A dropped file's path on disk, in the app; null in a browser, which never learns one. */
 export function pathForFile(file: File): string | null {

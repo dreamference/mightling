@@ -987,11 +987,11 @@ mod tests {
     }
 
     fn spark1() -> Advert {
-        advert("spark-1", "11111111-aaaa", "192.168.0.105")
+        advert("spark-1", "11111111-aaaa", "192.168.50.105")
     }
 
     fn spark2() -> Advert {
-        advert("spark-2", "22222222-bbbb", "192.168.0.106")
+        advert("spark-2", "22222222-bbbb", "192.168.50.106")
     }
 
     #[test]
@@ -1002,7 +1002,7 @@ mod tests {
         // The remembered node where it is remembered: done.
         assert_eq!(after_answer(Some(&remembered), &[spark2(), spark1()]), Listen::Stop);
         // The remembered node at another address: settle, in case it answers where it was.
-        let moved = advert("spark-1", "11111111-aaaa", "192.168.0.120");
+        let moved = advert("spark-1", "11111111-aaaa", "192.168.50.120");
         assert_eq!(after_answer(Some(&remembered), &[moved]), Listen::Settle);
         // Nothing wanted: the first answer settles.
         assert_eq!(after_answer(None, &[spark2()]), Listen::Settle);
@@ -1010,7 +1010,7 @@ mod tests {
         // A node wanted by name (MIGHTLING_NODE, `ling node use`): listen until it answers.
         assert_eq!(after_answer(Some(&named("spark-1")), &[spark2()]), Listen::Deadline);
         assert_eq!(after_answer(Some(&named("spark-1.local")), &[spark2(), spark1()]), Listen::Stop);
-        assert_eq!(after_answer(Some(&named("192.168.0.105")), &[spark1()]), Listen::Stop);
+        assert_eq!(after_answer(Some(&named("192.168.50.105")), &[spark1()]), Listen::Stop);
     }
 
     fn stopped(advert: Advert) -> Advert {
@@ -1070,7 +1070,7 @@ mod tests {
         assert_eq!(node, spark1().node);
         assert!(note.is_some_and(|note| note.contains("did not answer a browse")));
         // Another node that serves is still a question, never a silent switch.
-        let browser = Fixed::new(vec![stopped(spark2()), advert("spark-3", "33333333-cccc", "192.168.0.107")]);
+        let browser = Fixed::new(vec![stopped(spark2()), advert("spark-3", "33333333-cccc", "192.168.50.107")]);
         assert!(matches!(resolve(&inputs, &browser), Resolution::Choose { gone: Some(_), .. }));
     }
 
@@ -1110,12 +1110,12 @@ mod tests {
 
     #[test]
     fn the_remembered_node_is_found_again_by_id_at_a_new_address() {
-        let moved = advert("spark-1", "11111111-aaaa", "192.168.0.200");
+        let moved = advert("spark-1", "11111111-aaaa", "192.168.50.200");
         let browser = Fixed::new(vec![moved.clone()]);
         let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
         assert_eq!(
             resolve(&inputs, &browser),
-            Resolution::Found { advert: moved, remember: true, note: Some("Node spark-1 is now at 192.168.0.200.".into()) }
+            Resolution::Found { advert: moved, remember: true, note: Some("Node spark-1 is now at 192.168.50.200.".into()) }
         );
         // The browse was told which id to stop at.
         assert_eq!(*browser.asked.borrow(), vec![Some("11111111-aaaa".to_string())]);
@@ -1127,7 +1127,7 @@ mod tests {
     #[test]
     fn a_second_advert_claiming_the_remembered_id_is_never_followed_silently() {
         let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
-        let impostor = advert("spark-1", "11111111-aaaa", "192.168.0.66");
+        let impostor = advert("spark-1", "11111111-aaaa", "192.168.50.66");
         // The real node still answers where it was remembered: that one is used, whatever order
         // the browse returned them in.
         assert_eq!(
@@ -1135,7 +1135,7 @@ mod tests {
             Resolution::Found { advert: spark1(), remember: true, note: None }
         );
         // Two claimants and neither at the remembered address: the user is asked.
-        let other = advert("spark-1", "11111111-aaaa", "192.168.0.67");
+        let other = advert("spark-1", "11111111-aaaa", "192.168.50.67");
         assert!(matches!(resolve(&inputs, &Fixed::new(vec![impostor, other])), Resolution::Choose { .. }));
     }
 
@@ -1145,7 +1145,7 @@ mod tests {
         // different address on each start, and each start said it had moved.
         let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
         let mut seen = advert("spark-1", "11111111-aaaa", "172.18.0.1");
-        seen.addresses = vec!["172.18.0.1".into(), "192.168.0.105".into()];
+        seen.addresses = vec!["172.18.0.1".into(), "192.168.50.105".into()];
         assert_eq!(
             resolve(&inputs, &Fixed::new(vec![seen.clone()])),
             Resolution::Found { advert: Advert { node: spark1().node, ..seen.clone() }, remember: true, note: None }
@@ -1161,7 +1161,7 @@ mod tests {
         let silent = Fixed::new(Vec::new());
         let Resolution::LastAddress { node, note } = resolve(&inputs, &silent) else { panic!("not the last address") };
         assert_eq!(node, spark1().node);
-        assert!(note.is_some_and(|note| note.contains("did not answer a browse") && note.contains("192.168.0.105")));
+        assert!(note.is_some_and(|note| note.contains("did not answer a browse") && note.contains("192.168.50.105")));
     }
 
     #[test]
@@ -1190,7 +1190,7 @@ mod tests {
         let browser = Fixed::new(vec![spark1()]);
         let Resolution::Found { advert, remember, note } = resolve(&Inputs::default(), &browser) else { panic!("not found") };
         assert_eq!((advert, remember), (spark1(), true));
-        assert_eq!(note.as_deref(), Some("Using Mightling node spark-1 at 192.168.0.105 (remembered; `ling node list` shows every node)."));
+        assert_eq!(note.as_deref(), Some("Using Mightling node spark-1 at 192.168.50.105 (remembered; `ling node list` shows every node)."));
     }
 
     #[test]
@@ -1261,7 +1261,7 @@ mod tests {
     fn where_no_question_can_be_asked_the_choice_is_refused_with_the_list() {
         let error = choose(&[spark1(), spark2()], None, false).unwrap_err().to_string();
         assert!(error.starts_with("Several Mightling nodes are on this network:"), "{error}");
-        assert!(error.contains("spark-1") && error.contains("192.168.0.106") && error.contains("ling node use <name>"));
+        assert!(error.contains("spark-1") && error.contains("192.168.50.106") && error.contains("ling node use <name>"));
         let gone = choose(&[spark2()], Some("spark-1"), false).unwrap_err().to_string();
         assert!(gone.starts_with("The remembered node, spark-1, is not on this network, and another is:"), "{gone}");
     }
@@ -1284,7 +1284,7 @@ mod tests {
         );
         assert_eq!(state_verdict(&node, "loading", false), Ok(Some("Node spark-1: model loading".to_string())));
         let stale = state_verdict(&node, "ready", false).unwrap_err();
-        assert!(stale.contains("advertised as ready") && stale.contains("http://192.168.0.105:8000") && stale.contains("ling-admin status"));
+        assert!(stale.contains("advertised as ready") && stale.contains("http://192.168.50.105:8000") && stale.contains("ling-admin status"));
         // A remembered address that no browse confirmed: wait, as before the split.
         assert_eq!(state_verdict(&node, "", false), Ok(None));
     }
@@ -1292,10 +1292,10 @@ mod tests {
     #[test]
     fn a_node_is_named_by_name_address_or_id_prefix() {
         let node = spark1();
-        for name in ["spark-1", "Spark-1.local", "192.168.0.105", "1111", "11111111-AAAA"] {
+        for name in ["spark-1", "Spark-1.local", "192.168.50.105", "1111", "11111111-AAAA"] {
             assert!(matches(&node, name), "{name}");
         }
-        for name in ["spark", "111", "192.168.0.10", ""] {
+        for name in ["spark", "111", "192.168.50.10", ""] {
             assert!(!matches(&node, name), "{name}");
         }
     }
@@ -1333,8 +1333,8 @@ mod tests {
         let model = crate::ServedModel { id: "RadixArk/Qwen3.8-27B-NVFP4".into(), max_model_len: 262_144, owned_by: "sglang".into() };
         let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
         let lines = list_lines(&inputs, &[spark1(), Advert { state: "stopped".into(), main: false, ..spark2() }], &[Some(model), None]);
-        assert_eq!(lines[0], "* spark-1  http://192.168.0.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens)  Mightling 1.3.0");
-        assert_eq!(lines[1], "  spark-2  http://192.168.0.106:8000/v1  stopped  Mightling 1.3.0  (not a coding model)");
+        assert_eq!(lines[0], "* spark-1  http://192.168.50.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens)  Mightling 1.3.0");
+        assert_eq!(lines[1], "  spark-2  http://192.168.50.106:8000/v1  stopped  Mightling 1.3.0  (not a coding model)");
         assert_eq!(lines.len(), 2);
         // The remembered node did not answer: it is still shown as the one in use.
         let away = list_lines(&inputs, &[spark2()], &[None]);
@@ -1368,7 +1368,7 @@ mod tests {
         let away = list_json(&inputs, &[spark2()], &[None], Some("Wi-Fi power saving is on"));
         assert_eq!(away["rememberedAway"]["name"], "spark-1");
         assert_eq!(away["hint"], "Wi-Fi power saving is on");
-        assert!(!away.to_string().contains("192.168.0.105"));
+        assert!(!away.to_string().contains("192.168.50.105"));
         // A node with no name is chosen by its id; one with neither cannot be chosen.
         let unnamed = Advert { node: Node { name: String::new(), ..spark2().node }, ..spark2() };
         let bare = Advert { node: Node { name: String::new(), node: String::new(), ..spark2().node }, ..spark2() };
@@ -1391,10 +1391,10 @@ mod tests {
             .iter()
             .map(|(key, value)| (key.to_string(), value.to_string()))
             .collect();
-        let addresses: Vec<IpAddr> = ["fe80::1", "172.17.0.1", "192.168.0.105"].iter().filter_map(|a| a.parse().ok()).collect();
-        let advert = advert_from("gx10-9428._mightling-node._tcp.local.", 8000, &addresses, &records);
+        let addresses: Vec<IpAddr> = ["fe80::1", "172.17.0.1", "192.168.50.105"].iter().filter_map(|a| a.parse().ok()).collect();
+        let advert = advert_from("gx10-1a2b._mightling-node._tcp.local.", 8000, &addresses, &records);
         let advert = advert.unwrap_or_default();
-        assert_eq!(advert.node.name, "gx10-9428");
+        assert_eq!(advert.node.name, "gx10-1a2b");
         assert_eq!((advert.node.node.as_str(), advert.node.model_port, advert.node.web_port, advert.node.search_port), ("7c1e", 8000, Some(3000), Some(8888)));
         assert_eq!((advert.proto, advert.state.as_str(), advert.main), (1, "loading", true));
         // A node that shares nothing but the model, and says nothing else.
@@ -1407,7 +1407,7 @@ mod tests {
     #[test]
     fn ipv4_is_preferred_and_link_local_ipv6_is_dropped() {
         let parse = |addresses: &[&str]| addresses.iter().filter_map(|a| a.parse::<IpAddr>().ok()).collect::<Vec<_>>();
-        assert_eq!(best_address(&parse(&["fe80::1", "fd00::2", "192.168.0.105"])), "192.168.0.105".parse().ok());
+        assert_eq!(best_address(&parse(&["fe80::1", "fd00::2", "192.168.50.105"])), "192.168.50.105".parse().ok());
         assert_eq!(best_address(&parse(&["fe80::1", "fd00::2"])), "fd00::2".parse().ok());
         assert_eq!(best_address(&parse(&["127.0.0.1", "169.254.3.4"])), "169.254.3.4".parse().ok());
         assert_eq!(best_address(&parse(&["fe80::1"])), None);
@@ -1419,12 +1419,12 @@ mod tests {
     fn one_node_seen_on_several_interfaces_is_one_row_with_its_best_address() {
         let mut found = Vec::new();
         merge(&mut found, advert("spark-1", "1111", "fd00::2"));
-        merge(&mut found, advert("spark-1", "1111", "192.168.0.105"));
+        merge(&mut found, advert("spark-1", "1111", "192.168.50.105"));
         merge(&mut found, advert("spark-1", "1111", "fd00::2"));
-        merge(&mut found, advert("spark-2", "2222", "192.168.0.106"));
+        merge(&mut found, advert("spark-2", "2222", "192.168.50.106"));
         assert_eq!(found.iter().map(|a| (a.node.name.as_str(), a.node.address.as_str())).collect::<Vec<_>>(),
-                   vec![("spark-1", "192.168.0.105"), ("spark-2", "192.168.0.106")]);
-        assert_eq!(found[0].addresses, vec!["192.168.0.105".to_string(), "fd00::2".to_string()]);
+                   vec![("spark-1", "192.168.50.105"), ("spark-2", "192.168.50.106")]);
+        assert_eq!(found[0].addresses, vec!["192.168.50.105".to_string(), "fd00::2".to_string()]);
     }
 
     #[test]
@@ -1517,7 +1517,7 @@ mod tests {
 
     #[test]
     fn the_advert_carries_the_overlay_name_only_when_it_is_the_nodes_own() {
-        let addresses = ["192.168.0.105".parse().unwrap()];
+        let addresses = ["192.168.50.105".parse().unwrap()];
         let record = |remote: &str| {
             vec![("node".to_string(), "11111111-aaaa".to_string()), ("remote".to_string(), remote.to_string())]
         };

@@ -37,17 +37,17 @@ says whether the compaction finished, whether the turn was aborted, and when and
 message was taken up.
 
 Runbook (2026-10-13; the report repeats it). From the checkout of `bench/turn-end-compaction`
-(the worktree `~/PycharmProjects/dgxcoder-wt-tec`), with the project's interpreter::
+(the worktree `~/mightling-wt-tec`), with the project's interpreter::
 
-    cd ~/PycharmProjects/dgxcoder-wt-tec && PY=~/PycharmProjects/dgxcoder/.venv/bin/python
-    # 0. second-puffin's reference server must be up and alone (one model server at a time there):
-    ssh second-puffin 'docker ps --format "{{.Names}}"'      # ling-serve stopped, m0-prod8000 listed
-    ssh second-puffin 'docker start m0-prod8000'               # if it is not; then post a crew note
+    cd ~/mightling-wt-tec && PY=~/mightling/.venv/bin/python
+    # 0. node-b's reference server must be up and alone (one model server at a time there):
+    ssh node-b 'docker ps --format "{{.Names}}"'      # ling-serve stopped, m0-prod8000 listed
+    ssh node-b 'docker start m0-prod8000'               # if it is not; then post a crew note
     # 1. pre-flight (talks to the server, clones click, checks the binary):
-    $PY scripts/turn_end_compaction_bench.py preflight --host http://second-puffin.local:8000
+    $PY scripts/turn_end_compaction_bench.py preflight --host http://node-b.local:8000
     # 2. the run, in the background, with a log (about 3.5 h for 2 tasks x 2 arms x 2 repetitions):
     setsid nohup $PY scripts/turn_end_compaction_bench.py run \\
-        --host http://second-puffin.local:8000 --reps 2 \\
+        --host http://node-b.local:8000 --reps 2 \\
         --out ~/.cache/dreamference/turn-end-compaction/2026-10-13 \\
         > ~/.cache/dreamference/turn-end-compaction/2026-10-13.log 2>&1 < /dev/null &
     # 3. the report is rewritten after every session; re-render at any time with
@@ -1680,23 +1680,23 @@ def decide(sessions: list[dict[str, Any]], table: dict[str, dict[str, Any]]) -> 
 RUNBOOK: Final[str] = """\
 ## Runbook (v2, 2026-10-14)
 
-Target: second-puffin's reference server (`m0-prod8000`, the default model, 16 draft tokens), named by
+Target: node-b's reference server (`m0-prod8000`, the default model, 16 draft tokens), named by
 its mDNS name, never an address. Speed differs from this machine's server; compaction behaviour does not.
 
-0. On second-puffin only one model server runs at a time: `ling-serve` stopped, `m0-prod8000` up and
-   answering `/v1/models` on port 8000 (`ssh second-puffin 'docker ps --format "{{.Names}}"'`).
+0. On node-b only one model server runs at a time: `ling-serve` stopped, `m0-prod8000` up and
+   answering `/v1/models` on port 8000 (`ssh node-b 'docker ps --format "{{.Names}}"'`).
 1. The binary: a `ling` built from branch `compaction/cache-hit` (patches 0026 and 0027, the launcher's
    summary cap), never installed, with `codex-code-mode-host` beside it: `~/mightling-bench-build/bin/ling`.
-   From the checkout of that branch (`cd ~/PycharmProjects/wt-cache-hit`), with
-   `PY=~/PycharmProjects/dgxcoder/.venv/bin/python`. Pre-flight (server, model, window, KV pool, the
+   From the checkout of that branch (`cd ~/mightling-wt-cache-hit`), with
+   `PY=~/mightling/.venv/bin/python`. Pre-flight (server, model, window, KV pool, the
    binary's four switches, sandbox label, click clone):
-   `$PY scripts/turn_end_compaction_bench.py preflight --host http://second-puffin.local:8000 --ling ~/mightling-bench-build/bin/ling`
+   `$PY scripts/turn_end_compaction_bench.py preflight --host http://node-b.local:8000 --ling ~/mightling-bench-build/bin/ling`
 2. The run, as a user unit (outside PyCharm, so the sandbox runs as it does for users):
 
        systemd-run --user --unit tec-bench-v2-<date> --working-directory=$PWD \\
            -p StandardOutput=append:$HOME/.cache/dreamference/turn-end-compaction/<date>.log \\
            -p StandardError=append:$HOME/.cache/dreamference/turn-end-compaction/<date>.log \\
-           $PY -u scripts/turn_end_compaction_bench.py run --host http://second-puffin.local:8000 \\
+           $PY -u scripts/turn_end_compaction_bench.py run --host http://node-b.local:8000 \\
            --reps 2 --ling $HOME/mightling-bench-build/bin/ling --stop-by <ISO time> \\
            --out $HOME/.cache/dreamference/turn-end-compaction/<date>
 
@@ -2077,7 +2077,7 @@ def parser() -> argparse.ArgumentParser:
 
     def target(sub: argparse.ArgumentParser) -> None:
         sub.add_argument("--host", default=os.environ.get("DREAMFERENCE_VLLM_HOST"),
-                         help="the model server, e.g. http://second-puffin.local:8000 (required)")
+                         help="the model server, e.g. http://node-b.local:8000 (required)")
         sub.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="the compaction limit pinned on both arms")
         sub.add_argument("--expect-model", default="Qwen3.8-27B", help="refuse a server serving another model ('' to skip)")
         sub.add_argument("--cache", default=str(SOURCE_CACHE), help="where task sources are kept")

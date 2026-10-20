@@ -57,7 +57,7 @@ The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The sur
 
   The script is written: [`scripts/swe_bench_chooser_test.py`](../scripts/swe_bench_chooser_test.py). Its runbook is in the docstring, and its tests are in `tests/test_swe_bench_chooser.py` (a fake server on loopback).
 - **Depends on:**
-  - **A free model server.** It runs on second-puffin's production server, named by node name, when no SWE-bench run, Night Shift task or engine test needs it.
+  - **A free model server.** It runs on node-b's production server, named by node name, when no SWE-bench run, Night Shift task or engine test needs it.
   - **The runs, read only on this machine,** with their gradings' PASS_TO_PASS counts. These come from `grading.json` or, for gradings made before item 2, the harness's `report.json` files.
 - **Result of v1 (2026-10-13, `~/swe-bench-chooser-2026-10`):** best-of-3 33/44 against single runs 29/29/31 and an oracle of 36. On the 13 disagreeing tasks: chooser 10, the filter alone 9.33, a random run 6.67. The filter was right 3/3, the judge 7/10 (wrong on django 11477, 12663 and 13807).
 - **v2, approved and built 2026-10-14:** [`scripts/swe_bench_chooser_v2.py`](../scripts/swe_bench_chooser_v2.py), an R2E-Gym-style hybrid verifier over the same three runs and seed. Its stages, in order:
@@ -71,7 +71,7 @@ The owner approved items 1–13 on 2026-10-13 and item 14 on 2026-10-14. The sur
   ```bash
   .venv/bin/python scripts/swe_bench_chooser_test.py --dry-run     # 13 tasks, 10 to the judge, 26 calls at most
   .venv/bin/python scripts/swe_bench_chooser_test.py \
-      --server http://second-puffin.local:8000 \
+      --server http://node-b.local:8000 \
       --runs n2-default,n3-default,n4-default --seed 20261013 --out ~/swe-bench-chooser-2026-10
   ```
 - **Acceptance:** `summary.json` gives the chooser's expected resolved count on the 13 tasks against the filter alone, a random run (about 6.3) and the oracle (13).

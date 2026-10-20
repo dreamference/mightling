@@ -168,7 +168,7 @@ It serves:
 
 ### 4.4 Secure context and the LAN
 
-Browsers allow the microphone and the clipboard API only on HTTPS or `localhost`. Over plain HTTP from a phone (`http://192.168.0.105:3100`), voice and "copy" don't work. Options, in order:
+Browsers allow the microphone and the clipboard API only on HTTPS or `localhost`. Over plain HTTP from a phone (`http://192.168.50.105:3100`), voice and "copy" don't work. Options, in order:
 1. **Phase A: accept it,** and say so in the UI. Text works from any device. The Electron app on a client keeps working, because it loads the UI over `app://` and reaches the node through its own connection.
 2. **Phase D: TLS for an advertised node.** `ling-admin web tls` creates a per-node certificate authority, prints its fingerprint, and offers the CA file to paired devices, which install it once. This is a decision for the user (§14), because installing a CA on a phone is a real step.
 
@@ -486,7 +486,7 @@ No live service was touched: no model server, no installed `ling`, a scratch `HO
 - **`ling-rs/web`.** `cargo test` in a copy, with and without the UI embedded: 30 unit tests and 14 server tests.
   - **New unit tests:** the QR link, the address order, the SVG and the terminal drawing, the Devices page's escaping, its loopback case, the folded addresses, and the eight-digit check.
   - **New server tests:** `/devices` end to end, and a loopback server issuing no code. The end-to-end test covers the owner's page, a code and its QR codes, a foreign `Origin` refused, the prefilled pairing form, and an HTML-looking code not shown back. It then pairs from the code, checks that the paired device is refused the page, a new code and a revoke, and has the owner revoke it. The three new routes are in the credential test.
-- **The QR codes decode.** A code drawn by `qr::svg` and by `qr::terminal` for `http://192.168.0.105:3100/pair?code=01234567`, rendered to pixels and read by OpenCV's `QRCodeDetector` in a scratch virtualenv, gave back exactly that link, both ways.
+- **The QR codes decode.** A code drawn by `qr::svg` and by `qr::terminal` for `http://192.168.50.105:3100/pair?code=01234567`, rendered to pixels and read by OpenCV's `QRCodeDetector` in a scratch virtualenv, gave back exactly that link, both ways.
 - **The Python suite.**
 - **Not run:** the launcher's tests in a Codex export. `ling-rs/src/` did not change; the only change the export sees is the new `qrcodegen` dependency of `ling-web-server`, a leaf crate that Cargo adds to the workspace's lock at the next `codex build`, which does not use `--locked`. Its MIT licence is on the allow-list of the workspace's `deny.toml`, and that file bans nothing it brings.
 
@@ -662,7 +662,7 @@ SearXNG and the Google service are found on the network even when stopped, read 
 - **`desktop/ui`:** 29 vitest cases, the typecheck and the production build. **`desktop/electron`** (after `npm ci`): 33 vitest cases passed and 1 skipped, and the typecheck.
 - **`mkdocs build --strict`** with the docs workflow's pins (`docs/web-chat.md` is outside the nav on purpose, §19.6). `AGENTS.md` is 24,533 bytes.
 
-**Still to run, on a slot with the model server free** (none of them was run, by the rule that the benchmark nights hold this machine's model server and second-puffin's GPU is busy):
+**Still to run, on a slot with the model server free** (none of them was run, by the rule that the benchmark nights hold this machine's model server and node-b's GPU is busy):
 1. `ling-admin codex build` (it runs `ling-admin audit egress` at the end), then `ling-admin audit egress --web` and `ling-admin audit egress --app`: the verdict passes and the report says `Image search turn: answered with an image`.
 2. `ling-admin images start`, `ling-admin images status`, `ling-admin voice start`, `ling-admin voice status`: both on `dreamference-sidecars` (`docker inspect -f '{{.HostConfig.NetworkMode}}' dreamference-image-search dreamference-stt`).
 3. `ling-admin server stop` then `ling-admin server start` on this node with the two sidecars removed first (`ling-admin images stop`, `ling-admin voice stop`): both come back and the model loads.

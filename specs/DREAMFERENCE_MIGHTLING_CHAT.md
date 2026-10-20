@@ -170,8 +170,8 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 ### 5.3 Reaching it from the phone
 
 - **With Tailscale (the decided route).**
-  - **The setup check:** `ling-admin matrix start` finds Tailscale running and signed in (`tailscale status --json`). It takes the node's tailnet name (`Self.DNSName` without its trailing dot, for example `gx10-9428.tail1234.ts.net`) as the **server name**, and runs `tailscale serve --bg --https=443 http://127.0.0.1:6167`.
-  - **The server name is permanent.** Every account's id ends in it (`@owner:gx10-9428.tail1234.ts.net`), and Matrix has no way to rename a server. It is chosen once, stored in `matrix.json`, and passed to the container on every start. Renaming the machine, or moving it to another tailnet, changes its tailnet name: from then on `start` refuses, naming both names. The user either renames the machine back, or removes the homeserver (`ling-admin matrix remove`, which deletes the volume) and starts again with new accounts.
+  - **The setup check:** `ling-admin matrix start` finds Tailscale running and signed in (`tailscale status --json`). It takes the node's tailnet name (`Self.DNSName` without its trailing dot, for example `gx10-1a2b.tail1234.ts.net`) as the **server name**, and runs `tailscale serve --bg --https=443 http://127.0.0.1:6167`.
+  - **The server name is permanent.** Every account's id ends in it (`@owner:gx10-1a2b.tail1234.ts.net`), and Matrix has no way to rename a server. It is chosen once, stored in `matrix.json`, and passed to the container on every start. Renaming the machine, or moving it to another tailnet, changes its tailnet name: from then on `start` refuses, naming both names. The user either renames the machine back, or removes the homeserver (`ling-admin matrix remove`, which deletes the volume) and starts again with new accounts.
   - **Signing in:** the phone, with Tailscale installed and signed in to the same tailnet, signs in to `https://<tailnet name>` in Element X.
   - **The certificate:** a real one, issued by Let's Encrypt through Tailscale. This needs HTTPS turned on once in the tailnet's admin console, and the command says so when it is off.
   - **The privacy cost:** the tailnet name appears in public Certificate Transparency logs. The name is public; nothing about messages is.
@@ -428,4 +428,8 @@ A message after `new_thread_after_hours` (default 4) without the conversation mo
 - **Bounds and the final turn:** as the Signal bridge (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.3), the hub watches each turn (`limits.rs`, from `item/started` and `item/completed`) every 250 ms: past a bound it steers "answer now", 30 s later it interrupts and starts a final turn without tools, and a final turn past 90 s ends with what it wrote and one line.
 - **The phone prompt:** threads start with `prompt: "chat"` (falling back to `ask` on a `ling web` that refuses it), in a scratch folder named `ask/chat-<hex>`.
 - **The answer:** the turn's final message, or its last; a short last word after a longer earlier message ("The answer above stands.") brings that message with it, because the phone shows only the answer (2 of 56 Ask turns on 2026-10-20 ended so).
+
+### 16.4 Quick follow-ups (branch `chat/merge-quick`)
+
+The hub already steered a message into a running turn and merged the ones that could not steer into one turn when it ended (§3). Two changes: queued inputs keep their images (§16.1), and the final turn after a time-out (§16.3) is never steered into: a message then waits for the next turn.
 

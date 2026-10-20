@@ -1,0 +1,29 @@
+{
+  "id": "s15-mixed-message",
+  "family": "S15",
+  "failure": [
+    7
+  ],
+  "turns": [
+    {
+      "text": "Поясни, будь ласка, що таке NVMe і чим він відрізняється від SATA SSD?"
+    }
+  ],
+  "expect": {
+    "language": [
+      "uk"
+    ],
+    "max_tool_calls": 3
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}

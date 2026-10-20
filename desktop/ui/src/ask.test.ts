@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAskThread, turnInput } from "./ask";
+import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, insideFolder, isAskPath, isAskThread, turnInput, viewTabs } from "./ask";
 import { copyText, type ClipboardEnv } from "./clipboard";
 import type { ServerNotification } from "./protocol/ServerNotification";
 import type { Thread } from "./protocol/v2/Thread";
@@ -134,5 +134,41 @@ describe("the copy button", () => {
   it("says so when neither way copies", async () => {
     const { env } = stubDocument(false);
     await expect(copyText("x", env)).resolves.toBe(false);
+  });
+});
+
+describe("Ask's files beside the answer (DESKTOP_PARITY_CLAUDE §4.1)", () => {
+  const folder = `${ROOT}/q-0123abcd0123abcd`;
+  const other = `${ROOT}/q-ffff0000ffff0000`;
+  const file = (path: string) => ({ key: `file:${path}`, kind: "file" as const, path, line: null });
+  const tabs = [
+    { key: "review", kind: "review" as const },
+    file(`${folder}/report.md`),
+    file(`${other}/notes.md`),
+    file("/home/u/src/app/README.md"),
+    { key: "preview:1", kind: "preview" as const },
+  ];
+
+  it("Ask shows only the files of the question in front", () => {
+    expect(viewTabs(tabs, "ask", folder, ROOT).map((tab) => tab.key)).toEqual([`file:${folder}/report.md`]);
+    expect(viewTabs(tabs, "ask", null, ROOT)).toEqual([]);
+    // The folder itself, or a sibling whose name starts the same, is not inside it.
+    expect(viewTabs([file(folder), file(`${folder}0/x.md`)], "ask", folder, ROOT)).toEqual([]);
+  });
+
+  it("Work shows every tab but the files of Ask questions", () => {
+    expect(viewTabs(tabs, "work", null, ROOT).map((tab) => tab.key)).toEqual(["review", "file:/home/u/src/app/README.md", "preview:1"]);
+    // Without the host's root (a browser on an older ling web), by the scratch folder's shape.
+    expect(viewTabs(tabs, "work", null, null).map((tab) => tab.key)).toEqual(["review", "file:/home/u/src/app/README.md", "preview:1"]);
+  });
+
+  it("names a file's kind and its name", () => {
+    expect(fileKindLabel("markdown")).toBe("Document");
+    expect(fileKindLabel("html")).toBe("Web page");
+    expect(fileKindLabel(null)).toBe("File");
+    expect(baseName(`${folder}/sub/chart.svg`)).toBe("chart.svg");
+    expect(baseName("C:\\Users\\u\\a.pdf")).toBe("a.pdf");
+    expect(insideFolder(`${folder}\\x.md`, folder)).toBe(true);
+    expect(isAskPath("/tmp/ask/q-0a/x.md", null)).toBe(true);
   });
 });

@@ -10,6 +10,8 @@ export interface ShellActions {
   openAsk(): void;
   /** The app window on Work. */
   openWork(): void;
+  /** Quick Entry's box (quick.ts). */
+  quickQuestion?(): void;
 }
 
 export function installMenu(actions: ShellActions): void {
@@ -60,6 +62,7 @@ export function installTray(iconsDir: string, actions: ShellActions): void {
     Menu.buildFromTemplate([
       { label: "Ask", click: () => actions.openAsk() },
       { label: "Work", click: () => actions.openWork() },
+      ...(actions.quickQuestion ? [{ label: "New question…", click: () => actions.quickQuestion?.() }] : []),
       { type: "separator" },
       { role: "quit" },
     ]),

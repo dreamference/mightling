@@ -16,15 +16,15 @@ describe("the preview tab's rules", () => {
     expect(reachOf("10.0.0.5")).toBe("lan");
     expect(reachOf("172.20.1.1")).toBe("lan");
     expect(reachOf("172.32.1.1")).toBe("internet");
-    expect(reachOf("gx10-9428")).toBe("lan");
-    expect(reachOf("gx10-9428.local")).toBe("lan");
+    expect(reachOf("gx10-1a2b")).toBe("lan");
+    expect(reachOf("gx10-1a2b.local")).toBe("lan");
     expect(reachOf("example.com")).toBe("internet");
     expect(reachOf("8.8.8.8")).toBe("internet");
   });
 
   it("loads this machine, the LAN and files; asks for the internet; follows the user's choices", () => {
     expect(decide("http://localhost:5173/", {}, none, false).verdict).toBe("allow");
-    expect(decide("http://gx10-9428.local:8080/", {}, none, false).verdict).toBe("allow");
+    expect(decide("http://gx10-1a2b.local:8080/", {}, none, false).verdict).toBe("allow");
     expect(decide("file:///home/u/site/index.html", {}, none, false).verdict).toBe("allow");
     expect(decide("https://example.com/a", {}, none, false)).toMatchObject({ verdict: "ask", site: "example.com" });
     expect(decide("https://example.com/a", { "example.com": "allow" }, none, false).verdict).toBe("allow");
@@ -44,7 +44,7 @@ describe("the preview tab's rules", () => {
 
   it("reads the address bar: a local host gets http, a site https, a path is a file", () => {
     expect(addressOf("localhost:5173")).toBe("http://localhost:5173");
-    expect(addressOf("gx10-9428.local/docs")).toBe("http://gx10-9428.local/docs");
+    expect(addressOf("gx10-1a2b.local/docs")).toBe("http://gx10-1a2b.local/docs");
     expect(addressOf("example.com")).toBe("https://example.com");
     expect(addressOf("/home/u/site/index.html")).toBe("file:///home/u/site/index.html");
     expect(addressOf("https://example.com/x")).toBe("https://example.com/x");

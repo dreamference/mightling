@@ -33,12 +33,12 @@ SECRET = "correct horse battery staple"
 # -- the session ---------------------------------------------------------------------------------
 
 def test_the_host_key_is_filed_under_the_name_given_whatever_ssh_config_says(tmp_path):
-    # second-puffin's ~/.ssh/config entry sets `HostKeyAlias gx10-386b`; without this option the
+    # node-b's ~/.ssh/config entry sets `HostKeyAlias gx10-3c4d`; without this option the
     # run's known-hosts file filed the key under that alias, the fingerprint printed `?` and the
     # pairing found no key to pin (the first dry run against a real machine, 2026-10-20).
-    session = FleetSession("second-puffin", "owner", tmp_path)
+    session = FleetSession("node-b", "owner", tmp_path)
     for options in (session.options(first_contact=True), session.options()):
-        assert "HostKeyAlias=second-puffin" in options
+        assert "HostKeyAlias=node-b" in options
     other_port = FleetSession("spark-1a2b.local", "owner", tmp_path, ssh_port=2222)
     assert "HostKeyAlias=spark-1a2b.local-port-2222" in other_port.options()
     assert other_port._known_host_name() == "spark-1a2b.local-port-2222"
@@ -285,9 +285,9 @@ def avahi_line(service, name, host, address):
 
 def test_discovery_lists_new_gb10s_and_leaves_out_nodes_and_others(monkeypatch):
     ssh = "\n".join([avahi_line("_ssh._tcp", "spark-1a2b", "spark-1a2b.local", "10.0.0.5"),
-                     avahi_line("_ssh._tcp", "gx10-9428", "gx10-9428.local", "10.0.0.2"),
+                     avahi_line("_ssh._tcp", "gx10-1a2b", "gx10-1a2b.local", "10.0.0.2"),
                      avahi_line("_ssh._tcp", "laptop", "laptop.local", "10.0.0.9")])
-    nodes = [{"name": "gx10-9428", "host": "gx10-9428.local", "address": "10.0.0.2"}]
+    nodes = [{"name": "gx10-1a2b", "host": "gx10-1a2b.local", "address": "10.0.0.2"}]
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: nodes))
     monkeypatch.setattr(NodeBrowser, "browse_service",
                         classmethod(lambda cls, service, timeout=6: NodeBrowser.parse(ssh, service)))
