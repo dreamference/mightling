@@ -100,6 +100,13 @@ const terminals = {};
 const goals = {};
 const watches = {};
 const config = { features: { memories: false }, memories: {}, desktop: null };
+// hooks.state as config/batchWrite leaves it: a hook is trusted once its trusted_hash is its current hash.
+const hookState = {};
+const hookOf = (key, base) => {
+  const state = hookState[key] || {};
+  const trustStatus = base.isManaged ? "managed" : state.trusted_hash === base.currentHash ? "trusted" : state.trusted_hash ? "modified" : "untrusted";
+  return { ...base, key, enabled: state.enabled !== false, trustStatus };
+};
 let asked = false;
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
@@ -246,9 +253,20 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "plugin/uninstall": return answer({});
     case "skills/config/write": return answer({ effectiveEnabled: p.enabled });
     case "config/mcpServer/reload": return answer({});
-    case "hooks/list": return answer({ data: [{ cwd: (p.cwds || ["/"])[0], warnings: [], errors: [], hooks: [{ key: "ledger", eventName: "Stop", matcher: null, timeoutSec: 30, statusMessage: null,
-      additionalContextLimit: null, sourcePath: "/home/u/.mightling/hooks.json", source: "user", pluginId: null, displayOrder: 0, enabled: true, isManaged: false, currentHash: "x", trustStatus: "trusted",
-      handlerType: "command", command: "ling ledger", async: false }] }] });
+    case "hooks/list": return answer({ data: [{ cwd: (p.cwds || ["/"])[0], warnings: [], errors: [], hooks: [
+      { key: "ledger", eventName: "Stop", matcher: null, timeoutSec: 30, statusMessage: null, additionalContextLimit: null, sourcePath: "/home/u/.mightling/hooks.json", source: "user",
+        pluginId: null, displayOrder: 0, isManaged: true, currentHash: "x", handlerType: "command", command: "ling ledger", async: false },
+      { key: "/w/app/.codex/hooks.json:post_tool_use:0:0", eventName: "PostToolUse", matcher: "Bash", timeoutSec: 30, statusMessage: null, additionalContextLimit: null,
+        sourcePath: "/w/app/.codex/hooks.json", source: "project", pluginId: null, displayOrder: 1, isManaged: false, currentHash: "sha256:audit-v1", handlerType: "command",
+        command: "./scripts/audit.sh", async: false },
+    ].map((hook) => hookOf(hook.key, hook)) }] });
+    case "config/batchWrite": {
+      for (const edit of p.edits || []) {
+        if (edit.keyPath !== "hooks.state") continue;
+        for (const [key, value] of Object.entries(edit.value || {})) hookState[key] = { ...(hookState[key] || {}), ...value };
+      }
+      return answer({ status: "ok", version: "1", filePath: "/x", overriddenMetadata: null });
+    }
     case "config/value/write": {
       // Kept, so a later config/read answers what was written.
       const keys = String(p.keyPath).split(".");

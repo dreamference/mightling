@@ -2,7 +2,7 @@
 // new MCP server.
 import { describe, expect, it } from "vitest";
 
-import { MCP_NAME, mcpServerValue, skillSource } from "./ExtensionsView";
+import { MCP_NAME, hookEnabledEdit, hookNeedsReview, hookTrustEdit, hookTrustLabel, mcpServerValue, skillSource, uniqueHooks } from "./ExtensionsView";
 
 describe("skills and tools", () => {
   it("say where a skill comes from, another agent's linked in included", () => {
@@ -17,5 +17,21 @@ describe("skills and tools", () => {
     expect(MCP_NAME.test("ling-code")).toBe(true);
     expect(MCP_NAME.test("bad name")).toBe(false);
     expect(MCP_NAME.test("a.b")).toBe(false);
+  });
+
+  it("trust a hook as the TUI does, and say which ones Codex skips until then (item 15)", () => {
+    expect(hookNeedsReview({ trustStatus: "untrusted" })).toBe(true);
+    expect(hookNeedsReview({ trustStatus: "modified" })).toBe(true);
+    expect(hookNeedsReview({ trustStatus: "trusted" })).toBe(false);
+    expect(hookNeedsReview({ trustStatus: "managed" })).toBe(false);
+    expect(hookTrustLabel({ trustStatus: "modified" })).toBe("changed since it was trusted: skipped");
+    expect(hookTrustEdit([{ key: "a:stop:0:0", currentHash: "h1" }, { key: "b:stop:0:0", currentHash: "h2" }])).toEqual({
+      edits: [{ keyPath: "hooks.state", value: { "a:stop:0:0": { trusted_hash: "h1" }, "b:stop:0:0": { trusted_hash: "h2" } }, mergeStrategy: "upsert" }],
+      filePath: null, expectedVersion: null, reloadUserConfig: true,
+    });
+    expect(hookEnabledEdit("a:stop:0:0", false).edits).toEqual([{ keyPath: "hooks.state", value: { "a:stop:0:0": { enabled: false } }, mergeStrategy: "upsert" }]);
+    // A user's hook is listed once, however many folders were asked about.
+    const hook = { key: "u", trustStatus: "trusted" } as never;
+    expect(uniqueHooks([{ cwd: "/a", hooks: [hook], warnings: [], errors: [] }, { cwd: "/b", hooks: [hook], warnings: [], errors: [] }])).toHaveLength(1);
   });
 });
