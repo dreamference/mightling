@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from conftest import REAL_GATE_PROBE
 
-from dreamference.vllm_server import model_gate
+from dreamference.vllm_server import model_gate, model_gate_service
 from dreamference.vllm_server.model_gate import ModelGate
 from dreamference.vllm_server.model_gate_guard import ModelGateGuard as GateGuard
 from dreamference.vllm_server.model_gate_service import (
@@ -289,6 +289,27 @@ def test_the_loop_guards_cap_and_sampling_arm_reach_the_engine_as_fields(live):
         key: sent[key] for key in ("temperature", "top_p", "top_k", "min_p", "presence_penalty")
     } == {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5}
     assert sent["client_metadata"] == metadata and sent["input"] == "hi"
+
+
+def test_without_adapters_a_responses_body_the_guard_cannot_read_whole_streams_through(
+    live, monkeypatch
+):
+    # Above the gate's read limit: passed on untouched, as before the guard, never refused.
+    monkeypatch.setattr(model_gate_service, "BODY_LIMIT", 16)
+    body = responses_body(client_metadata={"ling_max_output_tokens": "4096"})
+    StandIn.second_chunk.set()
+    with post(live["port"], path="/v1/responses", body=body) as response:
+        assert response.status == 200 and b"[DONE]" in response.read()
+    assert StandIn.seen[-1][3] == body
+    # A chunked body, which Codex never sends, streams through too.
+    with socket.create_connection(("127.0.0.1", live["port"]), timeout=10) as client:
+        client.sendall(
+            b"POST /v1/responses HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n"
+            b"5\r\nhello\r\n0\r\n\r\n"
+        )
+        while client.recv(65536):
+            pass
+    assert StandIn.seen[-1][3] == b"hello"
 
 
 def test_a_value_the_client_set_wins_over_the_loop_guard():

@@ -26,7 +26,7 @@ Sampling is unchanged everywhere by default (owner, 2026-10-20); the non-thinkin
 
 SGLang v0.5.21 has a per-request thinking budget (`max_thinking_tokens`, enforced by the reasoner grammar), but only on the native `/generate` endpoint, and only with `--enable-strict-thinking`, which applies a token filter to every request's thinking server-wide. `/v1/responses`, the only endpoint `ling` speaks, carries neither it nor `custom_logit_processor`. And thinking is off anyway. So the budget is `max_output_tokens`, which `/v1/responses` honours.
 
-Codex builds the request body and offers no way to change it. What its extension API lets the launcher add is `client_metadata`, so the launcher names the cap there (`ling_max_output_tokens`, with `ling_surface` and, for the arm, `ling_sampling`), and the model gate, which reads every `/v1/responses` body, sets `max_output_tokens` (and the arm's sampling fields) **only where the body has none**. A body with no `ling_*` key is passed on byte for byte. The gate's probe answers `loop_guard: 1` when it has these rules.
+Codex builds the request body and offers no way to change it. What its extension API lets the launcher add is `client_metadata`, so the launcher names the cap there (`ling_max_output_tokens`, with `ling_surface` and, for the arm, `ling_sampling`), and the model gate, which reads each `/v1/responses` body sent whole and under 64 MB (anything else streams through untouched, as before), sets `max_output_tokens` (and the arm's sampling fields) **only where the body has none**. A body with no `ling_*` key is passed on byte for byte. The gate's probe answers `loop_guard: 1` when it has these rules.
 
 ## The detector
 
