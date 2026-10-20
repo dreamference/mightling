@@ -39,6 +39,8 @@ console: Final[Console] = Console()
 # where they keep it and this project is meant to work without a network.
 SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
 SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
+# `ling-admin remote` and `ling-admin node remote` (cli/remote_command.py).
+REMOTE_COMMAND: Final[str] = "remote"
 
 class DreamferenceCLIController:
     """
@@ -1301,6 +1303,8 @@ class DreamferenceCLIController:
         node_subparsers.add_parser("authorize", help="(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only")
         node_serve_parser = node_subparsers.add_parser("serve-job", help="(Run by sshd as a paired key's forced command) carry out one node operation")
         node_serve_parser.add_argument("--key", default=None, help="The connecting key's tag")
+        from dreamference.cli.remote_command import RemoteCommand
+        RemoteCommand.add_node_remote_parser(node_subparsers)
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
@@ -1416,6 +1420,9 @@ class DreamferenceCLIController:
         voice_subparsers.add_parser("stop", help="Remove the speech-to-text container; its model stays cached")
         voice_subparsers.add_parser("status", help="Show whether speech-to-text runs")
 
+        # Command: ling-admin remote (REMOTE_ACCESS: the node's NetBird overlay and its relay box)
+        remote_parser = RemoteCommand.add_remote_parser(subparsers)
+
         # Command: ling-admin matrix (the private homeserver behind `ling chat`'s Matrix adapter)
         matrix_parser = subparsers.add_parser(
             "matrix", help="Manage the private Matrix homeserver for chatting with Mightling from a phone"
@@ -1459,6 +1466,7 @@ class DreamferenceCLIController:
             ADAPTER_COMMAND: (adapter_parser, "adapter_command"),
             "voice": (voice_parser, "voice_command"),
             "matrix": (matrix_parser, "matrix_command"),
+            "remote": (remote_parser, "remote_command"),
         }
         if diffusion_model_parser is not None:
             parser.command_groups["diffusion-model"] = (diffusion_model_parser, "diffusion_model_command")
@@ -2617,6 +2625,9 @@ class DreamferenceCLIController:
                 sys.exit(FleetAskpass.ask())
             if args.node_command == "authorize":
                 sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
+            if args.node_command == REMOTE_COMMAND:
+                from dreamference.cli.remote_command import RemoteCommand
+                sys.exit(RemoteCommand.dispatch_node_remote(args))
             if args.node_command == "serve-job":
                 sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
             print("usage: ling-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
@@ -2799,6 +2810,10 @@ class DreamferenceCLIController:
 
         elif args.command == "voice":
             sys.exit(cls._run_voice(args.voice_command))
+
+        elif args.command == REMOTE_COMMAND:
+            from dreamference.cli.remote_command import RemoteCommand
+            sys.exit(RemoteCommand.dispatch_remote(args))
 
         elif args.command == "matrix":
             from dreamference.chat.matrix_homeserver import MatrixHomeserver
