@@ -1,5 +1,5 @@
 """
-`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}`
+`ling-admin swe-bench {setup,build,import,smoke,run,eval,report,status,clean}`
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §3).
 
 The parser and the dispatch live here so the CLI controller only registers and calls them.
@@ -15,6 +15,7 @@ from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
+from dreamference.swe_bench.swe_bench_image_builder import SweBenchImageBuilder
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
@@ -40,18 +41,35 @@ class SweBenchCommand:
         commands = parser.add_subparsers(dest="swe_bench_command")
 
         setup = commands.add_parser("setup", help="Install the harness, download the dataset, build the ling runtime for the instance images")
-        setup.add_argument("--dataset", default="verified", help="verified (default), lite, full, or a HuggingFace id")
+        setup.add_argument("--dataset", default="verified", help="verified (default), lite, full, rebench (every month of SWE-rebench), rebench-YYYY-MM (one month), or a HuggingFace id")
         setup.add_argument("--validate", action="store_true", help="Also check which instances grade correctly here (pulls their images)")
         setup.add_argument("--instances", default=None, help="With --validate: comma-separated instance ids")
         setup.add_argument("--limit", type=int, default=None, help="With --validate: only the first N instances, sorted by id")
         setup.add_argument("--force", action="store_true", help="With --validate: check again instances that already have a result")
+
+        build = commands.add_parser(
+            "build", help="SWE-rebench: build each instance's image for this machine's architecture, validate it, "
+                          "archive it for `import` and remove it (on any machine; no ling or model server needed)")
+        build.add_argument("--dataset", required=True, help="rebench-YYYY-MM (one month) or rebench (every month)")
+        build.add_argument("--instances", default=None, help="Comma-separated instance ids (default: the dataset's, sorted by id)")
+        build.add_argument("--limit", type=int, default=None, help="Only the first N instances")
+        build.add_argument("--force", action="store_true", help="Build again instances that already have a result")
+        build.add_argument("--keep-images", action="store_true", help="Leave each built image in Docker (default: removed once archived)")
+        build.add_argument("--memory", default=None, help="Memory cap of each build container (default [swe_bench] build_memory, 16G)")
+        build.add_argument("--cpus", type=int, default=None, help="CPU cap of each build container (default [swe_bench] build_cpus, 4)")
+        build.add_argument("--disk-reserve", default=None, help="Stop when less disk than this is free (default [swe_bench] disk_reserve)")
+        build.add_argument("--dry-run", action="store_true", help="Print the commands the first instance's build would run, and nothing else")
+
+        imported = commands.add_parser("import", help="SWE-rebench: take in the validated images another machine built (its archive folder)")
+        imported.add_argument("folder", help="A copy of the builder's ~/.cache/dreamference/swe-bench/rebench-images")
+        imported.add_argument("--dataset", required=True, help="rebench-YYYY-MM or rebench, as built")
 
         smoke = commands.add_parser("smoke", help="Prove the whole pipeline on five instances; run refuses until this has passed")
         smoke.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         smoke.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
 
         run = commands.add_parser("run", help="The agent phase: one ling exec per instance, producing predictions.jsonl")
-        run.add_argument("--dataset", default="verified", help="verified (default), lite, full, or a HuggingFace id")
+        run.add_argument("--dataset", default="verified", help="verified (default), lite, full, rebench (every month of SWE-rebench), rebench-YYYY-MM (one month), or a HuggingFace id")
         run.add_argument("--instances", default=None, help="Comma-separated instance ids")
         run.add_argument("--subset", default=None, help="A file of instance ids, one per line")
         run.add_argument("--limit", type=int, default=None, help="Only the first N selected instances, sorted by id")
@@ -157,6 +175,11 @@ class SweBenchCommand:
         command = getattr(args, "swe_bench_command", None)
         if command == "setup":
             return cls.setup(args.dataset, args.validate, cls._ids(args.instances), args.limit, args.force)
+        if command == "build":
+            return cls.build(args.dataset, cls._ids(args.instances), args.limit, args.force, args.keep_images,
+                             args.memory, args.cpus, args.disk_reserve, args.dry_run)
+        if command == "import":
+            return cls.import_images(args.folder, args.dataset)
         if command == "smoke":
             return cls.smoke(args.idle_minutes, args.ignore_open_sessions)
         if command == "run":
@@ -182,7 +205,7 @@ class SweBenchCommand:
             return cls.status()
         if command == "clean":
             return cls.clean(args.run, args.images)
-        print("usage: ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}")
+        print("usage: ling-admin swe-bench {setup,build,import,smoke,run,eval,report,status,clean}")
         return 2
 
     @classmethod
@@ -221,11 +244,19 @@ class SweBenchCommand:
         if meta is None:
             return 1
         print(f"✅ Dataset {meta.get('dataset')}: {meta.get('rows')} instances, revision {str(meta.get('revision'))[:12]}")
-        ids = [row["instance_id"] for row in SweBenchHarness.rows(dataset)]
-        tags = SweBenchImages.tags(refresh=True)
-        with_image = [i for i in ids if SweBenchImages.image_for(i, tags)]
-        print(f"✅ {architecture} images: {len(with_image)} of {len(ids)} instances "
-              f"({swe_bench_settings.COMMUNITY_IMAGE_REPO}, third-party); the rest are not evaluable here")
+        rows = SweBenchHarness.rows(dataset)
+        ids = [row["instance_id"] for row in rows]
+        if swe_bench_settings.SweBenchSettings.is_rebench(dataset):
+            print(f"💡 {swe_bench_settings.REBENCH_POOL_NOTE}.")
+            with_image = [row["instance_id"] for row in rows
+                          if SweBenchImages.image_for(row["instance_id"], [], dataset, row)]
+            print(f"✅ {architecture} images: {len(with_image)} of {len(ids)} instances built or archived here "
+                  "(`ling-admin swe-bench build` makes them, on any machine; `import` takes them in)")
+        else:
+            tags = SweBenchImages.tags(refresh=True)
+            with_image = [i for i in ids if SweBenchImages.image_for(i, tags)]
+            print(f"✅ {architecture} images: {len(with_image)} of {len(ids)} instances "
+                  f"({swe_bench_settings.COMMUNITY_IMAGE_REPO}, third-party); the rest are not evaluable here")
         mightling_bin = SweBenchRuntime.installed_mightling()
         if not mightling_bin:
             print("❌ ling is not built: run `ling-admin codex build` first.")
@@ -246,8 +277,101 @@ class SweBenchCommand:
             for instance_id, problem in sorted(outcome.items()):
                 if problem:
                     print(f"   {instance_id}: {problem}")
-            print(f"✅ {len(good)} of {len(wanted)} validated; list: {SweBenchImages.validated_path()}")
+            print(f"✅ {len(good)} of {len(wanted)} validated; list: {SweBenchImages.validated_path(dataset)}")
         return 0
+
+    # -- SWE-rebench's images ------------------------------------------------------------------
+
+    @classmethod
+    def build(cls, dataset: str, instances: Optional[List[str]] = None, limit: Optional[int] = None,
+              force: bool = False, keep_images: bool = False, memory: Optional[str] = None,
+              cpus: Optional[int] = None, disk_reserve: Optional[str] = None, dry_run: bool = False) -> int:
+        """
+        Builds, validates and archives SWE-rebench instance images, one instance at a time, on
+        whatever machine this runs on (`SweBenchImageBuilder.build_all`). It takes the runner lock,
+        so on a machine that also runs the benchmark a build and a run never overlap.
+
+        Args:
+            dataset: `rebench-YYYY-MM` or `rebench`.
+            instances: The instances; default every one of the dataset, sorted by id.
+            limit: Only the first N.
+            force: Build again instances that already have a result.
+            keep_images: Leave the built images in Docker.
+            memory: The build containers' memory cap.
+            cpus: Their CPU cap.
+            disk_reserve: Stop when less disk than this is free.
+            dry_run: Print the first instance's build commands and stop.
+
+        Returns:
+            int: 0 when every instance has a result (validated or not).
+        """
+        from dreamference.night_shift import NightShiftQueue
+        if not swe_bench_settings.SweBenchSettings.is_rebench(dataset):
+            print(f"❌ build makes SWE-rebench images (rebench-YYYY-MM); {dataset} has its images published.")
+            return 2
+        settings = swe_bench_settings.SweBenchSettings()
+        settings.build_memory = memory or settings.build_memory
+        settings.build_cpus = max(1, cpus) if cpus else settings.build_cpus
+        settings.disk_reserve = disk_reserve or settings.disk_reserve
+        if not dry_run and SweBenchDocker.run(["info", "--format", "{{.ServerVersion}}"], timeout=60).returncode != 0:
+            print("❌ Docker is not answering.")
+            return 1
+        if not SweBenchHarness.install():
+            return 1
+        meta = SweBenchHarness.download_dataset(dataset)
+        if meta is None:
+            return 1
+        rows = SweBenchHarness.rows(dataset)
+        known = {row["instance_id"] for row in rows}
+        wanted = instances or sorted(known)
+        unknown = [i for i in wanted if i not in known]
+        if unknown:
+            print(f"❌ not in {dataset}: {', '.join(unknown[:5])}")
+            return 1
+        wanted = wanted[:limit] if limit else wanted
+        print(f"💡 {swe_bench_settings.REBENCH_POOL_NOTE}.")
+        if dry_run:
+            first = next(row for row in rows if row["instance_id"] == wanted[0])
+            print(SweBenchImageBuilder.describe(first), end="")
+            return 0
+        with NightShiftQueue.runner_lock(NightShiftQueue.night_dir(), holder="a SWE-rebench image build") as held:
+            if not held:
+                print(f"⚠️  {NightShiftQueue.runner_holder() or 'Another run'} holds the runner lock.")
+                return 1
+            print(f"🔨 Building {len(wanted)} {swe_bench_settings.SweBenchSettings.architecture()} image(s) of "
+                  f"{meta.get('dataset')}, one at a time, each capped at {settings.build_memory} and "
+                  f"{settings.build_cpus} CPUs; logs in {swe_bench_settings.BUILD_DIR}")
+            outcome = SweBenchImageBuilder.build_all(dataset, wanted, settings, force=force, keep_images=keep_images)
+        good = [i for i, problem in outcome.items() if problem is None]
+        print(f"✅ {len(good)} of {len(wanted)} validated and archived in {swe_bench_settings.ARCHIVE_DIR}; "
+              f"{len(outcome) - len(good)} not usable, {len(wanted) - len(outcome)} not reached.")
+        print(f"💡 On the machine that runs the benchmark: copy {swe_bench_settings.ARCHIVE_DIR} there "
+              f"(e.g. rsync -a <this machine>:{swe_bench_settings.ARCHIVE_DIR}/ <folder>/), then "
+              f"`ling-admin swe-bench import <folder> --dataset {dataset}`.")
+        return 0 if len(outcome) == len(wanted) else 1
+
+    @classmethod
+    def import_images(cls, folder: str, dataset: str) -> int:
+        """
+        Takes in another machine's built and validated SWE-rebench images (`SweBenchImages.import_archives`).
+
+        Args:
+            folder: The builder's archive folder, copied here.
+            dataset: The dataset they were built for.
+
+        Returns:
+            int: 0 when every validated instance in the folder was taken in.
+        """
+        from pathlib import Path
+        if not swe_bench_settings.SweBenchSettings.is_rebench(dataset):
+            print(f"❌ import takes in SWE-rebench images (rebench-YYYY-MM), not {dataset}.")
+            return 2
+        taken, problems = SweBenchImages.import_archives(Path(folder).expanduser(), dataset)
+        for problem in problems:
+            print(f"   ⚠️  {problem}")
+        print(f"✅ {taken} validated instance(s) taken in; list: {SweBenchImages.validated_path(dataset)}; "
+              f"archives: {swe_bench_settings.ARCHIVE_DIR}")
+        return 0 if not problems else 1
 
     # -- smoke ---------------------------------------------------------------------------------
 
@@ -410,6 +534,9 @@ class SweBenchCommand:
         print(f"Smoke: {'passed' if SweBenchRunner.smoke_passed() else 'not passed with this harness version'}")
         print(f"Validated here: {len(SweBenchImages.validated())} instance(s); "
               f"rejected: {len(SweBenchImages.rejected())}")
+        if SweBenchImages.validated("rebench") or SweBenchImages.rejected("rebench"):
+            print(f"SWE-rebench validated: {len(SweBenchImages.validated('rebench'))} instance(s); "
+                  f"rejected: {len(SweBenchImages.rejected('rebench'))}")
         for name in SweBenchRunStore.runs():
             summary = SweBenchReport.summary(SweBenchRunStore(name), details=False) or {}
             print(f"  {name}: {summary.get('finished', 0)} of {summary.get('validated', 0)} run, "

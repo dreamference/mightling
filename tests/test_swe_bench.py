@@ -25,7 +25,7 @@ from dreamference.night_shift.refine_prompt import FIX_RULES, FIX_RULES_V2, STUD
 from dreamference.swe_bench import (
     SweBenchCodeIndex, SweBenchCommand, SweBenchDocker, SweBenchEvaluator, SweBenchHarness, SweBenchImages,
     SweBenchHooks, SweBenchInstanceRun, SweBenchIssueGate, SweBenchIssueTargets, SweBenchNameStripper,
-    SweBenchReport, SweBenchRunStore, SweBenchRunner, SweBenchRuntime, SweBenchSettings,
+    SweBenchRebenchRows, SweBenchReport, SweBenchRunStore, SweBenchRunner, SweBenchRuntime, SweBenchSettings,
 )
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS
@@ -151,7 +151,11 @@ class FakeDocker:
                 process.stopped = True
             return done()
         if verb == "images":
-            return done(0, "".join(f"{image}\t2.2GB\n" for image in sorted(self.present)))
+            return done(0, "".join(f"{image}\t2.2GB\n" for image in sorted(self.present)
+                                   if image.startswith(args[1] + ":")))
+        if verb == "load":  # a built SWE-rebench image's archive, named after its tag
+            self.present.add(f"mightling-swe-rebench-arm64:{Path(args[-1]).name[:-len('.tar.gz')]}")
+            return done()
         if verb == "rmi":
             self.present.discard(args[-1])
             return done()
@@ -424,7 +428,7 @@ class FakeHarness:
         run_id = command[command.index("--run-id") + 1]
         ids = [command[i + 1] for i, word in enumerate(command) if word == "-i"]
         dataset = [json.loads(line) for line in Path(command[2]).read_text().splitlines()]
-        assert all(entry["image"].startswith(REPOSITORY) for entry in dataset)
+        assert all(entry["image"].startswith((REPOSITORY, "mightling-swe-rebench-arm64:")) for entry in dataset)
         if "--gold" in command:
             verdicts = {i: ("gold", i not in self.bad_gold, True) for i in ids}
         else:
@@ -1056,6 +1060,43 @@ def test_the_manifest_records_what_was_measured(bench):
     assert manifest["images"]["acme__widget-1"]["image"] == f"{REPOSITORY}:acme-widget-1"
     with pytest.raises(FileExistsError):
         SweBenchRunStore("r1").write_manifest({})
+
+
+def test_a_rebench_month_runs_in_imported_images_and_its_report_names_the_pool(bench, monkeypatch):
+    """SWE-rebench (spec §27): the images built and validated elsewhere are loaded from their archives,
+    the run is graded in them, and the manifest and the report say what kind of tasks these are."""
+    monkeypatch.setattr(SweBenchSettings, "architecture", classmethod(lambda cls: "arm64"))
+    dataset = "rebench-2026-03"
+    ids = ["acme__widget-1", "acme__widget-2"]
+    config = {"install": "pip install -e .", "log_parser": "parse_log_pytest", "python": "3.12",
+              "test_cmd": "pytest -rA", "packages": ""}
+    snapshot = SweBenchHarness.snapshot_path(dataset)
+    snapshot.write_text("".join(json.dumps(SweBenchRebenchRows.adapt(dict(
+        row(i), install_config=config, docker_image=f"swerebench/sweb.eval.x86_64.{i}:latest"))) + "\n" for i in ids))
+    snapshot.with_suffix(".meta.json").write_text(json.dumps(
+        {"revision": "rev-r", "rows": 2, "dataset": SweBenchSettings.dataset_id(dataset)}))
+    for instance_id in ids:
+        image = SweBenchImages.built_image(instance_id)
+        archive = SweBenchImages.archive_path(image)
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_bytes(b"archive")
+        SweBenchImages.record_validation(instance_id, image, "sha256:built", None, dataset,
+                                         {"archive": {"file": archive.name}, "built_on": "builder-1"})
+    assert run(bench, dataset=dataset, evaluate=True) == 0
+    store = SweBenchRunStore("r1")
+    manifest = store.manifest()
+    assert manifest["dataset"] == "nebius/SWE-rebench-leaderboard:2026_03"
+    assert "not contamination-free" in manifest["task_pool"]
+    assert manifest["image_source"] == "built from the SWE-rebench fork's recipes for arm64 on builder-1"
+    assert manifest["images"]["acme__widget-1"]["image"] == "mightling-swe-rebench-arm64:acme-widget-1"
+    verbs = [call[0] for call in bench["docker"].calls]
+    assert verbs.count("load") == 2 and "pull" not in verbs
+    graded = [json.loads(line) for line in Path(bench["harness"].calls[-1][2]).read_text().splitlines()]
+    assert {entry["image"] for entry in graded} <= {SweBenchImages.built_image(i) for i in ids}
+    assert all("git checkout" not in entry["eval_script"] or "cat-file" in entry["eval_script"] for entry in graded)
+    text = SweBenchReport.write(store)
+    assert "Task pool: SWE-rebench: an extra task pool" in text
+    assert SweBenchImages.validated() == {}, "Verified's validated list never holds a SWE-rebench task"
 
 
 def test_the_report_counts_add_up_and_says_what_the_number_is_not(bench):

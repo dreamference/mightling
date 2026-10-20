@@ -7,6 +7,7 @@ the patches (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 from dreamference.swe_bench.swe_bench_settings import SweBenchSettings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
+from dreamference.swe_bench.swe_bench_rebench_rows import SweBenchRebenchRows
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
@@ -19,6 +20,7 @@ from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
+from dreamference.swe_bench.swe_bench_image_builder import SweBenchImageBuilder
 from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
@@ -34,12 +36,14 @@ __all__ = [
     "SweBenchGateHold",
     "SweBenchHarness",
     "SweBenchHooks",
+    "SweBenchImageBuilder",
     "SweBenchImages",
     "SweBenchInstanceRun",
     "SweBenchIssueGate",
     "SweBenchIssueTargets",
     "SweBenchNameStripper",
     "SweBenchPatchFilter",
+    "SweBenchRebenchRows",
     "SweBenchRelay",
     "SweBenchReport",
     "SweBenchRunStore",

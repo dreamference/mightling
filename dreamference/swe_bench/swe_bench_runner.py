@@ -252,6 +252,28 @@ class SweBenchRunner:
             cls.sleep(poll)
 
     @classmethod
+    def image_source(cls, dataset: str, records: List[Dict[str, Any]]) -> str:
+        """
+        Names where a run's images come from, for the manifest and the grader's identity.
+
+        Args:
+            dataset: The run's dataset.
+            records: The validated records of its instances.
+
+        Returns:
+            str: `community (greynewell/swe-bench-arm64)` for Verified; for SWE-rebench the
+            recipe its images were built from and the machines that built them.
+        """
+        if not swe_bench_settings.SweBenchSettings.is_rebench(dataset):
+            return f"community ({swe_bench_settings.COMMUNITY_IMAGE_REPO})"
+        if swe_bench_settings.SweBenchSettings.architecture() == "amd64":
+            return "published (swerebench)"
+        hosts = sorted({str(record.get("built_on")) for record in records if record.get("built_on")})
+        return ("built from the SWE-rebench fork's recipes for "
+                f"{swe_bench_settings.SweBenchSettings.architecture()}"
+                + (f" on {', '.join(hosts)}" if hosts else ""))
+
+    @classmethod
     def build_manifest(cls, name: str, dataset: str, selected: List[str], excluded: Dict[str, str],
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
                        runtime_hash: str, mightling_bin: str, parallel: int,
@@ -272,8 +294,9 @@ class SweBenchRunner:
         from dreamference.hardware import model_key_for_served_id
         from dreamference.runner.codex_branded_builder import CODEX_RELEASE_TAG, REPO_ROOT
         config = DreamferenceConfig()
-        validated = SweBenchImages.validated()
+        validated = SweBenchImages.validated(dataset)
         meta = SweBenchHarness.dataset_meta(dataset)
+        rebench = swe_bench_settings.SweBenchSettings.is_rebench(dataset)
         served_id, context = served
         try:
             alias = model_key_for_served_id(served_id, config.model)
@@ -298,7 +321,8 @@ class SweBenchRunner:
             "dataset_rows": meta.get("rows"),
             "harness": SweBenchHarness.installed_version(),
             "architecture": swe_bench_settings.SweBenchSettings.architecture(),
-            "image_source": f"community ({swe_bench_settings.COMMUNITY_IMAGE_REPO})",
+            "image_source": cls.image_source(dataset, [validated[i] for i in selected if i in validated]),
+            **({"task_pool": swe_bench_settings.REBENCH_POOL_NOTE} if rebench else {}),
             "images": {i: {"image": validated[i]["image"], "digest": validated[i].get("digest")}
                        for i in selected if i in validated},
             "instances": [i for i in selected if i not in excluded],
@@ -647,7 +671,7 @@ class SweBenchRunner:
                         image = manifest["images"][instance_id]["image"]
                         pulled = cycling and SweBenchDocker.image_digest(image) is None
                         record = SweBenchCodeIndex.ensure(rows[instance_id], image, arm) \
-                            if SweBenchDocker.ensure_image(image) else None
+                            if SweBenchImages.ensure(image) else None
                         if pulled:
                             SweBenchImages.remove([image])
                         if record is None:
@@ -861,7 +885,7 @@ class SweBenchRunner:
 
     @classmethod
     def _run_one(cls, run: SweBenchInstanceRun) -> None:
-        if SweBenchDocker.ensure_image(run.image) is None:
+        if SweBenchImages.ensure(run.image) is None:
             run.store.write_state(run.instance_id, {"instance_id": run.instance_id, "status": "error",
                                                     "notes": ["the image could not be pulled"]})
             run.store.append_prediction(run.instance_id, run.model_name, "")
