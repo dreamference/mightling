@@ -414,7 +414,7 @@ While a night run holds its lock, `server start`, `codex build` and `index` refu
 
 - **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+, and Maven and Gradle when installed) the optional indexers need. The index itself is the Rust binary `ling-code`, built and linked by `codex build`. See `DREAMFERENCE_MIGHTLING_CODE_INDEX.md`.
 - **`searxng start`:** creates the SearXNG container on the project network `dreamference-sidecars`, published on `127.0.0.1:8888` only. A container found on Docker's default bridge is replaced. See `DREAMFERENCE_DOCKER.md` §6. On a node that `node enable` advertised (§4.25) it is published beyond loopback instead.
-  It first writes `~/.config/searxng/settings.yml` (`SearxngSettings`): the JSON format, the limiter off, and the general engines (since 2026-10-20 Mwmbl, Yep, Seznam and Yandex beside Brave, Google, Startpage and Wikipedia; DuckDuckGo off), with suspensions of 15 minutes for "too many requests" and "access denied". The file carries a version line; a file with it (or the hand-made first line of older installs) is rewritten when the version is newer, keeping its `secret_key`, and the running container is restarted to read it. A file without it is the user's own and is left alone.
+  It first writes `~/.config/searxng/settings.yml` (`SearxngSettings`): the JSON format, the limiter off, every engine that answered from this machine on 2026-10-20, each in its own category, and none run by a Russian or Chinese company (removed outright; the list and the owners are in `DREAMFERENCE_MIGHTLING_AIRGAPPED.md` §14.10), with suspensions of 15 minutes for "too many requests" and "access denied". The file carries a version line; a file with it (or the hand-made first line of older installs) is rewritten when the version is newer, keeping its `secret_key`, and the running container is restarted to read it. A file without it is the user's own and is left alone.
 - **`searxng status`:** each general engine's state, from the container's logs since it started: `suspended` until when and why (SearXNG logs every suspension with its length), `failing` (an error in the last 15 minutes, for an engine that is not suspended, such as a CAPTCHA with a zero-second suspension), `not loaded` (its start-up failed), `ok` (no error logged recently; SearXNG does not log successes) or `off`. It sends no search. Exit 0 when a web engine is ok, 1 when none is, 2 when SearXNG is not running.
 
 ### 4.23. `ling-admin swe-bench`
@@ -560,7 +560,7 @@ num_scheduler_steps = 8
 attention_backend = "auto"
 # kv_cache_dtype unset = use the model recipe's value
 mightling_gmail = true
-mightling_cave_mode = "ultra"
+mightling_cave_mode = "lite"   # off | lite | full | ultra; unset: lite, the TUI full
 mightling_airgapped = "off"     # off | on
 mightling_compaction_ledger = true    # hand the agent a rule-built ledger after each compaction
 mightling_prompt = "default"    # the system prompt new sessions get (ling prompt use <name>)
@@ -604,7 +604,7 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_MIGHTLING_GMAIL` | `true` | Add the Gmail section to `ling`'s prompt when an account is connected |
 | `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW` | unset | The model's context window in tokens, overriding what the server reports (also `mightling_context_window` in the config file). Without either, `ling` reads `max_model_len`, `context_length` or `max_context_length` from `/v1/models`, then llama.cpp's `/props` `n_ctx`, then its `n_ctx_train`, else assumes 32,768. Ollama reports none, so set it there |
-| `DREAMFERENCE_MIGHTLING_CAVE_MODE` | `ultra` | Cave-mode level for new `ling` sessions (`off`, `lite`, `full`, `ultra`); also the config key `mightling_cave_mode` |
+| `DREAMFERENCE_MIGHTLING_CAVE_MODE` | `lite` (the TUI: `full`) | Cave-mode level for new `ling` sessions (`off`, `lite`, `full`, `ultra`); also the config key `mightling_cave_mode` |
 | `DREAMFERENCE_MIGHTLING_COMPAT` | `off` | The compatibility mode (`claude` or `off`; `--compat` on the command line sets it for the process and what it starts); also the config key `mightling_compat`, which `ling compat use` writes and which is read only from `~/.config/dreamference/config.toml`, never from a repository's `dreamference.toml` or `DREAMFERENCE_CONFIG_PATH`. A value naming no mode stops the start, from the flag or the variable; from the file it is reported and the mode stays off. Fixed for a session's life (`DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §0.4) |
 | `DREAMFERENCE_MIGHTLING_PROMPT` | `default` | System prompt for new `ling` sessions (`default`, `offline`, `high-swe`, `ask`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `mightling_prompt`, which `ling prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |
 | `DREAMFERENCE_MIGHTLING_AIRGAPPED` | `off` | How much of the internet a `ling` session may use (`off`, `on`); also the config key `mightling_airgapped` |

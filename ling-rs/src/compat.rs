@@ -335,9 +335,45 @@ fn status_lines(resolved: &Resolved) -> Vec<String> {
 fn doctor_lines(resolved: &Resolved) -> Vec<String> {
     let mut lines = status_lines(resolved);
     lines.push(String::new());
-    lines.push("In this build the mode is the switch alone. The interface, the command names, CLAUDE.md, \
-                .claude/ settings, commands, agents and hooks follow phase by phase \
-                (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
+    let dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let codex_home = codex_utils_home_dir::find_codex_home().ok().map(|home| home.as_path().to_path_buf());
+    lines.extend(interface_lines(&dir, codex_home.as_deref()));
+    lines.push(String::new());
+    lines.push("Not built yet: CLAUDE.md, .claude/ settings, commands, agents and hooks, the slash-command names \
+                and the interface hooks follow phase by phase (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
+        .to_string());
+    lines
+}
+
+/// The interface part of `ling compat doctor`: the renderer a TUI session here would start in, the
+/// key bindings written, and what behaves differently from Claude Code.
+fn interface_lines(dir: &Path, codex_home: Option<&Path>) -> Vec<String> {
+    use crate::compat_tui;
+    let config_text = codex_home.and_then(|home| std::fs::read_to_string(home.join("config.toml")).ok()).unwrap_or_default();
+    let home = ling_node_locator::home_dir();
+    let inputs = compat_tui::RendererInputs {
+        no_alt_screen_flag: false,
+        disable_alternate_screen: std::env::var(compat_tui::DISABLE_ALTERNATE_SCREEN_ENV).ok(),
+        no_flicker: std::env::var(compat_tui::NO_FLICKER_ENV).ok(),
+        codex_config_sets_screen: compat_tui::config_sets_screen(&config_text),
+        claude_tui: compat_tui::claude_tui_setting(&compat_tui::project_root(dir), home.as_deref()),
+    };
+    let renderer = match compat_tui::choose_renderer(&inputs) {
+        Some(compat_tui::Renderer::Classic) => "classic (inline, the conversation in the terminal's scrollback)".to_string(),
+        Some(compat_tui::Renderer::Fullscreen) => "fullscreen (the alternate screen)".to_string(),
+        None => "as tui.alternate_screen / tui.fullscreen_transcript in config.toml say (Mightling's own /tui choice)".to_string(),
+    };
+    let mut lines = vec![format!("Interface: {renderer}.")];
+    let keys = compat_tui::keymap_settings(&compat_tui::user_keymap(&config_text));
+    lines.push(format!(
+        "Keys: {} binding(s) written for the session (Ctrl+O opens and closes the transcript; g, G and b in the pager); \
+         your own [tui.keymap] wins over them.",
+        keys.len()
+    ));
+    lines.push("Different from Claude Code: Ctrl+L clears the terminal's scrollback in the classic renderer; \
+                CLAUDE_CODE_DISABLE_MOUSE is not honoured (the mouse is captured only in fullscreen and the transcript); \
+                Shift+Tab, a second press to exit, \\+Enter for a newline and the transcript written to the scrollback \
+                are not built yet."
         .to_string());
     lines
 }

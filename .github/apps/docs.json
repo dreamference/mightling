@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-docs",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Docs & Specs team's bot: commits, pull requests and reviews for the user docs, the specs, the website and the papers. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

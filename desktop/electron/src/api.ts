@@ -32,6 +32,9 @@ export type FromView =
   | { type: "work/airgapped"; thread: string | null }
   /** `/airgapped default <level>` from the composer: the level new threads start at. */
   | { type: "work/airgapped-default"; level: "off" | "on" }
+  /** How terse answers are (cavemode.ts): the level in force for a thread or a new session, and a change. */
+  | { type: "cave/status"; thread: string | null }
+  | { type: "cave/set"; level: string; thread: string | null }
   /** An attachment for an Ask thread, written into its folder (ask.ts); the bytes base64. */
   | { type: "ask/upload"; thread: string; name: string; kind: "image" | "file"; data: string }
   /** The microphone's recording, for text (voice.ts); the bytes base64. */
@@ -166,6 +169,16 @@ export interface Started {
 export interface Airgapped {
   level: "off" | "on";
   source: string;
+}
+
+/** `ling cavemode --json`: the level in force, where it came from, the configured one and the defaults. */
+export interface CaveMode {
+  level: string;
+  source: string;
+  configured: string | null;
+  default: string;
+  tuiDefault: string;
+  levels: { name: string; summary: string }[];
 }
 
 /** A piece of a payload too big for one message. */

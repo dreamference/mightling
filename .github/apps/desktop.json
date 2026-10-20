@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-desktop",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Desktop team's bot: commits, pull requests and reviews for the Electron desktop app and Work's interface. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

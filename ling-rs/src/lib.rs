@@ -43,6 +43,7 @@ pub mod cave;
 pub mod chat;
 pub mod code_index;
 pub mod compat;
+pub mod compat_tui;
 pub mod compaction;
 pub mod docs_index;
 pub mod exec_tool;
@@ -141,6 +142,17 @@ You have web access through two shell commands, run like any other command:
     ling-search --read "your question here"    # search and read the top 3 pages; --pages N (1-5)
     ling-fetch "https://example.com"           # fetch a page as readable text
 
+A plain search asks web search engines and Wikipedia. For anything else, name what you want:
+
+    ling-search -c news -t week "query"        # news; -t day|week|month|year keeps recent results
+    ling-search -c science "query"             # papers: arXiv, PubMed, Semantic Scholar, OpenAlex
+    ling-search -c it "query"                  # code: GitHub, Stack Overflow, crates.io, npm, PyPI, MDN
+    ling-search -c map "place"                 # places and addresses (OpenStreetMap)
+    ling-search -c videos|music|books|files|dictionaries|social|movies "query"
+
+The language is detected from the query, so a question in Portuguese, Ukrainian or German gets
+results and Wikipedia in that language; `-l en` (or `pt`, `uk`, `fr`, `de`, `es`) sets it instead.
+
 Use them whenever the answer depends on something you cannot know from training or from the files
 in front of you: today's weather or tides, current events, release versions, live documentation,
 anything dated. For a quick lookup (a version number, an error message, a URL) use plain
@@ -156,9 +168,10 @@ which looks like the site being down rather than the command being unavailable.
 There is no web search *tool* — do not look for one. Search is a shell command, shown above.
 
 Queries go to a SearXNG instance on this machine, which contacts upstream engines on your behalf:
-no API key, no account, and no query addressed to a search company. For a programming question,
-`!st` at the start of the query searches Stack Overflow and `!gh` GitHub. Repeating a query within
-the hour costs nothing: the answer is kept. If search says it is unavailable, do not try to repair
+no API key, no account, and no query addressed to a search company. Results that several engines
+agree on come first, and the same page is listed once. `!st` at the start of a query searches
+Stack Overflow alone, `!gh` GitHub, `!wp` Wikipedia. Repeating a query within the hour costs
+nothing: the answer is kept. If search says it is unavailable, do not try to repair
 it, restart anything or run docker: read a page you know with `ling-fetch` (Wikipedia, the
 project's documentation) or tell the user that web search is unavailable right now.
 
@@ -302,6 +315,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "airgapped"
     {
         std::process::exit(airgapped::run_cli(&user_args[index + 1..]));
+    }
+    // `cavemode` shows or sets how terse answers are (cave.rs), as `/cavemode` does inside a
+    // session; `ling web`, the desktop app and the phone bridges set it through this.
+    if let Some(index) = subcommand
+        && user_args[index] == "cavemode"
+    {
+        std::process::exit(cave::run_cli(&user_args[index + 1..]));
     }
     // `node` lists, chooses or forgets the Mightling node this machine uses (node.rs).
     if let Some(index) = subcommand
@@ -533,6 +553,14 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
+    // The TUI starts at its own cave level when nothing is configured (cave.rs; spec §11.5).
+    cave::set_tui(tui);
+    // The compatibility mode's renderer and key map, for this session only (compat_tui.rs).
+    let args = if compat_tui::applies(compat_mode.mode, tui) {
+        compat_tui::prepare(args, &user_args, &codex_home, &code_index::session_dir(&user_args))
+    } else {
+        args
+    };
     // Refine mode's hook for the interactive session; before the notice, which shows its line.
     refine::register_hook(&codex_home, tui);
     notice::publish(&codex_home, tui);
