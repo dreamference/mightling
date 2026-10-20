@@ -69,13 +69,13 @@ def test_a_misspelt_restart_arm_ends_the_night_before_any_round(tmp_path, arm):
 
 
 def test_the_apply_patch_arm_reaches_only_the_candidates_round(tmp_path):
-    status, recorded, folder = night(tmp_path, "default apply-patch-function")
+    status, recorded, folder = night(tmp_path, "default apply-patch-off")
     assert status == 0 and (folder / "done").exists()
     record, candidate = runs(recorded)
     assert "--name n4-default " in record and "--apply-patch" not in record
-    assert "--name n4-apply-patch-function " in candidate and candidate.count("--apply-patch function") == 1
+    assert "--name n4-apply-patch-off " in candidate and candidate.count("--apply-patch off") == 1
     assert "--task-rules" not in candidate
-    assert "swe-bench report n4-apply-patch-function --against n4-default" in recorded
+    assert "swe-bench report n4-apply-patch-off --against n4-default" in recorded
     # It stacks with the other arms like any part.
     stacked = tmp_path / "stacked"
     stacked.mkdir()
@@ -84,7 +84,8 @@ def test_the_apply_patch_arm_reaches_only_the_candidates_round(tmp_path):
     assert "--restart-after-compactions 2 --apply-patch freeform" in candidate
 
 
-@pytest.mark.parametrize("arm", ["apply-patch", "apply-patch-func", "apply_patch-function"])
+# `apply-patch-function` too: the pinned Codex has no function form, and ling refuses to start with one.
+@pytest.mark.parametrize("arm", ["apply-patch", "apply-patch-func", "apply_patch-function", "apply-patch-function"])
 def test_a_misspelt_apply_patch_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default {arm}")
     assert status == 2 and runs(recorded) == []
@@ -358,7 +359,7 @@ def test_best_of_takes_exactly_one_arm(tmp_path):
 
 
 def test_without_best_of_the_night_is_the_two_arm_night(tmp_path):
-    status, recorded, _ = best_of_night(tmp_path, arms="default apply-patch-function", best_of="1")
+    status, recorded, _ = best_of_night(tmp_path, arms="default apply-patch-off", best_of="1")
     assert status == 0
-    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n11-default", "n11-apply-patch-function"]
+    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n11-default", "n11-apply-patch-off"]
     assert not any("--seed 20261013" in line for line in recorded)
