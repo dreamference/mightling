@@ -23,7 +23,8 @@ import { ThreadLoader } from "./loader";
 import { inGitInternals } from "./files";
 import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
-import { APPEARANCE_TOKENS, DEFAULT_PREFS, cleanAppearance, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
+import { APPEARANCE_TOKENS, DEFAULT_PREFS, appearanceFor, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
+import { theme, useShownTheme } from "./theme";
 import { RpcClient, type ParamsOf } from "./rpc";
 import type { FuzzyFileSearchResult } from "./protocol/FuzzyFileSearchResult";
 import type { ServerNotification } from "./protocol/ServerNotification";
@@ -886,16 +887,18 @@ export function App() {
     if (answer.thread) dispatch({ type: "threads", list: [answer.thread] });
   }, [client]);
 
-  // Settings › Appearance: the colour and font tokens over the light base.
+  // Settings › Appearance: the theme (theme.ts), then the colour and font tokens over the theme shown.
+  useEffect(() => theme()?.setChoice(prefs.theme), [prefs.theme]);
+  const shownTheme = useShownTheme();
   useEffect(() => {
     const root = document.documentElement;
-    const chosen = cleanAppearance(prefs.appearance);
+    const chosen = appearanceFor(prefs.appearance, shownTheme);
     for (const [key, token] of Object.entries(APPEARANCE_TOKENS)) {
       const value = chosen[key as keyof typeof chosen];
       if (value) root.style.setProperty(token, value);
       else root.style.removeProperty(token);
     }
-  }, [prefs.appearance]);
+  }, [prefs.appearance, shownTheme]);
 
   // The user's shortcuts (applied as the page renders, so a handler never sees stale keys), the text
   // size and back/forward follow the window's state.
