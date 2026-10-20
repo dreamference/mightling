@@ -1,0 +1,50 @@
+{
+  "id": "s2-page-image",
+  "family": "S2",
+  "failure": [
+    1
+  ],
+  "turns": [
+    {
+      "text": "",
+      "images": [
+        {
+          "kind": "page",
+          "spec": {
+            "shop": "Example Cycles",
+            "name": "Trailhead 2 Bike Lock",
+            "price": "€39.90",
+            "lines": [
+              "In stock",
+              "Free delivery over €50"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "Trailhead"
+      ],
+      [
+        "39.90",
+        "39,90"
+      ]
+    ],
+    "max_tool_calls": 3
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  },
+  "requires_vision": true
+}

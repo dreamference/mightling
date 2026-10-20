@@ -1,0 +1,58 @@
+{
+  "id": "s7-page-blocked",
+  "family": "S7",
+  "failure": [
+    3,
+    8
+  ],
+  "turns": [
+    {
+      "text": "How many people live in Kettleby Moor?"
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "4,312",
+        "4312",
+        "4 312",
+        "4.312"
+      ]
+    ],
+    "max_fetches_per_url": 2,
+    "max_tool_calls": 8,
+    "no_engine_scrape": true,
+    "max_sleep_s": 9
+  },
+  "web": {
+    "search": {
+      "results": [
+        {
+          "title": "Kettleby Moor - town portal",
+          "url": "http://portal.example.test/kettleby",
+          "content": "Official portal of Kettleby Moor."
+        },
+        {
+          "title": "Kettleby Moor census 2025",
+          "url": "http://census.example.test/kettleby",
+          "content": "Census figures for Kettleby Moor."
+        }
+      ]
+    },
+    "pages": {
+      "http://portal.example.test/kettleby": {
+        "fault": "captcha"
+      },
+      "http://census.example.test/kettleby": {
+        "status": 200,
+        "body": "<html><body>Kettleby Moor census 2025: 4,312 residents in 1,870 households.</body></html>"
+      }
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}
