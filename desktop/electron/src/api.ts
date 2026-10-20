@@ -94,6 +94,11 @@ export type FromView =
   | { type: "insights" }
   /** Settings › Notifications: one notification now, to see that they arrive. */
   | { type: "notify/test" }
+  /** Settings › Node (nodes.ts): the nodes on the network, by name, and the choice of one. */
+  | { type: "node/list" }
+  | { type: "node/use"; choice: string }
+  /** Quit and start again, so the agent's server resolves the node chosen (Settings › Node). */
+  | { type: "app/relaunch" }
   /** The Scheduled view over Night Shift (night.ts). */
   | { type: "night/list" }
   | { type: "night/report"; name: string }
