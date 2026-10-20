@@ -2,7 +2,8 @@
 Best-of-N for a Night Shift task (specs/DREAMFERENCE_BACKLOG.md item 6;
 specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.9).
 
-A task is attempted N times (`[night] best_of`, 1 by default; a task's own `best_of` outranks it),
+A task is attempted N times (`[night] best_of`, 3 by default since the owner's decision of
+2026-10-19 after SWE-bench night 13; a task's own `best_of` outranks it),
 one attempt after another inside the task's one slot, so the scheduler's memory and request
 accounting stays one task, one scope. Each attempt is a whole `NightShiftTaskRun` in its own
 worktree on `night/<id>-a<k>`, with its own session, test run and time limit (`task_timeout`, never
@@ -16,8 +17,13 @@ Rules kept on purpose:
 - A task resumed from an earlier night (a recorded session), a task from another machine
   (`remote`) and `best_of = 1` run as one attempt, exactly as before.
 - Attempts are never resumed. When the window closes, the attempts that finished are chosen
-  among and the report says how many ran; with none finished the task is `interrupted` and starts
-  over the next night.
+  among and the report says how many ran and why; with none finished the task is `interrupted` and
+  starts over the next night. An attempt after the first is not started when the window has less
+  time left than the longest attempt so far took: it would only be cut off and thrown away.
+- The judge stops with the window: a comparison the window leaves unmade counts as a tie, and no
+  call waits past the window's end.
+- Without a test command the regression filter has nothing to go on and the judge alone decides;
+  the report says so.
 - With refine mode on, every attempt studies the task in its own session first.
 - A judge call that fails counts as unreadable (a tie at the floor), so a judge fault never stops
   the night; a tie at the top goes to the attempt whose tests passed, then the earliest.
@@ -31,10 +37,10 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Final, List, Optional, Tuple
 
 from dreamference.night_shift.chooser_candidate import ChooserCandidate
-from dreamference.night_shift.night_shift_chooser import Compare, NightShiftChooser
+from dreamference.night_shift.night_shift_chooser import JUDGE_TIMEOUT_S, Compare, NightShiftChooser
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
@@ -42,6 +48,10 @@ from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
 # Statuses of an attempt that ended without a candidate, worst last: what the task becomes when no
 # attempt left a change (`failed` only when every attempt failed).
 NO_CANDIDATE_ORDER = ("stalled", "no-change", "timed-out", "failed")
+
+# The shortest wait a judge call is given when the window is about to close; the call is not made
+# at all once it has.
+MIN_JUDGE_TIMEOUT_S: Final[float] = 60.0
 
 
 class NightShiftBestOfN:
@@ -92,6 +102,8 @@ class NightShiftBestOfN:
         self.judging = False
         self.attempts: int = int(task.get("attempts") or 0)
         self.started = time.time()
+        # Why fewer than `best_of` attempts ran, when they did (the record's `why`).
+        self.short: Optional[str] = None
 
     # -- what the scheduler reads ------------------------------------------------------------
 
@@ -186,6 +198,11 @@ class NightShiftBestOfN:
     def _run(self, outcomes: List[Dict[str, Any]]) -> str:
         for number in range(1, self.best_of + 1):
             if self._window_over():
+                self.short = f"the window closed before attempt {number} could start"
+                break
+            short = self.wont_fit(number, outcomes)
+            if short:
+                self.short = short
                 break
             if self._cancelled():
                 self._discard(outcomes)
@@ -203,11 +220,16 @@ class NightShiftBestOfN:
                 self.current = None
             outcome = attempt.outcome or {"attempt": number, "status": status, "result": {}}
             outcome["paths"] = (str(attempt.worktree), attempt.branch)
+            # Every attempt's logs stay in `logs/`, named in the record, whichever is chosen.
+            outcome["log"] = str(attempt.log_path)
+            if attempt.test_log_path.exists():
+                outcome["test_log"] = str(attempt.test_log_path)
             outcomes.append(outcome)
             if status == "cancelled":
                 self._discard(outcomes)
                 return self._finish("cancelled", result=self._timing(outcomes))
             if status == "interrupted":
+                self.short = f"the window closed during attempt {number}, which was discarded"
                 break
 
         candidates = [o for o in outcomes if o["status"] == "candidate"]
@@ -218,11 +240,35 @@ class NightShiftBestOfN:
         chosen, choice = self._choose(candidates)
         return self._commit(chosen, choice, outcomes)
 
+    def wont_fit(self, number: int, outcomes: List[Dict[str, Any]]) -> Optional[str]:
+        """
+        Whether attempt `number` should not start because the window has too little time left.
+
+        Args:
+            number: The attempt about to start.
+            outcomes: The attempts that ran.
+
+        Returns:
+            Optional[str]: Why it is not started, for the record; None when it may start. The first
+            attempt always may (the scheduler gave it its deadline); a later one only while the
+            window has at least as long left as the longest attempt so far took.
+        """
+        if number == 1 or self.window_end is None:
+            return None
+        took = [int(o["result"].get("wall_s") or 0) for o in outcomes if o["status"] != "interrupted"]
+        need = max(took, default=0)
+        left = self.window_end - time.time()
+        if need <= 0 or left >= need:
+            return None
+        return (f"attempt {number} was not started: {max(0, int(left)) // 60} min of the window were left, "
+                f"less than the {need // 60} min the longest attempt took")
+
     def _no_candidate(self, outcomes: List[Dict[str, Any]]) -> str:
         """No attempt left a change: the task ends as the attempts did, or `interrupted` by the window."""
         # An attempt that ran out of time or failed on its own may have left its worktree and branch.
         self._discard(outcomes)
         result = self._timing(outcomes)
+        result["best_of"] = self._record({"stage": "none"}, outcomes)
         last = next((o["result"].get("last_message") for o in reversed(outcomes)
                      if o["result"].get("last_message")), None)
         if any(o["status"] == "interrupted" for o in outcomes) or not outcomes:
@@ -258,6 +304,7 @@ class NightShiftBestOfN:
                 patch = ""
             pool.append(ChooserCandidate(id=cid, patch=patch, runs=[cid], p2p_failed=self.regression(result)))
         log: List[Dict[str, Any]] = []
+        unmade: List[Tuple[str, str]] = []
         seed = int(hashlib.sha256(self.task_id.encode()).hexdigest()[:8], 16)
         survivors = [c for c in pool if not c.breaks] or pool
         skipped: Optional[str] = None
@@ -268,8 +315,7 @@ class NightShiftBestOfN:
             skipped = "judge skipped: no model server"
             compare = lambda a, b: None
         else:
-            factory = self.JUDGE or NightShiftChooser.server_judge
-            compare = factory(self.model_host or "", self.text, seed=seed, log=log)
+            compare = self._window_bound(self._judge(seed, log), unmade)
         self.judging = True
         try:
             choice = NightShiftChooser.choose(pool, compare, random.Random(self.task_id))
@@ -277,6 +323,8 @@ class NightShiftBestOfN:
             self.judging = False
         if skipped:
             choice["stage"] = skipped
+        if unmade:
+            choice["judge_unmade"] = len(unmade)
         if log:
             path = self.night_dir / "logs" / f"{self.task_id}.judge.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -291,6 +339,24 @@ class NightShiftBestOfN:
         chosen_id = min(top, key=lambda cid: (breaks[cid], int(cid[1:])))
         choice["chosen_attempt"] = int(chosen_id[1:])
         return by_id[chosen_id], choice
+
+    def _judge(self, seed: int, log: List[Dict[str, Any]]) -> Compare:
+        """The judge: the tests' stand-in, or the model server, never waiting past the window."""
+        if self.JUDGE is not None:
+            return self.JUDGE(self.model_host or "", self.text, seed=seed, log=log)
+        timeout = JUDGE_TIMEOUT_S
+        if self.window_end is not None:
+            timeout = max(MIN_JUDGE_TIMEOUT_S, min(JUDGE_TIMEOUT_S, self.window_end - time.time()))
+        return NightShiftChooser.server_judge(self.model_host or "", self.text, seed=seed, timeout=timeout, log=log)
+
+    def _window_bound(self, compare: Compare, unmade: List[Tuple[str, str]]) -> Compare:
+        """`compare`, except that once the window has closed a pair is not judged (a tie at the floor)."""
+        def bounded(a: ChooserCandidate, b: ChooserCandidate) -> Optional[Tuple[float, float]]:
+            if self._window_over():
+                unmade.append((a.id, b.id))
+                return None
+            return compare(a, b)
+        return bounded
 
     @classmethod
     def regression(cls, result: Dict[str, Any]) -> Optional[int]:
@@ -330,7 +396,7 @@ class NightShiftBestOfN:
         return self._finish("done", result=result)
 
     def _record(self, choice: Dict[str, Any], outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """The result's `best_of` record: what ran, what was chosen and why, and every attempt."""
+        """The result's `best_of` record: what ran and why, what was chosen and why, and every attempt."""
         attempts = []
         for outcome in outcomes:
             result = outcome["result"]
@@ -339,14 +405,66 @@ class NightShiftBestOfN:
             for key in ("test_result", "diff", "timed_out"):
                 if result.get(key) is not None:
                     entry[key] = result[key]
+            for key in ("log", "test_log"):
+                if outcome.get(key):
+                    entry[key] = outcome[key]
             if result.get("diff_stat"):
                 entry["changes"] = result["diff_stat"].splitlines()[-1].strip()
             attempts.append(entry)
-        return {"n": self.best_of, "ran": len(outcomes), "chosen": choice.get("chosen_attempt"),
-                "stage": choice.get("stage"), "points": choice.get("points") or {},
-                "survivors": choice.get("survivors") or [], "judge_calls": choice.get("judge_calls", 0),
-                "judge_errors": choice.get("judge_errors", 0), "judge_log": choice.get("judge_log"),
-                "attempts": attempts}
+        test_command = next((o["result"]["test_command"] for o in outcomes if o["result"].get("test_command")), None)
+        record = {"n": self.best_of, "ran": len(outcomes), "chosen": choice.get("chosen_attempt"),
+                  "stage": choice.get("stage"), "points": choice.get("points") or {},
+                  "survivors": choice.get("survivors") or [], "judge_calls": choice.get("judge_calls", 0),
+                  "judge_errors": choice.get("judge_errors", 0), "judge_log": choice.get("judge_log"),
+                  "test_command": test_command, "attempts": attempts}
+        if self.short:
+            record["why"] = self.short
+        if choice.get("judge_unmade"):
+            record["judge_unmade"] = choice["judge_unmade"]
+        record["reason"] = self.reason(record, choice)
+        return record
+
+    @classmethod
+    def reason(cls, record: Dict[str, Any], choice: Dict[str, Any]) -> str:
+        """
+        Why the chosen attempt was chosen, in a sentence for the morning report.
+
+        Args:
+            record: The `best_of` record so far (`chosen`, `stage`, `survivors`, `test_command`, `attempts`).
+            choice: Chooser v1's choice (`chosen` lists every attempt tied at the top).
+
+        Returns:
+            str: The reason.
+        """
+        chosen, stage = record.get("chosen"), str(record.get("stage") or "")
+        candidates = [a for a in record.get("attempts") or [] if a.get("status") == "candidate"]
+        untested = record.get("test_command") in (None, "none")
+        if chosen is None:
+            return "no attempt left a change to choose"
+        names = lambda ids: ", ".join(str(i).lstrip("a") for i in ids)
+        if stage == "only candidate":
+            return f"attempt {chosen} was the only one that left a change"
+        if stage == "regression filter":
+            return (f"attempt {chosen} was the only one the regression filter kept: the other attempts' tests "
+                    f"failed or ran out of time")
+        if stage.startswith("judge skipped"):
+            text = f"{stage}, so the tie went to the attempt whose tests passed, then the earliest"
+        elif stage == "judge, all broke":
+            text = (f"every attempt's tests failed, so the judge compared all {len(candidates)} in pairs "
+                    f"and gave attempt {chosen} the most points")
+        elif untested:
+            text = (f"no test command, so the judge alone decided: it compared all {len(candidates)} attempts "
+                    f"in pairs and gave attempt {chosen} the most points")
+        else:
+            survivors = record.get("survivors") or []
+            text = (f"the judge compared the attempts the regression filter kept ({names(survivors)}) in pairs "
+                    f"and gave attempt {chosen} the most points")
+        if record.get("judge_unmade"):
+            text += (f"; the window closed while it judged, so {record['judge_unmade']} comparison(s) were "
+                     f"not made and counted as ties")
+        if len(choice.get("chosen") or []) > 1 and not stage.startswith("judge skipped"):
+            text += f"; attempts {names(choice['chosen'])} tied at the top, and the tie went to {chosen}"
+        return text
 
     # -- helpers -----------------------------------------------------------------------------
 

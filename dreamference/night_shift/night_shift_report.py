@@ -100,19 +100,27 @@ class NightShiftReport:
 
     @classmethod
     def _best_of_lines(cls, best: Dict[str, Any]) -> List[str]:
-        """Best-of-N (`NightShiftBestOfN`): what ran, the chosen attempt and why, and every alternative's diff."""
+        """
+        Best-of-N (`NightShiftBestOfN`): what ran and why, the chosen attempt and why, and every
+        attempt with its diff and logs.
+        """
         chosen = best.get("chosen")
         points = best.get("points") or {}
         ran = f"{best.get('ran', 0)} of {best.get('n', '?')} attempts ran"
+        if best.get("why"):
+            ran += f" ({best['why']})"
         if chosen is None:
             lines = [f"- Best of {best.get('n', '?')}: {ran}; none chosen"]
         else:
             scored = "; points " + ", ".join(f"{key} {value:.2f}" for key, value in sorted(points.items())) \
                 if points else ""
             lines = [f"- Best of {best.get('n', '?')}: {ran}; chose attempt {chosen} by {best.get('stage', '?')}{scored}"]
+        if best.get("reason"):
+            lines.append(f"  - Why: {best['reason']}")
         if best.get("judge_calls"):
             errors = f", {best['judge_errors']} unreadable or failed" if best.get("judge_errors") else ""
-            lines.append(f"  - Judge: {best['judge_calls']} call(s){errors}")
+            log = f"; answers in `{best['judge_log']}`" if best.get("judge_log") else ""
+            lines.append(f"  - Judge: {best['judge_calls']} call(s){errors}{log}")
         for entry in best.get("attempts") or []:
             parts = [str(entry.get("status", "?"))]
             if entry.get("changes"):
@@ -124,6 +132,10 @@ class NightShiftReport:
                 parts.append("chosen: the branch")
             elif entry.get("diff"):
                 parts.append(f"diff `{entry['diff']}`")
+            if entry.get("log"):
+                parts.append(f"log `{entry['log']}`")
+            if entry.get("test_log"):
+                parts.append(f"test log `{entry['test_log']}`")
             lines.append(f"  - Attempt {entry.get('attempt')}: " + ", ".join(parts))
         return lines
 

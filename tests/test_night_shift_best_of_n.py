@@ -96,7 +96,10 @@ def branches(repo):
 
 
 def test_the_default_is_three_attempts_and_one_runs_as_before(tmp_path):
-    assert NightShiftSettings({}).best_of == 1
+    # Three since the owner's decision of 2026-10-19 (night 13: 31/50 against a single run's 22/50).
+    assert NightShiftSettings({}).best_of == 3
+    assert NightShiftBestOfN.attempts_for({"id": "t", "repo": str(tmp_path), "base": "b", "task": "x"},
+                                          NightShiftSettings({})) == 3
     assert NightShiftSettings({"best_of": 1}).best_of == 1
     assert NightShiftSettings({"best_of": 0}).best_of == 1
     settings = NightShiftSettings({"best_of": 3})
@@ -156,6 +159,84 @@ def test_when_every_attempt_passes_the_judge_picks_and_the_report_names_every_at
     assert "  - Attempt 2: candidate, 1 file changed, 1 insertion(+), tests passed" in report
     assert "chosen: the branch" in report
     assert "  - Attempt 1: candidate" in report and "20261001-0100-abc-a1.diff`" in report
+    assert ("  - Why: the judge compared the attempts the regression filter kept (1, 2, 3) in pairs "
+            "and gave attempt 2 the most points") in report
+    # Every attempt keeps its own event log and test log, named in the record and the report.
+    for k in (1, 2, 3):
+        entry = best["attempts"][k - 1]
+        assert entry["log"].endswith(f"20261001-0100-abc-a{k}.jsonl") and Path(entry["log"]).is_file()
+        assert entry["test_log"].endswith(f"20261001-0100-abc-a{k}.test.log") and Path(entry["test_log"]).is_file()
+        assert f"log `{entry['log']}`" in report and f"test log `{entry['test_log']}`" in report
+    assert best["test_command"] == TEST
+
+
+def test_without_a_test_command_the_judge_alone_decides_and_the_report_says_so(bon, monkeypatch):
+    status, record, _ = run_best_of(bon, monkeypatch, ["fine", "bad", "GOOD"], test=None)
+    assert status == "done"
+    best = record["result"]["best_of"]
+    assert best["stage"] == "judge" and best["chosen"] == 3
+    assert [a["test_result"] for a in best["attempts"]] == ["untested"] * 3
+    assert len(bon["judged"]) == 3                                   # nothing filtered: all three judged
+    report = NightShiftReport.render(datetime.now(), [record], [])
+    assert "  - Why: no test command, so the judge alone decided: it compared all 3 attempts" in report
+
+
+def test_the_regression_filter_says_why(bon, monkeypatch):
+    _, record, _ = run_best_of(bon, monkeypatch, ["bad", "good", "bad"])
+    assert record["result"]["best_of"]["reason"].startswith("attempt 2 was the only one the regression filter kept")
+
+
+def test_the_only_candidate_says_why(bon, monkeypatch):
+    _, record, _ = run_best_of(bon, monkeypatch, ["none", "good", "none"])
+    best = record["result"]["best_of"]
+    assert (best["stage"], best["reason"]) == ("only candidate", "attempt 2 was the only one that left a change")
+
+
+def test_no_candidate_still_records_every_attempt(bon, monkeypatch):
+    _, record, _ = run_best_of(bon, monkeypatch, ["none", "none", "none"])
+    best = record["result"]["best_of"]
+    assert (best["ran"], best["chosen"]) == (3, None)
+    assert [a["status"] for a in best["attempts"]] == ["no-change"] * 3
+    report = NightShiftReport.render(datetime.now(), [record], [])
+    assert "- Best of 3: 3 of 3 attempts ran; none chosen" in report
+
+
+def test_an_attempt_that_would_not_fit_the_window_is_not_started(tmp_path):
+    task = {"id": "t", "repo": str(tmp_path), "base": "b", "task": "x"}
+    run = NightShiftBestOfN(tmp_path, task, NightShiftSettings({}), "ling", time.time() + 60, best_of=3,
+                            window_end=time.time() + 19.5 * 60)
+    took = lambda *walls: [{"attempt": i + 1, "status": "candidate", "result": {"wall_s": w}}
+                           for i, w in enumerate(walls)]
+    assert run.wont_fit(1, []) is None                               # the first attempt always starts
+    assert run.wont_fit(2, took(10 * 60)) is None                    # 19.5 min left, it took 10
+    assert run.wont_fit(3, took(10 * 60, 25 * 60)) == (
+        "attempt 3 was not started: 19 min of the window were left, less than the 25 min the longest attempt took")
+    # A cut-off attempt says nothing about how long one takes; without a window nothing is refused.
+    assert run.wont_fit(2, [{"attempt": 1, "status": "interrupted", "result": {"wall_s": 3600}}]) is None
+    run.window_end = None
+    assert run.wont_fit(3, took(10 * 3600)) is None
+
+
+def test_the_judge_stops_when_the_window_closes(bon, monkeypatch):
+    holder = {}
+
+    def judge(server, issue, seed=None, log=None):
+        def compare(a, b):
+            holder["run"].stop_event.set()                           # the window closes during the first call
+            log.append({"a": a.id, "b": b.id, "ratings": [3.0, 9.0]})
+            return 3.0, 9.0
+        return compare
+
+    monkeypatch.setattr(NightShiftBestOfN, "JUDGE", staticmethod(judge))
+    monkeypatch.setenv("FAKE_BON_PLAN", json.dumps(["fine", "good", "fine"]))
+    record = queue(bon["night"], bon["repo"], test=TEST)
+    run = NightShiftBestOfN.task_run(bon["night"], record, NightShiftSettings({"best_of": 3}), bon["ling"],
+                                     time.time() + 60, model_host="http://x")
+    holder["run"] = run
+    assert run.run() == "done"
+    best = NightShiftQueue.read(bon["night"], record["id"])["result"]["best_of"]
+    assert best["judge_calls"] == 1 and best["judge_unmade"] == 2
+    assert "the window closed while it judged, so 2 comparison(s) were not made" in best["reason"]
 
 
 def test_a_tie_goes_to_the_earliest_attempt_and_a_broken_judge_never_stops_the_task(bon, monkeypatch):
@@ -200,7 +281,7 @@ def test_the_window_closing_chooses_among_the_attempts_that_finished(bon, monkey
     assert branches(bon["repo"]) == ["night/20261001-0100-abc"]
     assert not any((bon["night"] / "worktrees").iterdir())          # the cut-off attempt is not kept
     report = NightShiftReport.render(datetime.now(), [record], [])
-    assert "2 of 3 attempts ran" in report
+    assert "2 of 3 attempts ran (the window closed during attempt 2, which was discarded)" in report
 
 
 def test_with_no_attempt_finished_the_task_is_interrupted_and_starts_over(bon, monkeypatch):
