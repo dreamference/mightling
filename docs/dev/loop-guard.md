@@ -60,6 +60,8 @@ LOOP_GUARD_CORPUS=/tmp/corpus.jsonl cargo test --release -p ling-loop-guard --te
 
 That is "at most once per turn" read as at most once per chain of responses: the extension API gives a request its thread id but not its turn, and a long agentic turn that loops twice, an hour apart, deserves two rescues. Two stops in a row always end the turn.
 
+`tests/test_loop_guard_binary.py` runs the built binary (`MIGHTLING_BIN=…`, skipped for a `ling` without the guard) against a stand-in Responses server and checks the whole path through Codex: a looping reasoning is cut, the server sees the client hang up, and the next request carries the nudge and the reasoning before its loop; an incomplete response with a cut tool call is neither retried nor run; two stops in a row end the turn; `exec` with nothing switched on sends no `ling_*` metadata. All four passed on 2026-10-20.
+
 Each stop is a line in `$CODEX_HOME/loop-guard/events.jsonl` (time, thread, surface, check, action, pieces streamed, items dropped). `ling loop-guard` prints each surface's settings and the counts by surface, check and action; a SWE-bench run counts them per instance (`loop_guard` in its state, a "Loop guard" line in its report).
 
 ## Settings
