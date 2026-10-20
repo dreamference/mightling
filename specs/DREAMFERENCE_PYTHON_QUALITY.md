@@ -1,6 +1,6 @@
 # Python Code Quality — a Stanford-grade standard for `dreamference/`, enforced by a ratchet
 
-**Status:** Phase 0 built (2026-10-03, §10): `pyproject.toml` with §3's rules, ruff 0.16.10 and mypy 2.4.0 pinned in setup.py's `dev` extra, and the real baseline measured (§10.1). The ratchet test and its baseline are written and pass, and are held back to land with Phase 1 (§10.2). §2's numbers were measured earlier on `main` at `584f26e` with flake8 7.3 and an AST script; §10.1 gives ruff's counts beside them.
+**Status:** Phase 0 built (2026-10-03, §10). **Phase 1 built (2026-10-20, §11) without its two tree-wide commits:** the ratchet is in the suite (`tests/test_code_quality.py` for ruff, the formatter and the §3.9 checks; `tests/test_typing.py` for mypy), the baselines recorded on the tree as it stood, and the seven dead shims deleted; `ruff format` and `ruff check --fix` over everything (§6, Phase 1 steps 1 and 2) were not run, by the owner's decision, because many branches were in flight, so the formatter is ratcheted per file (§11). §2's numbers were measured earlier on `main` at `584f26e` with flake8 7.3 and an AST script; §10.1 gives ruff's counts at Phase 0 and §11.2 at Phase 1.
 **Goal:** make the Python half of Mightling read like code written to a teaching standard: small, deep modules, one idea per function, names that make comments unnecessary for the *what* and comments that carry the *why*. The standard is checked by tools wherever a tool can decide, by a fixed review checklist where it cannot, and it may only get stricter over time.
 **Scope:** `dreamference/` and `tests/` (Python). Not the Rust crates (`ling-rs/`, `ling-web-rs/`, `ling-code-rs/`, which have `cargo clippy`), not `desktop/`, not the `codex/` submodule (never modified), not `scratch/`.
 
@@ -106,7 +106,7 @@ The project already guards limits with tests (`test_the_patches_stay_small`). Co
   - A count that **rises** fails, naming the file, the rule and the new finding.
   - A **new file** has a baseline of zero: new code meets the whole standard from its first commit.
   - A count that **falls** passes and prints the command that lowers the baseline (`… --update-baseline`), so cleanup is locked in by the commit that does it.
-  - The same test runs `ruff format --check` (no baseline: once Phase 1 has formatted everything, it is all or nothing) and the checks of §3.9.
+  - The same test runs `ruff format --check` (no baseline: once Phase 1 has formatted everything, it is all or nothing; until that commit is made it is ratcheted per file, §11) and the checks of §3.9.
 - **mypy** gets the same treatment in `tests/test_typing.py`, per package, with a baseline per package that may only fall; a package that reaches zero is moved to `strict` and its entry removed.
 - **The tools are pinned dev dependencies** (`extras_require={"dev": ["ruff==<x>", "mypy==<y>"]}`, installed with `.venv/bin/pip install -e .[dev]`). The tests **fail**, with that command in the message, when the tools are missing: a skip would let the standard lapse silently on any machine that lacks them. They run offline, as the rest of the suite does.
 - **Exceptions are visible.** Every `# noqa` carries a rule code and a reason (`RUF100` removes stale ones). A per-file ignore in `pyproject.toml` carries a comment. No blanket `# type: ignore`; always `# type: ignore[code]`.
@@ -146,7 +146,7 @@ Every phase is **behaviour-preserving**: the full suite passes before and after,
 
 **Phase 0: configure and measure (no code change).** Add `pyproject.toml` with §3's rule set and `extras_require["dev"]`. Run ruff and mypy and record the real baseline, which replaces §2's flake8 numbers. Confirm the container-script exemption list of §3.9 (whether `image_search_service.py` is copied into a container as one file). Decide any rule that turns out noisy here, in writing, in this spec.
 
-**Phase 1: mechanical.** One commit each, listed in `.git-blame-ignore-revs` so `git blame` skips them:
+**Phase 1: mechanical** (steps 3 and 4 built 2026-10-20, steps 1 and 2 not yet: §11). One commit each, listed in `.git-blame-ignore-revs` so `git blame` skips them:
 1. `ruff format` over everything.
 2. `ruff check --fix` with **safe** fixes only (imports, whitespace, pyupgrade, f-strings without placeholders).
 3. Delete the seven dead shim modules. Before deleting, a test asserts that `import dreamference.hardware` (etc.) resolves to the package's `__init__.py`, which is what AGENTS.md says already happens.
@@ -236,6 +236,38 @@ mypy 2.4.0, default strictness, `ignore_missing_imports`: **89 errors in 29 of 1
 `tests/test_code_quality.py` and `tests/quality_baseline.json` implement §4 as written: ruff's findings and the PQ checks of §3.9 (PQ001 one class per file, PQ002 `__init__.py` without `__all__`, PQ003 work at import time), counted per file and rule; a rise fails and names it; a new file counts from zero; a fall prints the update command; a ruff other than the pinned one fails with the install command; `--update-baseline` refuses to raise a count unless given `--allow-raise`. It runs in 0.7 s and passes against the tree it recorded.
 
 It is **on the branch `quality/phase0`, not on `main`**, because of what it would do to work in flight: new code written in today's house style (`Optional[...]`, the summary on a docstring's second line, `os.path`) fails it from its first commit, while AGENTS.md tells every author to match the surrounding style. Checked against the branches open on 2026-10-03: `fleet/provision`'s new `node/fleet_session.py` would fail with 7 rule counts above zero (`D212` 15, `D205` 11, `UP045` 11, `UP006` 8, `PLR2004` 4, `UP035`, `PTH123`), and `swe/runtime-lzma` with one (`UP006` 2→3 in `swe_bench_runtime.py`); `ctx/budget` and `tests/watchdog-leak` would pass. Phase 1's safe-fix commit converts the tree to the style the rules ask for; the test lands right after it with a re-recorded baseline, which is §6's order anyway (step 4).
+
+---
+
+## 11. Phase 1, as built (2026-10-20)
+
+The owner's decision of 2026-10-20: land the ratchet now, **without** the `ruff format` and `ruff check --fix` commits (§6, Phase 1 steps 1 and 2), because a change touching nearly every file would conflict with every branch in flight that day. Step 3 (the shims) and step 4 (the test) are built; steps 1 and 2 remain for a day with no branch open, and each is then one commit listed in `.git-blame-ignore-revs`, followed by `--update-baseline` (the counts only fall).
+
+- **`tests/test_code_quality.py`** is §10.2's test with three changes. **The formatter is ratcheted per file**, not all or nothing as §4 says: `ruff format --check` gives one `ruff-format` finding per file it would change, counted like a rule, so the 179 files unformatted on 2026-10-20 are in the baseline and every other file, a new one included, must stay formatted. A fall is reported through `warnings.warn` (shown in `pytest -q`'s summary, where a passing test's `print` is not). A rise names the file and the rule and says that `ruff format <file> && ruff check --fix <file>` fixes most findings in new code (§10.2's `D212`, `UP006`, `UP045`, `I001` are all safe fixes).
+- **`tests/test_typing.py`** is §4's mypy ratchet, landed now rather than with Phase 4: mypy 2.4.0 with `[tool.mypy]`'s settings, errors only (notes such as `annotation-unchecked` are not counted), per file and error code like ruff, against **`tests/typing_baseline.json`**. §10's objection was its cold time; it uses mypy's incremental cache in `.mypy_cache/` at the checkout's root, so the first run in a fresh checkout or worktree takes about 14 s and every later one 0.4 s. The per-package view of §4 is the sum over a package's files; a package that reaches zero is moved to `strict` in `pyproject.toml` (Phase 4).
+- Both fail, never skip, when a tool is missing or not the pinned version, with the install command (`.venv/bin/pip install -e .[dev]`); the release workflow's test job installs `.[dev]`.
+- **The seven shims are deleted** (`dreamference/{cli,config,context_engine,hardware,mcp_server,runner,vllm_server}.py`), with a test that each name resolves to its package's `__init__.py` and that no module of that name comes back. That removed the 7 `F403` findings.
+- **Time:** both ratchets add 1.2 s to a warm suite (ruff 0.1 s, the format check 0.1 s, mypy 0.4 s, plus process start-up), 14 s more on a checkout's first run.
+
+### 11.1 Running and lowering
+
+```bash
+.venv/bin/python -m pytest tests/test_code_quality.py tests/test_typing.py -q
+.venv/bin/python tests/test_code_quality.py --update-baseline   # after a cleanup: ruff, format, PQ
+.venv/bin/python tests/test_typing.py --update-baseline         # after a typing fix
+```
+
+`--update-baseline` refuses to raise a count; `--allow-raise` writes anyway and the commit says why (re-recording on a rebase over others' merges is the expected case).
+
+### 11.2 The baseline at Phase 1
+
+ruff 0.16.10 on `main` at the merge: **7,957 findings in 210 files** (7,063 in `dreamference/`, 894 in `tests/`), of which 179 are `ruff-format` (one per unformatted file). The count has grown by 46 % since §10.1's 5,452. The largest families: `UP` 2,137 (`UP006` 1,170, `UP045` 696), `D212` 1,222, `PTH` 858, `PLR2004` 643, `E501` 609, `T201` 549, `D205` 547. Decomposition: `C901` 63, `PLR1702` 141, `PLR0911` 25, `PLR0912` 25, `PLR0913` 25, `PLR0915` 20. Errors: `BLE001` 119, `S110` 48, `SIM105` 39, `E722` 2. Missing public docstrings 34 (`D103` 17, `D102` 12, `D100` 2, `D107` 2, `D101` 1). Project checks: `PQ001` 1 (`cli/code_index_setup.py`), `PQ002` 1 (`dreamference/__init__.py`).
+
+Complexity above 25: `run_cli` **224**, `SweBenchRunner.run` 40, `GmailSearchService.serve` 33, `build_launch_command` 33, `start_server` 29, `get_diagnostics_line` 25; then `save_config` and `SweBenchIssueTargets.conditions` 23, `tensorize_model` 21, `image_search_service.serve` 20. `SweBenchRunner.run` has overtaken the rest of §6 Phase 3's list and belongs on it.
+
+The files with the most findings: `cli/dreamference_cli_controller.py` 463, `vllm_server/vllm_server_manager.py` 259, `runner/codex_branded_builder.py` 210, `chat/gmail_search_service.py` 205, `swe_bench/swe_bench_report.py` 191, `swe_bench/swe_bench_runner.py` 189, `audit/egress_audit.py` 187, `chat/image_search_service.py` 165. By the decomposition rules alone: the CLI controller 56, `swe_bench_runner.py` 25, `swe_bench_instance_run.py` 21, `gmail_search_service.py` 20, `vllm_server_manager.py` 16.
+
+mypy 2.4.0: **136 errors in 40 files** (89 in 29 at Phase 0): `swe_bench` 35, `cli` 25, `vllm_server` 25, `node` 17, `chat` 13, `night_shift` 9, `runner` 7, `hardware` 2, `audit`, `config` and `mcp_server` 1 each; `context_engine` none. By code: `arg-type` 50, `union-attr` 28, `assignment` 20, `attr-defined` 10. `config/` has gained one since Phase 0, so Phase 4 starts with `context_engine/`, or with that one fix.
 
 ---
 

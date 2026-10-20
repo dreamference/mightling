@@ -1,0 +1,149 @@
+{
+ "counts": {
+  "dreamference/audit/strace_parser.py": {
+   "union-attr": 1
+  },
+  "dreamference/chat/gmail_credentials.py": {
+   "return-value": 1
+  },
+  "dreamference/chat/gmail_search_service.py": {
+   "arg-type": 2,
+   "assignment": 1,
+   "list-item": 1,
+   "union-attr": 2,
+   "var-annotated": 1
+  },
+  "dreamference/chat/image_search_service.py": {
+   "arg-type": 1,
+   "assignment": 2,
+   "dict-item": 1,
+   "return-value": 1
+  },
+  "dreamference/cli/code_index_setup.py": {
+   "union-attr": 1
+  },
+  "dreamference/cli/dreamference_cli_controller.py": {
+   "arg-type": 15,
+   "assignment": 3,
+   "attr-defined": 4,
+   "list-item": 2
+  },
+  "dreamference/config/dreamference_config.py": {
+   "assignment": 1
+  },
+  "dreamference/hardware/model_downloader.py": {
+   "assignment": 1,
+   "attr-defined": 1
+  },
+  "dreamference/mcp_server/mcp_server.py": {
+   "no-redef": 1
+  },
+  "dreamference/night_shift/night_shift_best_of_n.py": {
+   "arg-type": 1
+  },
+  "dreamference/night_shift/night_shift_chooser.py": {
+   "var-annotated": 1
+  },
+  "dreamference/night_shift/night_shift_remote.py": {
+   "union-attr": 2
+  },
+  "dreamference/night_shift/night_shift_runner.py": {
+   "arg-type": 2
+  },
+  "dreamference/night_shift/night_shift_scheduler.py": {
+   "var-annotated": 1
+  },
+  "dreamference/night_shift/night_shift_task_run.py": {
+   "assignment": 1,
+   "var-annotated": 1
+  },
+  "dreamference/node/node_job.py": {
+   "arg-type": 3,
+   "union-attr": 2
+  },
+  "dreamference/node/node_job_sender.py": {
+   "arg-type": 1,
+   "index": 5
+  },
+  "dreamference/node/node_model_sync.py": {
+   "union-attr": 1
+  },
+  "dreamference/node/node_pairing.py": {
+   "arg-type": 1
+  },
+  "dreamference/node/node_provisioner.py": {
+   "arg-type": 2
+  },
+  "dreamference/node/node_remote.py": {
+   "assignment": 1
+  },
+  "dreamference/node/node_serve.py": {
+   "assignment": 1
+  },
+  "dreamference/runner/cline_runner.py": {
+   "list-item": 1
+  },
+  "dreamference/runner/codex_branded_builder.py": {
+   "attr-defined": 2,
+   "union-attr": 1
+  },
+  "dreamference/runner/codex_test_runner.py": {
+   "union-attr": 2
+  },
+  "dreamference/runner/continue_runner.py": {
+   "list-item": 1
+  },
+  "dreamference/swe_bench/swe_bench_arm_smoke.py": {
+   "union-attr": 4
+  },
+  "dreamference/swe_bench/swe_bench_evaluator.py": {
+   "assignment": 1
+  },
+  "dreamference/swe_bench/swe_bench_images.py": {
+   "assignment": 1
+  },
+  "dreamference/swe_bench/swe_bench_instance_run.py": {
+   "assignment": 1
+  },
+  "dreamference/swe_bench/swe_bench_issue_gate.py": {
+   "arg-type": 4
+  },
+  "dreamference/swe_bench/swe_bench_relay.py": {
+   "union-attr": 1
+  },
+  "dreamference/swe_bench/swe_bench_report.py": {
+   "index": 1,
+   "misc": 3,
+   "operator": 1,
+   "union-attr": 5
+  },
+  "dreamference/swe_bench/swe_bench_run_store.py": {
+   "operator": 1
+  },
+  "dreamference/swe_bench/swe_bench_runner.py": {
+   "arg-type": 4,
+   "assignment": 1,
+   "attr-defined": 3,
+   "index": 3,
+   "union-attr": 1
+  },
+  "dreamference/vllm_server/diffusion_openai_service.py": {
+   "assignment": 1,
+   "misc": 1
+  },
+  "dreamference/vllm_server/host_safety_setup.py": {
+   "assignment": 1
+  },
+  "dreamference/vllm_server/model_gate_service.py": {
+   "union-attr": 5
+  },
+  "dreamference/vllm_server/model_loading_monitor.py": {
+   "assignment": 3
+  },
+  "dreamference/vllm_server/vllm_server_manager.py": {
+   "arg-type": 14
+  }
+ },
+ "mypy": "2.4.0",
+ "total": 136
+}
