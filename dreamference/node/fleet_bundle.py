@@ -40,7 +40,7 @@ OPTIONAL_BINARIES: Final[Tuple[str, ...]] = (
 SOURCE_THIS: Final[str] = "this"
 RELEASE_PREFIX: Final[str] = "release="
 
-RELEASE_REPO: Final[str] = os.environ.get("MIGHTLING_RELEASE_REPO", "dgxcoder/dgxcoder")
+RELEASE_REPO: Final[str] = os.environ.get("MIGHTLING_RELEASE_REPO", "dreamference/mightling")
 
 
 class FleetBundle:

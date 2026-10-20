@@ -4,7 +4,7 @@ Developer notes behind the "`ling` is Codex, built here" summary in `AGENTS.md`.
 
 ## `ling` is Codex with Mightling's branding and launcher compiled in, never upstream `codex`
 
-`codex/` is a submodule of the `dgxcoder/codex` fork of upstream Codex (`openai/codex`), pinned to a stable tag (`CODEX_RELEASE_TAG`, currently `rust-v0.158.0`) and **never modified**.
+`codex/` is a submodule of the `dreamference/codex` fork of upstream Codex (`openai/codex`), pinned to a stable tag (`CODEX_RELEASE_TAG`, currently `rust-v0.158.0`) and **never modified**.
 
 `CodexBrandedBuilder` (`runner/codex_branded_builder.py`):
 

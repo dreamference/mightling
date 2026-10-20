@@ -92,7 +92,7 @@ Outside the package:
 
 | Path | What |
 | --- | --- |
-| `codex/` | Submodule: the `dgxcoder/codex` fork, pinned to `CODEX_RELEASE_TAG` (`rust-v0.158.0`); never modified |
+| `codex/` | Submodule: the `dreamference/codex` fork, pinned to `CODEX_RELEASE_TAG` (`rust-v0.158.0`); never modified |
 | `codex-patches/` | The numbered hooks applied to an export of `codex/` |
 | `codex-tests/` | Skips, snapshot overlays and test-only patches for `ling-admin codex test` |
 | `ling-rs/` | The launcher crate compiled into `ling`, plus leaf crates (`airgapped/`, `node-locator/`, `skills/`, `masking/`, `apps/`, `web/`, and the messenger bridges `chat/` and `signal/`) and `prompts/` |
