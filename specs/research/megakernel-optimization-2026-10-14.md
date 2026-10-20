@@ -279,7 +279,7 @@ megakernel alone takes the single stream from 49 to about 52–56 tok/s; with ev
    view from the first note are the optimiser's inputs; without them every lever above is a guess.
 2. **2.3 then 2.2** (cheap sync, then chunked dependencies): the second multiplies the number of
    waits, so the first must come first.
-3. **2.1 as a loop, not a task.** The schedule search runs unattended on second-puffin like the
+3. **2.1 as a loop, not a task.** The schedule search runs unattended on node-b like the
    step-savings items do today: propose a validated schedule, replay a fixed seeded window at three
    context buckets, keep it if bit-identical and faster at 1 and 2 streams, log the per-SM timeline.
    ForgeMegakernel's "progressive milestones" and AutoMegaKernel's search loop are this pattern; the

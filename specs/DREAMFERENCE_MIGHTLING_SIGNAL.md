@@ -39,7 +39,7 @@
    - relays approvals as yes/no questions.
 
    Voice notes (through the speech sidecar), files *out* and Work threads on repositories are Phase 2.
-10. **Where it runs:** gx10-9428, the node with `ling web` and the model (the user's decision). Approvals are answered from the phone with YES or NO, as designed (§8).
+10. **Where it runs:** gx10-1a2b, the node with `ling web` and the model (the user's decision). Approvals are answered from the phone with YES or NO, as designed (§8).
 
 ---
 
@@ -419,7 +419,7 @@ Signal shows plain text with style ranges: bold, italic, strikethrough, monospac
 
 ## 12. Phase 0: measurements before building on them
 
-Each item is answered on this machine (gx10-9428), not on second-puffin (that machine is for ling-engine alone):
+Each item is answered on this machine (gx10-1a2b), not on node-b (that machine is for ling-engine alone):
 
 1. **Does signal-cli run on arm64:** JRE 25 from apt, with the exquo `libsignal_jni.so` for the bundled libsignal version? Verified by `signal-cli --version` and by `signal-cli link` reaching the provisioning step (it prints a `sgnl://` link; nothing is linked).
 2. **The JVM's memory:** resident memory idle and while receiving, which sets `MemoryMax`.
@@ -431,7 +431,7 @@ Each item is answered on this machine (gx10-9428), not on second-puffin (that ma
 
 ---
 
-### 12.1 Phase 0 results (2026-10-08, gx10-9428)
+### 12.1 Phase 0 results (2026-10-08, gx10-1a2b)
 
 - **Item 1, arm64: works.**
   - **What was run:** signal-cli 0.14.9 with Java 25.0.4 (Temurin, in a scratch folder; Ubuntu's `openjdk-25-jre-headless` 25.0.4 was the package setup installed then; since §17 setup fetches the pinned Temurin JRE instead) and exquo's `libsignal_jni.so` 0.103.0 for aarch64, the version the release bundles as `libsignal-client-0.103.0.jar`.
@@ -499,7 +499,7 @@ All without Signal, without a network, without `ling web` running, and without s
 
 1. **Number:** no new number. The bridge is linked to the owner's own account and talks in Note to Self (§4.2).
 2. **Approvals:** YES or NO from the phone, as designed (§8).
-3. **Machine:** gx10-9428.
+3. **Machine:** gx10-1a2b.
 4. **Disappearing messages:** one week, the default. In Note to Self that timer also covers the owner's own notes, so setup asks first (§4.2).
 
 ---
@@ -696,7 +696,7 @@ The plan's text says so: "Every download is checked before it is unpacked; signa
 
 **When `SIGNAL_CLI_VERSION` moves**, the `.asc` comes from the new release. Setup still checks it against the same pinned key, so a release signed with another key fails closed until the pin is changed here, on the same evidence as above.
 
-### 17.2 First live test against a real account (2026-10-12, gx10-9428)
+### 17.2 First live test against a real account (2026-10-12, gx10-1a2b)
 
 **What was run.** The owner tested the bridge against their own Signal account on this machine, about 21:00 on 2026-10-12, with Mightling 1.6.0 installed from the published release (`ling update`, replacing a source build):
 1. `ling signal remove`, clearing the attempt of 2026-10-11;
@@ -800,7 +800,7 @@ A failed setup leaves no half instance behind: the instance's unit, state and ac
 - **Refusals:** setup without `--name` beside `default`; a fifth instance; a duplicate ACI (from the fixture output of §4.2, including the stderr line signal-cli writes after a link); `remove` or `trust` by a Linux user other than the one served.
 - **Units:** the template unit's text, with `%i` in `User=`, `StateDirectory=` and `RuntimeDirectory=`, and §3's hardening lines unchanged.
 - **The audit:** two enabled instances give two declared exceptions; a disabled one gives none.
-- **Live, before it is called done:** two linked accounts (or one linked and one dedicated) on gx10-9428, each answering only in its own Note to Self; the memory of two JVMs read beside a resident model server; `remove` of one leaving the other running.
+- **Live, before it is called done:** two linked accounts (or one linked and one dedicated) on gx10-1a2b, each answering only in its own Note to Self; the memory of two JVMs read beside a resident model server; `remove` of one leaving the other running.
 
 ### 18.7 For the user to confirm
 
@@ -834,7 +834,7 @@ The owner decided on 2026-10-12 to build this proposal once the single-account l
 
 **Fixes after the first live checks (2026-10-13), none needing a phone:** `start`, `stop`, `trust` and `remove` (and `remove --dry-run`) refuse a bridge not on the node before any sudo; `setup --name N` on a node with no bridge is refused (decision 5); a second `setup` leaves an identical bridge binary alone. `ling-signal` now has 103 unit tests; the three end-to-end tests are unchanged.
 
-**Not done:** the live test of §18.6 (two accounts on gx10-9428, the memory of two JVMs beside the model server, `remove` of one leaving the other running). Nothing here was run against the live bridge.
+**Not done:** the live test of §18.6 (two accounts on gx10-1a2b, the memory of two JVMs beside the model server, `remove` of one leaving the other running). Nothing here was run against the live bridge.
 
 ## 19. After the first mornings of real use (2026-10-20)
 
@@ -860,4 +860,20 @@ On the morning of 2026-10-20 the owner's Note to Self thread gave useless answer
 - **The rule:** a question that arrives when the conversation has not moved for `[chat] new_thread_after_hours` (default 4; 0 switches it off) starts a new thread, and the bridge says so in one line: "New thread (the last message was 16h00m ago); /use 2 to go back." `/threads`, `/use N` and `/new` are unchanged; `/use` counts as the conversation moving, so a thread taken back is not left again by the next question.
 - **What counts as moving:** the owner's question and the end of an answer (`Bridge::last_activity_ms`, saved in `conversation.json` as `lastActivityMs`). A conversation saved before this was kept has no time, and its next question starts a new thread.
 - **Where the setting comes from:** the `[chat]` table of the user's own configuration (`~/.config/dreamference/config.toml`, never a repository's), which the bridge's system account cannot read: `ling web` serves it at `/api/chat/settings` (`ling-rs/web/src/chat_settings.rs`), and the bridge asks at start and every minute.
+
+### 19.3 An answer's bounds, and the phone prompt (branch `chat/bounds`)
+
+- **The fifteen minutes were a model call, not a command.** The rollout shows the Python command ending at once; then SGLang decoded from 38,000 to 121,000 tokens of context (acceptance 0.95, a repetition loop inside a tool call's argument, which its `qwen3_coder` parser buffers, so nothing streamed) until Codex's stream idle timeout (900 s) ended it. A per-command timeout would not have seen it; only the bridge's clock does.
+- **The bounds** (`limits.rs`, the same file from `Verdict` on in both bridges; `tests/test_chat_limits.py` holds them equal), from `[chat]` in the user's config through `/api/chat/settings`:
+
+| Key | Default | What happens past it |
+|---|---|---|
+| `answer_seconds` | 180 | the agent is told, by `turn/steer`, to stop and answer with what it has |
+| `tool_calls` | 25 | the same (every item that is not a message, reasoning or a plan counts) |
+| `command_seconds` | 60 | the same, for one command still running |
+
+  Thirty seconds after that "answer now", a turn still running is interrupted (`turn/interrupt`), the owner is told in one line ("This is taking too long (…), so I asked for an answer with what was found so far."), and a **final turn** asks for the answer from what was found, without tools. The final turn has 90 seconds; past them it is interrupted and the owner gets what it wrote and "No answer came in time, so I stopped it. Ask again, maybe more narrowly." `/stop` still stops everything, with no final turn. 0 switches a bound off.
+- **The phone prompt, `chat`:** the bridges open threads with `thread/start {prompt: "chat"}`, `ask` plus `ling-rs/prompts/chat.md`: answer within minutes, `ling-search` and `ling-fetch` first, never a search engine's result page with curl, never sleep-and-retry, `timeout` on a command that could hang, ask back about anything referred to but not visible (never answer about an earlier topic in its place), and what `[Screenshot text: …]` is. `ling web`'s policy names it (`namedPrompts`, `scratchPrompts`, a conformance case); a `ling web` that refuses it gets `ask`.
+- **How a phone thread is recognised:** its scratch folder is `ask/chat-<hex>` instead of `ask/q-<hex>` (`ask::folder_prefix`), so the model gate's extension gives a phone's thread its own output-token cap from the folder alone; nothing extra reaches the model. The desktop app counts both as Ask threads.
+- **Cave mode (§19, item 6).** On the morning of 2026-10-20 ultra applied to phone threads by design (it was the user-level default). Its "answer every question first" did not make the wrong answer: the empty message did, and the model answered the thread's last question. The cave texts are not changed (they are the benchmark's, byte for byte); the phone prompt says instead to ask back about anything referred to but not visible. Since the cave-mode study of the same day (branch `cave/default-study`) the phone starts at `lite` and `/cavemode` works from the phone.
 

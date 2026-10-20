@@ -145,7 +145,7 @@ async fn a_first_message_starts_an_ask_thread_and_streams_the_answer() {
     assert_eq!(next(&mut rig.telegram).await, Outbound::Draft { chat: CHAT.into(), text: String::new() });
     settle().await;
     assert_eq!(rig.log.methods(), vec!["thread/start", "thread/name/set", "turn/start"]);
-    assert_eq!(rig.log.params("thread/start")[0], json!({ "prompt": "ask" }));
+    assert_eq!(rig.log.params("thread/start")[0], json!({ "prompt": "chat" }));
     assert_eq!(rig.log.params("thread/name/set")[0]["name"], "What is the weather in Paris today?");
     assert_eq!(rig.log.params("turn/start")[0]["input"][0]["text"], "What is the weather in Paris today?");
 
@@ -513,3 +513,105 @@ async fn a_message_after_a_long_silence_starts_a_new_thread() {
     assert_eq!(threads.chats[CHAT].current.as_deref(), Some("th2"));
     assert_eq!(threads.chats[CHAT].recent[1].id, "th1");
 }
+
+/// The morning of 2026-10-20: one answer ran sixteen minutes. Past its time the agent is told to
+/// answer now; still running, it is interrupted and a final turn asks for the answer with no tools;
+/// that one out of time too, the user gets what it wrote and a line saying so.
+#[tokio::test]
+async fn an_answer_past_its_time_is_steered_then_interrupted_then_given_a_final_turn() {
+    let mut rig = rig("bounds", default_script(), false, |config| {
+        config.settings.answer_budget = Some(Duration::from_millis(200));
+        config.grace = Duration::from_millis(1_000);
+        config.final_budget = Duration::from_millis(600);
+    });
+    rig.inbound.send(text(CHAT, "compare these two purifiers")).unwrap();
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let steer = rig.log.params("turn/steer");
+    assert_eq!(steer.len(), 1, "{:?}", rig.log.methods());
+    assert!(steer[0]["input"][0]["text"].as_str().unwrap().contains("Stop now: run no more tools"));
+    assert!(rig.log.params("turn/interrupt").is_empty());
+    tokio::time::sleep(Duration::from_millis(1_000)).await;
+    assert_eq!(rig.log.params("turn/interrupt").len(), 1);
+    let Outbound::Notice { text: line, .. } = next_settled(&mut rig.telegram).await else { panic!() };
+    assert!(line.starts_with("This is taking too long (this answer has taken"), "{line}");
+    // The interrupted turn ends: a final turn, no "Stopped.", no partial answer yet.
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "interrupted", "items": [] } }))).unwrap();
+    settle().await;
+    let starts = rig.log.params("turn/start");
+    assert_eq!(starts.len(), 2);
+    assert!(starts[1]["input"][0]["text"].as_str().unwrap().contains("without running any tool"));
+    // The final turn writes a little, then runs out too.
+    rig.events.send(event("item/agentMessage/delta", json!({ "threadId": "th1", "turnId": "tu1", "itemId": "a", "delta": "The first one is quieter" }))).unwrap();
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    assert_eq!(rig.log.params("turn/interrupt").len(), 2);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "interrupted", "items": [] } }))).unwrap();
+    let mut outs = Vec::new();
+    for _ in 0..3 {
+        outs.push(next_settled(&mut rig.telegram).await);
+    }
+    assert!(outs.contains(&Outbound::Message { chat: CHAT.into(), markdown: "The first one is quieter".into() }), "{outs:?}");
+    assert!(outs.contains(&Outbound::Notice { chat: CHAT.into(), text: ling_chat::limits::GAVE_UP.into() }), "{outs:?}");
+    assert!(!outs.iter().any(|o| matches!(o, Outbound::Notice { text, .. } if text == "Stopped.")));
+}
+
+/// A `ling web` from before the phone prompt refuses `chat`: the thread is an Ask thread anyway.
+#[tokio::test]
+async fn an_older_ling_web_without_the_chat_prompt_gets_ask() {
+    let threads = Arc::new(Mutex::new(0u32));
+    let script: Script = Arc::new(move |method, params| match method {
+        "thread/start" if params["prompt"] == "chat" => Err("no prompt named \"chat\" may be chosen here; named prompts: ask, default".to_string()),
+        "thread/start" => {
+            *threads.lock().unwrap() += 1;
+            Ok(json!({ "thread": { "id": "th1" } }))
+        }
+        "turn/start" => Ok(json!({ "turn": { "id": "tu1", "status": "inProgress", "items": [] } })),
+        _ => Ok(json!({})),
+    });
+    let rig = rig("oldweb", script, false, |_| {});
+    rig.inbound.send(text(CHAT, "hello")).unwrap();
+    settle().await;
+    let starts = rig.log.params("thread/start");
+    assert_eq!(starts, vec![json!({ "prompt": "chat" }), json!({ "prompt": "ask" })]);
+    assert_eq!(rig.log.params("turn/start").len(), 1);
+}
+
+/// The model answered, called a tool, then said only "the answer above stands": the phone gets the
+/// answer, not the pointer alone.
+#[tokio::test]
+async fn a_short_last_word_after_a_longer_answer_brings_the_answer_with_it() {
+    let mut rig = rig("above", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "which purifier is quieter?")).unwrap();
+    settle().await;
+    let answer = format!(
+        "The Levoit is quieter: 24 dB on its night setting against 30 dB for the other one, and it keeps the HEPA 13 filter. {} [1]\n\n[1] Product page — https://example.com/p",
+        "Both run all day; the Levoit's filter lasts longer between changes and its fan is rated for continuous use. ".repeat(3)
+    );
+    let items = json!([
+        { "type": "agentMessage", "id": "m0", "text": "I'll check both product pages first.", "phase": "commentary" },
+        { "type": "agentMessage", "id": "m1", "text": answer },
+        { "type": "commandExecution", "id": "c1", "command": "ling-search x" },
+        { "type": "agentMessage", "id": "m2", "text": "The answer above stands.", "phase": "final_answer" }
+    ]);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": items } }))).unwrap();
+    loop {
+        if let Outbound::Message { markdown, .. } = next_settled(&mut rig.telegram).await {
+            assert_eq!(markdown, format!("{answer}\n\nThe answer above stands."));
+            break;
+        }
+    }
+    // A short final after short chatter is sent as it is.
+    rig.inbound.send(text(CHAT, "and the price?")).unwrap();
+    settle().await;
+    let items = json!([
+        { "type": "agentMessage", "id": "m3", "text": "Let me look the price up on the page." },
+        { "type": "agentMessage", "id": "m4", "text": "It costs 199 euros [1].", "phase": "final_answer" }
+    ]);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": items } }))).unwrap();
+    loop {
+        if let Outbound::Message { markdown, .. } = next_settled(&mut rig.telegram).await {
+            assert_eq!(markdown, "It costs 199 euros [1].");
+            break;
+        }
+    }
+}
+

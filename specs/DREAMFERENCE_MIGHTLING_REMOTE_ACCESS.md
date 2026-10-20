@@ -244,7 +244,7 @@ Caveat of this box's name: it is the provider's name for the address, not one th
 
 ### 12.4 Phase 0, second half: the node (2026-10-13)
 
-The provider's firewall now opens 33080/tcp+udp and 3478/udp. The owner ran `ling-admin remote setup <box> --ssh <alias>` on the node (gx10-9428) from the branch, while SWE-bench night 5 held the model server; nothing of night 5, the model gate or the model server was touched. Checked from the node and the box, with no client:
+The provider's firewall now opens 33080/tcp+udp and 3478/udp. The owner ran `ling-admin remote setup <box> --ssh <alias>` on the node (gx10-1a2b) from the branch, while SWE-bench night 5 held the model server; nothing of night 5, the model gate or the model server was touched. Checked from the node and the box, with no client:
 
 - **Setup:** one run; the container `dreamference-remote` (86 MB of its 512 MB cap), the user unit `mightling-remote-tunnel.service` (active, no restart), NetBird's client 0.80.0 joined under exactly `mightling-<node id>.netbird.selfhosted`.
 - **`remote status`:** exit 0. Box units active; port 443 "the box's name reaches this node's control plane (TLS under the node's CA); other names refused"; certificates 824 days; tunnel active; control plane running; peers 1 enrolled, 1 connected (the node).
@@ -305,7 +305,7 @@ The helpers report failures through their module loggers (the bare line on stand
 
 - **One name:** `remote.dreamference.ai`, a Cloudflare A record to the box, DNS only. The control plane at `https://remote.dreamference.ai:443`, the relay at `rels://remote.dreamference.ai:33080`. CA scope `dreamference.ai`.
 - **Pins stay 0.80.0** for the first live acceptance. For the next bump, read on 2026-10-20 from NetBird's published checksums and Docker Hub: 0.81.3 client archives (linux amd64 `cbdea310…b63b1`, linux arm64 `980eef93…c22d`, darwin amd64 `95ef6a3f…cac1f`, darwin arm64 `bc37108e…e71`), `netbirdio/netbird-server:0.81.3` index `sha256:541ecef7…7f1d`, `netbirdio/relay:0.81.3` amd64 `sha256:de516151…0324`, arm64 `sha256:f5f7bba0…41c7`; the relay binary's SHA-256 needs one extraction on the node.
-- **The box stays `vpn-box`**, with its other services untouched.
+- **The box stays the one already set up**, with its other services untouched.
 
 ### 14.4 The migration of the 10-13 deployment
 

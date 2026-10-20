@@ -540,7 +540,7 @@ mod tests {
 
     fn bundle_text() -> String {
         serde_json::json!({
-            "version": 1, "node": NODE_ID, "name": "gx10-9428", "ca": CA,
+            "version": 1, "node": NODE_ID, "name": "gx10-1a2b", "ca": CA,
             "management_url": "https://relay.example.org:443", "relay": "rels://relay.example.org:33080",
             "overlay_domain": "netbird.selfhosted",
             "overlay_name": format!("mightling-{NODE_ID}.netbird.selfhosted"),
@@ -691,8 +691,8 @@ mod tests {
 
     fn advert(id: &str, name: &str, main: bool) -> Advert {
         Advert {
-            node: Node { node: id.into(), name: name.into(), address: "192.168.0.5".into(), model_port: 8000, ..Node::default() },
-            addresses: vec!["192.168.0.5".into()],
+            node: Node { node: id.into(), name: name.into(), address: "192.168.50.5".into(), model_port: 8000, ..Node::default() },
+            addresses: vec!["192.168.50.5".into()],
             proto: 1,
             state: "ready".into(),
             main,

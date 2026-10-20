@@ -1,6 +1,6 @@
 # What the SGLang team's work offers Mightling (2026-10-13)
 
-**Status:** research survey; nothing was built and no GPU was used. One analysis is new and computed from data already on disk: the two-stream prefill interference in §2.1, from M4 stage 4's two `ling-serve` request logs on second-puffin (`~/m4s4/runs/s4c2.serve.log`, `s4c2b.serve.log`).
+**Status:** research survey; nothing was built and no GPU was used. One analysis is new and computed from data already on disk: the two-stream prefill interference in §2.1, from M4 stage 4's two `ling-serve` request logs on node-b (`~/m4s4/runs/s4c2.serve.log`, `s4c2b.serve.log`).
 
 **Question:** what in the published work of the SGLang team could do any of the following for one 27B hybrid model (Qwen3.8-27B NVFP4 with DFlash2 at 12 drafts) on one or two GB10s, air-gapped?
 - make ling-engine or the production server faster or more correct;
@@ -609,7 +609,7 @@ XGrammar-2's structural tags (§2.5) make "the model may write prose, but a tool
 | 10 | **`/v1/decisions`-style scoring** as an M5 API item, first used as the best-of-K selector on the 13 disputed tasks of nights 2–4 (§4.1) | ~2 days in the engine; the selector test itself ~1 hour of model time | Night Shift attempts and triage |
 | 11 | **PP2 written into the two-node note** as the exact alternative (§2.10) | docs | Item 8's choice, later |
 
-Steps 1–2 are production-side and need the model server; step 3 needs minutes of second-puffin's GPU; steps 4–5 need about an hour each. The rest is writing.
+Steps 1–2 are production-side and need the model server; step 3 needs minutes of node-b's GPU; steps 4–5 need about an hour each. The rest is writing.
 
 ## Sources
 
@@ -750,5 +750,5 @@ All read 2026-10-13. "Full" means the whole text was read; "part" means only the
 - [`novita/agentic_code_dataset_22`](https://huggingface.co/datasets/novita/agentic_code_dataset_22) (card only)
 
 **Measured or computed here:**
-- §2.1: the request lines of `~/m4s4/runs/s4c2.serve.log` and `s4c2b.serve.log` on second-puffin (M4 stage 4's two-stream replay, 146 requests each), parsed for new tokens, chunks, chunks beside a decode and compute rate.
+- §2.1: the request lines of `~/m4s4/runs/s4c2.serve.log` and `s4c2b.serve.log` on node-b (M4 stage 4's two-stream replay, 146 requests each), parsed for new tokens, chunks, chunks beside a decode and compute rate.
 - §3.1: the nights 2–4 default arms (the Together survey §3.1) and the standard paired power formula.

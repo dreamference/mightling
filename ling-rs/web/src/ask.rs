@@ -25,8 +25,20 @@ pub fn root(codex_home: &Path) -> PathBuf {
 
 /// Creates a new, empty folder for one Ask thread.
 pub fn new_folder(root: &Path) -> std::io::Result<PathBuf> {
+    new_folder_for(root, "ask")
+}
+
+/// The prefix of a new folder's name for a prompt: `chat-` for a phone bridge's thread, `q-` for
+/// every other. The name is how the model gate's extension tells a phone's thread from a tab's, by
+/// its working folder (specs/DREAMFERENCE_MIGHTLING_CHAT.md §16.3): nothing extra reaches the model.
+pub fn folder_prefix(prompt: &str) -> &'static str {
+    if prompt == "chat" { "chat-" } else { "q-" }
+}
+
+/// Creates a new, empty folder for one Ask thread started with the prompt `prompt`.
+pub fn new_folder_for(root: &Path, prompt: &str) -> std::io::Result<PathBuf> {
     crate::auth::private_dir(root)?;
-    let folder = root.join(format!("q-{}", crate::auth::random_hex(8)));
+    let folder = root.join(format!("{}{}", folder_prefix(prompt), crate::auth::random_hex(8)));
     std::fs::create_dir(&folder)?;
     #[cfg(unix)]
     {
@@ -86,8 +98,8 @@ impl PromptSource for MessagePrompts<'_> {
         }
     }
 
-    fn new_scratch_folder(&self) -> Result<String, String> {
-        let folder = new_folder(self.root).map_err(|err| format!("could not create an Ask folder: {err}"))?;
+    fn new_scratch_folder(&self, prompt: &str) -> Result<String, String> {
+        let folder = new_folder_for(self.root, prompt).map_err(|err| format!("could not create an Ask folder: {err}"))?;
         *self.created.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(folder.clone());
         Ok(folder.to_string_lossy().into_owned())
     }
@@ -121,6 +133,18 @@ mod tests {
         link_thread(&root, "0199-thread", &folder).unwrap();
         assert!(link_thread(&root, "../escape", &folder).is_err());
         assert_eq!(folder_of(&root, "../escape"), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_phone_threads_folder_says_so_in_its_name() {
+        let home = scratch("prefix");
+        let root = root(&home);
+        let chat = new_folder_for(&root, "chat").unwrap();
+        let ask = new_folder_for(&root, "ask").unwrap();
+        let name = |p: &Path| p.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name(&chat).starts_with("chat-") && name(&chat).len() == 5 + 16, "{chat:?}");
+        assert!(name(&ask).starts_with("q-") && is_folder(&root, &chat) && is_folder(&root, &ask));
         let _ = std::fs::remove_dir_all(&home);
     }
 

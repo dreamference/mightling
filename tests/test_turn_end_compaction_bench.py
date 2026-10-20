@@ -353,7 +353,7 @@ def test_the_report_carries_the_decision_the_tables_and_the_runbook():
                                 "threshold": 64_750, "binary": {}}, sessions)
     assert "**Decision: switch on.**" in text
     assert "| a-on-1 | enter | 3.0 | True | False | same turn | 30.0 | waited |" in text
-    assert "## Runbook" in text and "second-puffin.local:8000" in text
+    assert "## Runbook" in text and "node-b.local:8000" in text
 
 
 def test_sessions_alternate_arm_order_and_probe_keys_by_repetition(tmp_path):
@@ -415,7 +415,7 @@ def test_the_bench_refuses_to_run_without_a_named_server_or_against_this_machine
     for own in ("http://localhost:8000", "http://127.0.0.1:8000/", "http://0.0.0.0:8000", "http://[::1]:8000"):
         with pytest.raises(SystemExit):
             bench.require_host(own)
-    assert bench.require_host("http://second-puffin.local:8000/") == "http://second-puffin.local:8000"
+    assert bench.require_host("http://node-b.local:8000/") == "http://node-b.local:8000"
 
 
 def test_a_turn_whose_paste_was_cut_short_is_missing(tmp_path):

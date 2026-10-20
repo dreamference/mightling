@@ -79,3 +79,14 @@ site/
 
 # Cargo build output of any crate folder (the rename once committed two by mistake).
 **/target/
+
+# Agent instruction files and agent state are personal and never committed, at any depth.
+# AGENTS.md is the project's own guide and stays tracked.
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AGENTS.override.md
+GEMINI.md
+.cursor/
+.cursorrules
+.windsurfrules

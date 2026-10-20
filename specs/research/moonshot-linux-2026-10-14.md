@@ -6,13 +6,13 @@
 
 ling-engine's decode step is a 16–17 GB weight stream over a 273 GB/s bus with about 35 ms of other work beside it (reports/M3.md §5; specs/drafts/M4-sessions-and-batches-2026-10-10.md). The engine already does what a user-space server can do about the host: one CUDA graph per step with programmatic dependent launch, one engine thread, microseconds of host work per step, `cudaMalloc` for weights, KV and state, no per-step allocations (RESEARCH §16.9, M4 draft "Scheduler"). So the question is whether the layer *below* it, Linux and the NVIDIA driver, holds anything.
 
-The short answer: **no lever worth more than 1–3% of step time, and most of the real value is in not losing speed, not in gaining it.** The GB10's memory bandwidth is fixed (the memory clock is not exposed, let alone adjustable: `nvidia-smi -q -d CLOCK` reports `Memory: N/A`), the GPU is not power- or thermally-limited at decode (44–62 W, 2,405–2,476 MHz, throttle mask 0x0 over ten minutes: reports/micro-2026-10-10.md §4; second-puffin 2026-10-14), and the engine's own CPU thread barely touches memory. What remains is: (a) bus contention from everything *else* on the box, which Linux can bound; (b) wake-up latency on the engine thread between graph replays, which is a few hundred microseconds at most; (c) model load time, which is a one-off; and (d) one kernel-parameter change NVIDIA recommends for coherent systems that DGX OS already applies.
+The short answer: **no lever worth more than 1–3% of step time, and most of the real value is in not losing speed, not in gaining it.** The GB10's memory bandwidth is fixed (the memory clock is not exposed, let alone adjustable: `nvidia-smi -q -d CLOCK` reports `Memory: N/A`), the GPU is not power- or thermally-limited at decode (44–62 W, 2,405–2,476 MHz, throttle mask 0x0 over ten minutes: reports/micro-2026-10-10.md §4; node-b 2026-10-14), and the engine's own CPU thread barely touches memory. What remains is: (a) bus contention from everything *else* on the box, which Linux can bound; (b) wake-up latency on the engine thread between graph replays, which is a few hundred microseconds at most; (c) model load time, which is a one-off; and (d) one kernel-parameter change NVIDIA recommends for coherent systems that DGX OS already applies.
 
-## 2. What the two machines run today (read 2026-10-14, second-puffin; gx10-9428 differs where noted)
+## 2. What the two machines run today (read 2026-10-14, node-b; gx10-1a2b differs where noted)
 
 | Setting | Value | Note |
 | --- | --- | --- |
-| Kernel | 7.0.0-1019-nvidia (second-puffin), 6.17.0-1029-nvidia (gx10-9428) | the two GB10s run different kernels |
+| Kernel | 7.0.0-1019-nvidia (node-b), 6.17.0-1029-nvidia (gx10-1a2b) | the two GB10s run different kernels |
 | Page size | 4 KB | NVIDIA's Grace guide recommends 64 KB; DGX OS ships 4 KB |
 | THP | `madvise`, defrag `madvise`, no hugetlbfs pages | the CUDA driver's `cudaMalloc` does not go through THP |
 | CPU governor | `performance`, cppc_cpufreq, 2,808 MHz pinned | already optimal |
@@ -32,7 +32,7 @@ Memory bandwidth facts the note relies on (reports/micro-2026-10-10.md §1–2):
 
 ### 3.1 Bus contention from other processes: bound it (0–5%, mostly defensive)
 
-Everything on the box shares the 273 GB/s. The resident SGLang server costs 2% of the read stream *while idle* (micro §2). A CPU memory stream beside a decode step is the M0 measurement RESEARCH §16.9 asked for. The things that run beside production in practice: the code indexer and `ling-docs` (bounded by the host-wide memory budget, not by bandwidth), Night Shift's tests, SWE-bench containers, `tracker-miner-fs` (active on gx10-9428, 0 processes on second-puffin), `clamd` on the desktop class of machine, journald, docker's own copies.
+Everything on the box shares the 273 GB/s. The resident SGLang server costs 2% of the read stream *while idle* (micro §2). A CPU memory stream beside a decode step is the M0 measurement RESEARCH §16.9 asked for. The things that run beside production in practice: the code indexer and `ling-docs` (bounded by the host-wide memory budget, not by bandwidth), Night Shift's tests, SWE-bench containers, `tracker-miner-fs` (active on gx10-1a2b, 0 processes on node-b), `clamd` on the desktop class of machine, journald, docker's own copies.
 
 What Linux offers:
 - **cgroup v2 `memory.high`/`memory.max`** already bounds footprint. Bandwidth has no cgroup controller on arm64; the closest is **MPAM** (Arm's memory partitioning and monitoring), which the Cortex-X925/Grace class supports in hardware and Linux has been merging since 6.x as `resctrl` on arm64. Whether DGX OS's kernel exposes `/sys/fs/resctrl` on GB10 is a one-command check (`mount -t resctrl`); if it does, a bandwidth cap on the indexer/Night Shift cgroup is the only *direct* bandwidth lever Linux has. Expected value: nothing when the box is quiet, up to 5% when an indexer runs beside a user's session.
@@ -77,7 +77,7 @@ The case for a custom kernel module would be: a scheduler hook to keep the engin
 
 ## 4. What to do, in order
 
-1. **Measure, two hours, on second-puffin in a GPU slot:** (a) `ling-serve` decode step time with the engine thread pinned to a core ≠ 0 vs unpinned; (b) with a 1 ms spin-wait before the completion wait vs plain blocking; (c) with `stress-ng --vm` or the indexer running on four cores beside it, to put a number on contention (the M0 §1 measurement RESEARCH §16.9 wanted). Seeded replay, outputs must match. Expected: (a) and (b) ≤1% together; (c) is the number that decides whether 3.1 matters.
+1. **Measure, two hours, on node-b in a GPU slot:** (a) `ling-serve` decode step time with the engine thread pinned to a core ≠ 0 vs unpinned; (b) with a 1 ms spin-wait before the completion wait vs plain blocking; (c) with `stress-ng --vm` or the indexer running on four cores beside it, to put a number on contention (the M0 §1 measurement RESEARCH §16.9 wanted). Seeded replay, outputs must match. Expected: (a) and (b) ≤1% together; (c) is the number that decides whether 3.1 matters.
 2. **If (c) shows >3%:** check `mount -t resctrl` on DGX OS; if MPAM is exposed, put indexers and Night Shift in a bandwidth-capped group through the existing memory-budget machinery (`host setup`). If not, `SCHED_IDLE` for indexers, which costs nothing.
 3. **Guard rails, no measurement needed:** a `ling-stream-tests` assertion on the allocation kind of the weight arenas; `CPUAffinity=` and `Nice=-5` in the serve unit; stop `tracker-miner-fs` on nodes via `host setup` (it already handles Wi-Fi power saving the same way).
 4. **Do not pursue:** 64 KB pages, hugetlbfs, `isolcpus`/`nohz_full`, IOMMU passthrough, custom modules, GPUDirect Storage. Each costs a reboot or a kernel and buys under 1% of a decode step.
@@ -92,4 +92,4 @@ Linux is not where the next 10% is. The order of levers for single-stream decode
 - NVIDIA, *Grace Performance Tuning Guide — Operating System Settings* (page size, THP, `init_on_alloc`, `iommu.passthrough`, governor): https://docs.nvidia.com/dccpu/grace-perf-tuning-guide/os-settings.html
 - NVIDIA developer forums: "Very slow mmap on DGX Spark that affects model loading" (2025-11); "GB10 Hardware Baseline — First Direct Measurements" (2026-04); "NVML support for DGX Spark unified memory" (2026-01).
 - vLLM, *vLLM on the DGX Spark* (2026-06): CUDA graphs by default, unified-memory headroom.
-- Machine state read 2026-10-14 on second-puffin (kernel 7.0.0-1019-nvidia, driver 580.178.04) and gx10-9428 (kernel 6.17.0-1029-nvidia).
+- Machine state read 2026-10-14 on node-b (kernel 7.0.0-1019-nvidia, driver 580.178.04) and gx10-1a2b (kernel 6.17.0-1029-nvidia).

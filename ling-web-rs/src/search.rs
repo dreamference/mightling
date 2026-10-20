@@ -566,8 +566,8 @@ mod tests {
     fn remote() -> Node {
         Node {
             node: "7c1e".to_string(),
-            name: "gx10-9428".to_string(),
-            address: "192.168.0.105".to_string(),
+            name: "gx10-1a2b".to_string(),
+            address: "192.168.50.105".to_string(),
             model_port: 8000,
             web_port: Some(3000),
             search_port: Some(8888),
@@ -580,7 +580,7 @@ mod tests {
         // On a node, and on a client that remembers no node, `remote_node()` is None: loopback.
         assert_eq!(searxng_url_from(None, None), DEFAULT_SEARXNG_URL);
         assert_eq!(searxng_url_from(Some("  "), None), DEFAULT_SEARXNG_URL);
-        assert_eq!(searxng_url_from(None, Some(&remote())), "http://192.168.0.105:8888");
+        assert_eq!(searxng_url_from(None, Some(&remote())), "http://192.168.50.105:8888");
         // The override still wins, on either kind of machine.
         assert_eq!(searxng_url_from(Some("http://10.0.0.9:1234"), Some(&remote())), "http://10.0.0.9:1234");
         // A node that keeps its SearXNG to itself: nothing to connect to but loopback.
@@ -593,10 +593,10 @@ mod tests {
         assert_eq!(start_hint(None), "Start it with: ling-admin searxng start");
         assert_eq!(
             start_hint(Some(&remote())),
-            "Web search runs on the Mightling node (gx10-9428). On the node: ling-admin searxng start"
+            "Web search runs on the Mightling node (gx10-1a2b). On the node: ling-admin searxng start"
         );
         let unshared = Node { search_port: None, name: String::new(), ..remote() };
-        assert!(start_hint(Some(&unshared)).contains("(192.168.0.105), which does not share its SearXNG"));
+        assert!(start_hint(Some(&unshared)).contains("(192.168.50.105), which does not share its SearXNG"));
         assert!(start_hint(Some(&unshared)).ends_with("ling-admin node enable"));
         // Nothing tells the model to repair the container: the engines refuse upstream, and a
         // restart changes nothing (2026-10-20).
