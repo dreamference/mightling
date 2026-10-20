@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.vllm_server.model_gate_service import (
+    NODE_ID_FILE,
     PAUSE_FILE,
     PROBE_PATH,
     RUN_FILE,
@@ -118,6 +119,7 @@ class ModelGate:
         """
         GATE_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(SERVICE_SOURCE, GATE_DIR / SERVICE_COPY)
+        cls.write_node_id()
         cls.remove(port)
         result = subprocess.run(cls.run_command(port, docker_image), stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE, text=True)
@@ -138,6 +140,15 @@ class ModelGate:
         print(f"⚠️  The model gate started but did not answer on port {port}{': ' + detail if detail else ''}")
         cls.remove(port)
         return False
+
+    @classmethod
+    def write_node_id(cls) -> None:
+        """Puts the node's id beside the gate's state, for its probe (REMOTE_ACCESS §14.3, item 2)."""
+        from dreamference.node.node_identity import NodeIdentity
+
+        node_id = NodeIdentity.read()
+        if node_id:
+            (GATE_DIR / NODE_ID_FILE).write_text(node_id + "\n", encoding="utf-8")
 
     @classmethod
     def stop(cls, port: int) -> None:
