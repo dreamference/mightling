@@ -580,6 +580,27 @@ def test_tui_command_lines_are_told_from_the_rest():
     assert not NightShiftHost.is_interactive(["apps", "serve", "gmail"])
     assert NightShiftHost.is_interactive(["fork", "--last"])
     assert NightShiftHost.is_interactive(["agents"])
+    assert not NightShiftHost.is_interactive(["--help"])
+    assert not NightShiftHost.is_interactive(["resume", "-h"])
+
+
+@pytest.mark.parametrize("args", [
+    ["-C", "docs"], ["--cd", "web"], ["-C", "node", "fix the bug"], ["-m", "exec", "fix it"],
+    ["-p", "night"], ["--add-dir", "chat", "go"], ["-c", "model=x", "fix the night run"],
+    ["-i", "app", "what is this"], ["--", "exec"], ["--", "-h"], ["fix", "exec"],
+])
+def test_a_non_session_word_outside_the_subcommands_place_is_still_a_session(args):
+    # A word anywhere used to count, so `ling -C docs` (a folder named docs) was not counted as a
+    # session (noted in the 1.7.0 tests).
+    assert NightShiftHost.is_interactive(args)
+
+
+@pytest.mark.parametrize("args", [
+    ["-C", "/repo", "exec", "task"], ["-c", "model=x", "app-server"], ["--cd=/repo", "web", "serve"],
+    ["-m", "qwen", "--search", "review"], ["--enable", "x", "night", "list"],
+])
+def test_the_subcommand_after_options_and_their_values_is_found(args):
+    assert not NightShiftHost.is_interactive(args)
 
 
 @pytest.mark.parametrize("args", [
