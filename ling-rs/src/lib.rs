@@ -43,6 +43,7 @@ pub mod cave;
 pub mod chat;
 pub mod code_index;
 pub mod compat;
+pub mod compat_print;
 pub mod compat_tui;
 pub mod compaction;
 pub mod docs_index;
@@ -106,6 +107,12 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
     "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal",
+];
+
+/// The launcher's own subcommands, handled before Codex parses the command line.
+pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
+    "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
+    "signal", "refine", "compat", "cavemode",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -293,6 +300,15 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
+    // In the compatibility mode, `-p` is Claude Code's print mode (compat_print.rs): the task runs
+    // as a child `ling exec --json` and its events are written in the format asked for.
+    if compat::mode_now() == compat::Mode::Claude
+        && compat_print::is_print(&user_args, |word| {
+            command.find_subcommand(word).is_some() || LAUNCHER_SUBCOMMANDS.contains(&word)
+        })
+    {
+        std::process::exit(compat_print::run(&user_args).await);
+    }
     let subcommand = first_positional(command, &user_args);
     if let Some((name, reason)) = removed_command(&user_args, subcommand) {
         bail!("`ling {name}` is not available: {reason}.");
