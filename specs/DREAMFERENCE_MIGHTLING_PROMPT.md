@@ -223,10 +223,10 @@ A benchmark report under `high-swe` should be read class by class against this t
 
 ### 5.4 Cave mode
 
-Cave mode is a separate switch and stays one. But `ultra`, the default, tells the model "Between tool calls, write nothing", and `high-swe` asks for a written diagnosis before the first edit. The cave text arrives later in the context than the system prompt.
+Cave mode is a separate switch and stays one. But `ultra`, the default until 2026-10-20 (`lite` since, `full` in the TUI; CAVE_MODE §11), tells the model "Between tool calls, write nothing", and `high-swe` asks for a written diagnosis before the first edit. The cave text arrives later in the context than the system prompt.
 
 - **Phase 1 decides nothing by fiat:** the benchmark runs `high-swe` under `ultra` and under `off` (§6.2), and the pilot ran both (§6.4).
-- **If `off` wins by more than the noise floor,** a prompt gains one optional property, a cave level it prefers, which sits *below* the user's own choices in cave mode's chain (session, variable, file, **then the prompt's preference**, then `ultra`). `high-swe` would prefer `off`.
+- **If `off` wins by more than the noise floor,** a prompt gains one optional property, a cave level it prefers, which sits *below* the user's own choices in cave mode's chain (session, variable, file, **then the prompt's preference**, then the built-in default). `high-swe` would prefer `off`.
 
 ### 5.5 The tool list is a bigger lever than the text, and is not this command's
 

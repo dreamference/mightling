@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-engine",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Engine team's bot: commits, pull requests and reviews for ling-engine, the single-model inference engine for Qwen3.8-27B on the GB10, and its paper. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

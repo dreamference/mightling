@@ -275,10 +275,11 @@ A message that is exactly one of these is a command. Anything else is a question
 | `/status` | What is running and for how long, the queue, the model server's state, the air-gap level, the bridge's and signal-cli's versions |
 | `/threads` | The last eight threads started from Signal, numbered, with their first line |
 | `/use N` | Continues thread N from `/threads` (`thread/resume`; an Ask thread keeps its folder, ASK §16) |
+| `/cavemode [level]` | How terse this thread's answers are: the level in force, or `off`, `lite`, `full`, `ultra` for this thread; `/cavemode default <level|built-in>` for new threads, on every surface (CAVE_MODE §11.7). Through `ling web`'s `/api/cavemode` |
 | `/help` | This table |
 | `YES` / `NO` | Only while an approval is pending (§8); otherwise an ordinary message |
 
-**No command reaches the node's administration:** none starts or stops the model server, changes the air-gap level, pairs devices or changes the bridge. Those stay with a shell on the node.
+**No command reaches the node's administration:** none starts or stops the model server, changes the air-gap level, pairs devices or changes the bridge. (`/cavemode default` writes one preference of the owner's own, as the terminal's `/cavemode default` does.) Those stay with a shell on the node.
 
 ### 5.3 A changed identity key
 

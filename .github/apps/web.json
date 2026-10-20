@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-web",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Web & Ask team's bot: commits, pull requests and reviews for ling web and Ask, ling-search and ling-fetch, and the sidecars behind them. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}
