@@ -82,6 +82,27 @@ export function ReviewPane(props: ReviewPaneProps) {
   const cwdRef = useRef(props.cwd);
   cwdRef.current = props.cwd;
 
+  // What the user wrote and marked belongs to the thread and folder it was written for: each keeps its
+  // own comments, draft, viewed and folded files and commit message, put away when the pane shows
+  // another and given back on return, so thread A's comments never go to thread B's composer nor A's
+  // message into B's commit (§9.3; until 1.7.1 they followed the pane to whatever thread was shown).
+  const kept = useRef(new Map<string, { comments: ReviewComment[]; draft: Draft | null; viewed: Set<string>; collapsed: Set<string>; message: string }>());
+  const current = useRef({ comments, draft, viewed, collapsed, message });
+  current.current = { comments, draft, viewed, collapsed, message };
+  const owner = `${props.threadId ?? ""}\n${props.cwd ?? ""}`;
+  const shownOwner = useRef(owner);
+  useEffect(() => {
+    if (shownOwner.current === owner) return;
+    kept.current.set(shownOwner.current, current.current);
+    shownOwner.current = owner;
+    const back = kept.current.get(owner);
+    setComments(back?.comments ?? []);
+    setDraft(back?.draft ?? null);
+    setViewed(back?.viewed ?? new Set());
+    setCollapsed(back?.collapsed ?? new Set());
+    setMessage(back?.message ?? "");
+  }, [owner]);
+
   // The repositories of the thread's folder.
   useEffect(() => {
     if (!windowGit || !props.cwd) {
