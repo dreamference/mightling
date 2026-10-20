@@ -542,7 +542,13 @@ class ModelGateService:
                         await asyncio.wait_for(
                             self.copy_body(reader, framing, None, DRAIN_LIMIT), DRAIN_TIMEOUT_S
                         )
-                    except (TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError, ConnectionError):
+                    except (
+                        TimeoutError,
+                        asyncio.IncompleteReadError,
+                        asyncio.LimitOverrunError,
+                        ValueError,
+                        ConnectionError,
+                    ):
                         pass
                 await self.respond(
                     writer,
@@ -667,29 +673,74 @@ class ModelGateService:
                 head_only=method == READ_METHODS[1],
             )
             return None
-        if method != POST or path not in gate_adapters.GENERATION_PATHS:
+        if (
+            method != POST
+            or path not in gate_adapters.GENERATION_PATHS
+            or not self.body_is_read(listing, framing)
+        ):
             return self.rewrite_head(head, key), None, None
+        refusal, sent, replacement = await self.read_and_rewrite(
+            reader, framing, listing, guarded=guarded
+        )
+        if refusal is not None:
+            await self.respond(writer, refusal[0], "Refused", refusal[1])
+            return None
+        return self.rewrite_head(head, key, len(sent)), sent, replacement
+
+    @classmethod
+    def body_is_read(cls, listing: dict[str, object] | None, framing: tuple[str, int]) -> bool:
+        """Whether the gate reads a generation request's body whole before sending it on.
+
+        With adapters, always (`model_gate_adapters.py`). Without, only for the loop guard and only
+        a body that is whole and within the limit: a chunked or larger one streams through as before.
+
+        Args:
+            listing: The adapters served, or None.
+            framing: `framing()`'s answer.
+
+        Returns:
+            bool: True to read it.
+        """
+        return listing is not None or (
+            framing[0] == gate_adapters.FRAMING_LENGTH and framing[1] <= BODY_LIMIT
+        )
+
+    async def read_and_rewrite(
+        self,
+        reader: asyncio.StreamReader,
+        framing: tuple[str, int],
+        listing: dict[str, object] | None,
+        *,
+        guarded: bool,
+    ) -> tuple[tuple[int, dict[str, Any]] | None, bytes, tuple[bytes, bytes] | None]:
+        """Reads a generation request's body and applies the loop guard's and the adapters' rules.
+
+        Args:
+            reader: The client.
+            framing: `framing()`'s answer.
+            listing: The adapters served, or None.
+            guarded: Whether the loop guard's rules apply (`ModelGateGuard.applies`).
+
+        Returns:
+            tuple: A refusal (status and body) or None; the body to send; the (engine id, client id)
+            to swap back in the answer, or None.
+        """
         request_body = await GateAdapters.read_body(reader, framing, BODY_LIMIT)
-        if request_body is not None and guarded:
-            request_body, note = GateGuard.rewrite(request_body)
-            if note:
-                self.log(note)
         if request_body is None:
-            refusal, sent, replacement = (
+            return (
                 GateAdapters.refusal(
                     TOO_LARGE, "request_too_large", "The request is larger than the gate reads."
                 ),
                 b"",
                 None,
             )
-        elif listing is None:
-            refusal, sent, replacement = None, request_body, None
-        else:
-            refusal, sent, replacement = await self.adapters.rewrite(request_body, listing)
-        if refusal is not None:
-            await self.respond(writer, refusal[0], "Refused", refusal[1])
-            return None
-        return self.rewrite_head(head, key, len(sent)), sent, replacement
+        if guarded:
+            request_body, note = GateGuard.rewrite(request_body)
+            if note:
+                self.log(note)
+        if listing is None:
+            return None, request_body, None
+        return await self.adapters.rewrite(request_body, listing)
 
     @classmethod
     def log(cls, line: str) -> None:
