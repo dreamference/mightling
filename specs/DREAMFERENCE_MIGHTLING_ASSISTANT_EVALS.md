@@ -1,6 +1,6 @@
 # Mightling assistant evals: measuring the phone-chat assistant
 
-**Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built. **Phase 0 done the same day (§9):** runs happen in a `bwrap --unshare-net` jail that keeps production's sandbox and is offline by construction; nothing else built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
+**Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built. **Phase 0 done the same day (§9); three industry benchmarks added on the owner's request, planned in §10:** runs happen in a `bwrap --unshare-net` jail that keeps production's sandbox and is offline by construction; nothing else built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
 **Goal:** measure, every night, the faults that made the phone-chat assistant useless on the morning of 2026-10-20 ([MIGHTLING_SIGNAL §19](./DREAMFERENCE_MIGHTLING_SIGNAL.md), [MIGHTLING_CHAT §16](./DREAMFERENCE_MIGHTLING_CHAT.md)). Each fix then gets a number that shows when it regresses, as SWE-bench gives the coding agent.
 **Builds on:**
 - `scripts/cave_mode_bench/` (`run.py`, `drift.py`): real `ling exec` runs with a fresh `CODEX_HOME`, multi-turn through `exec resume --last`, a `check.py` per task, tokens counted with the served model's tokenizer;
@@ -158,6 +158,14 @@ There is no benchmark to adopt here. There are metrics, and the placement questi
 | 7 | **OCRBench v2** subset, **MM-UPD**'s image–question mismatch split and **MMStar** with and without the image | Screenshot reading by the served build, with a leaderboard row for Qwen3.8-27B to compare our NVFP4 build against; the mismatch split is the nearest public check of failure 1's model half | 1 | at each model or recipe change | ≈ 3–5 GPU-h |
 | 8 | **Lost in Conversation**, a subset with the simulator played by the served model | The only public set that plays a live thread; catches early confident framing | 5, 2 | monthly | ≈ 10 GPU-h |
 
+**Added on the owner's request (2026-10-20): three industry-standard benchmarks for `ling` itself** (§10). They measure the coding agent and the model rather than the phone chat, so they sit beside the ranking above. Their runners are built after the `ask-evals` core.
+
+| What | Measures | When | Est. cost |
+|---|---|---|---|
+| **IFEval** (541 prompts, rule-scored; plus IFBench's 300 as a second column) | instruction following; regressions from a prompt or a cave level | weekly assistant-evals night, and before any prompt or cave-level change merges | ≈ 1 h on the clock |
+| **Aider Polyglot** (225 Exercism exercises in C++, Go, Java, JavaScript, Python, Rust) | multi-language code editing with one retry on test output; the baseline for the language adapters | a separate coding night, fortnightly, and at every adapter or model change | ≈ 4–6 h on the clock |
+| **Terminal-Bench 2.1** (89 tasks; a fixed 30-task subset weekly) | agentic terminal work with `ling` as the agent | the subset in the separate coding night; the whole set monthly | ≈ 3–5 h subset, ≈ 10–15 h full |
+
 ### 4.2 Build ourselves
 
 - **`ask-evals` (§5)**, the core of this spec.
@@ -290,7 +298,7 @@ The harness's own logic (stand-ins, checks, loop metrics, scoring) gets ordinary
 | C. `night pause` mid-run | Pause the gate, run, resume | No separate slot | Perturbs the SWE-bench arm's timing and admission; rejected |
 | D. The second GB10 | Run on the paired node | Free of the first node's nights | That machine is used for ling-engine development, and its model and recipe must match production's for the number to mean anything |
 
-**The weekly outside sets** (§4.1 ranks 2–5, about 10–15 GPU-h estimated) replace one SWE-bench night a week (D3), or run as ranks 2–4 one night and rank 5 another. Ranks 6–8 run at a model or recipe change, or monthly.
+**The weekly outside sets** (§4.1 ranks 2–5, about 10–15 GPU-h estimated) replace one SWE-bench night a week (D3), or run as ranks 2–4 one night and rank 5 another. Ranks 6–8 run at a model or recipe change, or monthly. **IFEval** joins the weekly assistant-evals night (about an hour). **Aider Polyglot and Terminal-Bench's subset** do not fit beside them. Together they take about 7–11 hours, a whole night, so they get a **separate coding night**, fortnightly, which replaces a SWE-bench night the way D3's does (§10.4).
 
 **After a change.** A change to `ling-rs/prompts/ask.md`, a cave level's text, the bridges or the model recipe runs `ask-evals` once by hand before merging, as the cave levels were run before they shipped.
 
@@ -377,6 +385,102 @@ The container is the sandbox there: Codex's own cannot start inside one, and `li
 - tests of all of it on recorded events, with no model.
 
 Separately, the night script's optional step (D2, off by default) and a gate hold of `ask-evals`' own.
+
+## 10. Three industry-standard benchmarks for `ling` (added 2026-10-20)
+
+The owner asked for three more: Terminal-Bench, Aider Polyglot and IFEval. Each was checked for licence, for whether it runs offline on arm64, and for cost per run before it was planned. All three can run here, so none is swapped. Terminal-Bench and Aider Polyglot need work for arm64 and for offline use, described below. Sources were fetched on 2026-10-20 with `ling-fetch`. **V** = verified from the primary source, **NV** = not. Costs are estimates.
+
+### 10.1 Terminal-Bench: version 2.1, with 4.0 later
+
+- **What it measures.** An agent solving a task in a container: build, debug, configure, data and science work. Each task's verifier, pytest in the container, writes the reward (V, `tests/test.sh`). Its README calls it "used by virtually all frontier labs" (V).
+- **Versions.** The family on tbench.ai lists 1.0 (2025-05-19), 2.0 (2025-11-07), 2.1 (2026-05-06), 3.0 (2026-07-30) and **4.0 (2026-08-28), the current one** (V).
+  - 4.0 has **66 tasks** (`prebuilt-images.json`: `task_count` 66, `image_count` 157, V) and a flat agent timeout of **8 hours per task** (V, the release post and `task.toml`: `timeout_sec = 28800`), with 2 CPUs and 4 GB on the sampled task (V).
+  - 2.0 and 2.1 have **89 tasks** (V: the task list, and the Harbor hub's `terminal-bench-2-1`). Per-task agent timeouts are mostly 15–60 minutes (V: 96 of the `timeout_sec` lines in the 89 `task.toml` are 900 s).
+- **Licence.** Apache-2.0 for the task repositories `harbor-framework/terminal-bench` (4.0) and `terminal-bench-2`, and for the harness `harbor` (PyPI 0.24.0, `license_expression: Apache-2.0`, Python ≥ 3.12) (V).
+- **Why 2.1 first.** The published numbers for our model are on 2.1:
+  - Qwen3.8-27B scores **73.0** on "Terminal Bench 2.1 (Terminus)" (V, the upstream model card; thinking on by default);
+  - the NVFP4 checkpoint we serve scores **73.81% (62/84)** on an 84-task subset, pass@1, with a third-party coding agent as the harness (named on the card), on 4× B300 with TP4 SGLang (V, the RadixArk card).
+
+  `ling` with thinking off, on one GB10, offline, is a different configuration, so the number is ours to compare across nights, not with the card. The card says how far a harness and thinking can move it. 4.0's 8-hour timeouts make even a subset a night of its own: later, once 2.1 runs.
+- **arm64: needs local builds.** Every prebuilt image is **amd64 only**: all 89 of 2.0's `alexgshaw/<task>:20251031` and all 66 of 4.0's `harborframework/terminal-bench:<task>-environment-v4.0.0` on Docker Hub (V). The Dockerfiles are in the repositories, though:
+  - 2.x builds from multi-arch bases (`python:3.13-slim-bookworm` 41, `ubuntu:24.04` 38, plus debian and other python tags, V);
+  - only two tasks, `qemu-startup` and `qemu-alpine-ssh`, download an x86_64 ISO, which they boot under QEMU inside the task (V).
+
+  Harbor builds from the Dockerfile with `--force-build` (V). Whether every 2.1 task's packages exist for aarch64 is NV: Phase T0 builds them all once and lists the ones that fail. This machine has no x86 emulation registered (`/proc/sys/fs/binfmt_misc` lists only `python3.12`), so running the amd64 images is not an option without installing QEMU's binfmt, which is not proposed.
+- **Offline: needs pre-baking.**
+  - Every 2.x task says `allow_internet = true` (V, all 89).
+  - The verifier installs its tools at verification time: `apt-get install curl`, uv from astral.sh, then `uvx -p 3.13 -w pytest==8.4.1 -w pytest-json-ctrf==0.3.5` (V, `regex-log/tests/test.sh`).
+  - The runner therefore builds each task image with a layer that already holds curl, uv, Python 3.13 and the pinned pytest wheels in uv's cache, and runs agent and verifier with no network (the SWE-bench model: an internal Docker network, the model through its gateway).
+  - A task whose agent needs the internet to solve it fails offline. That is a known skew, recorded per task.
+  - The alternative, a night with the internet open, is a decision for the owner (D7, below).
+- **How `ling` plugs in.**
+  - Harbor's installed agents subclass `BaseInstalledAgent`. Its Codex agent installs the vendor's CLI with `npm install -g` in the container and runs `codex exec --json` (V, `src/harbor/agents/installed/codex.py`).
+  - Harbor takes a custom agent by import path (`--agent`, formerly `--agent-import-path`, V).
+  - Ours would mount SWE-bench's patchelf'd runtime (`/opt/ling`, SWE_BENCH §12) and run `ling exec --json --dangerously-bypass-approvals-and-sandbox`, the container being the sandbox as in SWE-bench, with `DREAMFERENCE_VLLM_HOST` set to the gateway.
+  - Harbor itself would be pinned in its own virtualenv like the SWE-bench harness.
+- **Cost (estimate).**
+  - The full 2.1 set under a 30-minute cap per task at 3 parallel is at most about 15 hours; at a median of about 10 minutes per task, about 5 hours.
+  - A fixed 30-task subset, drawn once and kept, takes about 2–4 hours.
+  - The images, once built, take on the order of 100+ GB of disk (NV until built). A night's `IMAGE_GB`/`RESERVE_GB` check applies as in the night scripts.
+
+### 10.2 Aider Polyglot
+
+- **What it measures.** Editing code to pass an exercise's tests in six languages. The model gets a second try with the failing test output, and the headline is `pass_rate_2` (V, aider's `benchmark/README.md`). It is the baseline for the language adapters (ADAPTERS spec), because the six languages include Rust and C++.
+- **Size.** **225 exercises**: C++ 26, Go 39, Java 47, JavaScript 49, Python 34, Rust 30 (V, counted in `Aider-AI/polyglot-benchmark`). The Harbor hub carries the same 225 as `aider/aider-polyglot` (V).
+- **Licence.**
+  - The exercises are Exercism's, and all six tracks are **MIT** (V: `exercism/{cpp,go,java,javascript,python,rust}`).
+  - The `polyglot-benchmark` repository has **no licence file** (GitHub reports none, V). Its README attributes everything to Exercism and points to the tracks' licences (V).
+  - Aider's harness is Apache-2.0 (V).
+  - We copy nothing into this repository: the runner clones the pinned commit into the cache at run time and records the licence in its manifest.
+- **arm64 and offline.**
+  - Aider's `benchmark/Dockerfile` builds from `buildpack-deps:jammy` (multi-arch, arm64 included, V) and picks Go's architecture from `uname -m`, aarch64 included (V).
+  - It installs Python 3.11, OpenJDK 21, CMake and Boost, Rust by rustup, Node 20 and the JavaScript test packages, all at **build** time (V).
+  - Java exercises use Gradle, whose wrapper downloads Gradle on first use (NV for these exercises). The image build therefore runs each language's test command once, so the run itself needs no network.
+- **How `ling` plugs in.** Aider's harness drives aider only. Ours is a small runner:
+  - copy the exercise into a scratch folder in the container;
+  - `ling exec` with the instructions (`.docs/instructions.md`) and the stub files;
+  - run the track's test command;
+  - on failure, one `ling exec resume --last` with the test output;
+  - score `pass_rate_1` and `pass_rate_2` exactly as aider names them.
+
+  Running through Harbor's dataset instead is possible once a Harbor agent for `ling` exists (§10.1). The runner is kept separate so this benchmark does not depend on Harbor.
+- **Published.** With aider, Qwen3 32B scored **40.0%** `pass_rate_2` at 372 s per case; Qwen2.5-Coder-32B-Instruct 16.4%; gemma-3-27b-it 4.9%; gpt-oss-120b (high) 41.8% (V, `polyglot_leaderboard.yml`). The leaderboard's latest entry is dated 2025-10-03 (V), so it is a historical anchor, not a current ranking, and `ling` is a different harness from aider.
+- **Cost (estimate).** 225 cases × about 3–5 minutes with up to two attempts, at 3 parallel, is about 4–6 hours. Per language, 26–49 cases are about 30–60 minutes each.
+
+### 10.3 IFEval, with IFBench beside it
+
+- **What it measures.** Whether the answer obeys verifiable instructions ("more than 400 words", "mention the keyword at least 3 times"), with 25 instruction types (V, arXiv 2311.07911). Scored by rules at four levels: strict and loose, by prompt and by instruction.
+- **Size and licence.** **541 prompts** (V, Hugging Face `google/IFEval`, one file `ifeval_input_data.jsonl`). The dataset is Apache-2.0 (V, the card), and so is the code (V, `google-research/google-research`).
+- **Offline.** The scorer needs `absl`, `langdetect`, `nltk` and `immutabledict` (V, `requirements.txt`). It loads NLTK's `punkt` sentence tokenizer (V, `instructions_util.py`: `nltk.data.load("nltk:tokenizers/punkt/english.pickle")`), downloaded once into the cache with the dataset. Nothing then needs the network.
+- **How it runs.**
+  - Each prompt goes through `ling exec` with the Ask or default prompt and the cave level under test, tools off, in the jail (§9.2). Raw completions from the model server would test the model alone.
+  - The point, as the owner put it, is to catch regressions from prompts and cave levels, so the prompt and level are the variable and everything else is held fixed.
+  - Cave mode's `ultra` limits answers to a few sentences. An IFEval prompt that asks for 400 words then tests the trade-off directly, and the report shows each level's strict prompt-level score next to `off`'s.
+- **IFBench as a second column.** AllenAI's IFBench (300 test prompts, 58 out-of-domain constraints, repository Apache-2.0; the test set's card names no licence, NV). It is the harder successor, and the one the upstream model card reports for Qwen3.8-27B: **79.5** (V, thinking on). Same scorer style, same runner.
+- **Cost (estimate).** 541 prompts × about 300 output tokens is about 160k tokens, about 30 minutes of decode at 3 streams. Each `ling exec` adds a few seconds of start, so about an hour on the clock with IFBench's 300 included.
+
+### 10.4 Where they run
+
+| Night | What | Est. clock time |
+|---|---|---|
+| Nightly slot (D2, off until switched on) | `ask-evals` | ≈ 1 h |
+| Weekly assistant-evals night (D3) | LCB + mixed threads, MMLU-ProX lite, SimpleQA Verified, AbstentionBench, CAVEWOMAN, BrowseComp-Plus subset, **IFEval + IFBench** | ≈ 10–15 h |
+| **Fortnightly coding night (new, D8)** | **Aider Polyglot** (all 225) and **Terminal-Bench 2.1's 30-task subset** | ≈ 7–11 h |
+| Monthly, or at a model, recipe or adapter change | Terminal-Bench 2.1 in full; later 4.0's subset | ≈ 10–15 h |
+
+**Two new decisions for the owner:**
+
+- **D7. Terminal-Bench offline or online.** Proposed: offline, like every other night (pre-baked verifier, internal network), with the tasks that need the internet listed and scored apart.
+- **D8. The fortnightly coding night**, replacing a SWE-bench night.
+
+### 10.5 Phases for the three
+
+| Phase | What | Acceptance |
+|---|---|---|
+| T0 | IFEval and IFBench data and `punkt` into the cache; the scorer pinned; Aider's image built for arm64 with each language's tests warmed; Terminal-Bench 2.1's 89 images built for arm64 with the verifier layer | a list of what failed to build, and why |
+| T1 | The IFEval runner (prompt and level as the variable) | known-good and known-bad responses score as the reference scorer does |
+| T2 | The Polyglot runner | the reference solutions (`.meta/`) pass and the stubs fail in every language |
+| T3 | The Harbor agent for `ling` and the Terminal-Bench runner | the oracle agent passes the built tasks; one task end to end with `ling` |
 
 ## Sources
 
