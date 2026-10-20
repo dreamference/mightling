@@ -121,7 +121,7 @@ Effort is the bridge's work after Phase 0, in working days for one person: **S**
 
 **How.**
 - **Drafts** with `sendRichMessageDraft`, final answers with `sendRichMessage`; `can_stop` as today, `keep_on_stop` per D9.
-- **The bridge builds `blocks`, not `markdown`.** Rich Markdown accepts HTML tags, including `<tg-button>` with `callback_data`, `url`, `login_url` and `web_app` types (`rich-messages.md`). Model text comes from web pages, mail and files the agent read; passed through, a prompt injection could put a button in an answer: a link dressed as "Approve", or a callback whose data mimics an approval. So the bridge parses the model's Markdown with the parser `render.rs` already has, and emits `InputRichBlock*` blocks (paragraphs, headings, lists, preformatted with a language, tables, quotes). Raw HTML in the model's text is shown as text. **No button, link-login or Mini App element ever comes from model text.**
+- **The bridge builds `blocks`, not `markdown`.** Rich Markdown accepts HTML tags, including `<tg-button>` with `callback_data`, `url`, `login_url` and `web_app` types (`rich-messages.md`). Model text comes from web pages, mail and files the agent read; passed through, a prompt injection could put a button in an answer: a link dressed as "Approve", or a callback whose data mimics an approval. So the bridge parses the model's Markdown itself (a real Markdown parser, new: `render.rs` today handles only inline styles and code fences, not tables, nested lists or quotes) and emits `InputRichBlock*` blocks (paragraphs, headings, lists, preformatted with a language, tables, quotes). Raw HTML in the model's text is shown as text. **No button, link-login or Mini App element ever comes from model text.**
 - **Approval callbacks carry a random nonce.** Today a button's data is `a:<n>:<choice>`, with `n` a counter the hub increments per approval (`hub.rs`, `next_approval`), checked against the hub's pending approvals and then `ling web`'s pending set (CHAT §3). A counter is guessable; that is harmless while answers cannot carry buttons, and stops being harmless the day they can. With rich messages each request gets an unguessable nonce, and a callback whose nonce the bridge never issued is ignored.
 - **Above 32,768 characters or 500 blocks**, the splitter (CHAT §3) still splits, now at a block boundary.
 - **Fallback:** if `sendRichMessage` is refused (an older Bot API, a client that cannot show it, a malformed block), the bridge sends today's HTML; a failed render never loses an answer.
@@ -134,7 +134,7 @@ Effort is the bridge's work after Phase 0, in working days for one person: **S**
 ### 3.3 Approvals with colour, a used state and the partial kept (Telegram only). Effort S
 
 - **Approve** as a `success` (green) button, **Decline** as `danger` (red).
-- **After a press**, the request stays readable with the choice shown as a `disabled` button (10.3), "Approved" or "Declined", in place of the keyboard. Today the bridge edits the message's text to append the outcome ("Answered elsewhere.", "The turn ended."), which drops the keyboard; the disabled button makes the outcome scannable in a long topic.
+- **After a press**, the request stays readable with the choice shown as a `disabled` button (10.3), "Approved" or "Declined", in place of the keyboard. Today the bridge edits the message's text to append the outcome ("Answered elsewhere.", "The turn ended."), which should also remove the keyboard (an edit without `reply_markup`; checked in Phase 0); the disabled button makes the outcome scannable in a long topic.
 - **A request whose 10 minutes ran out** is shown the same way, "Declined (timed out)".
 - **The stop button** keeps the partial (`keep_on_stop`), and the bridge sends it as a message ending "(stopped)" (D9).
 
@@ -291,7 +291,7 @@ Ranked by benefit to the owner, then by what new data leaves the node, then by e
   2. `sendRichMessageDraft` then `sendRichMessage`: a 20,000-character answer with tables and code; what an older client shows; `can_stop` and `keep_on_stop`;
   3. whether drafts count against one message a second, with two topics streaming;
   4. a voice note through `/api/transcribe`, as it comes;
-  5. `editMessageReplyMarkup` with `style` and `disabled` on an approval.
+  5. `editMessageReplyMarkup` with `style` and `disabled` on an approval, and whether today's `editMessageText` of a closed approval removes its keyboard.
 - **Phase 1:** §3.1, §3.2, §3.3 and D9. The stand-in Bot API learns topics and rich messages.
 - **Phase 2 (shared):** §3.4 voice, §3.5 Night Shift with the `ling web` report endpoint, §3.7 files on a press.
 - **Phase 3:** §3.6 Mini App, if D6 says so; §3.8.
