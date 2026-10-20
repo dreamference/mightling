@@ -1,6 +1,6 @@
 // The settings (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §2.15; Ctrl+,): pages in a dialog,
 // window settings in the window's preferences and agent settings in config.toml through the
-// server. General, Profile (statistics from the local session files), Keyboard shortcuts (§2.19),
+// server. General, Your documents (the local file index's folders, LOCAL_INDEX §8.3), Profile (statistics from the local session files), Keyboard shortcuts (§2.19),
 // Notifications, Appearance (System, Light or Dark, the §3.6 tokens over each, a theme shared as a file),
 // Personalization (`~/.mightling/AGENTS.md`), Archived threads, Git, Project, Worktrees. Pets,
 // Browser, Computer Use and Suggested prompts are not offered here (Phase 3 or not at all).
@@ -16,7 +16,7 @@ import { useShownTheme, type ThemeChoice } from "./theme";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node";
+export type SettingsPage = "general" | "documents" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -40,6 +40,7 @@ export interface SettingsProps {
 
 const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "general", label: "General" },
+  { id: "documents", label: "Your documents" },
   { id: "profile", label: "Profile", desktopOnly: true },
   { id: "shortcuts", label: "Keyboard shortcuts" },
   { id: "notifications", label: "Notifications", desktopOnly: true },
@@ -71,6 +72,7 @@ export function SettingsDialog(props: SettingsProps) {
           </nav>
           <div className="settings-page">
             {props.page === "general" ? <General {...props} /> : null}
+            {props.page === "documents" ? <Documents notice={props.notice} /> : null}
             {props.page === "profile" ? <Profile /> : null}
             {props.page === "shortcuts" ? <Shortcuts {...props} /> : null}
             {props.page === "notifications" ? <Notifications {...props} /> : null}
@@ -117,6 +119,90 @@ function General({ prefs, onChange }: SettingsProps) {
         <label className="field">{Math.round(prefs.fontScale * 100)}% ({shortcutLabel("fontBigger")} bigger, {shortcutLabel("fontSmaller")} smaller, {shortcutLabel("fontReset")} back to 100%)
           <input type="range" min={0.75} max={2} step={0.05} value={prefs.fontScale} aria-label="Text size" onChange={(event) => onChange({ fontScale: Number(event.target.value) })} />
         </label>
+      </fieldset>
+    </>
+  );
+}
+
+/** A size in bytes, for people. */
+export function humanBytes(n: number): string {
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
+  return `${Math.round(n / 1024)} KB`;
+}
+
+/** How long ago a Unix time was, roughly. */
+export function ago(seconds: number | null, now: number = Date.now() / 1000): string {
+  if (seconds === null) return "never";
+  const minutes = Math.max(0, Math.round((now - seconds) / 60));
+  if (minutes < 1) return "just now";
+  if (minutes < 120) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
+}
+
+/** One collection's line of state: documents, chunks, what failed or waits for OCR, the last run, disk. */
+export function collectionSummary(c: bridge.DocsCollection): string {
+  const n = c.counts;
+  const parts = [`${n.indexed} documents`, `${n.chunks} passages${n.embedded < n.chunks ? ` (${n.chunks - n.embedded} not yet searchable by meaning)` : ""}`];
+  if (n.pending) parts.push(`${n.pending} waiting`);
+  if (n.failed) parts.push(`${n.failed} could not be read`);
+  if (n.needs_ocr_pages) parts.push(`${n.needs_ocr_pages} scanned pages without text`);
+  parts.push(`last indexed ${ago(c.last_run)}${c.last_status && c.last_status !== "ok" ? ` (${c.last_status})` : ""}`);
+  parts.push(humanBytes(c.disk_bytes));
+  return parts.join(" · ");
+}
+
+/** Settings › Your documents (LOCAL_INDEX §8.3): the folders the agent can search, their state, and changing them. */
+function Documents({ notice }: { notice: (error: unknown) => void }) {
+  const [status, setStatus] = useState<bridge.DocsStatus | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [folder, setFolder] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () => bridge.docs.status().then((answer) => { setStatus(answer); setFailed(null); }).catch((error: unknown) => setFailed(error instanceof Error ? error.message : String(error)));
+  useEffect(() => {
+    void load();
+    // the state changes while indexing runs
+    const timer = window.setInterval(() => void load(), 10_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const act = (work: Promise<unknown>) => {
+    setBusy(true);
+    work.then(load).catch(notice).finally(() => setBusy(false));
+  };
+  const add = (path: string) => {
+    if (!path.trim()) return;
+    act(bridge.docs.add(path.trim()).then(() => setFolder("")));
+  };
+  return (
+    <>
+      <h3>Your documents</h3>
+      <p className="dialog-note">Folders the agent can search, in every thread, with citations that open the file. They are indexed on this machine and nothing leaves it; hidden files, ~/.ssh, ~/.config and files named like secrets are never read.</p>
+      {failed ? <p className="dialog-note">{failed}</p> : null}
+      {status?.runtime_missing ? <p className="dialog-note">Indexing waits: {status.runtime_missing}.</p> : null}
+      {status === null && !failed ? <p className="empty small">…</p> : null}
+      {status && status.collections.length === 0 ? <p className="empty small">No folders yet.</p> : null}
+      <ul className="settings-list documents">
+        {status?.collections.map((c) => (
+          <li key={c.name}>
+            <div><strong>{c.name}</strong> <code>{c.root}</code>{c.enabled ? null : " (off)"}</div>
+            <div className="small">{collectionSummary(c)}</div>
+            <div className="buttons">
+              <button disabled={busy} onClick={() => act(bridge.docs.reindex(c.name))}>Rebuild</button>
+              <button className="danger-button" disabled={busy} onClick={() => window.confirm(`Stop searching ${c.root}? Its index (the documents' text) is deleted; the files are not touched.${c.default ? " It is a default folder: it will not be added back." : ""}`) && act(bridge.docs.remove(c.name))}>Remove</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <fieldset>
+        <legend>Add a folder</legend>
+        <label className="field">Full path
+          <input value={folder} placeholder="/home/you/Documents/contracts" aria-label="Folder to add" onChange={(event) => setFolder(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") add(folder); }} />
+        </label>
+        <div className="buttons">
+          {bridge.host() === "electron" ? <button disabled={busy} onClick={() => bridge.chooseFolder().then((chosen) => { if (chosen) add(chosen); }).catch(notice)}>Choose…</button> : null}
+          <button disabled={busy || !folder.trim()} onClick={() => add(folder)}>Add</button>
+        </div>
       </fieldset>
     </>
   );

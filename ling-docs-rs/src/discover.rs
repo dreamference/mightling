@@ -45,13 +45,26 @@ pub enum Kind {
     Mbox,
     /// `.csv` and `.tsv` (Phase 2).
     Csv,
+    /// Excel workbooks: `.xlsx`, `.xlsm`, `.xlsb` (Phase 3).
+    Xlsx,
+    /// The legacy binary workbook, `.xls` (Phase 3).
+    Xls,
+    /// OpenDocument spreadsheet, `.ods` (Phase 3).
+    Ods,
+    /// PowerPoint, `.pptx` (Phase 3).
+    Pptx,
+    /// OpenDocument presentation, `.odp` (Phase 3).
+    Odp,
 }
 
 impl Kind {
     /// Every kind, in the order `--type` lists them.
-    pub const ALL: [Kind; 12] = [Kind::Text, Kind::Markdown, Kind::Rst, Kind::Org, Kind::Tex, Kind::Pdf, Kind::Docx, Kind::Odt, Kind::Html, Kind::Eml, Kind::Mbox, Kind::Csv];
+    pub const ALL: [Kind; 17] = [
+        Kind::Text, Kind::Markdown, Kind::Rst, Kind::Org, Kind::Tex, Kind::Pdf, Kind::Docx, Kind::Odt, Kind::Html, Kind::Eml, Kind::Mbox, Kind::Csv, Kind::Xlsx, Kind::Xls,
+        Kind::Ods, Kind::Pptx, Kind::Odp,
+    ];
 
-    /// The kind of a file name, by extension only (§7.1: the formats of Phases 1 and 2).
+    /// The kind of a file name, by extension only (§7.1: the formats of Phases 1, 2 and 3).
     pub fn of(name: &str) -> Option<Kind> {
         let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
         Some(match ext.as_str() {
@@ -67,6 +80,11 @@ impl Kind {
             "eml" => Kind::Eml,
             "mbox" => Kind::Mbox,
             "csv" | "tsv" => Kind::Csv,
+            "xlsx" | "xlsm" | "xlsb" => Kind::Xlsx,
+            "xls" => Kind::Xls,
+            "ods" => Kind::Ods,
+            "pptx" => Kind::Pptx,
+            "odp" => Kind::Odp,
             _ => return None,
         })
     }
@@ -85,6 +103,11 @@ impl Kind {
             Kind::Eml => "eml",
             Kind::Mbox => "mbox",
             Kind::Csv => "csv",
+            Kind::Xlsx => "xlsx",
+            Kind::Xls => "xls",
+            Kind::Ods => "ods",
+            Kind::Pptx => "pptx",
+            Kind::Odp => "odp",
         }
     }
 
@@ -94,7 +117,7 @@ impl Kind {
 
     /// A ZIP archive (Office and OpenDocument files).
     pub fn is_zip(self) -> bool {
-        matches!(self, Kind::Docx | Kind::Odt)
+        matches!(self, Kind::Docx | Kind::Odt | Kind::Xlsx | Kind::Ods | Kind::Pptx | Kind::Odp)
     }
 
     /// What a locator over this kind's numbered lines calls them (§7.1's locators): paragraphs
@@ -309,6 +332,9 @@ pub fn sniff_bytes(head: &[u8], kind: Kind) -> std::result::Result<(), &'static 
         Kind::Pdf => {
             let window = &head[..head.len().min(1024)];
             if window.windows(5).any(|w| w == b"%PDF-") { Ok(()) } else { Err("not a PDF (no %PDF- header)") }
+        }
+        Kind::Xls => {
+            if head.starts_with(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") { Ok(()) } else { Err("not an Excel workbook (no OLE header)") }
         }
         k if k.is_zip() => {
             if head.starts_with(b"PK\x03\x04") { Ok(()) } else { Err("not an Office or OpenDocument file (not a ZIP archive)") }

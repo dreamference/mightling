@@ -54,6 +54,8 @@ fn fake_ling(dir: &Path) -> PathBuf {
          documents/2) printf '{\"path\":\"%s/notes.md\",\"rel\":\"sub/notes.md\",\"kind\":\"markdown\",\"size\":7}' \"$d\" ;;\n\
          documents/3) printf '{\"path\":\"%s/page.html\",\"rel\":\"page.html\",\"kind\":\"html\",\"size\":30}' \"$d\" ;;\n\
          *) echo 'ling-docs: no document' >&2; exit 1 ;; esac; exit 0; fi\n\
+         if [ \"$1\" = docs ] && [ \"$2\" = status ]; then printf '{\"collections\":[{\"name\":\"documents\"}]}'; exit 0; fi\n\
+         if [ \"$1\" = docs ]; then echo \"$2 $3\" >> \"$(dirname \"$0\")/docs-calls\"; if [ \"$3\" = /home/x/.ssh ]; then echo 'ling-docs: never indexed' >&2; exit 1; fi; echo done; exit 0; fi\n\
          echo \"unexpected: $*\" >&2\nexit 7\n",
     )
     .unwrap();
@@ -122,6 +124,8 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/airgapped"),
     ("GET", "/images/0123456789abcdef.jpg"),
     ("GET", "/docs/documents/1"),
+    ("GET", "/api/docs"),
+    ("POST", "/api/docs/add"),
     ("GET", "/devices"),
     ("POST", "/devices/pair"),
     ("POST", "/devices/revoke"),
@@ -766,6 +770,32 @@ async fn a_cited_document_is_served_by_its_id_and_never_runs_on_this_origin() {
     for uri in ["/docs/documents/9", "/docs/../1", "/docs/documents/1.pdf", "/docs/%2e%2e/1", "/docs/documents"] {
         assert_eq!(call(&server, get(uri)).await.0, StatusCode::NOT_FOUND, "{uri}");
     }
+}
+
+#[tokio::test]
+async fn the_collections_are_managed_through_ling_docs_with_names_and_full_paths_only() {
+    let scratch = scratch("docset");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let (status, _, body) = call(&server, request("GET", "/api/docs").header(header::COOKIE, &cookie).body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["collections"][0]["name"], "documents");
+    let post = |uri: &str, body: &str| request("POST", uri).header(header::COOKIE, &cookie).header(header::ORIGIN, ORIGIN).body(Body::from(body.to_string())).unwrap();
+    assert_eq!(call(&server, post("/api/docs/add", r#"{"folder":"/home/x/Notes"}"#)).await.0, StatusCode::OK);
+    let (status, _, body) = call(&server, post("/api/docs/add", r#"{"folder":"/home/x/.ssh"}"#)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body.contains("never indexed"), "{body}");
+    assert_eq!(call(&server, post("/api/docs/remove", r#"{"name":"notes"}"#)).await.0, StatusCode::OK);
+    assert_eq!(call(&server, post("/api/docs/reindex", r#"{"name":"documents"}"#)).await.0, StatusCode::OK);
+    for (uri, body) in [("/api/docs/add", r#"{"folder":"relative"}"#), ("/api/docs/remove", r#"{"name":"../x"}"#), ("/api/docs/add", "not json")] {
+        assert_eq!(call(&server, post(uri, body)).await.0, StatusCode::BAD_REQUEST, "{uri} {body}");
+    }
+    assert_eq!(call(&server, post("/api/docs/delete-everything", "{}")).await.0, StatusCode::NOT_FOUND);
+    // From another site, nothing changes.
+    let foreign = request("POST", "/api/docs/remove").header(header::COOKIE, &cookie).header(header::ORIGIN, "http://evil.example").body(Body::from(r#"{"name":"documents"}"#)).unwrap();
+    assert_eq!(call(&server, foreign).await.0, StatusCode::FORBIDDEN);
+    let calls = std::fs::read_to_string(scratch.dir.join("docs-calls")).unwrap();
+    assert_eq!(calls.lines().collect::<Vec<_>>(), ["add /home/x/Notes", "add /home/x/.ssh", "remove notes", "reindex documents"]);
 }
 
 #[tokio::test]

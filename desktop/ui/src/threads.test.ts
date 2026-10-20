@@ -66,3 +66,16 @@ describe("subagents and memories", () => {
     expect(memorySwitches({ features: { memories: true }, memories: { use_memories: false, disable_on_external_context: true } })).toEqual({ enabled: true, use: false, generate: true, external: false });
   });
 });
+
+describe("Settings › Your documents", () => {
+  it("says what each collection holds, what failed and when it was indexed", async () => {
+    const { collectionSummary, ago, humanBytes } = await import("./SettingsDialog");
+    const counts = { documents: 12, indexed: 10, pending: 1, failed: 1, duplicates: 0, skipped: 0, chunks: 80, embedded: 70, needs_ocr_pages: 3, needs_ocr_documents: 1 };
+    const now = Date.now() / 1000;
+    const summary = collectionSummary({ name: "documents", root: "/home/x/Documents", enabled: true, default: true, counts, last_status: "ok", last_run: now - 600, disk_bytes: 3 << 20 });
+    expect(summary).toBe("10 documents · 80 passages (10 not yet searchable by meaning) · 1 waiting · 1 could not be read · 3 scanned pages without text · last indexed 10 min ago · 3.0 MB");
+    expect(ago(null)).toBe("never");
+    expect(ago(now - 3 * 86400, now)).toBe("3 days ago");
+    expect(humanBytes(2048)).toBe("2 KB");
+  });
+});

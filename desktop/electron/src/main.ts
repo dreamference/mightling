@@ -27,7 +27,7 @@ import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addTask, dropTask, readReport, readReports, readTasks, runNow } from "./night";
 import { Nodes } from "./nodes";
-import { locate } from "./docs";
+import { docsAdd, docsReindex, docsRemove, docsStatus, locate } from "./docs";
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
@@ -471,6 +471,18 @@ export async function main(options: MainOptions): Promise<void> {
         const failed = await shell.openPath(await locate(ling, message.doc));
         if (failed) throw new Error(failed);
         return null;
+      }
+      case "docs/status":
+      case "docs/add":
+      case "docs/remove":
+      case "docs/reindex": {
+        // Settings › Your documents: every change goes through `ling docs`, which applies the index's rules.
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        if (message.type === "docs/status") return docsStatus(ling);
+        if (message.type === "docs/add") return docsAdd(ling, message.folder);
+        if (message.type === "docs/remove") return docsRemove(ling, message.name);
+        return docsReindex(ling, message.name);
       }
       case "open/folder": {
         const failed = await shell.openPath(await folder(message.dir));
