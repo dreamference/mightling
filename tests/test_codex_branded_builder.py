@@ -102,7 +102,12 @@ def test_the_patches_stay_small():
     # Not raised for the exit summary's resume line (2026-10-20, 1.7.1): one hunk in 0001's
     # cli/src/main.rs (`codex resume` -> `ling resume` where the lines are printed), paid for by
     # dropping two of 0001's optional hunk-header section names; 44,952 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 45_000
+    # Raised to 46,849 on 2026-10-20 for 0028's `/adapter` hook (1,849 bytes: the variant, its
+    # description, two capability lists, the queue-drain list and two dispatch arms that print the
+    # handler's lines and send its model as `AppEvent::UpdateModel`; the handler is in
+    # ling-rs/src/adapter.rs, and the hunk headers carry no section names); the series was 44,952
+    # bytes before it and is 46,801 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 46_849
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

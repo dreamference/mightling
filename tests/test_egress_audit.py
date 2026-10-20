@@ -157,7 +157,8 @@ import json, os, shutil, sys
 args = sys.argv[1:]
 json.dump({{"args": args, "cwd": os.getcwd(), "CODEX_HOME": os.environ.get("CODEX_HOME"),
            "config": open(os.environ["DREAMFERENCE_CONFIG_PATH"]).read(),
-           "host": os.environ.get("DREAMFERENCE_VLLM_HOST")}}, open({str(calls)!r}, "w"))
+           "host": os.environ.get("DREAMFERENCE_VLLM_HOST"),
+           "adapter": os.environ.get("DREAMFERENCE_MIGHTLING_ADAPTER")}}, open({str(calls)!r}, "w"))
 shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
 open(args[len(args) - 2], "w").write("pong")
 """)
@@ -165,6 +166,7 @@ open(args[len(args) - 2], "w").write("pong")
     monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_ADAPTER", "rust")
     code = EgressAudit.run(write_json=True, mightling_bin="/opt/ling", vllm_host="http://localhost:8000")
     out = capsys.readouterr().out
     assert code == 0 and "✅ Egress audit: pass" in out
@@ -176,6 +178,8 @@ open(args[len(args) - 2], "w").write("pong")
     assert call["CODEX_HOME"] != str(home) and not os.path.exists(call["CODEX_HOME"])
     assert os.path.basename(call["cwd"]) == "repo" and not os.path.exists(call["cwd"])
     assert 'vllm_host = "http://localhost:8000"' in call["config"] and "code_index_enabled = false" in call["config"]
+    # The audited session is on the base, whatever adapter the user starts sessions with (adapters §10.4).
+    assert call["adapter"] == ""
     # The JSON result is written to the real CODEX_HOME, and says which build it was.
     (result_file,) = list((home / "audit").glob("*.json"))
     result = json.loads(result_file.read_text())
