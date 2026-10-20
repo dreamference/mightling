@@ -29,6 +29,7 @@ from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.refine_prompt import NIGHT_WRITES, RefinePrompt
+from dreamference.runner.codex_installer import ADAPTER_ENV
 
 PREAMBLE: Final[
     str
@@ -699,6 +700,8 @@ class NightShiftTaskRun:
         env[NIGHT_RUN_ENV] = "1"
         if self.model_host:
             env["DREAMFERENCE_VLLM_HOST"] = self.model_host
+        # The base unless an arm names an adapter: never the user's `mightling_adapter` default.
+        env[ADAPTER_ENV] = ""
         # The lane's model server may be another node's: it and loopback never go through a proxy.
         ProxyBypass.apply(env, self.model_host)
         env["GIT_TERMINAL_PROMPT"] = "0"
@@ -786,6 +789,7 @@ class NightShiftTaskRun:
         }
         if self.model_host:
             variables["DREAMFERENCE_VLLM_HOST"] = self.model_host
+        variables[ADAPTER_ENV] = ""
         ProxyBypass.apply(variables, self.model_host)
         if self.airgapped:
             variables[AIRGAPPED_ENV] = self.airgapped

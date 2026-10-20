@@ -8,9 +8,15 @@ would put the unbranded agent back on screen with nothing to say it had happened
 """
 
 import os
-from typing import Optional
+from typing import Final, Optional
 
 from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
+# The adapter a `ling` session starts with (ling-rs/src/adapter.rs). Unattended callers (Night
+# Shift, SWE-bench, the egress audit, Codex's test runner) set it to the empty string, which is the
+# base, so a user's `mightling_adapter` default never reaches their runs; an arm names its adapter
+# here explicitly (specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §10.4).
+ADAPTER_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_ADAPTER"
 
 
 class CodexInstaller:

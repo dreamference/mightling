@@ -702,6 +702,8 @@ def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
     assert any(mount.endswith(":/opt/ling:ro") for mount in created)
     env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://172.30.0.1:8000"
+    # The base, set explicitly: a user's `mightling_adapter` default never reaches a run (adapters §10.4).
+    assert env["DREAMFERENCE_MIGHTLING_ADAPTER"] == ""
     # Neither a proxy in the host's environment nor one Docker puts into containers sees the model.
     for key in ("NO_PROXY", "no_proxy"):
         assert {"localhost", "127.0.0.1", "::1", "172.30.0.1"} <= set(env[key].split(","))

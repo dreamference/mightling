@@ -222,6 +222,9 @@ class EgressAudit:
         reply_path = os.path.join(work_dir, "reply.txt")
         env = dict(os.environ)
         env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
+        # The base: the audited session is the same whatever adapter the user starts sessions with.
+        from dreamference.runner.codex_installer import ADAPTER_ENV
+        env[ADAPTER_ENV] = ""
         # `-yy` labels each descriptor with its socket kind and inode, which is what tells a UDP
         # route lookup from a connection (StraceParser).
         strace = ["strace", "-f", "-qq", "-yy", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]

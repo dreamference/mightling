@@ -94,6 +94,13 @@ def test_the_tests_see_an_empty_home_and_no_model_server(tmp_path):
     assert environment["RUSTY_V8_ARCHIVE"] == "a"
 
 
+def test_the_tests_start_on_the_base_whatever_the_users_default_adapter(tmp_path):
+    # specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §10.4: set, and empty, next to the model host.
+    with patch.dict(os.environ, {"DREAMFERENCE_MIGHTLING_ADAPTER": "rust"}):
+        environment = CodexTestRunner.environment({}, "/tools", 6, str(tmp_path))
+    assert environment["DREAMFERENCE_MIGHTLING_ADAPTER"] == ""
+
+
 def test_the_export_is_put_back_at_the_version_upstreams_tests_expect(tmp_path):
     manifest = tmp_path / "codex-rs" / "Cargo.toml"
     manifest.parent.mkdir()
