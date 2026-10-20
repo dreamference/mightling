@@ -40,6 +40,7 @@ pub mod cave;
 pub mod chat;
 pub mod code_index;
 pub mod compat;
+pub mod compat_tui;
 pub mod compaction;
 pub mod docs_index;
 pub mod exec_tool;
@@ -504,6 +505,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
+    // The compatibility mode's renderer and key map, for this session only (compat_tui.rs).
+    let args = if compat_tui::applies(compat_mode.mode, tui) {
+        compat_tui::prepare(args, &user_args, &codex_home, &code_index::session_dir(&user_args))
+    } else {
+        args
+    };
     // Refine mode's hook for the interactive session; before the notice, which shows its line.
     refine::register_hook(&codex_home, tui);
     notice::publish(&codex_home, tui);
