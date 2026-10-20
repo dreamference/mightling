@@ -171,6 +171,14 @@ Shortcuts are written here as on Linux and Windows. On a Mac, Ctrl is the Comman
 searches files, Cmd+T opens a preview) and Alt is Option; Control+Tab still cycles threads and
 Control+L still clears a terminal tab. Settings › Keyboard shortcuts shows each one with the Mac's keys.
 
+### Light and dark
+
+The app follows your computer's light or dark theme, and changes with it while it runs. To keep one
+of them whatever the computer uses, open **Settings › Appearance** and pick **Light** or **Dark**
+(**System** goes back to following the computer). The choice is kept for the next start, and every
+window of the app, the pet's bubble included, changes at once. On the same page you can change the
+accent, background and text colours of the theme in front; each theme keeps its own.
+
 ### Work
 
 - **Threads grouped by project**, with replies, commands and their output, file changes and the

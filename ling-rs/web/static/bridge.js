@@ -62,8 +62,17 @@
   };
   window.mightlingWindowType = "web";
 
-  // The system theme, as the desktop preload sets it for the first paint, and its changes.
+  // The theme for the first paint, as the desktop preload sets it (the page's theme.ts takes over):
+  // the choice this browser kept in Settings › Appearance (localStorage, prefs.ts), else the
+  // system's; and the system's changes.
   const scheme = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-  document.documentElement.dataset.theme = scheme && scheme.matches ? "dark" : "light";
+  let chosen = null;
+  try {
+    const stored = JSON.parse(window.localStorage.getItem("mightling.prefs") || "null");
+    if (stored && (stored.theme === "light" || stored.theme === "dark")) chosen = stored.theme;
+  } catch (_) {
+    // No storage (a private window, blocked site data): the system's theme.
+  }
+  document.documentElement.dataset.theme = chosen || (scheme && scheme.matches ? "dark" : "light");
   if (scheme) scheme.addEventListener("change", (event) => dispatch({ channel: "theme", payload: event.matches ? "dark" : "light" }));
 })();
