@@ -23,6 +23,7 @@ pub mod host;
 pub mod index;
 pub mod locate;
 pub mod mcp;
+pub mod ocr;
 pub mod pdf_search;
 pub mod prompt;
 pub mod read;

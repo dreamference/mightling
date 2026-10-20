@@ -97,6 +97,7 @@ fn env<'a>(host: &'a LocalHost, home: &Path, exe: PathBuf) -> Env<'a> {
         exe,
         lib_dir: lib_dir().unwrap_or_else(|| home.join("no-lib")),
         model_dir: home.join("no-model"),
+        ocr_dir: std::env::var_os("MIGHTLING_DOCS_OCR_DIR").map(PathBuf::from).unwrap_or_else(|| home.join("no-ocr")),
         sandbox: false,
         worker_args: vec!["--test-embedder".into()],
         poll: Duration::from_millis(20),
@@ -415,6 +416,74 @@ fn spreadsheets_and_presentations_are_indexed_and_read_in_their_own_parts() {
     let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
     let counts = ling_docs::store::counts(&conn).unwrap();
     assert_eq!((counts.indexed, counts.skipped), (2, 1), "the .xls that is no workbook is skipped by its sniff");
+}
+
+#[test]
+fn scanned_pages_and_images_are_read_by_ocr_once_and_again_when_they_change() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let root = home.join("Documents");
+    std::fs::create_dir_all(&root).unwrap();
+    let png = |shade: u8| {
+        let mut bytes = Vec::new();
+        image::RgbImage::from_pixel(8, 8, image::Rgb([shade, shade, shade])).write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+        bytes
+    };
+    std::fs::write(root.join("receipt.png"), png(200)).unwrap();
+    std::fs::write(root.join("fake.jpg"), b"not a jpeg").unwrap();
+    let with_pdf = lib_dir().is_some();
+    if with_pdf {
+        std::fs::write(root.join("contract.pdf"), pdf_pages(&[&["Master services agreement, page one."], &[]], None)).unwrap();
+    }
+    // SAFETY: the tests of this file take turns (TURN).
+    unsafe { std::env::set_var("MIGHTLING_DOCS_TEST_OCR", "fake") };
+    let mut docs = DocsToml::default();
+    docs.ensure_defaults(&home);
+    docs.save().unwrap();
+    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let env = env(&host, &home, exe());
+    assert_eq!(index::run(&env, &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    // The OCR ran in a scope of its own, named for `server start` to stop.
+    let started = host.started.lock().unwrap().clone();
+    assert!(started.iter().any(|(unit, cap)| unit.starts_with("mightling-index-docs-documents-o") && *cap == 2 << 30), "{started:?}");
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
+    let counts = ling_docs::store::counts(&conn).unwrap();
+    assert_eq!((counts.ocr_pages, counts.needs_ocr_pages, counts.skipped), (if with_pdf { 2 } else { 1 }, 0, 1), "{counts:?}");
+    drop(conn);
+
+    let collections: Vec<_> = docs.enabled().cloned().collect();
+    let mut searcher = Searcher::default();
+    searcher.refresh(&collections).unwrap();
+    let embedder = HashEmbedder { dim: 64 };
+    let hit = searcher.search("recognised text receipt", 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("receipt.png", "image", "scanned page (OCR)"));
+    let read = ling_docs::read::read(&collections, &hit.doc_id, None, 6000).unwrap();
+    assert_eq!((read.loc.as_str(), read.text.as_str()), ("image", "Recognised text of receipt.png page 1"));
+    if with_pdf {
+        let hit = searcher.search("recognised text contract page 2", 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
+        assert_eq!(hit.rel, "contract.pdf");
+        let read = ling_docs::read::read(&collections, &hit.doc_id, Some("p.2"), 6000).unwrap();
+        assert!(read.text.contains("Recognised text of contract.pdf page 2"), "{}", read.text);
+        let read = ling_docs::read::read(&collections, &hit.doc_id, Some("p.1"), 6000).unwrap();
+        assert!(read.text.contains("Master services agreement"), "the text layer stays: {}", read.text);
+    }
+
+    // Read once: a second run starts no OCR scope.
+    host.started.lock().unwrap().clear();
+    index::run(&env, &docs, None, false).unwrap();
+    assert!(!host.started.lock().unwrap().iter().any(|(unit, _)| unit.contains("-o")), "{:?}", host.started.lock().unwrap());
+    // A changed image is read again.
+    std::thread::sleep(Duration::from_millis(20));
+    std::fs::write(root.join("receipt.png"), png(100)).unwrap();
+    index::run(&env, &docs, None, false).unwrap();
+    assert!(host.started.lock().unwrap().iter().any(|(unit, _)| unit.contains("-o")));
+
+    // With OCR switched off, images are not even kept.
+    let off = Env { settings: Settings { ocr: false, ..env.settings.clone() }, ..env };
+    let found = ling_docs::discover::walk(&docs.collections[0], &home, false);
+    assert!(found.candidates.iter().all(|c| c.kind != ling_docs::discover::Kind::Image));
+    assert!(index::ocr_ready(&off).is_some());
+    unsafe { std::env::remove_var("MIGHTLING_DOCS_TEST_OCR") };
 }
 
 /// A stand-in extractor: hangs on files named `hang*`, dies as the kernel's OOM kill would on

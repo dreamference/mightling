@@ -315,6 +315,97 @@ impl Pdf {
 }
 
 /// The `Title` entry of the document information from PDFium's UTF-16LE bytes, or None when empty.
+/// The resolution scanned pages are rendered at when the page's images do not say theirs.
+pub const OCR_DPI: f32 = 200.0;
+/// A rendered page's longer side at most, in pixels (OCR shrinks it to 2,000 anyway).
+pub const OCR_MAX_SIDE: f32 = 4000.0;
+
+impl Pdf {
+    /// Pages rendered for OCR (spec §20), each in grey at the resolution of the largest image on
+    /// it (a scan's own, between 100 and 300 dpi; 200 dpi when it has none), its longer side at most
+    /// [`OCR_MAX_SIDE`]. `each` gets the 1-based page number, the width, the height and the
+    /// pixels, one page at a time; a page that cannot be loaded is skipped.
+    pub fn render_gray(&self, source: Source, pages: &[u32], each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>) -> Result<()> {
+        self.render(source, pages, None, each)
+    }
+
+    /// [`Pdf::render_gray`] at a given resolution (the measurements render each fixture at its own).
+    pub fn render_gray_at(&self, source: Source, pages: &[u32], dpi: f32, each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>) -> Result<()> {
+        self.render(source, pages, Some(dpi), each)
+    }
+
+    fn render(&self, source: Source, pages: &[u32], fixed: Option<f32>, each: &mut dyn FnMut(u32, usize, usize, &[u8]) -> Result<()>) -> Result<()> {
+        let b = self.bindings.as_ref();
+        let doc = match source {
+            Source::Path(path) => unsafe { b.FPDF_LoadDocument(path.to_str().ok_or_else(|| anyhow!("the path is not UTF-8"))?, None) },
+            Source::Bytes(bytes) => unsafe { b.FPDF_LoadMemDocument(bytes, None) },
+        };
+        if doc.is_null() {
+            bail!("PDFium could not open it for rendering");
+        }
+        let count = unsafe { b.FPDF_GetPageCount(doc) }.max(0) as u32;
+        let result = (|| -> Result<()> {
+            for &number in pages.iter().filter(|n| **n >= 1 && **n <= count) {
+                let page = unsafe { b.FPDF_LoadPage(doc, number as i32 - 1) };
+                if page.is_null() {
+                    continue;
+                }
+                let (pw, ph) = unsafe { (b.FPDF_GetPageWidthF(page), b.FPDF_GetPageHeightF(page)) };
+                // The largest image's resolution across the page.
+                let mut dpi: Option<f32> = None;
+                let mut best_area = 0f32;
+                for i in 0..unsafe { b.FPDFPage_CountObjects(page) }.max(0) {
+                    let obj = unsafe { b.FPDFPage_GetObject(page, i) };
+                    if obj.is_null() || unsafe { b.FPDFPageObj_GetType(obj) } != 3 {
+                        continue;
+                    }
+                    let (mut iw, mut ih) = (0u32, 0u32);
+                    let (mut l, mut bo, mut r, mut t) = (0f32, 0f32, 0f32, 0f32);
+                    if unsafe { b.FPDFImageObj_GetImagePixelSize(obj, &mut iw, &mut ih) } == 0 || unsafe { b.FPDFPageObj_GetBounds(obj, &mut l, &mut bo, &mut r, &mut t) } == 0 {
+                        continue;
+                    }
+                    let (bw, bh) = ((r - l).abs(), (t - bo).abs());
+                    if bw * bh > best_area && bw > 0.0 && iw > 0 {
+                        best_area = bw * bh;
+                        dpi = Some(iw as f32 / (bw / 72.0));
+                    }
+                }
+                let dpi = fixed.unwrap_or_else(|| dpi.unwrap_or(OCR_DPI).clamp(100.0, 300.0));
+                let scale = (dpi as f64 / 72.0).min(OCR_MAX_SIDE as f64 / pw.max(ph).max(1.0) as f64);
+                // Rounded up in double precision, as pypdfium2 sizes a rendering.
+                let (w, h) = ((pw as f64 * scale).ceil().max(1.0) as i32, (ph as f64 * scale).ceil().max(1.0) as i32);
+                let bitmap = unsafe { b.FPDFBitmap_CreateEx(w, h, 1, std::ptr::null_mut(), 0) };
+                if bitmap.is_null() {
+                    unsafe { b.FPDF_ClosePage(page) };
+                    continue;
+                }
+                let _ = unsafe { b.FPDFBitmap_FillRect(bitmap, 0, 0, w, h, 0xFFFF_FFFF) };
+                // FPDF_ANNOT | FPDF_GRAYSCALE, as pypdfium2 renders in grey.
+                unsafe { b.FPDF_RenderPageBitmap(bitmap, page, 0, 0, w, h, 0, 0x01 | 0x08) };
+                let stride = unsafe { b.FPDFBitmap_GetStride(bitmap) }.max(w) as usize;
+                let buffer = unsafe { b.FPDFBitmap_GetBuffer(bitmap) } as *const u8;
+                let (w, h) = (w as usize, h as usize);
+                let mut gray = Vec::with_capacity(w * h);
+                for y in 0..h {
+                    gray.extend_from_slice(unsafe { std::slice::from_raw_parts(buffer.add(y * stride), w) });
+                }
+                unsafe { b.FPDFBitmap_Destroy(bitmap) };
+                unsafe { b.FPDF_ClosePage(page) };
+                each(number, w, h, &gray)?;
+            }
+            Ok(())
+        })();
+        unsafe { b.FPDF_CloseDocument(doc) };
+        result
+    }
+}
+
+/// Where a PDF to render is.
+pub enum Source<'a> {
+    Path(&'a Path),
+    Bytes(&'a [u8]),
+}
+
 fn title_from_utf16(buffer: &[u8]) -> Option<String> {
     let units: Vec<u16> = buffer.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
     let title = String::from_utf16_lossy(&units).split_whitespace().collect::<Vec<_>>().join(" ");
