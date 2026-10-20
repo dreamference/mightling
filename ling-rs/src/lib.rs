@@ -39,6 +39,7 @@ pub mod cave;
 #[cfg(unix)]
 pub mod chat;
 pub mod code_index;
+pub mod compat;
 pub mod compaction;
 pub mod docs_index;
 pub mod exec_tool;
@@ -258,6 +259,9 @@ pub async fn parse<T: clap::Parser>() -> anyhow::Result<T> {
 pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
     // `--refine`/`--no-refine` are Mightling's (refine.rs), already turned into its variable.
     let args = refine::without_flags(args);
+    // `--compat` is the launcher's too (compat.rs): already turned into its variable, checked below.
+    let with_compat = args.clone();
+    let args = compat::without_flag(args);
     // What the user asked for, before anything is added: refine mode's study step starts from it.
     let original = args.clone();
     let user_args: Vec<String> = args
@@ -377,6 +381,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
             std::process::exit(2);
         }
     }
+    // `compat` shows, chooses or checks the compatibility mode (compat.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "compat"
+    {
+        std::process::exit(compat::run_cli(&user_args[index + 1..]));
+    }
     // `refine` shows refine mode's setting, and `refine hook` is its hook in the TUI (refine.rs).
     if let Some(index) = subcommand
         && user_args[index] == "refine"
@@ -386,6 +396,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
+    // The compatibility mode, fixed for the session's life; a value naming no mode stops here.
+    let compat_mode = compat::check_at_start(&with_compat)?;
     // At a configured `on`, Full Access contradicts the level: there is no sandbox to enforce it.
     let configured = airgapped::resolve(None);
     if let Some(reason) = airgapped::full_access_conflict(&user_args, configured.level) {
@@ -410,6 +422,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
 
     // The interactive TUI (no subcommand, or a prompt) says once what a night run finished.
     let interactive = subcommand.is_none_or(|index| command.find_subcommand(&user_args[index]).is_none());
+    for line in compat::startup_lines(&compat_mode, interactive) {
+        notice::say(&line);
+    }
     if interactive
         && let Some(dir) = night::night_dir()
         && let Ok(cwd) = std::env::current_dir()
