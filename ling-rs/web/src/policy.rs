@@ -7,7 +7,9 @@
 //! send, or an answer to a server request that is not waiting is refused; a thread opener loses the
 //! fields that would replace Mightling's prompt, provider or policy, and a named prompt becomes
 //! `baseInstructions` here, never from the UI's own text. An Ask thread (§3.1) also gets a fresh
-//! scratch folder as its `cwd` and a sandbox rooted there, whatever folder the UI asked for.
+//! scratch folder as its `cwd` and a sandbox rooted there, whatever folder the UI asked for. An
+//! import of another agent's setup loses its plugin items: their sources can be cloned from GitHub
+//! or fetched from npm, a path the egress audit does not trace (MIGHTLING_LING_CLAUDE §16.4).
 
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -44,6 +46,8 @@ pub struct Policy {
     pub scratch_prompts: BTreeSet<String>,
     pub scratch_fields: Vec<String>,
     pub scratch_sandbox: String,
+    pub import_request: String,
+    pub refused_import_items: BTreeSet<String>,
 }
 
 fn strings(value: &Value, key: &str) -> Result<Vec<String>, String> {
@@ -79,6 +83,8 @@ impl Policy {
             scratch_prompts: strings(&value, "scratchPrompts")?.into_iter().collect(),
             scratch_fields: strings(&value, "scratchFields")?,
             scratch_sandbox: string(&value, "scratchSandbox")?,
+            import_request: string(&value, "importRequest")?,
+            refused_import_items: strings(&value, "refusedImportItems")?.into_iter().collect(),
         };
         if !policy.scratch_prompts.is_subset(&policy.named_prompts) {
             return Err("policy.json: every scratch prompt must also be a named prompt".to_string());
@@ -128,6 +134,10 @@ impl Policy {
                         object.insert("params".to_string(), Value::Object(params));
                     }
                 }
+                if method == self.import_request {
+                    let params = object.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+                    object.insert("params".to_string(), Value::Object(self.vet_import_params(params)?));
+                }
                 Ok(Value::Object(object))
             }
             (Some(method), None) => {
@@ -176,6 +186,29 @@ impl Policy {
         if self.scratch_prompts.contains(&name) {
             self.confine(&mut params, prompts.new_scratch_folder()?);
         }
+        Ok(params)
+    }
+
+    /// Removes the items an import may not carry (`refusedImportItems`: plugins, whose sources can
+    /// be fetched from the network); the others are imported as asked. An item that does not name
+    /// its type, or an import left with nothing to do, is refused rather than guessed at.
+    fn vet_import_params(&self, mut params: Map<String, Value>) -> Result<Map<String, Value>, String> {
+        let Some(Value::Array(items)) = params.get("migrationItems") else {
+            return Err("an import must list its migrationItems".to_string());
+        };
+        let mut kept = Vec::new();
+        for item in items {
+            let Some(kind) = item.get("itemType").and_then(Value::as_str) else {
+                return Err("every migration item must name its itemType".to_string());
+            };
+            if !self.refused_import_items.contains(kind) {
+                kept.push(item.clone());
+            }
+        }
+        if kept.is_empty() {
+            return Err("nothing left to import: plugins are not imported here, since their sources can be fetched from the network".to_string());
+        }
+        params.insert("migrationItems".to_string(), Value::Array(kept));
         Ok(params)
     }
 
@@ -279,6 +312,7 @@ mod tests {
         let policy = Policy::embedded();
         assert!(policy.allowed_requests.contains("thread/start"));
         assert!(policy.named_prompts.contains("ask"));
+        assert!(policy.refused_import_items.contains("PLUGINS"), "an import never fetches plugins");
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {
             assert!(!policy.allowed_requests.contains(refused), "{refused}");
         }

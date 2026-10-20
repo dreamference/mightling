@@ -9,6 +9,7 @@ import path from "node:path";
 import { BrowserWindow, app, screen } from "electron";
 
 import { WORK_URL } from "./app-protocol";
+import { themeArgument, type Theme } from "./theme";
 
 export type PetSize = "small" | "medium" | "large";
 
@@ -100,7 +101,7 @@ export function petImage(file: unknown): string | null {
 }
 
 /** The pet's window: frameless, transparent, above the others, not in the task bar; bottom right to begin with. */
-export function openPet(preload: string, size: PetSize, show: boolean): BrowserWindow {
+export function openPet(preload: string, size: PetSize, show: boolean, theme: Theme): BrowserWindow {
   const side = PET_SIZES[size];
   const area = screen.getPrimaryDisplay().workArea;
   const window = new BrowserWindow({
@@ -119,6 +120,8 @@ export function openPet(preload: string, size: PetSize, show: boolean): BrowserW
     backgroundColor: "#00000000",
     webPreferences: {
       preload,
+      // The bubble's colours: the theme's from the first paint (theme.ts).
+      additionalArguments: [themeArgument(theme)],
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,

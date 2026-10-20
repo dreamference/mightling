@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as userFs from "./userfs";
-import { BrowserWindow, app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
@@ -37,6 +37,7 @@ import { Previews } from "./preview";
 import { PetStatus, fitPet, openPet, petImage, type PetSize, type PetState } from "./pet";
 import type { SiteChoice } from "./preview-rules";
 import { openWork } from "./work";
+import { themeChoice, windowColours, type Theme } from "./theme";
 
 export interface MainOptions {
   /** What `ling app` asked for: Work with a folder or thread, or `null` for Ask. */
@@ -60,6 +61,10 @@ export async function main(options: MainOptions): Promise<void> {
   const show = options.audit === null && !process.env.MIGHTLING_HIDDEN;
 
   const prefs = new Prefs(app.getPath("userData"));
+  // The theme (theme.ts): the preference is nativeTheme's source before any window opens, so the
+  // first paint, the native menus and the page's media query all have it.
+  nativeTheme.themeSource = themeChoice(prefs.read().theme);
+  const shownTheme = (): Theme => (nativeTheme.shouldUseDarkColors ? "dark" : "light");
   const notices = new Notices();
   /** Pop-outs: a thread in a window of its own, on the same app-server (windows.ts). */
   const popouts = new Map<number, BrowserWindow>();
@@ -118,10 +123,26 @@ export async function main(options: MainOptions): Promise<void> {
       deliver({ channel: "view", payload: view });
       return;
     }
-    window = openWork({ preload: path.join(__dirname, "preload.cjs"), show, view });
+    window = openWork({ preload: path.join(__dirname, "preload.cjs"), show, view, theme: shownTheme() });
     window.on("closed", () => (window = null));
   };
   const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };
+
+  /** Gives every window the theme shown now: its background, its title bar's symbols, the page's tokens. */
+  function paintTheme(): void {
+    const theme = shownTheme();
+    const colours = windowColours(theme);
+    for (const target of windows()) {
+      target.setBackgroundColor(colours.backgroundColor);
+      try {
+        target.setTitleBarOverlay(colours.titleBarOverlay);
+      } catch {
+        // No overlay to restyle (macOS draws its own traffic lights).
+      }
+    }
+    deliver({ channel: "theme", payload: theme });
+    if (pet && !pet.isDestroyed()) send(pet, { channel: "theme", payload: theme });
+  }
 
   // The pet (pet.ts, Phase 3 item 6): a window of its own, shown while Settings › Pets says so.
   const petStatus = new PetStatus();
@@ -142,7 +163,7 @@ export async function main(options: MainOptions): Promise<void> {
   const syncPet = () => {
     const wanted = prefs.read().petShown === true;
     if (wanted && (!pet || pet.isDestroyed())) {
-      pet = openPet(path.join(__dirname, "preload.cjs"), petSize(), show);
+      pet = openPet(path.join(__dirname, "preload.cjs"), petSize(), show, shownTheme());
       pet.on("closed", () => (pet = null));
     } else if (!wanted && pet && !pet.isDestroyed()) {
       pet.close();
@@ -264,7 +285,7 @@ export async function main(options: MainOptions): Promise<void> {
         return null;
       }
       case "window/popout": {
-        const popout = openWork({ preload: path.join(__dirname, "preload.cjs"), show, popout: message.thread });
+        const popout = openWork({ preload: path.join(__dirname, "preload.cjs"), show, popout: message.thread, theme: shownTheme() });
         const id = popout.webContents.id;
         popouts.set(id, popout);
         popout.on("closed", () => popouts.delete(id));
@@ -505,6 +526,10 @@ export async function main(options: MainOptions): Promise<void> {
       case "prefs/write": {
         const written = prefs.write(message.values);
         if (["petShown", "petSize", "petImage"].some((key) => key in (message.values ?? {}))) syncPet();
+        if ("theme" in (message.values ?? {})) {
+          nativeTheme.themeSource = themeChoice(prefs.read().theme);
+          paintTheme();
+        }
         return written;
       }
       case "window/minimize":
@@ -562,8 +587,11 @@ export async function main(options: MainOptions): Promise<void> {
     }
   }
 
-  // Light only (DESKTOP §14 question 3; dark not approved 2026-10-16): the system theme is not
-  // followed, so no nativeTheme change reaches the page or the title bar overlay (work.ts).
+  // The system's theme changed, or the preference did (themeSource): every window repaints its own
+  // background and the overlay's symbols, and each page, the pet's included, is told (theme.ts).
+  // Electron on Linux does not always pass a system change on to the page's media query, so the
+  // message, not the query, is what the page follows.
+  nativeTheme.on("updated", paintTheme);
 
   // A second instance, or a `mightling://` link: show what it asked for, in the one window.
   app.on("second-instance", (_event, argv, _cwd, data) => {

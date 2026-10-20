@@ -1,7 +1,9 @@
 // The look's rules that a stylesheet can break without any test of behaviour noticing
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §3, §5 "Look"): every token of §3.6 is on :root,
-// the app is light only (DESKTOP §14 question 3; dark not approved 2026-10-16), and nothing is
-// fetched from outside the bundle (the app is air-gapped; the CSP allows only `'self'` fonts).
+// the dark theme (item 11, approved 2026-10-20) redefines every colour but the accent and is written
+// the same way twice (for html[data-theme="dark"] and for the system's dark theme before any script
+// has run), and nothing is fetched from outside the bundle (the app is air-gapped; the CSP allows
+// only `'self'` fonts). Contrast is contrast.test.ts's.
 
 import { describe, expect, it } from "vitest";
 
@@ -25,6 +27,7 @@ function block(selector: string): Map<string, string> {
 const SPEC_TOKENS = [
   "--font-ui", "--font-code", "--size-base",
   "--canvas", "--panel", "--text", "--muted", "--line", "--accent", "--accent-soft", "--danger", "--add", "--del",
+  "--accent-text", "--on-accent", "--on-danger",
   "--radius-sm", "--radius-md", "--radius-lg",
   "--motion-fast", "--motion-slow",
 ];
@@ -50,11 +53,27 @@ describe("the look", () => {
     expect(root.get("--font-code")).toContain('"JetBrains Mono"');
   });
 
-  it("is light only: one colour set on :root, no dark theme, no system-theme query", () => {
+  it("has a light theme on :root and a dark one redefining every colour token but the accent", () => {
     expect(rules).toMatch(/:root \{[^}]*color-scheme: light;/);
-    expect(rules).not.toMatch(/data-theme="dark"/);
-    expect(rules).not.toMatch(/prefers-color-scheme/);
-    expect(rules).not.toMatch(/color-scheme: dark/);
+    const root = block(":root");
+    const dark = block(':root[data-theme="dark"]');
+    const colours = [...root].filter(([, value]) => /#[0-9a-f]{3,6}\b|rgba?\(/i.test(value)).map(([token]) => token);
+    expect(colours.length).toBeGreaterThan(30);
+    for (const token of colours.filter((token) => token !== "--accent")) expect(dark.has(token), token).toBe(true);
+    expect(dark.has("--accent")).toBe(false);
+    for (const token of dark.keys()) expect(colours, token).toContain(token);
+    expect(rules).toMatch(/:root\[data-theme="dark"\] \{[^}]*color-scheme: dark;/);
+  });
+
+  it("follows the system's dark theme with the same body, unless the page says light", () => {
+    const body = (from: number) => rules.slice(rules.indexOf("{", from) + 1, rules.indexOf("\n}", from));
+    const explicit = rules.indexOf('\n:root[data-theme="dark"] {');
+    const media = rules.indexOf("@media (prefers-color-scheme: dark) {\n:root:not([data-theme=\"light\"]) {");
+    expect(explicit).toBeGreaterThanOrEqual(0);
+    expect(media).toBeGreaterThanOrEqual(0);
+    const inner = rules.indexOf(":root:not(", media);
+    expect(body(inner)).toBe(body(explicit));
+    expect(rules.match(/prefers-color-scheme/g)?.length).toBe(1);
   });
 
   it("loads nothing from outside the bundle, and every font it names is a bundled file", () => {
@@ -74,7 +93,7 @@ describe("the look", () => {
     expect(iconsLicence).toContain("ISC License");
   });
 
-  it("paints the page's own background, since the window's is transparent", () => {
+  it("paints the page's own background over the window's", () => {
     expect(css).toContain("body { background: var(--canvas); }");
     expect(block(":root").get("--canvas")).toBe("#ffffff");
   });

@@ -740,6 +740,11 @@ class DreamferenceCLIController:
         for account in answer.get("accounts") or []:
             scopes = ", ".join(scope.rstrip("/").rsplit("/", 1)[-1] for scope in account.get("scopes", []))
             print(f"  {account.get('email')}: {scopes}")
+        if answer.get("accounts") is None and answer.get("email"):
+            # A service older than Drive and Calendar names its accounts in `email` only.
+            for address in str(answer["email"]).split(","):
+                print(f"  {address.strip()}: mail.google.com")
+            print("⚠️  The running service predates Drive and Calendar. Update it: ling-admin google start")
         if answer.get("error"):
             print(f"⚠️  {answer['error']}")
         return 0
