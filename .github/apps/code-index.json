@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-code-index",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Code Index team's bot: commits, pull requests and reviews for ling-code, the context engine and the MCP server for editors. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}
