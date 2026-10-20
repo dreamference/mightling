@@ -41,7 +41,8 @@ pub enum Inbound {
     /// The messenger's own stop control (Telegram's button on a streaming answer).
     Stop { chat: String },
     /// A button pressed or a reaction on an approval: `choice` indexes its options.
-    Answer { chat: String, approval: u64, choice: usize },
+    /// `approval` is the nonce the hub gave the request (never a counter, MOONSHOT §3.2).
+    Answer { chat: String, approval: String, choice: usize },
 }
 
 /// What the hub asks an adapter to show.
@@ -54,9 +55,11 @@ pub enum Outbound {
     /// One line from the bridge itself, plain text.
     Notice { chat: String, text: String },
     /// A request from the agent, with its options; the last option always declines.
-    Approval { chat: String, id: u64, text: String, options: Vec<String> },
+    Approval { chat: String, id: String, text: String, options: Vec<String> },
     /// An approval was answered, declined for lack of an answer, or resolved elsewhere.
-    ApprovalClosed { chat: String, id: u64, outcome: String },
+    ApprovalClosed { chat: String, id: String, outcome: String },
+    /// A topic's thread got its name (from the first message): the topic is renamed after it.
+    ThreadNamed { chat: String, name: String },
     /// The turn is over: drop the draft, stop "typing".
     TurnEnded { chat: String },
 }
@@ -69,6 +72,7 @@ impl Outbound {
             | Outbound::Notice { chat, .. }
             | Outbound::Approval { chat, .. }
             | Outbound::ApprovalClosed { chat, .. }
+            | Outbound::ThreadNamed { chat, .. }
             | Outbound::TurnEnded { chat } => chat,
         }
     }
@@ -77,6 +81,21 @@ impl Outbound {
 /// The adapter a chat key belongs to: the part before the first `:`.
 pub fn adapter_of(chat: &str) -> &str {
     chat.split(':').next().unwrap_or_default()
+}
+
+/// A Telegram topic's id in a chat key (`telegram:<chat id>/<topic id>`, MOONSHOT §3.1): each topic
+/// is its own conversation, with its own thread. Other keys have none.
+pub fn topic_of(chat: &str) -> Option<&str> {
+    let rest = chat.strip_prefix("telegram:")?;
+    rest.split_once('/').map(|(_, topic)| topic).filter(|topic| !topic.is_empty())
+}
+
+/// A chat key without its topic.
+pub fn base_of(chat: &str) -> &str {
+    match topic_of(chat) {
+        Some(topic) => &chat[..chat.len() - topic.len() - 1],
+        None => chat,
+    }
 }
 
 pub const HELP: &str = "Mightling, from your phone. Each conversation is an Ask thread on your machine.\n\
@@ -230,6 +249,8 @@ struct Pending {
     /// A question with no options takes the next message as its answer.
     free_text: bool,
     deadline: Instant,
+    /// When it was asked, in order.
+    seq: u64,
 }
 
 pub struct Hub {
@@ -240,8 +261,13 @@ pub struct Hub {
     turns: HashMap<String, Turn>,
     /// Messages that arrived while a turn ran and could not steer it, as turn inputs.
     queued: HashMap<String, Vec<Value>>,
-    approvals: HashMap<u64, Pending>,
+    /// Pending approvals by their nonce.
+    approvals: HashMap<String, Pending>,
+    /// The order approvals were asked in, for a typed "yes" (the newest open one).
     next_approval: u64,
+    /// Nonces of approvals that were answered or closed, so a late press is told so; a nonce the
+    /// hub never issued is ignored.
+    closed: std::collections::VecDeque<String>,
     /// Threads this connection is subscribed to (started or resumed since it was made).
     subscribed: HashSet<String>,
     airgap: Box<dyn Fn() -> bool + Send>,
@@ -316,6 +342,7 @@ impl Hub {
             queued: HashMap::new(),
             approvals: HashMap::new(),
             next_approval: 0,
+            closed: std::collections::VecDeque::new(),
             subscribed: HashSet::new(),
             airgap,
             airgapped,
@@ -332,6 +359,15 @@ impl Hub {
         if let Some(adapter) = self.adapters.get(adapter_of(out.chat())) {
             let _ = adapter.send(out);
         }
+    }
+
+    /// An approval is over: the adapter shows the outcome, and its nonce is remembered as closed.
+    fn close(&mut self, chat: String, id: String, outcome: &str) {
+        self.closed.push_back(id.clone());
+        while self.closed.len() > 200 {
+            self.closed.pop_front();
+        }
+        self.send(Outbound::ApprovalClosed { chat, id, outcome: outcome.to_string() });
     }
 
     fn notice(&self, chat: &str, text: impl Into<String>) {
@@ -403,7 +439,7 @@ impl Hub {
                 }
             }
             Inbound::Stop { chat } => self.stop(&chat).await,
-            Inbound::Answer { chat, approval, choice } => self.answer(&chat, approval, choice),
+            Inbound::Answer { chat, approval, choice } => self.answer(&chat, &approval, choice),
         }
     }
 
@@ -417,6 +453,25 @@ impl Hub {
                 self.notice(chat, "The next message starts a new thread.");
             }
             "/stop" => self.stop(chat).await,
+            "/threads" | "/use" if topic_of(chat).is_some() => {
+                // Each topic is one thread: the list is the topics, and switching is tapping one.
+                let base = base_of(chat);
+                let mut names: Vec<String> = self
+                    .threads
+                    .chats
+                    .iter()
+                    .filter(|(key, _)| base_of(key) == base && topic_of(key).is_some())
+                    .filter_map(|(key, c)| {
+                        let id = c.current.as_ref()?;
+                        let name = c.recent.iter().find(|t| &t.id == id).map(|t| t.name.clone()).unwrap_or_default();
+                        let marker = if key == chat { " (this topic)" } else { "" };
+                        Some(format!("• {}{marker}", if name.is_empty() { "(unnamed)" } else { name.as_str() }))
+                    })
+                    .collect();
+                names.sort();
+                let list = if names.is_empty() { String::new() } else { format!("{}\n", names.join("\n")) };
+                self.notice(chat, format!("{list}Each topic is one thread: open a topic to continue it, /new for another."));
+            }
             "/threads" => {
                 let recent = self.threads.chats.get(chat).map(|c| c.recent.clone()).unwrap_or_default();
                 if recent.is_empty() {
@@ -493,6 +548,11 @@ impl Hub {
     /// conversation has moved now.
     fn fresh_after_silence(&mut self, chat: &str) {
         let now = now_ms();
+        // A topic is the user saying which thread a message belongs to: no gap rule (MOONSHOT D2).
+        if topic_of(chat).is_some() {
+            self.threads.chats.entry(chat.to_string()).or_default().last_ms = Some(now);
+            return;
+        }
         let gap = self.config.settings.new_thread_after.map(|gap| gap.as_millis() as u64);
         let running = self.current(chat).is_some_and(|thread| self.thread_running(&thread) || self.queued.contains_key(&thread));
         let entry = self.threads.chats.entry(chat.to_string()).or_default();
@@ -525,6 +585,9 @@ impl Hub {
         self.subscribed.insert(thread.clone());
         let name = thread_name(first);
         let _ = self.agent.request("thread/name/set", json!({ "threadId": thread, "name": name })).await;
+        if topic_of(chat).is_some() {
+            self.send(Outbound::ThreadNamed { chat: chat.to_string(), name: name.clone() });
+        }
         self.threads.started(chat, ThreadRef { id: thread.clone(), name }, self.config.max_threads);
         let _ = self.threads.save(&self.config.dir);
         Ok(thread)
@@ -672,10 +735,10 @@ impl Hub {
             "turn/completed" => self.finish(&thread, &params["turn"]).await,
             "serverRequest/resolved" => {
                 let request = params.get("requestId").cloned().unwrap_or(Value::Null);
-                let resolved: Vec<u64> = self.approvals.iter().filter(|(_, p)| p.request == request).map(|(id, _)| *id).collect();
+                let resolved: Vec<String> = self.approvals.iter().filter(|(_, p)| p.request == request).map(|(id, _)| id.clone()).collect();
                 for id in resolved {
                     if let Some(pending) = self.approvals.remove(&id) {
-                        self.send(Outbound::ApprovalClosed { chat: pending.chat, id, outcome: "Answered elsewhere.".to_string() });
+                        self.close(pending.chat, id, "Answered elsewhere.");
                     }
                 }
             }
@@ -700,6 +763,11 @@ impl Hub {
         // a final turn out of time too ends with what it wrote.
         if let Some(reason) = turn.limit_reason.clone().filter(|_| status != "completed") {
             if !turn.watch.final_turn {
+                // What it wrote so far is kept as a message, not left in a draft that vanishes (D9).
+                if !answer.is_empty() {
+                    self.send(Outbound::TurnEnded { chat: chat.clone() });
+                    self.send(Outbound::Message { chat: chat.clone(), markdown: format!("{answer}\n\n_(cut off: {reason})_") });
+                }
                 self.start_turn(&chat, thread, text_input(&limits::final_text(&reason))).await;
                 if let Some(next) = self.turns.get_mut(thread) {
                     next.watch = Watch::final_turn(now_ms());
@@ -715,10 +783,15 @@ impl Hub {
             return;
         }
         self.send(Outbound::TurnEnded { chat: chat.clone() });
-        if !answer.is_empty() {
-            self.send(Outbound::Message { chat: chat.clone(), markdown: answer });
+        let wrote = !answer.is_empty();
+        match status {
+            // Stopped (the stop button, /stop): what it wrote so far is kept, marked (MOONSHOT D9).
+            "interrupted" if wrote => self.send(Outbound::Message { chat: chat.clone(), markdown: format!("{answer}\n\n_(stopped)_") }),
+            _ if wrote => self.send(Outbound::Message { chat: chat.clone(), markdown: answer }),
+            _ => {}
         }
         match status {
+            "interrupted" if wrote => {}
             "interrupted" => self.notice(&chat, "Stopped."),
             "failed" => {
                 let error = turn
@@ -777,10 +850,10 @@ impl Hub {
     async fn after_turn(&mut self, chat: &str, thread: &str) {
         let chat = chat.to_string();
         // Approvals of a finished turn can no longer be answered.
-        let stale: Vec<u64> = self.approvals.iter().filter(|(_, p)| p.thread == thread).map(|(id, _)| *id).collect();
+        let stale: Vec<String> = self.approvals.iter().filter(|(_, p)| p.thread == thread).map(|(id, _)| id.clone()).collect();
         for id in stale {
             if let Some(pending) = self.approvals.remove(&id) {
-                self.send(Outbound::ApprovalClosed { chat: pending.chat, id, outcome: "The turn ended.".to_string() });
+                self.close(pending.chat, id, "The turn ended.");
             }
         }
         if let Some(queued) = self.queued.remove(thread)
@@ -887,9 +960,10 @@ impl Hub {
             _ => return,
         };
         self.next_approval += 1;
-        let approval = self.next_approval;
+        // An unguessable id: a callback naming one the hub never issued is ignored (MOONSHOT §3.2).
+        let approval = ling_web_server::auth::random_hex(8);
         self.approvals.insert(
-            approval,
+            approval.clone(),
             Pending {
                 chat: chat.clone(),
                 thread,
@@ -899,6 +973,7 @@ impl Hub {
                 replies,
                 free_text,
                 deadline: Instant::now() + self.config.approval_timeout,
+                seq: self.next_approval,
             },
         );
         self.send(Outbound::Approval { chat, id: approval, text, options });
@@ -923,8 +998,8 @@ impl Hub {
         }
     }
 
-    fn resolve(&mut self, approval: u64, reply: Reply) {
-        let Some(pending) = self.approvals.remove(&approval) else { return };
+    fn resolve(&mut self, approval: &str, reply: Reply) {
+        let Some(pending) = self.approvals.remove(approval) else { return };
         let payload = Self::payload(&pending, &reply);
         self.agent.respond(pending.request.clone(), payload);
         let outcome = match &reply {
@@ -932,12 +1007,14 @@ impl Hub {
             Reply::Decline => "Declined.".to_string(),
             Reply::Answer(answer) => format!("Answered: {}", cut(answer, 100)),
         };
-        self.send(Outbound::ApprovalClosed { chat: pending.chat, id: approval, outcome });
+        self.close(pending.chat, approval.to_string(), &outcome);
     }
 
-    fn answer(&mut self, chat: &str, approval: u64, choice: usize) {
-        let Some(pending) = self.approvals.get(&approval) else {
-            self.notice(chat, "That request is no longer open.");
+    fn answer(&mut self, chat: &str, approval: &str, choice: usize) {
+        let Some(pending) = self.approvals.get(approval) else {
+            if self.closed.iter().any(|closed| closed == approval) {
+                self.notice(chat, "That request is no longer open.");
+            }
             return;
         };
         if pending.chat != chat {
@@ -950,13 +1027,14 @@ impl Hub {
     /// `yes`/`no`/a number/free text, when the chat has an open approval. Returns true when the
     /// message was taken as the answer.
     fn answer_by_text(&mut self, chat: &str, text: &str) -> bool {
-        let Some((&approval, pending)) = self.approvals.iter().filter(|(_, p)| p.chat == chat).max_by_key(|(id, _)| **id) else {
+        let Some((approval, pending)) = self.approvals.iter().filter(|(_, p)| p.chat == chat).max_by_key(|(_, p)| p.seq) else {
             return false;
         };
+        let approval = approval.clone();
         let word = text.trim().to_ascii_lowercase();
         if pending.free_text && !word.starts_with('/') {
             let reply = if matches!(word.as_str(), "no" | "decline") { Reply::Decline } else { Reply::Answer(text.trim().to_string()) };
-            self.resolve(approval, reply);
+            self.resolve(&approval, reply);
             return true;
         }
         let decline = pending.replies.len() - 1;
@@ -968,7 +1046,7 @@ impl Hub {
         match choice {
             Some(choice) => {
                 let reply = pending.replies[choice].clone();
-                self.resolve(approval, reply);
+                self.resolve(&approval, reply);
                 true
             }
             None => false,
@@ -997,15 +1075,11 @@ impl Hub {
         for draft in drafts {
             self.send(draft);
         }
-        let expired: Vec<u64> = self.approvals.iter().filter(|(_, p)| p.deadline <= now).map(|(id, _)| *id).collect();
+        let expired: Vec<String> = self.approvals.iter().filter(|(_, p)| p.deadline <= now).map(|(id, _)| id.clone()).collect();
         for approval in expired {
             if let Some(pending) = self.approvals.remove(&approval) {
                 self.agent.respond(pending.request.clone(), Self::payload(&pending, &Reply::Decline));
-                self.send(Outbound::ApprovalClosed {
-                    chat: pending.chat,
-                    id: approval,
-                    outcome: "Declined: no answer in time.".to_string(),
-                });
+                self.close(pending.chat, approval, "Declined: no answer in time.");
             }
         }
     }

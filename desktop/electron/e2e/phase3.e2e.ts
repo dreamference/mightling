@@ -647,3 +647,31 @@ test("a finished turn keeps its question and its commands when ling's turn/compl
     await close();
   }
 });
+
+test("item 14: an MCP server's question shows in its thread, a form answered and a link declined", async () => {
+  const { page, home, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("textbox", { name: "Project folder" }).fill(projectFolders(home).fetcher);
+    await page.locator(".composer textarea").fill("File the bug with a form, then with a link.");
+    await page.keyboard.press("Enter");
+    const form = page.locator(".approval.elicitation", { hasText: "Which ticket should this go under?" });
+    await expect(form).toContainText("tickets asks");
+    // A required field left empty is said, and nothing is sent.
+    await form.getByRole("button", { name: "Send" }).click();
+    await expect(form.getByRole("alert")).toHaveText("Ticket is required.");
+    expect(received(home).some((m) => m.id === "elicit-1")).toBe(false);
+    await form.getByRole("textbox", { name: "Ticket" }).fill("OPS-12");
+    await form.getByRole("checkbox", { name: "Urgent" }).check();
+    await form.getByRole("combobox", { name: "Team" }).selectOption("infra");
+    await form.getByRole("button", { name: "Send" }).click();
+    await expect.poll(() => received(home).find((m) => m.id === "elicit-1")?.result).toEqual({ action: "accept", content: { ticket: "OPS-12", urgent: true, team: "infra" }, _meta: null });
+    await expect(form).toHaveCount(0);
+    const link = page.locator(".approval.elicitation", { hasText: "Sign in to the ticket tracker." });
+    await expect(link.locator(".elicitation-url")).toHaveText("http://127.0.0.1:9/login");
+    await link.getByRole("button", { name: "Decline" }).click();
+    await expect.poll(() => received(home).find((m) => m.id === "elicit-2")?.result).toEqual({ action: "decline", content: null, _meta: null });
+  } finally {
+    await close();
+  }
+});

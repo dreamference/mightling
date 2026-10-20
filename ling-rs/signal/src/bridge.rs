@@ -628,6 +628,10 @@ impl Bridge {
                     // was found; the final turn out of time too ends with what it wrote.
                     if let Some(reason) = limit_reason.filter(|_| error.is_some() && !stopping && !self.airgapped()) {
                         if !watch.final_turn {
+                            // What it wrote so far is kept, marked, before the final turn (MOONSHOT D9).
+                            if !answer.trim().is_empty() {
+                                actions.push(Action::Reply(format::reply(&format!("{}\n\n(cut off: {reason})", answer.trim()))));
+                            }
                             self.phase = Phase::Running {
                                 thread: thread.clone(),
                                 turn: None,
@@ -652,6 +656,10 @@ impl Bridge {
                         actions.push(Action::Notice(limits::GAVE_UP.to_string()));
                         actions.extend(self.next(now));
                         return actions;
+                    }
+                    // The owner's /stop keeps what was written, marked (MOONSHOT D9).
+                    if stopping && !self.airgapped() && !answer.trim().is_empty() {
+                        actions.push(Action::Reply(format::reply(&format!("{}\n\n(stopped)", answer.trim()))));
                     }
                     if !self.airgapped() && !stopping {
                         actions.push(Action::Typing(false));
@@ -1012,7 +1020,9 @@ mod tests {
         assert_eq!(started, vec![Action::Interrupt { thread: "t1".to_string(), turn: "u1".to_string() }]);
         b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "partial".to_string() }, 0);
         let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: Some("interrupted".to_string()) }, 0);
-        assert!(replies(&done).is_empty() && notices(&done).is_empty(), "{done:?}");
+        // What was written is kept, marked (MOONSHOT D9); no error line.
+        assert_eq!(replies(&done), vec!["partial\n\n(stopped)"]);
+        assert!(notices(&done).is_empty(), "{done:?}");
         assert!(!done.iter().any(|a| matches!(a, Action::StartTurn { .. })), "the queue was emptied");
         assert_eq!(notices(&b.on_message(msg("/stop", 4), 0)), vec!["Nothing is running."]);
     }
@@ -1315,7 +1325,8 @@ mod tests {
         assert!(notices(&interrupt)[0].starts_with("This is taking too long (this answer has taken 3 min)"), "{interrupt:?}");
         b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "half a sent".to_string() }, budget + limits::GRACE_MS);
         let ended = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: Some("interrupted".to_string()) }, budget + limits::GRACE_MS + 1);
-        assert!(replies(&ended).is_empty() && notices(&ended).is_empty(), "no partial answer, no error: {ended:?}");
+        assert_eq!(replies(&ended), vec!["half a sent\n\n(cut off: this answer has taken 3 min)"], "the partial is kept: {ended:?}");
+        assert!(notices(&ended).is_empty(), "no error: {ended:?}");
         let Some(Action::StartTurn { text, .. }) = ended.iter().find(|a| matches!(a, Action::StartTurn { .. })) else { panic!("{ended:?}") };
         assert!(text.contains("without running any tool"));
         let start = budget + limits::GRACE_MS + 1;

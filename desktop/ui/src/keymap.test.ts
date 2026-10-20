@@ -28,13 +28,22 @@ describe("the keymap", () => {
     expect(new Set(KEYMAP.map((action) => action.group))).toEqual(new Set(["General", "Chats", "Input", "Workspace"]));
     expect(new Set(KEYMAP.map((action) => action.id)).size).toBe(KEYMAP.length);
     expect(conflicts()).toEqual([]);
-    expect(conflicts([...KEYMAP, { ...keyAction("newChat"), id: "clash" }])).toEqual(["Ctrl+N in global: newChat and clash"]);
+    expect(conflicts([...KEYMAP, { ...keyAction("newChat"), id: "clash" }])).toEqual(["Ctrl+N in global: newChat and clash", "Ctrl+Shift+O in global: newChat and clash"]);
     // Spot checks against §2.19.
     expect(keyAction("commandMenu").keys).toEqual(["Ctrl+Shift+P", "Ctrl+K"]);
     expect(keyAction("modelPicker").keys).toEqual(["Ctrl+Shift+M"]);
     expect(keyAction("restorePrompt").keys).toEqual(["ArrowUp"]);
     expect(keyAction("environmentAction1").keys).toEqual(["Super+Shift+D"]);
     expect(keyAction("viewAsk").keys).toEqual(["Alt+1"]);
+    // The vendor's other bindings for the same actions (its commands reference, Linux; §9.3).
+    expect(keyAction("redoAction").keys).toEqual(["Ctrl+Shift+Z", "Ctrl+Y"]);
+    expect(keyAction("closeTab").keys).toEqual(["Ctrl+W", "Ctrl+F4"]);
+    expect(keyAction("newChat").keys).toEqual(["Ctrl+N", "Ctrl+Shift+O"]);
+    expect(keyAction("previousChat").keys).toEqual(["Ctrl+Shift+Tab", "Ctrl+PageUp", "Ctrl+Shift+["]);
+    expect(keyAction("nextChat").keys).toEqual(["Ctrl+Tab", "Ctrl+PageDown", "Ctrl+Shift+]"]);
+    expect(keyAction("clearTerminal").keys).toEqual(["Ctrl+L", "Ctrl+K"]);
+    expect(keyAction("fontBigger").keys).toEqual(["Ctrl+=", "Ctrl++"]);
+    expect(keyAction("previewReloadHard")).toMatchObject({ keys: ["Ctrl+Shift+R"], context: "preview", status: "built" });
   });
 
   it("marks built exactly the actions the UI handles", () => {
@@ -58,6 +67,14 @@ describe("the keymap", () => {
     expect(matchesChord(key("+", { ctrlKey: true, shiftKey: true }), "Ctrl+=")).toBe(true);
     expect(matchesChord(key("=", { ctrlKey: true }), "Ctrl+=")).toBe(true);
     expect(matchesChord(key("d", { metaKey: true, shiftKey: true }), "Super+Shift+D")).toBe(true);
+    // `Ctrl++` is the plus key itself (the numeric keypad's), not Ctrl and an empty key.
+    expect(parseChord("Ctrl++")).toEqual({ ctrl: true, shift: false, alt: false, meta: false, key: "+" });
+    expect(matches(key("+", { ctrlKey: true }), keyAction("fontBigger"))).toBe(true);
+    // Ctrl+Shift+[ is the previous thread, and only that: not also back (Ctrl+[).
+    expect(matches(key("{", { ctrlKey: true, shiftKey: true }), keyAction("previousChat"))).toBe(true);
+    expect(matches(key("}", { ctrlKey: true, shiftKey: true }), keyAction("nextChat"))).toBe(true);
+    expect(matches(key("{", { ctrlKey: true, shiftKey: true }), keyAction("back"))).toBe(false);
+    expect(matches(key("[", { ctrlKey: true }), keyAction("back"))).toBe(true);
     // A sequence (Escape Escape) is its owner's to match, never a single press.
     expect(matches(key("Escape"), keyAction("editPrevious"))).toBe(false);
   });

@@ -31,6 +31,14 @@ export interface ManagedEntry {
 }
 
 /**
+ * The threads whose managed worktrees the cleanup keeps: one with a turn running, the one shown and
+ * every pinned one (the vendor's rule: a worktree a pinned chat is tied to is never deleted).
+ */
+export function protectedOwners(running: string[], shown: string | null, pinned: string[]): Set<string> {
+  return new Set([...running, ...(shown ? [shown] : []), ...pinned]);
+}
+
+/**
  * The worktrees the cleanup removes to keep the most recent `keep` (the vendor's default is 15):
  * never a permanent one, one whose thread is running or pinned, or the one just made; oldest first.
  */
