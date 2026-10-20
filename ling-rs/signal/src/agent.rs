@@ -215,11 +215,34 @@ pub async fn pair(port: u16, code: &str, device: &str) -> Result<String, String>
         .ok_or_else(|| format!("ling web refused the pairing code (HTTP {status}); run `ling web pair` for a new one"))
 }
 
-/// Puts one attachment into an Ask thread's folder (`/api/upload`); returns where it was written.
-pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bool, bytes: &[u8]) -> Result<String, String> {
+/// What `ling web` answered for one upload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Saved {
+    /// Where it was written in the thread's folder.
+    pub path: String,
+    /// An image's text, read by `ling web`'s offline reader.
+    pub text: Option<String>,
+    /// Whether the served model takes images.
+    pub vision: bool,
+}
+
+/// Reads `/api/upload`'s answer. A `ling web` from before `read=1` answers the path alone: then no
+/// text was read, and the model is not taken to take images.
+pub fn saved_from(body: &str) -> Saved {
+    let value: Value = serde_json::from_str(body).unwrap_or(Value::String(body.to_string()));
+    Saved {
+        path: value.get("path").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| body.to_string()),
+        text: value.get("text").and_then(Value::as_str).map(str::to_string),
+        vision: value.get("vision").and_then(Value::as_bool).unwrap_or(false),
+    }
+}
+
+/// Puts one attachment into an Ask thread's folder (`/api/upload`, with `read=1` so an image's text
+/// is read and the model's image support reported; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.1).
+pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bool, bytes: &[u8]) -> Result<Saved, String> {
     let kind = if image { "image" } else { "file" };
     let mut request = format!(
-        "POST /api/upload?thread={}&kind={kind}&name={} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST /api/upload?thread={}&kind={kind}&name={}&read=1 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         form_escape(thread),
         form_escape(name),
         bytes.len()
@@ -231,8 +254,7 @@ pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bo
     if status != 200 {
         return Err(format!("the upload was refused (HTTP {status}): {body}"));
     }
-    let value: Value = serde_json::from_str(&body).unwrap_or(Value::String(body.clone()));
-    Ok(value.get("path").and_then(Value::as_str).map(str::to_string).unwrap_or(body))
+    Ok(saved_from(&body))
 }
 
 /// The user-level air-gap level, as `ling web` resolves it (`/api/airgapped`): true for `on`.
@@ -340,13 +362,11 @@ pub fn handshake() -> Vec<Value> {
 }
 
 /// A turn's input: the text, and each image uploaded into the thread's folder.
-pub fn turn_input(text: &str, images: &[String], files: &[String]) -> Value {
-    let mut text = text.to_string();
-    if !files.is_empty() {
-        let names: Vec<String> = files.iter().map(|path| std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone())).collect();
-        text.push_str(&format!("\n\n[Attached and saved in this thread's folder: {}]", names.join(", ")));
+pub fn turn_input(text: &str, images: &[String]) -> Value {
+    let mut input = Vec::new();
+    if !text.trim().is_empty() {
+        input.push(json!({ "type": "text", "text": text.trim(), "text_elements": [] }));
     }
-    let mut input = vec![json!({ "type": "text", "text": text.trim(), "text_elements": [] })];
     for image in images {
         input.push(json!({ "type": "localImage", "path": image }));
     }
@@ -417,11 +437,22 @@ mod tests {
     }
 
     #[test]
-    fn turn_input_lists_files_and_adds_images() {
-        let input = turn_input("look", &["/a/x.jpg".to_string()], &["/a/report.pdf".to_string()]);
-        assert_eq!(input[0]["text"], json!("look\n\n[Attached and saved in this thread's folder: report.pdf]"));
+    fn turn_input_adds_images_and_never_sends_empty_text() {
+        let input = turn_input("look", &["/a/x.jpg".to_string()]);
+        assert_eq!(input[0]["text"], json!("look"));
         assert_eq!(input[1], json!({"type": "localImage", "path": "/a/x.jpg"}));
-        assert_eq!(turn_input("plain", &[], &[]).as_array().unwrap().len(), 1);
+        assert_eq!(turn_input("plain", &[]).as_array().unwrap().len(), 1);
+        // An image alone: no empty text item beside it.
+        assert_eq!(turn_input("  ", &["/a/x.jpg".to_string()]), json!([{"type": "localImage", "path": "/a/x.jpg"}]));
+    }
+
+    #[test]
+    fn upload_answers_are_read_old_and_new() {
+        assert_eq!(saved_from(r#"{"path":"/a/x.jpg","bytes":3}"#), Saved { path: "/a/x.jpg".to_string(), text: None, vision: false });
+        assert_eq!(
+            saved_from(r#"{"path":"/a/x.jpg","bytes":3,"text":"HEPA","vision":true}"#),
+            Saved { path: "/a/x.jpg".to_string(), text: Some("HEPA".to_string()), vision: true }
+        );
     }
 
     #[test]

@@ -86,9 +86,20 @@ async fn handle(State(stand): State<Stand>, method: Method, uri: Uri, body: Byte
     Json(answer)
 }
 
+/// Authenticated media: the bytes name the file, for the bot's token only.
+async fn media(axum::extract::Path((server, media)): axum::extract::Path<(String, String)>, headers: axum::http::HeaderMap) -> (axum::http::StatusCode, Vec<u8>) {
+    if headers.get("authorization").and_then(|v| v.to_str().ok()) != Some("Bearer bot-token") {
+        return (axum::http::StatusCode::UNAUTHORIZED, Vec::new());
+    }
+    (axum::http::StatusCode::OK, format!("MEDIA:{server}/{media}").into_bytes())
+}
+
 async fn stand_in() -> (Stand, String) {
     let stand = Stand::default();
-    let app = Router::new().fallback(handle).with_state(stand.clone());
+    let app = Router::new()
+        .route("/_matrix/client/v1/media/download/{server}/{media}", axum::routing::get(media))
+        .fallback(handle)
+        .with_state(stand.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let root = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -152,6 +163,30 @@ async fn messages_from_allowed_users_reach_the_hub_after_the_first_sync() {
     syncer.handle(&config, &message("!dm:x", BOT, "an answer"), false).await;
     syncer.handle(&config, &message("!dm:x", "@eve:x", "hi"), false).await;
     assert!(inbound.try_recv().is_err());
+    let _ = stand;
+}
+
+/// An image (with a caption, Matrix 1.10 style) is downloaded and reaches the hub as media; a
+/// voice message is named as dropped.
+#[tokio::test]
+async fn images_reach_the_hub_downloaded_and_audio_is_named_as_dropped() {
+    let (stand, root) = stand_in().await;
+    let (dir, config) = setup("media", &root);
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let (syncer, _) = ling_chat::matrix::pair_for_tests(MatrixApi::new(&root, "bot-token"), dir, BOT, hub);
+    let mut image = message("!dm:x", OWNER, "");
+    image["rooms"]["join"]["!dm:x"]["timeline"]["events"][0]["content"] =
+        json!({ "msgtype": "m.image", "body": "is this one quiet?", "filename": "shot.png", "url": "mxc://node.tail.ts.net/abc123", "info": { "mimetype": "image/png" } });
+    syncer.handle(&config, &image, false).await;
+    let Inbound::Media { chat, text, attachments, dropped } = inbound.try_recv().unwrap() else { panic!("not media") };
+    assert_eq!((chat.as_str(), text.as_str()), ("matrix:!dm:x", "is this one quiet?"));
+    assert_eq!((attachments[0].name.as_str(), attachments[0].mime.as_str()), ("shot.png", "image/png"));
+    assert_eq!(attachments[0].bytes, b"MEDIA:node.tail.ts.net/abc123");
+    assert!(dropped.is_empty());
+    let mut audio = message("!dm:x", OWNER, "");
+    audio["rooms"]["join"]["!dm:x"]["timeline"]["events"][0]["content"] = json!({ "msgtype": "m.audio", "body": "voice.ogg", "url": "mxc://node.tail.ts.net/v1" });
+    syncer.handle(&config, &audio, false).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Media { chat: "matrix:!dm:x".into(), text: String::new(), attachments: vec![], dropped: vec!["an audio message".into()] });
     let _ = stand;
 }
 

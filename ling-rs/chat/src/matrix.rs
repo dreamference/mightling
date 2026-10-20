@@ -19,6 +19,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
+use crate::attachments::Media;
 use crate::hub::Inbound;
 use crate::hub::Outbound;
 use crate::render;
@@ -52,6 +53,39 @@ pub struct MatrixError {
 impl std::fmt::Display for MatrixError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} ({})", self.error, self.errcode)
+    }
+}
+
+/// The largest file the bridge downloads: `ling web`'s cap on an image.
+pub const MEDIA_LIMIT: u64 = 20 * 1024 * 1024;
+
+/// What an `m.room.message` carries besides text: the media URI, a name and a type, when it is an
+/// image or a file; the kinds the bridge does not take, named for the user; and its caption.
+pub fn media_of(content: &Value) -> (Option<(String, String, String)>, Vec<String>, String) {
+    let msgtype = content.get("msgtype").and_then(Value::as_str).unwrap_or_default();
+    let body = content.get("body").and_then(Value::as_str).unwrap_or_default();
+    // A caption is the body when a separate file name is given (Matrix 1.10 media captions).
+    let filename = content.get("filename").and_then(Value::as_str);
+    let caption = match filename {
+        Some(name) if name != body => without_reply_fallback(body),
+        _ => String::new(),
+    };
+    match msgtype {
+        "m.image" | "m.file" => match content.get("url").and_then(Value::as_str) {
+            Some(url) => {
+                let fallback = if msgtype == "m.image" { "image.jpg" } else { "file" };
+                let name = filename.unwrap_or(if body.is_empty() { fallback } else { body }).to_string();
+                let default_mime = if msgtype == "m.image" { "image/jpeg" } else { "application/octet-stream" };
+                let mime = content.pointer("/info/mimetype").and_then(Value::as_str).unwrap_or(default_mime).to_string();
+                (Some((url.to_string(), name, mime)), Vec::new(), caption)
+            }
+            // An encrypted file (`file` instead of `url`): rooms here are unencrypted, so not expected.
+            None => (None, vec!["an encrypted file".to_string()], caption),
+        },
+        "m.audio" => (None, vec!["an audio message".to_string()], caption),
+        "m.video" => (None, vec!["a video".to_string()], caption),
+        "m.location" => (None, vec!["a location".to_string()], String::new()),
+        _ => (None, vec!["this kind of message".to_string()], String::new()),
     }
 }
 
@@ -100,6 +134,32 @@ impl MatrixApi {
 
     fn short() -> Duration {
         Duration::from_secs(30)
+    }
+
+    /// Downloads the file an `mxc://<server>/<id>` URI names: the authenticated media endpoint,
+    /// then the older unauthenticated one for a homeserver without it.
+    pub async fn download(&self, mxc: &str) -> Result<Vec<u8>, MatrixError> {
+        let failed = |error: String| MatrixError { errcode: "M_UNKNOWN".to_string(), error };
+        let (server, media) = mxc.strip_prefix("mxc://").and_then(|rest| rest.split_once('/')).ok_or_else(|| failed(format!("not a media URI: {mxc}")))?;
+        let (server, media) = (encode(server), encode(media));
+        for path in [format!("/_matrix/client/v1/media/download/{server}/{media}"), format!("/_matrix/media/v3/download/{server}/{media}")] {
+            let response = self
+                .http
+                .get(format!("{}{path}", self.base))
+                .bearer_auth(&self.token)
+                .timeout(Duration::from_secs(120))
+                .send()
+                .await
+                .map_err(|err| MatrixError { errcode: "M_UNREACHABLE".to_string(), error: err.without_url().to_string() })?;
+            if response.status().is_success() {
+                let bytes = response.bytes().await.map_err(|err| failed(err.without_url().to_string()))?;
+                if bytes.len() as u64 > MEDIA_LIMIT {
+                    return Err(failed("the file is larger than the bridge takes".to_string()));
+                }
+                return Ok(bytes.to_vec());
+            }
+        }
+        Err(failed("the homeserver did not give the file".to_string()))
     }
 
     pub async fn send(&self, room: &str, content: Value) -> Result<String, MatrixError> {
@@ -301,7 +361,18 @@ impl Syncer {
                             let text = without_reply_fallback(body);
                             let _ = self.hub.send(Inbound::Text { chat: chat_key(room), text });
                         } else {
-                            let _ = self.api.send(room, json!({ "msgtype": "m.notice", "body": "Only text messages for now." })).await;
+                            let (media, dropped, caption) = media_of(&event["content"]);
+                            let mut attachments = Vec::new();
+                            if let Some((url, name, mime)) = media {
+                                match self.api.download(&url).await {
+                                    Ok(bytes) => attachments.push(Media { name, mime, bytes }),
+                                    Err(err) => {
+                                        let line = format!("I couldn't download {name} from the homeserver ({}); send it again.", err.error);
+                                        let _ = self.api.send(room, json!({ "msgtype": "m.notice", "body": line })).await;
+                                    }
+                                }
+                            }
+                            let _ = self.hub.send(Inbound::Media { chat: chat_key(room), text: caption, attachments, dropped });
                         }
                     }
                     Some("m.reaction") => {

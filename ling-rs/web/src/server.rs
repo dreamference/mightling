@@ -195,6 +195,18 @@ impl Server {
         let first = catalog.get("models")?.get(0)?;
         first.get("slug").or_else(|| first.get("id")).and_then(|name| name.as_str()).map(str::to_string)
     }
+
+    /// Whether the served model takes images: true only when the launcher wrote `image` into the
+    /// catalog's `input_modalities`, which it does after asking the model server (ling-rs
+    /// `vision.rs`). A catalog that does not say is not taken as a yes.
+    pub fn served_model_takes_images(&self) -> bool {
+        let Ok(text) = std::fs::read_to_string(self.config.codex_home.join("model_catalog.json")) else { return false };
+        let Ok(catalog) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
+        catalog
+            .pointer("/models/0/input_modalities")
+            .and_then(|modalities| modalities.as_array())
+            .is_some_and(|modalities| modalities.iter().any(|m| m.as_str() == Some("image")))
+    }
 }
 
 pub fn header_str(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
@@ -525,6 +537,9 @@ fn unused_path(folder: &Path, name: &str) -> PathBuf {
 
 /// An attachment into an Ask thread's folder: `?thread=<id>&name=<file>&kind=image|file`, the
 /// bytes as the body. Answers the path the UI then sends as `localImage` or names in the prompt.
+/// With `read=1` (the phone bridges), an image's text is read too (ocr.rs) and the answer adds
+/// `text` (null when none was read) and `vision`, whether the served model takes images, so a
+/// bridge knows what the model can be given (specs/DREAMFERENCE_MIGHTLING_CHAT.md §16).
 async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>, request: Request) -> Response {
     let cap = match query.get("kind").map(String::as_str) {
         Some("image") => IMAGE_CAP,
@@ -566,7 +581,14 @@ async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<S
         }
     }
     let _ = file.flush().await;
-    json_response(StatusCode::OK, json!({ "path": path.to_string_lossy(), "bytes": written }))
+    drop(file);
+    let mut answer = json!({ "path": path.to_string_lossy(), "bytes": written });
+    if query.get("read").map(String::as_str) == Some("1") {
+        let text = if query.get("kind").map(String::as_str) == Some("image") { crate::ocr::read_text(&path).await } else { None };
+        answer["text"] = json!(text);
+        answer["vision"] = json!(server.served_model_takes_images());
+    }
+    json_response(StatusCode::OK, answer)
 }
 
 /// Serves until `shutdown` resolves, on every address in `binds`.
