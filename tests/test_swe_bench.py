@@ -25,7 +25,8 @@ from dreamference.night_shift.refine_prompt import FIX_RULES, FIX_RULES_V2, STUD
 from dreamference.swe_bench import (
     SweBenchCodeIndex, SweBenchCommand, SweBenchDocker, SweBenchEvaluator, SweBenchHarness, SweBenchImages,
     SweBenchHooks, SweBenchInstanceRun, SweBenchIssueGate, SweBenchIssueTargets, SweBenchNameStripper,
-    SweBenchReport, SweBenchRunStore, SweBenchRunner, SweBenchRuntime, SweBenchSettings,
+    SweBenchReport, SweBenchRunStore, SweBenchRunner, SweBenchRuntime, SweBenchSettings, SweBenchShardMerge,
+    SweBenchShards,
 )
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS
@@ -2215,7 +2216,7 @@ def test_eval_and_report_take_the_drop_test_hunks_switch(monkeypatch):
     for words in (["eval", "r", "--drop-test-hunks", "--remove-images"], ["eval", "r"],
                   ["report", "r", "--drop-test-hunks", "--against", "r"]):
         assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", *words])) == 0
-    assert seen == [("eval", ("r", DROP_TEST_HUNKS, True)), ("eval", ("r", None, False)),
+    assert seen == [("eval", ("r", DROP_TEST_HUNKS, True, None)), ("eval", ("r", None, False, None)),
                     ("report", ("r", "r", DROP_TEST_HUNKS))]
 
 
@@ -3370,3 +3371,181 @@ def test_the_drop_arm_is_told_apart_by_against_and_parsed(bench, monkeypatch):
     assert seen["drop_old_outputs"] is True
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["drop_old_outputs"] is False
+
+
+# -- image chunks, shards and their merge (150-task nights, 2026-10-20) ---------------------------
+
+def graded_batches(harness, since=0):
+    return [sorted(call[i + 1] for i, word in enumerate(call) if word == "-i")
+            for call in harness.calls[since:] if "-p" in call and "to-grade.jsonl" in call[call.index("-p") + 1]]
+
+
+def test_the_image_chunk_defaults_to_25_and_is_read_from_the_config():
+    assert SweBenchSettings({}).image_chunk == 25
+    assert SweBenchSettings({"image_chunk": 10}).image_chunk == 10
+    assert SweBenchSettings({"image_chunk": -3}).image_chunk == 0
+
+
+def test_a_large_repository_is_cut_into_equal_chunks_in_run_order():
+    ids = [f"acme__widget-{n}" for n in range(86)] + ["beta__gadget-1", "beta__gadget-2"]
+    rows = {i: row(i) for i in ids}
+    chunks = SweBenchRunner.image_chunks(ids, rows, 25)
+    assert [len(chunk) for chunk in chunks] == [22, 22, 21, 21, 2]
+    assert [i for chunk in chunks for i in chunk] == ids
+    assert [len(chunk) for chunk in SweBenchRunner.image_chunks(ids, rows, 0)] == [86, 2]
+    assert [len(chunk) for chunk in SweBenchRunner.image_chunks(ids, rows, 100)] == [86, 2]
+
+
+def test_remove_images_runs_grades_and_removes_one_chunk_at_a_time(bench):
+    assert run(bench, evaluate=True, keep_images=False, image_chunk=1) == 0
+    docker, harness = bench["docker"], bench["harness"]
+    assert graded_batches(harness) == [["acme__widget-1"], ["acme__widget-2"], ["beta__gadget-7"]]
+    order = [call[0] for call in docker.calls if call[0] in ("rmi", "run")]
+    # Never two images of one repository on disk: each goes once its chunk is graded.
+    assert order == ["run", "rmi", "run", "rmi", "run", "rmi"]
+    assert docker.present == set()
+    assert SweBenchReport.summary(SweBenchRunStore("r1"))["resolved"] == 3
+
+
+def test_the_configured_chunk_applies_when_no_flag_is_given(bench):
+    assert run(bench, evaluate=True, keep_images=False, settings=SweBenchSettings({"task_timeout": "5s", "image_chunk": 1})) == 0
+    assert graded_batches(bench["harness"]) == [["acme__widget-1"], ["acme__widget-2"], ["beta__gadget-7"]]
+
+
+def test_a_negative_image_chunk_or_a_malformed_shard_is_refused(bench, capsys):
+    assert run(bench, image_chunk=-1) == 1
+    assert run(bench, shard="3/2") == 1
+    assert "--image-chunk -1" in capsys.readouterr().out
+    assert SweBenchRunStore("r1").manifest() is None
+
+
+def test_eval_with_remove_images_grades_in_chunks(bench, monkeypatch):
+    from dreamference.night_shift.night_shift_host import NightShiftHost
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 1 << 50))
+    bench["docker"].modes = {i: "with_tests" for i in IDS}
+    run(bench, instances=["acme__widget-1", "acme__widget-2"], evaluate=True)
+    docker, harness = bench["docker"], bench["harness"]
+    docker.present.clear()
+    since = len(harness.calls)
+    assert SweBenchCommand.evaluate("r1", DROP_TEST_HUNKS, remove_images=True, image_chunk=1) == 0
+    assert sorted(graded_batches(harness, since)) == [["acme__widget-1"], ["acme__widget-2"]]
+    assert docker.present == set()
+
+
+def test_two_shards_cover_the_list_once_and_record_what_they_are(bench):
+    assert run(bench, name="s1", shard="1/2") == 0
+    assert run(bench, name="s2", shard="2/2") == 0
+    first, second = SweBenchRunStore("s1").manifest(), SweBenchRunStore("s2").manifest()
+    covered = first["instances"] + list(first["excluded"]) + second["instances"] + list(second["excluded"])
+    assert sorted(covered) == sorted(IDS)
+    assert first["shard"]["index"] == 1 and second["shard"]["index"] == 2
+    assert first["shard"]["of"] == second["shard"]["of"] == 2 and first["shard"]["list_instances"] == len(IDS)
+    assert first["shard"]["list_sha256"] == second["shard"]["list_sha256"] == SweBenchShards.digest(IDS)
+    # Each shard takes one task of each repository.
+    for manifest in (first, second):
+        both = manifest["instances"] + list(manifest["excluded"])
+        assert sorted(i.split("__")[0] for i in both) == ["acme", "beta"]
+
+
+def test_a_resumed_shard_keeps_its_shard_and_a_merged_run_is_never_run(bench, capsys):
+    assert run(bench, name="s1", shard="1/2") == 0
+    assert run(bench, name="s1", shard="2/2") == 1
+    assert "it was started with shard 1/2" in capsys.readouterr().out
+    assert run(bench, name="s1") == 0  # resuming without naming the shard keeps it
+    assert run(bench, name="s2", shard="2/2") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 0
+    assert run(bench, name="m") == 1
+    assert "only reports" in capsys.readouterr().out
+
+
+def test_merged_shards_report_as_one_run(bench):
+    bench["docker"].modes = {i: "with_tests" for i in IDS}
+    assert run(bench, name="s1", shard="1/2", evaluate=True) == 0
+    assert run(bench, name="s2", shard="2/2", evaluate=True) == 0
+    for name in ("s1", "s2"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"], variant=DROP_TEST_HUNKS)
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 0
+    merged, s1, s2 = (SweBenchRunStore(name) for name in ("m", "s1", "s2"))
+    manifest = merged.manifest()
+    assert manifest["merged_from"] == ["s1", "s2"] and "shard" not in manifest
+    assert manifest["instances"] == sorted(s1.manifest()["instances"] + s2.manifest()["instances"])
+    assert sorted(manifest["excluded"]) == ["beta__gadget-9"]
+    assert [shard["shard"]["index"] for shard in manifest["shards"]] == [1, 2]
+    assert sorted(p["instance_id"] for p in merged.predictions()) == manifest["instances"]
+    assert sorted(merged.finished()) == manifest["instances"]
+    plain = merged.grading(1)["results"]
+    assert sorted(plain) == manifest["instances"]
+    assert plain == {**s1.grading(1)["results"], **s2.grading(1)["results"]}
+    dropped = merged.grading(1, DROP_TEST_HUNKS)["results"]
+    assert sorted(dropped) == manifest["instances"]
+    assert all(r.get("reused") in (None, "plain grading 1") for r in dropped.values())
+    # Each instance's scratch is the shard's, linked, so the rollouts are read where they are.
+    some = manifest["instances"][0]
+    owner = s1 if some in s1.manifest()["instances"] else s2
+    assert (merged.directory / "scratch" / some).resolve() == (owner.directory / "scratch" / some).resolve()
+    summary = SweBenchReport.summary(merged)
+    assert summary["resolved"] == SweBenchReport.summary(s1)["resolved"] + SweBenchReport.summary(s2)["resolved"]
+    assert SweBenchReport.render(merged).count("run m") == 1
+    # A merged run compares like any run: against a run of the same instances (here itself), and a
+    # shard, which covers fewer, is refused as any run of other instances is.
+    assert SweBenchReport.against(merged, merged).startswith("m against m:")
+    assert SweBenchReport.against(merged, s1).startswith("Not compared: m and s1 cover different instances")
+
+
+def test_shards_that_measured_different_things_or_overlap_are_not_merged(bench, capsys):
+    assert run(bench, name="s1", shard="1/2") == 0
+    assert run(bench, name="s2", shard="2/2", task_rules=["tests-v2"]) == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 1
+    assert "task_rules differ" in capsys.readouterr().out
+    assert run(bench, name="all") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "all"]) == 1
+    assert "some runs are shards" in capsys.readouterr().out
+    assert run(bench, name="again", shard="1/2") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "again"]) == 1
+    assert "two runs are the same shard" in capsys.readouterr().out
+    # Runs of hand-made lists (not --shard) merge when they share no instance.
+    assert run(bench, name="x", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="y", instances=["acme__widget-1", "beta__gadget-7"]) == 0
+    assert SweBenchShardMerge.merge("m", ["x", "y"]) == 1
+    assert "1 instance(s) are in more than one run, e.g. acme__widget-1" in capsys.readouterr().out
+    assert SweBenchShardMerge.merge("m", ["s1"]) == 1
+    assert SweBenchShardMerge.merge("m", ["s1", "missing"]) == 1
+    assert SweBenchRunStore("m").manifest() is None
+
+
+def test_a_merge_of_some_shards_says_which_are_missing(bench, capsys):
+    assert run(bench, name="s1", shard="1/3") == 0
+    assert run(bench, name="s2", shard="2/3") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 0
+    assert "Shard(s) 3 of 3 are not in the merge" in capsys.readouterr().out
+
+
+def test_the_shard_command_writes_the_lists_run_would_cover(bench, tmp_path, capsys):
+    source = tmp_path / "list.txt"
+    source.write_text("# four\n" + "".join(f"{i}\n" for i in IDS))
+    assert SweBenchCommand.shard(source, 2) == 0
+    written = [tmp_path / "list-1of2.txt", tmp_path / "list-2of2.txt"]
+    repos = {i: row(i)["repo"] for i in IDS}
+    for index, path in enumerate(written, start=1):
+        ids = [line for line in path.read_text().splitlines() if not line.startswith("#")]
+        assert ids == SweBenchShards.pick(IDS, repos, index, 2)
+    source.write_text("not__a-task\n")
+    assert SweBenchCommand.shard(source, 2) == 1
+    assert SweBenchCommand.shard(source, 0) == 1
+
+
+def test_run_eval_shard_and_merge_take_their_options(monkeypatch):
+    import argparse
+    seen = []
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **k: seen.append(("run", k["shard"], k["image_chunk"])) or 0))
+    monkeypatch.setattr(SweBenchCommand, "evaluate", classmethod(lambda cls, *a: seen.append(("eval", a)) or 0))
+    monkeypatch.setattr(SweBenchCommand, "shard", classmethod(lambda cls, *a: seen.append(("shard", a)) or 0))
+    monkeypatch.setattr(SweBenchShardMerge, "merge", classmethod(lambda cls, *a: seen.append(("merge", a)) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    for words in (["run", "--shard", "2/3", "--image-chunk", "10", "--eval", "--remove-images"],
+                  ["eval", "r", "--remove-images", "--image-chunk", "5"], ["shard", "l.txt", "--shards", "3"],
+                  ["merge", "m", "a", "b", "c"]):
+        assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", *words])) == 0
+    assert seen == [("run", "2/3", 10), ("eval", ("r", None, True, 5)), ("shard", (Path("l.txt"), 3, None, "verified")),
+                    ("merge", ("m", ["a", "b", "c"]))]

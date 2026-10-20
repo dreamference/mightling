@@ -35,6 +35,7 @@ from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
 from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
+from dreamference.swe_bench.swe_bench_shards import SweBenchShards
 from dreamference.vllm_server.model_gate import ModelGate
 
 POLL_S: Final[float] = 5.0
@@ -401,7 +402,9 @@ class SweBenchRunner:
             restart_after_compactions: int = 0,
             apply_patch: Optional[str] = None,
             exec_tool: Optional[str] = None,
-            drop_old_outputs: bool = False) -> int:
+            drop_old_outputs: bool = False,
+            shard: Optional[str] = None,
+            image_chunk: Optional[int] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -415,8 +418,9 @@ class SweBenchRunner:
             until: `HH:MM` after which no new instance starts; running ones finish.
             idle_minutes: Minutes the model must have been idle first; defaults to the setting.
             ignore_sessions: Do not wait for open `ling` sessions (for testing beside one).
-            keep_images: With `evaluate`, False works one repository at a time and removes its
-                images once it is graded, to make room for the next repository's.
+            keep_images: With `evaluate`, False works one repository at a time, in chunks of at
+                most `image_chunk` instances, and removes a chunk's images once it is graded, to
+                make room for the next chunk's.
             require_smoke: Refuse to run unless a smoke has passed on this machine.
             code_index: `off`, `universal` to index each instance's repository on the host
                 and give the agent `ling-code`, or `exact` for the same with the SCIP stores
@@ -468,6 +472,13 @@ class SweBenchRunner:
                 (`turn_end_percent`), `off` pins it at 0, a number pins that percentage; None
                 leaves the key alone, and `exec` never compacts at a turn's end. The launcher's
                 switch is set to `1` or `0` beside it. A new run only, like `code_index`.
+            shard: `I/K`: a new run covers only the I-th of K balanced shards of the selected
+                instances (`SweBenchShards`), so K machines can share one list; recorded in the
+                manifest, where `swe-bench merge` reads it. A resumed run keeps its shard, and
+                naming another is refused.
+            image_chunk: With `evaluate` and `keep_images` False, the most instances of one
+                repository whose images are on disk at once; None takes `[swe_bench]
+                image_chunk` (25), 0 the whole repository.
 
         Returns:
             int: 0 when the run did what it could (whatever its instances did), 1 when it could
@@ -498,6 +509,13 @@ class SweBenchRunner:
         if unknown_hooks:
             print(f"❌ --hooks takes: {', '.join(HOOK_SETS)} (not {', '.join(unknown_hooks)}).")
             return 1
+        wanted_shard = SweBenchShards.parse(shard) if shard is not None else None
+        if shard is not None and wanted_shard is None:
+            print(f"❌ --shard {shard!r}: I/K, the I-th of K shards (1 <= I <= K).")
+            return 1
+        if image_chunk is not None and image_chunk < 0:
+            print(f"❌ --image-chunk {image_chunk}: a number of instances, 0 for a whole repository.")
+            return 1
         if name is not None and not RUN_NAME.fullmatch(name) and SweBenchRunStore(name).manifest() is None:
             print(f"❌ --name {name!r}: a run's name is letters, digits, '.', '_' and '-', because the grader "
                   "names Docker containers after it (join task rules with '-': n3-tests-v2-issue-v1).")
@@ -517,6 +535,10 @@ class SweBenchRunner:
         vllm_host = DreamferenceConfig().vllm_host
 
         store = SweBenchRunStore(name or cls.default_name())
+        refusal = cls.resume_problem(store.manifest(), wanted_shard)
+        if refusal:
+            print(f"❌ Run {store.name}: {refusal}")
+            return 1
         end = cls.until_time(until)
         with NightShiftQueue.runner_lock(NightShiftQueue.night_dir(), holder=LOCK_HOLDER) as held:
             if not held:
@@ -563,6 +585,12 @@ class SweBenchRunner:
                     except (ValueError, OSError) as error:
                         print(f"❌ {error}")
                         return 1
+                    whole = list(selected)
+                    if wanted_shard is not None:
+                        repos = {row["instance_id"]: str(row.get("repo", "")) for row in SweBenchHarness.rows(dataset)}
+                        selected = SweBenchShards.pick(whole, repos, *wanted_shard)
+                        print(f"🧩 Shard {wanted_shard[0]} of {wanted_shard[1]}: {len(selected)} of the "
+                              f"{len(whole)} selected instance(s), {SweBenchShards.mix(selected, repos)}.")
                     print(f"🔎 Checking that {len(selected)} instance(s) grade correctly here "
                           "(reference patch resolves, no-op patch does not)...")
                     problems = SweBenchEvaluator.validate(dataset, selected, settings)
@@ -574,6 +602,9 @@ class SweBenchRunner:
                                                   restart_after_compactions=restart_after_compactions,
                                                   apply_patch=apply_patch, exec_tool=exec_tool,
                                                   drop_old_outputs=drop_old_outputs)
+                    if wanted_shard is not None:
+                        manifest["shard"] = {"index": wanted_shard[0], "of": wanted_shard[1],
+                                             "list_instances": len(whole), "list_sha256": SweBenchShards.digest(whole)}
                     store.write_manifest(manifest)
                 elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                     print(f"❌ Run {store.name} was started with another ling build or model "
@@ -668,16 +699,26 @@ class SweBenchRunner:
                 if threading.current_thread() is threading.main_thread():
                     signal.signal(signal.SIGTERM, cls._raise_interrupt)
                 try:
-                    # One repository at a time only when its images are to be removed after grading;
-                    # otherwise everything is one group, so small repositories do not run alone.
+                    # One repository at a time, in chunks of at most `image_chunk` instances, only when
+                    # the images are to be removed after grading; otherwise everything is one group, so
+                    # small repositories do not run alone. The chunks are cut from the whole run, so a
+                    # resumed run has the same ones, and a chunk with nothing left to run is skipped.
                     cycling = evaluate and not keep_images
-                    groups = cls.by_repository(pending, rows) if cycling else {None: pending}
-                    for repo, group in groups.items():
-                        stopped = cls.schedule(store, group, rows, manifest, settings, runtime_hash,
+                    chunk = settings.image_chunk if image_chunk is None else image_chunk
+                    waiting = set(pending)
+                    groups: List[Optional[List[str]]] = [None]
+                    if cycling:
+                        groups = [list(group) for group in cls.image_chunks(manifest["instances"], rows, chunk)
+                                  if waiting.intersection(group)]
+                        print(f"🧩 Images one repository at a time, at most {chunk or 'all'} of one repository "
+                              f"on disk at once: {len(groups)} chunk(s) to run.", flush=True)
+                    for group in groups:
+                        todo = pending if group is None else [i for i in group if i in waiting]
+                        stopped = cls.schedule(store, todo, rows, manifest, settings, runtime_hash,
                                                model_url, vllm_host, mightling_bin, parallel, end, extra_env,
                                                indexes, extra_mounts, lanes=lanes, hold=hold)
                         if evaluate:
-                            graded_now = [i for i in manifest["instances"] if repo is None or rows[i]["repo"] == repo]
+                            graded_now = list(manifest["instances"]) if group is None else group
                             SweBenchEvaluator.grade(store, settings, only=graded_now)
                             if cycling and not stopped:
                                 SweBenchImages.remove([manifest["images"][i]["image"] for i in graded_now
@@ -886,6 +927,57 @@ class SweBenchRunner:
         for instance_id in instance_ids:
             groups.setdefault(rows[instance_id]["repo"], []).append(instance_id)
         return groups
+
+    @classmethod
+    def image_chunks(cls, instance_ids: List[str], rows: Dict[str, Dict[str, Any]], size: int) -> List[List[str]]:
+        """
+        Cuts instances into the chunks whose images are on disk together with `--eval
+        --remove-images`: one repository at a time (`by_repository`), a repository of more than
+        `size` instances into as few chunks of at most `size` as hold it, as equal as can be and in
+        the instances' order (86 at 25: 22, 22, 21, 21).
+
+        Args:
+            instance_ids: The instances, in run order.
+            rows: Their dataset rows.
+            size: The most instances in a chunk; 0 for a whole repository.
+
+        Returns:
+            List[List[str]]: The chunks, repository by repository.
+        """
+        chunks: List[List[str]] = []
+        for group in cls.by_repository(instance_ids, rows).values():
+            parts = -(-len(group) // size) if size > 0 else 1
+            low, extra = divmod(len(group), parts)
+            start = 0
+            for part in range(parts):
+                end = start + low + (1 if part < extra else 0)
+                chunks.append(group[start:end])
+                start = end
+        return chunks
+
+    @classmethod
+    def resume_problem(cls, manifest: Optional[Dict[str, Any]], shard: Optional[tuple]) -> Optional[str]:
+        """
+        Why a run of this name cannot be run (again) as asked.
+
+        Args:
+            manifest: The existing run's manifest; None for a new run.
+            shard: The (I, K) asked for, or None.
+
+        Returns:
+            Optional[str]: The reason, or None.
+        """
+        if manifest is None:
+            return None
+        if manifest.get("merged_from"):
+            return (f"it is the merge of {', '.join(manifest['merged_from'])} (`swe-bench merge`), which only "
+                    "reports: resume the shard that is not finished and merge again.")
+        recorded = manifest.get("shard") or {}
+        recorded_pair = (recorded.get("index"), recorded.get("of")) if recorded else None
+        if shard is not None and tuple(shard) != recorded_pair:
+            had = f"shard {recorded_pair[0]}/{recorded_pair[1]}" if recorded_pair else "no shard"
+            return f"it was started with {had}; a resumed run keeps its instances. Use a new --name."
+        return None
 
     @classmethod
     def default_name(cls) -> str:

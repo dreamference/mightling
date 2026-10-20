@@ -42,6 +42,13 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 # and the runner's own check (which stops starting instances below it) use the same number.
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
+# A repository's instances are run, graded and their images removed in chunks of at most IMAGE_CHUNK
+# (`--image-chunk`; 0: the whole repository at once), so the disk holds one chunk's images, not the
+# largest repository's (fresh-150k's 86 django tasks would need about 260 GB at once; 25 need 75).
+IMAGE_CHUNK=${IMAGE_CHUNK:-25}
+# SHARD=I/K: this machine runs only the I-th of K balanced shards of LIST (`swe-bench run --shard`),
+# the other machines the others; `ling-admin swe-bench merge` puts each arm's K rounds together.
+SHARD=${SHARD:-}
 REFINE=${REFINE:-0}
 # The per-task time limit (`[swe_bench] task_timeout`, e.g. 60m); the runner's default (45m) when unset.
 TASK_TIMEOUT=${TASK_TIMEOUT:-}
@@ -103,6 +110,9 @@ arm_flags() {
     echo "${flags# }"
 }
 arm_name() { echo "$1" | tr ,+ --; }
+# The options every round and regrade takes: the image chunk, and the round's shard of the list.
+chunk_flags() { echo "--image-chunk $IMAGE_CHUNK"; }
+shard_flags() { [ -n "$SHARD" ] && echo "--shard $SHARD"; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
 
 # The smoke check: one real task per arm (SMOKE_INSTANCE), with the night's settings and the arm's
@@ -257,12 +267,19 @@ start() {
     if [ ! -s "$LIST" ]; then
         echo "❌ No task list at $LIST: run scripts/swe_bench_fresh.py validate, then draw."; exit 1
     fi
+    case "$IMAGE_CHUNK" in ''|*[!0-9]*) echo "❌ IMAGE_CHUNK=$IMAGE_CHUNK: a number of instances, 0 for a whole repository."; exit 2 ;; esac
+    if [ -n "$SHARD" ] && { ! [[ "$SHARD" =~ ^[1-9][0-9]*/[1-9][0-9]*$ ]] || [ "${SHARD%/*}" -gt "${SHARD#*/}" ]; }; then
+        echo "❌ SHARD=$SHARD: I/K, the I-th of K shards of the list."; exit 2
+    fi
     count=$(grep -cv '^\s*\(#\|$\)' "$LIST")
-    # The largest repository's images are on disk at once while that repository is graded.
+    # One chunk of the largest repository's images is on disk at once while it is run and graded
+    # (the whole list's count: a shard holds no more).
     largest=$(grep -v '^\s*\(#\|$\)' "$LIST" | sed 's/-[0-9]*$//' | sort | uniq -c | sort -rn | awk 'NR==1{print $1}')
-    need=$(( largest * IMAGE_GB + RESERVE_GB ))
+    at_once=$largest
+    [ "$IMAGE_CHUNK" -gt 0 ] && [ "$largest" -gt "$IMAGE_CHUNK" ] && at_once=$IMAGE_CHUNK
+    need=$(( at_once * IMAGE_GB + RESERVE_GB ))
     free=$(df --output=avail -BG "$HOME/.cache" | tail -1 | tr -dc '0-9')
-    echo "Tasks: $count; largest repository: $largest; disk needed about ${need}G, free ${free}G."
+    echo "Tasks: $count${SHARD:+ (this machine: shard $SHARD)}; largest repository: $largest, at most $at_once of its images at once; disk needed about ${need}G, free ${free}G."
     if [ "$free" -lt "$need" ]; then
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
@@ -287,6 +304,7 @@ start() {
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
+        --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
@@ -317,7 +335,8 @@ best_of_run() {
         round="$PREFIX-$name-$k"
         log "round $round (attempt $k of $BEST_OF)"
         admin swe-bench run --subset "$LIST" --name "$round" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
+            --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) \
+            --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
         rc=$?
         log "$round finished ($rc)"
         df -h / | tail -1
@@ -353,7 +372,7 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}, image chunk $IMAGE_CHUNK${SHARD:+, shard $SHARD}"
     if [ "$BEST_OF" -gt 1 ]; then
         best_of_run
         return
@@ -373,7 +392,7 @@ run() {
         log "round $PREFIX-$name"
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
+            --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) --label "night $NIGHT, $name arm"
         rc=$?
         log "$PREFIX-$name finished ($rc)"
         df -h / | tail -1
@@ -386,7 +405,7 @@ run() {
     done
     for name in $rname $cname; do
         log "regrade $PREFIX-$name with the test files dropped"
-        admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images
+        admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images $(chunk_flags)
         rc=$?
         log "regrade of $PREFIX-$name finished ($rc)"
         [ "$rc" -eq 0 ] || fail "regrade $PREFIX-$name" "$rc"

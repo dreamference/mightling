@@ -320,7 +320,9 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--limit` | Only the first N selected instances, sorted by id. |
 | `--name` | The run's name (letters, digits, ., _ and -); an existing run of that name is resumed. |
 | `--eval` | Grade the predictions when the agent phase ends. |
-| `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
+| `--remove-images` | With --eval: work one repository at a time, in chunks of at most --image-chunk instances, and remove a chunk's images once it is graded. |
+| `--image-chunk` | With --eval --remove-images: the most instances of one repository whose images are on disk at once (default [swe_bench] image_chunk, 25; 0: the whole repository) |
+| `--shard` | A new run covers only the I-th of K shards of the selected instances, balanced by difficulty and repository and the same on every machine, so K machines share one list; `swe-bench merge` puts the K runs back together. |
 | `--code-index` | universal: index each instance's repository on the host and give the agent ling-code (default off); exact: the same with the SCIP stores alone and no graph. One of: `off`, `universal`, `exact`. |
 | `--prompt` | The system prompt the agent starts with: default, offline (default without the web and email blocks), high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one) |
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
@@ -348,7 +350,8 @@ The grading phase: the upstream harness applies each patch and runs the tests.
 |---|---|
 | `run` | The run (default: the latest) |
 | `--drop-test-hunks` | Grade the same predictions again with every test file left out of each patch, as a separate grading (eval-drop-test-hunks/); no agent runs. |
-| `--remove-images` | Grade one repository at a time and remove the images this grading pulled once their repository is graded. |
+| `--remove-images` | Grade one repository at a time, in chunks of at most --image-chunk instances, and remove the images this grading pulled once their chunk is graded. |
+| `--image-chunk` | With --remove-images: the most instances of one repository graded at once (default [swe_bench] image_chunk, 25; 0: the whole repository) |
 
 #### `ling-admin swe-bench report`
 
@@ -363,6 +366,26 @@ Print the resolved rate and what it was measured with.
 #### `ling-admin swe-bench status`
 
 Runs, their progress, images and disk.
+
+#### `ling-admin swe-bench shard`
+
+Split a task list into K balanced shards, written as lists of their own.
+
+| Option | Description |
+|---|---|
+| `list` | The task list, one instance id per line. |
+| `--shards` | How many shards. |
+| `--out-dir` | Where to write <list>-<I>of<K>.txt (default: beside the list) |
+| `--dataset` | The dataset the ids are from (default verified) |
+
+#### `ling-admin swe-bench merge`
+
+Put the runs of one list's shards together as one run, which report reads like any other.
+
+| Option | Description |
+|---|---|
+| `name` | The merged run's name. |
+| `runs` | The shards' runs (copy a run made on another machine into this machine's runs directory first) |
 
 #### `ling-admin swe-bench clean`
 

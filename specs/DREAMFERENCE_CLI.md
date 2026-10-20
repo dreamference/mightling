@@ -39,7 +39,7 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 
 - **Setup:** `init`, `host {check,setup}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off, §4.2), `clear {model-cache,tensorize-cache}`, `docs setup`
 - **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run,pause,resume}`
-- **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
+- **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}`, `audit {egress}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch,provision,prepare}` (plus `authorize`, `serve-job`, `job-exec` and `askpass`, which a person does not type, §4.25)
 - **Web UI, desktop and messengers:** `chat {remove,status}` (the retired Onyx web chat's leftovers, since 2026-10-18; alias `onyx`), `desktop {install,run,build,status}`, `matrix {start,stop,status,add-user,push,remove}`; `ling web` itself is the launcher's
 - **Agent tools:** `gmail {search,read,status}`, `google {start,stop,status}`, `images {start,stop,status,mcp}`, `voice {start,stop,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `ling-search` and `ling-fetch` (§4.16), and so is the code index, `ling-code` (§4.22)
