@@ -23,7 +23,7 @@ The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from
 
 ### The patches are one-line hooks and nothing else
 
-25 patches, ~44.9 KB in all (44,952 bytes); `test_the_patches_stay_small` caps them at 45 KB. The cap's history:
+26 patches, ~47.2 KB in all (47,178 bytes); `test_the_patches_stay_small` caps them at 55 KB. The cap's history:
 
 - raised from 20 KB on 2026-09-30 for the last on-screen Codex names;
 - to 25 KB on 2026-10-01 for `0017-cave-mode`;
@@ -42,6 +42,8 @@ The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from
 - not raised on 2026-10-14 for `0027-compaction-same-tools` (675 bytes, 44,672 in all), the compaction cache patch the 45 KB allowed for: it changes 0020's request hook to `ling_tools::for_request`, which also takes the request's thread id and whether it is a compaction, so a local compaction offers the tools of its thread's last request and its prompt shares the server's cached prefix (`ling-rs/tools/src/compaction.rs`; before it, every compaction re-read 62–91K tokens, `docs/dev/turn-end-compaction/2026-10-13.md`). `DREAMFERENCE_MIGHTLING_COMPACTION_TOOLS=0` switches it off;
 - not raised on 2026-10-19 for hiding `/import` (two lines in 0012's hunk, 163 bytes; 44,835 in all);
 - not raised on 2026-10-20 for the exit summary's resume line, which said `codex resume <id>` (one hunk in 0001's `cli/src/main.rs` that rewrites `codex resume` to `ling resume` where `handle_app_exit` prints the lines, 117 bytes net: two of 0001's hunk headers lost their optional section names; 44,952 in all);
+- to 46,849 bytes on 2026-10-20 for `0028-adapter-slash-command` (1,849 bytes; 46,801 in all);
+- to 55 KB the same day by the owner, for 1.7.1 and ling-claude's five TUI hooks (about 3.8 KB): first used by 0019's sandbox hunk, which denies the host's control sockets to every sandboxed command (`ling_airgapped::host_sockets`, 377 bytes; 47,178 in all; [airgapped.md](airgapped.md));
 - and to be raised again, explicitly, for each hook that needs it.
 
 `0001` renames what is visible: session header, status card, `exec` banner, clap `name`/`bin_name`/usage (so `--version` says `ling`), subcommand usage lines and the exit summary's `ling resume <id>`. `0002` adds `ling-launcher = { path = "../ling" }` to the CLI's manifest (a path dependency inside the workspace root joins the workspace by itself) and replaces `MultitoolCli::parse()` with `ling_launcher::help::parse(ling_launcher::args().await?)`, which also rewrites "Codex" in every about/help string of the clap tree at parse time (`ling-rs/src/help.rs`) so no doc comment needs a patch; paths such as `~/.codex` and `$CODEX_HOME` are left alone. `0001` still carries `exec`'s hard-coded `override_usage`, since clap has no getter for it.
