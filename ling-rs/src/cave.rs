@@ -393,9 +393,11 @@ impl ContextContributor for CaveMode {
 }
 
 /// Registers the cave-mode section. Called beside `codex_git_attribution::install` in the app
-/// server's registry and in the one `ling debug prompt-input` builds.
+/// server's registry and in the one `ling debug prompt-input` builds. The loop guard rides on the
+/// same call (loop_guard.rs), which keeps it out of the patches.
 pub fn install<C: Sync>(registry: &mut ExtensionRegistryBuilder<C>) {
     registry.prompt_contributor(Arc::new(CaveMode));
+    crate::loop_guard::install(registry);
 }
 
 #[cfg(test)]

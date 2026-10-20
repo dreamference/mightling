@@ -1,5 +1,4 @@
-"""
-The model gate: the one door in front of the model server (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18).
+"""The model gate: the one door in front of the model server (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18).
 
 This file is executed *inside* the gate's container, not on the host: `ModelGate` bind-mounts a
 copy of it into the model server's own image (which carries a Python) and runs it there, as
@@ -7,9 +6,13 @@ copy of it into the model server's own image (which carries a Python) and runs i
 by `ModelGate` for the state it reports), so it uses the standard library only.
 
 The engine listens on loopback at an internal port; this proxy owns the public port, on every
-interface, as the engine did. Every request passes through untouched (streamed both ways, never
-buffered) unless a SWE-bench run holds the gate: then a request that is not the run's is answered
+interface, as the engine did. Every request passes through (answers streamed, never buffered)
+unless a SWE-bench run holds the gate: then a request that is not the run's is answered
 503 in the API's own error shape, naming the run and its ETA, and never reaches the engine.
+
+A `/v1/responses` body is read whole and passes `model_gate_guard.py`, which turns what `ling`'s loop
+guard asks in the body's `client_metadata` (a length cap, a sampling arm) into the request's own
+fields where the body sets none; a body that asks for nothing goes on byte for byte.
 
 A request is the run's when it comes from the run's internal Docker network: its containers reach
 the model at that network's gateway, so their source address is in the network's subnet, which
@@ -30,7 +33,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional, Tuple
+from typing import Any, Final
 
 # The adapter rules, copied beside this file into the gate's container (`ModelGate.start`), where
 # the package is not installed and the interpreter may run isolated (`-I`), so the copy is found by
@@ -41,6 +44,13 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     gate_adapters = importlib.import_module("model_gate_adapters")
 GateAdapters = gate_adapters.ModelGateAdapters
+# The loop guard's rules (what `ling` asks in a request's client_metadata), copied the same way.
+try:
+    gate_guard = importlib.import_module("dreamference.vllm_server.model_gate_guard")
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    gate_guard = importlib.import_module("model_gate_guard")
+GateGuard = gate_guard.ModelGateGuard
 
 # Answered by the gate itself, never forwarded: what the gate is doing, as JSON.
 PROBE_PATH: Final[str] = "/mightling-gate"
@@ -54,9 +64,17 @@ STALE_S: Final[float] = 180.0
 # Read-only probes pass even while the gate is closed: the launcher reads /v1/models before its
 # first turn, and the run's own admission, Night Shift and `ling-code` read /metrics. None of them
 # runs the model. `/health_generate` does, and is not here.
-READ_ONLY_PATHS: Final[Tuple[str, ...]] = (
-    "/health", "/v1/models", "/metrics", "/get_model_info", "/get_server_info",
-    "/server_info", "/model_info", "/version", "/ping", PROBE_PATH,
+READ_ONLY_PATHS: Final[tuple[str, ...]] = (
+    "/health",
+    "/v1/models",
+    "/metrics",
+    "/get_model_info",
+    "/get_server_info",
+    "/server_info",
+    "/model_info",
+    "/version",
+    "/ping",
+    PROBE_PATH,
 )
 
 HEAD_LIMIT: Final[int] = 1 << 20
@@ -73,7 +91,11 @@ REFUSAL_CODE: Final[str] = "benchmark_running"
 # backoff. Never a real delay: an hour here would hang a turn for a day.
 RETRY_AFTER: Final[str] = "0"
 
-DROPPED_REQUEST_HEADERS: Final[Tuple[bytes, ...]] = (b"connection", b"keep-alive", b"proxy-connection")
+DROPPED_REQUEST_HEADERS: Final[tuple[bytes, ...]] = (
+    b"connection",
+    b"keep-alive",
+    b"proxy-connection",
+)
 # Replaced when the gate sends a body of its own, or the engine's key.
 FRAMING_HEADERS: Final[tuple[bytes, ...]] = (b"content-length", b"transfer-encoding")
 AUTHORIZATION: Final[bytes] = b"authorization"
@@ -89,41 +111,38 @@ BAD_GATEWAY: Final[int] = 502
 class ModelGateService:
     """The proxy and the rules it applies; the rules are classmethods the host shares."""
 
-    def __init__(self, listen: Tuple[str, int], upstream: Tuple[str, int], state_dir: str) -> None:
-        """
-        Args:
-            listen: Address and port to serve on (the model server's public port).
-            upstream: The engine's loopback address and internal port.
-            state_dir: The directory holding `run.json` and `pause.json`.
+    def __init__(self, listen: tuple[str, int], upstream: tuple[str, int], state_dir: str) -> None:
+        """Args:
+        listen: Address and port to serve on (the model server's public port).
+        upstream: The engine's loopback address and internal port.
+        state_dir: The directory holding `run.json` and `pause.json`.
         """
         self.listen = listen
         self.upstream = upstream
         self.state_dir = state_dir
-        self.server: Optional[asyncio.AbstractServer] = None
+        self.server: asyncio.AbstractServer | None = None
         self.adapters = GateAdapters(state_dir, upstream)
 
     # -- the rules -----------------------------------------------------------------------------
 
     @classmethod
-    def read_json(cls, path: str) -> Optional[Dict[str, Any]]:
-        """
-        Args:
+    def read_json(cls, path: str) -> dict[str, Any] | None:
+        """Args:
             path: A JSON file.
 
         Returns:
             Optional[Dict[str, Any]]: Its object, or None if it is missing or not an object.
         """
         try:
-            with open(path, "r", encoding="utf-8") as handle:
+            with Path(path).open("r", encoding="utf-8") as handle:
                 record = json.load(handle)
         except (OSError, ValueError):
             return None
         return record if isinstance(record, dict) else None
 
     @classmethod
-    def describe_eta(cls, seconds: Any) -> Optional[str]:
-        """
-        Args:
+    def describe_eta(cls, seconds: Any) -> str | None:
+        """Args:
             seconds: Seconds left, or None when not known yet.
 
         Returns:
@@ -140,9 +159,8 @@ class ModelGateService:
         return f"about {int(round(minutes / 60))} h left"
 
     @classmethod
-    def message(cls, run: Dict[str, Any]) -> str:
-        """
-        The refusal's text.
+    def message(cls, run: dict[str, Any]) -> str:
+        """The refusal's text.
 
         Args:
             run: The run's record.
@@ -158,13 +176,14 @@ class ModelGateService:
         eta = cls.describe_eta(run.get("eta_s"))
         if eta:
             parts.append(eta)
-        return (f"The model is running a benchmark ({', '.join(parts)}). "
-                "Try later or run `ling-admin night pause`.")
+        return (
+            f"The model is running a benchmark ({', '.join(parts)}). "
+            "Try later or run `ling-admin night pause`."
+        )
 
     @classmethod
-    def state(cls, state_dir: str, now: Optional[float] = None) -> Dict[str, Any]:
-        """
-        What the gate does right now, from its two files.
+    def state(cls, state_dir: str, now: float | None = None) -> dict[str, Any]:
+        """What the gate does right now, from its two files.
 
         Args:
             state_dir: The directory holding `run.json` and `pause.json`.
@@ -176,7 +195,13 @@ class ModelGateService:
             `paused_until` while a pause is in force; `stale` when a run's record was ignored.
         """
         now = time.time() if now is None else now
-        result: Dict[str, Any] = {"gate": "mightling", "state": "open"}
+        # `loop_guard`: this gate applies `ling`'s length cap and sampling arm (model_gate_guard.py);
+        # a SWE-bench arm that needs them refuses a gate without it.
+        result: dict[str, Any] = {
+            "gate": "mightling",
+            "state": "open",
+            "loop_guard": gate_guard.VERSION,
+        }
         pause = cls.read_json(os.path.join(state_dir, PAUSE_FILE)) or {}
         until = pause.get("until")
         if isinstance(until, (int, float)) and until > now:
@@ -186,20 +211,28 @@ class ModelGateService:
             return result
         heartbeat = run.get("heartbeat")
         networks = run.get("networks")
-        if not isinstance(heartbeat, (int, float)) or now - heartbeat > STALE_S \
-                or not isinstance(networks, list) or not networks:
+        if (
+            not isinstance(heartbeat, (int, float))
+            or now - heartbeat > STALE_S
+            or not isinstance(networks, list)
+            or not networks
+        ):
             result["stale"] = run.get("run")
             return result
-        result.update({key: run.get(key) for key in ("run", "id", "label", "done", "total", "eta_s", "started")})
+        result.update(
+            {
+                key: run.get(key)
+                for key in ("run", "id", "label", "done", "total", "eta_s", "started")
+            }
+        )
         result["networks"] = [str(network) for network in networks]
         result["message"] = cls.message(run)
         result["state"] = "paused" if "paused_until" in result else "closed"
         return result
 
     @classmethod
-    def from_networks(cls, peer: str, networks: List[str]) -> bool:
-        """
-        Args:
+    def from_networks(cls, peer: str, networks: list[str]) -> bool:
+        """Args:
             peer: The client's address.
             networks: The run's subnets.
 
@@ -221,9 +254,8 @@ class ModelGateService:
         return False
 
     @classmethod
-    def allows(cls, state: Dict[str, Any], peer: str, method: str, path: str) -> bool:
-        """
-        Whether a request passes.
+    def allows(cls, state: dict[str, Any], peer: str, method: str, path: str) -> bool:
+        """Whether a request passes.
 
         Args:
             state: `state()`'s answer.
@@ -237,28 +269,34 @@ class ModelGateService:
         """
         if state.get("state") != "closed":
             return True
-        if method in ("GET", "HEAD") and (path in READ_ONLY_PATHS or path.startswith("/v1/models/")):
+        if method in ("GET", "HEAD") and (
+            path in READ_ONLY_PATHS or path.startswith("/v1/models/")
+        ):
             return True
         return cls.from_networks(peer, state.get("networks") or [])
 
     @classmethod
-    def refusal(cls, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Args:
+    def refusal(cls, state: dict[str, Any]) -> dict[str, Any]:
+        """Args:
             state: `state()`'s answer while closed.
 
         Returns:
             Dict[str, Any]: The body, in the API's own error shape.
         """
-        return {"error": {"message": state.get("message") or cls.message({}), "type": "service_unavailable",
-                          "code": REFUSAL_CODE, "param": None}}
+        return {
+            "error": {
+                "message": state.get("message") or cls.message({}),
+                "type": "service_unavailable",
+                "code": REFUSAL_CODE,
+                "param": None,
+            }
+        }
 
     # -- HTTP ----------------------------------------------------------------------------------
 
     @classmethod
-    def parse_head(cls, head: bytes) -> Optional[Tuple[str, str, List[Tuple[bytes, bytes]]]]:
-        """
-        Args:
+    def parse_head(cls, head: bytes) -> tuple[str, str, list[tuple[bytes, bytes]]] | None:
+        """Args:
             head: The request line and headers, ending with an empty line.
 
         Returns:
@@ -298,11 +336,17 @@ class ModelGateService:
         Returns:
             bytes: The head to send to the engine.
         """
-        dropped = DROPPED_REQUEST_HEADERS + (FRAMING_HEADERS if length is not None else ()) \
+        dropped = (
+            DROPPED_REQUEST_HEADERS
+            + (FRAMING_HEADERS if length is not None else ())
             + ((AUTHORIZATION,) if key else ())
+        )
         lines = head.split(b"\r\n")
-        kept = [lines[0]] + [line for line in lines[1:] if line and
-                             line.partition(b":")[0].strip().lower() not in dropped]
+        kept = [lines[0]] + [
+            line
+            for line in lines[1:]
+            if line and line.partition(b":")[0].strip().lower() not in dropped
+        ]
         if length is not None:
             kept.append(f"Content-Length: {length}".encode("latin-1"))
         if key:
@@ -310,9 +354,8 @@ class ModelGateService:
         return b"\r\n".join(kept + [b"Connection: close", b"", b""])
 
     @classmethod
-    def framing(cls, headers: List[Tuple[bytes, bytes]]) -> Tuple[str, int]:
-        """
-        Args:
+    def framing(cls, headers: list[tuple[bytes, bytes]]) -> tuple[str, int]:
+        """Args:
             headers: The request's headers.
 
         Returns:
@@ -328,10 +371,14 @@ class ModelGateService:
         return ("length", length) if length > 0 else ("none", 0)
 
     @classmethod
-    async def copy_body(cls, reader: asyncio.StreamReader, framing: Tuple[str, int],
-                        sink: Optional[asyncio.StreamWriter], limit: Optional[int] = None) -> None:
-        """
-        Moves one request body from the client to the engine (or nowhere, to discard it).
+    async def copy_body(
+        cls,
+        reader: asyncio.StreamReader,
+        framing: tuple[str, int],
+        sink: asyncio.StreamWriter | None,
+        limit: int | None = None,
+    ) -> None:
+        """Moves one request body from the client to the engine (or nowhere, to discard it).
 
         Args:
             reader: The client.
@@ -370,10 +417,16 @@ class ModelGateService:
                 await send(await reader.readexactly(size + 2))
 
     @classmethod
-    async def respond(cls, writer: asyncio.StreamWriter, status: int, reason: str, body: Dict[str, Any],
-                      extra: Optional[List[Tuple[str, str]]] = None, head_only: bool = False) -> None:
-        """
-        Writes a JSON answer that closes the connection.
+    async def respond(
+        cls,
+        writer: asyncio.StreamWriter,
+        status: int,
+        reason: str,
+        body: dict[str, Any],
+        extra: list[tuple[str, str]] | None = None,
+        head_only: bool = False,
+    ) -> None:
+        """Writes a JSON answer that closes the connection.
 
         Args:
             writer: The client.
@@ -384,32 +437,46 @@ class ModelGateService:
             head_only: For a HEAD request.
         """
         data = json.dumps(body).encode("utf-8")
-        lines = [f"HTTP/1.1 {status} {reason}", "Content-Type: application/json",
-                 f"Content-Length: {len(data)}", "Connection: close"]
+        lines = [
+            f"HTTP/1.1 {status} {reason}",
+            "Content-Type: application/json",
+            f"Content-Length: {len(data)}",
+            "Connection: close",
+        ]
         lines += [f"{name}: {value}" for name, value in (extra or [])]
-        writer.write(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + (b"" if head_only else data))
+        writer.write(
+            ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + (b"" if head_only else data)
+        )
         await writer.drain()
 
     @classmethod
-    async def pipe(cls, source: asyncio.StreamReader, sink: asyncio.StreamWriter,
-                   replacement: tuple[bytes, bytes] | None = None) -> None:
+    async def pipe(
+        cls,
+        source: asyncio.StreamReader,
+        sink: asyncio.StreamWriter,
+        replacement: tuple[bytes, bytes] | None = None,
+    ) -> None:
         """Copies bytes as they arrive until the source ends, replacing one id with another of its length."""
         carry = b""
         while True:
             data = await source.read(BUFFER)
             if replacement is not None:
-                data, carry = GateAdapters.replace_stream(data, carry, *replacement) if data \
-                    else (carry, b"")
+                data, carry = (
+                    GateAdapters.replace_stream(data, carry, *replacement) if data else (carry, b"")
+                )
             if not data:
                 return
             sink.write(data)
             await sink.drain()
 
     @classmethod
-    async def pipe_response(cls, source: asyncio.StreamReader, sink: asyncio.StreamWriter,
-                            replacement: tuple[bytes, bytes] | None = None) -> None:
-        """
-        Copies the engine's answer: its head with `Connection: close` (so the client never pools
+    async def pipe_response(
+        cls,
+        source: asyncio.StreamReader,
+        sink: asyncio.StreamWriter,
+        replacement: tuple[bytes, bytes] | None = None,
+    ) -> None:
+        """Copies the engine's answer: its head with `Connection: close` (so the client never pools
         a connection the gate let through, whatever the engine says), then the body as it
         arrives. Interim `1xx` heads (`100 Continue`) pass as they are.
         """
@@ -428,8 +495,7 @@ class ModelGateService:
 
     @classmethod
     async def watch_client(cls, reader: asyncio.StreamReader) -> None:
-        """
-        Returns when the client goes away after its request; anything it sends meanwhile (a
+        """Returns when the client goes away after its request; anything it sends meanwhile (a
         pipelined second request) is never forwarded.
         """
         while await reader.read(BUFFER):
@@ -437,8 +503,8 @@ class ModelGateService:
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Serves one connection: one request, decided, then refused or streamed through."""
-        upstream_writer: Optional[asyncio.StreamWriter] = None
-        tasks: List[asyncio.Task] = []
+        upstream_writer: asyncio.StreamWriter | None = None
+        tasks: list[asyncio.Task] = []
         try:
             peer = writer.get_extra_info("peername")
             peer_address = str(peer[0]) if peer else ""
@@ -448,9 +514,19 @@ class ModelGateService:
                 return
             request = self.parse_head(head)
             if request is None:
-                await self.respond(writer, 400, "Bad Request", {"error": {
-                    "message": "Not an HTTP/1.x request.", "type": "invalid_request_error",
-                    "code": None, "param": None}})
+                await self.respond(
+                    writer,
+                    400,
+                    "Bad Request",
+                    {
+                        "error": {
+                            "message": "Not an HTTP/1.x request.",
+                            "type": "invalid_request_error",
+                            "code": None,
+                            "param": None,
+                        }
+                    },
+                )
                 return
             method, path, headers = request
             state = self.state(self.state_dir)
@@ -463,25 +539,42 @@ class ModelGateService:
                 self.log(f"refused {method} {path} from {peer_address} ({state.get('run')})")
                 if not expects_continue:
                     try:
-                        await asyncio.wait_for(self.copy_body(reader, framing, None, DRAIN_LIMIT), DRAIN_TIMEOUT_S)
-                    except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError,
-                            ValueError, ConnectionError):
+                        await asyncio.wait_for(
+                            self.copy_body(reader, framing, None, DRAIN_LIMIT), DRAIN_TIMEOUT_S
+                        )
+                    except (TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError, ConnectionError):
                         pass
-                await self.respond(writer, 503, "Service Unavailable", self.refusal(state),
-                                   [("Retry-After", RETRY_AFTER), ("X-Mightling-Gate", "closed")],
-                                   head_only=method == "HEAD")
+                await self.respond(
+                    writer,
+                    503,
+                    "Service Unavailable",
+                    self.refusal(state),
+                    [("Retry-After", RETRY_AFTER), ("X-Mightling-Gate", "closed")],
+                    head_only=method == "HEAD",
+                )
                 return
             forward = await self.adapter_request(reader, writer, (method, path, head), framing)
             if forward is None:
                 return
             try:
                 upstream_reader, upstream_writer = await asyncio.wait_for(
-                    asyncio.open_connection(*self.upstream), UPSTREAM_CONNECT_TIMEOUT_S)
-            except (OSError, asyncio.TimeoutError):
-                await self.respond(writer, 502, "Bad Gateway", {"error": {
-                    "message": "The model server is not answering behind its gate; it may still be loading.",
-                    "type": "service_unavailable", "code": "engine_unavailable", "param": None}},
-                                   head_only=method == "HEAD")
+                    asyncio.open_connection(*self.upstream), UPSTREAM_CONNECT_TIMEOUT_S
+                )
+            except (TimeoutError, OSError):
+                await self.respond(
+                    writer,
+                    502,
+                    "Bad Gateway",
+                    {
+                        "error": {
+                            "message": "The model server is not answering behind its gate; it may still be loading.",
+                            "type": "service_unavailable",
+                            "code": "engine_unavailable",
+                            "param": None,
+                        }
+                    },
+                    head_only=method == "HEAD",
+                )
                 return
             upstream_writer.write(forward[0] + (forward[1] or b""))
             await upstream_writer.drain()
@@ -491,12 +584,20 @@ class ModelGateService:
                     await self.copy_body(reader, framing, upstream_writer)
                 await self.watch_client(reader)
 
-            tasks = [asyncio.ensure_future(client_side()),
-                     asyncio.ensure_future(self.pipe_response(upstream_reader, writer, forward[2]))]
+            tasks = [
+                asyncio.ensure_future(client_side()),
+                asyncio.ensure_future(self.pipe_response(upstream_reader, writer, forward[2])),
+            ]
             # The answer is over when the engine closes (it was asked to) or the client leaves,
             # which also tells the engine to stop generating.
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        except (ConnectionError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError, OSError):
+        except (
+            ConnectionError,
+            asyncio.IncompleteReadError,
+            asyncio.LimitOverrunError,
+            ValueError,
+            OSError,
+        ):
             pass
         finally:
             for task in tasks:
@@ -514,9 +615,13 @@ class ModelGateService:
                 except (OSError, RuntimeError):
                     pass
 
-    async def adapter_request(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                              request: tuple[str, str, bytes], framing: tuple[str, int]
-                              ) -> tuple[bytes, bytes | None, tuple[bytes, bytes] | None] | None:
+    async def adapter_request(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        request: tuple[str, str, bytes],
+        framing: tuple[str, int],
+    ) -> tuple[bytes, bytes | None, tuple[bytes, bytes] | None] | None:
         """Applies the adapter rules (`model_gate_adapters.py`) to a request the gate lets through.
 
         Args:
@@ -533,25 +638,52 @@ class ModelGateService:
         method, path, head = request
         if path in gate_adapters.REFUSED_PATHS:
             self.log(f"refused {method} {path}: only the gate loads adapters")
-            await self.respond(writer, FORBIDDEN, "Forbidden", GateAdapters.refusal(
-                FORBIDDEN, "adapter_loading_refused", "Adapters are loaded by the node's model gate only.")[1])
+            await self.respond(
+                writer,
+                FORBIDDEN,
+                "Forbidden",
+                GateAdapters.refusal(
+                    FORBIDDEN,
+                    "adapter_loading_refused",
+                    "Adapters are loaded by the node's model gate only.",
+                )[1],
+            )
             return None
         listing = self.adapters.listing()
-        if listing is None:
+        # `/v1/responses` bodies are read for the loop guard (`model_gate_guard.py`) even without
+        # adapters; every other request without adapters streams through as before.
+        guarded = GateGuard.applies(method, path)
+        if listing is None and not guarded:
             return self.rewrite_head(head), None, None
-        key = self.adapters.key()
-        if method in READ_METHODS and path == gate_adapters.MODELS_PATH:
+        key = self.adapters.key() if listing is not None else None
+        if listing is not None and method in READ_METHODS and path == gate_adapters.MODELS_PATH:
             status, body = await self.adapters.engine_call("GET", gate_adapters.MODELS_PATH, None)
             reason = "OK" if status == gate_adapters.HTTP_OK else "Bad Gateway"
-            await self.respond(writer, status or BAD_GATEWAY, reason, GateAdapters.models(body, listing),
-                               head_only=method == READ_METHODS[1])
+            await self.respond(
+                writer,
+                status or BAD_GATEWAY,
+                reason,
+                GateAdapters.models(body, listing),
+                head_only=method == READ_METHODS[1],
+            )
             return None
         if method != POST or path not in gate_adapters.GENERATION_PATHS:
             return self.rewrite_head(head, key), None, None
         request_body = await GateAdapters.read_body(reader, framing, BODY_LIMIT)
+        if request_body is not None and guarded:
+            request_body, note = GateGuard.rewrite(request_body)
+            if note:
+                self.log(note)
         if request_body is None:
-            refusal, sent, replacement = GateAdapters.refusal(
-                TOO_LARGE, "request_too_large", "The request is larger than the gate reads."), b"", None
+            refusal, sent, replacement = (
+                GateAdapters.refusal(
+                    TOO_LARGE, "request_too_large", "The request is larger than the gate reads."
+                ),
+                b"",
+                None,
+            )
+        elif listing is None:
+            refusal, sent, replacement = None, request_body, None
         else:
             refusal, sent, replacement = await self.adapters.rewrite(request_body, listing)
         if refusal is not None:
@@ -562,35 +694,39 @@ class ModelGateService:
     @classmethod
     def log(cls, line: str) -> None:
         """One line to the container's log."""
-        print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} model gate: {line}", file=sys.stderr, flush=True)
+        print(
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} model gate: {line}", file=sys.stderr, flush=True
+        )
 
     async def start(self) -> int:
-        """
-        Starts serving.
+        """Starts serving.
 
         Returns:
             int: The port served on (useful when `listen` asked for port 0).
         """
-        self.server = await asyncio.start_server(self.handle, self.listen[0], self.listen[1],
-                                                 limit=HEAD_LIMIT, reuse_address=True)
+        self.server = await asyncio.start_server(
+            self.handle, self.listen[0], self.listen[1], limit=HEAD_LIMIT, reuse_address=True
+        )
         return int(self.server.sockets[0].getsockname()[1])
 
     async def serve(self) -> None:
         """Serves until cancelled."""
         port = await self.start()
         # Not "ready" or "listening on": the model loading monitor reads those words as the engine's.
-        self.log(f"on {self.listen[0]}:{port} in front of {self.upstream[0]}:{self.upstream[1]}, "
-                 f"state in {self.state_dir}")
+        self.log(
+            f"on {self.listen[0]}:{port} in front of {self.upstream[0]}:{self.upstream[1]}, "
+            f"state in {self.state_dir}"
+        )
         async with self.server:
             await self.server.serve_forever()
 
 
-def _address(text: str) -> Tuple[str, int]:
+def _address(text: str) -> tuple[str, int]:
     host, _, port = text.rpartition(":")
     return host.strip("[]") or "0.0.0.0", int(port)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Runs the gate: `--listen 0.0.0.0:8000 --upstream 127.0.0.1:18000 --state /mightling-gate`."""
     parser = argparse.ArgumentParser(description="Mightling's model gate")
     parser.add_argument("--listen", required=True)

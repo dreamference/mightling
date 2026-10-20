@@ -14,6 +14,8 @@ The launcher (`ling-rs/src/lib.rs`) is what the Python runner used to do, and `C
 - edits `config.toml` with `toml_edit` (so top-level keys can never be reparented into a table; `check_for_update_on_startup = false` because the update prompt would offer to replace Mightling with upstream Codex);
 - prepends `--oss --local-provider openai-custom --model <id>` unless the user gave their own.
 
+Every surface sends reasoning effort `none` (the catalog's one level), so the model never thinks, and no sampling field: SGLang applies the checkpoint's `generation_config.json`. The loop guard ([loop-guard.md](loop-guard.md)) adds a per-response cap and a stream detector to every surface but `exec`, through Codex's extension API, installed from `cave::install`.
+
 Two settings guard the connection to the local server:
 
 - `stream_idle_timeout_ms = 900000` in the provider entry, only when absent. Upstream's 300 s idle timer is the only timeout before the first token, and it covers the server's queue as well as the prefill: one full KV pool (~157K tokens) is about 3 minutes, but three SWE-bench sessions queued behind each other can take 9 (`specs/DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md` §1.10).
