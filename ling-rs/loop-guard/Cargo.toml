@@ -1,0 +1,19 @@
+# The loop guard's detector (docs/dev/loop-guard.md): three checks on streamed model text that
+# tell a degenerate repetition loop from normal prose, code and tables. Its own crate, with flate2
+# as its only dependency, so its tests and the corpus check run without the rest of the launcher.
+[package]
+name = "ling-loop-guard"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_loop_guard"
+path = "src/lib.rs"
+
+[dependencies]
+flate2 = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -123,6 +123,8 @@ Outside the package:
 
 **The launcher** (`ling-rs/src/lib.rs`) resolves the model server, waits for it, reads the model id and `max_model_len` from `/v1/models`, writes `model_catalog.json` and `config.toml`, and prepends `--oss --local-provider openai-custom --model <id>`. `CODEX_HOME` is `~/.mightling`, never `~/.codex`, so the vendor's sign-in is never shared; patches 0013, 0015 and 0016 close the channels to the vendor. Details: [docs/dev/launcher.md](docs/dev/launcher.md). System prompts are chosen by name (`default`, `high-swe`, custom): [docs/dev/prompt.md](docs/dev/prompt.md).
 
+**The loop guard** stops a model that repeats itself: a per-response cap (`max_output_tokens`, named by the launcher in `client_metadata` and set by the model gate) and a detector on the streamed text, both through Codex's extension API (no patch); a stop cuts the response, nudges once and then ends the turn. `ling exec`, so SWE-bench and Night Shift, is left alone unless an arm (`--loop-guard`, `--output-budget`, `--sampling nonthinking`) asks. Details: [docs/dev/loop-guard.md](docs/dev/loop-guard.md).
+
 **The egress audit**, `ling-admin audit egress`, runs a real `ling exec` under strace and passes only if every connection is an allowlisted loopback port and no DNS query left. Re-run it after any Codex bump; `codex build` runs it. Details: [docs/dev/egress-audit.md](docs/dev/egress-audit.md).
 
 **`/airgapped`** has two levels, `off` and `on`; `on` gives every sandboxed command an empty network namespace, enforced in Codex's sandbox helper (patch `0019`), and is never allowed together with Full Access. Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
@@ -177,6 +179,7 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/codex-build.md](docs/dev/codex-build.md): building `ling`, the patches and their size cap, V8, the submodules
 - [docs/dev/launcher.md](docs/dev/launcher.md): the launcher, `~/.mightling`, the vendor channels closed
 - [docs/dev/prompt.md](docs/dev/prompt.md): named system prompts
+- [docs/dev/loop-guard.md](docs/dev/loop-guard.md): the loop guard, what each surface sends the model server, the detector's thresholds
 - [docs/dev/egress-audit.md](docs/dev/egress-audit.md): `ling-admin audit egress`
 - [docs/dev/airgapped.md](docs/dev/airgapped.md): `/airgapped`
 - [docs/dev/skills.md](docs/dev/skills.md): skills from other agents
