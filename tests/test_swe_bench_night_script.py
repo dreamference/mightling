@@ -15,12 +15,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "scripts", "swe_bench_night1.sh")
 
 
-def night(tmp_path, arms, **extra):
+def night(tmp_path, arms, ling=None, **extra):
     """Runs the night's `run` step with `arms`; returns (exit status, recorded admin calls, D)."""
     calls = tmp_path / "calls.txt"
     fake = tmp_path / "python"
-    # The script calls `"$PY" -c <code> <ling-admin arguments>`: drop the two, record the rest.
-    fake.write_text(f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n')
+    # The script calls `"$PY" -c <code> <ling-admin arguments>`: drop the two, record the rest; asked
+    # for the installed ling, it names `ling`.
+    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}"; exit 0;; esac\n'
+                    f'shift 2\necho "$*" >> "{calls}"\n')
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
     task_list.write_text("# two tasks\nacme__widget-1\nacme__widget-2\n")
@@ -183,25 +185,28 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch
 
 
 def start(tmp_path, arms, smoke_fails=None, task_timeout="", tasks=("acme__widget-1", "acme__widget-2"),
-          free_gb=None, **extra):
+          free_gb=None, ling_bytes=None, **extra):
     """
     Runs `start` with stand-ins for everything it reaches: no unit is active (systemctl), git
     succeeds and changes nothing, systemd-run records its arguments, and the venv's Python names a
     fake `ling` and a fake install folder, records every `ling-admin` call and every smoke verdict,
     and fails the verdict of the arm named in `smoke_fails`. With `free_gb`, `df` says that much is
-    free. Returns (result, admin calls, verdicts, systemd-run calls, D).
+    free. git answers `rev-parse HEAD` with REF and records its calls in git.txt. Returns (result, admin
+    calls, verdicts, systemd-run calls, D).
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     ling = tmp_path / "ling"
-    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL DREAMFERENCE_MIGHTLING_APPLY_PATCH DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ...")
+    ling.write_bytes(ling_bytes or b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL DREAMFERENCE_MIGHTLING_APPLY_PATCH DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ...")
     install = tmp_path / "install"
     (install / "bin").mkdir(parents=True)
     for tool in ("ling-code", "codebase-memory-mcp"):
         (install / "bin" / tool).write_text("#!/bin/bash\n")
         (install / "bin" / tool).chmod(0o755)
     units = tmp_path / "systemd-run.txt"
-    tools = [("systemctl", "exit 1"), ("git", "exit 0"), ("systemd-run", f'echo "$*" >> "{units}"')]
+    git_log = tmp_path / "git.txt"
+    git_body = f'echo "$*" >> "{git_log}"\ncase "$*" in *rev-parse*HEAD*) echo "$REF";; esac\nexit 0'
+    tools = [("systemctl", "exit 1"), ("git", git_body), ("systemd-run", f'echo "$*" >> "{units}"')]
     if free_gb is not None:
         tools.append(("df", f'echo "Avail"; echo " {free_gb}G"'))
     for name, body in tools:
@@ -408,3 +413,57 @@ def test_start_passes_the_shard_to_the_unit_but_never_to_a_smoke(tmp_path):
 def test_start_refuses_a_malformed_shard_or_chunk_before_anything_runs(tmp_path, extra):
     result, recorded, _, units, folder = start(tmp_path, "default tests-v2", free_gb=500, **extra)
     assert result.returncode == 2 and runs(recorded) == [] and units == [] and not folder.exists()
+
+
+PINNED_REF = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_a_pinned_series_builds_ling_once_records_it_and_never_rebuilds(tmp_path):
+    import hashlib
+    first = tmp_path / "first"
+    first.mkdir()
+    result, recorded, _, units, _ = start(first, "default tests-v2", free_gb=500, REF=PINNED_REF, PINS=str(tmp_path / "pins"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    built = hashlib.sha256((first / "ling").read_bytes()).hexdigest()
+    record = tmp_path / "pins" / f"ling-{PINNED_REF}.sha256"
+    assert record.read_text().split()[0] == built and PINNED_REF in record.read_text()
+    assert recorded.count("codex build") == 1 and f"LING_PIN_SHA256={built}" in units[0]
+    # The pinned commit is here (git cat-file succeeds), so nothing is fetched.
+    assert not any(line.startswith("-C") and " fetch " in f" {line} " for line in (first / "git.txt").read_text().splitlines())
+    # The next night of the series: the same build, found, not rebuilt.
+    second = tmp_path / "second"
+    second.mkdir()
+    result, recorded, _, units, _ = start(second, "default tests-v2", free_gb=500, REF=PINNED_REF, PINS=str(tmp_path / "pins"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "codex build" not in recorded and f"LING_PIN_SHA256={built}" in units[0]
+    assert "no fetch past it, no rebuild" in result.stdout
+
+
+def test_a_pinned_series_refuses_a_ling_that_is_not_its_build(tmp_path):
+    pins = tmp_path / "pins"
+    pins.mkdir()
+    (pins / f"ling-{PINNED_REF}.sha256").write_text(f"{'0' * 64}  /somewhere/ling  {PINNED_REF}  2026-10-20\n")
+    result, recorded, _, units, folder = start(tmp_path, "default tests-v2", free_gb=500, REF=PINNED_REF, PINS=str(pins))
+    assert result.returncode == 1 and "is not the build pinned for" in result.stdout
+    assert "codex build" not in recorded and runs(recorded) == [] and units == [] and not folder.exists()
+
+
+def test_an_unpinned_ref_neither_builds_nor_records(tmp_path):
+    result, recorded, _, units, _ = start(tmp_path, "default tests-v2", free_gb=500, PINS=str(tmp_path / "pins"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "codex build" not in recorded and not (tmp_path / "pins").exists()
+    assert "--setenv=LING_PIN_SHA256= " in units[0]
+    assert any(" fetch " in f" {line} " for line in (tmp_path / "git.txt").read_text().splitlines())
+
+
+def test_each_round_of_a_pinned_night_checks_the_build(tmp_path):
+    import hashlib
+    ling = tmp_path / "ling"
+    ling.write_bytes(b"the pinned build")
+    pin = hashlib.sha256(ling.read_bytes()).hexdigest()
+    status, recorded, folder = night(tmp_path, "default tests-v2", ling=ling, LING_PIN_SHA256=pin)
+    assert status == 0 and len(runs(recorded)) == 2 and (folder / "done").exists()
+    other = tmp_path / "other"
+    other.mkdir()
+    status, recorded, folder = night(other, "default tests-v2", ling=ling, LING_PIN_SHA256="f" * 64)
+    assert status == 1 and runs(recorded) == [] and "pinned ling check" in (folder / "failed").read_text()

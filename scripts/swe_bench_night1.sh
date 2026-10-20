@@ -80,8 +80,49 @@ CHOOSER_SEED=${CHOOSER_SEED:-20261013}
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
+# A series of nights pinned to one commit and one `ling` build (the owner's decision of 2026-10-20 for nights
+# 14-16, the three thirds of fresh-150k, whose runs `swe-bench merge` joins only when they measured the same
+# thing): REF is a full 40-character commit. The first `start` at that REF builds `ling` from the worktree
+# (`codex build`, with its egress audit) and records the build's sha256 in $PINS/ling-<REF>.sha256; every later
+# `start` at the same REF neither fetches (when the commit is here) nor rebuilds, and refuses an installed `ling`
+# that is not the recorded build. The unit checks the build again before each round (LING_PIN_SHA256).
+PINS=${PINS:-$(dirname "$D")/pins}
+LING_PIN_SHA256=${LING_PIN_SHA256:-}
 
 log() { echo "$(date -Is) $*"; }
+pinned() { [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; }
+installed_ling() { "$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())"; }
+
+# A pinned series' build (see REF above): the recorded build of REF, or, the first time, a build from the
+# worktree, recorded. Sets LING_PIN_SHA256. Never builds while a SWE-bench unit runs, since the build
+# replaces the `ling` a night would be running.
+pin_build() {
+    local record="$PINS/ling-$REF.sha256" ling have want busy
+    [ "$(git -C "$WT" rev-parse HEAD 2>/dev/null)" = "$REF" ] || { echo "❌ $WT is not at the pinned $REF."; return 1; }
+    ling=$(cd "$WT" && PYTHONPATH="$WT" installed_ling) || return 1
+    if [ -s "$record" ]; then
+        want=$(awk 'NR==1{print $1}' "$record")
+        have=$(sha256sum "$ling" 2>/dev/null | cut -d' ' -f1)
+        if [ "$have" != "$want" ]; then
+            echo "❌ $ling is not the build pinned for $REF (sha256 ${have:-none}; pinned ${want:0:12} in $record):"
+            echo "   it was rebuilt or replaced since, and this night's runs would not merge with the series'."
+            echo "   Restore that build, or remove $record to start a new series on purpose."
+            return 1
+        fi
+        echo "📌 Pinned to ${REF:0:12} and its recorded build of ling (${want:0:12}): no fetch past it, no rebuild."
+    else
+        busy=$(systemctl --user list-units --state=active --plain --no-legend 'ling-swe-*' 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+        [ -z "${busy// /}" ] || { echo "❌ Not building the pinned ling while $busy runs: it would replace that night's ling."; return 1; }
+        echo "📌 Pinned to ${REF:0:12} with no build recorded: building ling from $WT (codex build, with its egress audit)..."
+        git -C "$WT" submodule update --init codex > /dev/null 2>&1 || { echo "❌ Could not check out the codex submodule in $WT."; return 1; }
+        ( cd "$WT" && PYTHONPATH="$WT" admin codex build ) || { echo "❌ codex build at $REF failed; nothing recorded."; return 1; }
+        have=$(sha256sum "$ling" 2>/dev/null | cut -d' ' -f1)
+        [ -n "$have" ] || { echo "❌ No ling at $ling after the build."; return 1; }
+        mkdir -p "$PINS" && echo "$have  $ling  $REF  $(date -Is)" > "$record" || return 1
+        echo "📌 Built and recorded: $record (${have:0:12})."
+    fi
+    LING_PIN_SHA256=$have
+}
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
 # arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM function,
 # freeform or off: `--apply-patch FORM`, spec §22), `exec-tool-FORM` (FORM function or freeform:
@@ -182,13 +223,20 @@ start() {
     fi
     # The worktree is what the unit runs (this script included), so it is moved to origin/main
     # every start: a stale worktree would run last night's script with none of today's fixes.
-    git -C "$REPO" fetch origin || exit 1
+    # A pinned commit already here needs no fetch; anything else is fetched, as before.
+    if ! { pinned && git -C "$REPO" cat-file -e "$REF^{commit}" 2>/dev/null; }; then
+        git -C "$REPO" fetch origin || exit 1
+    fi
     if [ ! -d "$WT" ]; then
         git -C "$REPO" worktree add --detach "$WT" "$REF" || exit 1
     elif [ -z "$(git -C "$WT" status --porcelain)" ]; then
         git -C "$WT" checkout --quiet --detach "$REF" || exit 1
     else
         echo "❌ $WT has local changes; commit or discard them so the night runs $REF."; exit 1
+    fi
+    # Before the checks below that read the installed ling: a pinned series builds it once, here.
+    if pinned; then
+        pin_build || exit 1
     fi
     if ! grep -q -- '"tests-v2"' "$WT/dreamference/swe_bench/swe_bench_instance_run.py"; then
         echo "❌ $WT does not have the tests-v2 task rule: update it to origin/main."; exit 1
@@ -304,7 +352,7 @@ start() {
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
-        --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" \
+        --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" --setenv=LING_PIN_SHA256="$LING_PIN_SHA256" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
@@ -321,6 +369,15 @@ fail() {
     exit "$rc"
 }
 
+# A pinned series: the installed ling is still the recorded build (another build between two rounds would
+# leave the night's rounds measuring two binaries).
+check_pin() {
+    [ -n "$LING_PIN_SHA256" ] || return 0
+    local have
+    have=$(sha256sum "$(installed_ling)" 2>/dev/null | cut -d' ' -f1)
+    [ "$have" = "$LING_PIN_SHA256" ] || fail "pinned ling check (installed ${have:-none}, pinned ${LING_PIN_SHA256:0:12})" 1
+}
+
 # BEST_OF > 1: the one arm N times, then chooser v1 over the N runs and the report against run 1.
 best_of_run() {
     local arm name extra k round names=""
@@ -333,6 +390,7 @@ best_of_run() {
     [ "$REFINE" = 1 ] && extra="$extra --refine"
     for k in $(seq 1 "$BEST_OF"); do
         round="$PREFIX-$name-$k"
+        check_pin
         log "round $round (attempt $k of $BEST_OF)"
         admin swe-bench run --subset "$LIST" --name "$round" --code-index universal --mask off \
             --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) \
@@ -372,7 +430,7 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}, image chunk $IMAGE_CHUNK${SHARD:+, shard $SHARD}"
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}, image chunk $IMAGE_CHUNK${SHARD:+, shard $SHARD}${LING_PIN_SHA256:+, pinned ling ${LING_PIN_SHA256:0:12}}"
     if [ "$BEST_OF" -gt 1 ]; then
         best_of_run
         return
@@ -389,6 +447,7 @@ run() {
         name=$(arm_name "$arm")
         extra=$(arm_flags "$arm")
         [ "$REFINE" = 1 ] && extra="$extra --refine"
+        check_pin
         log "round $PREFIX-$name"
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \

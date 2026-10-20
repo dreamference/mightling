@@ -3529,6 +3529,15 @@ def test_the_shard_command_writes_the_lists_run_would_cover(bench, tmp_path, cap
     for index, path in enumerate(written, start=1):
         ids = [line for line in path.read_text().splitlines() if not line.startswith("#")]
         assert ids == SweBenchShards.pick(IDS, repos, index, 2)
+    # --balance-by spreads another list's tasks; a list sharing none with it is refused.
+    other = tmp_path / "other.txt"
+    other.write_text("acme__widget-1\nacme__widget-2\n")
+    assert SweBenchCommand.shard(source, 2, balance_by=[other]) == 0
+    halves = [[line for line in path.read_text().splitlines() if not line.startswith("#")] for path in written]
+    assert sorted(len({"acme__widget-1", "acme__widget-2"} & set(half)) for half in halves) == [1, 1]
+    assert "NOT the tasks of" in written[0].read_text()
+    other.write_text("sympy__sympy-1\n")
+    assert SweBenchCommand.shard(source, 2, balance_by=[other]) == 1
     source.write_text("not__a-task\n")
     assert SweBenchCommand.shard(source, 2) == 1
     assert SweBenchCommand.shard(source, 0) == 1
@@ -3544,8 +3553,8 @@ def test_run_eval_shard_and_merge_take_their_options(monkeypatch):
     parser = argparse.ArgumentParser()
     SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
     for words in (["run", "--shard", "2/3", "--image-chunk", "10", "--eval", "--remove-images"],
-                  ["eval", "r", "--remove-images", "--image-chunk", "5"], ["shard", "l.txt", "--shards", "3"],
+                  ["eval", "r", "--remove-images", "--image-chunk", "5"], ["shard", "l.txt", "--shards", "3", "--balance-by", "f.txt"],
                   ["merge", "m", "a", "b", "c"]):
         assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", *words])) == 0
-    assert seen == [("run", "2/3", 10), ("eval", ("r", None, True, 5)), ("shard", (Path("l.txt"), 3, None, "verified")),
+    assert seen == [("run", "2/3", 10), ("eval", ("r", None, True, 5)), ("shard", (Path("l.txt"), 3, None, "verified", [Path("f.txt")])),
                     ("merge", ("m", ["a", "b", "c"]))]

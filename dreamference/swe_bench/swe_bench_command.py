@@ -160,6 +160,9 @@ class SweBenchCommand:
         shard.add_argument("--out-dir", default=None,
                            help="Where to write <list>-<I>of<K>.txt (default: beside the list)")
         shard.add_argument("--dataset", default="verified", help="The dataset the ids are from (default verified)")
+        shard.add_argument("--balance-by", action="append", default=[], metavar="OTHER",
+                           help="Also spread the tasks of this other list evenly over the shards (repeatable), e.g. "
+                                "the fresh ones; the shards are then not those run --shard makes, and say so")
 
         merge = commands.add_parser("merge", help="Put the runs of one list's shards together as one run, which report reads like any other")
         merge.add_argument("name", help="The merged run's name")
@@ -205,7 +208,8 @@ class SweBenchCommand:
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images,
                                 args.image_chunk)
         if command == "shard":
-            return cls.shard(Path(args.list), args.shards, Path(args.out_dir) if args.out_dir else None, args.dataset)
+            return cls.shard(Path(args.list), args.shards, Path(args.out_dir) if args.out_dir else None, args.dataset,
+                             [Path(other) for other in args.balance_by])
         if command == "merge":
             return SweBenchShardMerge.merge(args.name, args.runs)
         if command == "report":
@@ -414,16 +418,19 @@ class SweBenchCommand:
         return 0
 
     @classmethod
-    def shard(cls, source: Path, count: int, out_dir: Optional[Path] = None, dataset: str = "verified") -> int:
+    def shard(cls, source: Path, count: int, out_dir: Optional[Path] = None, dataset: str = "verified",
+              balance_by: Optional[List[Path]] = None) -> int:
         """
         Writes a task list's shards as lists of their own (`SweBenchShards.write`): the same tasks
-        `run --subset <list> --shard I/K` covers on each machine.
+        `run --subset <list> --shard I/K` covers on each machine, unless `balance_by` names lists
+        whose tasks are spread evenly too.
 
         Args:
             source: The task list.
             count: How many shards.
             out_dir: Where to write them; None for the list's own folder.
             dataset: The dataset the ids are from, for their repositories.
+            balance_by: Other lists whose tasks each shard holds as evenly as the split can.
 
         Returns:
             int: 0 when the shards were written.
@@ -431,10 +438,20 @@ class SweBenchCommand:
         if SweBenchShards.parse(f"1/{count}") is None:
             print(f"❌ --shards {count}: from 1 to {swe_bench_shards.MAX_SHARDS}.")
             return 1
-        try:
-            ids = [line.strip() for line in source.read_text().splitlines() if line.strip() and not line.startswith("#")]
-        except OSError as error:
-            print(f"❌ {source}: {error}")
+        def read(path: Path) -> Optional[List[str]]:
+            try:
+                return [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.startswith("#")]
+            except OSError as error:
+                print(f"❌ {path}: {error}")
+                return None
+
+        ids = read(source)
+        others = {path.name: read(path) for path in balance_by or []}
+        if ids is None or any(other is None for other in others.values()):
+            return 1
+        empty = [name for name, other in others.items() if not set(other) & set(ids)]
+        if empty:
+            print(f"❌ --balance-by {', '.join(empty)}: no task of {source.name} is in it.")
             return 1
         rows = {row["instance_id"]: row for row in SweBenchHarness.rows(dataset)}
         unknown = sorted(set(ids) - set(rows))
@@ -442,7 +459,7 @@ class SweBenchCommand:
             print(f"❌ Not in {dataset}: {', '.join(unknown[:5]) or 'the dataset is not downloaded (swe-bench setup)'}.")
             return 1
         repos = {instance_id: str(rows[instance_id].get("repo", "")) for instance_id in ids}
-        for path in SweBenchShards.write(source, ids, repos, count, out_dir or source.parent):
+        for path in SweBenchShards.write(source, ids, repos, count, out_dir or source.parent, others or None):
             shard = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]
             print(f"✅ {path}: {len(shard)} tasks, {SweBenchShards.mix(shard, repos)}")
         return 0
