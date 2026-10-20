@@ -253,6 +253,11 @@ async fn approvals_are_coloured_buttons_and_closing_one_leaves_its_outcome_as_a_
     let sent = &stand.bodies("sendMessage")[0];
     assert_eq!(sent["reply_markup"]["inline_keyboard"][0][0], json!({ "text": "Approve once", "callback_data": "a:9a7f:0", "style": "success" }));
     assert_eq!(sent["reply_markup"]["inline_keyboard"][1][0], json!({ "text": "Decline", "callback_data": "a:9a7f:1", "style": "danger" }));
+    // A question's own options are not painted as approvals.
+    renderer.render(Outbound::Approval { chat: "telegram:111".into(), id: "c0".into(), text: "Which?".into(), options: vec!["PDF".into(), "HTML".into(), "Decline".into()] }).await;
+    let question = &stand.bodies("sendMessage")[1]["reply_markup"]["inline_keyboard"];
+    assert!(question[0][0].get("style").is_none() && question[1][0].get("style").is_none());
+    assert_eq!(question[2][0]["style"], "danger");
     renderer.render(Outbound::ApprovalClosed { chat: "telegram:111".into(), id: "9a7f".into(), outcome: "Approved.".into() }).await;
     let edit = &stand.bodies("editMessageText")[0];
     assert_eq!(edit["message_id"], 900);
