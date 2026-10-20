@@ -48,6 +48,84 @@ pub enum AgentEvent {
     Delta { thread: String, text: String },
     TurnCompleted { thread: String, error: Option<String> },
     Approval { id: Value, thread: String, kind: ApprovalKind, command: Option<String>, cwd: Option<String>, reason: Option<String> },
+    /// The owner's attachments for this thread's next turn, after [`Action::Upload`].
+    Uploaded { thread: String, uploads: Vec<Uploaded> },
+}
+
+/// One attachment after the driver handed it to `ling web` (or failed to).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Uploaded {
+    pub name: String,
+    pub image: bool,
+    /// Where `ling web` saved it in the thread's folder; None when it never got there.
+    pub path: Option<String>,
+    /// The text read off an image (`ling web`'s offline reader), if any.
+    pub text: Option<String>,
+    /// Whether the served model takes images, as `ling web` reported with the upload.
+    pub vision: bool,
+}
+
+/// What a message with attachments becomes (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Composed {
+    /// A turn: its text, and the images the model is shown.
+    Turn { text: String, images: Vec<String> },
+    /// Nothing the model could use: the bridge answers itself with this, and no turn starts. An
+    /// empty message never reaches the model.
+    Refused(String),
+}
+
+pub const UNREADABLE_IMAGE: &str = "I can't read this image; describe it or paste the text.";
+pub const NOT_RECEIVED: &str = "I couldn't receive that attachment; send it again, or describe it or paste the text.";
+
+/// Builds a turn from the owner's text and their uploaded attachments: an image goes to the model
+/// as an image when the model takes images, and its text as `[Screenshot text: …]` whenever any was
+/// read; another file is named, saved in the thread's folder. With nothing usable, the bridge
+/// answers itself instead ([`Composed::Refused`]).
+pub fn compose(text: &str, uploads: &[Uploaded]) -> Composed {
+    let mut notes: Vec<String> = Vec::new();
+    let mut images = Vec::new();
+    let mut files = Vec::new();
+    let (mut unreadable, mut missing) = (0, 0);
+    for upload in uploads {
+        let Some(path) = &upload.path else {
+            missing += 1;
+            continue;
+        };
+        if !upload.image {
+            files.push(std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| upload.name.clone()));
+            continue;
+        }
+        if upload.vision {
+            images.push(path.clone());
+        }
+        match upload.text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+            Some(read) => notes.push(format!("[Screenshot text: {read}]")),
+            None if !upload.vision => unreadable += 1,
+            None => {}
+        }
+    }
+    if !files.is_empty() {
+        notes.push(format!("[Attached and saved in this thread's folder: {}]", files.join(", ")));
+    }
+    let asked = text.trim();
+    if asked.is_empty() && notes.is_empty() && images.is_empty() {
+        return Composed::Refused(if unreadable > 0 || missing == 0 { UNREADABLE_IMAGE } else { NOT_RECEIVED }.to_string());
+    }
+    if unreadable > 0 {
+        notes.push("[An attached image could not be read, and this model does not take images.]".to_string());
+    }
+    if missing > 0 {
+        notes.push(format!("[{missing} attachment(s) could not be received.]"));
+    }
+    let mut turn = asked.to_string();
+    for note in notes {
+        if !turn.is_empty() {
+            turn.push_str("\n\n");
+        }
+        turn.push_str(&note);
+    }
+    Composed::Turn { text: turn, images }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,8 +148,10 @@ pub enum Action {
     Receipt(u64),
     StartThread,
     ResumeThread(String),
-    /// Upload the attachments into the thread's Ask folder, then start the turn.
-    StartTurn { thread: String, text: String, attachments: Vec<Attachment> },
+    /// Upload the attachments into the thread's Ask folder and report [`AgentEvent::Uploaded`].
+    Upload { thread: String, attachments: Vec<Attachment> },
+    /// Start a turn: the text, and each image the model is shown (`localImage`).
+    StartTurn { thread: String, text: String, images: Vec<String> },
     Interrupt { thread: String, turn: String },
     /// A JSON-RPC response to a server request: `{decision: accept|decline}`.
     AnswerApproval { id: Value, result: Value },
@@ -98,7 +178,18 @@ enum Phase {
     Idle,
     /// A thread is being started or resumed for this message.
     Opening { message: OwnerMessage, fresh: bool },
-    Running { thread: String, turn: Option<String>, started_ms: u64, last_typing_ms: u64, next_progress_ms: u64, answer: String, activity: Option<String>, stopping: bool },
+    Running {
+        thread: String,
+        turn: Option<String>,
+        started_ms: u64,
+        last_typing_ms: u64,
+        next_progress_ms: u64,
+        answer: String,
+        activity: Option<String>,
+        stopping: bool,
+        /// The owner's text while their attachments are uploaded; the turn starts after.
+        uploading: Option<String>,
+    },
 }
 
 /// Facts `/status` reports that the bridge does not track itself.
@@ -268,6 +359,12 @@ impl Bridge {
     }
 
     fn run(&mut self, thread: String, message: OwnerMessage, now: u64) -> Vec<Action> {
+        if message.text.trim().is_empty() && message.attachments.is_empty() {
+            // Never an empty turn: the model would answer something it was not asked.
+            self.phase = Phase::Idle;
+            return self.next(now);
+        }
+        let with_attachments = !message.attachments.is_empty();
         self.phase = Phase::Running {
             thread: thread.clone(),
             turn: None,
@@ -277,8 +374,13 @@ impl Bridge {
             answer: String::new(),
             activity: None,
             stopping: false,
+            uploading: with_attachments.then(|| message.text.clone()),
         };
-        vec![Action::Typing(true), Action::StartTurn { thread, text: message.text, attachments: message.attachments }]
+        if with_attachments {
+            vec![Action::Typing(true), Action::Upload { thread, attachments: message.attachments }]
+        } else {
+            vec![Action::Typing(true), Action::StartTurn { thread, text: message.text, images: Vec::new() }]
+        }
     }
 
     /// Takes the next queued question, if the bridge is free.
@@ -425,6 +527,27 @@ impl Bridge {
                         }
                     }
                     actions.extend(self.next(now));
+                }
+            }
+            AgentEvent::Uploaded { thread, uploads } => {
+                let waiting = match &mut self.phase {
+                    Phase::Running { thread: running, uploading, stopping, .. } if *running == thread => uploading.take().map(|text| (text, *stopping)),
+                    _ => None,
+                };
+                if let Some((text, stopping)) = waiting {
+                    match compose(&text, &uploads) {
+                        _ if stopping => {
+                            self.phase = Phase::Idle;
+                            actions.extend(self.next(now));
+                        }
+                        Composed::Turn { text, images } => actions.push(Action::StartTurn { thread, text, images }),
+                        Composed::Refused(reply) => {
+                            self.phase = Phase::Idle;
+                            actions.push(Action::Typing(false));
+                            actions.push(Action::Notice(reply));
+                            actions.extend(self.next(now));
+                        }
+                    }
                 }
             }
             AgentEvent::Approval { id, thread: _, kind, command, cwd, reason } => {
@@ -615,7 +738,7 @@ mod tests {
         assert_eq!(first, vec![Action::Receipt(7), Action::StartThread]);
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
         assert!(ready.contains(&Action::Save));
-        assert!(ready.contains(&Action::StartTurn { thread: "t1".to_string(), text: "What is **2+2**?".to_string(), attachments: vec![] }));
+        assert!(ready.contains(&Action::StartTurn { thread: "t1".to_string(), text: "What is **2+2**?".to_string(), images: vec![] }));
         assert_eq!(b.current.as_deref(), Some("t1"));
         assert_eq!(b.recent[0].title, "What is **2+2**?");
         b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 0);
@@ -840,7 +963,74 @@ mod tests {
         let actions = b.on_message(OwnerMessage { text: "/new".to_string(), attachments: vec![image.clone()], timestamp: 1 }, 0);
         assert_eq!(actions[1], Action::StartThread);
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
-        assert!(ready.iter().any(|a| matches!(a, Action::StartTurn { attachments, .. } if attachments == &vec![image.clone()])));
+        assert!(ready.iter().any(|a| matches!(a, Action::Upload { attachments, .. } if attachments == &vec![image.clone()])), "{ready:?}");
+        assert!(!ready.iter().any(|a| matches!(a, Action::StartTurn { .. })), "the turn waits for the upload");
+    }
+
+    fn shot(path: Option<&str>, text: Option<&str>, vision: bool) -> Uploaded {
+        Uploaded { name: "shot.jpg".to_string(), image: true, path: path.map(str::to_string), text: text.map(str::to_string), vision }
+    }
+
+    /// The morning of 2026-10-20: a screenshot alone in Note to Self reached the model as an empty
+    /// message, and the model answered about the thread's previous topic. Now an image with nothing
+    /// readable is answered by the bridge, and no turn starts.
+    #[test]
+    fn an_image_alone_that_cannot_be_read_never_becomes_an_empty_turn() {
+        let mut b = connected();
+        let image = Attachment { id: "x.jpg".to_string(), content_type: "image/jpeg".to_string(), filename: None, size: None };
+        b.on_message(OwnerMessage { text: String::new(), attachments: vec![image], timestamp: 1 }, 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        // No text read, a model without images: nothing to ask.
+        let done = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads: vec![shot(Some("/ask/q/shot.jpg"), None, false)] }, 0);
+        assert!(!done.iter().any(|a| matches!(a, Action::StartTurn { .. })), "{done:?}");
+        assert_eq!(notices(&done), vec![UNREADABLE_IMAGE]);
+        assert!(done.contains(&Action::Typing(false)));
+        assert!(!b.is_busy());
+        // The attachment never arrived (signal-cli had not downloaded it): said so, still no turn.
+        let image = Attachment { id: "y.jpg".to_string(), content_type: "image/jpeg".to_string(), filename: None, size: None };
+        b.on_message(OwnerMessage { text: String::new(), attachments: vec![image], timestamp: 2 }, 0);
+        let done = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads: vec![shot(None, None, true)] }, 0);
+        assert_eq!(notices(&done), vec![NOT_RECEIVED]);
+        assert!(!done.iter().any(|a| matches!(a, Action::StartTurn { .. })));
+    }
+
+    #[test]
+    fn a_screenshot_reaches_the_model_as_its_text_and_as_an_image_when_the_model_takes_images() {
+        let mut b = connected();
+        let image = Attachment { id: "x.jpg".to_string(), content_type: "image/jpeg".to_string(), filename: None, size: None };
+        b.on_message(OwnerMessage { text: String::new(), attachments: vec![image], timestamp: 1 }, 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        let uploads = vec![shot(Some("/ask/q/shot.jpg"), Some("Air purifier HEPA 13"), true)];
+        let done = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads }, 0);
+        assert_eq!(
+            done,
+            vec![Action::StartTurn { thread: "t1".to_string(), text: "[Screenshot text: Air purifier HEPA 13]".to_string(), images: vec!["/ask/q/shot.jpg".to_string()] }]
+        );
+        // Text-only model: the text alone; the question keeps its words first.
+        assert_eq!(
+            compose("compare it", &[shot(Some("/p.jpg"), Some("Model X"), false)]),
+            Composed::Turn { text: "compare it\n\n[Screenshot text: Model X]".to_string(), images: vec![] }
+        );
+        // An image the model takes but with no text on it: the image alone is a question.
+        assert_eq!(compose("", &[shot(Some("/p.jpg"), None, true)]), Composed::Turn { text: String::new(), images: vec!["/p.jpg".to_string()] });
+        // Words with an image nobody can read: the words go on, with a note.
+        let Composed::Turn { text, images } = compose("what is this?", &[shot(Some("/p.jpg"), None, false)]) else { panic!() };
+        assert!(text.starts_with("what is this?") && text.contains("could not be read") && images.is_empty(), "{text}");
+        // A file is saved and named.
+        let pdf = Uploaded { name: "r.pdf".to_string(), image: false, path: Some("/ask/q/r.pdf".to_string()), text: None, vision: true };
+        assert_eq!(compose("", &[pdf]), Composed::Turn { text: "[Attached and saved in this thread's folder: r.pdf]".to_string(), images: vec![] });
+    }
+
+    #[test]
+    fn stop_while_uploading_starts_no_turn() {
+        let mut b = connected();
+        let image = Attachment { id: "x.jpg".to_string(), content_type: "image/jpeg".to_string(), filename: None, size: None };
+        b.on_message(OwnerMessage { text: "look".to_string(), attachments: vec![image], timestamp: 1 }, 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        b.on_message(msg("/stop", 2), 0);
+        let done = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads: vec![shot(Some("/p.jpg"), Some("text"), true)] }, 0);
+        assert!(!done.iter().any(|a| matches!(a, Action::StartTurn { .. })), "{done:?}");
+        assert!(!b.is_busy());
     }
 
     #[test]
