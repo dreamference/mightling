@@ -835,3 +835,35 @@ html.pet-page body { margin: 0; }
   .approval .buttons button { flex: 1 1 auto; }
   .startup { margin: 24px auto; }
 }
+
+/* A file an Ask answer made (DESKTOP_PARITY_CLAUDE §4.1): a card that opens it beside the answer. */
+.made-file {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  margin: 6px 0;
+  max-width: 420px;
+}
+.made-file > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.made-file > summary::-webkit-details-marker { display: none; }
+.made-file-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.made-file-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.made-file-kind { color: var(--muted); font-size: 12px; }
+.made-file-open {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--canvas);
+  color: var(--text);
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.made-file-open:hover { background: var(--hover); }
+.made-file[open] { max-width: none; }
+.made-file[open] > summary { border-bottom: 1px solid var(--line); }
