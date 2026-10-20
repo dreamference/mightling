@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-messengers",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Messengers team's bot: commits, pull requests and reviews for ling signal, ling chat and the Matrix homeserver. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

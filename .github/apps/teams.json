@@ -1,0 +1,104 @@
+{
+  "org": "dreamference",
+  "homepage": "https://mightling.dreamference.ai",
+  "repositories": [
+    "dreamference/mightling",
+    "dreamference/ling-engine"
+  ],
+  "publish_hours_utc": [
+    9,
+    21
+  ],
+  "teams": {
+    "engine": {
+      "name": "Engine",
+      "mission": "ling-engine, the single-model inference engine for Qwen3.8-27B on the GB10, and its paper",
+      "email": "engine@dreamference.ai",
+      "peer": "models"
+    },
+    "models": {
+      "name": "Inference & Models",
+      "mission": "the model server: the registry, SGLang and vLLM launches, downloads, adapters and host safety",
+      "email": "models@dreamference.ai",
+      "peer": "engine"
+    },
+    "agent": {
+      "name": "Agent",
+      "mission": "ling itself: the launcher, the Codex patches and build, prompts, skills and ling-admin's core",
+      "email": "agent@dreamference.ai",
+      "peer": "security"
+    },
+    "desktop": {
+      "name": "Desktop",
+      "mission": "the Electron desktop app and Work's interface",
+      "email": "desktop@dreamference.ai",
+      "peer": "web"
+    },
+    "web": {
+      "name": "Web & Ask",
+      "mission": "ling web and Ask, ling-search and ling-fetch, and the sidecars behind them",
+      "email": "web@dreamference.ai",
+      "peer": "desktop"
+    },
+    "code-index": {
+      "name": "Code Index",
+      "mission": "ling-code, the context engine and the MCP server for editors",
+      "email": "code-index@dreamference.ai",
+      "peer": "local-index"
+    },
+    "local-index": {
+      "name": "Local Index",
+      "mission": "ling-docs, the index of the user's own files",
+      "email": "local-index@dreamference.ai",
+      "peer": "code-index"
+    },
+    "messengers": {
+      "name": "Messengers",
+      "mission": "ling signal, ling chat and the Matrix homeserver",
+      "email": "messengers@dreamference.ai",
+      "peer": "security"
+    },
+    "night-shift": {
+      "name": "Night Shift",
+      "mission": "the overnight queue, its runner, report and timer",
+      "email": "night-shift@dreamference.ai",
+      "peer": "benchmarks"
+    },
+    "benchmarks": {
+      "name": "Benchmarks",
+      "mission": "the SWE-bench harness and the measurement scripts and results",
+      "email": "benchmarks@dreamference.ai",
+      "peer": "night-shift"
+    },
+    "security": {
+      "name": "Security & Egress",
+      "mission": "the egress audit, /airgapped, the web policy, the sandbox and vulnerability reports",
+      "email": "security@dreamference.ai",
+      "peer": "quality"
+    },
+    "release": {
+      "name": "Release & Infra",
+      "mission": "CI, the release workflow and its signing, the installers and the updater",
+      "email": "release@dreamference.ai",
+      "peer": "security"
+    },
+    "nodes": {
+      "name": "Nodes & Remote Access",
+      "mission": "nodes, pairing, jobs and model sync, the node locator and remote access",
+      "email": "nodes@dreamference.ai",
+      "peer": "security"
+    },
+    "docs": {
+      "name": "Docs & Specs",
+      "mission": "the user docs, the specs, the website and the papers",
+      "email": "docs@dreamference.ai",
+      "peer": "quality"
+    },
+    "quality": {
+      "name": "Quality",
+      "mission": "the test suite and its guards, the quality ratchets and the team-review gate",
+      "email": "quality@dreamference.ai",
+      "peer": "docs"
+    }
+  }
+}
