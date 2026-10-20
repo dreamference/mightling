@@ -21,7 +21,7 @@
 | ~~`duckduckgo`~~ | DuckDuckGo only | Any page | Yes | Yes | The web commands (§4). A preference, not a barrier. **Removed 2026-10-03** (§14.6) |
 | `on` | None | None | None | None | The kernel (§5) |
 
-**`off` is today's `ling`.** On this machine a general search currently goes to Brave, DuckDuckGo, Google (through `google cse`), Startpage (which serves Google's results), Wikipedia and Wikidata, plus four small answer engines. SearXNG sends them the query text; they see SearXNG's address, not an account.
+**`off` is today's `ling`.** Since 2026-10-20 a general search goes to Brave, Google (through `google cse`), Startpage (which serves Google's results), Mwmbl, Yep, Seznam, Yandex, Wikipedia and Wikidata, plus four small answer engines; DuckDuckGo is off (the settings `ling-admin searxng start` writes, `dreamference/chat/searxng_settings.py`). Before that date the list was Brave, DuckDuckGo, Google, Startpage, Wikipedia and Wikidata, and on 2026-10-20 all four web engines among them refused this machine. SearXNG sends them the query text; they see SearXNG's address, not an account. A query repeated within the hour is answered from `ling-search`'s cache and sent nowhere.
 
 **`duckduckgo` changed who read the queries, and nothing else** (removed, §14.6). Search goes to DuckDuckGo alone. Fetching a page, Gmail and the agent's own commands (`git`, `pip`, `cargo`, `curl`) work as at `off`: the level is about which search company sees what the session is looking for.
 

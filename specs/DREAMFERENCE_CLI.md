@@ -43,7 +43,7 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 - **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch,provision,prepare}` (plus `authorize`, `serve-job`, `job-exec` and `askpass`, which a person does not type, §4.25)
 - **Web UI, desktop and messengers:** `chat {remove,status}` (the retired Onyx web chat's leftovers, since 2026-10-18; alias `onyx`), `desktop {install,run,build,status}`, `matrix {start,stop,status,add-user,push,remove}`; `ling web` itself is the launcher's
-- **Agent tools:** `gmail {search,read,status}`, `google {start,stop,status}`, `images {start,stop,status,mcp}`, `voice {start,stop,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `ling-search` and `ling-fetch` (§4.16), and so is the code index, `ling-code` (§4.22)
+- **Agent tools:** `gmail {search,read,status}`, `google {start,stop,status}`, `images {start,stop,status,mcp}`, `voice {start,stop,status}`, `searxng {start,status}`, `code setup`; search and fetch are commands of their own, `ling-search` and `ling-fetch` (§4.16), and so is the code index, `ling-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
 
 ---
@@ -101,7 +101,8 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | **`docs setup`** | Fetch what `ling-docs` loads: PDFium, ONNX Runtime and the embedding model, pinned | — |
 | **`google …`** | The Google service (Gmail, Drive, Calendar for `/apps`) without the web UI, on `127.0.0.1:8767` | `start`, `stop`, `status`; see §4.27 |
 | **`matrix …`** | The private Matrix homeserver behind `ling chat` (off by default) | `start`, `stop`, `status`, `add-user NAME`, `push on\|off`, `remove [--yes]`; see §4.28 |
-| **`searxng start`** | Start the SearXNG container on `127.0.0.1:8888`, on the network `dreamference-sidecars`; replaces one made on Docker's default bridge ([DOCKER §6](./DREAMFERENCE_DOCKER.md)) | — |
+| **`searxng start`** | Start the SearXNG container on `127.0.0.1:8888`, on the network `dreamference-sidecars`; replaces one made on Docker's default bridge ([DOCKER §6](./DREAMFERENCE_DOCKER.md)) and writes its settings | — |
+| **`searxng status`** | Each general search engine's state: ok, failing, suspended until when, not loaded, off; read from SearXNG's logs, nothing searched | — |
 | **`gmail …`** | Read-only Gmail search and read | `search QUERY [-n 10] [--json]`, `read ID [--max-chars 8000] [--json]`, `status [--json]` |
 
 A top-level `clear-tensorize-cache` subcommand is the older spelling of `clear tensorize-cache` and does the same (until 2026-09-29 it parsed and did nothing).
@@ -409,10 +410,12 @@ Night Shift (`dreamference/night_shift/`, `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md
 
 While a night run holds its lock, `server start`, `codex build` and `index` refuse to run. A SWE-bench run takes the same lock (§4.23), so the two exclude each other and the refusal names whichever holds it.
 
-### 4.22. `ling-admin code setup`, `ling-admin searxng start`
+### 4.22. `ling-admin code setup`, `ling-admin searxng start`, `ling-admin searxng status`
 
 - **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+, and Maven and Gradle when installed) the optional indexers need. The index itself is the Rust binary `ling-code`, built and linked by `codex build`. See `DREAMFERENCE_MIGHTLING_CODE_INDEX.md`.
 - **`searxng start`:** creates the SearXNG container on the project network `dreamference-sidecars`, published on `127.0.0.1:8888` only. A container found on Docker's default bridge is replaced. See `DREAMFERENCE_DOCKER.md` §6. On a node that `node enable` advertised (§4.25) it is published beyond loopback instead.
+  It first writes `~/.config/searxng/settings.yml` (`SearxngSettings`): the JSON format, the limiter off, and the general engines (since 2026-10-20 Mwmbl, Yep, Seznam and Yandex beside Brave, Google, Startpage and Wikipedia; DuckDuckGo off), with suspensions of 15 minutes for "too many requests" and "access denied". The file carries a version line; a file with it (or the hand-made first line of older installs) is rewritten when the version is newer, keeping its `secret_key`, and the running container is restarted to read it. A file without it is the user's own and is left alone.
+- **`searxng status`:** each general engine's state, from the container's logs since it started: `suspended` until when and why (SearXNG logs every suspension with its length), `failing` (an error in the last 15 minutes, for an engine that is not suspended, such as a CAPTCHA with a zero-second suspension), `not loaded` (its start-up failed), `ok` (no error logged recently; SearXNG does not log successes) or `off`. It sends no search. Exit 0 when a web engine is ok, 1 when none is, 2 when SearXNG is not running.
 
 ### 4.23. `ling-admin swe-bench`
 

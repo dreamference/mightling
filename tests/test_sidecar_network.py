@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from dreamference.chat import searxng_sidecar, sidecar_network
+from dreamference.chat.searxng_settings import SearxngSettings
 from dreamference.chat.searxng_sidecar import SEARXNG_CONTAINER_NAME, SearxngSidecar
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
@@ -99,6 +100,8 @@ def test_a_searxng_on_the_default_bridge_is_replaced_and_rejoins_its_other_netwo
 
 
 def test_a_searxng_already_on_a_user_defined_network_is_left_alone(docker):
+    # With its settings current: new settings restart it (test_searxng_settings.py).
+    SearxngSettings.ensure(SearxngSidecar.config_dir())
     fake = docker(modes={SEARXNG_CONTAINER_NAME: SIDECAR_NETWORK})
     assert SearxngSidecar.start()
     assert fake.commands("docker", "rm") == [] and fake.commands("docker", "run") == []

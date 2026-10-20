@@ -682,6 +682,10 @@ Manage the local SearXNG search container.
 
 Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge).
 
+#### `ling-admin searxng status`
+
+Show each search engine's state (ok, failing, suspended).
+
 ### `ling-admin google`
 
 Manage the local Google service (Gmail, Drive, Calendar).
