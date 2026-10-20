@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { WorktreeLink } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import { initialState, projects, reduce } from "./store";
-import { DEFAULT_KEEP, carry, cleanupVictims, projectFolder, turnCwd, worktreeSettings } from "./worktrees";
+import { DEFAULT_KEEP, carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings } from "./worktrees";
 
 const link: WorktreeLink = {
   checkout: "/home/u/.mightling/worktrees/ab12/app", cwd: "/home/u/.mightling/worktrees/ab12/app/src",
@@ -44,6 +44,10 @@ describe("worktree threads", () => {
     expect(cleanupVictims(entries, 3, new Set(["t1"]), ["/w/2"], null)).toEqual(["/w/3", "/w/4"]);
     expect(cleanupVictims(entries, 5, new Set(), [], null)).toEqual([]);
     expect(cleanupVictims(entries, 4, new Set(), [], "/w/1")).toEqual(["/w/2"]);
+    // A pinned thread's worktree is kept like a running or shown one's (§9.3; it was not until 1.7.1).
+    expect([...protectedOwners(["t1"], "t2", ["t3"])].sort()).toEqual(["t1", "t2", "t3"]);
+    expect(protectedOwners([], null, [])).toEqual(new Set());
+    expect(cleanupVictims(entries, 3, protectedOwners([], null, ["t1"]), [], null)).toEqual(["/w/2", "/w/3"]);
   });
 
   it("read the [desktop] settings the codex-worktree crate reads, with its defaults", () => {

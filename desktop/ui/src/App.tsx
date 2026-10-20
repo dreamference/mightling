@@ -67,7 +67,7 @@ import { findRanges, mark } from "./find";
 import { moveToSection, nextAttention, pinnedFirst, recentThreads, stepThread, threadLink, toggled, type Section } from "./threads";
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
-import { carry, cleanupVictims, projectFolder, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
+import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
@@ -607,9 +607,9 @@ export function App() {
     if (!wtSettings.autoCleanup) return;
     try {
       const listed = await bridge.worktrees.list(sourceCwd, wtSettings.root);
-      const running = new Set(Object.values(state.threads).filter((entry) => entry.activeTurnId).map((entry) => entry.thread.id));
-      if (state.selected) running.add(state.selected);
-      const victims = cleanupVictims(listed.map((entry) => ({ root: entry.root, owner: entry.owner ?? null, modified: entry.modified ?? 0 })), wtSettings.keep, running, prefsRef.current.permanentWorktrees, spare);
+      const running = Object.values(state.threads).filter((entry) => entry.activeTurnId).map((entry) => entry.thread.id);
+      const kept = protectedOwners(running, state.selected, prefsRef.current.pinnedThreads);
+      const victims = cleanupVictims(listed.map((entry) => ({ root: entry.root, owner: entry.owner ?? null, modified: entry.modified ?? 0 })), wtSettings.keep, kept, prefsRef.current.permanentWorktrees, spare);
       for (const checkout of victims) {
         const owner = listed.find((entry) => entry.root === checkout)?.owner ?? null;
         const kept = await bridge.worktrees.remove(sourceCwd, checkout, wtSettings.root, owner ?? `cleanup-${Date.now()}`);
