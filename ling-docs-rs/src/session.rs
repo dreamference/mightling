@@ -4,6 +4,8 @@
 //! One per user: it takes `docs/session.lock` (a second one exits at once). It adds the default
 //! collections when their folders exist (§14.1), starts a change scan of every collection, then
 //! every few seconds drains the request queue and, every `docs_scan_interval_min`, scans again.
+//! Between scans the change watch ([`crate::watch`], inotify within a budget of watches) asks for
+//! a collection whose files changed, once they have been quiet for a few seconds.
 //! At most one `ling-docs index` runs at a time; none starts while Night Shift or a benchmark
 //! holds the runner lock. It exits when its parent does; an index run in flight finishes alone.
 
@@ -60,6 +62,8 @@ pub fn run(parent: Option<i32>) -> Result<()> {
     let mut pending = vec![Request::All];
     let mut last_scan = Instant::now();
     let mut child: Option<Child> = None;
+    let mut watcher = crate::watch::Watcher::new(crate::watch::budget());
+    let mut watched_stamp = None;
     loop {
         if let Some(pid) = parent {
             if unsafe { libc::kill(pid, 0) } != 0 {
@@ -67,6 +71,18 @@ pub fn run(parent: Option<i32>) -> Result<()> {
             }
         }
         pending.extend(requests::drain(&dir));
+        if let Some(watcher) = watcher.as_mut() {
+            // Collections added or removed since: watched afresh.
+            let stamp = std::fs::metadata(config::docs_toml()).and_then(|m| m.modified()).ok();
+            if watched_stamp != Some(stamp) {
+                if let Ok(docs) = DocsToml::load() {
+                    let collections: Vec<_> = docs.enabled().cloned().collect();
+                    watcher.watch(&collections, &config::user_home());
+                }
+                watched_stamp = Some(stamp);
+            }
+            pending.extend(watcher.poll(&config::user_home()).into_iter().map(Request::One));
+        }
         if last_scan.elapsed() >= interval {
             pending.push(Request::All);
             last_scan = Instant::now();
