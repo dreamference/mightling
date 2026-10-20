@@ -498,8 +498,8 @@ Phase 1's code, tested with no model. The first run against the model waits unti
   - `askevals/gate.py`: the slot's hold on the model gate;
   - a `README.md`.
 - **The scenarios.** 29 synthetic scenarios in `scenarios/`, covering failure classes 1 to 8 (S1–S17 of §5.4). S13 runs each question at `off` and at `ultra`.
-- **The night step.** `ASK_EVALS=1` in `scripts/swe_bench_night1.sh` runs the suite before the arms, with `--model-port 18000 --hold-gate "night N, assistant evals"`, under `timeout ASK_EVALS_LIMIT` (90 min). It is **off by default** (D2), and its result never fails the night.
-- **Tests.** `tests/test_ask_evals.py`, 64 tests:
+- **The night step.** `ASK_EVALS=1` in `scripts/swe_bench_night1.sh` runs the suite before the arms, with `--model-port 18000 --hold-gate "night N, assistant evals"`, under `timeout ASK_EVALS_LIMIT` (90 min), with the installed binary by its real path (`ASK_EVALS_LING`), so a rebuild mid-slot changes nothing. A stop runs the clean-up: SIGTERM opens the gate and removes the forwarder and its socket. The step is **off by default** (D2), and its result never fails the night.
+- **Tests.** `tests/test_ask_evals.py`, 65 tests:
   - the metrics on known texts;
   - the stand-ins over real loopback HTTP, faults and log included;
   - every image kind;
@@ -509,7 +509,7 @@ Phase 1's code, tested with no model. The first run against the model waits unti
   - the runner end to end with a stand-in `ling` in good and bad modes;
   - multi-turn resume;
   - the jail's command line;
-  - the gate hold;
+  - the gate hold, and its release when the run is stopped;
   - the night step on and off.
 - **Checked by hand.** The same stand-in `ling` was run once through the real jail in a user unit (`bwrap --unshare-net`, stand-ins inside). It scored as expected: scraping, sleep and the call budget all failed.
 - **Open before the first model run** (Phase 1 acceptance):

@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -214,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
         forwarder, socket_path = start_forwarder(args.model_port)
     runs = Path(args.runs)
     records = []
+    # A stop (the night slot's `timeout`, `systemctl stop`) must still open the gate, stop the
+    # forwarder and remove its socket: SIGTERM becomes an exit that runs the `finally` below.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     hold = None
     if args.hold_gate:
         from askevals.gate import GateHold  # noqa: PLC0415 - needs the dreamference package
