@@ -1,0 +1,30 @@
+{
+  "id": "s16-long-list",
+  "family": "S16",
+  "failure": [
+    4
+  ],
+  "turns": [
+    {
+      "text": "List 60 countries with their capitals, one per line, as 'Country - Capital'."
+    }
+  ],
+  "expect": {
+    "no_loop": true,
+    "min_answer_chars": 600,
+    "max_answer_tokens": 2500,
+    "max_tool_calls": 2
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  },
+  "turn_limit_s": 420
+}
