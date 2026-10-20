@@ -21,6 +21,10 @@ Two settings guard the connection to the local server:
 
 The web-access instructions are appended to the system prompt by the launcher (`WEB_ACCESS_INSTRUCTIONS` in `ling-rs/src/lib.rs`), so they apply in every workspace, not only this one.
 
+## The compatibility mode
+
+`ling --compat claude` (or `DREAMFERENCE_MIGHTLING_COMPAT=claude`, or `mightling_compat = "claude"` written by `ling compat use claude`) makes a session work the way Claude Code does (spec `specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md`). `src/compat.rs` holds the switch. The flag becomes the variable first thing in `main()`, as refine's does (`home::use_mightling_home`), and is removed from the arguments before Codex parses them. The key is read **only** from the user's `~/.config/dreamference/config.toml`. One in a repository's `dreamference.toml` or in `DREAMFERENCE_CONFIG_PATH` is reported at start and ignored, so a clone cannot turn the mode on. A value naming no mode stops the start. Everything the mode does is gated on `compat::Mode::Claude`, and `ling compat doctor` reports what it reads.
+
 ## `CODEX_HOME` is `~/.mightling`, not `~/.codex`
 
 `ling-rs/src/home.rs`, called first thing in Codex's `main()` by patch 0014, before `arg0` reads `.env` from the home folder. Upstream Codex keeps the vendor's sign-in in `~/.codex/auth.json`, and sharing the folder handed Mightling that login, and with it usage analytics, token refresh and the other channels to the vendor's backend. On first run the launcher copies an allow-list across (sessions, history, config, rules, skills, the session databases) and never `auth.json`, `installation_id`, `packages/` or the logs; the keyring is keyed by a hash of the home path, so it cannot leak the old login either. An explicit `CODEX_HOME` is respected. `CodexInstaller.home_dir()` mirrors the resolution for `ling-admin logs mcp`.
