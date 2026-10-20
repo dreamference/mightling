@@ -29,8 +29,6 @@ import json
 import os
 import sys
 import time
-import uuid
-from pathlib import Path
 from typing import Any, Dict, Final, List, Optional, Tuple
 
 # The adapter rules, copied beside this file into the gate's container (`ModelGate.start`), where
@@ -48,9 +46,6 @@ PROBE_PATH: Final[str] = "/mightling-gate"
 
 RUN_FILE: Final[str] = "run.json"
 PAUSE_FILE: Final[str] = "pause.json"
-# The node's id, written by the host beside the run's record: the probe answers it, so a client
-# that reached the node by its overlay name can check whose model it is (REMOTE_ACCESS §14.3, item 2).
-NODE_ID_FILE: Final[str] = "node-id"
 
 # A run's record counts only while its heartbeat is this recent (the run refreshes it every 15 s).
 STALE_S: Final[float] = 180.0
@@ -177,14 +172,10 @@ class ModelGateService:
         Returns:
             Dict[str, Any]: `state` (`open`, `closed` or `paused`), and with a live run its
             `run`, `id`, `label`, `done`, `total`, `eta_s`, `networks` and refusal `message`;
-            `paused_until` while a pause is in force; `stale` when a run's record was ignored;
-            `node`, the node's id, when the host wrote it.
+            `paused_until` while a pause is in force; `stale` when a run's record was ignored.
         """
         now = time.time() if now is None else now
         result: Dict[str, Any] = {"gate": "mightling", "state": "open"}
-        node = cls.node_id(state_dir)
-        if node:
-            result["node"] = node
         pause = cls.read_json(os.path.join(state_dir, PAUSE_FILE)) or {}
         until = pause.get("until")
         if isinstance(until, (int, float)) and until > now:
@@ -203,21 +194,6 @@ class ModelGateService:
         result["message"] = cls.message(run)
         result["state"] = "paused" if "paused_until" in result else "closed"
         return result
-
-    @classmethod
-    def node_id(cls, state_dir: str) -> str:
-        """The node's id the host wrote beside the gate's state.
-
-        Args:
-            state_dir: The gate's state directory.
-
-        Returns:
-            str: The id, or "" when the file is missing or not a UUID.
-        """
-        try:
-            return str(uuid.UUID((Path(state_dir) / NODE_ID_FILE).read_text(encoding="utf-8").strip()))
-        except (OSError, ValueError):
-            return ""
 
     @classmethod
     def from_networks(cls, peer: str, networks: List[str]) -> bool:

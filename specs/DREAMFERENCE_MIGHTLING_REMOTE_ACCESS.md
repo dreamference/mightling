@@ -1,6 +1,6 @@
 # Mightling from outside the LAN: remote access (MVP)
 
-**Status:** proposed 2026-10-10, the user's design; the build was decided on 2026-10-20 (§13, phases) and Phase 0 was done at the desk that day (§14: pins, what the source confirms, the open points decided), and Phase 1, the node's half, was built the same day (§15); nothing has run on a real machine. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. Phones are documented, not built. §12 lists what was checked against NetBird's own documentation on 2026-10-10 and what remains open.
+**Status:** proposed 2026-10-10, the user's design; the build was decided on 2026-10-20 (§13, phases) and Phase 0 was done at the desk that day (§14: pins, what the source confirms, the open points decided). Nothing else built yet. This document is the MVP: a client on a hotspot or a hotel network reaches its node by name, through an overlay the node runs itself and one rented machine that can see nothing. Phones are documented, not built. §12 lists what was checked against NetBird's own documentation on 2026-10-10 and what remains open.
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 
@@ -269,19 +269,3 @@ NetBird **0.81.3** (released 2026-10-19, the latest stable on the day). Each val
 - §11.5 (TURN): on evidence only, as before.
 - Peer names through the system resolver on macOS (14.2, item 9).
 - Whether a peer that dials `rels://…:443` uses QUIC through the UDP redirect, or falls back to the WebSocket (either works; the redirect is there so the first can).
-- That the control plane needs nothing beyond its internal Docker network (§15: no route out), and that a peer moved to a new box name by `netbird up --management-url` alone keeps its identity.
-
----
-
-## 15. What was built
-
-### 15.1 Phase 1, the node (branch `remote/phase1-node`, 2026-10-20)
-
-`dreamference/remote/` (a package of its own, one class per file) and `cli/remote_command.py`: `ling-admin remote setup|status|remove` (§3, the node's half) and `ling-admin node remote code|peers|revoke` (§4.1, §4.4). Tested offline (`tests/test_remote_access.py`), never run on a real machine. `remote setup` prints its whole plan, its sudo steps verbatim, and then refuses with nothing changed until Phase 2 builds the box's half. The notes are `docs/dev/remote-access.md`. Decided while building, beyond §14:
-
-1. **The CA is name-constrained** to its scope (the box name's parent domain for a name of three labels or more, else the name itself), the overlay's domain, `localhost` and loopback. A CA in every client's system store must not be able to vouch for any other site if its key is stolen; the price is that a box outside the scope needs a new CA and every client enrolled again.
-2. **The control plane has no route out**: its container is on an internal Docker network, reached through a loopback proxy, as the Matrix homeserver is; metrics and the GeoLite download are also off in its configuration.
-3. **The owner's token** is asked for only while the container runs with `NB_SETUP_PAT_ENABLED=true`, which is that one start; every later start leaves it off. The owner's random password is kept beside the token (0600) as the way back if a token lapses.
-4. **The enrolment listener** is port 33074, plain HTTP, in the foreground of `node remote code`, answering private and link-local addresses only (NetBird's range, loopback and public addresses refused).
-5. **`remote remove` without `--purge` keeps the node's peer**, so a replacement box needs nothing on the node but `netbird up --management-url` (no key) when its name differs; with `--purge` the node leaves the overlay and the CA leaves its trust store.
-6. **The gate's probe carries `node`** from a file the host writes at `server start` (§14.3, item 2).
