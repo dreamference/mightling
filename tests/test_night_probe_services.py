@@ -58,3 +58,12 @@ def test_the_units_command_lines_are_found():
 )
 def test_a_service_command_line_is_no_session(args):
     assert not NightShiftHost.is_interactive(args)
+
+
+def test_the_compatibility_mode_flag_is_read_with_its_value():
+    """`--compat claude` is the launcher's option with a value (ling-rs/src/compat.rs), never a subcommand."""
+    assert NightShiftHost.is_interactive(["--compat", "claude"])
+    assert NightShiftHost.is_interactive(["--compat", "claude", "fix the bug"])
+    assert not NightShiftHost.is_interactive(["--compat", "claude", "exec", "task"])
+    assert not NightShiftHost.is_interactive(["compat", "status"])
+    assert not NightShiftHost.is_interactive(["compat", "use", "claude"])
