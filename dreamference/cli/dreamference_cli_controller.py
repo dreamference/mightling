@@ -1386,6 +1386,7 @@ class DreamferenceCLIController:
         searxng_parser = subparsers.add_parser("searxng", help="Manage the local SearXNG search container")
         searxng_subparsers = searxng_parser.add_subparsers(dest="searxng_command")
         searxng_subparsers.add_parser("start", help="Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge)")
+        searxng_subparsers.add_parser("status", help="Show each search engine's state (ok, failing, suspended)")
 
         # Command: ling-admin google (the service behind Gmail, Drive and Calendar in /apps)
         google_parser = subparsers.add_parser("google", help="Manage the local Google service (Gmail, Drive, Calendar)")
@@ -2790,18 +2791,8 @@ class DreamferenceCLIController:
             sys.exit(2)
 
         elif args.command == "searxng":
-            if args.searxng_command == "start":
-                from dreamference.chat.searxng_sidecar import SEARXNG_HOST_PORT, SearxngSidecar
-                if not SearxngSidecar.start():
-                    print("❌ SearXNG did not start.")
-                    sys.exit(1)
-                print(f"✅ SearXNG is running on http://127.0.0.1:{SEARXNG_HOST_PORT}")
-                # An advertised node offers it to clients from now on.
-                from dreamference.node import NodeAdvertiser
-                NodeAdvertiser.on_searxng_started()
-                sys.exit(0)
-            print("usage: ling-admin searxng {start}")
-            sys.exit(2)
+            from dreamference.cli.searxng_command import SearxngCommand
+            sys.exit(SearxngCommand.run(args.searxng_command))
 
         elif args.command == "google":
             cls._run_google(args.google_command)

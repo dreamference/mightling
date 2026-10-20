@@ -79,7 +79,10 @@ def test_web_search_reports_engines_that_all_failed_rather_than_no_results():
     with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response):
         outcome = WebTools.search("python asyncio")
     assert "duckduckgo: HTTP connection error" in outcome["error"]
-    assert "docker restart dreamference-searxng" in outcome["hint"]
+    # The hint sends the model to a known page and to the user, never to repair the container:
+    # the engines refuse upstream, and a restart changes nothing (2026-10-20).
+    assert "web_fetch" in outcome["hint"] and "tell the user" in outcome["hint"]
+    assert "docker" not in outcome["hint"] and "restart the" not in outcome["hint"]
 
     response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "brave"}],
                                   "unresponsive_engines": [["duckduckgo", "timeout"]]}

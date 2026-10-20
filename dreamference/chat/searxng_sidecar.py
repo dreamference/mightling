@@ -10,8 +10,10 @@ and a container found on the default bridge is replaced.
 
 import os
 import subprocess
+from collections.abc import Callable
 from typing import Final, List
 
+from dreamference.chat.searxng_settings import OWN, WRITTEN, SearxngSettings
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
 # The name other sidecars (image search) resolve SearXNG by on the sidecar network. SearXNG publishes
@@ -30,7 +32,8 @@ class SearxngSidecar:
         """
         Returns:
             str: `~/.config/searxng`, mounted as the container's `/etc/searxng`. Its
-            `settings.yml` is what enables the JSON API (`web_tools.py` documents the two keys).
+            `settings.yml`, written by `SearxngSettings`, enables the JSON API and picks the
+            engines.
         """
         return os.path.expanduser("~/.config/searxng")
 
@@ -88,24 +91,36 @@ class SearxngSidecar:
         return addresses[0] if addresses else ""
 
     @classmethod
-    def start(cls) -> bool:
+    def start(cls, say: Callable[[str], None] | None = None) -> bool:
         """
         Makes SearXNG run on the sidecar network, published where the node's settings say.
 
-        A container already created on a user-defined network and published on the right address
-        is only started. One created on the default bridge, or published on the other address
+        The settings file is made this version's first (`SearxngSettings.ensure`, which leaves a
+        file of the user's own alone). A container already created on a user-defined network and
+        published on the right address is only started, or restarted when the settings changed:
+        SearXNG reads them once, at start. One created on the default bridge, or published on the other address
         (the node was enabled or disabled since), is removed and created again, and rejoins the
         other networks it was on; it holds no state outside the mounted configuration folder.
+
+        Args:
+            say (Callable[[str], None] | None): Told when the settings were written, or kept
+                because they are the user's own; nothing is said without it.
 
         Returns:
             bool: True if the container is running once this returns.
         """
         from dreamference.node.node_settings import NodeSettings
+        settings = SearxngSettings.ensure(cls.config_dir())
+        if say and settings == WRITTEN:
+            say(f"📝 Wrote SearXNG's settings: {cls.config_dir()}/settings.yml")
+        elif say and settings == OWN:
+            say("💡 Keeping your own SearXNG settings.yml (it has no ling-admin version line).")
         mode = SidecarNetwork.network_mode(SEARXNG_CONTAINER_NAME)
         on_bridge = bool(mode) and SidecarNetwork.created_on_default_bridge(SEARXNG_CONTAINER_NAME)
         published = cls.published_address() if mode and not on_bridge else ""
         if mode and not on_bridge and published in ("", NodeSettings.search_bind_address()):
-            started = subprocess.run(["docker", "start", SEARXNG_CONTAINER_NAME],
+            verb = "restart" if settings == WRITTEN else "start"
+            started = subprocess.run(["docker", verb, SEARXNG_CONTAINER_NAME],
                                      capture_output=True, text=True, timeout=60, check=False)
             return started.returncode == 0
 
@@ -120,7 +135,6 @@ class SearxngSidecar:
         if mode:
             subprocess.run(["docker", "rm", "-f", SEARXNG_CONTAINER_NAME],
                            capture_output=True, text=True, timeout=60, check=False)
-        os.makedirs(cls.config_dir(), exist_ok=True)
         result = subprocess.run(cls.run_command(), capture_output=True, text=True, timeout=600, check=False)
         if result.returncode != 0:
             print(f"⚠️  {result.stderr.strip()[:200]}")
