@@ -70,6 +70,8 @@ export type FromView =
   /** The chat header's Open: a terminal or the file manager in the thread's folder. */
   | { type: "open/terminal"; dir: string }
   | { type: "open/folder"; dir: string }
+  /** A citation of the user's documents (`documents/42`), opened with the system's handler (docs.ts). */
+  | { type: "docs/open"; doc: string }
   | { type: "open/editor"; dir: string; editor: string | null }
   /** The editors found on this machine (editors.ts), and opening a file in one at a line. */
   | { type: "editors/list" }
