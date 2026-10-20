@@ -52,7 +52,7 @@ export class PetStatus {
       this.finished++;
       return true;
     }
-    if (id !== undefined && (method.endsWith("/requestApproval") || method === "item/tool/requestUserInput" || method === "execCommandApproval" || method === "applyPatchApproval")) {
+    if (id !== undefined && (method.endsWith("/requestApproval") || method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request" || method === "execCommandApproval" || method === "applyPatchApproval")) {
       this.asking.set(String(id), thread);
       return true;
     }

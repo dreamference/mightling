@@ -67,6 +67,8 @@ import { findRanges, mark } from "./find";
 import { moveToSection, nextAttention, pinnedFirst, recentThreads, stepThread, threadLink, toggled, type Section } from "./threads";
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
+import { ElicitationCard } from "./ElicitationCard";
+import { elicitationAnswer, shownElicitation } from "./elicitation";
 import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
 
@@ -78,6 +80,7 @@ const ASKED = new Set<ServerRequest["method"]>([
   "item/fileChange/requestApproval",
   "item/permissions/requestApproval",
   "item/tool/requestUserInput",
+  "mcpServer/elicitation/request",
   "execCommandApproval",
   "applyPatchApproval",
 ]);
@@ -290,7 +293,8 @@ export function App() {
       case "currentTime/read":
         return client.respond(request.id, { currentTimeAt: Math.floor(Date.now() / 1000) });
       case "mcpServer/elicitation/request":
-        return client.respond(request.id, { action: "decline", content: null, _meta: null });
+        // The vendor's own identity check (`openai/userVerification`): nothing here can answer it.
+        return client.respond(request.id, elicitationAnswer("decline"));
       default:
         return client.respondError(request.id, -32601, `Mightling does not handle ${request.method} here`);
     }
@@ -366,7 +370,8 @@ export function App() {
       for (const listener of listeners.current) listener(notification);
     };
     client.onServerRequest = (request) => {
-      if (ASKED.has(request.method)) dispatch({ type: "serverRequest", request });
+      // An MCP server's question shows in its thread (item 14); only the vendor's identity check is declined unseen.
+      if (ASKED.has(request.method) && (request.method !== "mcpServer/elicitation/request" || shownElicitation(request.params))) dispatch({ type: "serverRequest", request });
       else answerUnasked(request).catch(notice);
     };
     let stop: (() => void) | undefined;
@@ -2419,6 +2424,8 @@ function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnsw
           </div>
         </div>
       );
+    case "mcpServer/elicitation/request":
+      return <ElicitationCard params={params} airgappedOn={props.airgappedOn} onAnswer={onAnswer} />;
     case "item/tool/requestUserInput": {
       const questions = (params.questions ?? []) as { id: string; header: string; question: string; options: { label: string }[] | null }[];
       return (
