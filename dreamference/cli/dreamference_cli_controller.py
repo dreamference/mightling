@@ -1039,6 +1039,12 @@ class DreamferenceCLIController:
         run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
+        run_parser.add_argument(
+            "--compat",
+            choices=["claude", "off"],
+            default=None,
+            help="The compatibility mode for this session (ling only; ling --compat)",
+        )
 
         # Command: ling-admin status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
@@ -1232,6 +1238,13 @@ class DreamferenceCLIController:
         audit_egress_mode.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
         audit_egress_mode.add_argument("--app", action="store_true", help="Trace the desktop app (ling-app) with its window hidden, on the display DISPLAY names")
         audit_egress_mode.add_argument("--web", action="store_true", help="Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`")
+        audit_egress_mode.add_argument(
+            "--compat",
+            choices=["claude"],
+            default=None,
+            help="Trace the compatibility mode's print mode, `ling --compat claude -p`, "
+            "in a repository with Claude Code's files",
+        )
         audit_egress_mode.add_argument("--docs", action="store_true", help="Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web or docs)")
@@ -2298,6 +2311,11 @@ class DreamferenceCLIController:
             console.print(f"   [cyan]Indexed Files:[/cyan]   {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")
 
         elif args.command == "run":
+            if args.compat is not None:
+                if not isinstance(runner, CodexRunner):
+                    print(f"❌ --compat is a mode of ling; the {config.agent_runner} runner has none.")
+                    sys.exit(2)
+                sys.exit(runner.run_session(prompt=args.prompt, debug=args.debug, compat=args.compat))
             sys.exit(runner.run_session(prompt=args.prompt, debug=args.debug))
 
         elif args.command == "status":
@@ -2583,7 +2601,8 @@ class DreamferenceCLIController:
                         sys.exit(2)
                     sys.exit(DocsEgressAudit.run(ling_docs=args.ling_docs_bin, write_json=args.json))
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
-                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui, app=args.app, web=args.web))
+                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui, app=args.app, web=args.web,
+                                         compat=args.compat is not None))
             print("usage: ling-admin audit {egress}")
             sys.exit(2)
 
