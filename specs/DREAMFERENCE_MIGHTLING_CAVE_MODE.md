@@ -1,6 +1,7 @@
 # Mightling Cave Mode — `/cavemode`
 
 **Status:** implemented (Phase 1) on 2026-10-01: `ling-rs/src/cave.rs`, the level texts in `ling-rs/cave/`, patch `0017-cave-mode`, `DreamferenceConfig.mightling_cave_mode`, and the tests of §8. The three Phase 1 checks ran against the live model (§10). The measurements in §1 were taken for it on 2026-09-30 and 2026-10-01; the §9 proposals that change a level's text are not in, because each needs a Phase 0 re-run first.
+**Default under review (2026-10-20):** §11 studies which level each surface should start at and recommends `lite` for Ask and the phone, `full` for the TUI, never `ultra`; nothing is changed until the owner decides.
 **Goal:** `ling` answers tersely by default, so the model spends its slowest tokens (prose, 25.5 tok/s) and the user's reading time only on what the user needs. `/cavemode` switches the level at any moment, mid-turn included.
 **Builds on:**
 - Codex's World State sections and its extension registry: a `ContextContributor` can add a section that reaches the model's history only when its value changes, as the `git-attribution` extension does (`codex-rs/ext/git-attribution/src/world_state.rs`);
@@ -158,7 +159,7 @@ More room: /cavemode full (this session) or /cavemode default full (new sessions
 - **The level belongs to the session.** `ling resume` keeps it; a new session, a fork, a side conversation and a subagent start at the default. (A subagent's text goes to the parent model, not to the user, and §4 already keeps text another model reads in normal prose.)
 - **The model cannot change it.** "Explain in detail" gets a full answer to that question (every level says so) but leaves the level alone. Only `/cavemode` and configuration change it.
 - **`ling exec` and scripts** take the default, or `DREAMFERENCE_MIGHTLING_CAVE_MODE=off ling exec …` for one run.
-- **Only the terminal agent.** The web chat (Onyx, retired in 1.7.0) had its own assistant prompt (`MIGHTLING_ASSISTANT_INSTRUCTIONS`) and was not covered here; Ask threads use the `ask` prompt.
+- **Only the terminal agent.** The web chat (Onyx, retired in 1.7.0) had its own assistant prompt (`MIGHTLING_ASSISTANT_INSTRUCTIONS`) and was not covered here; Ask threads use the `ask` prompt. The level still applies to them: the section is registered in the app server, so Ask threads, the app and the phone bridges all get the built-in default (§11.1).
 
 ---
 
@@ -351,6 +352,122 @@ The series was capped at 22,000 bytes (`test_the_patches_stay_small`) and stood 
 Not checked: how Qwen3.8's chat template renders the per-turn developer message (§5.2 expects a `<system-reminder>` inside the user turn); the rollout shows it as its own developer message in the right place, but the rendered prompt at the server was not inspected.
 
 **Codex's own tests** (`ling-admin codex test`) were not re-run. A new slash command shifts the TUI's popup snapshots that list commands (for example `command_popup_default_items`), so those need Mightling snapshots accepted with `--accept-snapshots` and reviewed, which refuses anything but a name change: expect a handful of manual acceptances.
+
+## 11. Which level should be the default (study of 2026-10-20)
+
+**Why.** An Ask thread on the phone (Signal) gave an answer that made no sense, and the developer message before that turn was ultra's reminder: "Cave mode ultra still applies: answer every question first; at most three sentences of prose outside code and one code block; no alternatives, recaps or closing offers." The owner's position: ultra should not be the default. This section works out what the default should be, surface by surface. **Nothing is changed by it**: the defaults in `ling-rs/src/cave.rs` and `dreamference/config/dreamference_config.py` are still `ultra`.
+
+### 11.1 Where each surface gets its level today
+
+The section is registered in the app server's extension registry (patches `0017` and `0019`, `codex-rs/app-server/src/extensions.rs`). Every surface that talks to `ling app-server` therefore gets it, whatever its system prompt, and resolves the level through the same four tiers (§5.3) inside the app-server process:
+
+| Surface | How it reaches the model | Level it gets | Can the user change it there? |
+|---|---|---|---|
+| TUI (`ling`) | in-process app server, default prompt | tier 4, `ultra` | yes: `/cavemode` |
+| `ling exec`, scripts | in-process app server | tier 4, `ultra` | only `DREAMFERENCE_MIGHTLING_CAVE_MODE` or the TOML file |
+| Ask in `ling web` and the desktop app | `thread/start {"prompt": "ask"}` to the user's `ling app-server` (`ling-rs/web/src/ask_client.rs`, `relay.rs`) | tier 4, `ultra`, stacked on `ask.md`'s own "keep answers short unless the user asks for depth" | no: neither UI has a cave setting or a `/cavemode` |
+| Signal (`ling signal`) | `work/start` through `ling web`, then `thread/start {"prompt": "ask"}` (`ling-rs/signal/src/serve.rs`) | tier 4, `ultra` | no: the bridge's commands are `/new /stop /status /threads /use /help` (`command.rs`) |
+| Telegram and Matrix (`ling chat`) | `thread/start {"prompt": "ask"}` (`ling-rs/chat/src/hub.rs`) | tier 4, `ultra` | no, same command set |
+| Night Shift | `ling exec` per task; sets `DREAMFERENCE_MIGHTLING_PROMPT`, `…_REFINE`, `…_AIRGAPPED` and the host, not the cave level (`night_shift_task_run.py`) | tier 4, `ultra` (or the user's TOML) | only through the TOML file or the unit's environment |
+| SWE-bench | sets `DREAMFERENCE_MIGHTLING_CAVE_MODE` in the container from the run's manifest, which records `DreamferenceConfig.mightling_cave_mode` (`swe_bench_runner.py`) | `ultra` in every run so far (all 50 manifests here) | `DREAMFERENCE_MIGHTLING_CAVE_MODE` when the run is set up |
+
+So **no bridge forces a level; they all inherit the built-in default**, and on the phone and in the app nothing can change it short of editing the node's TOML file or the environment of the unit behind `ling web`. Two consequences:
+
+- **§3 reads as if Ask threads sit outside cave mode; the code applies it there too.** "Only the terminal agent … Ask threads use the `ask` prompt" is about the prompt, and the level is a separate section on top of it. `ling debug prompt-input "hi"` with `DREAMFERENCE_MIGHTLING_PROMPT=ask` carries ultra's full text, as with the default prompt. ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) line 118 says "cave mode applies as usual", which is what the code does.)
+- **On this node, in real use, every session ran at `ultra`.** `~/.mightling/cave_mode/` is empty: `/cavemode` never set a session level here since it shipped on 2026-10-01. Of the October rollouts here, 103 final answers ran at `ultra` (69 `ling exec`, 14 TUI, 19 Signal, 1 desktop), and 3 at no level. The 20 Ask turns (Signal and desktop) had a median answer of 43 tokens (p90 137), two sentences, and 2 of them went over three sentences; the 83 terminal and `exec` turns had a median of 41 tokens, and 27 went over three sentences. This is all the real-session data the §7 Phase 2 check has so far. It covers one node and is too small to settle anything.
+
+### 11.2 What §1 measured, and what it did not
+
+§1.1 measured the levels on **nine single-turn tasks in a git workspace with the default prompt**: four coding tasks and five questions, all about code, each with an automatic check. It also measured eight-turn coding sessions. It counted answer tokens, wall time and checks passed; whether an answer was good beyond its check was not scored. Its rule chose `ultra` by 35 of 36 checks and by a 0.49 session ratio, the second narrowly.
+
+It did not measure:
+
+- **the `ask` prompt**, which every Ask thread, the app and the phone use, and which already says "Keep answers short unless the user asks for depth";
+- **questions that are not about code**: products, labels, screenshots, songs, everyday advice;
+- **multi-part questions** ("which is quieter, which cleans better, which is more reliable"), where a three-sentence cap meets three sub-questions;
+- **questions that need a web search**, and questions about the agent itself ("why was that slow?");
+- **anything a reader would judge**: whether every part was answered, whether the answer was right, whether it was usable on a phone;
+- **Night Shift's reports and SWE-bench**, beyond the PROMPT spec's two-instance pilot (§11.4).
+
+### 11.3 The measurement of 2026-10-20
+
+`scripts/cave_mode_bench/default_study.py` (with `default_study_judge.py` and `default_study_analyze.py`; results in `results/default-study-*.jsonl`). The prompts were written for this study, in the kinds of question the owner sends from the phone; none is a real message. Unlike §1.1, the level goes in **the way `ling` ships it**: `DREAMFERENCE_MIGHTLING_CAVE_MODE=<level>`, so the model gets the level's full text and then the reminder on every later turn. Ask items run with `DREAMFERENCE_MIGHTLING_PROMPT=ask` in an empty scratch folder, as an Ask thread does. Terminal items run with the default prompt in `run.py`'s workspaces and keep their checks. Each run uses a fresh `CODEX_HOME`; runs go one at a time, with items and levels shuffled together. The model was Qwen3.8-27B NVFP4 on SGLang (`dreamference-vllm-8000` on gx10-9428, the model gate open), thinking off. There is **one run per cell**, so every ratio below carries the noise §1.1 measured (`off` against itself spans about [0.7, 1.4] on questions).
+
+**Search failed during the study.** About twenty cells in, every engine behind SearXNG refused requests: brave and google cse with "too many requests", duckduckgo and startpage with a CAPTCHA. The four cells that ran into this were set aside. The twelve items that do not need current facts were then re-run at every level with **`/airgapped on`** (`DREAMFERENCE_MIGHTLING_AIRGAPPED=on`), so the model answered from memory and was told it could not search. That is one condition shared by all levels, but it is not how the phone works. When search came back, the three lookup items were run with search at every level. They were also run once more without network.
+
+| Set | Items | Condition |
+|---|---|---|
+| Ask, knowledge | label text, battery-screen text, router-screen text, three song meanings, two three-part comparisons (robot vacuums, home servers), heat pump vs air conditioner, descaling, overnight charging, and a two-turn dishwasher comparison with a "which would you buy" follow-up | `ask` prompt, no network |
+| Ask, lookup | latest Python release, this autumn's clock change in the US and the EU, and a two-turn "latest Linux kernel?" then "why did that take so long?" | `ask` prompt, with search; repeated without network |
+| Terminal | `repoq`, `debug`, `howto` from §1.1, with their checks | default prompt, workspace |
+
+**Numbers.** "Answer" is the final reply of the last turn, counted with Qwen3.8's tokenizer. Ratios are the geometric mean over items of level / `off`. "Over three sentences" counts lines and sentences of prose outside code, bullets included, sources lines excluded.
+
+| 15 Ask items | `off` | `lite` | `full` | `ultra` |
+|---|---|---|---|---|
+| Answer tokens, median | 530 | 261 | 301 | 268 |
+| Answer tokens vs `off` | 1.00 | **0.49** | 0.68 | 0.55 |
+| Output tokens vs `off` (tool calls included) | 1.00 | 0.64 | 0.86 | 0.65 |
+| Wall time vs `off` | 1.00 | 0.77 | 0.86 | 0.72 |
+| Answers over three sentences | 15 / 15 | 13 / 15 | 14 / 15 | **14 / 15** |
+| Turns with a closing offer | 7 | 3 | 4 | 3 |
+| Parts answered (judge, §11.3) | 0.97 | 0.90 | 0.97 | 0.92 |
+
+| 3 terminal items | `off` | `lite` | `full` | `ultra` |
+|---|---|---|---|---|
+| Answer tokens vs `off` | 1.00 | 0.59 | 0.61 | 0.44 |
+| Wall time vs `off` | 1.00 | 0.70 | 0.76 | 0.63 |
+| Checks passed | 3 / 3 | 3 / 3 | 3 / 3 | 3 / 3 |
+| Files written that nobody asked for | 0 | 0 | 0 | 1 (`point.py`, `howto`) |
+
+**What the answers show** (every answer was read, most of them in full, besides being judged):
+
+- **On Ask, `ultra`'s cap is not followed, so it buys nothing over `lite`.** Fourteen of fifteen `ultra` answers went over three sentences: they had headings, bullets, and one paragraph per sub-question. The vacuum comparison ran 658 tokens with search and 367 without. `ultra` answers came out about as long as `lite` ones (0.55 against 0.49 of `off`). `ask.md` already asks for short answers, and what shortens an answer is answer-first, no recap and no closing offer, which `lite` carries. The cap, the dropped articles and the "no alternatives" rule add nothing measurable here.
+- **Errors appear at every level.** No level is safe from them at one run per cell. Reading the answers, these misled on the main point:
+  - `off`: two stale facts with search (Python 3.14.8 for 3.15.0, kernel 6.18 for 7.3), and one source it cited without network;
+  - `lite`: one answer written as commentary before a tool call, with a final reply that only says "the answer above stands"; a false claim that Nespresso recommends vinegar; a runtime contradiction on the humidifier; the wrong year for the clock change without network;
+  - `full`: a running-cost table off by a factor of twelve (it took 730 hours, a month, as the year), and the kernel as 6.19 with search;
+  - `ultra`: the clock change for 2025 instead of this year, with search; a flat verdict that a heat pump is "not worth it" at −20 °C and that electric heating is cheaper (the other three levels said a cold-climate unit still beats resistance heating); numbered sources invented without network in 2 of 14 answers (none at `lite` or `full`); one answer that stopped mid-sentence; and the unrequested `point.py`.
+
+  Song meanings carried invented lyrics at every level. That is the model's knowledge, not the level.
+- **"Why did that take so long?" is where `ultra` fails in the owner's way.** With search, every level explained the delay from the tool timings it can see; `lite` gave 24 tokens ("Not abnormally slow"). Without network, `off` admitted that its earlier citation was not a source it had read. `ultra` answered "I misread the session tag … The real 2026 current would be 6.16.x or higher", which answers nothing that was asked.
+- **The judge is weak here** (the same model, scoring blind, one answer per request, then one shuffled ranking per item). It rated 2026 facts that search had confirmed (Python 3.15.0, Linux 7.3) as errors, because its own knowledge is older. It also rewarded length: the ranking put `off` first and `ultra` last on average (2.13 against 2.87). Its parts coverage agrees with the reading above, and none of its other numbers carries the conclusion.
+
+### 11.4 Night Shift and SWE-bench
+
+Neither was measured here. Two pieces of evidence bear on them:
+
+- **Coding work does not move with the level** (§1.2 item 1; and here, three of three checks at every level). What changes is the final summary and the narration between tool calls.
+- **The narration rule matters for unattended runs.** In the PROMPT spec's pilot ([MIGHTLING_PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md) §6.4), `high-swe` at `off` wrote four to six times as many words before its last edit as at `ultra`, and timed out on both Django instances. That is two instances. "Between tool calls, write nothing unless you need a decision, must warn, or the plan changed" is in `lite` and `full` as well as `ultra`, so leaving `ultra` does not give up that rule.
+- **SWE-bench inherits the product default without saying so.** `swe_bench_runner.py` records `config.mightling_cave_mode` in the manifest and sets it in the container. Changing `DEFAULT_MIGHTLING_CAVE_MODE` would therefore change every later night's arms, and those nights would no longer be comparable with the earlier ones: all 50 manifests on gx10-9428 record `ultra`.
+
+### 11.5 Recommendation (for the owner to decide; nothing is changed)
+
+| Surface | Default | Why |
+|---|---|---|
+| Ask in `ling web` and the app; Signal, Telegram and Matrix | **`lite`** | As short as `ultra` on these questions (0.49 against 0.55 of `off`) in full sentences, with answer-first, every part answered, no recaps and no closing offers. `ultra`'s cap is ignored here anyway (14 of 15), and its "no alternatives" rule produced the one forced wrong verdict. `off` is twice as long (median 530 tokens, about 95 s of reading at §1's 5.5 tokens a second) and closed with an offer in 7 of its 17 turns |
+| TUI | **`full`** | A developer at a terminal who can type `/cavemode`. §1.1: −25–35% on questions, every check passed in batches 2–4 (92 of 92). Here, 0.61 of `off` with every check passed. It fades over a session, but its reminder now ships. `lite` is the fallback if one default is wanted everywhere |
+| `ling exec`, scripts, Night Shift | **`lite`** | Read later by a person (Night Shift's morning report), never interactively. The narration rule is kept (§11.4), and full sentences keep a summary readable out of context. Not measured here |
+| SWE-bench | **stays `ultra`, pinned explicitly** | Not a user default but a benchmark setting: the runner should record a level of its own, not `config.mightling_cave_mode`, so that a product change cannot silently move the nights' baseline. Switch it only through an A/B arm (`ultra` against `lite` on the validated set) |
+
+**If only one default is wanted, it is `lite`.** It is the only level that was within the noise of the best on every set measured here and in §1.1. Its texts and reminder are already built and tested.
+
+**What the per-surface split needs.** Today there is one built-in default for every surface (§5.3, tier 4).
+
+- Changing that constant to `lite` covers the Ask, phone, `exec` and Night Shift rows at once.
+- A TUI default of `full` needs a tier below the TOML file: a default per surface or per prompt. The PROMPT spec §5.4 already proposes a "cave level a prompt prefers", which sits below the user's own choices. In that form, `ask` would prefer `lite` and the TUI would keep the built-in default.
+- Night Shift can set `DREAMFERENCE_MIGHTLING_CAVE_MODE` in its task environment, as it sets the prompt and the air-gap. Note that the variable outranks the user's TOML.
+- SWE-bench needs the explicit level of the previous row.
+
+Separately, **the phone and the app have no way to change the level**. A `/cavemode` in the bridges' command set and a setting in the app would let a reader ask for more room in the one place it is missing.
+
+**Re-run before deciding, if the decision is close.** One run per cell cannot separate `lite` from `full` on Ask (0.49 against 0.68 is inside the noise). Two more repetitions of the Ask sets with search working would take about an hour at a quiet hour. The search engines' limits mean one run at a time, with a pause between batches.
+
+### 11.6 Found on the way (not about the level)
+
+- **A sandboxed run restarted a host container.** When SearXNG cannot reach any engine, `ling-search` prints "restart the container: docker restart dreamference-searxng". A `workspace-write` `ling exec` in this study ran exactly that, because the Docker socket is reachable from the sandbox. A restart does not lift an upstream rate limit, and the hint invites the agent to touch the host.
+- **`ling chat` (Telegram, Matrix) sends only `final_answer` items** (`hub.rs`, `Turn::answer`). When the model writes its answer as commentary before a tool call and its final reply only refers back to it ("the answer above stands"), the phone gets the reference without the answer. That happened in 2 of 56 Ask turns here, at `lite` and at `full`. Signal joins every agent message's deltas, so it keeps the answer.
+- **Two turns ended badly at levels where it was not the level's doing.** One `off` run ended on "Let me try a more targeted search" with no answer and was re-run. One `ultra` answer stopped mid-sentence with `task_complete`.
 
 ## Sources
 
