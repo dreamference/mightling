@@ -2,7 +2,8 @@
 
 **Status:** Phase 1 built (§16) and integrated on the renamed tree for 1.6.0 (§16.7, §17); Phase 2
 built on 2026-10-20 except OCR, the vision queue and the settings page (§18: DOCX, ODT, HTML,
-e-mail with attachments, CSV, the change watch, citations that open); Phase 3 proposed. Part of the plan to drop Onyx while keeping a web UI (Onyx retired 2026-10-18,
+e-mail with attachments, CSV, the change watch, citations that open); Phase 3 built on 2026-10-20
+(§19: spreadsheets, presentations, the settings page); OCR and the vision queue not built (§18.6). Part of the plan to drop Onyx while keeping a web UI (Onyx retired 2026-10-18,
 `eb42c76`, for 1.7.0): the "Ask" threads and
 Mightling's own web server are specified separately; this document covers the index of the user's
 own files that both of them, and the coding agent, search.
@@ -145,6 +146,8 @@ the release says in §17.
 | `.html .htm .xhtml` | html5ever (`scraper`), as `ling-fetch` parses, with its non-content subtrees and a readability pass dropped (§18.1) | heading path, paragraph range |
 | `.eml .mbox` | `mail-parser`: headers (From, To, Cc, Date, Subject, attachment names) + text body; attachments one level deep, through the same extractors (§18.1) | message (`msg 3`), attachment (`msg 3 · invoice.pdf p.2`) |
 | `.csv .tsv` | header + rows as `column: value` text (Phase 0's form), 20 rows a unit, at most 100,000 rows (§18.1) | row range (`rows 2-21`) |
+| `.xlsx .xlsm .xlsb .xls .ods` | `calamine` (pure Rust): each worksheet as a CSV is read, its stored values (a formula's last result); built in Phase 3 (§19.1) | sheet and its own rows (`sheet Budget, rows 2-21`) |
+| `.pptx .odp` | ZIP + XML as for DOCX: each slide's text frames and tables, then its speaker notes (§19.1) | slide (`slide 4`) |
 
 - Extraction of untrusted files is attack surface (PDF parsers especially). Every extractor runs
   in a **bwrap scope with no network, the collection root read-only, no home directory, a memory
@@ -252,7 +255,8 @@ workers are the binary's own (`session` and the workers hidden).
 
 *Citation opening built 2026-10-20 (§18.4): a passage's `cite` link (`docs:documents/42#page=7`),
 opened by the desktop app with the system handler and served by `ling web` at `/docs/`. The
-collections settings page is not built (§18.6).*
+collections settings page built the same day (§19.2): Settings › Your documents in the app and in
+`ling web`.*
 
 - Ask threads use the same tools; citations render as links.
 - **Opening a citation:** the desktop app opens the file with the system handler (PDFs at the page
@@ -345,7 +349,7 @@ the BM25 weight and the `pdf_*` ones to `ling-docs mcp` (`FORWARDED_ENV`). File 
 | 0 | Measurements: PDFium text quality vs the Python reference (PyMuPDF) on the eval PDFs; the multilingual embedding candidates' quality, speed and memory on 4 cores of the GB10 and on an Apple Silicon laptop; chunk-size sweep; RapidOCR on scanned fixtures; skipping a Downloads folder's unsupported files | **Done 2026-10-07 on the GB10 (§15); Apple Silicon not measured here** |
 | 1 | `ling-docs` with text/Markdown/PDF; collections; hybrid search; CLI; MCP tools; prompt block; admission; egress scenario | §12 acceptance on text + PDF: **built and passed 2026-10-08 (§16)** |
 | 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening; **OCR of scanned PDFs and images with RapidOCR** (Apache-2.0, its PP-OCR ONNX models, CPU, sandboxed); pages with low recognition confidence queued for **Qwen3.8's vision** in Night Shift's idle hours, and any page read by Qwen3.8 on demand when the user asks about it | Same, all formats; OCR recall measured on scanned fixtures. **Built 2026-10-20 but OCR, the vision queue and the settings page (§18)** |
-| 3 | XLSX; anything left from Phase 2 | Same |
+| 3 | XLSX; anything left from Phase 2 | Same. **Built 2026-10-20 (§19): spreadsheets, presentations, the settings page; OCR and the vision queue still not (§18.6)** |
 
 Phase 1 depends on nothing in the Onyx-retirement plan; the Ask threads and web UI consume it when
 they land.
@@ -920,3 +924,73 @@ write), `quick-xml` 0.42.0 (MIT), `mail-parser` 0.11.9 (Apache-2.0 OR MIT), `csv
 (Unlicense OR MIT), `scraper` 0.27.0 and `ego-tree` 0.11.0 (ISC), `html5ever`/`markup5ever` 0.39
 (MIT OR Apache-2.0), `selectors` 0.38 and `cssparser` 0.37 (MPL-2.0), `encoding_rs` 0.8.42
 ((Apache-2.0 OR MIT) AND BSD-3-Clause), and their MIT or Apache-2.0 helpers.
+
+## 19. Phase 3: what was built (2026-10-20)
+
+Branch `docs-index/phase3`, on top of Phase 2. Same machine and conditions as §18.
+
+### 19.1 Spreadsheets and presentations
+
+| Module | Files | What it does |
+|---|---|---|
+| `extract/sheets.rs` | `.xlsx` `.xlsm` `.xlsb` `.xls` `.ods` | `calamine` 0.37 (MIT, pure Rust; it brings its own `zip` and `quick-xml`, the versions Phase 2 pinned). Each worksheet (chart sheets left out) is read as a CSV file is (§18.1): its first non-empty row the header and the heading (`Budget > Item, Cost, Due`), every other row `column: value, …`, 20 rows a unit. Every row of the sheet's used range is a line, empty ones included, so the locator is the sheet's own row numbers as the spreadsheet shows them, `sheet Budget, rows 2-21`; a sheet is chunked apart from the others. The stored values are read (a formula's last result); dates as `2025-03-14` (with the time when it has one), durations as `h:mm:ss`, whole numbers without a decimal point. At most 100,000 rows a file |
+| `extract/slides.rs` | `.pptx` `.odp` | The streamed ZIP and XML reading of DOCX and ODT, the same inflation cap. One unit per slide, `slide N` in the order the presentation shows (PowerPoint's `sldIdLst` through its relationships; the slide parts by number when it has none), its title placeholder the heading; every text frame's paragraphs and every table row, then the speaker notes after a `Notes:` line. Slide numbers, dates, footers and headers are left out. A slide is a chunk of its own (more when long), as a message is |
+
+The sniff wants a ZIP for the Office Open XML and OpenDocument kinds and the OLE header for
+`.xls`. `read` takes `sheet Budget` (the whole sheet), `sheet Budget, rows 5-9` (shifted to the
+file's line numbering by where the sheet's first unit starts), `slide 4`, or any range of lines.
+`ling web` serves these kinds as downloads (§18.4). An e-mail's spreadsheet or presentation
+attachment is read too (by MIME type when its name has no extension).
+
+### 19.2 Settings › Your documents
+
+A page of the settings in the desktop app and in `ling web` (`desktop/ui/src/SettingsDialog.tsx`):
+each collection with its folder, documents, passages (and how many are not yet searchable by
+meaning), what is waiting, what could not be read, scanned pages without text, when it was last
+indexed and the disk its index takes, refreshed every 10 s while the page is open; **Rebuild** and
+**Remove** (after a confirmation that says the index, never the files, is deleted, and that a
+default folder is not added back); **Add a folder** by full path, and in the app with the system's
+folder chooser. Every change goes through `ling docs`, so §5's rules apply unchanged (never `~`,
+`/` or a secret folder): in the app by the main process (`docs/status`, `docs/add`, `docs/remove`,
+`docs/reindex`, `desktop/electron/src/docs.ts`), in a browser through `ling web`'s
+`GET /api/docs` and `POST /api/docs/{add,remove,reindex}` (JSON bodies, behind the credential and
+`Origin` checks of every route, a name or an absolute path only; `ling-rs/web/src/documents.rs`).
+
+### 19.3 Acceptance
+
+The set has no spreadsheet or presentation of its own. `eval/make_xlsx.py` writes its five CSV
+tables into one workbook, a sheet each (whole numbers as numbers, everything else as inline
+strings), and copies the five CSV questions with the workbook as their document;
+`eval/phase3_acceptance.py` scores the set with `csv/` left out of the collection, so the workbook
+stands in for the CSV files (`eval/results/phase3-acceptance.json`).
+
+| | Questions | R@5 | R@10 | MRR |
+|---|---|---|---|---|
+| All 181, merged | 181 | 0.878 | **0.928** | 0.751 |
+| All 181, per chunk | 181 | 0.845 | 0.912 | 0.701 |
+| The workbook's five, merged | 5 | 0.8 | 0.8 | 0.7 |
+
+- **Recall@10 ≥ 0.85: passed** (0.928; 0.934 with the CSV files, §18.5). The workbook answers its
+  four lexical questions; its paraphrase question ("How much did we pay the electricians in
+  Gothenburg in November?") ranks below ten passages of the fictional company's mailbox, which
+  discusses the same work, where the CSV file of §18.5 ranked inside them. One question; not tuned.
+- Presentations are covered by tests only (a PPTX in the slide order of its list, with notes, a
+  table and furniture; an ODP with notes), not by evaluation questions.
+- Query latency this run: p50 91 ms, p95 141 ms (the machine at 107 of 121 GB in use under the
+  night's run; §18.5 measured 19 / 35 ms on the same index), under the 300 ms target.
+
+### 19.4 Still not built
+
+OCR of scanned PDFs and images and the Qwen3.8 vision queue (§18.6). One fact has changed since
+§18.6 was written: the phone bridges now read images with the distribution's Tesseract
+(`ling-rs/web/src/ocr.rs`, installed by `ling signal setup` and `ling chat start`), so a
+Tesseract-based route, and its OSD for picking the RapidOCR model per page (§15.7), is available on
+machines that run a bridge. Whether OCR follows §14.3's decision (RapidOCR, the script picked by
+OSD) or uses Tesseract alone (0.83 word recall on the fixtures against the route's 0.93) is the
+owner's call before that phase starts.
+
+### 19.5 New dependencies
+
+`calamine` 0.37.0 (MIT) with `atoi_simd`, `fast-float2`, `debug_unsafe` (MIT OR Apache-2.0),
+`codepage` (Apache-2.0 OR MIT), `byteorder` (Unlicense OR MIT) and `log` (MIT OR Apache-2.0); no
+other crate, no run-time file.
