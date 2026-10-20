@@ -28,6 +28,7 @@ One class per file in `dreamference/remote/`; none prints (the quality ratchet's
 - **`RemoteEnrolment`, `RemoteEnrolmentServer`, `RemoteJoinHandler`, `RemotePeers`**: `node remote code` mints a one-off key, prints an eight-digit code and serves `POST /mightling-remote/join` on port **33074** in the foreground until it is used, ten wrong codes withdraw it, or ten minutes pass; then the port is closed and an unused key withdrawn. Only private and link-local addresses are answered: loopback, NetBird's 100.64.0.0/10 and public addresses are refused. Plain HTTP on the trusted LAN. The bundle: node id and name, overlay name and domain, management URL, relay URL, the CA and its fingerprint, the key, NetBird's version. `peers` lists; `revoke` deletes a peer by name, overlay label or id (a prefix of four or more), never the node's own.
 - **The gate**: `ModelGate.start` writes the node id beside the gate's state, and `/mightling-gate` answers it as `node` (§14.3, item 2), for Phase 3's name tier. The running gate picks it up at its next `server start`.
 - **conftest** refuses a real `netbird` (anything named so outside the test's own folder).
+- **`docs/admin.md`** is generated from the parser (`tests/test_admin_reference.py`). From a worktree run the generator as `PYTHONPATH=$PWD .venv/bin/python scripts/gen_admin_reference.py` (with the main checkout's venv): bare, it imports the editable install, which is the main checkout, and writes a stale file.
 
 ## Hard limits while this is built
 
