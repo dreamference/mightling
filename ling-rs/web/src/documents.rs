@@ -66,6 +66,36 @@ pub async fn locate(launch: &Launch, collection: &str, id: &str) -> Result<Locat
     }
 }
 
+/// Settings › Your documents (LOCAL_INDEX §8.3): `ling docs <args>`, its output or why it failed.
+/// Every change to the collections goes through `ling docs`, which applies the index's rules
+/// (§5: never `~`, `/` or a secret folder; removing deletes the index, never the files).
+pub async fn docs_cli(launch: &Launch, args: &[&str]) -> Result<String, String> {
+    let mut command = Command::new(&launch.ling);
+    command
+        .arg("docs")
+        .args(args)
+        .envs(launch.env.iter().map(|(key, value)| (key.as_str(), value.as_str())))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(30), command.output())
+        .await
+        .map_err(|_| "the local file index took too long to answer".to_string())?
+        .map_err(|err| format!("could not run {}: {err}", launch.ling.display()))?;
+    let said = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        let reason = String::from_utf8_lossy(&output.stderr).trim().trim_start_matches("ling-docs: ").to_string();
+        return Err(if reason.is_empty() { said } else { reason });
+    }
+    Ok(said)
+}
+
+/// A collection's name, as `ling-docs` makes them.
+pub fn valid_collection(name: &str) -> bool {
+    valid(name, "1")
+}
+
 /// How a kind is served: its type, whether inline, and its content security policy.
 pub fn presentation(kind: &str) -> (&'static str, bool, &'static str) {
     const TEXT_POLICY: &str = "sandbox; default-src 'none'";

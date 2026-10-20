@@ -10,8 +10,10 @@
 //! The level is resolved before every model request, first match wins: this session's file
 //! (`$CODEX_HOME/cave_mode/<thread-id>`, written by `/cavemode <level>`), then
 //! `DREAMFERENCE_MIGHTLING_CAVE_MODE`, then `mightling_cave_mode` in the Dreamference TOML file, then
-//! [`DEFAULT_MIGHTLING_CAVE_MODE`]. A file keyed by thread id survives `ling resume` and needs no
-//! channel between the TUI and the extension, which may run in another process.
+//! the surface's default: [`TUI_DEFAULT`] in a process the launcher opened the TUI in, otherwise
+//! [`DEFAULT_MIGHTLING_CAVE_MODE`] (Ask threads, the app, the phone bridges, `ling exec`, Night
+//! Shift; spec §11.5). A file keyed by thread id survives `ling resume` and needs no channel
+//! between the TUI and the extension, which may run in another process.
 //!
 //! The texts in `cave/` are byte-for-byte the ones `scripts/cave_mode_bench/levels/` measured; a
 //! Python test keeps them equal, because the benchmark's verdict is only about that text.
@@ -19,6 +21,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -32,9 +36,25 @@ use codex_extension_api::WorldStateSectionContribution;
 use serde_json::Value;
 use serde_json::json;
 
-/// The level a session starts at when nothing else is configured. Mirrored by
-/// `DEFAULT_MIGHTLING_CAVE_MODE` in Dreamference's Python config, which a test compares with this line.
-pub const DEFAULT_MIGHTLING_CAVE_MODE: &str = "ultra";
+/// The level a session starts at when nothing else is configured, on every surface but the TUI
+/// (spec §11.5: `lite` since 2026-10-20, `ultra` before). Mirrored by `DEFAULT_MIGHTLING_CAVE_MODE`
+/// in Dreamference's Python config, which a test compares with this line.
+pub const DEFAULT_MIGHTLING_CAVE_MODE: &str = "lite";
+
+/// The level the TUI starts at when nothing else is configured: below the session, the variable
+/// and the TOML file, above the built-in default. The launcher marks a process that opens the TUI
+/// ([`set_tui`]); a daemon or an app server started on its own never is.
+pub const TUI_DEFAULT: Level = Level::Full;
+
+/// Whether this process is the TUI the launcher opened (`ling`, `ling resume`, `ling fork`).
+static TUI: AtomicBool = AtomicBool::new(false);
+
+/// Marks this process as the TUI, so a session with nothing configured starts at [`TUI_DEFAULT`].
+/// Called by the launcher before Codex starts; a static, not a variable, so nothing the TUI spawns
+/// (a shell, a nested `ling exec`) inherits it.
+pub fn set_tui(tui: bool) {
+    TUI.store(tui, Ordering::Relaxed);
+}
 
 /// The environment variable that overrides the TOML file for every session.
 pub const ENV_VAR: &str = "DREAMFERENCE_MIGHTLING_CAVE_MODE";
@@ -47,7 +67,11 @@ const START_MARKER: &str = "<cave_mode>";
 const END_MARKER: &str = "</cave_mode>";
 const SESSION_DIR: &str = "cave_mode";
 const SESSION_FILE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
-const USAGE: &str = "Usage: /cavemode [off|lite|full|ultra] or /cavemode default <level>";
+const USAGE: &str = "Usage: /cavemode [off|lite|full|ultra] or /cavemode default <level|built-in>";
+
+/// What `/cavemode default` takes to drop the configured level, so every surface starts at its
+/// own default again (`lite`, the TUI `full`).
+const BUILT_IN: &str = "built-in";
 
 const LITE: &str = include_str!("../cave/lite.txt");
 const FULL: &str = include_str!("../cave/full.txt");
@@ -131,6 +155,8 @@ pub enum Source {
     Session,
     Environment,
     ConfigFile(PathBuf),
+    /// The TUI's own default ([`TUI_DEFAULT`]).
+    Terminal,
     Default,
 }
 
@@ -140,6 +166,7 @@ impl Source {
             Source::Session => "this session".to_string(),
             Source::Environment => ENV_VAR.to_string(),
             Source::ConfigFile(path) => format!("{TOML_KEY} in {}", path.display()),
+            Source::Terminal => "the terminal's default".to_string(),
             Source::Default => "default".to_string(),
         }
     }
@@ -153,8 +180,18 @@ pub struct Resolved {
     pub invalid: Vec<String>,
 }
 
-/// Resolves the level from already-read tiers; [`resolve`] supplies the real ones.
+/// Resolves the level from already-read tiers, outside the TUI; [`resolve`] supplies the real ones.
 pub fn resolve_from(
+    session: Option<&str>,
+    environment: Option<&str>,
+    config: Option<(&Path, &str)>,
+) -> Resolved {
+    resolve_from_on(false, session, environment, config)
+}
+
+/// [`resolve_from`] in the TUI (`tui`) or elsewhere: only the last tier differs.
+pub fn resolve_from_on(
+    tui: bool,
     session: Option<&str>,
     environment: Option<&str>,
     config: Option<(&Path, &str)>,
@@ -180,8 +217,14 @@ pub fn resolve_from(
             let value = toml::from_str::<toml::Table>(text).ok()?.get(TOML_KEY)?.as_str()?.to_string();
             tier(Some(&value), Source::ConfigFile(path.to_path_buf()))
         });
-    let (level, source) = found.unwrap_or((Level::Ultra, Source::Default));
+    let fallback = if tui { (TUI_DEFAULT, Source::Terminal) } else { (default_level(), Source::Default) };
+    let (level, source) = found.unwrap_or(fallback);
     Resolved { level, source, invalid }
+}
+
+/// [`DEFAULT_MIGHTLING_CAVE_MODE`] as a level.
+fn default_level() -> Level {
+    Level::parse(DEFAULT_MIGHTLING_CAVE_MODE).unwrap_or(Level::Lite)
 }
 
 /// Resolves the level in force for a thread, reading every tier.
@@ -189,7 +232,8 @@ pub fn resolve(thread_id: Option<&str>) -> Resolved {
     let session = thread_id.and_then(session_file).and_then(|path| std::fs::read_to_string(path).ok());
     let environment = std::env::var(ENV_VAR).ok();
     let config = crate::config_file().and_then(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text)));
-    resolve_from(
+    resolve_from_on(
+        TUI.load(Ordering::Relaxed),
         session.as_deref(),
         environment.as_deref(),
         config.as_ref().map(|(path, text)| (path.as_path(), text.as_str())),
@@ -242,12 +286,73 @@ pub fn command<T: std::fmt::Display>(thread_id: Option<T>, args: &str) -> Vec<St
             Some(level) => set_session(thread_id, level),
             None => vec![USAGE.to_string()],
         },
+        [default, name] if default.eq_ignore_ascii_case("default") && name.eq_ignore_ascii_case(BUILT_IN) => {
+            set_default(thread_id, None)
+        }
         [default, name] if default.eq_ignore_ascii_case("default") => match Level::parse(name) {
-            Some(level) => set_default(thread_id, level),
+            Some(level) => set_default(thread_id, Some(level)),
             None => vec![USAGE.to_string()],
         },
         _ => vec![USAGE.to_string()],
     }
+}
+
+/// Runs `ling cavemode …` from outside a session: what `ling web`, the desktop app and the phone
+/// bridges call, and a shell can (spec §11.5). `--thread <id>` names the session; `--json` prints
+/// the level in force as one JSON object instead of lines; the rest is `/cavemode`'s arguments.
+/// Outside the TUI, so the built-in default is the one Ask threads and `ling exec` get. Returns
+/// the exit code.
+pub fn run_cli(args: &[String]) -> i32 {
+    let mut thread = None;
+    let mut json = false;
+    let mut rest = Vec::new();
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--json" => json = true,
+            "--thread" => match words.next() {
+                Some(id) => thread = Some(id.clone()),
+                None => return usage_exit(),
+            },
+            _ => rest.push(word.as_str()),
+        }
+    }
+    if json {
+        if !rest.is_empty() {
+            return usage_exit();
+        }
+        println!("{}", status_json(&resolve(thread.as_deref())));
+        return 0;
+    }
+    let lines = command(thread.as_deref(), &rest.join(" "));
+    let failed = lines.first().is_some_and(|line| line.starts_with("Usage:"));
+    for line in lines {
+        println!("{line}");
+    }
+    i32::from(failed) * 2
+}
+
+fn usage_exit() -> i32 {
+    println!("Usage: ling cavemode [--thread <id>] [--json] [off|lite|full|ultra | default <level|built-in>]");
+    2
+}
+
+/// The level in force, for a client that shows it: where it came from, the level configured in
+/// the TOML file (null when none), and the built-in defaults.
+fn status_json(resolved: &Resolved) -> Value {
+    let configured = crate::config_file()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| toml::from_str::<toml::Table>(&text).ok())
+        .and_then(|table| table.get(TOML_KEY)?.as_str().and_then(Level::parse))
+        .map(Level::name);
+    json!({
+        "level": resolved.level.name(),
+        "source": resolved.source.label(),
+        "configured": configured,
+        "default": DEFAULT_MIGHTLING_CAVE_MODE,
+        "tuiDefault": TUI_DEFAULT.name(),
+        "levels": Level::ALL.iter().map(|level| json!({ "name": level.name(), "summary": level.summary() })).collect::<Vec<_>>(),
+    })
 }
 
 fn status(thread_id: Option<&str>) -> Vec<String> {
@@ -262,7 +367,7 @@ fn status_lines(resolved: &Resolved) -> Vec<String> {
         lines.push(format!("  {:<6} {}{marker}", level.name(), level.summary()));
     }
     lines.extend(resolved.invalid.iter().map(|note| format!("Note: {note}.")));
-    lines.push("More room: /cavemode full (this session) or /cavemode default full (new sessions).".to_string());
+    lines.push("Change it: /cavemode <level> (this session) or /cavemode default <level> (new sessions, every surface).".to_string());
     lines
 }
 
@@ -286,7 +391,8 @@ fn write_session_file(path: &Path, level: Level) -> std::io::Result<()> {
     std::fs::write(path, format!("{}\n", level.name()))
 }
 
-fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
+/// Writes `level` as the configured default, or with None removes it.
+fn set_default(thread_id: Option<&str>, level: Option<Level>) -> Vec<String> {
     let path = crate::config_file().or_else(|| {
         Some(ling_node_locator::home_dir()?.join(".config").join("dreamference").join("config.toml"))
     });
@@ -305,13 +411,23 @@ fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
     if let Err(err) = written {
         return vec![format!("Could not write {}: {err}", path.display())];
     }
-    let mut lines = vec![format!(
-        "Cave mode: {} for new sessions ({TOML_KEY} in {}).",
-        level.name(),
-        path.display()
-    )];
-    if thread_id.is_some() {
-        lines.extend(set_session(thread_id, level));
+    let mut lines = match level {
+        Some(level) => vec![format!("Cave mode: {} for new sessions ({TOML_KEY} in {}).", level.name(), path.display())],
+        None => vec![format!(
+            "Cave mode: the built-in defaults for new sessions ({DEFAULT_MIGHTLING_CAVE_MODE}, the terminal {}; {TOML_KEY} removed from {}).",
+            TUI_DEFAULT.name(),
+            path.display()
+        )],
+    };
+    match (thread_id, level) {
+        (Some(_), Some(level)) => lines.extend(set_session(thread_id, level)),
+        // Back to the defaults: this session follows them too.
+        (Some(id), None) => {
+            if let Some(file) = session_file(id) {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+        (None, _) => {}
     }
     if std::env::var(ENV_VAR).is_ok_and(|value| !value.trim().is_empty()) {
         lines.push(format!("{ENV_VAR} is set, and it still wins for new sessions."));
@@ -319,10 +435,16 @@ fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
     lines
 }
 
-/// The TOML text with `mightling_cave_mode` set to `level`, everything else kept as written.
-fn with_default(existing: &str, level: Level) -> Result<String, toml_edit::TomlError> {
+/// The TOML text with `mightling_cave_mode` set to `level` (None: removed), everything else kept
+/// as written.
+fn with_default(existing: &str, level: Option<Level>) -> Result<String, toml_edit::TomlError> {
     let mut document: toml_edit::DocumentMut = existing.parse()?;
-    document[TOML_KEY] = toml_edit::value(level.name());
+    match level {
+        Some(level) => document[TOML_KEY] = toml_edit::value(level.name()),
+        None => {
+            document.remove(TOML_KEY);
+        }
+    }
     Ok(document.to_string())
 }
 
@@ -426,9 +548,22 @@ mod tests {
     }
 
     #[test]
-    fn the_default_is_ultra() {
-        assert_eq!(Level::parse(DEFAULT_MIGHTLING_CAVE_MODE), Some(Level::Ultra));
-        assert_eq!(resolve_from(None, None, None), Resolved { level: Level::Ultra, source: Source::Default, invalid: vec![] });
+    fn the_default_is_lite_and_the_tui_starts_at_full() {
+        assert_eq!(Level::parse(DEFAULT_MIGHTLING_CAVE_MODE), Some(Level::Lite));
+        assert_eq!(default_level(), Level::Lite);
+        assert_eq!(resolve_from(None, None, None), Resolved { level: Level::Lite, source: Source::Default, invalid: vec![] });
+        assert_eq!(resolve_from_on(true, None, None, None), Resolved { level: Level::Full, source: Source::Terminal, invalid: vec![] });
+    }
+
+    #[test]
+    fn the_tuis_default_sits_below_every_configured_tier() {
+        let path = Path::new("/tmp/dreamference.toml");
+        let toml = "mightling_cave_mode = \"ultra\"\n";
+        assert_eq!(resolve_from_on(true, None, None, Some((path, toml))).level, Level::Ultra);
+        assert_eq!(resolve_from_on(true, None, Some("off"), None).level, Level::Off);
+        assert_eq!(resolve_from_on(true, Some("lite\n"), None, None).source, Source::Session);
+        assert_eq!(resolve_from_on(true, None, Some("loud"), None).source, Source::Terminal);
+        assert!(status_lines(&resolve_from_on(true, None, None, None))[0].ends_with("(the terminal's default)"));
     }
 
     #[test]
@@ -450,7 +585,7 @@ mod tests {
         assert_eq!(resolved.invalid, vec!["ignored \"loud\" from this session".to_string()]);
         let path = Path::new("/etc/x.toml");
         let resolved = resolve_from(None, Some("max"), Some((path, "mightling_cave_mode = \"tiny\"\n")));
-        assert_eq!((resolved.level, resolved.source.clone()), (Level::Ultra, Source::Default));
+        assert_eq!((resolved.level, resolved.source.clone()), (Level::Lite, Source::Default));
         assert_eq!(resolved.invalid.len(), 2);
         assert!(status_lines(&resolved).iter().any(|line| line.contains("\"tiny\" from mightling_cave_mode in /etc/x.toml")));
     }
@@ -515,13 +650,24 @@ mod tests {
     }
 
     #[test]
+    fn the_json_status_names_the_defaults_and_every_level() {
+        let value = status_json(&resolve_from(None, Some("full"), None));
+        assert_eq!(value["level"], "full");
+        assert_eq!(value["source"], ENV_VAR);
+        assert_eq!(value["default"], "lite");
+        assert_eq!(value["tuiDefault"], "full");
+        assert_eq!(value["levels"].as_array().map(Vec::len), Some(4));
+        assert_eq!(value["levels"][0]["name"], "off");
+    }
+
+    #[test]
     fn status_marks_the_level_in_force_and_its_source() {
         let lines = status_lines(&resolve_from(None, Some("full"), None));
         assert_eq!(lines[0], format!("Cave mode: full ({ENV_VAR})"));
         assert_eq!(lines.iter().filter(|line| line.contains("← in force")).count(), 1);
         assert!(lines.iter().any(|line| line.starts_with("  full ") && line.contains("← in force")));
         assert!(lines.iter().all(|line| !line.contains("Codex")));
-        assert!(lines.last().unwrap().starts_with("More room:"));
+        assert!(lines.last().unwrap().starts_with("Change it:"));
     }
 
     #[test]
@@ -530,6 +676,7 @@ mod tests {
         assert_eq!(command(Some("t"), "default"), vec![USAGE.to_string()]);
         assert_eq!(command(Some("t"), "default loud"), vec![USAGE.to_string()]);
         assert_eq!(command(Some("t"), "full now"), vec![USAGE.to_string()]);
+        assert_eq!(command(Some("t"), "built-in"), vec![USAGE.to_string()]);
     }
 
     #[test]
@@ -541,15 +688,20 @@ mod tests {
 
     #[test]
     fn the_default_is_written_without_disturbing_the_file() {
-        let updated = with_default("# mine\nvllm_host = \"http://h:8000\"\n\n[table]\nkey = 1\n", Level::Full).unwrap();
+        let updated = with_default("# mine\nvllm_host = \"http://h:8000\"\n\n[table]\nkey = 1\n", Some(Level::Full)).unwrap();
         assert!(updated.starts_with("# mine\nvllm_host = \"http://h:8000\"\n"));
         assert!(updated.contains("[table]\nkey = 1"));
         let parsed: toml::Table = toml::from_str(&updated).unwrap();
         assert_eq!(parsed["mightling_cave_mode"].as_str(), Some("full"));
         assert!(parsed.get("table").unwrap().get("mightling_cave_mode").is_none());
-        let again = with_default(&updated, Level::Off).unwrap();
+        let again = with_default(&updated, Some(Level::Off)).unwrap();
         assert_eq!(toml::from_str::<toml::Table>(&again).unwrap()["mightling_cave_mode"].as_str(), Some("off"));
         assert_eq!(again.matches("mightling_cave_mode").count(), 1);
+        // `built-in`: the key goes, the rest stays.
+        let removed = with_default(&again, None).unwrap();
+        assert!(!removed.contains("mightling_cave_mode"));
+        assert!(removed.starts_with("# mine\nvllm_host = \"http://h:8000\"\n") && removed.contains("[table]\nkey = 1"));
+        assert_eq!(with_default("", None).unwrap(), "");
     }
 
     #[test]

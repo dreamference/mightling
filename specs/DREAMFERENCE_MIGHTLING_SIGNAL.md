@@ -275,10 +275,11 @@ A message that is exactly one of these is a command. Anything else is a question
 | `/status` | What is running and for how long, the queue, the model server's state, the air-gap level, the bridge's and signal-cli's versions |
 | `/threads` | The last eight threads started from Signal, numbered, with their first line |
 | `/use N` | Continues thread N from `/threads` (`thread/resume`; an Ask thread keeps its folder, ASK §16) |
+| `/cavemode [level]` | How terse this thread's answers are: the level in force, or `off`, `lite`, `full`, `ultra` for this thread; `/cavemode default <level|built-in>` for new threads, on every surface (CAVE_MODE §11.7). Through `ling web`'s `/api/cavemode` |
 | `/help` | This table |
 | `YES` / `NO` | Only while an approval is pending (§8); otherwise an ordinary message |
 
-**No command reaches the node's administration:** none starts or stops the model server, changes the air-gap level, pairs devices or changes the bridge. Those stay with a shell on the node.
+**No command reaches the node's administration:** none starts or stops the model server, changes the air-gap level, pairs devices or changes the bridge. (`/cavemode default` writes one preference of the owner's own, as the terminal's `/cavemode default` does.) Those stay with a shell on the node.
 
 ### 5.3 A changed identity key
 
@@ -853,4 +854,10 @@ On the morning of 2026-10-20 the owner's Note to Self thread gave useless answer
   - **with nothing usable** (no words, no text read, a model without images), the bridge answers "I can't read this image; describe it or paste the text." and starts no turn; an attachment that never arrived gets "I couldn't receive that attachment; …". **An empty message never reaches the model**: a regression test replays the morning's message.
 - **Whether the model takes images** is asked of the model server, never assumed: the launcher reads `has_image_understanding` from SGLang's `/model_info` (`/get_model_info` on older servers) and writes `input_modalities` into the catalog (`ling-rs/src/vision.rs`); `ling web` reports `vision: true` only when the catalog says `image`. A server that does not say (vLLM, llama.cpp) gets the text alone. `bridge.json`'s `vision` (never set by setup) still forces it on.
 - **The offline reader** is Tesseract, the distribution's package (`tesseract-ocr`): `ling signal setup` and `setup --refresh` install it when it is missing. `ling web` runs it (`ling-rs/web/src/ocr.rs`) with a 30-second limit, one thread and a 1.5 GB address space, in every installed language (`apt install tesseract-ocr-<code>` adds one), and passes at most 4,000 characters on. No cloud service, no network.
+
+### 19.2 A new thread after a long silence (branch `chat/fresh-thread`)
+
+- **The rule:** a question that arrives when the conversation has not moved for `[chat] new_thread_after_hours` (default 4; 0 switches it off) starts a new thread, and the bridge says so in one line: "New thread (the last message was 16h00m ago); /use 2 to go back." `/threads`, `/use N` and `/new` are unchanged; `/use` counts as the conversation moving, so a thread taken back is not left again by the next question.
+- **What counts as moving:** the owner's question and the end of an answer (`Bridge::last_activity_ms`, saved in `conversation.json` as `lastActivityMs`). A conversation saved before this was kept has no time, and its next question starts a new thread.
+- **Where the setting comes from:** the `[chat]` table of the user's own configuration (`~/.config/dreamference/config.toml`, never a repository's), which the bridge's system account cannot read: `ling web` serves it at `/api/chat/settings` (`ling-rs/web/src/chat_settings.rs`), and the bridge asks at start and every minute.
 

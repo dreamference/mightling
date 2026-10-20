@@ -19,6 +19,11 @@ v gpu "$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n
 v hostname "$(hostname)"
 v bundle "$(cat "$HOME/.local/share/dreamference/mightling/VERSION" 2>/dev/null)"
 [ -x "$HOME/.local/share/dreamference/venv/bin/ling-admin" ] && v admin 1 || v admin 0
+# DGX OS ships python3 without venv (python3-venv), which `install.sh` needs and, with no terminal
+# for sudo, cannot install itself (measured on a fresh GX10, 2026-10-08).
+if [ -x "$HOME/.local/share/dreamference/venv/bin/python" ] || ! command -v dpkg-query >/dev/null 2>&1 \
+  || dpkg-query -W -f='${Status}' python3-venv 2>/dev/null | grep -q 'ok installed'; then v venv 1
+else v venv 0; fi
 v node_id "$(cat "$HOME/.config/dreamference/node-id" 2>/dev/null)"
 id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker && v docker_group 1 || v docker_group 0
 [ -f "/var/lib/systemd/linger/$(id -un)" ] && v linger 1 || v linger 0

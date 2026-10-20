@@ -23,6 +23,9 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# Spreadsheets: `.xlsx`, `.xlsm`, `.xls`, `.xlsb` and `.ods` (Phase 3, §7.1), pure Rust; its own `zip`
+# and `quick-xml` are the ones the documents use. MIT.
+calamine = { version = "=0.37.0", default-features = false }
 # CSV and TSV files (Phase 2, §7.1). MIT OR Unlicense.
 csv = "=1.4.0"
 # Legacy charsets of HTML pages (`<meta charset>`), as ling-fetch decodes them. (Apache-2.0 OR MIT) AND BSD-3-Clause.

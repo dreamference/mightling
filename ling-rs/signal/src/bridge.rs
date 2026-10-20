@@ -33,6 +33,9 @@ pub const PROGRESS_EVERY_MS: u64 = 300_000;
 pub const APPROVAL_MS: u64 = 10 * 60_000;
 /// The owner is told the web server is down once it has been down this long.
 pub const DOWN_NOTICE_MS: u64 = 10_000;
+/// A question after this long a silence starts a new thread, unless `[chat]
+/// new_thread_after_hours` says otherwise (§19.2).
+pub const NEW_THREAD_AFTER_MS: u64 = 4 * 3600 * 1000;
 
 /// What the agent side reports, read from `ling web`'s relay.
 #[derive(Clone, Debug, PartialEq)]
@@ -157,6 +160,9 @@ pub enum Action {
     AnswerApproval { id: Value, result: Value },
     /// The persistent part of the state changed.
     Save,
+    /// `/cavemode <text>` for the current thread (None before the first question), through `ling
+    /// web`; what it answers goes back as a notice.
+    Cavemode { thread: Option<String>, text: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,6 +210,11 @@ pub struct Bridge {
     pub current: Option<String>,
     pub recent: Vec<ThreadRef>,
     pub info: Info,
+    /// When the conversation last moved: the owner's last question or the last answer. None for a
+    /// conversation saved before this was kept, taken as long ago.
+    pub last_activity_ms: Option<u64>,
+    /// A question after this long a silence starts a new thread; None: never.
+    pub new_thread_after_ms: Option<u64>,
     loaded: HashSet<String>,
     connected: bool,
     phase: Phase,
@@ -263,6 +274,8 @@ impl Bridge {
             current,
             recent,
             info,
+            last_activity_ms: None,
+            new_thread_after_ms: Some(NEW_THREAD_AFTER_MS),
             loaded: HashSet::new(),
             connected: false,
             phase: Phase::Idle,
@@ -320,13 +333,19 @@ impl Bridge {
             Input::Use(n) => match self.recent.get(n - 1).cloned() {
                 Some(thread) => {
                     self.current = Some(thread.id.clone());
+                    self.last_activity_ms = Some(now);
                     actions.push(Action::Notice(format!("Continuing: {}", thread.title)));
                     actions.push(Action::Save);
                 }
                 None => actions.push(Action::Notice(format!("There is no thread {n}. /threads lists them."))),
             },
             Input::Help => actions.push(Action::Notice(command::HELP.to_string())),
+            Input::Cavemode(text) => actions.push(Action::Cavemode { thread: self.current.clone(), text }),
             Input::Question(_) => {
+                if !self.is_busy() && self.queue.is_empty() {
+                    actions.extend(self.fresh_after_silence(now));
+                }
+                self.last_activity_ms = Some(now);
                 if self.is_busy() || !self.connected {
                     if self.queue.len() >= QUEUE_LIMIT {
                         actions.push(Action::Notice(format!("{QUEUE_LIMIT} questions are already waiting; send this again once they're answered.")));
@@ -341,6 +360,19 @@ impl Bridge {
             }
         }
         actions
+    }
+
+    /// A question after a long silence goes to a new thread, said in one line (§19.2): the morning
+    /// of 2026-10-20, a screenshot was read as part of a two-day-old thread about songs.
+    fn fresh_after_silence(&mut self, now: u64) -> Vec<Action> {
+        let (Some(_), Some(gap)) = (&self.current, self.new_thread_after_ms) else { return Vec::new() };
+        let silence = self.last_activity_ms.map(|last| now.saturating_sub(last));
+        if silence.is_some_and(|silence| silence < gap) {
+            return Vec::new();
+        }
+        self.current = None;
+        let since = silence.map(|ms| format!(" (the last message was {} ago)", duration(ms))).unwrap_or_default();
+        vec![Action::Notice(format!("New thread{since}; /use 2 to go back.")), Action::Save]
     }
 
     /// Starts work on one question: opens its thread if needed, else starts the turn.
@@ -507,6 +539,7 @@ impl Bridge {
                 let running = matches!(&self.phase, Phase::Running { thread: t, .. } if *t == thread);
                 if running && let Phase::Running { answer, stopping, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
                     self.approvals.clear();
+                    self.last_activity_ms = Some(now);
                     if !self.airgapped() && !stopping {
                         actions.push(Action::Typing(false));
                         match error {
@@ -756,6 +789,16 @@ mod tests {
     }
 
     #[test]
+    fn cavemode_names_the_current_thread_and_passes_the_rest_on() {
+        let mut b = connected();
+        assert_eq!(b.on_message(msg("/cavemode default full", 1), 0), vec![Action::Receipt(1), Action::Cavemode { thread: None, text: "default full".to_string() }]);
+        answered(&mut b, "first", "ok", 2);
+        let set = b.on_message(msg("/cavemode off", 3), 3);
+        assert_eq!(set, vec![Action::Receipt(3), Action::Cavemode { thread: Some("t1".to_string()), text: "off".to_string() }]);
+        assert!(!b.is_busy());
+    }
+
+    #[test]
     fn a_question_during_a_turn_is_queued_then_taken() {
         let mut b = connected();
         b.on_message(msg("first", 1), 0);
@@ -809,8 +852,45 @@ mod tests {
     }
 
     #[test]
+    fn a_question_after_a_long_silence_starts_a_new_thread_and_says_how_to_go_back() {
+        let mut b = connected();
+        let hour = 3_600_000;
+        answered(&mut b, "a song", "about falling", 0);
+        assert_eq!(b.current.as_deref(), Some("t1"));
+        // Within the gap: the same thread.
+        let soon = b.on_message(msg("and the chorus?", 2), 3 * hour);
+        assert!(notices(&soon).is_empty() && soon.iter().any(|a| matches!(a, Action::StartTurn { thread, .. } if thread == "t1")), "{soon:?}");
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 3 * hour);
+        // Sixteen hours later: a new thread, in one line.
+        let later = b.on_message(msg("compare it with a Dyson", 3), 19 * hour);
+        assert_eq!(notices(&later), vec!["New thread (the last message was 16h00m ago); /use 2 to go back."]);
+        assert!(later.contains(&Action::StartThread) && later.contains(&Action::Save), "{later:?}");
+        b.on_agent(AgentEvent::ThreadReady { thread: "t2".to_string() }, 19 * hour);
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t2".to_string(), error: None }, 19 * hour);
+        // /use 2 goes back, and is not undone by the next question.
+        b.on_message(msg("/use 2", 4), 19 * hour + 1);
+        assert_eq!(b.current.as_deref(), Some("t1"));
+        let back = b.on_message(msg("more about the song", 5), 19 * hour + 2);
+        assert!(notices(&back).is_empty() && back.iter().any(|a| matches!(a, Action::StartTurn { thread, .. } if thread == "t1")), "{back:?}");
+        // Switched off: never.
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 19 * hour + 2);
+        b.new_thread_after_ms = None;
+        assert!(notices(&b.on_message(msg("a week later", 6), 200 * hour)).is_empty());
+    }
+
+    #[test]
+    fn a_conversation_saved_before_activity_was_kept_starts_fresh() {
+        let mut b = Bridge::new(Some("t9".to_string()), vec![ThreadRef { id: "t9".to_string(), title: "old".to_string() }], Info::default());
+        b.on_agent(AgentEvent::Connected, 0);
+        let first = b.on_message(msg("hello", 1), 5);
+        assert_eq!(notices(&first), vec!["New thread; /use 2 to go back."]);
+        assert!(first.contains(&Action::StartThread));
+    }
+
+    #[test]
     fn a_saved_thread_is_resumed_after_a_restart() {
         let mut b = Bridge::new(Some("t9".to_string()), vec![ThreadRef { id: "t9".to_string(), title: "old".to_string() }], Info::default());
+        b.last_activity_ms = Some(0);
         b.on_agent(AgentEvent::Connected, 0);
         assert_eq!(b.on_message(msg("continue", 1), 0)[1], Action::ResumeThread("t9".to_string()));
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t9".to_string() }, 0);
@@ -821,6 +901,7 @@ mod tests {
     #[test]
     fn a_thread_that_will_not_resume_is_left_for_a_new_one() {
         let mut b = Bridge::new(Some("gone".to_string()), vec![], Info::default());
+        b.last_activity_ms = Some(0);
         b.on_agent(AgentEvent::Connected, 0);
         b.on_message(msg("hello", 1), 0);
         let failed = b.on_agent(AgentEvent::ThreadFailed { error: "no such thread".to_string() }, 0);

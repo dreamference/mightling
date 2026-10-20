@@ -82,14 +82,26 @@ fn run(binary: &str, args: &[&str], env: &[(&str, &str)]) -> Output {
         "CODEX_THREAD_ID",
         "CODEX_SESSION_ID",
         "CODEX_HOME",
+        "XDG_CACHE_HOME",
     ] {
         command.env_remove(name);
     }
     command.env("HOME", std::env::temp_dir().join("ling-web-tests-no-home"));
+    // No cache unless a test names one: a test server's port is reused by later tests, and an
+    // answer cached for one would be printed in another.
+    command.env(ling_web::cache::CACHE_DIR_ENV, "off");
     for (name, value) in env {
         command.env(name, value);
     }
     command.output().unwrap()
+}
+
+fn fresh_cache_dir() -> std::path::PathBuf {
+    static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let run = RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("ling-web-tests-cache-{}-{run}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
 }
 
 fn search(args: &[&str], env: &[(&str, &str)]) -> Output {
@@ -124,10 +136,34 @@ fn search_asks_searxng_for_json_and_prints_results() {
     let request = &server.requests()[0];
     assert!(
         request.starts_with(
-            "GET /search?q=lisbon+weather&format=json&categories=general&language=en "
+            "GET /search?q=lisbon+weather&format=json&categories=general&language=auto "
         ),
         "{request}"
     );
+}
+
+#[test]
+fn a_category_a_time_range_and_a_language_reach_searxng() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let output = search(
+        &["--category", "social", "--time", "week", "--lang", "pt", "elétrico", "28"],
+        &[("DREAMFERENCE_SEARXNG_URL", &server.base)],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    let request = &server.requests()[0];
+    assert!(
+        request.starts_with(
+            "GET /search?q=el%C3%A9trico+28&format=json&categories=social+media&language=pt&time_range=week "
+        ),
+        "{request}"
+    );
+
+    // Anything else is refused before a request is sent.
+    let output = search(&["-c", "shopping", "q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base)]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stdout(&output).contains("unknown category"));
+    assert_eq!(server.requests().len(), 1);
 }
 
 #[test]
@@ -145,7 +181,7 @@ fn the_removed_duckduckgo_level_searches_every_general_engine() {
     assert!(output.status.success());
     let request = &server.requests()[0];
     assert!(
-        request.starts_with("GET /search?q=lisbon&format=json&categories=general&language=en "),
+        request.starts_with("GET /search?q=lisbon&format=json&categories=general&language=auto "),
         "{request}"
     );
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -277,8 +313,33 @@ fn search_reports_every_failed_engine() {
     assert_eq!(
         stdout(&output),
         "❌ SearXNG could not reach any search engine: brave: CAPTCHA; startpage: timeout\n\
-         💡 If this machine is online, restart the container: docker restart dreamference-searxng\n"
+         💡 Web search is unavailable for now: the search engines are refusing this machine's queries, which usually passes within hours. Do not try to fix it or restart anything. If you know a page that answers the question, read it with ling-fetch (for example: ling-fetch \"https://en.wikipedia.org/wiki/Lisbon\"); otherwise tell the user that web search is unavailable at the moment.\n"
     );
+}
+
+#[test]
+fn a_repeated_search_is_answered_from_the_cache() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let cache = fresh_cache_dir();
+    let cache = cache.to_str().unwrap();
+    let env = [("DREAMFERENCE_SEARXNG_URL", server.base.as_str()), (ling_web::cache::CACHE_DIR_ENV, cache)];
+    let first = search(&["lisbon", "weather"], &env);
+    let second = search(&["lisbon", "weather"], &env);
+    assert!(first.status.success() && second.status.success());
+    assert_eq!(stdout(&first), stdout(&second));
+    assert_eq!(server.requests().len(), 1, "{:?}", server.requests());
+
+    // A failed search is not kept: the next one asks again.
+    let failing = Server::start(|_| {
+        let body = r#"{"results": [], "answers": [], "unresponsive_engines": [["brave", "CAPTCHA"]]}"#;
+        response("200 OK", "application/json", body.as_bytes(), "")
+    });
+    let env = [("DREAMFERENCE_SEARXNG_URL", failing.base.as_str()), (ling_web::cache::CACHE_DIR_ENV, cache)];
+    assert_eq!(search(&["q"], &env).status.code(), Some(1));
+    assert_eq!(search(&["q"], &env).status.code(), Some(1));
+    assert_eq!(failing.requests().len(), 2);
+    let _ = std::fs::remove_dir_all(cache);
 }
 
 #[test]

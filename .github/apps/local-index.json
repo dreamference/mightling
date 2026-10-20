@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-local-index",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Local Index team's bot: commits, pull requests and reviews for ling-docs, the index of the user's own files. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

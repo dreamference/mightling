@@ -145,7 +145,7 @@ A stdio MCP server (`ling-admin mcp`) with `ide_*` tools over an in-process `IDE
 
 | Path | What |
 | --- | --- |
-| `codex/` | Submodule: the `dgxcoder/codex` fork, pinned to `rust-v0.158.0`, never edited |
+| `codex/` | Submodule: the `dreamference/codex` fork, pinned to `rust-v0.158.0`, never edited |
 | `codex-patches/` | Patch series applied to an exported copy at build time (23 patches, `0001`–`0025`, 42,958 bytes against a 43 KB cap) |
 | `ling-rs/` | The launcher crate compiled into `ling`: the model-server resolution, the catalog and prompts, `update`, `/usage`, `/cavemode`, `/night`, `/airgapped`, `/node`, `ling skill`, `ling prompt`, `ling docs`, refine, the compaction ledger, and the subcommands `ling web`, `ling chat` and `ling signal`. Member crates: `airgapped/` and `node-locator/` (standard library only), `masking/`, `skills/`, `apps/`, `tools/`, `web/` (`ling web`), `signal/` (also the `ling-signal` daemon) and `chat/` |
 | `ling-web-rs/` | `ling-search` and `ling-fetch`, the agent's web commands: a standalone crate installed beside `ling`. It carries byte-identical copies of the two leaf crates' sources |

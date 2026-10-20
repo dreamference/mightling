@@ -27,7 +27,7 @@ use super::{sections, Para, Unit};
 pub const MAX_ENTRY_BYTES: u64 = 256 << 20;
 
 /// A reader that fails once more than `left` bytes have come through it.
-struct Capped<R> {
+pub(super) struct Capped<R> {
     inner: R,
     left: u64,
     name: String,
@@ -44,14 +44,14 @@ impl<R: Read> Read for Capped<R> {
     }
 }
 
-type Archive<'a> = zip::ZipArchive<Cursor<&'a [u8]>>;
+pub(super) type Archive<'a> = zip::ZipArchive<Cursor<&'a [u8]>>;
 
-fn open(bytes: &[u8]) -> Result<Archive<'_>> {
+pub(super) fn open(bytes: &[u8]) -> Result<Archive<'_>> {
     zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| anyhow!("not a readable ZIP archive: {e}"))
 }
 
 /// Streams one entry's XML events to `each`; a missing entry is `Ok(false)`.
-fn read_xml(archive: &mut Archive, name: &str, each: &mut dyn FnMut(Event) -> Result<()>) -> Result<bool> {
+pub(super) fn read_xml(archive: &mut Archive, name: &str, each: &mut dyn FnMut(Event) -> Result<()>) -> Result<bool> {
     let entry = match archive.by_name(name) {
         Ok(entry) => entry,
         Err(zip::result::ZipError::FileNotFound) => return Ok(false),
@@ -76,12 +76,12 @@ fn read_xml(archive: &mut Archive, name: &str, each: &mut dyn FnMut(Event) -> Re
 }
 
 /// An element's name without its namespace prefix.
-fn local(e: &BytesStart) -> String {
+pub(super) fn local(e: &BytesStart) -> String {
     e.local_name().as_ref().to_string()
 }
 
 /// The value of attribute `name` (local name, any prefix).
-fn attr(e: &BytesStart, name: &str) -> Option<String> {
+pub(super) fn attr(e: &BytesStart, name: &str) -> Option<String> {
     e.attributes().flatten().find(|a| a.key.local_name().as_ref() == name).and_then(|a| a.normalized_value(quick_xml::XmlVersion::Implicit1_0).ok().map(|v| v.into_owned()))
 }
 
@@ -105,7 +105,7 @@ fn reference(name: &str) -> Option<char> {
 }
 
 /// Text events as a string; references resolved.
-fn text_of(event: &Event) -> Option<String> {
+pub(super) fn text_of(event: &Event) -> Option<String> {
     match event {
         Event::Text(t) => Some(t.xml10_content().into_owned()),
         Event::CData(t) => Some(t.xml10_content().into_owned()),
@@ -118,18 +118,18 @@ fn text_of(event: &Event) -> Option<String> {
 /// paragraphs nest (a text box inside a paragraph, a note's body), tables nest, and a cell's
 /// paragraphs are joined into the cell.
 #[derive(Default)]
-struct Collector {
-    paras: Vec<Para>,
+pub(super) struct Collector {
+    pub(super) paras: Vec<Para>,
     /// Open paragraphs, innermost last: text, heading level, and whether it is dropped.
     open: Vec<(String, Option<usize>, bool)>,
     /// Open tables: the cells of the current row, and the current cell when one is open.
     tables: Vec<(Vec<String>, Option<String>)>,
     /// Depth of an ignored subtree, when inside one.
-    skip: usize,
+    pub(super) skip: usize,
 }
 
 impl Collector {
-    fn text(&mut self, text: &str) {
+    pub(super) fn text(&mut self, text: &str) {
         if self.skip > 0 {
             return;
         }
@@ -138,13 +138,13 @@ impl Collector {
         }
     }
 
-    fn start_para(&mut self, level: Option<usize>) {
+    pub(super) fn start_para(&mut self, level: Option<usize>) {
         if self.skip == 0 {
             self.open.push((String::new(), level, false));
         }
     }
 
-    fn set_level(&mut self, level: Option<usize>) {
+    pub(super) fn set_level(&mut self, level: Option<usize>) {
         if let (0, Some(open)) = (self.skip, self.open.last_mut()) {
             if level.is_some() {
                 open.1 = level;
@@ -153,13 +153,13 @@ impl Collector {
     }
 
     /// Leaves the current paragraph out (a table of contents' entry).
-    fn drop_para(&mut self) {
+    pub(super) fn drop_para(&mut self) {
         if let (0, Some(open)) = (self.skip, self.open.last_mut()) {
             open.2 = true;
         }
     }
 
-    fn end_para(&mut self) {
+    pub(super) fn end_para(&mut self) {
         if self.skip > 0 {
             return;
         }
@@ -179,26 +179,26 @@ impl Collector {
         self.paras.push(Para { text, level });
     }
 
-    fn start_table(&mut self) {
+    pub(super) fn start_table(&mut self) {
         if self.skip == 0 {
             self.tables.push((Vec::new(), None));
         }
     }
 
-    fn start_cell(&mut self) {
+    pub(super) fn start_cell(&mut self) {
         if let (0, Some(table)) = (self.skip, self.tables.last_mut()) {
             table.1 = Some(String::new());
         }
     }
 
-    fn end_cell(&mut self) {
+    pub(super) fn end_cell(&mut self) {
         if let (0, Some(table)) = (self.skip, self.tables.last_mut()) {
             let cell = table.1.take().unwrap_or_default();
             table.0.push(cell);
         }
     }
 
-    fn end_row(&mut self) {
+    pub(super) fn end_row(&mut self) {
         if self.skip > 0 {
             return;
         }
@@ -222,7 +222,7 @@ impl Collector {
         self.paras.push(Para { text: row, level: None });
     }
 
-    fn end_table(&mut self) {
+    pub(super) fn end_table(&mut self) {
         if self.skip == 0 {
             self.tables.pop();
         }

@@ -117,7 +117,8 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
     gate.ignored = conversation.ignored;
     gate.identity_refusals = conversation.identity_refusals;
     let info = Info { node: config.node.clone(), bridge_version: env!("CARGO_PKG_VERSION").to_string(), signal_cli_version: config.signal_cli_version.clone() };
-    let bridge = Bridge::new(conversation.current.clone(), conversation.recent.clone(), info);
+    let mut bridge = Bridge::new(conversation.current.clone(), conversation.recent.clone(), info);
+    bridge.last_activity_ms = conversation.last_activity_ms;
     let mut daemon = Daemon {
         state_dir: state_dir.to_path_buf(),
         runtime_dir: runtime_dir.map(Path::to_path_buf),
@@ -138,6 +139,7 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
     };
     daemon.sweep_attachments(SystemTime::now());
     daemon.poll_airgap().await;
+    daemon.poll_settings().await;
     eprintln!("ling-signal {}: started ({} mode)", env!("CARGO_PKG_VERSION"), match daemon.config.mode { Mode::Dedicated => "dedicated", Mode::Linked { .. } => "linked" });
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut airgap = tokio::time::interval(AIRGAP_EVERY);
@@ -182,6 +184,7 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
                 }
                 if now / 1000 % 60 == 0 {
                     daemon.sweep_attachments(SystemTime::now());
+                    daemon.poll_settings().await;
                 }
             }
             _ = airgap.tick() => daemon.poll_airgap().await,
@@ -210,6 +213,14 @@ impl Daemon {
         self.save_conversation();
         self.write_status(false);
         true
+    }
+
+    /// Asks `ling web` for the chat settings of the user's configuration (§19.2); an older `ling
+    /// web` without them leaves the defaults.
+    async fn poll_settings(&mut self) {
+        if let Ok(settings) = agent::chat_settings(self.config.port, &self.cookie).await {
+            self.bridge.new_thread_after_ms = settings.new_thread_after_ms;
+        }
     }
 
     /// Asks `ling web` for the air-gap level; the first answer also releases held messages.
@@ -407,6 +418,12 @@ impl Daemon {
                 }
             }
             Action::Notice(text) => self.send_text(&Styled::plain(&text)).await,
+            Action::Cavemode { thread, text } => {
+                let said = match agent::cavemode(self.config.port, &self.cookie, thread.as_deref(), &text).await {
+                    Ok(said) | Err(said) => said,
+                };
+                self.send_text(&Styled::plain(&said)).await;
+            }
             // Note to Self shows neither typing nor receipts, and a receipt there would mark the
             // owner's note read on every device; linked mode sends neither.
             Action::Typing(_) | Action::Receipt(_) if self.linked() => {}
@@ -539,6 +556,7 @@ impl Daemon {
             seen: self.gate.seen(),
             ignored: self.gate.ignored,
             identity_refusals: self.gate.identity_refusals,
+            last_activity_ms: self.bridge.last_activity_ms,
         };
         if let Err(err) = conversation.save(&self.state_dir) {
             self.note_error(format!("could not save conversation.json: {err}"));
