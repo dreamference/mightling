@@ -81,6 +81,8 @@ ASK_EVALS=${ASK_EVALS:-0}
 ASK_EVALS_REPS=${ASK_EVALS_REPS:-1}
 ASK_EVALS_LIMIT=${ASK_EVALS_LIMIT:-90m}
 ASK_EVALS_PORT=${ASK_EVALS_PORT:-18000}
+# The installed binary by its real path, not PATH's link, so a rebuild changes nothing mid-slot.
+ASK_EVALS_LING=${ASK_EVALS_LING:-$HOME/.local/share/dreamference/mightling/bin/ling}
 
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
@@ -360,7 +362,7 @@ best_of_run() {
 ask_evals_slot() {
     log "assistant evals: $ASK_EVALS_REPS repetition(s), at most $ASK_EVALS_LIMIT"
     timeout "$ASK_EVALS_LIMIT" "$PY" "$WT/scripts/ask_evals/run.py" --reps "$(seq -s, 1 "$ASK_EVALS_REPS")" \
-        --model-port "$ASK_EVALS_PORT" --out "$D/ask-evals.jsonl" \
+        --model-port "$ASK_EVALS_PORT" --ling "$ASK_EVALS_LING" --out "$D/ask-evals.jsonl" \
         --runs "$HOME/.cache/dreamference/ask-evals/runs/$PREFIX" \
         --hold-gate "night $NIGHT, assistant evals" > "$D/ask-evals.txt" 2>&1
     log "assistant evals finished ($?); summary in $D/ask-evals.txt"

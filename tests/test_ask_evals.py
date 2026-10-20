@@ -565,3 +565,30 @@ def test_a_switched_on_slot_runs_before_the_arms_and_holds_the_gate(tmp_path):
     line = calls[slot[0]]
     assert "--reps 1,2,3" in line and "--model-port 18000" in line
     assert "--hold-gate night 20, assistant evals" in line
+    assert "--ling " + str(Path.home() / ".local/share/dreamference/mightling/bin/ling") in line
+
+
+def test_a_stopped_run_opens_the_gate_and_removes_its_socket(tmp_path, monkeypatch):
+    """SIGTERM (the slot's `timeout`) still runs the clean-up: the hold is cleared."""
+    script = tmp_path / "stop.py"
+    script.write_text(
+        "import os, signal, sys, threading\n"
+        f"sys.path.insert(0, {str(SUITE)!r})\n"
+        "import importlib.util\n"
+        f"spec = importlib.util.spec_from_file_location('r', {str(SUITE / 'run.py')!r})\n"
+        "run = importlib.util.module_from_spec(spec); spec.loader.exec_module(run)\n"
+        "import askevals.gate as g\n"
+        "class Gate:\n"
+        "    def write_run(self, record): pass\n"
+        f"    def clear_run(self, hold_id): open({str(tmp_path / 'cleared')!r}, 'w').write(hold_id)\n"
+        "real = g.GateHold.__init__\n"
+        "g.GateHold.__init__ = lambda self, label, total, gate=None: real(self, label, total, Gate())\n"
+        "run.subprocess.run = lambda *a, **k: os.kill(os.getpid(), signal.SIGTERM)\n"
+        "sys.exit(run.main(['--only', 's8-', '--no-jail', '--no-model', '--hold-gate', 'x',\n"
+        f"    '--out', {str(tmp_path / 'o.jsonl')!r}, '--runs', {str(tmp_path / 'runs')!r}]))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert result.returncode == 143, result.stderr
+    assert (tmp_path / "cleared").exists()
