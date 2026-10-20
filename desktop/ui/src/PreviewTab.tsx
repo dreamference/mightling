@@ -143,6 +143,7 @@ export function PreviewTab(props: PreviewTabProps) {
     if (action === "previewBack") bridge.preview.go(id, "back").catch(notice);
     else if (action === "previewForward") bridge.preview.go(id, "forward").catch(notice);
     else if (action === "previewReload") bridge.preview.reload(id).catch(notice);
+    else if (action === "previewReloadHard") bridge.preview.reload(id, true).catch(notice);
     else if (action === "addressBar") address.current?.select();
     else if (action === "commentMode") void pick();
     else if (action === "copyUrl") void copyText(state?.url ?? typed);
@@ -158,6 +159,7 @@ export function PreviewTab(props: PreviewTabProps) {
       const bound: [ReturnType<typeof keyAction>, string][] = [
         [keyAction("addressBar"), "addressBar"],
         [keyAction("previewReload"), "previewReload"],
+        [keyAction("previewReloadHard"), "previewReloadHard"],
         [keyAction("previewBack"), "previewBack"],
         [keyAction("previewForward"), "previewForward"],
         [keyAction("commentMode"), "commentMode"],
