@@ -1482,7 +1482,7 @@ mod tests {
 
     #[test]
     fn the_overlay_name_comes_before_any_browse() {
-        let browser = Fixed { adverts: vec![spark1()], asked: RefCell::new(Vec::new()) };
+        let browser = Fixed::new(vec![spark1()]);
         let inputs = Inputs { remembered: Some(enrolled()), overlay: true, ..Inputs::default() };
         match resolve(&inputs, &browser) {
             Resolution::Overlay { node } => assert_eq!(node.model_url(), "http://mightling-11111111-aaaa.netbird.selfhosted:8000"),
@@ -1493,14 +1493,14 @@ mod tests {
 
     #[test]
     fn with_the_overlay_down_the_lan_tiers_run_as_before() {
-        let browser = Fixed { adverts: vec![spark1()], asked: RefCell::new(Vec::new()) };
+        let browser = Fixed::new(vec![spark1()]);
         let inputs = Inputs { remembered: Some(enrolled()), overlay: false, ..Inputs::default() };
         assert!(matches!(resolve(&inputs, &browser), Resolution::Found { .. }));
     }
 
     #[test]
     fn configuration_and_a_node_still_win_over_the_overlay() {
-        let browser = Fixed { adverts: Vec::new(), asked: RefCell::new(Vec::new()) };
+        let browser = Fixed::new(Vec::new());
         let configured = Inputs { configured: Some("http://10.0.0.1:8000".into()), remembered: Some(enrolled()), overlay: true, ..Inputs::default() };
         assert_eq!(resolve(&configured, &browser), Resolution::Host("http://10.0.0.1:8000".into()));
         let node = Inputs { is_node: true, remembered: Some(enrolled()), overlay: true, ..Inputs::default() };
@@ -1509,7 +1509,7 @@ mod tests {
 
     #[test]
     fn an_overlay_name_that_is_not_the_nodes_own_is_never_used() {
-        let browser = Fixed { adverts: Vec::new(), asked: RefCell::new(Vec::new()) };
+        let browser = Fixed::new(Vec::new());
         let stranger = Node { remote: "laptop.netbird.selfhosted".to_string(), ..spark1().node };
         let inputs = Inputs { remembered: Some(stranger), overlay: true, ..Inputs::default() };
         assert!(matches!(resolve(&inputs, &browser), Resolution::LastAddress { .. }));
