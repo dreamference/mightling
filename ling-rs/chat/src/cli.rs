@@ -117,6 +117,9 @@ pub fn hub_config(environment: &Environment) -> HubConfig {
     if let Some(n) = chat_setting(&text, "max_threads_listed") {
         config.max_threads = (n as usize).clamp(1, 50);
     }
+    // The settings both bridges share (MIGHTLING_CHAT §16), read again every minute.
+    config.settings = ling_web_server::chat_settings::ChatSettings::from_toml(&text);
+    config.settings_file = Some(environment.user_config());
     config
 }
 

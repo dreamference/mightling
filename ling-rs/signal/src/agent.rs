@@ -257,6 +257,36 @@ pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bo
     Ok(saved_from(&body))
 }
 
+/// The chat settings of the user's configuration (`[chat]`), as `ling web` reads them for the
+/// bridge, which cannot (`/api/chat/settings`; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatSettings {
+    /// A question after this long a silence starts a new thread; None: never.
+    pub new_thread_after_ms: Option<u64>,
+}
+
+impl ChatSettings {
+    /// `/api/chat/settings`' answer; a missing field keeps the bridge's default.
+    pub fn from_json(value: &Value) -> ChatSettings {
+        let new_thread_after_ms = match value.get("newThreadAfterSeconds").and_then(Value::as_u64) {
+            Some(0) => None,
+            Some(seconds) => Some(seconds * 1000),
+            None => Some(crate::bridge::NEW_THREAD_AFTER_MS),
+        };
+        ChatSettings { new_thread_after_ms }
+    }
+}
+
+pub async fn chat_settings(port: u16, cookie: &str) -> Result<ChatSettings, String> {
+    let request = format!("GET /api/chat/settings HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");
+    let (status, _, body) = http(port, request.as_bytes()).await?;
+    if status != 200 {
+        return Err(format!("ling web did not report the chat settings (HTTP {status})"));
+    }
+    let value: Value = serde_json::from_slice(&body).map_err(|err| err.to_string())?;
+    Ok(ChatSettings::from_json(&value))
+}
+
 /// The user-level air-gap level, as `ling web` resolves it (`/api/airgapped`): true for `on`.
 pub async fn airgap_level(port: u16, cookie: &str) -> Result<bool, String> {
     let request = format!("GET /api/airgapped HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");
@@ -444,6 +474,13 @@ mod tests {
         assert_eq!(turn_input("plain", &[]).as_array().unwrap().len(), 1);
         // An image alone: no empty text item beside it.
         assert_eq!(turn_input("  ", &["/a/x.jpg".to_string()]), json!([{"type": "localImage", "path": "/a/x.jpg"}]));
+    }
+
+    #[test]
+    fn chat_settings_come_from_ling_web_with_the_bridges_defaults() {
+        assert_eq!(ChatSettings::from_json(&json!({"newThreadAfterSeconds": 7200})).new_thread_after_ms, Some(7_200_000));
+        assert_eq!(ChatSettings::from_json(&json!({"newThreadAfterSeconds": 0})).new_thread_after_ms, None);
+        assert_eq!(ChatSettings::from_json(&json!({})).new_thread_after_ms, Some(crate::bridge::NEW_THREAD_AFTER_MS));
     }
 
     #[test]

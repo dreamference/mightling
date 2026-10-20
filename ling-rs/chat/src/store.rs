@@ -151,6 +151,9 @@ pub struct ChatThreads {
     pub current: Option<String>,
     /// Newest first.
     pub recent: Vec<ThreadRef>,
+    /// When the conversation last moved, milliseconds since the epoch: the user's last message or
+    /// the last answer (MIGHTLING_CHAT §16.2). None in a file from before, taken as long ago.
+    pub last_ms: Option<u64>,
 }
 
 /// `threads.json`: chat key (`telegram:<chat id>`, `matrix:<room id>`) → its threads.
@@ -188,7 +191,8 @@ impl Threads {
                             })
                             .unwrap_or_default();
                         let current = chat.get("current").and_then(Value::as_str).map(str::to_string);
-                        (key.clone(), ChatThreads { current, recent })
+                        let last_ms = chat.get("last").and_then(Value::as_u64);
+                        (key.clone(), ChatThreads { current, recent, last_ms })
                     })
                     .collect()
             })
@@ -202,7 +206,7 @@ impl Threads {
             .iter()
             .map(|(key, chat)| {
                 let recent: Vec<Value> = chat.recent.iter().map(|t| json!({ "id": t.id, "name": t.name })).collect();
-                (key.clone(), json!({ "current": chat.current, "recent": recent }))
+                (key.clone(), json!({ "current": chat.current, "recent": recent, "last": chat.last_ms }))
             })
             .collect();
         write_private(&Self::path(dir), &serde_json::to_string_pretty(&json!({ "chats": chats })).unwrap_or_default())

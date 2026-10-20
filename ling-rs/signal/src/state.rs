@@ -149,6 +149,8 @@ pub struct Conversation {
     pub seen: Vec<u64>,
     pub ignored: u64,
     pub identity_refusals: u64,
+    /// When the conversation last moved (§19.2).
+    pub last_activity_ms: Option<u64>,
 }
 
 impl Conversation {
@@ -159,6 +161,7 @@ impl Conversation {
             "seen": self.seen,
             "ignored": self.ignored,
             "identityRefusals": self.identity_refusals,
+            "lastActivityMs": self.last_activity_ms,
         })
     }
 
@@ -177,6 +180,7 @@ impl Conversation {
             seen: value.get("seen").and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_u64).collect()).unwrap_or_default(),
             ignored: value.get("ignored").and_then(Value::as_u64).unwrap_or(0),
             identity_refusals: value.get("identityRefusals").and_then(Value::as_u64).unwrap_or(0),
+            last_activity_ms: value.get("lastActivityMs").and_then(Value::as_u64),
         }
     }
 
@@ -283,6 +287,7 @@ mod tests {
             seen: vec![1, 2, 3],
             ignored: 4,
             identity_refusals: 1,
+            last_activity_ms: Some(1_792_000_000_000),
         };
         conversation.save(&dir).unwrap();
         assert_eq!(Conversation::load(&dir), conversation);

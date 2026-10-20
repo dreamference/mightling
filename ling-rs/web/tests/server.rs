@@ -122,6 +122,7 @@ const PROTECTED: &[(&str, &str)] = &[
     ("POST", "/api/transcribe"),
     ("GET", "/api/apps"),
     ("GET", "/api/airgapped"),
+    ("GET", "/api/chat/settings"),
     ("GET", "/images/0123456789abcdef.jpg"),
     ("GET", "/docs/documents/1"),
     ("GET", "/api/docs"),

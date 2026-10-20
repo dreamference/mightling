@@ -456,3 +456,31 @@ async fn a_screenshot_goes_in_as_its_text_and_as_an_image_for_a_model_that_takes
     assert!(text.contains("a voice message"), "{text}");
 }
 
+
+/// A message after a long silence starts a new thread and says how to go back; `/use 2` does.
+#[tokio::test]
+async fn a_message_after_a_long_silence_starts_a_new_thread() {
+    let mut rig = rig("silence", default_script(), false, |config| {
+        config.settings.new_thread_after = Some(Duration::from_millis(300));
+    });
+    rig.inbound.send(text(CHAT, "about a song")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    settle().await;
+    // Soon after: the same thread.
+    rig.inbound.send(text(CHAT, "and the chorus?")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    assert_eq!(rig.log.params("thread/start").len(), 1);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    while rig.telegram.try_recv().is_ok() {}
+    rig.inbound.send(text(CHAT, "compare it with a Dyson")).unwrap();
+    let notice = next_settled(&mut rig.telegram).await;
+    let Outbound::Notice { text: line, .. } = notice else { panic!("{notice:?}") };
+    assert!(line.starts_with("New thread (the last message was") && line.ends_with("; /use 2 to go back."), "{line}");
+    settle().await;
+    assert_eq!(rig.log.params("thread/start").len(), 2);
+    let threads = ling_chat::store::Threads::load(&rig.dir);
+    assert_eq!(threads.chats[CHAT].current.as_deref(), Some("th2"));
+    assert_eq!(threads.chats[CHAT].recent[1].id, "th1");
+}
