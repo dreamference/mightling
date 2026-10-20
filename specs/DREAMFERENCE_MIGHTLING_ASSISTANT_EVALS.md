@@ -1,6 +1,6 @@
 # Mightling assistant evals: measuring the phone-chat assistant
 
-**Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built, Phase 0 first; nothing built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
+**Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built. **Phase 0 done the same day (§9):** runs happen in a `bwrap --unshare-net` jail that keeps production's sandbox and is offline by construction; nothing else built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
 **Goal:** measure, every night, the faults that made the phone-chat assistant useless on the morning of 2026-10-20 ([MIGHTLING_SIGNAL §19](./DREAMFERENCE_MIGHTLING_SIGNAL.md), [MIGHTLING_CHAT §16](./DREAMFERENCE_MIGHTLING_CHAT.md)). Each fix then gets a number that shows when it regresses, as SWE-bench gives the coding agent.
 **Builds on:**
 - `scripts/cave_mode_bench/` (`run.py`, `drift.py`): real `ling exec` runs with a fresh `CODEX_HOME`, multi-turn through `exec resume --last`, a `check.py` per task, tokens counted with the served model's tokenizer;
@@ -189,14 +189,14 @@ There is no benchmark to adopt here. There are metrics, and the placement questi
 - **Synthetic only.** Every scenario is written for the suite with its own subjects. None is taken, paraphrased or translated from the owner's messages, and no real session is checked in or read by the harness. The failure *classes* of §1 are the input, never the text.
 - **The real agent.** Each scenario runs the installed `ling` with the Ask prompt and the cave mode level under test against the model server, not a raw completion. Under test is the whole loop: prompt, tools, compaction and, in bridge mode, the bridge.
 - **Scored by code.** Each scenario has a `check.py`, as `cave_mode_bench`'s tasks do, reading the turn's events and final answer. A judge appears only as an extra column where no rule decides (§5.5), never as the pass.
-- **Offline, stated precisely.** Direct mode is offline **by construction**: a container on an internal network (§5.2). Bridge mode runs on the host and is offline **by audit**: any egress makes the run void (§5.3).
+- **Offline by construction, in both modes** (since Phase 0, §9.2): every run happens inside a **jail**, a `bwrap --unshare-net` namespace whose only network is its own loopback. The stand-ins listen on that loopback. One port is carried out: the model server's, through a Unix socket that a forwarder on each side joins. Codex's own sandbox (`workspace-write`, as in production) runs nested inside the jail. A command that ignores every proxy finds no network at all.
 
 ### 5.2 Two ways in
 
 | Mode | Path | What it covers | Notes |
 |---|---|---|---|
-| **Direct** (most scenarios) | `DREAMFERENCE_MIGHTLING_PROMPT=ask ling exec`, then `ling exec resume --last` for each later turn, as `cave_mode_bench/drift.py` already does; a fresh `CODEX_HOME` per scenario; the patched `ling` SWE-bench uses, in a container on its own Docker network (`mightling-ask-evals`) with the stand-ins of §5.3 on the same network and the model reached as SWE-bench's instances reach it (SWE_BENCH §18.1) | the turn itself: tool choice and budgets, honesty, language, loops, brevity | Nothing outside the network is reachable, so `curl` to a search engine fails as it would offline. The stand-in proxy logs the attempt, which is what S6 scores. Whether `exec` with the Ask prompt matches `ling web`'s Ask turn (scratch folder, sandbox, composed prompt, `ling prompt show ask --composed`) is a Phase 0 check |
-| **Bridge** (end to end) | the real `ling-signal` daemon against the scripted signal-cli of `ling-rs/signal/tests/daemon.rs` (which delivers `receive` envelopes and logs every `send`), connected to a real `ling web` on loopback, which runs the real Ask turn against the model | attachments (`bridge::compose`, the Tesseract path, the "can't read this image" answer), queued messages merged into one turn, thread age and choice, the reply's format, the benchmark-gate answer | On the host, audited. Telegram and Matrix come later the same way, through the stand-in Bot API and the stand-in homeserver of CHAT §13 |
+| **Direct** (most scenarios) | Inside the jail: `DREAMFERENCE_MIGHTLING_PROMPT=ask ling exec --json -s workspace-write -C <fresh scratch folder> --skip-git-repo-check`, images with `-i`, then `ling exec resume --last` for each later turn, as `cave_mode_bench/drift.py` does; a `CODEX_HOME` per scenario, outside `/tmp` (§9.1) | the turn itself: tool choice and budgets, honesty, language, loops, brevity | The same prompt, sandbox and scratch-folder rule as `ling web`'s Ask turn (§9.1). The differences are listed there: no approvals, and no inserted history |
+| **Bridge** (end to end) | the real `ling-signal` daemon against the scripted signal-cli of `ling-rs/signal/tests/daemon.rs` (which delivers `receive` envelopes and logs every `send`), connected to a real `ling web` on loopback, which runs the real Ask turn against the model | attachments (`bridge::compose`, the Tesseract path, the "can't read this image" answer), queued messages merged into one turn, thread age and choice, the reply's format, the benchmark-gate answer | In the jail too: `ling web`, the bridge, the scripted signal-cli and Tesseract all run inside it. Telegram and Matrix come later the same way, through the stand-in Bot API and the stand-in homeserver of CHAT §13 |
 
 **Model-free bridge checks.** S1's and S3's bridge halves are deterministic: the bridge answers by itself and starts no turn. They are already covered by the regression test on `main` (SIGNAL §19.1). `ask-evals` re-runs them in bridge mode only as a cheap end-to-end check of the installed binaries, and they cost no GPU time. The model-dependent part of failure 1 is S2 and S1's vision-on variant.
 
@@ -208,8 +208,8 @@ There is no benchmark to adopt here. There are metrics, and the placement questi
   - empty results;
   - a 20-second stall;
   - results that contradict each other.
-- **Fetch.** The real `ling-fetch` behind a stand-in HTTP proxy (`HTTP_PROXY`/`HTTPS_PROXY`, which `ling-web-rs`'s `proxy_for` and curl both honour). The proxy serves a frozen page set and answers everything else as the scenario says: a CAPTCHA page, 403, 429 with `Retry-After`, a reset, a 30-second stall. Phase 0 checks two things: that the proxy variables reach `ling-fetch` and curl inside Codex's sandbox, and how HTTPS pages are served from the set without a test CA. If either fails, the fallback is a stand-in `ling-fetch` first on `PATH`, as `cave_mode_bench` pins its binaries. In direct mode the network leaves no other way out; in bridge mode the audit catches it.
-- **Egress.** Every bridge-mode run is audited the way `ling-admin audit egress` audits a session (strace). A run with any connection outside loopback and the stand-ins is void and reported, which also shows that the suite never touched a search engine.
+- **Fetch.** The real `ling-fetch` behind a stand-in HTTP proxy on the jail's loopback. `HTTP_PROXY`, `http_proxy` and `HTTPS_PROXY` are all set, because curl reads only the lower-case name for `http://`. They reach every sandboxed command (§9.2). The page set is served at `http://` addresses on hosts that do not exist (`shop.example.test`), and the stand-in SearXNG's results link to them, so no TLS is involved. A `CONNECT` (any `https://` URL) is answered as the scenario says: 403, a reset or a stall. Plain requests to hosts outside the set get the scenario's fault: a CAPTCHA page, 403, 429 with `Retry-After`, a 30-second stall. Every request is logged, and S6 and S7 score that log.
+- **Egress.** The jail has no route out, so nothing is audited for safety. Each run still records the connections that failed for lack of a route (strace, as `ling-admin audit egress` does), because an attempt to reach the real web is a behaviour S6 scores.
 - **Images**, generated by the harness, never photographed:
   - a blank PNG;
   - noise with no text;
@@ -219,7 +219,7 @@ There is no benchmark to adopt here. There are metrics, and the placement questi
   - a 1×1 and a truncated file.
 
   Each check knows what is in its image.
-- **Time.** Threads are aged through the envelopes' timestamps and, where the bridge reads the wall clock, a clock override for the bridge alone (to be added). Phase 0 finds which clock decides the thread a message lands in.
+- **Time.** On `main`, no clock picks a bridge's thread: the bridge keeps its current thread until `/new` (§9.3). The model learns the date from Codex's World State. A thread is aged by running its earlier turns under libfaketime (`faketime '-2 days'`, in the jail only). That needs the `faketime` package, which is not installed on this machine and needs sudo once. Envelope timestamps cannot age a message: the gate drops any envelope more than 24 hours old (`STALE_MS`).
 
 ### 5.4 Scenarios (first set)
 
@@ -285,7 +285,7 @@ The harness's own logic (stand-ins, checks, loop metrics, scoring) gets ordinary
 
 | Option | How | For | Against |
 |---|---|---|---|
-| **A. A slot before the arm (proposed, D2)** | The night's unit runs `ask_evals.sh run` first, then starts the arm. Bridge mode runs first, with the gate open: its `ling web` runs on the host, and a held gate admits only a run's network (§18.3), so the gate would refuse it. Direct mode then holds the gate with the same record a SWE-bench run writes, for its own network, `mightling-ask-evals`. The night scripts already run steps in sequence (production served, speed measured, arm A, swap, arm B, restore) | Every night, the same model state the arm sees; one more step in a script that exists; a phone question meanwhile gets the "busy with a benchmark" answer | About an hour off the SWE-bench night |
+| **A. A slot before the arm (proposed, D2)** | The night's unit runs `ask_evals.sh run` first, then starts the arm. `ask-evals` holds the gate for the whole slot, so a phone question meanwhile gets the "busy with a benchmark" answer. The jail's model socket is joined to the engine's own loopback port (`127.0.0.1:18000` for 8000, the deliberate override SWE_BENCH §18.1 allows), so both modes pass a gate that refuses everyone else (§9.5). The night scripts already run steps in sequence (production served, speed measured, arm A, swap, arm B, restore) | Every night, the same model state the arm sees; one more step in a script that exists; a phone question meanwhile gets the "busy with a benchmark" answer | About an hour off the SWE-bench night |
 | B. Alternate nights | `ask-evals` and the weekly outside sets on their own night | No change to SWE-bench nights | A regression is seen two days late |
 | C. `night pause` mid-run | Pause the gate, run, resume | No separate slot | Perturbs the SWE-bench arm's timing and admission; rejected |
 | D. The second GB10 | Run on the paired node | Free of the first node's nights | That machine is used for ling-engine development, and its model and recipe must match production's for the number to mean anything |
@@ -300,7 +300,7 @@ The harness's own logic (stand-ins, checks, loop metrics, scoring) gets ordinary
 
 | Phase | What | Acceptance |
 |---|---|---|
-| **0. Checks, no model jobs** | Does `DREAMFERENCE_MIGHTLING_PROMPT=ask ling exec` reproduce `ling web`'s Ask turn (prompt, scratch folder, sandbox)? Do the proxy variables reach `ling-fetch` and curl inside the sandbox, and how is HTTPS served from the page set? Which clock picks a bridge thread? Can app-server threads take inserted assistant turns (for *seed* sets)? Can the patched SWE-bench `ling` run Ask in a container with the stand-ins? | A short written answer to each, with the files read |
+| **0. Checks, no model jobs** (**done 2026-10-20, §9**) | Does `DREAMFERENCE_MIGHTLING_PROMPT=ask ling exec` reproduce `ling web`'s Ask turn (prompt, scratch folder, sandbox)? Do the proxy variables reach `ling-fetch` and curl inside the sandbox, and how is HTTPS served from the page set? Which clock picks a bridge thread? Can app-server threads take inserted assistant turns (for *seed* sets)? Can the patched SWE-bench `ling` run Ask in a container with the stand-ins? | A short written answer to each, with the files read |
 | **1. `ask-evals` direct mode** | S4–S17 in direct mode; stand-ins; loop, language and effort metrics; morning report line | Three consecutive nights with the same commit give the same pass/fail per scenario at least 90% of the time (the noise floor); known-bad replays fail: a scripted transcript with a 92-call retry loop, an n-gram loop, a reply in the wrong language |
 | **2. Bridge mode** | S1–S3 and S4's thread-age variant through the real `ling-signal` and `ling web` | The empty-image and missing-attachment paths pass end to end; the egress audit is clean |
 | **3. Weekly outside sets** | LCB + mixed threads, MMLU-ProX lite, SimpleQA Verified, CAVEWOMAN, BrowseComp-Plus subset with the fault wrapper; AbstentionBench if D4 | Each has a pinned dataset revision, a runner script and a first number in this spec |
@@ -316,6 +316,67 @@ The harness's own logic (stand-ins, checks, loop metrics, scoring) gets ordinary
 - **Leaderboard numbers** for Qwen3.8-27B (OCRBench v2) come from a setting that does not state precision or thinking mode, so they are not our NVFP4, thinking-off build.
 - **Whether `exec` matches the Ask turn**, the proxy path in the sandbox and *seed* insertion are open (Phase 0).
 - **Claims marked NV** were not found in a primary source in this pass and should not be relied on.
+
+---
+
+## 9. Phase 0 results (2026-10-20)
+
+Code read on `main` at `f8647d7` and on the pinned Codex. The checks ran here with `ling sandbox` and `bwrap`, which never start a session, plus two read-only probes of the model server (`/v1/models`, `/mightling-gate`). No model job was run.
+
+### 9.1 `ling exec` with the Ask prompt reproduces the Ask turn, with two differences
+
+- **The same prompt.** `ling web` turns `thread/start {prompt: "ask"}` into `baseInstructions` from the same composition `ling prompt show ask --composed` prints (`ling-rs/web/src/policy.rs`, `vet_thread_params`). `DREAMFERENCE_MIGHTLING_PROMPT=ask` gives `ling exec` that composed text through its own catalog, `model_catalog.ask.json` (`ling-rs/src/prompt.rs`). The composition depends on `CODEX_HOME` (the Gmail, documents and apps blocks), so each scenario's home is built from the same configuration. A scenario that needs a block says so.
+- **The same sandbox and folder rule.** An Ask thread gets a fresh scratch folder as `cwd` and `workspace-write` (`policy.json`: `scratchPrompts ["ask"]`, `scratchSandbox "workspace-write"`). The bridges open threads exactly so (`serve.rs` and `hub.rs`: `thread/start {prompt: "ask"}`, then `turn/start {threadId, input}`). Direct mode passes `-s workspace-write -C <fresh folder>`. Images go in with `ling exec -i`, as the bridge's `localImage` does.
+- **Difference 1, approvals.** `exec` approves nothing. In the bridge, an approval request reaches the phone. Ask with `workspace-write` and the network rarely asks, and a scenario that would ask runs in bridge mode.
+- **Difference 2, history.** `exec` cannot insert earlier assistant turns. The pinned app-server can: `thread/inject_items` "Append[s] raw Responses API items to the thread history without starting a user turn". `ling web`'s policy does not allow it (it is not in `allowedRequests`). So the *seed* sets of §3.2 need the harness to drive `ling app-server` over stdio, not `ling web`.
+- **`CODEX_HOME` outside `/tmp`.** Under `/tmp`, Codex refuses to create its helper aliases ("Refusing to create helper binaries under temporary dir"). The suite keeps its homes in `~/.cache/dreamference/ask-evals/`.
+
+### 9.2 Proxies reach the sandbox, but only a network namespace makes the run offline
+
+Run with `ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true` against a stand-in proxy on loopback:
+
+- **The variables arrive.** `HTTP_PROXY` and `HTTPS_PROXY` reach the sandboxed command. Codex adds `NO_PROXY=localhost,127.0.0.1,::1`.
+- **`ling-fetch` honours the proxy.** It got the stand-in's page.
+- **`ling-search` does not use the proxy.** A non-loopback `DREAMFERENCE_SEARXNG_URL` was looked up in DNS directly. So the stand-in SearXNG listens on loopback.
+- **curl honours the proxy only partly.** It used `HTTPS_PROXY` for `https://` (the stand-in's 403 came back). For `http://` it read only the lower-case `http_proxy`, and fetched the real page while only `HTTP_PROXY` was set. With `--noproxy '*'` it reached the real web: HTTP 200 from a search engine.
+- **A permissions profile does not close the network either.** One extending `:workspace` with `[network] enabled = true` still let `--noproxy` through, because `ling sandbox` does not start Codex's managed network proxy. Whether a session would is not checked, and is not needed after the next point.
+- **The jail works.** `bwrap --unshare-net --dev-bind / /` gives a namespace with loopback alone. Inside it:
+  - every request outside it failed;
+  - Codex's own sandbox ran nested and wrote to its workspace;
+  - the model server answered `/v1/models` through a Unix-socket forwarder pair.
+
+  This held both in this shell and in a transient user unit (`systemd-run --user`), where the AppArmor profile for `bwrap` applies. Unix socket paths must stay under 108 bytes, so the socket lives in `$XDG_RUNTIME_DIR`.
+
+The SWE-bench container route (§9.5) is therefore not needed for offline runs.
+
+### 9.3 No clock picks a bridge's thread
+
+- **The thread.** The Signal bridge opens a thread when it has none, and otherwise resumes or continues `current` from `conversation.json` until `/new` (`bridge.rs`, `begin`). There is no age rule on `main`. The thread-age fix SIGNAL §19 implies is not built.
+- **The wall clock.** It is used only by the gate, which drops an owner's envelope older than 24 hours as late (`gate.rs`, `STALE_MS`), and for progress and typing (`serve.rs`, `now_ms`).
+- **What the model sees.** The date, from Codex's World State environment section (`core/src/session/world_state.rs`, `current_date`, read through the session's time provider).
+- **For the suite.** A stale thread is its history plus a date change. The history is aged with libfaketime on the earlier turns (§5.3). Once a thread-age rule exists, S4's bridge variant tests it through the same clock.
+
+### 9.4 Inserted history
+
+Possible through `ling app-server` (`thread/inject_items`), not through `ling web` or `exec` (§9.1). The *seed* outside sets wait for Phase 3 and a small stdio driver.
+
+### 9.5 SWE-bench's container is not the right place
+
+The container is the sandbox there: Codex's own cannot start inside one, and `ling exec` runs with `--dangerously-bypass-approvals-and-sandbox` (`swe_bench_instance_run.py`). The model's permission instructions would then differ from the Ask turn's, which changes what is measured. The jail (§9.2) keeps production's sandbox, needs no patched binary and no Docker network, and also takes bridge mode. The model is reached through the engine's own loopback port, so `ask-evals` can hold the gate for its slot (§6) the way a SWE-bench run does, without being refused by it.
+
+### 9.6 What Phase 1 builds from this
+
+`scripts/ask_evals/`:
+
+- the jail and its socket forwarder;
+- the stand-in SearXNG and proxy, with the faults of §5.3;
+- the image generator;
+- the scenario format and the checks;
+- the loop, language and effort metrics;
+- the runner for direct mode;
+- tests of all of it on recorded events, with no model.
+
+Separately, the night script's optional step (D2, off by default) and a gate hold of `ask-evals`' own.
 
 ## Sources
 
