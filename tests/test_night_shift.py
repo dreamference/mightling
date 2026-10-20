@@ -43,7 +43,7 @@ FAKE_MIGHTLING = textwrap.dedent("""\
     with open(os.environ["FAKE_MIGHTLING_CALLS"] + ".env", "a") as log:
         log.write(json.dumps({{name: os.environ.get(name) for name in
                                ("DREAMFERENCE_MIGHTLING_PROMPT", "DREAMFERENCE_MIGHTLING_REFINE",
-                                "NO_PROXY", "no_proxy")}}) + "\\n")
+                                "DREAMFERENCE_MIGHTLING_ADAPTER", "NO_PROXY", "no_proxy")}}) + "\\n")
     cwd = args[args.index("-C") + 1]
     out = args[args.index("-o") + 1]
     resume = "resume" in args
@@ -185,6 +185,15 @@ def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup
     assert status == "done"
     seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
     assert seen and all(entry["DREAMFERENCE_MIGHTLING_PROMPT"] is None for entry in seen)
+
+
+def test_every_session_of_a_task_is_on_the_base_whatever_the_users_default_adapter(setup, monkeypatch):
+    # specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §10.4: the runner sets the variable itself, empty.
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_ADAPTER", "rust")
+    status, _, _ = run_task(setup, monkeypatch, "change")
+    assert status == "done"
+    seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
+    assert seen and all(entry["DREAMFERENCE_MIGHTLING_ADAPTER"] == "" for entry in seen)
 
 
 def test_the_model_server_and_loopback_never_go_through_a_leftover_proxy(setup, monkeypatch):
@@ -1253,5 +1262,6 @@ def test_a_task_from_another_machine_runs_in_the_job_sandbox_with_its_own_home(s
     variables = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
     assert variables["CODEX_HOME"] == str(home) and variables["DREAMFERENCE_MIGHTLING_GMAIL"] == "false"
     assert variables["DREAMFERENCE_MIGHTLING_AIRGAPPED"] == "on" and variables["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:8000"
+    assert variables["DREAMFERENCE_MIGHTLING_ADAPTER"] == ""                  # the base (adapters §10.4)
     assert variables["NO_PROXY"] == variables["no_proxy"] == "localhost,127.0.0.1,::1"
     assert run.last_message_path.parent == home
