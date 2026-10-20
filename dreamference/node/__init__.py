@@ -9,6 +9,7 @@ from dreamference.node.fleet_bundle import FleetBundle
 from dreamference.node.fleet_model_plan import FleetModelPlan
 from dreamference.node.fleet_probe import FleetProbe
 from dreamference.node.fleet_session import FleetSession
+from dreamference.node.node_adapter_sync import NodeAdapterSync
 from dreamference.node.node_advertiser import NodeAdvertiser
 from dreamference.node.node_browser import NodeBrowser
 from dreamference.node.node_identity import NodeIdentity
@@ -37,6 +38,7 @@ __all__ = [
     "NodeJobSender",
     "NodeLanes",
     "NodeModelSync",
+    "NodeAdapterSync",
     "NodePairing",
     "NodePrepare",
     "NodeProvisioner",

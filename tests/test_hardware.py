@@ -175,16 +175,19 @@ def test_the_minima_candidate_differs_from_production_in_the_checkpoint_alone():
     # are its own revision and a BF16 KV pool, which SGLang would otherwise make FP8 for a checkpoint
     # that ships KV scales. It is never the default.
     from dreamference.hardware.model_matrix_registry import (
-        DEFAULT_MODEL_ALIAS, ModelMatrixRegistry, QWEN38_SGLANG_RECIPE)
+        DEFAULT_MODEL_ALIAS, ModelMatrixRegistry, QWEN38_LORA_RECIPE, QWEN38_SGLANG_RECIPE)
     key = "qwen3.8-27b-minima-nvfp4-dflash2"
     candidate = ModelMatrixRegistry.get_launch_overrides(key)
     production = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
     assert DEFAULT_MODEL_ALIAS == "qwen3.8-27b-nvfp4-dflash2"
-    assert production == QWEN38_SGLANG_RECIPE
+    # Production adds only its adapters' settings, which Minima never takes: every one of its
+    # layers is NVFP4, and LoRA on an NVFP4 layer crashed the probe's start under torch.compile.
+    assert production == {**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE}
+    assert "lora" not in candidate
     assert candidate["revision"] == "16e768e7d0461b0b86e565ecedd08a24eca53e9a"
     assert candidate["extra_args"] == production["extra_args"] + ["--kv-cache-dtype", "bfloat16"]
     rest = {k: v for k, v in candidate.items() if k not in ("revision", "extra_args")}
-    assert rest == {k: v for k, v in production.items() if k not in ("revision", "extra_args")}
+    assert rest == {k: v for k, v in production.items() if k not in ("revision", "extra_args", "lora")}
     assert ModelMatrixRegistry.get_spec("minima-ai/mnma_qwen3.8_27b_nvfp4") is MODEL_MATRIX[key]
     assert ModelMatrixRegistry.key_for_served_id("minima-ai/mnma_qwen3.8_27b_nvfp4") == key
     assert MODEL_MATRIX[key].supports_vision is False
