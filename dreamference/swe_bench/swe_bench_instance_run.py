@@ -334,6 +334,10 @@ COMPACTION_GAP_S: Final[float] = 2.0
 # Drop-first compaction's log, one line per attempt, under the instance's `codex-home`
 # (ling-rs/masking/src/dropping.rs).
 DROP_LOG: Final[str] = "masking/dropped/log.jsonl"
+# The launcher's guards keep one state file per session here, under the instance's `codex-home`
+# (ling-rs/src/guard.rs, `STATE_DIR`); the kinds of hold they record.
+GUARD_DIR: Final[str] = "guards"
+GUARD_HOLDS: Final[tuple] = ("untested", "pre-existing", "mid-work", "test-edits")
 
 
 class SweBenchInstanceRun:
@@ -597,6 +601,7 @@ class SweBenchInstanceRun:
         state["apply_patch"] = {"form": self.apply_patch, "calls": self.apply_patch_calls()}
         state["exec_tool"] = {"form": self.exec_tool, "calls": self.exec_calls()}
         state["compaction"] = self.compaction_record()
+        state["guards"] = self.guard_record()
         state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
                      wall_s=int(time.time() - self.started), patch_bytes=len(patch.encode()),
                      last_message=self._last_message()[:LAST_MESSAGE_LIMIT], notes=self.notes)
@@ -809,6 +814,53 @@ class SweBenchInstanceRun:
                 declined += 1
         return {"compactions": compactions, "seconds": round(seconds, 1), "drops": drops,
                 "declined": declined, "dropped_outputs": dropped}
+
+    def guard_record(self) -> dict[str, Any]:
+        """Collects what the launcher's guards did in this instance's sessions (spec §27).
+
+        Read from their state files in the scratch `codex-home` (`GUARD_DIR`), the only record,
+        since `exec --json` carries no hook events. A run without a guard arm has no files and
+        records `sessions` 0.
+
+        Returns:
+            dict[str, Any]: `sessions`, the totals `calls`, `edits`, `test_runs` and `notes`,
+            `holds` (per kind: `fired`, `complied`), and from the session updated last,
+            `last_stop` (`edited`, `tested_now`, `weakened_files`, …).
+        """
+        record: dict[str, Any] = {"sessions": 0, "calls": 0, "edits": 0, "test_runs": 0, "notes": 0,
+                                  "holds": {}, "last_stop": None}
+        latest = -1
+        for path in sorted((self.scratch / "codex-home" / GUARD_DIR).glob("*.json")):
+            try:
+                session = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if not isinstance(session, dict):
+                continue
+            record["sessions"] += 1
+            for key in ("calls", "edits", "test_runs"):
+                record[key] += int(session.get(key) or 0)
+            record["notes"] += len(session.get("notes") or [])
+            self.count_holds(record["holds"], session.get("holds") or [])
+            if int(session.get("updated") or 0) > latest:
+                latest = int(session.get("updated") or 0)
+                record["last_stop"] = session.get("last_stop")
+        return record
+
+    @classmethod
+    def count_holds(cls, counts: dict[str, dict[str, int]], holds: list[Any]) -> None:
+        """Adds one session's holds to the per-kind counts.
+
+        Args:
+            counts: `{kind: {"fired": n, "complied": n}}`, updated in place.
+            holds: The session's `holds`.
+        """
+        for hold in holds:
+            if not isinstance(hold, dict) or hold.get("kind") not in GUARD_HOLDS:
+                continue
+            entry = counts.setdefault(str(hold["kind"]), {"fired": 0, "complied": 0})
+            entry["fired"] += 1
+            entry["complied"] += 1 if hold.get("complied") else 0
 
     def apply_patch_calls(self) -> int:
         """

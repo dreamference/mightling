@@ -36,7 +36,8 @@ from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLL
 from dreamference.swe_bench.swe_bench_instance_run import RESTART_DIFF, RESTART_PREAMBLE, REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 from dreamference.swe_bench.swe_bench_runner import (APPLY_PATCH_ENV, BUILT_IN_PROMPTS, DROP_OLD_OUTPUTS_ENV,
-                                                      EXEC_TOOL_ENV, RUN_NAME)
+                                                      EXEC_TOOL_ENV, FINISH_CHECK_ENV, RUN_NAME,
+                                                      TEST_GUARD_ENV)
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -89,6 +90,8 @@ class FakeDocker:
         self.removed = {}
         self.modes = {}
         self.default_mode = "change"
+        # True: the guard arms' hooks never run, so no state file is written.
+        self.guards_silent = False
         self.processes = []
         # The review turn, per instance: `leave` (the default), `edit`, `hang`.
         self.review_modes = {}
@@ -178,6 +181,31 @@ class FakeDocker:
             for _ in range(count):
                 handle.write(json.dumps({"type": "compacted", "payload": {"message": "summary"}}) + "\n")
 
+    @classmethod
+    def write_guard_state(cls, box, session):
+        """Writes what the launcher's guard hooks leave in `codex-home/guards/` (guard.rs).
+
+        With the finish check, an untested change held and then tested; with the test guard, a
+        note and a test-edits hold the agent did not comply with. A second, older session holds
+        nothing.
+        """
+        folder = box["scratch"] / "codex-home" / "guards"
+        folder.mkdir(parents=True, exist_ok=True)
+        holds, notes = [], []
+        if box["env"].get(FINISH_CHECK_ENV) == "1":
+            holds.append({"kind": "untested", "call": 3, "stop": 1, "complied": True, "files": ["widget.py"]})
+        if box["env"].get(TEST_GUARD_ENV) == "1":
+            notes.append({"call": 2, "files": [{"path": "tests/test_widget.py", "lines": ["- assert w() == 1"]}]})
+            holds.append({"kind": "test-edits", "call": 3, "stop": 1, "complied": False, "remaining": 1})
+            holds.append({"kind": "not-a-kind", "complied": True})
+        (folder / f"{session}.json").write_text(json.dumps({
+            "version": 1, "session": session, "updated": 200, "calls": 5, "edits": 2, "test_runs": 1,
+            "notes": notes, "holds": holds,
+            "last_stop": {"stop": 2, "edited": True, "code_changed": 1, "tested_now": True, "weakened_files": 0}}))
+        (folder / "older.json").write_text(json.dumps({"updated": 100, "calls": 1, "edits": 0, "holds": [],
+                                                       "last_stop": {"edited": False}}))
+        (folder / "torn.json").write_text("{not json")
+
     # -- SweBenchDocker.popen ----------------------------------------------------------------
     def popen(self, args, stdout):
         self.calls.append(list(args))
@@ -264,6 +292,9 @@ class FakeDocker:
                 {"timestamp": "2026-10-13T01:00:00.000Z", "type": "response_item", "payload": {"type": "message"}},
                 {"timestamp": "2026-10-13T01:01:37.000Z", "type": "event_msg", "payload": {"type": "token_count"}},
                 {"timestamp": "2026-10-13T01:01:38.000Z", "type": "compacted", "payload": {"message": "summary"}})))
+        if (box["env"].get(TEST_GUARD_ENV) == "1" or box["env"].get(FINISH_CHECK_ENV) == "1") \
+                and not self.guards_silent:
+            self.write_guard_state(box, session)
         form = box["env"].get(APPLY_PATCH_ENV)
         if form in ("function", "freeform") and mode == "change":
             rollout = box["scratch"] / "codex-home" / "sessions" / "2026" / "10" / "02" / "rollout-2026-10-02T00-00-00-fake.jsonl"
@@ -3372,3 +3403,146 @@ def test_the_drop_arm_is_told_apart_by_against_and_parsed(bench, monkeypatch):
     assert seen["drop_old_outputs"] is True
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["drop_old_outputs"] is False
+
+
+# -- the guard arms (`--test-guard`, `--finish-check`, spec §27) ------------------------------------
+
+def test_the_guard_arms_set_the_launchers_switches_and_the_report_counts_their_holds(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    assert run(bench, name="guarded", instances=["acme__widget-1"], test_guard=True, finish_check=True) == 0
+    env, _ = container_env(bench)
+    assert env[TEST_GUARD_ENV] == "1" and env[FINISH_CHECK_ENV] == "1"
+    store = SweBenchRunStore("guarded")
+    manifest = store.manifest()
+    assert manifest["test_guard"] is True and manifest["finish_check"] is True
+    record = store.state("acme__widget-1")["guards"]
+    assert record["sessions"] == 2 and record["calls"] == 6 and record["edits"] == 2 and record["notes"] == 1
+    assert record["holds"] == {"untested": {"fired": 1, "complied": 1}, "test-edits": {"fired": 1, "complied": 0}}
+    assert record["last_stop"]["tested_now"] is True
+    assert ("Guards              test guard on, finish check on: ran in 1 of 1 finished instance(s); notes in 1; "
+            "holds: untested 1 (complied 1), test-edits 1 (complied 0); tested at the last stop in 1 of 1 "
+            "that changed code") in SweBenchReport.render(store)
+    # Without the flags neither variable is set, and every instance still gets an empty record.
+    bench["docker"].calls.clear()
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert TEST_GUARD_ENV not in env and FINISH_CHECK_ENV not in env
+    plain = SweBenchRunStore("plain")
+    assert plain.manifest()["test_guard"] is False and plain.manifest()["finish_check"] is False
+    assert plain.state("acme__widget-1")["guards"]["sessions"] == 0
+    assert "Guards              test guard off, finish check off\n" in SweBenchReport.render(plain)
+
+
+def test_one_guard_alone_sets_only_its_switch(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    assert run(bench, name="finish", instances=["acme__widget-1"], finish_check=True) == 0
+    env, _ = container_env(bench)
+    assert env[FINISH_CHECK_ENV] == "1" and TEST_GUARD_ENV not in env
+    record = SweBenchRunStore("finish").state("acme__widget-1")["guards"]
+    assert record["holds"] == {"untested": {"fired": 1, "complied": 1}} and record["notes"] == 0
+
+
+def test_a_guard_arm_whose_hooks_never_ran_says_so(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    run(bench, name="plain", instances=["acme__widget-1"])
+    bench["docker"].guards_silent = True
+    assert run(bench, name="silent", instances=["acme__widget-1"], finish_check=True) == 0
+    for name in ("plain", "silent"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    report = SweBenchReport.render(SweBenchRunStore("silent"))
+    assert ("Guards              test guard off, finish check on: the hooks never ran "
+            "(no instance has a guard state)") in report
+    against = SweBenchReport.against(SweBenchRunStore("silent"), SweBenchRunStore("plain"))
+    assert "In silent the guards never ran: this comparison says nothing about them." in against
+    assert "differs: finish_check: True | False" in against
+
+
+def test_the_guard_arms_are_told_apart_by_against_and_parsed(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    run(bench, name="plain", instances=["acme__widget-1"])
+    assert run(bench, name="guarded", instances=["acme__widget-1"], test_guard=True) == 0
+    for name in ("plain", "guarded"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    against = SweBenchReport.against(SweBenchRunStore("guarded"), SweBenchRunStore("plain"))
+    assert "differs: test_guard: True | False" in against
+    assert "finish_check" not in against
+    assert re.search(r"guards\s+test-guard\s+none", against)
+    # A run made before the options existed ran without them.
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["test_guard"], manifest["finish_check"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "test_guard" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    against = SweBenchReport.against(SweBenchRunStore("guarded"), SweBenchRunStore("plain"))
+    assert "differs: test_guard: True | False" in against
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--test-guard", "--finish-check",
+                                                       "--name", "x"])) == 0
+    assert seen["test_guard"] is True and seen["finish_check"] is True
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["test_guard"] is False and seen["finish_check"] is False
+
+
+WEAKENING_PATCH = """diff --git a/tests/test_widget.py b/tests/test_widget.py
+index 1111111..2222222 100644
+--- a/tests/test_widget.py
++++ b/tests/test_widget.py
+@@ -1,6 +1,6 @@
+ import pytest
+-def test_widget():
+-    assert widget() == 1
++@pytest.mark.skip
++def test_widget():
++    assert widget() in (1, 2)
+     assert widget() is not None
+-        assert moved()
++    assert moved()
+diff --git a/tests/test_new.py b/tests/test_new.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_new.py
+@@ -0,0 +1,2 @@
++@pytest.mark.skip
++def test_new(): assert False
+diff --git a/acme/core.py b/acme/core.py
+--- a/acme/core.py
++++ b/acme/core.py
+@@ -1,2 +1,2 @@
+-    assert value, "checked"
++    pass
+"""
+
+
+def test_a_weakened_test_is_found_from_the_patch_alone():
+    # A rewritten assertion and an added skip in an existing test file; a moved, re-indented
+    # assertion, a new test file and an assertion in source code weaken nothing.
+    assert SweBenchPatchFilter.weakened_tests(WEAKENING_PATCH) == {
+        "tests/test_widget.py": ["- assert widget() == 1", "+ @pytest.mark.skip"]}
+    deleted = ("diff --git a/tests/test_old.py b/tests/test_old.py\ndeleted file mode 100644\n"
+               "--- a/tests/test_old.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-def test_old():\n-    assert old()\n"
+               "-# assert in a comment\n")
+    assert SweBenchPatchFilter.weakened_tests(deleted) == {
+        "tests/test_old.py": ["- def test_old():", "- assert old()"]}
+    assert SweBenchPatchFilter.weakened_tests("") == {}
+
+
+def test_the_report_counts_patches_that_weaken_an_existing_test_in_every_run(bench):
+    assert run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("plain")
+    assert "Weakened tests      0 of 2 patch(es) weaken an existing test" in SweBenchReport.render(store)
+    lines = store.predictions_path.read_text().splitlines()
+    first = json.loads(lines[0])
+    first["model_patch"] = WEAKENING_PATCH
+    store.predictions_path.write_text("\n".join([json.dumps(first), *lines[1:]]) + "\n")
+    assert (f"Weakened tests      1 of 2 patch(es) weaken an existing test (an assertion removed or "
+            f"rewritten, a test deleted or skipped): {first['instance_id']}") in SweBenchReport.render(store)
+    SweBenchEvaluator.grade(store, bench["settings"])
+    assert re.search(r"weakened tests\s+1\s+1", SweBenchReport.against(store, store))
