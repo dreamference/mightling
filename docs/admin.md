@@ -652,7 +652,7 @@ Manage the local file index's run-time files (ling-docs).
 
 #### `ling-admin docs setup`
 
-Install PDFium, ONNX Runtime and the embedding model ling-docs loads (pinned, checked).
+Install PDFium, ONNX Runtime, the embedding model and OCR's models and libraries ling-docs loads (pinned, checked).
 
 ### `ling-admin searxng`
 
