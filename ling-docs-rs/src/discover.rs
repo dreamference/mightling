@@ -55,13 +55,15 @@ pub enum Kind {
     Pptx,
     /// OpenDocument presentation, `.odp` (Phase 3).
     Odp,
+    /// A picture read by OCR: `.png .jpg .jpeg .tif .tiff .webp .bmp .gif` (§20).
+    Image,
 }
 
 impl Kind {
     /// Every kind, in the order `--type` lists them.
-    pub const ALL: [Kind; 17] = [
+    pub const ALL: [Kind; 18] = [
         Kind::Text, Kind::Markdown, Kind::Rst, Kind::Org, Kind::Tex, Kind::Pdf, Kind::Docx, Kind::Odt, Kind::Html, Kind::Eml, Kind::Mbox, Kind::Csv, Kind::Xlsx, Kind::Xls,
-        Kind::Ods, Kind::Pptx, Kind::Odp,
+        Kind::Ods, Kind::Pptx, Kind::Odp, Kind::Image,
     ];
 
     /// The kind of a file name, by extension only (§7.1: the formats of Phases 1, 2 and 3).
@@ -85,6 +87,7 @@ impl Kind {
             "ods" => Kind::Ods,
             "pptx" => Kind::Pptx,
             "odp" => Kind::Odp,
+            "png" | "jpg" | "jpeg" | "tif" | "tiff" | "webp" | "bmp" | "gif" => Kind::Image,
             _ => return None,
         })
     }
@@ -108,6 +111,7 @@ impl Kind {
             Kind::Ods => "ods",
             Kind::Pptx => "pptx",
             Kind::Odp => "odp",
+            Kind::Image => "image",
         }
     }
 
@@ -187,8 +191,9 @@ fn globs(patterns: &[String]) -> Option<GlobSet> {
     builder.build().ok()
 }
 
-/// Walks a collection.
-pub fn walk(collection: &Collection, user_home: &Path) -> Discovery {
+/// Walks a collection. Images are read only by OCR, so they are kept only when `images` is true
+/// (`docs_ocr`, §20); otherwise they count as a type not read.
+pub fn walk(collection: &Collection, user_home: &Path, images: bool) -> Discovery {
     let mut out = Discovery::default();
     let root = match collection.root.canonicalize() {
         Ok(root) => root,
@@ -271,7 +276,7 @@ pub fn walk(collection: &Collection, user_home: &Path) -> Discovery {
             if !meta.is_file() {
                 continue;
             }
-            let Some(kind) = Kind::of(&name) else {
+            let Some(kind) = Kind::of(&name).filter(|k| images || *k != Kind::Image) else {
                 *out.skipped.entry("type not read").or_default() += 1;
                 continue;
             };
@@ -332,6 +337,11 @@ pub fn sniff_bytes(head: &[u8], kind: Kind) -> std::result::Result<(), &'static 
         Kind::Pdf => {
             let window = &head[..head.len().min(1024)];
             if window.windows(5).any(|w| w == b"%PDF-") { Ok(()) } else { Err("not a PDF (no %PDF- header)") }
+        }
+        Kind::Image => {
+            let magic: &[&[u8]] = &[b"\x89PNG\r\n\x1a\n", b"\xFF\xD8\xFF", b"II*\x00", b"MM\x00*", b"GIF87a", b"GIF89a", b"BM"];
+            let webp = head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP";
+            if webp || magic.iter().any(|m| head.starts_with(m)) { Ok(()) } else { Err("not an image (no PNG, JPEG, TIFF, WebP, GIF or BMP header)") }
         }
         Kind::Xls => {
             if head.starts_with(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") { Ok(()) } else { Err("not an Excel workbook (no OLE header)") }
@@ -405,7 +415,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(root.join("locked.zip"), std::fs::Permissions::from_mode(0o000)).unwrap();
         let collection = Collection::new("downloads", root.clone());
-        let found = walk(&collection, &home);
+        let found = walk(&collection, &home, true);
         let rels: Vec<&str> = found.candidates.iter().map(|c| c.rel.as_str()).collect();
         assert_eq!(rels, ["a.pdf", "notes.md", "sub/ok.txt"]);
         assert_eq!(found.skipped["type not read"], 3);
@@ -426,7 +436,7 @@ mod tests {
         std::os::unix::fs::symlink(root.join("in.md"), root.join("alias.md")).unwrap();
         std::os::unix::fs::symlink(&root, root.join("loop")).unwrap();
         let mut collection = Collection::new("docs", root.clone());
-        let rels = |c: &Collection| walk(c, &home).candidates.iter().map(|c| c.rel.clone()).collect::<Vec<_>>();
+        let rels = |c: &Collection| walk(c, &home, true).candidates.iter().map(|c| c.rel.clone()).collect::<Vec<_>>();
         assert_eq!(rels(&collection), ["in.md"]);
         collection.follow_symlinks = true;
         // The alias is kept under its own name (the hash makes it a duplicate later); the escape
@@ -446,6 +456,13 @@ mod tests {
         let pdf = dir.path().join("y.pdf");
         std::fs::write(&pdf, b"\n%PDF-1.4\n").unwrap();
         assert!(sniff(&pdf, Kind::Pdf).is_ok());
+        // Pictures by their own headers (§20).
+        for head in [&b"\x89PNG\r\n\x1a\n...."[..], b"\xFF\xD8\xFF\xE0..JFIF", b"RIFF\x00\x00\x00\x00WEBPVP8 ", b"II*\x00....", b"GIF89a..", b"BM......"] {
+            assert!(sniff_bytes(head, Kind::Image).is_ok(), "{head:?}");
+        }
+        assert!(sniff_bytes(b"%PDF-1.4", Kind::Image).is_err());
+        assert_eq!(Kind::of("Scan 3.JPEG"), Some(Kind::Image));
+        assert_eq!(Kind::of("photo.heic"), None, "no pure-Rust decoder");
         assert_eq!(hash(&pdf).unwrap().len(), 64);
     }
 }

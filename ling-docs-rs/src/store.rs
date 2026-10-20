@@ -1,8 +1,9 @@
 //! A collection's database (spec §6, §7.4): `docs/<collection>.db`, SQLite, mode 600.
 //!
 //! - `documents`: one row per file, with its size, modification time and SHA-256 (the change
-//!   scan's keys), its status (`pending`, `ok`, `duplicate`, `failed: …`, `skipped: …`) and the
-//!   PDF pages that need OCR;
+//!   scan's keys), its status (`pending`, `ok`, `duplicate`, `failed: …`, `skipped: …`), the
+//!   pages without a text layer that OCR has not read, and what OCR did (`ocr`, JSON, §20: empty
+//!   until OCR has run on the document, so a newly installed OCR finds what is left to read);
 //! - `units`: the extracted text by page or section, which `read` serves;
 //! - `chunks`: the 512-token chunks with their locators and, once embedded, a float32 vector;
 //! - `chunks_fts` (`porter unicode61`) and `chunks_cjk` (`trigram`, only for chunks with Chinese
@@ -37,7 +38,8 @@ CREATE TABLE IF NOT EXISTS documents(
     status TEXT NOT NULL,
     needs_ocr TEXT NOT NULL DEFAULT '',
     dup_of INTEGER,
-    indexed_at INTEGER
+    indexed_at INTEGER,
+    ocr TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS documents_sha ON documents(sha256);
 CREATE TABLE IF NOT EXISTS units(
@@ -89,7 +91,17 @@ pub fn open_rw(path: &Path) -> Result<Connection> {
     } else if version != SCHEMA_VERSION {
         anyhow::bail!("{} has schema {version}, this ling-docs knows {SCHEMA_VERSION}: `ling docs reindex` rebuilds it", path.display());
     }
+    // Added by the OCR phase (§20) to databases written before it: their documents read as not
+    // yet seen by OCR.
+    if !has_ocr_column(&conn) {
+        conn.execute_batch("ALTER TABLE documents ADD COLUMN ocr TEXT NOT NULL DEFAULT ''")?;
+    }
     Ok(conn)
+}
+
+/// Whether `documents` has the `ocr` column (a database from before §20 opened read-only does not).
+pub fn has_ocr_column(conn: &Connection) -> bool {
+    conn.prepare("SELECT ocr FROM documents LIMIT 0").is_ok()
 }
 
 /// Opens a database read-only, as queries do. None when it does not exist yet.
@@ -189,9 +201,37 @@ pub fn write_document(conn: &mut Connection, id: i64, title: &str, pages: Option
         }
     }
     let ocr = needs_ocr.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
-    tx.execute("UPDATE documents SET title = ?, pages = ?, needs_ocr = ?, status = 'ok', indexed_at = ? WHERE id = ?", params![title, pages, ocr, now, id])?;
+    // Freshly extracted: OCR has not seen this version of the file.
+    tx.execute("UPDATE documents SET title = ?, pages = ?, needs_ocr = ?, status = 'ok', indexed_at = ?, ocr = '' WHERE id = ?", params![title, pages, ocr, now, id])?;
     tx.commit()?;
     Ok(())
+}
+
+/// A document's units and chunks after OCR (§20): the text layer's units with the read pages'
+/// units among them, the pages still without text, and the record of what OCR did.
+pub fn write_ocr(conn: &mut Connection, id: i64, title: &str, units: &[Unit], chunks: &[Chunk], needs_ocr: &[u32], record: &str) -> Result<()> {
+    let pages: Option<u32> = conn.query_row("SELECT pages FROM documents WHERE id = ?", [id], |r| r.get(0)).ok().flatten();
+    let indexed: Option<i64> = conn.query_row("SELECT indexed_at FROM documents WHERE id = ?", [id], |r| r.get(0)).ok().flatten();
+    write_document(conn, id, title, pages, needs_ocr, units, chunks, indexed.unwrap_or(0))?;
+    conn.execute("UPDATE documents SET ocr = ? WHERE id = ?", params![record, id])?;
+    Ok(())
+}
+
+/// A document's stored units, in order (what `read` serves; OCR merges into them).
+pub fn units(conn: &Connection, id: i64) -> Result<Vec<Unit>> {
+    let mut stmt = conn.prepare("SELECT loc, page, line_first, line_last, heading, text FROM units WHERE doc_id = ? ORDER BY ord")?;
+    let rows = stmt.query_map([id], |r| Ok(Unit { loc: r.get(0)?, page: r.get(1)?, line_first: r.get(2)?, line_last: r.get(3)?, heading: r.get(4)?, group: None, text: r.get(5)? }))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Documents with pages OCR has not read and no record of OCR yet: id, path, kind, the pages.
+pub fn awaiting_ocr(conn: &Connection) -> Result<Vec<(i64, String, String, Vec<u32>)>> {
+    if !has_ocr_column(conn) {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare("SELECT id, path, kind, needs_ocr FROM documents WHERE status = 'ok' AND needs_ocr != '' AND ocr = '' ORDER BY id")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?;
+    Ok(rows.filter_map(|r| r.ok()).map(|(id, path, kind, pages)| (id, path, kind, pages.split(',').filter_map(|p| p.parse().ok()).collect())).collect())
 }
 
 pub fn set_status(conn: &Connection, id: i64, status: &str) -> Result<()> {
@@ -212,6 +252,12 @@ pub struct Counts {
     pub embedded: i64,
     pub needs_ocr_pages: i64,
     pub needs_ocr_documents: i64,
+    /// Pages OCR read, and how many of them below `docs_ocr_send_below` (§20).
+    pub ocr_pages: i64,
+    pub ocr_low_pages: i64,
+    /// Documents OCR could not read, and documents whose OCR is still to come.
+    pub ocr_failed_documents: i64,
+    pub ocr_waiting_documents: i64,
 }
 
 pub fn counts(conn: &Connection) -> Result<Counts> {
@@ -228,7 +274,28 @@ pub fn counts(conn: &Connection) -> Result<Counts> {
         embedded: one("SELECT count(*) FROM chunks WHERE vector IS NOT NULL")?,
         needs_ocr_pages: ocr.iter().map(|s| s.split(',').count() as i64).sum(),
         needs_ocr_documents: ocr.len() as i64,
+        ..ocr_counts(conn)?
     })
+}
+
+/// The OCR part of [`Counts`], from each document's `ocr` record.
+fn ocr_counts(conn: &Connection) -> Result<Counts> {
+    let mut out = Counts::default();
+    if !has_ocr_column(conn) {
+        return Ok(out);
+    }
+    let rows: Vec<(String, String)> = conn.prepare("SELECT ocr, needs_ocr FROM documents WHERE status = 'ok'")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    for (record, needs) in rows {
+        if record.is_empty() {
+            out.ocr_waiting_documents += i64::from(!needs.is_empty());
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&record) else { continue };
+        out.ocr_pages += value["read"].as_i64().unwrap_or(0);
+        out.ocr_low_pages += value["low"].as_i64().unwrap_or(0);
+        out.ocr_failed_documents += i64::from(value["failed"].is_string());
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

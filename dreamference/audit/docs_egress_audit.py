@@ -74,8 +74,9 @@ class DocsEgressAudit:
     @classmethod
     def make_fixture(cls, home: str) -> str:
         """Writes the fixture folder: `~/Documents` (a default collection) with a Markdown note, a
-        text file, a PDF, a saved web page, a Word file and an e-mail with a CSV attachment (every
-        parser the index has), plus a file of a type the index never opens.
+        text file, a PDF, a PDF page without a text layer (for OCR), a saved web page, a Word file
+        and an e-mail with a CSV attachment (every parser the index has), plus a file of a type the
+        index never opens.
 
         Args:
             home (str): The throwaway home.
@@ -97,6 +98,8 @@ class DocsEgressAudit:
                     ["Colony survey", "The colony counted 412 breeding pairs this year."]
                 )
             )
+        # A page with no text layer, as a scan reads: OCR's scope runs too where OCR is installed.
+        (pathlib.Path(folder) / "scan.pdf").write_bytes(cls.fixture_pdf([]))
         with (pathlib.Path(folder) / "terns.html").open("w") as handle:
             handle.write(
                 "<html><body><h1>Terns</h1><p>Arctic terns migrate from pole to pole.</p></body></html>\n"

@@ -87,6 +87,16 @@ pub fn model_dir() -> PathBuf {
     exe_dir().map(|d| d.join("../models").join(MODEL_NAME)).unwrap_or_else(|| PathBuf::from(MODEL_NAME))
 }
 
+/// The OCR models' folder (spec §20): `MIGHTLING_DOCS_OCR_DIR`, else `../models/rapidocr-3.9.2`
+/// beside the binary. It holds the PP-OCR ONNX models and `tessdata/osd.traineddata`.
+pub fn ocr_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("MIGHTLING_DOCS_OCR_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    let name = format!("rapidocr-{}", crate::ocr::RAPIDOCR_VERSION);
+    exe_dir().map(|d| d.join("../models").join(&name)).unwrap_or_else(|| PathBuf::from(name))
+}
+
 /// What is missing for indexing, if anything: indexing waits and says why (§7.3).
 pub fn missing_runtime() -> Option<String> {
     missing_runtime_at(&lib_dir(), &model_dir())
@@ -137,6 +147,15 @@ pub struct Settings {
     pub pdf_cache_mb: u64,
     /// Days an unused cache entry is kept.
     pub pdf_cache_days: u64,
+    /// `docs_ocr`: scanned PDF pages and images read by OCR (§20).
+    pub ocr: bool,
+    /// `docs_ocr_max_pages`: the scanned pages of one document OCR reads, from the first.
+    pub ocr_max_pages: u32,
+    /// `docs_ocr_timeout_s`: one page's OCR time limit.
+    pub ocr_timeout_s: u64,
+    /// `docs_ocr_send_below`: a page read with a lower mean confidence counts as poorly read
+    /// (the vision queue, not built, would take it, §15.7).
+    pub ocr_send_below: f64,
 }
 
 impl Default for Settings {
@@ -155,6 +174,10 @@ impl Default for Settings {
             pdf_wait_s: 45,
             pdf_cache_mb: 1024,
             pdf_cache_days: 1,
+            ocr: true,
+            ocr_max_pages: 500,
+            ocr_timeout_s: 120,
+            ocr_send_below: crate::ocr::SEND_BELOW as f64,
         }
     }
 }
@@ -219,6 +242,18 @@ impl Settings {
         }
         if let Some(v) = number("docs_pdf_cache_days", "DREAMFERENCE_MIGHTLING_DOCS_PDF_CACHE_DAYS").filter(|v| *v >= 0.0) {
             s.pdf_cache_days = v as u64;
+        }
+        if let Some(v) = flag("docs_ocr", "DREAMFERENCE_MIGHTLING_DOCS_OCR") {
+            s.ocr = v;
+        }
+        if let Some(v) = number("docs_ocr_max_pages", "DREAMFERENCE_MIGHTLING_DOCS_OCR_MAX_PAGES").filter(|v| *v >= 0.0) {
+            s.ocr_max_pages = v.min(u32::MAX as f64) as u32;
+        }
+        if let Some(v) = number("docs_ocr_timeout_s", "DREAMFERENCE_MIGHTLING_DOCS_OCR_TIMEOUT_S").filter(|v| *v >= 1.0) {
+            s.ocr_timeout_s = v as u64;
+        }
+        if let Some(v) = number("docs_ocr_send_below", "DREAMFERENCE_MIGHTLING_DOCS_OCR_SEND_BELOW").filter(|v| (0.0..=1.0).contains(v)) {
+            s.ocr_send_below = v;
         }
         if let Some(v) = env("DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL").or_else(|| table.get("docs_embedding_model").and_then(toml::Value::as_str).map(str::to_string)) {
             s.embedding_model = v;

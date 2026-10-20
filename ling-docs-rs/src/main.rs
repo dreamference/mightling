@@ -143,6 +143,20 @@ enum Command {
         model_dir: PathBuf,
         #[arg(long)]
         test_embedder: bool,
+        /// An OCR page under this mean confidence counts as poorly read (§20).
+        #[arg(long, default_value_t = ling_docs::ocr::SEND_BELOW as f64)]
+        send_below: f64,
+    },
+    #[command(hide = true)]
+    OcrWorker {
+        jobs: PathBuf,
+        out: PathBuf,
+        #[arg(long)]
+        lib_dir: PathBuf,
+        #[arg(long)]
+        ocr_dir: PathBuf,
+        #[arg(long, default_value_t = 4)]
+        threads: usize,
     },
     /// Prints the embeddings of lines of text read from stdin, one JSON array per line (checks).
     #[command(hide = true)]
@@ -150,6 +164,20 @@ enum Command {
         /// Embed as queries (`query: ` prefix).
         #[arg(long)]
         query: bool,
+    },
+    /// Reads a scanned page or an image with OCR, in this process, and prints each page's text,
+    /// confidence, route and time as JSON lines (the measurements of spec §20).
+    #[command(hide = true)]
+    OcrFile {
+        file: PathBuf,
+        /// Render PDF pages at this resolution instead of their images' own.
+        #[arg(long)]
+        dpi: Option<f32>,
+        /// Take this route instead of asking Tesseract (latin, han, cyrillic, hangul, arabic).
+        #[arg(long)]
+        route: Option<String>,
+        #[arg(long, default_value_t = 4)]
+        threads: usize,
     },
     /// Runs many searches in one process and records the ranked chunks and the latency of each
     /// (the evaluation of spec §12).
@@ -286,8 +314,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 }));
             }
             let missing = config::missing_runtime();
+            let settings = Settings::load();
+            let ocr_missing = if !settings.ocr { Some("OCR is switched off (docs_ocr = false)".to_string()) } else { ling_docs::ocr::missing(&config::lib_dir(), &config::ocr_dir()) };
             if json {
-                writeln!(out, "{}", serde_json::to_string_pretty(&serde_json::json!({ "collections": rows, "runtime_missing": missing, "network": "none: local only, unaffected by /airgapped" }))?)?;
+                writeln!(out, "{}", serde_json::to_string_pretty(&serde_json::json!({ "collections": rows, "runtime_missing": missing, "ocr_missing": ocr_missing, "network": "none: local only, unaffected by /airgapped" }))?)?;
                 return Ok(ExitCode::SUCCESS);
             }
             if rows.is_empty() {
@@ -298,8 +328,19 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 writeln!(out, "{} — {}", row["name"].as_str().unwrap_or(""), row["root"].as_str().unwrap_or(""))?;
                 writeln!(out, "  documents {} indexed, {} pending, {} failed, {} duplicates, {} skipped", n("indexed"), n("pending"), n("failed"), n("duplicates"), n("skipped"))?;
                 writeln!(out, "  chunks {} ({} embedded); index {}", n("chunks"), n("embedded"), human_bytes(row["disk_bytes"].as_u64().unwrap_or(0)))?;
+                if n("ocr_pages") > 0 {
+                    writeln!(out, "  OCR: {} scanned pages and images read, {} of them with low confidence", n("ocr_pages"), n("ocr_low_pages"))?;
+                }
                 if n("needs_ocr_pages") > 0 {
-                    writeln!(out, "  needs OCR: {} pages in {} documents (unsearchable until OCR, Phase 2)", n("needs_ocr_pages"), n("needs_ocr_documents"))?;
+                    let why = match &ocr_missing {
+                        Some(why) => format!("not read: {why}"),
+                        None if n("ocr_waiting_documents") > 0 => format!("{} documents wait for OCR", n("ocr_waiting_documents")),
+                        None => "past docs_ocr_max_pages, or unreadable".to_string(),
+                    };
+                    writeln!(out, "  without text: {} scanned pages in {} documents ({why})", n("needs_ocr_pages"), n("needs_ocr_documents"))?;
+                }
+                if n("ocr_failed_documents") > 0 {
+                    writeln!(out, "  OCR could not read {} documents (not retried until they change)", n("ocr_failed_documents"))?;
                 }
                 if let Some(status) = row["last_status"].as_str() {
                     let ago = row["last_run"].as_i64().map(|t| format!(", {} min ago", (index::now() - t) / 60)).unwrap_or_default();
@@ -415,17 +456,19 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Command::Extract { file, page, pages, max_chars, json } => return extract_command(&file, page, pages.as_deref(), max_chars, json),
         Command::ExtractWorker { jobs, out: events, lib_dir } => ling_docs::extract::worker(&jobs, &events, &lib_dir)?,
-        Command::IndexWorker { collection, db, events, threads, lib_dir, model_dir, test_embedder } => {
+        Command::OcrWorker { jobs, out: events, lib_dir, ocr_dir, threads } => ling_docs::ocr::worker::worker(&jobs, &events, &lib_dir, &ocr_dir, threads)?,
+        Command::IndexWorker { collection, db, events, threads, lib_dir, model_dir, test_embedder, send_below } => {
             let mut log = std::io::stderr();
             if test_embedder {
                 let embedder = ling_docs::embed::HashEmbedder { dim: 64 };
-                index::index_worker(&collection, &db, &events, &embedder, &ling_docs::chunk::Words, &mut log)?;
+                index::index_worker_with(&collection, &db, &events, &embedder, &ling_docs::chunk::Words, send_below, &mut log)?;
             } else {
                 let embedder = ling_docs::embed::OnnxEmbedder::load(&model_dir, &lib_dir, threads)?;
-                index::index_worker(&collection, &db, &events, &embedder, &embedder.tokenizer, &mut log)?;
+                index::index_worker_with(&collection, &db, &events, &embedder, &embedder.tokenizer, send_below, &mut log)?;
             }
         }
         Command::BenchSearch { questions, out: path, k, no_merge } => bench_search(&questions, &path, k, no_merge)?,
+        Command::OcrFile { file, dpi, route, threads } => ocr_file(&file, dpi, route.as_deref(), threads)?,
         Command::Embed { query } => {
             use std::io::BufRead;
             let embedder = ling_docs::embed::OnnxEmbedder::load(&config::model_dir(), &config::lib_dir(), 4)?;
@@ -554,6 +597,47 @@ fn bench_search(questions: &PathBuf, path: &PathBuf, k: usize, no_merge: bool) -
         let ms = started.elapsed().as_secs_f64() * 1000.0;
         let hits: Vec<serde_json::Value> = answer.hits.iter().map(|h| serde_json::json!({ "rel": h.rel, "collection": h.collection, "loc": h.loc, "text": h.text })).collect();
         writeln!(sink, "{}", serde_json::json!({ "id": q["id"], "ms": ms, "hits": hits }))?;
+    }
+    Ok(())
+}
+
+/// `ling-docs ocr-file`: every page of a PDF (or the image) through the OCR, one JSON line each.
+fn ocr_file(file: &std::path::Path, dpi: Option<f32>, route: Option<&str>, threads: usize) -> Result<()> {
+    use ling_docs::ocr::{self, image::Image, osd::Script};
+    let mut out = std::io::stdout();
+    let mut engine = ocr::Ocr::load(&config::lib_dir(), &config::ocr_dir(), threads)?;
+    let route = route.map(|r| match r {
+        "han" => Script::Han,
+        "cyrillic" => Script::Cyrillic,
+        "hangul" => Script::Hangul,
+        "arabic" => Script::Arabic,
+        _ => Script::Latin,
+    });
+    let mut read = |page: u32, img: &Image| -> Result<()> {
+        let started = std::time::Instant::now();
+        let text = match route {
+            Some(script) => engine.read_as(img, script)?,
+            None => engine.read_page(img)?,
+        };
+        let seconds = started.elapsed().as_secs_f64();
+        writeln!(out, "{}", serde_json::json!({ "page": page, "seconds": seconds, "width": img.width, "height": img.height, "route": text.route, "tesseract_script": text.tesseract_script, "confidence": text.confidence, "lines": text.lines, "text": text.text() }))?;
+        Ok(())
+    };
+    if ling_docs::discover::Kind::of(&file.to_string_lossy()) == Some(ling_docs::discover::Kind::Pdf) {
+        let pdf = ling_docs::extract::pdf::Pdf::load(&config::lib_dir())?;
+        let count = pdf.extract(file, Some(0))?.page_count;
+        let pages: Vec<u32> = (1..=count).collect();
+        let mut render = |number: u32, w: usize, h: usize, gray: &[u8]| -> Result<()> {
+            let img = Image::from_gray(w, h, gray);
+            read(number, &img)
+        };
+        match dpi {
+            Some(dpi) => pdf.render_gray_at(ling_docs::extract::pdf::Source::Path(file), &pages, dpi, &mut render)?,
+            None => pdf.render_gray(ling_docs::extract::pdf::Source::Path(file), &pages, &mut render)?,
+        }
+    } else {
+        let img = ocr::decode_image(&std::fs::read(file)?)?;
+        read(1, &img)?;
     }
     Ok(())
 }

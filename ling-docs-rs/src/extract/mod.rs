@@ -155,6 +155,10 @@ pub fn extract_file(path: &Path, kind: Kind, readers: &Readers, max_pages: Optio
     if kind == Kind::Pdf {
         return Ok(pdf_extracted(readers.pdf()?.extract(path, max_pages)?));
     }
+    if kind == Kind::Image {
+        // Read only by OCR, in its own scope (§20): the extractor does not decode it.
+        return Ok(Extracted { pages: Some(1), needs_ocr: vec![1], ..Extracted::default() });
+    }
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     extract_bytes(&name, kind, &std::fs::read(path)?, readers, max_pages)
 }
@@ -173,6 +177,8 @@ pub fn extract_bytes(name: &str, kind: Kind, bytes: &[u8], readers: &Readers, ma
         Kind::Xlsx | Kind::Xls | Kind::Ods => sheets::sheets(bytes)?,
         Kind::Pptx => slides::pptx(bytes)?,
         Kind::Odp => slides::odp(bytes)?,
+        // An image inside a mail is not read: OCR reads files of a collection only.
+        Kind::Image => Vec::new(),
         Kind::Markdown => text::markdown(&decode(bytes)),
         Kind::Rst => text::rst(&decode(bytes)),
         Kind::Org => text::org(&decode(bytes)),
@@ -210,13 +216,28 @@ pub struct Job {
     pub max_pages: Option<u32>,
 }
 
-/// A line of the worker's output: `start` before a file, then its result.
+/// A line of a worker's output: `start` before a file, then its result. The OCR worker (§20)
+/// writes `progress` after each page (the per-page time limit starts again), then `ocr` or
+/// `ocrfailed`; a failed OCR leaves the document's text as it is.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "lowercase")]
 pub enum Event {
     Start { id: i64 },
     Done { id: i64, result: Extracted },
     Failed { id: i64, error: String },
+    Progress { id: i64 },
+    Ocr { id: i64, result: crate::ocr::worker::OcrResult },
+    OcrFailed { id: i64, error: String },
+}
+
+impl Event {
+    /// The document an event ends, if it ends one.
+    pub fn finished(&self) -> Option<i64> {
+        match self {
+            Event::Done { id, .. } | Event::Failed { id, .. } | Event::Ocr { id, .. } | Event::OcrFailed { id, .. } => Some(*id),
+            Event::Start { .. } | Event::Progress { .. } => None,
+        }
+    }
 }
 
 /// `ling-docs extract-worker <jobs.jsonl> <out.jsonl>`: reads each job's file and appends its
