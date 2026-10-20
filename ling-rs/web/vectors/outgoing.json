@@ -295,6 +295,27 @@
       "out": {"id": 64, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "AGENTS_MD", "description": "AGENTS.md", "cwd": "/w", "details": null}]}}
     },
     {
+      "name": "externalAgentConfig/import loses its plugin items, whose sources can be cloned or fetched from the network; config and skills still import",
+      "message": {"id": 66, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "CONFIG", "description": "settings", "cwd": "/w", "details": null}, {"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}, {"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}], "source": "desktop"}},
+      "accept": true,
+      "out": {"id": 66, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "CONFIG", "description": "settings", "cwd": "/w", "details": null}, {"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}], "source": "desktop"}}
+    },
+    {
+      "name": "externalAgentConfig/import of plugins alone is refused: nothing would be left to import",
+      "message": {"id": 67, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}]}},
+      "accept": false
+    },
+    {
+      "name": "externalAgentConfig/import with an item that names no itemType is refused rather than guessed at",
+      "message": {"id": 68, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}, {"description": "?", "cwd": null, "details": null}]}},
+      "accept": false
+    },
+    {
+      "name": "externalAgentConfig/import without a migrationItems list is refused",
+      "message": {"id": 69, "method": "externalAgentConfig/import", "params": {"migrationItems": "PLUGINS"}},
+      "accept": false
+    },
+    {
       "name": "externalAgentConfig/import/readHistories passes: the past imports are listed",
       "message": {"id": 65, "method": "externalAgentConfig/import/readHistories", "params": {}},
       "accept": true,

@@ -27,6 +27,7 @@ describe("the policy", () => {
     expect([...POLICY.droppedThreadFields]).toEqual(file.droppedThreadFields);
     expect([...POLICY.namedPrompts].sort()).toEqual([...file.namedPrompts].sort());
     expect(POLICY.namedPrompts.has("ask")).toBe(true);
+    expect(POLICY.refusedImportItems.has("PLUGINS"), "an import never fetches plugins").toBe(true);
     for (const refused of ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"]) {
       expect(POLICY.allowedRequests.has(refused), refused).toBe(false);
     }
