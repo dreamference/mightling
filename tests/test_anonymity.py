@@ -73,7 +73,7 @@ PLACEHOLDER_USERS: Final[frozenset] = frozenset(
 
 IPV4: Final[Pattern] = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.]*\d)")
 HOME_PATH: Final[Pattern] = re.compile(
-    r"(?:/home/|/Users/|[A-Za-z]:\\{1,2}Users\\{1,2})([A-Za-z0-9_.-]+)"
+    r"(?:(?:(?<![\w.~/-])|(?<=file://))/(?:home|Users)/|[A-Za-z]:\\{1,2}Users\\{1,2})([A-Za-z0-9_.-]+)"
 )
 
 # Files no identifier could be read from.
@@ -214,12 +214,16 @@ def test_the_generic_checks_catch_what_they_are_for():
     assert generic_findings("connect to 192.168.7.105:8000") == ["LAN address 192.168.7.105"]
     assert generic_findings("tailnet peer 100.90.1.2") == ["overlay address 100.90.1.2"]
     assert generic_findings("run /home/somebody/bin/x") == ["home path /home/somebody"]
+    assert generic_findings("file:///home/somebody/x") == ["home path /home/somebody"]
     assert generic_findings(r"C:\Users\somebody\x") == [r"home path C:\Users\somebody"]
     assert (
         generic_findings("192.168.50.105 100.101.102.103 /home/user/mightling 10.0.0.2 172.17.0.1")
         == []
     )
     assert generic_findings("version 1.192.168.0.5 and 2001.192.168.0") == []
+    assert (
+        generic_findings("https://example.com/home/kitchen and results/run-1/home/sessions") == []
+    )
 
 
 def test_denylist_entries_match_whole_words_and_fall_back_to_literals():
