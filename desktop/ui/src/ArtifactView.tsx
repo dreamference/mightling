@@ -259,14 +259,14 @@ const DOCUMENT_STYLE = `
 .doc table { border-collapse: collapse; } .doc th, .doc td { border: 1px solid var(--line); padding: 4px 8px; }
 .doc blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
 .doc img { max-width: 100%; }
-.doc .link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.doc .link { color: var(--accent-text); cursor: pointer; text-decoration: underline; }
 .image-alt { color: var(--muted); }
 `;
 
-/** An HTML document's starting point; its own styles come after and win. */
+/** An HTML document's starting point; its own styles come after and win. It stays paper-white in the dark theme, as a PDF page does: the page was written for its own colours. */
 const HTML_BASE_STYLE = `
 .doc.html { display: block; font: 15px/1.5 system-ui, sans-serif; color: #111; background: #fff; padding: 12px 16px 32px; }
 a[data-href] { color: #0b5cad; text-decoration: underline; cursor: pointer; }
 img { max-width: 100%; }
-.image-alt { color: #777; }
+.image-alt { color: #6b6b6b; }
 `;

@@ -68,3 +68,25 @@ def test_the_connect_page_and_programs_still_reach_disconnect(service_port):
     # No such account: the request is accepted and answers that nothing was deleted.
     assert _post(service_port, "/disconnect", origin=HOST_ORIGIN) in (200, 400)
     assert _post(service_port, "/disconnect") in (200, 400)
+
+
+def test_a_service_started_without_a_secret_serves_nothing(monkeypatch):
+    # A container made before the rename hands the secret over as PUFFIN_GMAIL_SECRET, which the
+    # service no longer reads; restarted with today's code it must refuse, not serve mail openly.
+    from dreamference.chat.gmail_search_service import AUTH_HEADER, NO_SECRET_ERROR
+
+    monkeypatch.delenv("MIGHTLING_GMAIL_SECRET", raising=False)
+    port = _free_port()
+    threading.Thread(target=GmailSearchService.serve, kwargs={"port": port}, daemon=True).start()
+    for _ in range(50):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                break
+        except OSError:
+            time.sleep(0.05)
+    for headers in ({}, {AUTH_HEADER: ""}):
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/search?query=x", headers=headers)
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(request, timeout=5)
+        assert refused.value.code == 401
+        assert json.load(refused.value)["error"] == NO_SECRET_ERROR

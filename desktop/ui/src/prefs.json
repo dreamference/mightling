@@ -178,6 +178,10 @@
         "collapsed",
         "hidden"
       ]
+    },
+    "theme": {
+      "default": "system",
+      "enum": ["system", "light", "dark"]
     }
   }
 }

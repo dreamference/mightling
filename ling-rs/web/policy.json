@@ -107,5 +107,9 @@
     "permissions",
     "runtimeWorkspaceRoots"
   ],
-  "scratchSandbox": "workspace-write"
+  "scratchSandbox": "workspace-write",
+  "importRequest": "externalAgentConfig/import",
+  "refusedImportItems": [
+    "PLUGINS"
+  ]
 }

@@ -4,14 +4,15 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { PetView } from "./PetView";
 import { host } from "./bridge";
+import { STORAGE_KEY } from "./prefs";
+import { browserThemeHost, startTheme } from "./theme";
 import "./styles.css";
 
 // Styles that belong to one host (the desktop app's frameless title bar) key on this.
 document.documentElement.dataset.host = host();
 
-// Light only (DESKTOP §14 question 3, 2026-10-03; dark not approved 2026-10-16): the system theme
-// is not followed. html[data-theme] stays the hook a dark block over styles.css's tokens would use.
-document.documentElement.dataset.theme = "light";
+// The theme (theme.ts): set before the first render, then kept on the system's or the user's choice.
+startTheme(browserThemeHost(host(), STORAGE_KEY));
 
 const root = document.getElementById("root");
 if (root) {

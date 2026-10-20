@@ -76,6 +76,8 @@ export interface Prefs {
   commandOutput: "running" | "collapsed" | "hidden";
   /** Whether the bottom panel is open (Ctrl+J). */
   bottomPanel: boolean;
+  /** The theme (Settings › Appearance): the system's, or light or dark whatever the system's (theme.ts). */
+  theme: "system" | "light" | "dark";
 }
 
 /** A thread's worktree, where its work is now, and the snapshot kept when the worktree was removed. */
@@ -95,7 +97,8 @@ const SCHEMA = (schemaFile as { keys: Record<string, Spec> }).keys;
 
 export const DEFAULT_PREFS: Prefs = Object.fromEntries(Object.entries(SCHEMA).map(([key, spec]) => [key, spec.default])) as unknown as Prefs;
 
-const STORAGE_KEY = "mightling.prefs";
+/** Where a browser keeps them; theme.ts reads the theme from it before the first render. */
+export const STORAGE_KEY = "mightling.prefs";
 
 /** Keeps only the keys the schema has, with values of the right kind; the rest fall back. */
 export function sanitize(stored: unknown): Prefs {
@@ -147,16 +150,26 @@ export async function savePrefs(current: Prefs, values: Partial<Prefs>): Promise
   return next;
 }
 
-/** The tokens Appearance may set: the accent, the canvas, the text, and the UI and code fonts. */
-export interface Appearance {
+/** The colours Appearance may set for one theme. */
+export interface AppearanceColours {
   accent?: string;
   canvas?: string;
   text?: string;
-  fontUi?: string;
-  fontCode?: string;
 }
 
-export const APPEARANCE_TOKENS: Record<keyof Appearance, string> = {
+/**
+ * The tokens Appearance may set: the accent, the canvas and the text over the light base, the same
+ * three over the dark one (`dark`; its accent falls back to the light one's, as the themes share
+ * Tiffany Blue), and the UI and code fonts for both.
+ */
+export interface Appearance extends AppearanceColours {
+  fontUi?: string;
+  fontCode?: string;
+  dark?: AppearanceColours;
+}
+
+/** The tokens one theme's overrides set, by key of `appearanceFor`'s answer. */
+export const APPEARANCE_TOKENS: Record<"accent" | "canvas" | "text" | "fontUi" | "fontCode", string> = {
   accent: "--accent",
   canvas: "--canvas",
   text: "--text",
@@ -164,18 +177,36 @@ export const APPEARANCE_TOKENS: Record<keyof Appearance, string> = {
   fontCode: "--font-code",
 };
 
-/** Only colours (#rgb, #rrggbb) and font lists of plain names reach the stylesheet. */
-export function cleanAppearance(value: unknown): Appearance {
-  const result: Appearance = {};
-  if (typeof value !== "object" || value === null) return result;
-  const entries = value as Record<string, unknown>;
+const COLOUR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+function cleanColours(entries: Record<string, unknown>): AppearanceColours {
+  const result: AppearanceColours = {};
   for (const key of ["accent", "canvas", "text"] as const) {
     const colour = entries[key];
-    if (typeof colour === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(colour)) result[key] = colour;
+    if (typeof colour === "string" && COLOUR.test(colour)) result[key] = colour;
   }
+  return result;
+}
+
+/** Only colours (#rgb, #rrggbb) and font lists of plain names reach the stylesheet. */
+export function cleanAppearance(value: unknown): Appearance {
+  if (typeof value !== "object" || value === null) return {};
+  const entries = value as Record<string, unknown>;
+  const result: Appearance = cleanColours(entries);
   for (const key of ["fontUi", "fontCode"] as const) {
     const font = entries[key];
     if (typeof font === "string" && font.length <= 200 && /^[\w\s"',.-]+$/.test(font)) result[key] = font;
   }
+  if (typeof entries.dark === "object" && entries.dark !== null && !Array.isArray(entries.dark)) {
+    const dark = cleanColours(entries.dark as Record<string, unknown>);
+    if (Object.keys(dark).length > 0) result.dark = dark;
+  }
   return result;
+}
+
+/** The overrides the shown theme takes: the light set's colours, or the dark set's (its accent falling back to the light one's); the fonts in both. */
+export function appearanceFor(appearance: Appearance, theme: "light" | "dark"): Partial<Record<keyof typeof APPEARANCE_TOKENS, string>> {
+  const clean = cleanAppearance(appearance);
+  const colours: AppearanceColours = theme === "dark" ? { accent: clean.dark?.accent ?? clean.accent, canvas: clean.dark?.canvas, text: clean.dark?.text } : clean;
+  return { accent: colours.accent, canvas: colours.canvas, text: colours.text, fontUi: clean.fontUi, fontCode: clean.fontCode };
 }
