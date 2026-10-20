@@ -187,6 +187,7 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/code-index.md](docs/dev/code-index.md): `ling-code`
 - [docs/dev/local-file-index.md](docs/dev/local-file-index.md): `ling-docs`
 - [docs/dev/context-engine.md](docs/dev/context-engine.md): the Python context engine
+- [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay (being built)
 - [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
 - [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
 - [docs/dev/cli.md](docs/dev/cli.md): every `ling-admin` subcommand, the sidecars behind `ling web` and the app
