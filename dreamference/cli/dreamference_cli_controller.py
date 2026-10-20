@@ -432,8 +432,12 @@ class DreamferenceCLIController:
                 i += 1
             return flags
 
+        # A server behind the model gate listens on loopback; rebuilt the same way, so the gate's
+        # host and port, and the adapters only a gated launch serves, are not reported as drift.
+        from dreamference.vllm_server.model_gate import ENGINE_BIND_ADDRESS
         try:
-            expected_full = VLLMServerManager().build_launch_command(model=model, port=port)
+            expected_full = VLLMServerManager().build_launch_command(
+                model=model, port=port, gate=ENGINE_BIND_ADDRESS in running_cmd)
         except Exception:
             return {}
 

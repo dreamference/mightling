@@ -185,13 +185,26 @@ class AdapterVerifier:
             entry of the matrix with a pinned revision.
         """
         served = cls.served_id(host)
-        source = "server" if served else "configuration"
         key = ModelMatrixRegistry.key_for_served_id(served, configured) if served else configured
-        spec = ModelMatrixRegistry.get_spec(key) if key else None
-        revision = (
-            str(ModelMatrixRegistry.get_launch_overrides(key).get("revision") or "") if key else ""
-        )
-        if spec is None or not key or not revision:
+        base = cls.base_for(key) if key else None
+        if base is not None:
+            base["source"] = "server" if served else "configuration"
+        return base
+
+    @classmethod
+    def base_for(cls, key: str) -> dict[str, str] | None:
+        """A model of the matrix as a base: its repository, pinned revision and local snapshot.
+
+        Args:
+            key: A model matrix key (the one being served, or about to be).
+
+        Returns:
+            dict[str, str] | None: `key`, `repo`, `revision`, `snapshot`; None when the model is
+            not an entry with a pinned revision.
+        """
+        spec = ModelMatrixRegistry.get_spec(key)
+        revision = str(ModelMatrixRegistry.get_launch_overrides(key).get("revision") or "")
+        if spec is None or not revision:
             return None
         snapshot = (
             ModelDownloader.get_hf_cache_dir()
@@ -204,7 +217,6 @@ class AdapterVerifier:
             "repo": spec.hf_repo_id,
             "revision": revision,
             "snapshot": str(snapshot),
-            "source": source,
         }
 
     @classmethod
