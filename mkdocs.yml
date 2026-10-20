@@ -49,6 +49,7 @@ nav:
       - Terminal agent: ling.md
       - Web UI: web.md
       - Desktop app: desktop.md
+      - Your documents: documents.md
       - Phone messengers: messengers.md
   - Reference:
       - ling-admin: admin.md

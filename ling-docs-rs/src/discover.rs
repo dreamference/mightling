@@ -3,7 +3,8 @@
 //! **The walk opens nothing it will not index.** It reads directory entries and metadata only and
 //! keeps files by extension; a disk image, an installer or a video in `~/Downloads` is never read
 //! (on the synthetic Downloads of §15.8 that saved 10.4 GiB of reads). A kept file is then sniffed
-//! (its first 8 KiB: a PDF must say `%PDF-`, text must have no NUL byte) and hashed, so a
+//! (its first 8 KiB: a PDF must say `%PDF-`, a DOCX or ODT must be a ZIP archive, a mailbox must
+//! start with a `From ` line, text must have no NUL byte) and hashed, so a
 //! browser's `x (1).pdf` copy is indexed once; both happen only for files that are new or changed.
 //!
 //! Excluded whatever the globs say: hidden files and folders, the secret folders of
@@ -32,10 +33,25 @@ pub enum Kind {
     Org,
     Tex,
     Pdf,
+    /// Word's `.docx` (Phase 2).
+    Docx,
+    /// OpenDocument text, `.odt` (Phase 2).
+    Odt,
+    /// `.html`, `.htm`, `.xhtml` (Phase 2).
+    Html,
+    /// One message, `.eml` (Phase 2).
+    Eml,
+    /// A mailbox of messages, `.mbox` (Phase 2).
+    Mbox,
+    /// `.csv` and `.tsv` (Phase 2).
+    Csv,
 }
 
 impl Kind {
-    /// The kind of a file name, by extension only (§7.1, v1 formats of Phase 1).
+    /// Every kind, in the order `--type` lists them.
+    pub const ALL: [Kind; 12] = [Kind::Text, Kind::Markdown, Kind::Rst, Kind::Org, Kind::Tex, Kind::Pdf, Kind::Docx, Kind::Odt, Kind::Html, Kind::Eml, Kind::Mbox, Kind::Csv];
+
+    /// The kind of a file name, by extension only (§7.1: the formats of Phases 1 and 2).
     pub fn of(name: &str) -> Option<Kind> {
         let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
         Some(match ext.as_str() {
@@ -45,6 +61,12 @@ impl Kind {
             "org" => Kind::Org,
             "tex" => Kind::Tex,
             "pdf" => Kind::Pdf,
+            "docx" => Kind::Docx,
+            "odt" => Kind::Odt,
+            "html" | "htm" | "xhtml" => Kind::Html,
+            "eml" => Kind::Eml,
+            "mbox" => Kind::Mbox,
+            "csv" | "tsv" => Kind::Csv,
             _ => return None,
         })
     }
@@ -57,11 +79,32 @@ impl Kind {
             Kind::Org => "org",
             Kind::Tex => "tex",
             Kind::Pdf => "pdf",
+            Kind::Docx => "docx",
+            Kind::Odt => "odt",
+            Kind::Html => "html",
+            Kind::Eml => "eml",
+            Kind::Mbox => "mbox",
+            Kind::Csv => "csv",
         }
     }
 
     pub fn parse(text: &str) -> Option<Kind> {
-        [Kind::Text, Kind::Markdown, Kind::Rst, Kind::Org, Kind::Tex, Kind::Pdf].into_iter().find(|k| k.as_str() == text)
+        Kind::ALL.into_iter().find(|k| k.as_str() == text)
+    }
+
+    /// A ZIP archive (Office and OpenDocument files).
+    pub fn is_zip(self) -> bool {
+        matches!(self, Kind::Docx | Kind::Odt)
+    }
+
+    /// What a locator over this kind's numbered lines calls them (§7.1's locators): paragraphs
+    /// of a document, rows of a table, lines of everything else. PDFs are read by page.
+    pub fn line_word(self) -> &'static str {
+        match self {
+            Kind::Docx | Kind::Odt | Kind::Html => "para",
+            Kind::Csv => "rows",
+            _ => "lines",
+        }
     }
 }
 
@@ -100,6 +143,12 @@ fn secret_name(name: &str) -> bool {
 /// `target/`, many caches) or a virtualenv's `pyvenv.cfg`.
 fn build_tree(dir: &Path) -> bool {
     dir.join("CACHEDIR.TAG").is_file() || dir.join("pyvenv.cfg").is_file()
+}
+
+/// Whether the walk enters a folder of this name at this path: not hidden, not a package or
+/// build tree (the change watch follows the same rule).
+pub fn entered(name: &str, path: &Path) -> bool {
+    !name.starts_with('.') && !SKIP_DIRS.contains(&name) && !build_tree(path)
 }
 
 fn globs(patterns: &[String]) -> Option<GlobSet> {
@@ -251,10 +300,29 @@ pub fn sniff(path: &Path, kind: Kind) -> std::result::Result<(), &'static str> {
         }
     }
     head.truncate(read);
+    sniff_bytes(&head, kind)
+}
+
+/// [`sniff`] on the first bytes of a file.
+pub fn sniff_bytes(head: &[u8], kind: Kind) -> std::result::Result<(), &'static str> {
     match kind {
         Kind::Pdf => {
             let window = &head[..head.len().min(1024)];
             if window.windows(5).any(|w| w == b"%PDF-") { Ok(()) } else { Err("not a PDF (no %PDF- header)") }
+        }
+        k if k.is_zip() => {
+            if head.starts_with(b"PK\x03\x04") { Ok(()) } else { Err("not an Office or OpenDocument file (not a ZIP archive)") }
+        }
+        Kind::Mbox => {
+            let text = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
+            let start = text.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(text.len());
+            if head.contains(&0) {
+                Err("binary content (NUL byte)")
+            } else if text[start..].starts_with(b"From ") {
+                Ok(())
+            } else {
+                Err("not a mailbox (no `From ` line first)")
+            }
         }
         _ => {
             if head.contains(&0) { Err("binary content (NUL byte)") } else { Ok(()) }

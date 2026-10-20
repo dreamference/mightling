@@ -1,0 +1,27 @@
+// Opening a cited document: only an id reaches `ling docs locate`, and only its answer is opened.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import { locate } from "./docs";
+import { nodeScript } from "./test-ling";
+
+describe("a cited document", () => {
+  it("is found by its id through ling docs locate, and nothing else is asked", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-docs-open-")));
+    const log = path.join(home, "calls.txt");
+    const file = path.join(home, "report.pdf");
+    const ling = nodeScript(home, "ling", `require("fs").appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(" ") + "\\n");
+if (process.argv[4] === "documents/42") console.log(JSON.stringify({ path: ${JSON.stringify(file)}, kind: "pdf" }));
+else { console.error("ling-docs: no document documents:7"); process.exit(1); }
+`);
+    await expect(locate(ling, "documents/42")).resolves.toBe(file);
+    await expect(locate(ling, "documents/7")).rejects.toThrow("no document documents:7");
+    for (const bad of ["../etc/1", "/etc/passwd", "documents/1.pdf", "documents", 42]) {
+      await expect(locate(ling, bad)).rejects.toThrow("not a document");
+    }
+    expect(fs.readFileSync(log, "utf8").trim().split("\n")).toEqual(["docs locate documents/42 --json", "docs locate documents/7 --json"]);
+  });
+});

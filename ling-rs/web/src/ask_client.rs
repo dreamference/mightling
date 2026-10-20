@@ -117,6 +117,64 @@ pub async fn sign_in(state: &Path, port: u16) -> Result<String, String> {
         .ok_or_else(|| "ling web did not sign this client in".to_string())
 }
 
+/// What `/api/upload` answered a phone bridge (`read=1`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Saved {
+    /// Where it was written in the thread's folder.
+    pub path: String,
+    /// An image's text, read by the offline reader (ocr.rs).
+    pub text: Option<String>,
+    /// Whether the served model takes images.
+    pub vision: bool,
+}
+
+/// Reads `/api/upload`'s answer.
+pub fn saved_from(body: &str) -> Result<Saved, String> {
+    let value: Value = serde_json::from_str(body).map_err(|err| format!("ling web answered the upload with {body:?}: {err}"))?;
+    Ok(Saved {
+        path: value.get("path").and_then(Value::as_str).ok_or("ling web named no path for the upload")?.to_string(),
+        text: value.get("text").and_then(Value::as_str).map(str::to_string),
+        vision: value.get("vision").and_then(Value::as_bool).unwrap_or(false),
+    })
+}
+
+fn form_escape(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Puts a phone bridge's attachment into an Ask thread's folder, as a signed-in client
+/// (`cookie` from [`sign_in`]): the image's text is read and the model's image support reported.
+pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bool, bytes: &[u8]) -> Result<Saved, String> {
+    let kind = if image { "image" } else { "file" };
+    let mut request = format!(
+        "POST /api/upload?thread={}&kind={kind}&name={}&read=1 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        form_escape(thread),
+        form_escape(name),
+        bytes.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(bytes);
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;
+    stream.write_all(&request).await.map_err(|err| err.to_string())?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.map_err(|err| err.to_string())?;
+    let split = response.windows(4).position(|w| w == b"\r\n\r\n").ok_or("ling web sent no HTTP response")?;
+    let head = String::from_utf8_lossy(&response[..split]).into_owned();
+    let body = String::from_utf8_lossy(&response[split + 4..]).trim().to_string();
+    let status = head.split_whitespace().nth(1).unwrap_or_default();
+    if status != "200" {
+        return Err(format!("the upload was refused (HTTP {status}): {body}"));
+    }
+    saved_from(&body)
+}
+
 /// Asks one question in a new Ask thread; returns the answer, streaming it to stdout.
 pub async fn ask(state: &Path, port: u16, question: &str, limit: Duration) -> Result<String, String> {
     let cookie = sign_in(state, port).await?;

@@ -42,6 +42,7 @@ use crate::ask;
 use crate::auth;
 use crate::auth::Addresses;
 use crate::devices;
+use crate::documents;
 use crate::policy::BusyTracker;
 use crate::policy::Policy;
 use crate::sidecars;
@@ -195,6 +196,18 @@ impl Server {
         let first = catalog.get("models")?.get(0)?;
         first.get("slug").or_else(|| first.get("id")).and_then(|name| name.as_str()).map(str::to_string)
     }
+
+    /// Whether the served model takes images: true only when the launcher wrote `image` into the
+    /// catalog's `input_modalities`, which it does after asking the model server (ling-rs
+    /// `vision.rs`). A catalog that does not say is not taken as a yes.
+    pub fn served_model_takes_images(&self) -> bool {
+        let Ok(text) = std::fs::read_to_string(self.config.codex_home.join("model_catalog.json")) else { return false };
+        let Ok(catalog) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
+        catalog
+            .pointer("/models/0/input_modalities")
+            .and_then(|modalities| modalities.as_array())
+            .is_some_and(|modalities| modalities.iter().any(|m| m.as_str() == Some("image")))
+    }
 }
 
 pub fn header_str(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
@@ -213,6 +226,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/transcribe", post(transcribe).layer(DefaultBodyLimit::disable()))
         .route("/api/apps", get(not_built))
         .route("/images/{*path}", get(image))
+        .route("/docs/{collection}/{id}", get(document))
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
         .route("/login", get(login))
@@ -253,7 +267,8 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
 
 fn secured(mut response: Response) -> Response {
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+    // A served document carries a stricter policy of its own (documents.rs).
+    headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(HeaderValue::from_static(CSP));
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
@@ -318,6 +333,33 @@ async fn image(State(server): State<Arc<Server>>, axum::extract::Path(path): axu
         }
         None => not_found().await,
     }
+}
+
+/// A document a citation names (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §8.3), found by the
+/// local file index inside its collection, never by a path from the request (documents.rs).
+async fn document(State(server): State<Arc<Server>>, axum::extract::Path((collection, id)): axum::extract::Path<(String, String)>) -> Response {
+    if !documents::valid(&collection, &id) {
+        return not_found().await;
+    }
+    let located = match documents::locate(&server.config.launch, &collection, &id).await {
+        Ok(located) => located,
+        Err(reason) => return text(StatusCode::NOT_FOUND, &format!("{reason}\n")),
+    };
+    if located.size > documents::DOCUMENT_CAP {
+        return text(StatusCode::PAYLOAD_TOO_LARGE, "This document is too large to open here.\n");
+    }
+    let bytes = match tokio::fs::read(&located.path).await {
+        Ok(bytes) => bytes,
+        Err(_) => return not_found().await,
+    };
+    let (content_type, inline, policy) = documents::presentation(&located.kind);
+    let mut response = (StatusCode::OK, [(header::CONTENT_TYPE, content_type)], bytes).into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(policy));
+    if let Ok(value) = HeaderValue::from_str(&documents::disposition(inline, &located.rel)) {
+        headers.insert(header::CONTENT_DISPOSITION, value);
+    }
+    response
 }
 
 /// The microphone's recording, turned into text by the speech-to-text service on this machine
@@ -525,6 +567,9 @@ fn unused_path(folder: &Path, name: &str) -> PathBuf {
 
 /// An attachment into an Ask thread's folder: `?thread=<id>&name=<file>&kind=image|file`, the
 /// bytes as the body. Answers the path the UI then sends as `localImage` or names in the prompt.
+/// With `read=1` (the phone bridges), an image's text is read too (ocr.rs) and the answer adds
+/// `text` (null when none was read) and `vision`, whether the served model takes images, so a
+/// bridge knows what the model can be given (specs/DREAMFERENCE_MIGHTLING_CHAT.md §16).
 async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>, request: Request) -> Response {
     let cap = match query.get("kind").map(String::as_str) {
         Some("image") => IMAGE_CAP,
@@ -566,7 +611,14 @@ async fn upload(State(server): State<Arc<Server>>, Query(query): Query<HashMap<S
         }
     }
     let _ = file.flush().await;
-    json_response(StatusCode::OK, json!({ "path": path.to_string_lossy(), "bytes": written }))
+    drop(file);
+    let mut answer = json!({ "path": path.to_string_lossy(), "bytes": written });
+    if query.get("read").map(String::as_str) == Some("1") {
+        let text = if query.get("kind").map(String::as_str) == Some("image") { crate::ocr::read_text(&path).await } else { None };
+        answer["text"] = json!(text);
+        answer["vision"] = json!(server.served_model_takes_images());
+    }
+    json_response(StatusCode::OK, answer)
 }
 
 /// Serves until `shutdown` resolves, on every address in `binds`.

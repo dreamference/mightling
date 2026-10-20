@@ -11,6 +11,16 @@ Developer notes for `ling-admin adapter` and serving adapters on the default mod
 - `AdapterInstaller.install` fetches `manifest.json` and its signature alone first, checks them and the base, and only then fetches the files the manifest lists (`allow_patterns`). Files live in the hub cache as a snapshot at the pinned commit; `installed.json` (`AdapterStore`, 0600) records the snapshot relative to the hub, so the engine's container finds it under its own mount.
 - `ADAPTER_CATALOG` (`adapter_catalog.py`) is empty until the first adapter meets the publishing bar; the organisation's slug `dreamference` is assumed (spec §17, question 9).
 
+## Signing (`.github/workflows/adapter-sign.yml`, `scripts/adapters/sign_manifest.py`)
+
+Manifests are signed in CI, never by hand (spec §5.1). The input is a manifest committed to this repository at `adapters/<name>/<version>/manifest.json`, the folders naming the manifest's own `name` and `version`, with `source.json` beside it: `{"repo": "dreamference/mightling-<name>", "commit": "<40 hex>"}`, the adapter's Hugging Face repository and the commit its weights were uploaded at (the manifest has no field for either, and its parser refuses unknown keys). A push of one to `main` runs the job in the `release` environment:
+
+- `check`: `AdapterManifest.parse`; every listed file's sha256 against the repository's metadata at that commit (LFS files by their recorded sha256, the few small files downloaded, checked against their git blob id and hashed); `base` and `drafter_base` against the registry's pins (the matrix entry's `revision`, its `speculative_config` drafter); and each digest against `AdapterBaseDigest.compute` over a snapshot staged from the base repository's metadata (weights as links named by their LFS sha256, as in the hub cache), so publishing and installing take the digest with the same code.
+- `sign`: checks again, writes `manifest.json.sig` with `ssh-keygen -Y sign -n mightling-adapter` (the key a 0600 file for that step only), and verifies it with `AdapterSignature` against `ling-rs/release-signing.pub`; a key that is not a release key stops the job. The pair is attested (build provenance).
+- `publish`: checks and verifies again, uploads both files as one commit whose parent is exactly the checked commit (`HF_ADAPTER_TOKEN`), and writes the catalogue entry; `catalog` adds it to `ADAPTER_CATALOG` and the job opens the pull request.
+
+Any failure stops before anything is signed or uploaded. `publish --dry-run --key <file>` checks and signs with a key of your own and never uploads; `tests/test_adapter_signing.py` runs it with session keys and the hub mocked. The repository must allow GitHub Actions to create pull requests (Settings, Actions, General).
+
 ## Paired nodes
 
 `node sync-model` follows a successful model copy with `NodeAdapterSync.send`: one `adapter-receive <name> <repo> <commit> <size>` per installed adapter that Dreamference signed for that model, a tar of its cache folder over the same forced command. The receiving node unpacks into a staging folder, checks the blobs and the adapter itself (its own key list), and only then merges and records it. A third-party adapter is never sent.

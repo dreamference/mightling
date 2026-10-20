@@ -25,6 +25,7 @@ from dreamference.night_shift.night_shift_task_run import ANNOUNCES_WORK, NUDGE,
 from dreamference.night_shift.refine_prompt import (FIX_RULES, FIX_RULES_V2, NO_REFINED as NO_REFINED_PIECE,
                                                     REFINED_HEADING, STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS,
                                                     STUDY_SECTIONS_V2, RefinePrompt)
+from dreamference.runner.codex_installer import ADAPTER_ENV
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_hooks import GATE_DIRECTORY, GATE_MOUNT, SweBenchHooks
@@ -1012,6 +1013,8 @@ class SweBenchInstanceRun:
             "SCRATCH": SCRATCH_MOUNT,
             "BASE_COMMIT": self.base_commit,
             "DREAMFERENCE_VLLM_HOST": self.model_url,
+            # The base unless the arm names an adapter in `extra_env`: never the user's default.
+            ADAPTER_ENV: "",
             NIGHT_RUN_ENV: "1",
             "GIT_TERMINAL_PROMPT": "0",
             # /testbed belongs to root in the image and the agent runs as the host's user.
