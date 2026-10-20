@@ -67,7 +67,7 @@ The Qwen 3.5 122B and Qwen 3.6 35B entries, their drafter and their vLLM images 
 
 ## 3. Packages
 
-Each package's `__init__.py` is a re-export facade with an explicit `__all__`. The same-named top-level modules (`dreamference/config.py`, `cli.py`, …) are dead shims, shadowed by the packages.
+Each package's `__init__.py` is a re-export facade with an explicit `__all__`. The same-named top-level modules (`dreamference/config.py`, `cli.py`, …) that used to sit beside them, dead shims shadowed by the packages, were deleted on 2026-10-20 (PYTHON_QUALITY §11).
 
 ### 3.1. `config/`: 4-tier configuration
 
