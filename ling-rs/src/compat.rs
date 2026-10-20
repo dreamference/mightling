@@ -339,9 +339,27 @@ fn doctor_lines(resolved: &Resolved) -> Vec<String> {
     let codex_home = codex_utils_home_dir::find_codex_home().ok().map(|home| home.as_path().to_path_buf());
     lines.extend(interface_lines(&dir, codex_home.as_deref()));
     lines.push(String::new());
-    lines.push("Not built yet: CLAUDE.md, .claude/ settings, commands, agents and hooks follow phase by phase \
+    lines.extend(memory_lines(&dir, codex_home.as_deref()));
+    lines.push(String::new());
+    lines.push("Not built yet: .claude/ settings, commands, agents and hooks follow phase by phase \
                 (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
         .to_string());
+    lines
+}
+
+/// The memory part of `ling compat doctor`: the CLAUDE.md files a session here would be given,
+/// and what was left out.
+fn memory_lines(dir: &Path, codex_home: Option<&Path>) -> Vec<String> {
+    use crate::compat_memory;
+    let places = compat_memory::Places::for_dir(dir, codex_home);
+    let memory = compat_memory::read(&places);
+    let mut lines = vec![format!(
+        "Memory: {} CLAUDE.md file(s), given to the session by a SessionStart hook beside AGENTS.md{}",
+        memory.files.len(),
+        if memory.files.is_empty() { "." } else { ":" }
+    )];
+    lines.extend(memory.files.iter().map(|file| format!("  {} ({} bytes)", file.path.display(), file.text.len())));
+    lines.extend(memory.notes.iter().map(|note| format!("  ⚠️  {note}")));
     lines
 }
 
@@ -398,6 +416,10 @@ const USAGE: &str = "usage: ling compat [status | use claude|off | doctor]";
 
 /// `ling compat …` from a shell. Returns the exit code. It never waits for a model server.
 pub fn run_cli(args: &[String]) -> i32 {
+    // The memory hook Codex runs inside a session in the mode (compat_memory.rs).
+    if args.first().map(String::as_str) == Some("memory") {
+        return crate::compat_memory::run_hook();
+    }
     let resolved = match resolve() {
         Ok(resolved) => resolved,
         Err(err) => {
