@@ -189,7 +189,7 @@ async fn the_owners_question_is_answered_through_ling_web_and_a_strangers_is_not
     let methods: Vec<&str> = messages.iter().filter_map(|m| m["message"]["method"].as_str()).collect();
     assert_eq!(methods, vec!["initialize", "initialized", "thread/start", "turn/start"]);
     let start = messages.iter().find(|m| m["message"]["method"] == "thread/start").unwrap();
-    assert_eq!(start["message"]["params"], json!({ "prompt": "ask" }));
+    assert_eq!(start["message"]["params"], json!({ "prompt": "chat" }));
     let turn = messages.iter().find(|m| m["message"]["method"] == "turn/start").unwrap();
     assert_eq!(turn["message"]["params"]["input"][0]["text"], "what is 2+2?");
 
