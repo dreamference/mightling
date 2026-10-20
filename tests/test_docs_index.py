@@ -1,5 +1,4 @@
-"""
-The Python side of the local file index (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md): the pinned
+"""The Python side of the local file index (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md): the pinned
 run-time files `ling-admin docs setup` installs, and the docs egress scenario's verdict. Nothing
 here downloads anything or runs strace: fetches are stubbed, traces are text.
 """
@@ -7,8 +6,9 @@ here downloads anything or runs strace: fetches are stubbed, traces are text.
 import hashlib
 import io
 import os
-import zipfile
+import pathlib
 import tarfile
+import zipfile
 
 import pytest
 
@@ -38,17 +38,34 @@ def pinned(tmp_path, monkeypatch):
         "https://x/ort.tgz": ort,
     }
     sha = lambda data: hashlib.sha256(data).hexdigest()
-    monkeypatch.setattr(docs_index_setup, "LIBRARIES", {"aarch64": [
-        ("https://x/pdfium.tgz", sha(pdfium), "lib/libpdfium.so", "libpdfium.so"),
-        ("https://x/ort.tgz", sha(ort), "ort/lib/libonnxruntime.so.1.30.0", "libonnxruntime.so"),
-    ]})
+    monkeypatch.setattr(
+        docs_index_setup,
+        "LIBRARIES",
+        {
+            "aarch64": [
+                ("https://x/pdfium.tgz", sha(pdfium), "lib/libpdfium.so", "libpdfium.so"),
+                (
+                    "https://x/ort.tgz",
+                    sha(ort),
+                    "ort/lib/libonnxruntime.so.1.30.0",
+                    "libonnxruntime.so",
+                ),
+            ]
+        },
+    )
     model = {"onnx/model_int8.onnx": b"weights", "tokenizer.json": b"{}"}
-    monkeypatch.setattr(docs_index_setup, "MODEL_FILES", [
-        ("onnx/model_int8.onnx", sha(model["onnx/model_int8.onnx"]), "model.onnx"),
-        ("tokenizer.json", sha(model["tokenizer.json"]), "tokenizer.json"),
-    ])
+    monkeypatch.setattr(
+        docs_index_setup,
+        "MODEL_FILES",
+        [
+            ("onnx/model_int8.onnx", sha(model["onnx/model_int8.onnx"]), "model.onnx"),
+            ("tokenizer.json", sha(model["tokenizer.json"]), "tokenizer.json"),
+        ],
+    )
     for path, data in model.items():
-        files[f"https://huggingface.co/{docs_index_setup.MODEL_REPO}/resolve/{docs_index_setup.MODEL_REVISION}/{path}"] = data
+        files[
+            f"https://huggingface.co/{docs_index_setup.MODEL_REPO}/resolve/{docs_index_setup.MODEL_REVISION}/{path}"
+        ] = data
     monkeypatch.setattr(docs_index_setup, "DOCS_LIB_DIR", str(tmp_path / "lib" / "ling-docs"))
     monkeypatch.setattr(docs_index_setup, "DOCS_MODEL_DIR", str(tmp_path / "models" / "m"))
     fetched = []
@@ -66,7 +83,12 @@ def pinned(tmp_path, monkeypatch):
 
 def test_setup_installs_each_pinned_file_once(pinned):
     tmp_path, _, fetched = pinned
-    assert DocsIndexSetup.missing("aarch64") == ["libpdfium.so", "libonnxruntime.so", "model.onnx", "tokenizer.json"]
+    assert DocsIndexSetup.missing("aarch64") == [
+        "libpdfium.so",
+        "libonnxruntime.so",
+        "model.onnx",
+        "tokenizer.json",
+    ]
     assert DocsIndexSetup.install("aarch64") is True
     assert (tmp_path / "lib" / "ling-docs" / "libpdfium.so").read_bytes() == b"pdfium"
     assert (tmp_path / "lib" / "ling-docs" / "libonnxruntime.so").read_bytes() == b"onnxruntime"
@@ -132,20 +154,29 @@ def test_the_fixture_is_a_readable_pdf_and_a_folder_the_index_takes(tmp_path):
     folder = DocsEgressAudit.make_fixture(str(tmp_path))
     assert folder == os.path.join(str(tmp_path), "Documents")
     # Every parser the index has is exercised: a page, a Word file (a ZIP), mail with an attachment.
-    assert sorted(os.listdir(folder)) == ["gulls.docx", "installer.deb", "notes.txt", "report.pdf", "seabirds.md", "survey.eml", "terns.html"]
-    assert zipfile.is_zipfile(os.path.join(folder, "gulls.docx"))
-    with open(os.path.join(folder, "report.pdf"), "rb") as handle:
+    assert sorted(entry.name for entry in pathlib.Path(folder).iterdir()) == [
+        "gulls.docx",
+        "installer.deb",
+        "notes.txt",
+        "report.pdf",
+        "seabirds.md",
+        "survey.eml",
+        "terns.html",
+    ]
+    assert zipfile.is_zipfile(pathlib.Path(folder) / "gulls.docx")
+    with pathlib.Path(os.path.join(folder, "report.pdf")).open("rb") as handle:
         data = handle.read()
     assert data.startswith(b"%PDF-1.4") and b"startxref" in data
     # The xref offsets point at the objects.
     xref = int(data.rsplit(b"startxref\n", 1)[1].split(b"\n")[0])
-    assert data[xref:xref + 4] == b"xref"
+    assert data[xref : xref + 4] == b"xref"
     first = int(data[xref:].split(b"\n")[3].split()[0])
-    assert data[first:first + 7] == b"1 0 obj"
+    assert data[first : first + 7] == b"1 0 obj"
 
 
 def test_without_strace_or_ling_docs_the_trace_fails(monkeypatch, tmp_path):
     import shutil as shutil_module
+
     monkeypatch.setattr(shutil_module, "which", lambda name: None)
     assert DocsEgressAudit.run(ling_docs=str(tmp_path / "ling-docs")) == 2
     monkeypatch.setattr(shutil_module, "which", lambda name: "/usr/bin/strace")
@@ -157,13 +188,17 @@ def test_json_writes_the_result_as_timestamp_docs_json(monkeypatch, tmp_path, ca
     # audit's `<timestamp>-<session>.json`.
     import json
     import shutil as shutil_module
+
     ling_docs = tmp_path / "ling-docs"
     ling_docs.write_bytes(b"#!/bin/sh\n")
     ling_docs.chmod(0o755)
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
     monkeypatch.setattr(shutil_module, "which", lambda name: "/usr/bin/strace")
-    monkeypatch.setattr(DocsEgressAudit, "trace", classmethod(
-        lambda cls, binary, work_dir: (StraceParser.parse(CLEAN), True, True, {})))
+    monkeypatch.setattr(
+        DocsEgressAudit,
+        "trace",
+        classmethod(lambda cls, binary, work_dir: (StraceParser.parse(CLEAN), True, True, {})),
+    )
     assert DocsEgressAudit.run(ling_docs=str(ling_docs)) == 0
     assert not (tmp_path / "codex-home" / "audit").exists()
     assert DocsEgressAudit.run(ling_docs=str(ling_docs), write_json=True) == 0
@@ -183,8 +218,15 @@ def test_every_setting_ling_docs_reads_reaches_its_mcp_server():
     from pathlib import Path
 
     repo = Path(__file__).resolve().parent.parent
-    read = set(re.findall(r'"(DREAMFERENCE_MIGHTLING_DOCS\w*)"', (repo / "ling-docs-rs" / "src" / "config.rs").read_text()))
+    read = set(
+        re.findall(
+            r'"(DREAMFERENCE_MIGHTLING_DOCS\w*)"',
+            (repo / "ling-docs-rs" / "src" / "config.rs").read_text(),
+        )
+    )
     launcher = (repo / "ling-rs" / "src" / "docs_index.rs").read_text()
-    forwarded = set(re.findall(r'"(\w+)"', launcher.split("const FORWARDED_ENV", 1)[1].split("];", 1)[0]))
+    forwarded = set(
+        re.findall(r'"(\w+)"', launcher.split("const FORWARDED_ENV", 1)[1].split("];", 1)[0])
+    )
     assert "DREAMFERENCE_MIGHTLING_DOCS_EMBEDDING_MODEL" in read
     assert read <= forwarded, sorted(read - forwarded)
