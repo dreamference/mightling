@@ -212,7 +212,7 @@ Offline, as the rest of the suite: fixture PDFs (generated, a few KB each; `ling
 
 Merged to main on 2026-10-13, after the live check of Phase 1 below.
 
-**Live check (2026-10-13, second-puffin, production SGLang with the default model, `ling exec` built from the merge, throwaway `CODEX_HOME`):**
+**Live check (2026-10-13, node-b, production SGLang with the default model, `ling exec` built from the merge, throwaway `CODEX_HOME`):**
 - "In https://arxiv.org/pdf/1512.03385, what learning rate did the authors use for training on ImageNet, and on which page?": one `pdf_search` call, unprompted; answer 0.1 (divided by 10 on plateaus), p.4, correct. Tool output 9,767 characters.
 - Two questions on the same URL in one session (mini-batch 256, p.4; ensemble top-5 error 3.57 %, Table 5, p.6, both correct): two `pdf_search` calls, one `ling-fetch --download` (counted by a wrapper). Largest output 17,497 characters (`k` = 10), under 8,000 tokens.
 - `DREAMFERENCE_MIGHTLING_AIRGAPPED=on`: the URL refused with the air-gap sentence and no fetch started; the local `resnet.pdf` searched (served from the content-keyed cache, so its header names the URL it was first indexed from).

@@ -83,7 +83,7 @@ class FleetSession:
             "-o",
             f"UserKnownHostsFile={self.known_hosts}",
             # The run's known-hosts file names the key after the host as given here, whatever
-            # `~/.ssh/config` says: an alias there (second-puffin's `HostKeyAlias gx10-386b`) filed
+            # `~/.ssh/config` says: an alias there (node-b's `HostKeyAlias gx10-3c4d`) filed
             # it under that name, the fingerprint printed `?` and pairing found no key to pin
             # (first dry run against a real machine, 2026-10-20).
             "-o",

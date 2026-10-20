@@ -602,13 +602,13 @@ def test_a_right_proof_gets_a_bundle_the_client_can_check():
 @pytest.mark.parametrize(
     "address,allowed",
     [
-        ("192.168.0.20", True),
+        ("192.168.50.20", True),
         ("10.1.2.3", True),
         ("172.16.5.5", True),
         ("fe80::1%wlan0", True),
         ("127.0.0.1", True),
-        ("::ffff:192.168.0.20", True),
-        ("100.82.28.142", False),
+        ("::ffff:192.168.50.20", True),
+        ("100.101.102.103", False),
         ("100.64.0.1", False),
         ("8.8.8.8", False),
         ("2001:4860::1", False),

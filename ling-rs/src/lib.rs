@@ -1813,7 +1813,7 @@ mod tests {
         for host in ["http://localhost:8000", "http://127.0.0.1:8000/", "http://[::1]:8000", "localhost"] {
             assert!(host_is_local(host), "{host}");
         }
-        for host in ["http://192.168.0.105:8000", "http://gx10-9428.local:8000", "http://[fd00::2]:8000", ""] {
+        for host in ["http://192.168.50.105:8000", "http://gx10-1a2b.local:8000", "http://[fd00::2]:8000", ""] {
             assert!(!host_is_local(host), "{host}");
         }
     }

@@ -271,26 +271,26 @@ def test_status_says_what_clients_see(machine, monkeypatch):
     NodeSettings.save(advertise=True)
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, node_id, "1.3.0", "ready", 3000, 8888))
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "gx10-9428", "address": "192.168.0.105", "port": "8000", "node": node_id,
+        {"name": "gx10-1a2b", "address": "192.168.50.105", "port": "8000", "node": node_id,
          "state": "ready", "version": "1.3.0"}]))
     text = NodeAdvertiser.status()
     assert "Advertised: yes" in text and "state=ready" in text
     assert "Web UI (ling web, port 3100): the local network, paired devices only" in text
-    assert "gx10-9428 at 192.168.0.105:8000 state=ready version=1.3.0 (this node)" in text
+    assert "gx10-1a2b at 192.168.50.105:8000 state=ready version=1.3.0 (this node)" in text
     assert "SearXNG published on: 0.0.0.0" in text
 
 
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join([
-        '+;wlP9s9;IPv4;gx10-9428;_mightling-node._tcp;local',
-        '=;br-8544a6cf391a;IPv4;gx10-9428;_mightling-node._tcp;local;gx10-9428.local;172.20.0.1;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
-        '=;vethb68d363;IPv6;gx10-9428;_mightling-node._tcp;local;gx10-9428.local;fe80::1;8000;"state=ready" "node=abc" "proto=1"',
-        '=;wlP9s9;IPv4;gx10-9428;_mightling-node._tcp;local;gx10-9428.local;192.168.0.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
-        '=;wlP9s9;IPv4;gx10-9428;_mightling-node._tcp;local;gx10-9428.local;192.168.0.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
-        '=;wlP9s9;IPv4;other;_ssh._tcp;local;other.local;192.168.0.9;22;""',
+        '+;wlP9s9;IPv4;gx10-1a2b;_mightling-node._tcp;local',
+        '=;br-8544a6cf391a;IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;172.20.0.1;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
+        '=;vethb68d363;IPv6;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;fe80::1;8000;"state=ready" "node=abc" "proto=1"',
+        '=;wlP9s9;IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;192.168.50.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
+        '=;wlP9s9;IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;192.168.50.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
+        '=;wlP9s9;IPv4;other;_ssh._tcp;local;other.local;192.168.50.9;22;""',
     ])
     assert NodeBrowser.parse(output) == [{
-        "interface": "wlP9s9", "name": "gx10-9428", "host": "gx10-9428.local", "address": "192.168.0.105",
+        "interface": "wlP9s9", "name": "gx10-1a2b", "host": "gx10-1a2b.local", "address": "192.168.50.105",
         "port": "8000", "main": "1", "state": "ready", "version": "1.3.0", "node": "abc", "proto": "1"}]
 
 
@@ -510,7 +510,7 @@ def test_only_a_key_of_the_nodes_own_matrix_is_loaded(monkeypatch, capsys):
     assert NodeServe.serve("set-model qwen3.8-27b-nvfp4-dflash2") == 0 and ran[-1] == ["server", "start"]
 
 
-def paired_record(node_id="2222-bbbb", address="192.168.0.106"):
+def paired_record(node_id="2222-bbbb", address="192.168.50.106"):
     from dreamference.node import NodePairing
     record = {"node": node_id, "name": "spark-2", "address": address, "user": "owner", "ssh_port": 22}
     NodePairing._save(record)
@@ -520,17 +520,17 @@ def paired_record(node_id="2222-bbbb", address="192.168.0.106"):
 def test_every_connection_uses_the_pairing_key_and_the_pinned_host_key(monkeypatch):
     from dreamference.node import NodePairing
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.106", "port": "8000"}]))
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000"}]))
     record = paired_record()
     command = NodePairing.ssh_command(record, "status")
-    assert command[0] == "ssh" and command[-2:] == ["owner@192.168.0.106", "status"]
+    assert command[0] == "ssh" and command[-2:] == ["owner@192.168.50.106", "status"]
     options = " ".join(command)
     assert f"-i {NodePairing.key_path()}" in options and "IdentitiesOnly=yes" in options
     assert "BatchMode=yes" in options                           # never a password prompt mid-command
     assert "StrictHostKeyChecking=yes" in options and "HostKeyAlias=mightling-node-2222-bbbb" in options
     assert f"UserKnownHostsFile={NodePairing.known_hosts()}" in options
     assert "accept-new" in " ".join(NodePairing.ssh_options(record, accept_new=True))
-    for name in ("spark-2", "SPARK-2", "192.168.0.106", "2222-bbbb", "2222"):
+    for name in ("spark-2", "SPARK-2", "192.168.50.106", "2222-bbbb", "2222"):
         assert NodePairing.find(name)["node"] == "2222-bbbb", name
     assert NodePairing.find("spark-9") is None and NodePairing.find("222") is None
 
@@ -539,9 +539,9 @@ def test_a_paired_node_is_followed_to_its_new_address(monkeypatch):
     from dreamference.node import NodePairing
     paired_record()
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.200", "port": "8000"}]))
-    assert NodePairing.find("spark-2")["address"] == "192.168.0.200"
-    assert NodePairing.paired()[0]["address"] == "192.168.0.200"
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"}]))
+    assert NodePairing.find("spark-2")["address"] == "192.168.50.200"
+    assert NodePairing.paired()[0]["address"] == "192.168.50.200"
 
 
 def test_managing_a_node_needs_the_pairing_and_sends_one_operation(monkeypatch, capsys):
@@ -565,7 +565,7 @@ def test_managing_a_node_needs_the_pairing_and_sends_one_operation(monkeypatch, 
 
 def test_pairing_checks_that_the_machine_that_answered_is_the_advertised_node(monkeypatch, capsys):
     from dreamference.node import NodePairing
-    advert = {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.106", "port": "8000"}
+    advert = {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000"}
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [advert]))
     sent = []
     monkeypatch.setattr(NodePairing, "authorize_on_node",
@@ -595,8 +595,8 @@ def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypat
     from dreamference.node import NodeRemote
     mine = NodeIdentity.ensure()
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-1", "node": mine, "address": "192.168.0.105", "port": "8000", "main": "1", "version": "1.3.0", "state": "ready"},
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.106", "port": "8000", "version": "1.3.0", "state": "stopped"}]))
+        {"name": "spark-1", "node": mine, "address": "192.168.50.105", "port": "8000", "main": "1", "version": "1.3.0", "state": "ready"},
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000", "version": "1.3.0", "state": "stopped"}]))
     monkeypatch.setattr(NightShiftHost, "served_model", classmethod(
         lambda cls, host, timeout=3.0: ("RadixArk/Qwen3.8-27B-NVFP4", 262144) if "105" in host else None))
     monkeypatch.setattr(NightShiftHost, "metrics", classmethod(
@@ -604,10 +604,10 @@ def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypat
     monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 40 * 1024 ** 3))
     monkeypatch.setattr(NightShiftHost, "mem_total_bytes", classmethod(lambda cls: 120 * 1024 ** 3))
     lines = NodeRemote.list_lines()
-    assert lines[0] == ("spark-1  http://192.168.0.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens), "
+    assert lines[0] == ("spark-1  http://192.168.50.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens), "
                         "2 request(s) running, KV pool 156907 tokens, 40.0 of 120.0 GiB free  Mightling 1.3.0  (this machine)")
     # Memory is not on the open model port: an unpaired node shows none.
-    assert lines[1] == ("spark-2  http://192.168.0.106:8000/v1  model server stopped  Mightling 1.3.0  "
+    assert lines[1] == ("spark-2  http://192.168.50.106:8000/v1  model server stopped  Mightling 1.3.0  "
                         "(not paired: `ling-admin node add spark-2` to manage it; not a coding model)")
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     assert "No Mightling node answers" in NodeRemote.list_lines()[0]
@@ -618,7 +618,7 @@ def test_a_paired_nodes_memory_is_asked_over_the_pairing(monkeypatch):
     from dreamference.night_shift import NightShiftHost
     paired_record()
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.106", "port": "8000", "main": "1",
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000", "main": "1",
          "version": "1.3.0", "state": "stopped"}]))
     monkeypatch.setattr(NightShiftHost, "served_model", classmethod(lambda cls, host, timeout=3.0: None))
     asked = []
@@ -626,13 +626,13 @@ def test_a_paired_nodes_memory_is_asked_over_the_pairing(monkeypatch):
     monkeypatch.setattr(NodePairing, "run", classmethod(
         lambda cls, record, request, capture=True, input_text=None:
         asked.append(request) or subprocess.CompletedProcess([], 0, json.dumps(info) + "\n", "")))
-    assert NodeRemote.list_lines() == ["spark-2  http://192.168.0.106:8000/v1  model server stopped, "
+    assert NodeRemote.list_lines() == ["spark-2  http://192.168.50.106:8000/v1  model server stopped, "
                                        "60.0 of 120.0 GiB free  Mightling 1.3.0  (paired)"]
     assert asked == ["info"]
     # A paired node that does not answer is listed without memory, not left out.
     monkeypatch.setattr(NodePairing, "run", classmethod(
         lambda cls, record, request, capture=True, input_text=None: subprocess.CompletedProcess([], 255, "", "timeout")))
-    assert NodeRemote.list_lines() == ["spark-2  http://192.168.0.106:8000/v1  model server stopped  Mightling 1.3.0  (paired)"]
+    assert NodeRemote.list_lines() == ["spark-2  http://192.168.50.106:8000/v1  model server stopped  Mightling 1.3.0  (paired)"]
 
 
 def test_info_says_what_a_lane_and_the_list_need(monkeypatch, capsys):
@@ -866,7 +866,7 @@ def test_only_a_job_repository_can_be_pushed_to_or_fetched_from(monkeypatch, cap
     from dreamference.node import NodeJob, NodeServe
     ran = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **_: ran.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
-    for path in ("/home/user/PycharmProjects/dgxcoder", "jobs/../../.ssh.git", "jobs/a/b.git", "jobs/x", "/etc/passwd", "~/.mightling"):
+    for path in ("/home/user/mightling", "jobs/../../.ssh.git", "jobs/a/b.git", "jobs/x", "/etc/passwd", "~/.mightling"):
         assert NodeServe.serve(f"git-receive-pack '{path}'") == 2, path
         assert NodeServe.serve(f"git-upload-pack '{path}'") == 2, path
     assert ran == []
@@ -1032,13 +1032,13 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
     paired_record()                                                               # spark-2, .106
     for number in (3, 4, 5):
         NodePairing._save({"node": f"{number}{number}{number}{number}-x", "name": f"spark-{number}",
-                           "address": f"192.168.0.10{number + 4}", "user": "owner", "ssh_port": 22})
+                           "address": f"192.168.50.10{number + 4}", "user": "owner", "ssh_port": 22})
     # Every node is reached where the browse shows it, never at its recorded address.
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
         {"name": record["name"], "node": record["node"], "address": record["address"], "port": "8000"}
         for record in NodePairing.paired()]))
-    answers = {"192.168.0.106": {"model_port": 8000}, "192.168.0.107": {"model_port": 8000},
-               "192.168.0.108": {"runner": "a Night Shift run"}}
+    answers = {"192.168.50.106": {"model_port": 8000}, "192.168.50.107": {"model_port": 8000},
+               "192.168.50.108": {"runner": "a Night Shift run"}}
     asked = []
 
     def run(cls, record, request, capture=True, input_text=None):
@@ -1051,7 +1051,7 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
     class Host:
         @classmethod
         def served_model(cls, host, timeout=3.0):
-            return {"http://192.168.0.106:8000": ("m", 1), "http://192.168.0.107:8000": ("other", 1)}.get(host)
+            return {"http://192.168.50.106:8000": ("m", 1), "http://192.168.50.107:8000": ("other", 1)}.get(host)
 
         @classmethod
         def metrics(cls, host, timeout=3.0):
@@ -1060,7 +1060,7 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
     budget = lambda pool: (int(pool // 100000), 50000)
     lanes, notes = NodeLanes.lanes("http://127.0.0.1:8000", ("m", 1), "paired", Host, budget)
     assert [(lane["name"], lane["host"], lane["parallel"]) for lane in lanes] == [
-        ("this machine", "http://127.0.0.1:8000", 1), ("spark-2", "http://192.168.0.106:8000", 3)]
+        ("this machine", "http://127.0.0.1:8000", 1), ("spark-2", "http://192.168.50.106:8000", 3)]
     assert any("spark-3: serves other, not m" in note for note in notes)
     assert any("spark-4: a Night Shift run is in progress there" in note for note in notes)
     assert any("spark-5: did not answer" in note for note in notes)
@@ -1076,7 +1076,7 @@ def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named
 def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(tmp_path, monkeypatch):
     from dreamference.node import NodeJobSender, NodePairing
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.106", "port": "8000"}]))
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000"}]))
     repo = tmp_path / "My Repo!"
     repo.mkdir()
     subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
@@ -1086,7 +1086,7 @@ def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(t
     assert re.fullmatch(r"My-Repo-[0-9a-f]{10}", request["repo"])
     assert NodeJobSender.compose(str(repo), "a" * 40, ["x"], "16G", "2h", "pytest -q")["test"] == "pytest -q"
     record = paired_record()
-    assert NodeJobSender.git_url(record, "calc-0123456789") == "ssh://owner@192.168.0.106:22/jobs/calc-0123456789.git"
+    assert NodeJobSender.git_url(record, "calc-0123456789") == "ssh://owner@192.168.50.106:22/jobs/calc-0123456789.git"
     fixed = dict(record, address="fd00::6", ssh_port=2222, address_fixed=True)   # a direct link, given by hand
     assert NodeJobSender.git_url(fixed, "r") == "ssh://owner@[fd00::6]:2222/jobs/r.git"
     ssh = NodeJobSender.git_environment(record)["GIT_SSH_COMMAND"]
@@ -1328,22 +1328,22 @@ def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypa
 # -- a paired node is reached where it is now, never at a remembered address -----------------------
 
 def test_every_connection_resolves_the_node_on_the_network_first(monkeypatch):
-    # 2026-10-10: second-puffin's lease had moved from .30 to .246 and every lane probe went to the
+    # 2026-10-10: node-b's lease had moved from .30 to .246 and every lane probe went to the
     # old address for a night. The record remembers an address; no connection trusts it.
     from dreamference.node import NodePairing
     record = paired_record()                                                      # remembered at .106
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.200", "port": "8000"}]))
-    assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.0.200"
-    assert NodePairing.paired()[0]["address"] == "192.168.0.200"                # remembered for next time
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"}]))
+    assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.50.200"
+    assert NodePairing.paired()[0]["address"] == "192.168.50.200"                # remembered for next time
     # Other nodes answer and this one does not: it is off, and its old address may be another
     # machine's by now. Nothing is tried.
     NodePairing.forget_resolved()
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-3", "node": "3333-cccc", "address": "192.168.0.106", "port": "8000"}]))
+        {"name": "spark-3", "node": "3333-cccc", "address": "192.168.50.106", "port": "8000"}]))
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("ssh must not run"))
     answer = NodePairing.run(record, "info")
-    assert answer.returncode == 255 and "not on the network" in answer.stderr and "192.168.0.200" in answer.stderr
+    assert answer.returncode == 255 and "not on the network" in answer.stderr and "192.168.50.200" in answer.stderr
     with pytest.raises(LookupError):
         NodePairing.ssh_command(record, "info")
     # A browse that returns nothing at all (multicast blocked, the access point rebooting) is
@@ -1358,28 +1358,28 @@ def test_every_connection_resolves_the_node_on_the_network_first(monkeypatch):
     assert len(browses) >= 2, "the browse was repeated before the node was given up"
     # ... and a node that appears during the wait is found.
     NodePairing.forget_resolved()
-    answers = [[], [], [{"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.200", "port": "8000"}]]
+    answers = [[], [], [{"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"}]]
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: answers.pop(0) if answers else []))
     monkeypatch.setattr(NodePairing, "resolve_wait_s", 5.0)
     monkeypatch.setattr("dreamference.node.node_pairing.time.sleep", lambda seconds: None)
-    assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.0.200"
+    assert NodePairing.ssh_command(record, "info")[-2] == "owner@192.168.50.200"
     assert not answers, "the node was found on the third browse"
     NodePairing.forget_resolved()
     # An address given by hand (`sync-model --address`, a direct link) is used as it is.
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.201", "port": "8000"}]))
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.201", "port": "8000"}]))
     fixed = dict(record, address="10.10.0.2", address_fixed=True)
     assert NodePairing.ssh_command(fixed, "info")[-2] == "owner@10.10.0.2"
-    assert NodePairing.paired()[0]["address"] == "192.168.0.200"                # a fixed address is not remembered
+    assert NodePairing.paired()[0]["address"] == "192.168.50.200"                # a fixed address is not remembered
 
 
 def test_a_lane_and_a_job_follow_the_node_to_its_new_address(monkeypatch):
     from dreamference.node import NodeJobSender, NodeLanes, NodePairing
     paired_record()                                                               # remembered at .106
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
-        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.0.200", "port": "8000"},
-        {"name": "spark-7", "node": "7777-gggg", "address": "192.168.0.207", "port": "8000"}]))
-    NodePairing._save({"node": "5555-eeee", "name": "spark-5", "address": "192.168.0.109", "user": "owner",
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"},
+        {"name": "spark-7", "node": "7777-gggg", "address": "192.168.50.207", "port": "8000"}]))
+    NodePairing._save({"node": "5555-eeee", "name": "spark-5", "address": "192.168.50.109", "user": "owner",
                        "ssh_port": 22})                                           # paired, not on the network
     monkeypatch.setattr(NodePairing, "run", classmethod(
         lambda cls, record, request, capture=True, input_text=None:
@@ -1388,16 +1388,16 @@ def test_a_lane_and_a_job_follow_the_node_to_its_new_address(monkeypatch):
     class Host:
         @classmethod
         def served_model(cls, host, timeout=3.0):
-            return ("m", 1) if host == "http://192.168.0.200:8000" else None
+            return ("m", 1) if host == "http://192.168.50.200:8000" else None
 
         @classmethod
         def metrics(cls, host, timeout=3.0):
             return {"kv_pool": 200000.0}
 
     lanes, notes = NodeLanes.lanes("http://127.0.0.1:8000", ("m", 1), "paired", Host, lambda pool: (2, None))
-    assert [lane["host"] for lane in lanes[1:]] == ["http://192.168.0.200:8000"]
+    assert [lane["host"] for lane in lanes[1:]] == ["http://192.168.50.200:8000"]
     assert any("spark-5: is not on the network" in note for note in notes)
     record = NodePairing.find("spark-2", browse=False)
-    assert NodeJobSender.git_url(record, "repo-abc").startswith("ssh://owner@192.168.0.200:22/")
+    assert NodeJobSender.git_url(record, "repo-abc").startswith("ssh://owner@192.168.50.200:22/")
     with pytest.raises(LookupError):
         NodeJobSender.git_url(NodePairing.find("spark-5", browse=False), "repo-abc")

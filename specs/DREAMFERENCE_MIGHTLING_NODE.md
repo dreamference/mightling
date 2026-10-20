@@ -40,16 +40,16 @@
 
 ## 2. What was checked, and what was not
 
-Checked on this GB10 (`gx10-9428`, Wi-Fi address `192.168.0.105`) on 2026-10-01:
+Checked on this GB10 (`gx10-1a2b`, Wi-Fi address `192.168.50.105`) on 2026-10-01:
 
 | Question | Result |
 |---|---|
 | Is an mDNS responder already running on the node? | Yes: `avahi-daemon` 0.8 is active and enabled; `/etc/avahi/services/` holds only `ssh.service`. |
-| Does the service type work? | `avahi-publish -s mightling-spec-probe _mightling-node._tcp 8000 proto=1 version=1.2.0 node=… web=3000 search=8888`, run as an ordinary user, was browsed back with `avahi-browse -rtp`: it resolved to `gx10-9428.local`, `192.168.0.105`, port 8000, with all five TXT records. |
+| Does the service type work? | `avahi-publish -s mightling-spec-probe _mightling-node._tcp 8000 proto=1 version=1.2.0 node=… web=3000 search=8888`, run as an ordinary user, was browsed back with `avahi-browse -rtp`: it resolved to `gx10-1a2b.local`, `192.168.50.105`, port 8000, with all five TXT records. |
 | Which interfaces does Avahi advertise on? | All of them: the Wi-Fi interface, loopback, both Docker bridges and every container veth. mDNS is per link, so LAN clients see only the Wi-Fi record. |
-| Is the model server already reachable from the LAN? | Yes: `http://192.168.0.105:8000/v1/models` answers 200 (it binds `0.0.0.0:8000`, accepted by design). |
+| Is the model server already reachable from the LAN? | Yes: `http://192.168.50.105:8000/v1/models` answers 200 (it binds `0.0.0.0:8000`, accepted by design). |
 | What else listens beyond loopback? | Nothing of Mightling's. The web UI (3000, 80), SearXNG (8888), Gmail (8767), image search (8768), speech-to-text (8100) and the diffusion sidecar (8001; switched off since 2026-10-03) are all on `127.0.0.1`. |
-| Does the web UI accept a non-localhost `Host`? | Yes: `/app` answers 200 for `Host: 192.168.0.105:3000` and `Host: gx10-9428.local:3000` as for `localhost:3000`. |
+| Does the web UI accept a non-localhost `Host`? | Yes: `/app` answers 200 for `Host: 192.168.50.105:3000` and `Host: gx10-1a2b.local:3000` as for `localhost:3000`. |
 | Do the model containers come back after a reboot with nobody logged in? | Their restart policy is `unless-stopped` (model server, SearXNG, nginx). The user's systemd lingering is **off**, so a user unit would not run before login. (`install.sh` turns lingering on for a node since 2026-10-08, SETUP §3.2.1.) |
 | Can Codex be built for the client platforms? | Upstream's release workflows build `aarch64`/`x86_64` for `apple-darwin` and `unknown-linux-musl`, and `x86_64`/`aarch64-pc-windows-msvc` in a separate Windows workflow. The pinned V8 manifests (`third_party/v8/rusty_v8_150_4_0_release_manifests.sha256`) list pointer-compression-and-sandbox builds for all of them plus `linux-gnu`. Read from the submodule; **never built here**. |
 | Do the index tools exist for the client platforms? | codebase-memory-mcp v0.11.0 ships `darwin-amd64`, `darwin-arm64`, `linux-amd64` and `linux-arm64`; a Windows asset was seen only for its UI build. The scip CLI v0.10.0 ships `darwin` and `linux`, both architectures, and **no Windows build**. |
@@ -121,7 +121,7 @@ Under the trusted-LAN decision both become "accepted by design" on an advertised
 ### 5.1 The service
 
 - **Type:** `_mightling-node._tcp` (the name is 11 characters; DNS-SD allows 15).
-- **Instance name:** the host name (`gx10-9428`).
+- **Instance name:** the host name (`gx10-1a2b`).
 - **Port (SRV):** the model server's, 8000.
 - **TXT records:**
 
@@ -152,7 +152,7 @@ Nothing that changes from minute to minute is advertised. Which model is loaded 
 
 One code path on all three systems: the pure-Rust `mdns-sd` crate browses `_mightling-node._tcp.local.` for up to 2 s and stops at the first answer when it is looking for one remembered node.
 
-- **Connect to the resolved address, never the `.local` name.** The browse answer carries the addresses. Resolving `gx10-9428.local` through the operating system depends on `nss-mdns` on Linux and is unreliable on Windows.
+- **Connect to the resolved address, never the `.local` name.** The browse answer carries the addresses. Resolving `gx10-1a2b.local` through the operating system depends on `nss-mdns` on Linux and is unreliable on Windows.
 - **IPv4 first**, then IPv6 with its scope id; link-local IPv6 without a scope is dropped.
 - **Only the launcher and `ling-app` browse.** `ling-search` and `ling-code` read the file the launcher wrote (§6.2), so they need no multicast and work inside Codex's sandbox.
 - **The alternative, the system's own DNS-SD** (Bonjour on macOS, the Win32 API, Avahi over D-Bus), is three code paths. It is kept in reserve for the case Phase 1 finds `mdns-sd` blocked where the native API is not, which is plausible on macOS (§8.2).
@@ -184,7 +184,7 @@ Tiers 1 and 2 are today's behaviour and still mean "I know where the server is".
 `$CODEX_HOME/node.json` (`~/.mightling/node.json`), written whole and atomically by the launcher:
 
 ```json
-{ "node": "7c1e…", "name": "gx10-9428", "address": "192.168.0.105",
+{ "node": "7c1e…", "name": "gx10-1a2b", "address": "192.168.50.105",
   "model_port": 8000, "web_port": 3100, "search_port": 8888,
   "version": "1.6.4", "last_seen": "2026-10-01T22:10:04+01:00" }
 ```
@@ -222,8 +222,8 @@ Today the launcher prints dots for up to 600 s when the server does not answer. 
 | Case | What the client says |
 |---|---|
 | No node found, none remembered | `No Mightling node found on this network.` then: start one on a GB10 (`ling-admin server start`, `ling-admin node enable`), or `ling node use <address>` |
-| Node found, `state=stopped` | `Node gx10-9428 found, but its model server is not running. On the node: ling-admin server start` and no wait |
-| Node found, `state=loading` | `Node gx10-9428: model loading` and today's dotted wait |
+| Node found, `state=stopped` | `Node gx10-1a2b found, but its model server is not running. On the node: ling-admin server start` and no wait |
+| Node found, `state=loading` | `Node gx10-1a2b: model loading` and today's dotted wait |
 | Node found, `state=ready`, port refuses | The advert is stale (the server died without `server stop`): the first message, plus `ling-admin status` on the node |
 
 Added 2026-10-12: when a browse misses (no node found and none remembered; the remembered node did not answer and its last address is tried; `MIGHTLING_NODE` names a node that did not answer) and the client is Linux with a connected Wi-Fi connection that saves power, one more line follows: `Hint: Wi-Fi power saving is on for <interface> (<connection>), and it loses most of the multicast a node is found by. Turn it off: sudo nmcli connection modify <connection> 802-11-wireless.powersave 2 && sudo iw dev <interface> set power_save off`. A hint, never a failure; `ling` runs none of it. A remembered node that did not answer while other nodes did (the question of §6.2) gets no hint.
@@ -263,7 +263,7 @@ Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/s
 
 **Chosen design: a loopback forwarder inside the app.** On a machine that is not a node, `ling-app` resolves the node (§6.1, with its own browse), binds `127.0.0.1:3000` and forwards every request, streamed response and WebSocket upgrade to `<address>:<web_port>`. The window keeps loading `http://localhost:3000/app`.
 
-- **The origin stays `localhost`**, which is a secure context, so the microphone works; a window on `http://192.168.0.105:3000` would have no `navigator.mediaDevices` (§2).
+- **The origin stays `localhost`**, which is a secure context, so the microphone works; a window on `http://192.168.50.105:3000` would have no `navigator.mediaDevices` (§2).
 - **Nothing about the web UI changes**: cookies, the Google sign-in redirect and every patch `configure` applies see the address they see today.
 - **The `Host` header is passed through unchanged** (`localhost:3000`), so redirects and any absolute address the UI emits come back pointing at the forwarder. The web UI answers the same for any `Host` (§2), so nothing on the node has to know.
 - **If port 3000 is taken** on the client, the app uses 33000 and says so in its title bar once; the saved session is per origin, so the port must not change from run to run.
@@ -685,9 +685,9 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 ### 18.3 Measured on this machine
 
 - **`mdns-sd` browses beside Avahi.** With a test advert published through Avahi (`avahi-publish -s … _mightling-node._tcp 8000 proto=1 node=… state=ready main=1`), the launcher's own browse found it in 0.48 s with all records, and in 1.08 s when told which id to stop at. Phase 0's item for Linux is answered.
-- **A browse run on the node itself is answered once per interface**: three browses gave `172.18.0.1`, `172.19.0.1` and `127.0.0.1`, never the Wi-Fi address, and a client run on the same machine announced that the node had moved on every start. The browse now collects every usable address a node answers on (`172.18.0.1`, `172.19.0.1`, `172.20.0.1`, `192.168.0.105` here), keeps the remembered address for as long as the node still answers there, and stops as soon as it does. §2's assumption that a LAN client receives only the LAN record **was not verified from a second machine**, and no longer has to hold.
+- **A browse run on the node itself is answered once per interface**: three browses gave `172.18.0.1`, `172.19.0.1` and `127.0.0.1`, never the Wi-Fi address, and a client run on the same machine announced that the node had moved on every start. The browse now collects every usable address a node answers on (`172.18.0.1`, `172.19.0.1`, `172.20.0.1`, `192.168.50.105` here), keeps the remembered address for as long as the node still answers there, and stops as soon as it does. §2's assumption that a LAN client receives only the LAN record **was not verified from a second machine**, and no longer has to hold.
 - **The forwarder in front of the real web UI**: `/app` (44,756 bytes, the same as direct), `/api/health` and a login `POST` answer through it as they do directly, with `Host: localhost:3000` passed through.
-- **The web UI is not reachable on the LAN address today** (`192.168.0.105:3000` refuses), as it should be on a node that has not been enabled.
+- **The web UI is not reachable on the LAN address today** (`192.168.50.105:3000` refuses), as it should be on a node that has not been enabled.
 - **A client with nothing configured, on one machine.** The installed `ling` (rebuilt at 11:59 with the launcher above) was run with a scratch home folder, so with no node id, no `node.json` and no configuration, against a test advert of this GB10 published through Avahi:
   - `ling node list` showed `gx10-e2e  http://172.18.0.1:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens)  Mightling 1.3.0` and said none was remembered;
   - `ling exec` printed `Using Mightling node gx10-e2e at 172.18.0.1 (remembered; …)`, wrote `node.json` and a `config.toml` whose `base_url` is the node's address, and the model answered; the second start found the node by its id and answered in 4.0 s;
@@ -820,7 +820,7 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 
 ### 18.10 Added on 2026-10-08: the first two machines
 
-A second GB10 (an ASUS GX10, renamed `second-puffin`, on Wi-Fi like this one) was installed with 1.4.1 on 2026-10-08 over SSH, with no one at its terminal, and paired with this machine. It is the development machine of `ling-engine` and serves no lanes. What two real machines showed, and what changed in the code for it (`2e81039`):
+A second GB10 (an ASUS GX10, renamed `node-b`, on Wi-Fi like this one) was installed with 1.4.1 on 2026-10-08 over SSH, with no one at its terminal, and paired with this machine. It is the development machine of `ling-engine` and serves no lanes. What two real machines showed, and what changed in the code for it (`2e81039`):
 
 - **`node add` picked an address ssh could not use.** The browse returned a link-local IPv6 address without its interface, and ssh answered "Invalid argument". The pairing went through by IPv4 (`node add <address> --user <user>`). Since then a browsed node is kept once, IPv4 first, then IPv6 that needs no scope, then link-local IPv6 with `%<interface>` added (`NodeBrowser`, mirroring `usable_addresses` in `ling-rs/src/node.rs`, which drops link-local addresses altogether), and rsync brackets IPv6 hosts.
 - **`host setup` and `node enable` needed a terminal**, because each asks before running `sudo`. Both now take `--yes`, which runs `sudo -n` and needs none; `install.sh` uses it on an unattended node install (SETUP §3.2.1).
