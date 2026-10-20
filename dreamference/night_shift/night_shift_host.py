@@ -32,7 +32,7 @@ NON_INTERACTIVE: Final[frozenset] = frozenset({
     "debug", "features", "doctor", "night", "node", "airgapped", "skill", "prompt", "update", "app", "apps", "web", "help",
     "review", "plugin", "remote-control", "exec-server", "queue", "archive", "unarchive", "delete", "execpolicy",
     "migrate-rollouts", "responses-api-proxy", "stdio-to-uds", "tcp-tunnel",
-    "audit", "docs", "chat", "signal", "ledger", "notice", "refine",
+    "audit", "docs", "chat", "signal", "ledger", "notice", "refine", "compat",
 })
 
 # Options that print and exit wherever they stand on the command line.
@@ -45,6 +45,8 @@ VALUE_OPTIONS: Final[frozenset] = frozenset({
     "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env",
     "-i", "--image", "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox",
     "-a", "--ask-for-approval", "-C", "--cd", "--add-dir",
+    # The launcher's own (ling-rs/src/compat.rs), removed before Codex parses the rest.
+    "--compat",
 })
 
 # What `/proc/<pid>/exe` appends to a program whose file has since been removed or replaced, as a
