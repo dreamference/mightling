@@ -36,4 +36,4 @@ There is no `pip`/`npm`/install-script path any more.
 ## Links
 
 - Upstream: https://github.com/openai/codex
-- Fork: https://github.com/dgxcoder/codex (submodule `codex/`, pinned to `rust-v0.158.0`)
+- Fork: https://github.com/dreamference/codex (submodule `codex/`, pinned to `rust-v0.158.0`)
