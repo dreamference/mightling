@@ -5,7 +5,7 @@
 // Personalization (`~/.mightling/AGENTS.md`), Archived threads, Git, Project, Worktrees. Pets,
 // Browser, Computer Use and Suggested prompts are not offered here (Phase 3 or not at all).
 
-import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import * as bridge from "./bridge";
 import { Icon } from "./icons";
@@ -15,7 +15,7 @@ import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents";
+export type SettingsPage = "general" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -53,6 +53,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "pets", label: "Pets", desktopOnly: true },
   { id: "suggestions", label: "Suggested prompts" },
   { id: "agents", label: "Agents" },
+  { id: "node", label: "Node", desktopOnly: true },
 ];
 
 export function SettingsDialog(props: SettingsProps) {
@@ -83,6 +84,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "pets" && bridge.git.available() ? <Pets {...props} /> : null}
             {props.page === "suggestions" ? <Suggestions {...props} /> : null}
             {props.page === "agents" ? <Agents {...props} /> : null}
+            {props.page === "node" && bridge.git.available() ? <NodePage notice={props.notice} /> : null}
           </div>
         </div>
       </section>
@@ -329,6 +331,87 @@ function Personalization({ notice }: { notice: (error: unknown) => void }) {
       <div className="buttons dialog-buttons">
         <button className="primary" onClick={() => bridge.writePersonal(text).then(() => setSaved(true)).catch(notice)}>Save</button>
         {saved ? <span className="dialog-note">Saved. New threads read it.</span> : null}
+      </div>
+    </>
+  );
+}
+
+/** How a node is called on the page: its name, else the start of its id (never its address). */
+function nodeLabel(node: { name: string; id: string }): string {
+  return node.name || (node.id ? `node ${node.id.slice(0, 8)}` : "a node with no name");
+}
+
+/**
+ * Settings › Node: the Mightling nodes on the network (`ling node list`), the one in use marked,
+ * and Use for another (`ling node use <name>`). Names only: nothing here takes or shows an address.
+ * The list is browsed when the page opens and on Refresh, never at start-up.
+ */
+function NodePage({ notice }: { notice: (error: unknown) => void }) {
+  const [list, setList] = useState<bridge.NodeList | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [chosen, setChosen] = useState<{ label: string; waiting: boolean } | null>(null);
+  const load = useCallback(() => {
+    setBusy(true);
+    bridge.nodes.list().then(setList).catch(notice).finally(() => setBusy(false));
+  }, [notice]);
+  useEffect(load, [load]);
+  const use = (node: bridge.NodeEntry) => {
+    if (!node.choice) return;
+    setBusy(true);
+    bridge.nodes.use(node.choice)
+      .then((said) => {
+        setChosen({ label: nodeLabel(node), waiting: /does not answer/.test(said) });
+        load();
+      })
+      .catch((error) => {
+        setBusy(false);
+        notice(error);
+      });
+  };
+  const client = list?.thisMachine === "client";
+  return (
+    <>
+      <h3>Node</h3>
+      <p className="dialog-note">The Mightling nodes on this network: the machine whose model server this one&apos;s agent uses. A node is chosen by its name; the one chosen is remembered, and found again by name when it moves.</p>
+      {list?.thisMachine === "node" ? <p className="dialog-note node-note">This machine is a node: its agent uses its own model server, so none is chosen here.</p> : null}
+      {list?.thisMachine === "configured" ? <p className="dialog-note node-note">This machine is set to use one model server (DREAMFERENCE_VLLM_HOST or vllm_host), so no node is chosen here.</p> : null}
+      {list === null ? <p className="empty small">{busy ? "Looking for nodes…" : "No list."}</p> : list.nodes.length === 0 && !list.rememberedAway ? (
+        <p className="empty small">No Mightling node answered on this network.</p>
+      ) : (
+        <table className="shortcut-table nodes" aria-label="Nodes">
+          <tbody>
+            {list.nodes.map((node) => (
+              <tr key={node.id || node.name} className={node.inUse ? "node in-use" : "node"}>
+                <td>{nodeLabel(node)}{node.inUse ? <span className="node-current"> · in use</span> : null}</td>
+                <td className="planned-note">
+                  {node.model ? `${node.model}${node.contextTokens ? ` (${node.contextTokens.toLocaleString()} tokens)` : ""}` : node.state || "not answering"}
+                  {node.coding ? "" : " · not a coding model"}
+                  {node.version ? ` · Mightling ${node.version}` : ""}
+                </td>
+                <td className="shortcut-actions">
+                  {client && !node.inUse && node.choice ? <button className="link-button" disabled={busy} onClick={() => use(node)}>Use</button> : null}
+                </td>
+              </tr>
+            ))}
+            {list.rememberedAway ? (
+              <tr className="node in-use away">
+                <td>{nodeLabel(list.rememberedAway)}<span className="node-current"> · in use</span></td>
+                <td className="planned-note">remembered; did not answer this time</td>
+                <td />
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      )}
+      {list?.hint ? <p className="dialog-note">{list.hint}</p> : null}
+      {chosen ? (
+        <p className="dialog-note">
+          {`Using ${chosen.label}.`}{chosen.waiting ? " Its model server does not answer right now; Mightling waits for it." : ""} The agent&apos;s server keeps the node it started with until Mightling starts again.{" "}
+          <button className="link-button" onClick={() => void bridge.relaunchApp().catch(notice)}>Restart Mightling</button>
+        </p>
+      ) : null}
+      <div className="buttons dialog-buttons">
+        <button disabled={busy} onClick={load}>{busy ? "Looking…" : "Refresh"}</button>
       </div>
     </>
   );

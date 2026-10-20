@@ -26,6 +26,7 @@ import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addTask, dropTask, readReport, readReports, readTasks, runNow } from "./night";
+import { Nodes } from "./nodes";
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
@@ -232,6 +233,8 @@ export async function main(options: MainOptions): Promise<void> {
     },
   );
   let editors: Editor[] | null = null;
+  /** Settings › Node: the last list the window was given, whose choices alone it may send back. */
+  const nodes = new Nodes();
   const tasks = new Tasks((event) => deliver({ channel: "task://event", payload: event }));
   /** The worktree root the page read from the agent's config, or `$CODEX_HOME/worktrees`. */
   const worktreeRoot = (root: string | null) => {
@@ -272,6 +275,16 @@ export async function main(options: MainOptions): Promise<void> {
         return own.isAlwaysOnTop();
       case "app/home":
         return app.getPath("home");
+      case "node/list": {
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return nodes.list(ling);
+      }
+      case "node/use": {
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return nodes.use(ling, message.choice);
+      }
       case "night/list": {
         const home = codexHome();
         if (!home) return { tasks: [], reports: [] };
@@ -508,6 +521,10 @@ export async function main(options: MainOptions): Promise<void> {
         own.setFullScreen(!own.isFullScreen());
         return null;
       case "app/quit":
+        app.quit();
+        return null;
+      case "app/relaunch":
+        app.relaunch();
         app.quit();
         return null;
       case "pr/list":

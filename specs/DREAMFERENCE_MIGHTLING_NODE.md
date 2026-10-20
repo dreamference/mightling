@@ -203,10 +203,13 @@ A launcher subcommand, intercepted in `prepare_args` the way `night` is, so it c
 | Command | Does |
 |---|---|
 | `ling node` or `ling node list` | Browses and lists every node: name, address, served model and context (asked of each), version, and which one is in use |
+| `ling node list --json` | The same browse as one line of JSON, for the desktop app (1.7.1): each node's name, id, the name to choose it by, served model and context, state, version and whether it is in use; whether this machine is a client, a node or configured; the remembered node when it did not answer. No address, URL or configured host is in it |
 | `ling node use <name\|address>` | Remembers that node. An address works with no mDNS at all |
 | `ling node forget` | Deletes `node.json`; the next start browses again |
 
 ~~There is no `/node` slash command: the patch series stands at 31,175 of 31,500 bytes.~~ *Built on 2026-10-07 (`741353a`, merged `b6a7509`): patch `0025-node-slash-command` adds `/node`, which runs `ling-admin node …` (`provision`, `add`, `list`, `status`, `remove`) in the terminal, outside the sandbox (§18.9). It is the node-management command, not this one: `use` and `forget` stay `ling node`'s.*
+
+**Settings › Node in the desktop app** (1.7.1, `desktop/electron/src/nodes.ts`) lists `ling node list --json` when the page opens or on Refresh, never at start-up, marks the node in use, and Use runs `ling node use <name>` (the id for a node advertising no name) in the main process, which accepts only a choice the last list offered and nothing that reads as an address. The remembered node keeps its last address as the fallback after a failed browse (§6.2), unchanged. The app's own `ling app-server` resolved its node when it started, so the page offers Restart Mightling. On a node or with a configured host the page shows the list and offers no choice.
 
 **Several nodes and none remembered:** an interactive `ling` lists them and asks which; `ling exec` and other non-interactive commands refuse with the list and the `ling node use` line. The client does not guess.
 

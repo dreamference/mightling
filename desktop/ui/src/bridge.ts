@@ -217,6 +217,8 @@ export async function toggleFullScreen(): Promise<void> {
 }
 /** Ctrl+Q: quits the app (a browser tab is the browser's to close). */
 export const quitApp = () => (host() === "electron" ? send<void>({ type: "app/quit" }) : Promise.resolve());
+/** Quits and starts the app again: its agent's server resolves the node as it starts (Settings › Node). */
+export const relaunchApp = () => send<void>({ type: "app/relaunch" });
 /** A thread in a window of its own (the app only); a browser opens the thread in a new tab. */
 export async function popOut(thread: string): Promise<void> {
   if (host() === "electron") return send<void>({ type: "window/popout", thread });
@@ -254,6 +256,33 @@ export interface NightTask {
   at: string | null;
   result: unknown;
 }
+
+/** A node as Settings › Node lists it (desktop/electron/src/nodes.ts): names, never an address. */
+export interface NodeEntry {
+  name: string;
+  id: string;
+  /** What choosing it sends; null when it advertises no name to choose it by. */
+  choice: string | null;
+  inUse: boolean;
+  model: string | null;
+  contextTokens: number | null;
+  state: string;
+  version: string;
+  coding: boolean;
+}
+
+export interface NodeList {
+  thisMachine: "client" | "node" | "configured";
+  nodes: NodeEntry[];
+  rememberedAway: { name: string; id: string } | null;
+  hint: string | null;
+}
+
+/** Settings › Node: `ling node list --json` and `ling node use <name>`, in the main process. */
+export const nodes = {
+  list: () => send<NodeList>({ type: "node/list" }),
+  use: (choice: string) => send<string>({ type: "node/use", choice }),
+};
 
 /** The Scheduled view over Night Shift (desktop/electron/src/night.ts). */
 export const night = {
