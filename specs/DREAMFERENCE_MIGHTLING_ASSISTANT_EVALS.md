@@ -1,6 +1,6 @@
 # Mightling assistant evals: measuring the phone-chat assistant
 
-**Status:** proposed, nothing built (2026-10-20). Research and writing only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. A moonshot spec: it ranks what to adopt, what to build and what to skip, and leaves every decision to the owner (§0).
+**Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built, Phase 0 first; nothing built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
 **Goal:** measure, every night, the faults that made the phone-chat assistant useless on the morning of 2026-10-20 ([MIGHTLING_SIGNAL §19](./DREAMFERENCE_MIGHTLING_SIGNAL.md), [MIGHTLING_CHAT §16](./DREAMFERENCE_MIGHTLING_CHAT.md)). Each fix then gets a number that shows when it regresses, as SWE-bench gives the coding agent.
 **Builds on:**
 - `scripts/cave_mode_bench/` (`run.py`, `drift.py`): real `ling exec` runs with a fresh `CODEX_HOME`, multi-turn through `exec resume --last`, a `check.py` per task, tokens counted with the served model's tokenizer;
@@ -26,7 +26,7 @@ These should run weekly, not nightly. The well-known tool-use leaderboards (BFCL
 
 ## 0. Decisions, stated first
 
-Proposed; each one is the owner's to take.
+Proposed; each was the owner's to take, and was taken on 2026-10-20 (§0.1).
 
 - **D1. Build `ask-evals` first (§5), Phase 0 and 1 of §7.** It is the only measurement that matches failures 1, 3, 4 and 8, and the only one that tests the bridges.
 - **D2. A nightly assistant slot of about an hour, before the SWE-bench arm, in the night's own unit (§6, option A).** Its direct mode holds the model gate, as a SWE-bench run does, so a phone question during it gets the "busy with a benchmark" answer (SIGNAL §17.3) and not a slower answer. Its bridge mode runs first with the gate open, because it runs on the host and a held gate would refuse it.
@@ -34,6 +34,15 @@ Proposed; each one is the owner's to take.
 - **D4. Non-commercial data (AbstentionBench, LoCoMo, TopiOCQA, HalluLens are CC BY-NC).** Dreamference is a company, and measuring a product with NC data may count as commercial use. The proposal: AbstentionBench only after the owner says yes, never redistributed, never in the repository. The rest are skipped.
 - **D5. A judge model.** Every score in `ask-evals` is computed by code. Outside sets that need a judge use the served model itself, and their judged numbers are compared only with themselves (same model, same judge), never with a leaderboard. A second, larger judge model on the GB10 (Gaia2's reference judge is gpt-oss-120b) is not proposed: it does not fit beside the resident model under host safety.
 - **D6. What `ask-evals` gates.** The proposal: a regression in `ask-evals` (a scenario failing two nights running) is reported in the morning and holds a release that touches Ask, the bridges, the prompt, cave mode or the model recipe. It never blocks a coding-only release.
+
+### 0.1 The owner's decisions (2026-10-20)
+
+- **D1, yes.** Build `ask-evals`: this spec on `main` first, then Phase 0's checks, then the stand-ins and the scenarios, each part on its own branch and merged on a fresh `origin/main` after the full suite passes.
+- **D2, yes.** The slot of about an hour before the SWE-bench arm, wired into the night script as an **optional step, off** until the owner switches it on after the first clean runs.
+- **D3, yes.** One assistant-evals night a week for the outside sets.
+- **D4, yes, for internal measurement only.** Non-commercial datasets may be used, never redistributed and never committed: they are downloaded at run time into the cache, and each run's manifest records the dataset's licence and revision.
+- **D5, as proposed.** No second judge model on the GB10. Every `ask-evals` score is computed by code; outside sets that need a judge use the served model, and their judged numbers are compared only with themselves.
+- **D6, as proposed.** A scenario failing two nights running is reported in the morning and holds a release that touches Ask, the bridges, the prompt, cave mode or the model recipe; it never blocks a coding-only release.
 
 ---
 
