@@ -567,6 +567,7 @@ class VLLMServerManager:
         # max_num_batched_tokens.
         docker_image: Optional[str] = None,
         gate: bool = False,
+        serve_adapters: bool = True,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -613,6 +614,9 @@ class VLLMServerManager:
             gate (bool): The model gate owns `port` (`ModelGate`): the engine listens on loopback
                 at the internal port instead, so nothing reaches it but through the gate. The
                 container is still named after `port`.
+            serve_adapters (bool): Serve the installed adapters (only behind the gate, and only
+                with no API key of the caller's: the engine's key is the gate's). False when
+                `server start` could not prepare what serving them needs.
 
         Returns:
             List[str]: Complete executable command list.
@@ -688,15 +692,22 @@ class VLLMServerManager:
                     "Docker is required to run the model server but is not available. "
                     "Please ensure Docker is installed and the daemon is running (`docker ps` must succeed)."
                 )
-            cmd = self._docker_run_prefix(port, gpu_memory_utilization, recipe, token_env)
+            # Installed adapters (specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §8): none unless one is
+            # installed for this model, so the launch line is otherwise unchanged.
+            from dreamference.vllm_server.adapter_serving import AdapterServing
+            adapters = AdapterServing.launch_adapters(model) if gate and serve_adapters and not api_key else []
+            cmd = self._docker_run_prefix(port, gpu_memory_utilization,
+                                          AdapterServing.with_headroom(recipe, adapters), token_env)
             for env_key, env_val in sorted(SGLangLaunchBuilder.container_env().items()):
                 cmd.extend(["-e", f"{env_key}={env_val}"])
+            cmd.extend(AdapterServing.docker_args(recipe, adapters))
             # The image's own entrypoint, as the recipe this entry follows runs it.
             cmd.append(docker_image)
             cmd.extend(SGLangLaunchBuilder.server_args(
                 hf_model, recipe, engine_port, max_model_len, gpu_memory_utilization,
                 tool_call_parser, reasoning_parser, api_key, host=engine_host,
             ))
+            cmd.extend(AdapterServing.server_args(recipe, adapters))
             return cmd
 
         base_args: List[str] = [
@@ -1766,7 +1777,11 @@ class VLLMServerManager:
             use_tensorizer=use_tensorizer,
             docker_image=docker_image,
         )
-        cmd = self.build_launch_command(**launch, gate=gate)
+        # What serving adapters needs, before the engine starts: the patched /v1/responses and the
+        # gate's list. If the patch cannot be prepared, this start serves the base alone.
+        from dreamference.vllm_server.adapter_serving import AdapterServing
+        serve_adapters = AdapterServing.prepare(model, docker_image, gate and not api_key)
+        cmd = self.build_launch_command(**launch, gate=gate, serve_adapters=serve_adapters)
 
         # Step 3: Cleanup potential container name conflicts prior to launch
         if cmd and cmd[0] == "docker":
