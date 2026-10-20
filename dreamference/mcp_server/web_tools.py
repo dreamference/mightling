@@ -51,6 +51,11 @@ SEARXNG_URL: Final[str] = os.getenv("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.
 # bridge, whose DNS is a copy taken at start (dreamference/chat/sidecar_network.py).
 SEARXNG_START_HINT: Final[str] = "ling-admin searxng start"
 
+# The time ranges SearXNG filters by, and the categories named differently there than in
+# `ling-search --category` (ling-web-rs/src/search.rs).
+TIME_RANGES: Final[frozenset[str]] = frozenset({"day", "week", "month", "year"})
+SEARXNG_CATEGORY_NAMES: Final[dict[str, str]] = {"social": "social media"}
+
 # Said when SearXNG answers but no engine does. It must not send the model to repair anything:
 # until 2026-10-20 it named `docker restart dreamference-searxng`, an agent ran it, and nothing
 # changed, because the engines were refusing this machine's address upstream. `ling-search` says
@@ -238,7 +243,8 @@ class WebTools:
         query: str,
         max_results: int = 8,
         categories: str = "general",
-        language: str = "en",
+        language: str = "auto",
+        time_range: str = "",
     ) -> Dict[str, Any]:
         """
         Searches the web through the configured SearXNG instance.
@@ -251,8 +257,10 @@ class WebTools:
         Args:
             query (str): Search terms.
             max_results (int): Maximum results to return.
-            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'.
-            language (str): Result language code.
+            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'
+                ('social' is sent as SearXNG's 'social media').
+            language (str): Result language code, or 'auto' to detect it from the query.
+            time_range (str): 'day', 'week', 'month' or 'year' for recent results only; '' for any.
 
         Returns:
             Dict[str, Any]: {'query', 'result_count', 'results': [{'title', 'url', 'snippet',
@@ -272,8 +280,9 @@ class WebTools:
                 params={
                     "q": query,
                     "format": "json",
-                    "categories": categories,
+                    "categories": SEARXNG_CATEGORY_NAMES.get(categories, categories),
                     "language": language,
+                    **({"time_range": time_range} if time_range in TIME_RANGES else {}),
                 },
                 headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
                 timeout=REQUEST_TIMEOUT_S,

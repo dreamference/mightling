@@ -36,9 +36,97 @@ pub const JSON_FORMAT_HINT: &str =
 /// (`SEARCH_UNAVAILABLE_HINT` in `dreamference/mcp_server/web_tools.py`).
 pub const UNAVAILABLE_HINT: &str = "Web search is unavailable for now: the search engines are refusing this machine's queries, which usually passes within hours. Do not try to fix it or restart anything. If you know a page that answers the question, read it with ling-fetch (for example: ling-fetch \"https://en.wikipedia.org/wiki/Lisbon\"); otherwise tell the user that web search is unavailable at the moment.";
 
-/// The SearXNG parameters every search sends besides the query.
-const CATEGORIES: &str = "general";
-const LANGUAGE: &str = "en";
+/// The categories `--category` accepts, each a SearXNG category of the settings `ling-admin
+/// searxng start` writes (`dreamference/chat/searxng_settings.py`), with what it searches. A
+/// general search asks the web engines and Wikipedia only, so that package names, papers and
+/// videos do not drown it; the others are asked when the question is theirs.
+pub const CATEGORIES: &[(&str, &str)] = &[
+    ("general", "the web, Wikipedia and Wikidata (the default)"),
+    ("news", "news sites and news search, newest first with --time"),
+    ("science", "papers: arXiv, PubMed, Semantic Scholar, OpenAlex, Crossref, Google Scholar"),
+    ("it", "code and packages: GitHub, GitLab, Stack Overflow, crates.io, npm, PyPI, MDN, wikis"),
+    ("map", "places: OpenStreetMap, Photon, Apple Maps"),
+    ("images", "images"),
+    ("videos", "videos: YouTube, PeerTube, Dailymotion, archives"),
+    ("music", "music, lyrics, radio, podcasts"),
+    ("files", "apps: F-Droid, Google Play, the App Store, APKMirror"),
+    ("social", "Mastodon, Lemmy, forums"),
+    ("books", "books: Open Library, Goodreads"),
+    ("dictionaries", "Wiktionary, Wordnik, Duden, Etymonline"),
+    ("wikimedia", "Wikivoyage, Wikiquote, Wikibooks, Wikisource, Wikiversity"),
+    ("movies", "films: IMDb, Rotten Tomatoes"),
+    ("weather", "weather"),
+];
+
+/// The time ranges `--time` accepts, as SearXNG names them. Engines that cannot filter by time
+/// are left out of a search that asks for one.
+pub const TIME_RANGES: &[&str] = &["day", "week", "month", "year"];
+
+/// Asks SearXNG to detect the query's language, so a question in Portuguese or Ukrainian reaches
+/// that language's Wikipedia and the engines' results in it.
+pub const AUTO_LANGUAGE: &str = "auto";
+
+/// What a search asks SearXNG for besides the query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchOptions {
+    /// A SearXNG category (`social` is sent as `social media`).
+    pub category: String,
+    /// `day`, `week`, `month` or `year`; none for any time.
+    pub time_range: Option<String>,
+    /// A language code (`pt`, `uk`, `de-CH`) or `auto`.
+    pub language: String,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        SearchOptions {
+            category: "general".to_string(),
+            time_range: None,
+            language: AUTO_LANGUAGE.to_string(),
+        }
+    }
+}
+
+impl SearchOptions {
+    /// Checks the options a person or a model typed.
+    ///
+    /// Returns the error to print for a category or time range not in the lists, or a language
+    /// that is not a language code.
+    pub fn new(category: Option<&str>, time_range: Option<&str>, language: Option<&str>) -> Result<SearchOptions, String> {
+        let mut options = SearchOptions::default();
+        if let Some(category) = category.map(|value| value.trim().to_lowercase()) {
+            let category = if category == "social media" { "social".to_string() } else { category };
+            if !CATEGORIES.iter().any(|(name, _)| *name == category) {
+                let names: Vec<&str> = CATEGORIES.iter().map(|(name, _)| *name).collect();
+                return Err(format!("unknown category {category:?}; one of: {}", names.join(", ")));
+            }
+            options.category = category;
+        }
+        if let Some(time_range) = time_range.map(|value| value.trim().to_lowercase()) {
+            if !TIME_RANGES.contains(&time_range.as_str()) {
+                return Err(format!("unknown time range {time_range:?}; one of: {}", TIME_RANGES.join(", ")));
+            }
+            options.time_range = Some(time_range);
+        }
+        if let Some(language) = language.map(str::trim).filter(|value| !value.is_empty()) {
+            let valid = language == AUTO_LANGUAGE
+                || language == "all"
+                || (language.len() <= 6
+                    && language.split('-').next().is_some_and(|code| (2..=3).contains(&code.len()))
+                    && language.chars().all(|c| c.is_ascii_alphabetic() || c == '-'));
+            if !valid {
+                return Err(format!("unknown language {language:?}; a code such as en, pt, uk, de-CH, or auto"));
+            }
+            options.language = language.to_string();
+        }
+        Ok(options)
+    }
+
+    /// The category as SearXNG names it.
+    pub fn searxng_category(&self) -> &str {
+        if self.category == "social" { "social media" } else { &self.category }
+    }
+}
 
 /// One result, in the field order `ling-search --json` has always printed.
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -50,6 +138,9 @@ pub struct SearchResult {
     /// Every engine SearXNG reports for the result; `engine` is only the first of them, which
     /// cannot show that no other engine contributed.
     pub engines: Vec<String>,
+    /// When it was published, as the engine says (news, papers, videos); absent when it does not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published: Option<String>,
 }
 
 /// A successful search.
@@ -132,6 +223,18 @@ pub fn search_from(
     level: Level,
     node: Option<&Node>,
 ) -> Result<SearchPayload, SearchError> {
+    search_with(base_url, query, max_results, level, node, &SearchOptions::default())
+}
+
+/// [`search_from`] with a category, a time range and a language.
+pub fn search_with(
+    base_url: &str,
+    query: &str,
+    max_results: i64,
+    level: Level,
+    node: Option<&Node>,
+    options: &SearchOptions,
+) -> Result<SearchPayload, SearchError> {
     if level == Level::On {
         return Err(SearchError {
             error: crate::AIRGAPPED_ON_MESSAGE.to_string(),
@@ -145,7 +248,13 @@ pub fn search_from(
         });
     }
     let cache = crate::cache::Cache::open();
-    let key = crate::cache::key(base_url, query, CATEGORIES, LANGUAGE);
+    let time_range = options.time_range.as_deref().unwrap_or_default();
+    let key = crate::cache::key(
+        base_url,
+        query,
+        &format!("{}|{time_range}", options.searxng_category()),
+        &options.language,
+    );
     let now = std::time::SystemTime::now();
     if let Some(payload) = cache.as_ref().and_then(|cache| cache.get(&key, now)) {
         if let Ok(found) = from_searxng(query, &payload, max_results, level) {
@@ -156,14 +265,16 @@ pub fn search_from(
         std::thread::sleep(cache.reserve(now));
     }
     let endpoint = format!("{}/search", base_url.trim_end_matches('/'));
-    let response = agent(None)
+    let mut request = agent(None)
         .get(&endpoint)
         .query("q", query)
         .query("format", "json")
-        .query("categories", CATEGORIES)
-        .query("language", LANGUAGE)
-        .set("Accept", "application/json")
-        .call();
+        .query("categories", options.searxng_category())
+        .query("language", &options.language);
+    if !time_range.is_empty() {
+        request = request.query("time_range", time_range);
+    }
+    let response = request.set("Accept", "application/json").call();
     let body = match response {
         Ok(response) => response.into_string(),
         Err(ureq::Error::Status(status, response)) => {
@@ -203,6 +314,62 @@ pub fn search_from(
     Ok(found)
 }
 
+/// The address a result is compared by: without the scheme, `www.`, a trailing slash, the
+/// fragment, and tracking parameters (`utm_*`, `fbclid`, `gclid`, Bing's `msockid`).
+pub fn comparable_url(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let rest = rest.split('#').next().unwrap_or_default();
+    let (address, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let (host, path) = address.split_once('/').unwrap_or((address, ""));
+    let host = host.to_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|pair| {
+            let name = pair.split('=').next().unwrap_or_default().to_lowercase();
+            !pair.is_empty() && !name.starts_with("utm_") && !["fbclid", "gclid", "msockid"].contains(&name.as_str())
+        })
+        .collect();
+    let path = path.trim_end_matches('/');
+    let mut comparable = format!("{host}/{path}");
+    if !kept.is_empty() {
+        comparable.push('?');
+        comparable.push_str(&kept.join("&"));
+    }
+    comparable
+}
+
+/// Merges results that are the same page under addresses SearXNG keeps apart (`http` and
+/// `https`, with and without `www.`, a tracking parameter), keeping the first, which SearXNG
+/// ranked highest, and adding the other's engines to it. SearXNG's order stays: it scores a
+/// result by its position at each engine that found it, weighted by the engine's weight, so a page
+/// several engines agree on is already ranked above one only a single engine found.
+pub fn merge_duplicates(results: impl IntoIterator<Item = SearchResult>) -> Vec<SearchResult> {
+    let mut merged: Vec<SearchResult> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for result in results {
+        let key = comparable_url(&result.url);
+        if let Some(index) = seen.iter().position(|known| *known == key) {
+            let kept = &mut merged[index];
+            for engine in result.engines.into_iter().chain(std::iter::once(result.engine)) {
+                if !engine.is_empty() && !kept.engines.contains(&engine) {
+                    kept.engines.push(engine);
+                }
+            }
+            if kept.snippet.is_empty() {
+                kept.snippet = result.snippet;
+            }
+            if kept.published.is_none() {
+                kept.published = result.published;
+            }
+            continue;
+        }
+        seen.push(key);
+        merged.push(result);
+    }
+    merged
+}
+
 /// SearXNG's infoboxes as results. Wikipedia and Wikidata answer only with an infobox (a summary
 /// of the article), never in `results`: before 2026-10-20 a search that only Wikipedia answered
 /// printed nothing.
@@ -230,6 +397,7 @@ fn infobox_results(payload: &Value) -> Vec<SearchResult> {
                 snippet: infobox["content"].as_str().unwrap_or_default().to_string(),
                 engine,
                 engines,
+                published: None,
             })
         })
         .collect()
@@ -264,8 +432,13 @@ pub fn from_searxng(
                 .flatten()
                 .filter_map(|engine| engine.as_str().map(str::to_string))
                 .collect(),
+            published: item["publishedDate"]
+                .as_str()
+                .filter(|date| !date.is_empty())
+                .map(|date| date.chars().take(10).collect()),
         });
-    let results: Vec<SearchResult> = infoboxes.into_iter().take(1).chain(web).take(limit).collect();
+    let results: Vec<SearchResult> =
+        merge_duplicates(infoboxes.into_iter().take(1).chain(web)).into_iter().take(limit).collect();
     let answers: Vec<Value> = payload["answers"].as_array().cloned().unwrap_or_default();
     let failed = payload["unresponsive_engines"]
         .as_array()
@@ -325,6 +498,9 @@ pub fn render_text(payload: &SearchPayload) -> String {
             result.title,
             result.url
         ));
+        if let Some(published) = &result.published {
+            out.push_str(&format!("   {published}\n"));
+        }
         if !result.snippet.is_empty() {
             out.push_str(&format!("   {}\n", crate::take_chars(&result.snippet, 200)));
         }
@@ -361,7 +537,8 @@ mod tests {
                 url: "https://a".into(),
                 snippet: "about a".into(),
                 engine: "wikipedia".into(),
-                engines: vec![]
+                engines: vec![],
+                published: None,
             }
         );
         assert_eq!(from_searxng("q", &payload, 0, Level::Off).unwrap().result_count, 1);
@@ -490,6 +667,41 @@ mod tests {
         let mut only = searxng(json!([]), json!([]), json!([["brave", "too many requests"]]));
         only["infoboxes"] = payload["infoboxes"].clone();
         assert_eq!(from_searxng("lisbon", &only, 5, Level::Off).unwrap().result_count, 1);
+    }
+
+    #[test]
+    fn the_same_page_under_two_addresses_is_one_result_with_both_engines() {
+        let payload = searxng(
+            json!([
+                {"title": "Trams", "url": "https://www.example.org/trams/", "content": "", "engine": "mwmbl", "engines": ["mwmbl"]},
+                {"title": "News", "url": "https://news.example/a", "content": "n", "engine": "bing news", "publishedDate": "2026-10-20T08:00:00"},
+                {"title": "Trams", "url": "http://example.org/trams?utm_source=x", "content": "the 28", "engine": "duckduckgo web", "engines": ["duckduckgo web"]},
+                {"title": "Trams page 2", "url": "https://example.org/trams?page=2", "engine": "yep"}
+            ]),
+            json!([]),
+            json!([]),
+        );
+        let found = from_searxng("q", &payload, 10, Level::Off).unwrap();
+        let urls: Vec<&str> = found.results.iter().map(|result| result.url.as_str()).collect();
+        assert_eq!(urls, ["https://www.example.org/trams/", "https://news.example/a", "https://example.org/trams?page=2"]);
+        assert_eq!(found.results[0].engines, ["mwmbl", "duckduckgo web"]);
+        assert_eq!(found.results[0].snippet, "the 28");
+        assert_eq!(found.results[1].published.as_deref(), Some("2026-10-20"));
+        assert!(render_text(&found).contains("   2026-10-20\n"));
+    }
+
+    #[test]
+    fn options_are_checked_and_social_is_sent_by_searxngs_name() {
+        let options = SearchOptions::new(Some("Social"), Some("week"), Some("pt")).unwrap();
+        assert_eq!(options.searxng_category(), "social media");
+        assert_eq!(options.time_range.as_deref(), Some("week"));
+        assert_eq!(options.language, "pt");
+        assert_eq!(SearchOptions::new(None, None, None).unwrap(), SearchOptions::default());
+        assert_eq!(SearchOptions::default().language, AUTO_LANGUAGE);
+        assert!(SearchOptions::new(Some("shopping"), None, None).unwrap_err().contains("one of: general, news"));
+        assert!(SearchOptions::new(None, Some("hour"), None).is_err());
+        assert!(SearchOptions::new(None, None, Some("en; rm -rf")).is_err());
+        assert!(SearchOptions::new(None, None, Some("de-CH")).is_ok());
     }
 
     #[test]

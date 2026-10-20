@@ -59,14 +59,24 @@ def test_the_file_is_valid_yaml_with_the_engines_it_promises(tmp_path):
     SearxngSettings.ensure(str(tmp_path))
     settings = yaml.safe_load(read(tmp_path / "settings.yml"))
     engines = {engine["name"]: engine for engine in settings["engines"]}
-    # DuckDuckGo raises its CAPTCHA with a zero-second suspension, so it was asked on every search.
+    # DuckDuckGo's HTML endpoint raises its CAPTCHA with a zero-second suspension, so it was asked
+    # on every search; its API endpoint (`duckduckgo web`) answered and is on.
     assert engines["duckduckgo"]["disabled"] is True
-    for name in ("mwmbl", "yep", "seznam", "yandex"):
-        assert engines[name]["disabled"] is False and "general" in engines[name]["categories"]
-        assert engines[name]["engine"] and engines[name]["shortcut"]
-    assert (
-        "bing" not in engines
-    )  # left at SearXNG's default, off: it answered with speed-test sites
+    assert engines["duckduckgo web"]["disabled"] is False
+    assert "general" in engines["duckduckgo web"]["categories"]
+    for name in ("mwmbl", "yep", "seznam"):  # SearXNG ships these off
+        assert engines[name]["disabled"] is False, name
+    # Bing's web search is left at SearXNG's default, off: it answered with speed-test sites.
+    assert "bing" not in engines
+    # Wikimedia's other projects and the books engines stay out of general, so it is not drowned.
+    for name in ("wikivoyage", "wikiquote", "openlibrary", "tagesschau"):
+        assert "general" not in engines[name]["categories"], name
+    # The torrent indexes SearXNG ships on are off.
+    assert all(engines[name]["disabled"] is True for name in ("piratebay", "kickass", "bt4g"))
+    # Engines run by Russian or Chinese companies are removed outright, so no bang reaches them.
+    removed = settings["use_default_settings"]["engines"]["remove"]
+    assert {"yandex", "baidu", "sogou", "360search", "quark", "bilibili"} <= set(removed)
+    assert not set(removed) & set(engines)
     assert settings["search"]["suspended_times"]["SearxEngineTooManyRequests"] == 900
     assert settings["search"]["formats"] == ["html", "json"]
     assert settings["server"]["limiter"] is False
