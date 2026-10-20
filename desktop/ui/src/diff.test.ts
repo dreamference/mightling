@@ -2,7 +2,7 @@
 // patch; the split view's rows; the comments sent to the composer.
 import { describe, expect, it } from "vitest";
 
-import { commentsMessage, filePatch, fingerprint, hunkPatch, parseDiff, splitRows, underDirectory } from "./diff";
+import { commentsMessage, filePatch, fingerprint, hunkPatch, parseDiff, revertQuestion, splitRows, underDirectory } from "./diff";
 
 const GIT = `diff --git a/a.txt b/a.txt
 index 1111111..2222222 100644
@@ -93,5 +93,32 @@ describe("a turn's diff under a folder of the repository", () => {
     expect(underDirectory(diff, "")).toBe(diff);
     // A new file keeps /dev/null.
     expect(underDirectory("--- /dev/null\n+++ b/new.txt\n", "app")).toBe("--- /dev/null\n+++ b/app/new.txt\n");
+  });
+});
+
+describe("Revert's question", () => {
+  const edit = "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n";
+  const said = (text: string) => ({ type: "agentMessage", text });
+  const ran = { type: "commandExecution" };
+
+  it("says the files are undone and nothing of shell commands when none ran", () => {
+    const question = revertQuestion([{ diff: edit, items: [said("done")] }], 0);
+    expect(question).toBe("Remove this turn from the thread and undo the file changes it made? The conversation cannot be brought back from here.");
+  });
+
+  it("says what shell commands changed is not undone when the turn ran one", () => {
+    const question = revertQuestion([{ diff: edit, items: [ran, said("done")] }], 0);
+    expect(question).toBe("Remove this turn from the thread and undo the file changes it made? Changes made by shell commands in this turn are not undone. The conversation cannot be brought back from here.");
+    // With no diff too: the files the commands wrote stay as they are.
+    expect(revertQuestion([{ diff: null, items: [ran] }], 0)).toContain("Changes made by shell commands in this turn are not undone.");
+  });
+
+  it("counts the later turns it removes, and their shell commands", () => {
+    const turns = [{ diff: edit, items: [said("a")] }, { diff: null, items: [said("b")] }, { diff: null, items: [ran] }];
+    const question = revertQuestion(turns, 0);
+    expect(question).toMatch(/^Remove this turn and the 2 after it from the thread and undo the file changes it made\?/);
+    expect(question).toContain("Changes made by shell commands in these turns are not undone.");
+    // The last turn alone: the earlier turns' commands are not its concern.
+    expect(revertQuestion([{ diff: null, items: [ran] }, { diff: edit, items: [said("c")] }], 1)).not.toContain("shell");
   });
 });
