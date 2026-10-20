@@ -286,7 +286,7 @@ fn resolve_import(target: &str, from: &Path, home: Option<&Path>) -> Option<Path
 pub fn render(memory: &Memory, budget: usize) -> String {
     let mut texts: Vec<String> = memory.files.iter().map(|file| file.text.trim_end().to_string()).collect();
     let header_len: usize = memory.files.iter().map(|file| file.path.display().to_string().len() + 32).sum::<usize>() + 160;
-    let mut total = |texts: &[String]| texts.iter().map(String::len).sum::<usize>() + header_len;
+    let total = |texts: &[String]| texts.iter().map(String::len).sum::<usize>() + header_len;
     while total(&texts) > budget {
         let Some((largest, _)) = texts.iter().enumerate().max_by_key(|(_, text)| text.len()) else { break };
         let over = total(&texts) - budget;
@@ -459,15 +459,13 @@ fn with_settings(args: Vec<std::ffi::OsString>, settings: &[String]) -> Vec<std:
     out
 }
 
-/// The session's memory settings: in the mode, the hook (unless `--bare` asked for none); outside
-/// it, `CLAUDE.md` as a fallback document when `mightling_claude_md` is on.
+/// The session's memory settings outside the mode: `CLAUDE.md` as a fallback document when
+/// `mightling_claude_md` is on. In the mode the hook is registered by compat_hooks.rs, together
+/// with the settings files' hooks, since all of them share one `-c hooks={…}` table.
 pub fn prepare(args: Vec<std::ffi::OsString>, mode: crate::compat::Mode, codex_home: &Path) -> Vec<std::ffi::OsString> {
+    // In the mode the hook goes in with the settings files' hooks, one table (compat_hooks.rs).
     if mode == crate::compat::Mode::Claude {
-        if std::env::var_os(crate::compat_print::BARE_ENV).is_some() {
-            return args;
-        }
-        let Ok(exe) = std::env::current_exe() else { return args };
-        return with_settings(args, &hook_settings(&hook_command(&exe)));
+        return args;
     }
     let config_text = crate::config_file().and_then(|path| std::fs::read_to_string(path).ok());
     if !claude_md_fallback_on(std::env::var(CLAUDE_MD_ENV).ok().as_deref(), config_text.as_deref()) {
