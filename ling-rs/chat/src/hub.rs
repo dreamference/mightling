@@ -21,6 +21,10 @@ use crate::agent::CONNECTED;
 use crate::attachments;
 use crate::attachments::Media;
 use crate::attachments::Uploaded;
+use crate::limits;
+use crate::limits::Limits;
+use crate::limits::Verdict;
+use crate::limits::Watch;
 use ling_web_server::chat_settings::ChatSettings;
 
 use crate::store::ThreadRef;
@@ -100,6 +104,9 @@ pub struct HubConfig {
     pub settings: ChatSettings,
     /// The user's configuration, read again for the settings with the air gap; None in tests.
     pub settings_file: Option<PathBuf>,
+    /// After "answer now", how long before the interrupt; the final turn's time (limits.rs).
+    pub grace: Duration,
+    pub final_budget: Duration,
 }
 
 impl HubConfig {
@@ -113,6 +120,8 @@ impl HubConfig {
             airgap_interval: Duration::from_secs(60),
             settings: ChatSettings::default(),
             settings_file: None,
+            grace: Duration::from_millis(limits::GRACE_MS),
+            final_budget: Duration::from_millis(limits::FINAL_BUDGET_MS),
         }
     }
 }
@@ -126,6 +135,10 @@ struct Turn {
     error: Option<String>,
     dirty: bool,
     last_draft: Instant,
+    /// Its bounds (limits.rs).
+    watch: Watch,
+    /// Why the bridge interrupted it, when it did.
+    limit_reason: Option<String>,
 }
 
 impl Turn {
@@ -133,7 +146,10 @@ impl Turn {
         self.items.iter().map(|(_, text, _)| text.trim()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("\n\n")
     }
 
-    /// The answer: the items marked final, or else the last message.
+    /// The answer: the items marked final, or else the last message. A short last word after a
+    /// longer earlier message ("The answer above stands.") brings that message with it: the phone
+    /// shows only this, and in 2 of 56 Ask turns on 2026-10-20 the model gave its answer before a
+    /// tool call and then only referred to it.
     fn answer(&self) -> String {
         let finals: Vec<&str> = self
             .items
@@ -142,10 +158,27 @@ impl Turn {
             .map(|(_, text, _)| text.trim())
             .filter(|text| !text.is_empty())
             .collect();
-        if !finals.is_empty() {
-            return finals.join("\n\n");
+        let last = if finals.is_empty() {
+            self.items.iter().rev().map(|(_, text, _)| text.trim()).find(|text| !text.is_empty()).unwrap_or_default().to_string()
+        } else {
+            finals.join("\n\n")
+        };
+        if last.chars().count() >= SUBSTANTIVE {
+            return last;
         }
-        self.items.iter().rev().map(|(_, text, _)| text.trim()).find(|text| !text.is_empty()).unwrap_or_default().to_string()
+        // Never the model's commentary between tool calls, and only a message long enough to be an
+        // answer: a short "I'll check two pages" before a tool call is not one.
+        let earlier = self
+            .items
+            .iter()
+            .filter(|(_, _, phase)| phase.as_deref() != Some("commentary"))
+            .map(|(_, text, _)| text.trim())
+            .filter(|text| !text.is_empty() && *text != last && !last.contains(*text))
+            .max_by_key(|text| text.chars().count());
+        match earlier {
+            Some(earlier) if earlier.chars().count() >= EARLIER_ANSWER => format!("{earlier}\n\n{last}"),
+            _ => last,
+        }
     }
 
     fn delta(&mut self, item: &str, delta: &str) {
@@ -170,6 +203,11 @@ impl Turn {
         self.dirty = true;
     }
 }
+
+/// A final answer shorter than this is taken as a pointer to an earlier, longer message.
+const SUBSTANTIVE: usize = 200;
+/// An earlier message at least this long is taken as the answer such a last word points at.
+const EARLIER_ANSWER: usize = 400;
 
 /// What a pending approval answers with.
 #[derive(Clone, Debug)]
@@ -478,7 +516,11 @@ impl Hub {
             }
             return Ok(thread);
         }
-        let started = self.agent.request("thread/start", json!({ "prompt": "ask" })).await?;
+        // `chat`: Ask with the phone block (MIGHTLING_CHAT §16.3); `ask` from a `ling web` without it.
+        let started = match self.agent.request("thread/start", json!({ "prompt": "chat" })).await {
+            Err(err) if err.contains("no prompt named") => self.agent.request("thread/start", json!({ "prompt": "ask" })).await?,
+            other => other?,
+        };
         let thread = started.pointer("/thread/id").and_then(Value::as_str).ok_or("thread/start named no thread")?.to_string();
         self.subscribed.insert(thread.clone());
         let name = thread_name(first);
@@ -551,7 +593,16 @@ impl Hub {
     async fn start_turn(&mut self, chat: &str, thread: &str, input: Value) {
         self.turns.insert(
             thread.to_string(),
-            Turn { chat: chat.to_string(), id: None, items: Vec::new(), error: None, dirty: false, last_draft: Instant::now() },
+            Turn {
+                chat: chat.to_string(),
+                id: None,
+                items: Vec::new(),
+                error: None,
+                dirty: false,
+                last_draft: Instant::now(),
+                watch: Watch::new(now_ms()),
+                limit_reason: None,
+            },
         );
         self.send(Outbound::Draft { chat: chat.to_string(), text: String::new() });
         match self.agent.request("turn/start", json!({ "threadId": thread, "input": input })).await {
@@ -592,11 +643,22 @@ impl Hub {
                     turn.delta(item, params.get("delta").and_then(Value::as_str).unwrap_or_default());
                 }
             }
-            "item/completed" => {
+            "item/started" => {
                 if let Some(turn) = self.turns.get_mut(&thread)
-                    && params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage")
+                    && let Some(kind) = params.pointer("/item/type").and_then(Value::as_str)
+                    && limits::is_tool(kind)
                 {
-                    turn.completed_item(&params["item"]);
+                    let item = params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default();
+                    let command = (kind == "commandExecution").then(|| params.pointer("/item/command").and_then(Value::as_str).unwrap_or("a command"));
+                    turn.watch.tool_started(item, command, now_ms());
+                }
+            }
+            "item/completed" => {
+                if let Some(turn) = self.turns.get_mut(&thread) {
+                    if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") {
+                        turn.completed_item(&params["item"]);
+                    }
+                    turn.watch.tool_completed(params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default());
                 }
             }
             "error" => {
@@ -633,6 +695,24 @@ impl Hub {
         let _ = self.threads.save(&self.config.dir);
         let answer = turn.answer();
         let status = turn_value.get("status").and_then(Value::as_str).unwrap_or("completed");
+        // Interrupted by its bounds (limits.rs): a final turn asks for the answer from what was found;
+        // a final turn out of time too ends with what it wrote.
+        if let Some(reason) = turn.limit_reason.clone().filter(|_| status != "completed") {
+            if !turn.watch.final_turn {
+                self.start_turn(&chat, thread, text_input(&limits::final_text(&reason))).await;
+                if let Some(next) = self.turns.get_mut(thread) {
+                    next.watch = Watch::final_turn(now_ms());
+                }
+                return;
+            }
+            self.send(Outbound::TurnEnded { chat: chat.clone() });
+            if !answer.is_empty() {
+                self.send(Outbound::Message { chat: chat.clone(), markdown: answer });
+            }
+            self.notice(&chat, limits::GAVE_UP);
+            self.after_turn(&chat, thread).await;
+            return;
+        }
         self.send(Outbound::TurnEnded { chat: chat.clone() });
         if !answer.is_empty() {
             self.send(Outbound::Message { chat: chat.clone(), markdown: answer });
@@ -648,6 +728,53 @@ impl Hub {
             }
             _ => {}
         }
+        self.after_turn(&chat, thread).await;
+    }
+
+    /// Each running turn against its bounds: told to answer now, then interrupted (limits.rs).
+    fn check_limits(&mut self) {
+        let limits = Limits {
+            grace_ms: self.config.grace.as_millis() as u64,
+            final_ms: self.config.final_budget.as_millis() as u64,
+            ..Limits::from_settings(&self.config.settings)
+        };
+        let now = now_ms();
+        let mut actions = Vec::new();
+        for (thread, turn) in self.turns.iter_mut() {
+            let Some(turn_id) = turn.id.clone() else { continue };
+            match turn.watch.check(now, &limits) {
+                Some(Verdict::Steer(text)) => actions.push((turn.chat.clone(), thread.clone(), turn_id, Some(text), None)),
+                Some(Verdict::Interrupt(reason)) => {
+                    turn.limit_reason = Some(reason.clone());
+                    let notice = (!turn.watch.final_turn).then(|| limits::interrupted_notice(&reason));
+                    actions.push((turn.chat.clone(), thread.clone(), turn_id, None, notice));
+                }
+                None => {}
+            }
+        }
+        for (chat, thread, turn_id, steer, notice) in actions {
+            let agent = self.agent.clone();
+            match steer {
+                Some(text) => {
+                    tokio::spawn(async move {
+                        let _ = agent.request("turn/steer", json!({ "threadId": thread, "input": text_input(&text), "expectedTurnId": turn_id })).await;
+                    });
+                }
+                None => {
+                    if let Some(line) = notice {
+                        self.notice(&chat, line);
+                    }
+                    tokio::spawn(async move {
+                        let _ = agent.request("turn/interrupt", json!({ "threadId": thread, "turnId": turn_id })).await;
+                    });
+                }
+            }
+        }
+    }
+
+    /// After a turn's answer: its approvals close, and messages that waited start the next turn.
+    async fn after_turn(&mut self, chat: &str, thread: &str) {
+        let chat = chat.to_string();
         // Approvals of a finished turn can no longer be answered.
         let stale: Vec<u64> = self.approvals.iter().filter(|(_, p)| p.thread == thread).map(|(id, _)| *id).collect();
         for id in stale {
@@ -849,6 +976,7 @@ impl Hub {
 
     pub fn on_tick(&mut self) {
         let now = Instant::now();
+        self.check_limits();
         if now.duration_since(self.airgap_read) >= self.config.airgap_interval {
             self.airgapped = (self.airgap)();
             self.airgap_read = now;
