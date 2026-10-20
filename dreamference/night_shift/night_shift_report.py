@@ -1,5 +1,4 @@
-"""
-The morning report (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.6).
+"""The morning report (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.6).
 
 One `## <repository>` section per repository, so `/night report` can print just the section of the
 repository it is asked from, and the general notes after them.
@@ -7,7 +6,7 @@ repository it is asked from, and the general notes after them.
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Final
 
 LAST_MESSAGE_STATUSES: Final[tuple] = ("stalled", "failed", "interrupted")
 
@@ -16,10 +15,14 @@ class NightShiftReport:
     """Formats and writes `reports/<date>.md`."""
 
     @classmethod
-    def render(cls, started: datetime, tasks: List[Dict[str, Any]], notes: List[str],
-               compactions: list[str] | None = None) -> str:
-        """
-        Renders a report.
+    def render(
+        cls,
+        started: datetime,
+        tasks: list[dict[str, Any]],
+        notes: list[str],
+        compactions: list[str] | None = None,
+    ) -> str:
+        """Renders a report.
 
         Args:
             started: When the run started; it names the report.
@@ -30,9 +33,13 @@ class NightShiftReport:
         Returns:
             str: Markdown.
         """
-        lines = [f"# Night Shift — {started:%Y-%m-%d}", "",
-                 f"Run started {started:%H:%M}, finished {datetime.now():%H:%M}.", ""]
-        by_repo: Dict[str, List[Dict[str, Any]]] = {}
+        lines = [
+            f"# Night Shift — {started:%Y-%m-%d}",
+            "",
+            f"Run started {started:%H:%M}, finished {datetime.now():%H:%M}.",
+            "",
+        ]
+        by_repo: dict[str, list[dict[str, Any]]] = {}
         for task in tasks:
             by_repo.setdefault(task.get("repo", "?"), []).append(task)
         for repo, repo_tasks in by_repo.items():
@@ -52,21 +59,26 @@ class NightShiftReport:
         lines = ["## Review", ""]
         branches = [task for task in tasks if (task.get("result") or {}).get("branch")]
         for task in branches:
-            lines.append(f"- `git -C {task['repo']} diff {task['base'][:12]}..{task['result']['branch']}`")
+            lines.append(
+                f"- `git -C {task['repo']} diff {task['base'][:12]}..{task['result']['branch']}`"
+            )
         if not branches:
             lines.append("- No branch to review.")
         lines.append("- `git worktree list` shows the worktrees kept for interrupted tasks.")
         return lines
 
     @classmethod
-    def _task_block(cls, task: Dict[str, Any]) -> List[str]:
+    def _task_block(cls, task: dict[str, Any]) -> list[str]:
         result = task.get("result") or {}
         first = (task.get("task", "").strip().splitlines() or [""])[0]
         lines = [f"### {task.get('id')} — {task.get('status')}", "", f"- Task: {first}"]
         if task.get("on"):
             target = (task.get("sent_to") or {}).get("name") or task["on"]
-            lines.append(f"- Ran on: {target}, by that node's own runner and model server"
-                         if result.get("node") else f"- Sent to: {target}")
+            lines.append(
+                f"- Ran on: {target}, by that node's own runner and model server"
+                if result.get("node")
+                else f"- Sent to: {target}"
+            )
         elif result.get("model_node"):
             lines.append(f"- Model server: {result['model_node']}'s (the task ran on this machine)")
         if task.get("status") == "sent":
@@ -78,19 +90,31 @@ class NightShiftReport:
             lines.append(f"- Changes: {summary}")
         if result.get("test_command"):
             sandbox = f", sandbox: {result['test_sandbox']}" if result.get("test_sandbox") else ""
-            lines.append(f"- Tests: `{result['test_command']}` ({result.get('test_source', '?')}): "
-                         f"{result.get('test_result', '?')}{sandbox}")
-        lines.append(f"- Attempts: {result.get('attempts', task.get('attempts', 0))}, "
-                     f"nudges: {result.get('nudges', 0)}, wall time: {cls._minutes(result.get('wall_s'))}")
+            lines.append(
+                f"- Tests: `{result['test_command']}` ({result.get('test_source', '?')}): "
+                f"{result.get('test_result', '?')}{sandbox}"
+            )
+        lines.append(
+            f"- Attempts: {result.get('attempts', task.get('attempts', 0))}, "
+            f"nudges: {result.get('nudges', 0)}, wall time: {cls._minutes(result.get('wall_s'))}"
+        )
         best = result.get("best_of")
         if isinstance(best, dict):
             lines += cls._best_of_lines(best)
         refine = result.get("refine")
         if isinstance(refine, dict):
-            edited = "; it changed the worktree, which was put back" if refine.get("study_edited") else ""
-            version = f" (refine-{refine['version']})" if refine.get("version", "v1") != "v1" else ""
-            lines.append(f"- Refine: studied first for {cls._minutes(refine.get('study_s'))}, "
-                         f"a {refine.get('refined_chars', 0)}-character description{edited}{version}")
+            edited = (
+                "; it changed the worktree, which was put back"
+                if refine.get("study_edited")
+                else ""
+            )
+            version = (
+                f" (refine-{refine['version']})" if refine.get("version", "v1") != "v1" else ""
+            )
+            lines.append(
+                f"- Refine: studied first for {cls._minutes(refine.get('study_s'))}, "
+                f"a {refine.get('refined_chars', 0)}-character description{edited}{version}"
+            )
         if task.get("status") in LAST_MESSAGE_STATUSES and result.get("last_message"):
             message = result["last_message"].strip().replace("\n", " ")
             lines.append(f"- Last message: {message[:400]}")
@@ -99,44 +123,63 @@ class NightShiftReport:
         return lines
 
     @classmethod
-    def _best_of_lines(cls, best: Dict[str, Any]) -> List[str]:
-        """Best-of-N (`NightShiftBestOfN`): what ran, the chosen attempt and why, and every alternative's diff."""
+    def _best_of_lines(cls, best: dict[str, Any]) -> list[str]:
+        """Best-of-N (`NightShiftBestOfN`): what ran and why, the chosen attempt and why, every attempt."""
         chosen = best.get("chosen")
         points = best.get("points") or {}
         ran = f"{best.get('ran', 0)} of {best.get('n', '?')} attempts ran"
+        if best.get("why"):
+            ran += f" ({best['why']})"
         if chosen is None:
             lines = [f"- Best of {best.get('n', '?')}: {ran}; none chosen"]
         else:
-            scored = "; points " + ", ".join(f"{key} {value:.2f}" for key, value in sorted(points.items())) \
-                if points else ""
-            lines = [f"- Best of {best.get('n', '?')}: {ran}; chose attempt {chosen} by {best.get('stage', '?')}{scored}"]
+            scored = (
+                "; points "
+                + ", ".join(f"{key} {value:.2f}" for key, value in sorted(points.items()))
+                if points
+                else ""
+            )
+            lines = [
+                f"- Best of {best.get('n', '?')}: {ran}; chose attempt {chosen} by {best.get('stage', '?')}{scored}"
+            ]
+        if best.get("reason"):
+            lines.append(f"  - Why: {best['reason']}")
         if best.get("judge_calls"):
-            errors = f", {best['judge_errors']} unreadable or failed" if best.get("judge_errors") else ""
-            lines.append(f"  - Judge: {best['judge_calls']} call(s){errors}")
-        for entry in best.get("attempts") or []:
-            parts = [str(entry.get("status", "?"))]
-            if entry.get("changes"):
-                parts.append(entry["changes"])
-            if entry.get("test_result"):
-                parts.append(f"tests {entry['test_result']}")
-            parts.append(cls._minutes(entry.get("wall_s")))
-            if entry.get("attempt") == chosen:
-                parts.append("chosen: the branch")
-            elif entry.get("diff"):
-                parts.append(f"diff `{entry['diff']}`")
-            lines.append(f"  - Attempt {entry.get('attempt')}: " + ", ".join(parts))
+            errors = (
+                f", {best['judge_errors']} unreadable or failed" if best.get("judge_errors") else ""
+            )
+            log = f"; answers in `{best['judge_log']}`" if best.get("judge_log") else ""
+            lines.append(f"  - Judge: {best['judge_calls']} call(s){errors}{log}")
+        lines += [cls._attempt_line(entry, chosen) for entry in best.get("attempts") or []]
         return lines
 
     @classmethod
-    def _minutes(cls, seconds: Optional[int]) -> str:
+    def _attempt_line(cls, entry: dict[str, Any], chosen: int | None) -> str:
+        """One attempt of a best-of-N task: its end, change, tests, time, and where its diff and logs are."""
+        parts = [str(entry.get("status", "?"))]
+        if entry.get("changes"):
+            parts.append(entry["changes"])
+        if entry.get("test_result"):
+            parts.append(f"tests {entry['test_result']}")
+        parts.append(cls._minutes(entry.get("wall_s")))
+        if entry.get("attempt") == chosen:
+            parts.append("chosen: the branch")
+        elif entry.get("diff"):
+            parts.append(f"diff `{entry['diff']}`")
+        for key, label in (("log", "log"), ("test_log", "test log")):
+            if entry.get(key):
+                parts.append(f"{label} `{entry[key]}`")
+        return f"  - Attempt {entry.get('attempt')}: " + ", ".join(parts)
+
+    @classmethod
+    def _minutes(cls, seconds: int | None) -> str:
         if seconds is None:
             return "—"
         return f"{seconds // 60} min {seconds % 60} s" if seconds >= 60 else f"{seconds} s"
 
     @classmethod
     def write(cls, night_dir: Path, started: datetime, text: str) -> Path:
-        """
-        Writes the report, numbering it if a report for that date exists.
+        """Writes the report, numbering it if a report for that date exists.
 
         Args:
             night_dir: The queue directory.
