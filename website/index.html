@@ -30,6 +30,7 @@
     <a class="brand" href="#"><img src="assets/favicon.svg" alt="" width="34" height="34">Mightling</a>
     <nav class="links">
       <a href="#install">Install</a>
+      <a class="opt" href="#new">New in 1.7</a>
       <a class="opt" href="#benchmark">Benchmark</a>
       <a class="opt" href="#proof">Proof</a>
       <a class="opt" href="#faq">FAQ</a>
@@ -86,6 +87,52 @@
   </div>
 
 </div>
+
+<section id="new">
+  <div class="wrap">
+    <h2>New in 1.7: the desktop app on a Mac, Linux and Windows</h2>
+    <p class="sub">Mightling 1.7.0's desktop app holds Ask and Work in one window. Work is a full workbench for
+      agent sessions: a composer with files, skills and commands, a review pane to stage, revert and commit,
+      worktrees, terminal tabs, and a file tree and file tabs beside the thread. On your other computers it is a
+      client of your GB10, which it finds on the local network. Check each download against the release's signed
+      <code>SHA256SUMS</code> first.</p>
+    <div class="pillars">
+      <div class="pillar">
+        <h3>macOS <span class="tag">preview</span></h3>
+        <p><code>Mightling-1.7.0-arm64-preview.dmg</code> for Apple silicon and the <code>x64</code> one for
+          Intel, macOS 12 or later. It is not signed with an Apple Developer ID or notarized, so macOS refuses it
+          the first time:</p>
+        <ol>
+          <li>Drag Mightling onto Applications.</li>
+          <li>Open it once; macOS says it cannot verify it. Click Done.</li>
+          <li>System Settings → Privacy &amp; Security → <b>Open Anyway</b>.</li>
+        </ol>
+        <p>On macOS 14 and earlier, Control-click the app and choose Open instead.
+          <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#on-a-mac-preview">Step by step</a>.</p>
+      </div>
+      <div class="pillar">
+        <h3>Linux</h3>
+        <p>On the GB10, <code>mightling_1.7.0_arm64.deb</code> installs the app, its launcher entry and the
+          <code>ling-app</code> command, with the sandbox profile it needs:</p>
+        <div class="cmd"><pre><span class="p">$ </span>sudo apt install ./mightling_1.7.0_arm64.deb</pre></div>
+        <p>Then open it from the application menu, or with <code>ling app</code>.
+          <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#install-and-run">More</a>.</p>
+      </div>
+      <div class="pillar">
+        <h3>Windows 11 <span class="tag">preview</span></h3>
+        <p>New in 1.7: an installer, <code>Mightling-Setup-1.7.0-x64.exe</code> for x86-64 and
+          the <code>arm64</code> one for Windows on Arm, with <code>ling.exe</code> inside. It installs for you alone,
+          without administrator rights, and adds a Start menu entry; Settings → Apps removes it.</p>
+        <p>Not signed yet: SmartScreen warns the first time (More info, then Run anyway), and Smart App Control
+          must be off. To update, run the next release's installer.</p>
+      </div>
+    </div>
+    <p class="sub after">Also in 1.7.0: Night Shift can try a task several times and keep the best attempt
+      (<code>/night add --best-of N</code>), one machine can run several Signal bridges, and a client chooses
+      between two nodes on one network without losing the one it knows.
+      <a href="https://github.com/dreamference/mightling/releases/tag/v1.7.0">Release notes and downloads</a>.</p>
+  </div>
+</section>
 
 <section id="benchmark">
   <div class="wrap">
@@ -298,7 +345,7 @@ Networked git commands: none</pre></div>
       <div class="feature"><h3>🧭 A code index</h3><p>Definitions, callers and impact across your repository, so the agent finds code instead of grepping for it.</p></div>
       <div class="feature"><h3>🧩 Your existing skills</h3><p>Skills you already wrote for Claude Code, Gemini CLI, OpenClaw or Hermes work unchanged.</p></div>
       <div class="feature"><h3>💬 Ask, in a browser</h3><p>Questions with web search, image search and dictation, and your agent sessions, from this machine or a paired phone, on the same local model.</p></div>
-      <div class="feature"><h3>🪟 Desktop app <span class="tag">preview</span></h3><p>The chat in a window of its own, plus a Work window for agent sessions with approvals, diffs and undo.</p></div>
+      <div class="feature"><h3>🪟 Desktop app <span class="tag">preview</span></h3><p>Ask and Work in one window, on the GB10, a Mac, Linux or Windows: agent sessions with approvals, a review pane, worktrees and undo. <a href="#new">New in 1.7</a>.</p></div>
       <div class="feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">preview</span></h3><p>Read-only, through a sign-in that stays on your machine. Switched off entirely at <code>/airgapped on</code>.</p></div>
     </div>
   </div>
