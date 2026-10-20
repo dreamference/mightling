@@ -4,7 +4,8 @@
 
 This module provides the EgressAudit class. It runs one real `ling` session under `strace`
 (`ling exec`; with `--tui` the full-screen interface on a pseudo-terminal; with `--web` the web
-server, `ling web serve`, answering one Ask thread asked through it), in a throwaway
+server, `ling web serve`, answering one Ask thread asked through it; with `--compat claude` the
+compatibility mode's print mode in a repository holding Claude Code's files), in a throwaway
 repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked
 of a resolver and every process the session started, with a verdict. It makes "your code stays on your machine" something a user can check and re-check
 after each Codex bump, instead of a promise.
@@ -25,9 +26,11 @@ import sys
 import tempfile
 import time
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Dict, Final, List, Optional, Tuple
 from urllib.parse import urlparse
 
+from dreamference.audit.compat_print_session import CompatPrintSession
 from dreamference.audit.egress_trace import EgressTrace
 from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED, EgressVerdict
 from dreamference.audit.preview_page import PreviewPage
@@ -66,11 +69,13 @@ EXEC: Final[str] = "exec"
 TUI: Final[str] = "tui"
 APP: Final[str] = "app"
 WEB: Final[str] = "web"
+CLAUDE: Final[str] = "claude"
 SESSION_NAMES: Final[Dict[str, str]] = {
     EXEC: "`ling exec` session",
     TUI: "full-screen `ling` session",
     APP: "desktop app session (`ling-app`, windows hidden)",
     WEB: "`ling web` server answering an Ask thread",
+    CLAUDE: "compatibility-mode print session (`ling --compat claude -p --output-format json`)",
 }
 
 # The desktop app's session (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §6): `ling-app` is
@@ -202,7 +207,7 @@ class EgressAudit:
             vllm_host (str): The model server's base URL.
             prompt (str): The prompt to send.
             work_dir (str): A scratch directory, owned by the caller.
-            session (str): `exec`, `tui` or `app`.
+            session (str): `exec`, `tui`, `app` or `claude` (CompatPrintSession).
             app_bin (Optional[str]): The desktop app's executable, for an `app` session.
 
         Returns:
@@ -231,8 +236,15 @@ class EgressAudit:
         # `-yy` labels each descriptor with its socket kind and inode, which is what tells a UDP
         # route lookup from a connection (StraceParser).
         strace = ["strace", "-f", "-qq", "-yy", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]
-        if session == WEB:
-            replied = cls._web_session(strace, mightling_bin, repo, env, work_dir, home, prompt)
+        if session in (WEB, CLAUDE):
+            # Both answer on their own channel: the web server to its client, print mode on stdout.
+            replied = (
+                cls._web_session(strace, mightling_bin, repo, env, work_dir, home, prompt)
+                if session == WEB
+                else CompatPrintSession.run(
+                    CompatPrintSession.command(strace, prompt), Path(repo), env, Path(reply_path), SESSION_TIMEOUT_S
+                )
+            )
             return cls._read_trace(trace_path), replied, trace_path
         if session == TUI:
             TuiSession.trust(home, repo)
@@ -684,7 +696,7 @@ class EgressAudit:
     @classmethod
     def run(cls, prompt: Optional[str] = None, write_json: bool = False,
             mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False,
-            app: bool = False, app_bin: Optional[str] = None, web: bool = False) -> int:
+            app: bool = False, app_bin: Optional[str] = None, web: bool = False, compat: bool = False) -> int:
         """
         Runs the audit and prints its report.
 
@@ -698,6 +710,7 @@ class EgressAudit:
             app (bool): Trace the desktop app in its hidden audit session instead (needs a
                 display: `DISPLAY`, or `xvfb-run`; Electron's headless platform crashes here).
             web (bool): Trace `ling web serve` answering one Ask thread instead.
+            compat (bool): Trace the compatibility mode's print mode instead (CompatPrintSession).
             mightling_bin (Optional[str]): The `ling` executable; the installed build by default.
             vllm_host (Optional[str]): The model server; the configured one by default.
             app_bin (Optional[str]): The desktop app; the packaged or installed one by default.
@@ -715,7 +728,7 @@ class EgressAudit:
             print("⚠️  Egress audit: trace failed")
             print("   - ling is not built: run `ling-admin codex build` first.")
             return 2
-        session = APP if app else WEB if web else TUI if tui else EXEC
+        session = APP if app else WEB if web else TUI if tui else CLAUDE if compat else EXEC
         if app:
             app_bin = app_bin or cls.app_executable()
             if not app_bin:
@@ -778,8 +791,9 @@ class EgressAudit:
         """
         The audit `ling-admin codex build` runs once it has installed a new `ling` (§2): a
         Codex bump is when a new channel would appear, and nobody remembers to re-run a trace by
-        hand. Both kinds of session are traced, `exec` and then the interface, and each result
-        is written under `$CODEX_HOME/audit/`.
+        hand. Both kinds of session are traced, `exec` and then the interface, and the
+        compatibility mode's print session when the user's sessions start in that mode; each
+        result is written under `$CODEX_HOME/audit/`.
 
         It never fails the build: the binary is installed either way, and the verdict is what
         the user reads. Without a model server it does not wait for one; it says how to run the
@@ -813,6 +827,10 @@ class EgressAudit:
                       "`ling-admin audit egress --tui` says how to add them.")
             else:
                 codes.append(cls.run(write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host, tui=True))
+            # The compatibility mode too, when the user's new sessions start in it.
+            codes += CompatPrintSession.after_build(
+                lambda: cls.run(write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host, compat=True)
+            )
             worst = 1 if 1 in codes else max(codes)
             if worst == 1:
                 print("❌ This build reaches something it should not: see the destinations above. "
