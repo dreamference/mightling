@@ -177,6 +177,16 @@ are kept. `ling-admin matrix status` shows how it stands.
 
 ## Telegram
 
+**Topics.** If you turn on topics for your bot in @BotFather's settings for it, each
+topic is its own thread: `/new` makes one, a topic you create starts one, and it is named after
+your first message in it. Two topics can answer at once. Outside topics the chat works as before.
+
+**Rich answers** (tables, headings, lists) are off until they have been checked on real clients;
+turn them on with `telegram_rich = true` under `[chat]` in `~/.config/dreamference/config.toml`.
+Approvals show a green and a red button, and stay in the chat with their outcome. Stopping an
+answer keeps what was written, marked "(stopped)".
+
+
 Telegram is the less private choice. Everything you send the bot, and every answer, passes through
 Telegram's servers unencrypted. Answers can include what the agent reads for you, such as mail,
 files and code. Setup shows this warning and asks you to type `yes`.
