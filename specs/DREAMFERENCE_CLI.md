@@ -24,6 +24,7 @@
 - `ling-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
 - `ling`: **not** a Python entry point. It is the Rust binary built by `ling-admin codex build`: Codex with Mightling's branding and launcher compiled in, linked at `~/.local/bin/ling`. It takes Codex's command line, plus subcommands the launcher answers itself before Codex parses anything:
   - `ling app` (the desktop app), `ling night …`, `ling airgapped [default <level>]`, `ling node list|use|forget`;
+  - `ling compat [status|use claude|off|doctor]` and the flag `--compat claude|off`, the compatibility mode: `ling` working the way Claude Code does, reading its project files (`DREAMFERENCE_MIGHTLING_COMPAT` or `mightling_compat`, the key read only from the user's own `~/.config/dreamference/config.toml`; see `DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §0.4);
   - `ling prompt [list|show [<name>]|use <name>]`, which chooses the system prompt new sessions get (`default`, `offline`, `high-swe`, `ask` or a custom one; `DREAMFERENCE_MIGHTLING_PROMPT` or `mightling_prompt`, see `DREAMFERENCE_MIGHTLING_PROMPT.md`);
   - `ling skill …` (other agents' skills, `DREAMFERENCE_MIGHTLING_SKILLS.md`) and `ling docs add|remove|search|read|status` (the document index, `DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md`);
   - `ling web serve|start|stop|status|open|pair` (the web UI on port 3100, `DREAMFERENCE_MIGHTLING_ASK.md`), `ling chat …` (Matrix and Telegram) and `ling signal setup|status|start|stop|trust|remove|unit` (Linux), both off until set up (`DREAMFERENCE_MIGHTLING_CHAT.md`, `DREAMFERENCE_MIGHTLING_SIGNAL.md`);
@@ -562,6 +563,7 @@ mightling_compaction_ledger = true    # hand the agent a rule-built ledger after
 mightling_prompt = "default"    # the system prompt new sessions get (ling prompt use <name>)
 mightling_refine = false        # refine mode: study the task first, then solve it (MIGHTLING_REFINE)
 mightling_refine_version = "v1" # its texts: v1 (measured) or v2 (MIGHTLING_REFINE §10)
+mightling_compat = "off"        # claude | off: the compatibility mode (ling compat use; read from this file only)
 
 [night]                      # Night Shift, read by `ling-admin night` (NightShiftSettings)
 window = "01:00-07:00"
@@ -600,6 +602,7 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_MIGHTLING_GMAIL` | `true` | Add the Gmail section to `ling`'s prompt when an account is connected |
 | `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW` | unset | The model's context window in tokens, overriding what the server reports (also `mightling_context_window` in the config file). Without either, `ling` reads `max_model_len`, `context_length` or `max_context_length` from `/v1/models`, then llama.cpp's `/props` `n_ctx`, then its `n_ctx_train`, else assumes 32,768. Ollama reports none, so set it there |
 | `DREAMFERENCE_MIGHTLING_CAVE_MODE` | `ultra` | Cave-mode level for new `ling` sessions (`off`, `lite`, `full`, `ultra`); also the config key `mightling_cave_mode` |
+| `DREAMFERENCE_MIGHTLING_COMPAT` | `off` | The compatibility mode (`claude` or `off`; `--compat` on the command line sets it for the process and what it starts); also the config key `mightling_compat`, which `ling compat use` writes and which is read only from `~/.config/dreamference/config.toml`, never from a repository's `dreamference.toml` or `DREAMFERENCE_CONFIG_PATH`. A value naming no mode stops the start, from the flag or the variable; from the file it is reported and the mode stays off. Fixed for a session's life (`DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §0.4) |
 | `DREAMFERENCE_MIGHTLING_PROMPT` | `default` | System prompt for new `ling` sessions (`default`, `offline`, `high-swe`, `ask`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `mightling_prompt`, which `ling prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |
 | `DREAMFERENCE_MIGHTLING_AIRGAPPED` | `off` | How much of the internet a `ling` session may use (`off`, `on`); also the config key `mightling_airgapped` |
 | `DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER` | `true` | Register `ling ledger` as the hook that runs after each compaction of a `ling` session ([MIGHTLING_COMPACTION §11](./DREAMFERENCE_MIGHTLING_COMPACTION.md)); also the config key `mightling_compaction_ledger` |
