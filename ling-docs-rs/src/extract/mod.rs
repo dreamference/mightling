@@ -7,14 +7,17 @@
 //!
 //! Every kind but PDF numbers its text by lines, so `read` can serve any range: the lines of a
 //! text file, the paragraphs of a DOCX, ODT or HTML page (`para 12-30`), the rows of a CSV
-//! (`rows 2-21`), and the lines of a mail file's messages and attachments (`msg 3`). PDFs are
-//! read by page.
+//! (`rows 2-21`), and the lines of a mail file's messages and attachments (`msg 3`), of a
+//! workbook's sheets (`sheet Budget, rows 2-21`, in the sheet's own rows) and of a presentation's
+//! slides (`slide 4`). PDFs are read by page.
 
 pub mod csv;
 pub mod html;
 pub mod mail;
 pub mod office;
 pub mod pdf;
+pub mod sheets;
+pub mod slides;
 pub mod text;
 
 use std::io::{BufRead, Write};
@@ -167,6 +170,9 @@ pub fn extract_bytes(name: &str, kind: Kind, bytes: &[u8], readers: &Readers, ma
         Kind::Eml => mail::eml(bytes, readers),
         Kind::Mbox => mail::mbox(bytes, readers),
         Kind::Csv => csv::csv(&decode(bytes), name.to_ascii_lowercase().ends_with(".tsv")),
+        Kind::Xlsx | Kind::Xls | Kind::Ods => sheets::sheets(bytes)?,
+        Kind::Pptx => slides::pptx(bytes)?,
+        Kind::Odp => slides::odp(bytes)?,
         Kind::Markdown => text::markdown(&decode(bytes)),
         Kind::Rst => text::rst(&decode(bytes)),
         Kind::Org => text::org(&decode(bytes)),
