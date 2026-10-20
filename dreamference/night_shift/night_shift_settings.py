@@ -24,10 +24,12 @@ DEFAULT_NUDGES: Final[int] = 2
 DEFAULT_IDLE_MINUTES: Final[int] = 10
 DEFAULT_INDEX_TIMEOUT: Final[str] = "20m"
 # Best-of-N (backlog item 6): each task is attempted this many times, one attempt after another in
-# worktrees of their own, and chooser v1 picks the one the runner commits. 1 by default (the owner's
-# decision of 2026-10-18, after night 11's best-of-3 18/30 against 15/30, p = 0.375): a task gets
-# more attempts only when `[night] best_of` or the task's own `best_of` asks for them.
-DEFAULT_BEST_OF: Final[int] = 1
+# worktrees of their own, and chooser v1 picks the one the runner commits. 3 by default (the owner's
+# decision of 2026-10-19, after SWE-bench night 13: best-of-3 resolved 31/50 against a single run's
+# 22/50, paired p = 0.022; it was 1 from 2026-10-18 after night 11's 18/30 against 15/30, p = 0.375).
+# `[night] best_of = 1`, or a task's own `best_of = 1`, is a single attempt as before. Interactive
+# `ling` is never affected: this is Night Shift's alone.
+DEFAULT_BEST_OF: Final[int] = 3
 
 # The smallest KV budget a concurrent task may be given; the run splits the pool evenly between as
 # many tasks as can each get at least this much, and each task's session compacts at its share

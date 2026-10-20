@@ -133,6 +133,7 @@ class NightShiftTaskRun:
         self.worktree = night_dir / "worktrees" / self.task_id
         self.log_path = night_dir / "logs" / f"{self.task_id}.jsonl"
         self.last_message_path = night_dir / "logs" / f"{self.task_id}.last.txt"
+        self.test_log_path = night_dir / "logs" / f"{self.task_id}.test.log"
         if self.remote:
             # Written by `ling` from inside the sandbox, where only the task's own home is writable.
             from dreamference.night_shift.night_shift_remote import NightShiftRemote
@@ -156,6 +157,8 @@ class NightShiftTaskRun:
             self.log_path = night_dir / "logs" / f"{self.task_id}{suffix}.jsonl"
             self.last_message_path = night_dir / "logs" / f"{self.task_id}{suffix}.last.txt"
             self.diff_path: Path = night_dir / "logs" / f"{self.task_id}{suffix}.diff"
+            # Each attempt's test output is its own, so the report can point at every one.
+            self.test_log_path = night_dir / "logs" / f"{self.task_id}{suffix}.test.log"
 
     @property
     def unit_prefix(self) -> str:
@@ -399,7 +402,7 @@ class NightShiftTaskRun:
         return self.airgapped
 
     def _run_tests(self, test_command: str) -> Dict[str, Any]:
-        output_path = self.night_dir / "logs" / f"{self.task_id}.test.log"
+        output_path = self.test_log_path
         level = self._fix_level()
         sandboxed = self.USE_SANDBOX and self.settings.test_sandbox
         if level == SEALED and not self.settings.test_sandbox:

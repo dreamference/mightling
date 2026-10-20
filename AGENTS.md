@@ -129,7 +129,7 @@ Outside the package:
 
 **Skills from other agents** are linked under `~/.mightling/skills/from-<agent>/` at every start and budgeted, with no Codex patch. Details: [docs/dev/skills.md](docs/dev/skills.md).
 
-**Night Shift** is two halves that share only files: `/night add` queues a task, `ling-admin night run` (a user timer) runs each in its own git worktree and memory-capped scope; the runner commits, and nothing is merged or pushed. Details: [docs/dev/night-shift.md](docs/dev/night-shift.md).
+**Night Shift** is two halves that share only files: `/night add` queues a task, `ling-admin night run` (a user timer) runs each in its own git worktree and memory-capped scope, three attempts by default (`[night] best_of`, chooser v1 picks one); the runner commits, and nothing is merged or pushed. Details: [docs/dev/night-shift.md](docs/dev/night-shift.md).
 
 **SWE-bench** runs `ling` inside each instance's container (third-party arm64 images, validated instances only, a patchelf'd `ling`, the container as the sandbox). Its number compares configurations on this machine and is not a leaderboard score. While a run lasts, the model gate in front of the model server (its own container, started by `server start`; the engine sits on loopback behind it) refuses every request not from the run's network; `night pause` lets them through. Details: [docs/dev/swe-bench.md](docs/dev/swe-bench.md).
 
