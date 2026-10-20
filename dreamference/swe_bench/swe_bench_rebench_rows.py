@@ -1,5 +1,5 @@
 """
-SWE-rebench's rows in the form the pinned harness grades (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §27).
+SWE-rebench's rows in the form the pinned harness grades (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §28).
 
 The pinned `swebench` grades any row that carries its own `image`, `eval_script`, `log_parser`
 and `eval_type`. SWE-rebench's rows carry none of them: each has an `install_config` (Python

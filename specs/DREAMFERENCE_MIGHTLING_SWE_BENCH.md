@@ -872,7 +872,7 @@ Most unresolved patches fail by not fixing the issue; broken passing tests are 2
 **Tests** (`tests/test_swe_bench.py`, +3, with the fake agent writing a drop log and a timed compaction when the variable is set; `tests/test_swe_bench_night_script.py`, +3): the variable only with the flag, the record and the report line in both arms, untimed compactions counted without seconds, the manifest field told apart by `--against` and read as `False` when absent, the command line; the arm reaches only its round and stacks, a misspelt arm ends the night, `start` refuses a `ling` without the variable.
 
 
-## 27. SWE-rebench, a second task pool (`--dataset rebench-YYYY-MM`, 2026-10-20)
+## 28. SWE-rebench, a second task pool (`--dataset rebench-YYYY-MM`, 2026-10-20)
 
 *Built on branch `bench/swe-rebench` (the owner's decision of 2026-10-20), not merged and not yet run: no image has been built on any machine.* Verified stays the comparison number. SWE-rebench adds tasks this harness's rules were never designed on, because the validated arm64 Verified tasks are used up (§16's rotation).
 

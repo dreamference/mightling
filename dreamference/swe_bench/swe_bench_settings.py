@@ -35,7 +35,7 @@ DATASETS: Final[Dict[str, str]] = {
     "full": "SWE-bench/SWE-bench",
 }
 
-# SWE-rebench (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §27): an extra pool of tasks beside
+# SWE-rebench (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §28): an extra pool of tasks beside
 # Verified, from the leaderboard dataset's monthly splits. `rebench` is its `test` split (every
 # month), `rebench-YYYY-MM` one month's split `YYYY_MM`. Its tasks are new to this harness's rules,
 # not free of contamination for the model: every published task predates Qwen3.8-27B's release

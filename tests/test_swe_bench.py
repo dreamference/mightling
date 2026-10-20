@@ -1063,7 +1063,7 @@ def test_the_manifest_records_what_was_measured(bench):
 
 
 def test_a_rebench_month_runs_in_imported_images_and_its_report_names_the_pool(bench, monkeypatch):
-    """SWE-rebench (spec §27): the images built and validated elsewhere are loaded from their archives,
+    """SWE-rebench (spec §28): the images built and validated elsewhere are loaded from their archives,
     the run is graded in them, and the manifest and the report say what kind of tasks these are."""
     monkeypatch.setattr(SweBenchSettings, "architecture", classmethod(lambda cls: "arm64"))
     dataset = "rebench-2026-03"

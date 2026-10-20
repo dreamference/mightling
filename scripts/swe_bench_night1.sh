@@ -33,7 +33,7 @@ WT=${WT:-$REPO/.claude/worktrees/swe-night1}
 PY=${PY:-$REPO/.venv/bin/python}
 LIST=${LIST:-$HOME/.cache/dreamference/swe-bench/fresh-50.txt}
 # The rounds' dataset (`swe-bench run --dataset`): `verified`, or a SWE-rebench month such as
-# `rebench-2026-03`, whose tasks are an extra pool, not contamination-free (SWE_BENCH spec §27).
+# `rebench-2026-03`, whose tasks are an extra pool, not contamination-free (SWE_BENCH spec §28).
 # The smoke check stays on Verified's SMOKE_INSTANCE, which proves each arm starts either way.
 DATASET=${DATASET:-verified}
 D=${D:-$HOME/.local/share/dreamference/swe-bench/night1}
