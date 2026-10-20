@@ -196,10 +196,16 @@ pub fn applies(mode: crate::compat::Mode, tui: bool) -> bool {
     tui && mode == crate::compat::Mode::Claude
 }
 
+/// Codex's auto-review ("Approve for me") asks a review model ling does not serve (patch 0012
+/// hides its command for that reason). In the mode `Shift+Tab` cycles the approval modes, so the
+/// feature is switched off for the session, and the cycle holds Read Only and the default mode.
+pub const NO_AUTO_REVIEW: &str = "features.guardian_approval=false";
+
 /// Every `-c` setting the mode adds to a TUI session.
 pub fn settings(inputs: &RendererInputs, user: &UserKeymap) -> Vec<String> {
     let mut settings = choose_renderer(inputs).map(renderer_settings).unwrap_or_default();
     settings.extend(keymap_settings(user));
+    settings.push(NO_AUTO_REVIEW.to_string());
     settings
 }
 
@@ -307,6 +313,16 @@ mod tests {
         assert!(settings.iter().all(|s| !s.contains("ctrl-o")), "{settings:?}");
         assert!(settings.iter().any(|s| s.contains("pager.jump_top")));
         assert_eq!(user_keymap("not toml ["), UserKeymap::default());
+    }
+
+    #[test]
+    fn the_session_has_no_auto_review_to_cycle_into() {
+        let all = settings(&RendererInputs::default(), &UserKeymap::default());
+        assert_eq!(all.last().map(String::as_str), Some(NO_AUTO_REVIEW));
+        let parsed: toml::Table = toml::from_str(NO_AUTO_REVIEW).unwrap();
+        assert_eq!(parsed["features"]["guardian_approval"].as_bool(), Some(false));
+        // The feature still has that key in the pinned Codex.
+        assert!(include_str!("../../features/src/lib.rs").contains("key: \"guardian_approval\""));
     }
 
     #[test]

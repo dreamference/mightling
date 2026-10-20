@@ -339,8 +339,8 @@ fn doctor_lines(resolved: &Resolved) -> Vec<String> {
     let codex_home = codex_utils_home_dir::find_codex_home().ok().map(|home| home.as_path().to_path_buf());
     lines.extend(interface_lines(&dir, codex_home.as_deref()));
     lines.push(String::new());
-    lines.push("Not built yet: CLAUDE.md, .claude/ settings, commands, agents and hooks, the slash-command names \
-                and the interface hooks follow phase by phase (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
+    lines.push("Not built yet: CLAUDE.md, .claude/ settings, commands, agents and hooks follow phase by phase \
+                (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
         .to_string());
     lines
 }
@@ -370,12 +370,28 @@ fn interface_lines(dir: &Path, codex_home: Option<&Path>) -> Vec<String> {
          your own [tui.keymap] wins over them.",
         keys.len()
     ));
-    lines.push("Different from Claude Code: Ctrl+L clears the terminal's scrollback in the classic renderer; \
-                CLAUDE_CODE_DISABLE_MOUSE is not honoured (the mouse is captured only in fullscreen and the transcript); \
-                Shift+Tab, a second press to exit, \\+Enter for a newline and the transcript written to the scrollback \
-                are not built yet."
-        .to_string());
+    lines.push(
+        "Keys and commands: Shift+Tab cycles the approval modes (Read Only and the default, never Full Access), \
+         Ctrl+C or Ctrl+D twice exits, \\ then Enter adds a newline, and [ or v in the transcript writes it to the \
+         scrollback or opens it in your editor. Claude Code's command names run Codex's (/branch, /tasks, /context, ...) \
+         or are answered (/help, /memory, /config, /rewind)."
+            .to_string(),
+    );
+    lines.push(
+        "Different from Claude Code: Ctrl+L clears the terminal's scrollback in the classic renderer; \
+         CLAUDE_CODE_DISABLE_MOUSE is not honoured (the mouse is captured only in fullscreen and the transcript); \
+         the plan mode is reached with /plan, not Shift+Tab; /rewind restores the conversation, not files."
+            .to_string(),
+    );
     lines
+}
+
+/// The `ling compat doctor` report, for `/config` and `/doctor` inside a session.
+pub fn report_lines() -> Vec<String> {
+    match resolve() {
+        Ok(resolved) => doctor_lines(&resolved),
+        Err(err) => vec![err],
+    }
 }
 
 const USAGE: &str = "usage: ling compat [status | use claude|off | doctor]";

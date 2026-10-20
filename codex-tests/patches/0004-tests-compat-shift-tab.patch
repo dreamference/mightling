@@ -1,0 +1,44 @@
+diff --git a/codex-rs/tui/src/chatwidget/tests/permission_shortcuts_tests.rs b/codex-rs/tui/src/chatwidget/tests/permission_shortcuts_tests.rs
+--- a/codex-rs/tui/src/chatwidget/tests/permission_shortcuts_tests.rs
++++ b/codex-rs/tui/src/chatwidget/tests/permission_shortcuts_tests.rs
+@@ -144 +144,40 @@
+ }
++
++/// Mightling's compatibility mode (owner's decision D6): Shift+Tab cycles the approval modes, and
++/// never lands on Full Access, so never at `/airgapped on`; outside the mode it is Codex's.
++#[tokio::test]
++async fn compat_shift_tab_cycles_approval_modes_and_never_full_access() {
++    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
++    let thread_id = ThreadId::new();
++    chat.thread_id = Some(thread_id);
++    let shift_tab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
++    ling_launcher::compat_keys::force_on_this_thread(false);
++    let codex_mode = chat.active_collaboration_mode_kind();
++    chat.handle_key_event(shift_tab);
++    assert!(!matches!(rx.try_recv(), Ok(AppEvent::ApplyPermissionShortcut { .. })));
++    let mode_before = chat.active_collaboration_mode_kind();
++    assert_ne!(mode_before, codex_mode, "outside the mode Shift+Tab is Codex's collaboration-mode cycle");
++
++    ling_launcher::compat_keys::force_on_this_thread(true);
++    let mut current = PermissionProfile::Disabled; // Full Access, at /airgapped off
++    let mut seen = Vec::new();
++    for _ in 0..6 {
++        chat.config.permissions.set_permission_profile(current.clone()).expect("set profile");
++        while rx.try_recv().is_ok() {}
++        chat.handle_key_event(shift_tab);
++        let Ok(AppEvent::ApplyPermissionShortcut { selection, .. }) = rx.try_recv() else {
++            panic!("Shift+Tab must choose an approval mode in the mode");
++        };
++        chat.complete_permission_shortcut(thread_id);
++        current = if selection.profile_id == ":read-only" {
++            PermissionProfile::read_only()
++        } else {
++            PermissionProfile::workspace_write()
++        };
++        seen.push(selection.profile_id.clone());
++    }
++    assert!(seen.iter().all(|id| id == ":read-only" || id == ":workspace"), "{seen:?}");
++    assert!(seen.iter().any(|id| id == ":read-only") && seen.iter().any(|id| id == ":workspace"), "{seen:?}");
++    assert_eq!(chat.active_collaboration_mode_kind(), mode_before, "Shift+Tab no longer changes the plan mode");
++    ling_launcher::compat_keys::force_on_this_thread(false);
++}
