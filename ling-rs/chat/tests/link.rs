@@ -103,6 +103,12 @@ async fn next_out(rx: &mut mpsc::UnboundedReceiver<Outbound>) -> Outbound {
     }
 }
 
+/// Waits for the link's next `connected` to reach the hub, then gives the idle hub a moment to take it.
+async fn connected_settled(connected: &mut mpsc::UnboundedReceiver<()>) {
+    tokio::time::timeout(Duration::from_secs(10), connected.recv()).await.expect("the link never said it connected").unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_back_and_a_restart_is_survived() {
     let scratch = scratch("e2e");
@@ -132,7 +138,21 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
 
     let (agent, commands) = AgentHandle::channel();
     let (events_tx, events) = mpsc::unbounded_channel();
-    tokio::spawn(ling_chat::agent::run_link(WebTarget { state: state_dir.clone(), ling: None }, commands, events_tx));
+    // The link's events pass through here, so the test can tell when each `connected` is out.
+    let (link_tx, mut from_link) = mpsc::unbounded_channel::<Value>();
+    let (connected_tx, mut connected) = mpsc::unbounded_channel::<()>();
+    tokio::spawn(async move {
+        while let Some(event) = from_link.recv().await {
+            let is_connected = event["method"] == ling_chat::agent::CONNECTED;
+            if events_tx.send(event).is_err() {
+                break;
+            }
+            if is_connected {
+                let _ = connected_tx.send(());
+            }
+        }
+    });
+    tokio::spawn(ling_chat::agent::run_link(WebTarget { state: state_dir.clone(), ling: None }, commands, link_tx));
     let mut hub = Hub::new(HubConfig::new(scratch.dir.join("chat")), agent, Box::new(|| false));
     let (out_tx, mut out) = mpsc::unbounded_channel();
     hub.add_adapter("telegram", out_tx);
@@ -146,6 +166,9 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
     reply.send(json!({ "id": frame["id"], "result": {} })).unwrap();
     let (frame, _) = next_frame(&mut app_server).await;
     assert_eq!(frame["method"], "initialized");
+    // The hub must have taken the link's first `connected` before the first message: taken after
+    // it, it resumes the thread the message just started, and this stand-in never answers a resume.
+    connected_settled(&mut connected).await;
 
     inbound.send(Inbound::Text { chat: "telegram:7".into(), text: "Clean the build folder".into() }).unwrap();
     let (frame, reply) = next_frame(&mut app_server).await;
@@ -213,8 +236,9 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
     reply.send(json!({ "id": frame["id"], "result": {} })).unwrap();
     let (frame, _) = next_frame(&mut app_server).await;
     assert_eq!(frame["method"], "initialized");
-    // The same chat continues its thread: resubscribed first, on the new connection.
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // The same chat continues its thread: resubscribed first, on the new connection, once the hub
+    // has taken this connection's `connected`.
+    connected_settled(&mut connected).await;
     inbound.send(Inbound::Text { chat: "telegram:7".into(), text: "And the cache?".into() }).unwrap();
     let (frame, reply) = next_frame(&mut app_server).await;
     assert_eq!(frame["method"], "thread/resume");
