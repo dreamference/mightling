@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { PetView } from "./PetView";
+import { QuickView } from "./QuickView";
 import { host } from "./bridge";
 import { STORAGE_KEY } from "./prefs";
 import { browserThemeHost, startTheme } from "./theme";
@@ -18,7 +19,7 @@ const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      {location.hash === "#pet" ? <PetView /> : <App />}
+      {location.hash === "#pet" ? <PetView /> : location.hash === "#quick" ? <QuickView /> : <App />}
     </StrictMode>,
   );
 }

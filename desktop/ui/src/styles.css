@@ -835,3 +835,67 @@ html.pet-page body { margin: 0; }
   .approval .buttons button { flex: 1 1 auto; }
   .startup { margin: 24px auto; }
 }
+
+/* A file an Ask answer made (DESKTOP_PARITY_CLAUDE §4.1): a card that opens it beside the answer. */
+.made-file {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  margin: 6px 0;
+  max-width: 420px;
+}
+.made-file > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.made-file > summary::-webkit-details-marker { display: none; }
+.made-file-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.made-file-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.made-file-kind { color: var(--muted); font-size: 12px; }
+.made-file-open {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--canvas);
+  color: var(--text);
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.made-file-open:hover { background: var(--hover); }
+.made-file[open] { max-width: none; }
+.made-file[open] > summary { border-bottom: 1px solid var(--line); }
+/* Quick Entry's box (QuickView.tsx, DESKTOP_PARITY_CLAUDE §4.2): one composer in a small frameless window. */
+html.quick-page, html.quick-page body, html.quick-page #root { height: 100%; overflow: hidden; }
+html.quick-page body { margin: 0; background: var(--canvas); }
+.quick-box {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  -webkit-app-region: drag;
+}
+.quick-row { display: flex; gap: 12px; align-items: flex-start; flex: 1; min-height: 0; }
+.quick-row textarea {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--size-prose);
+  line-height: 1.45;
+}
+.quick-hint { margin: 0; color: var(--faint); font-size: 12px; }
+.quick-entry .dialog-note.warning { color: var(--danger); }
+.quick-row textarea, .quick-row textarea:focus, .quick-row textarea:focus-visible { border: none; box-shadow: none; outline: none; padding: 0; border-radius: 0; }

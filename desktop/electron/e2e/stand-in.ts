@@ -230,6 +230,14 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
             say({ id: "elicit-2", method: "mcpServer/elicitation/request", params: { threadId: p.threadId, turnId: id, serverName: "tickets", mode: "url", _meta: null,
               message: "Sign in to the ticket tracker.", url: "http://127.0.0.1:9/login", elicitationId: "e2" } });
           }
+          if (asked.includes("with a report")) {
+            // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
+            const own = threads.find((t) => t.id === p.threadId);
+            const report = require("node:path").join((own && own.cwd) || "/tmp", "report.md");
+            require("node:fs").writeFileSync(report, "# Memory on the GB10\\n\\nOne pool of LPDDR5X, shared by the CPU and the GPU.\\n");
+            say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
+              changes: [{ path: report, kind: { type: "add" }, diff: "+# Memory on the GB10\\n" }] } } });
+          }
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }

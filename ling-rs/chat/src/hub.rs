@@ -572,7 +572,8 @@ impl Hub {
     /// Steers the running turn with `input`, queues it if it cannot, or starts a turn with it.
     async fn deliver(&mut self, chat: &str, thread: &str, input: Value) {
         if let Some(turn) = self.turns.get(thread) {
-            let expected = turn.id.clone();
+            // The final turn after a time-out is not added to: the message waits for the next one.
+            let expected = turn.id.clone().filter(|_| !turn.watch.final_turn);
             let steered = match expected {
                 Some(turn_id) => self
                     .agent

@@ -70,3 +70,49 @@ export function attachmentName(name: string | undefined, type: string, index: nu
 export function askTitle(thread: Pick<Thread, "name" | "preview">): string {
   return thread.name || thread.preview || "New question";
 }
+
+/** Whether a path is inside a folder (the folder itself is not), on either separator. */
+export function insideFolder(path: string, folder: string): boolean {
+  const root = folder.replace(/[\\/]+$/, "");
+  return root !== "" && (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`));
+}
+
+/** Whether a path is inside an Ask scratch folder: under the host's Ask root, or of the folder's shape. */
+export function isAskPath(path: string, askRoot: string | null): boolean {
+  if (askRoot) return insideFolder(path, askRoot);
+  return /[\\/]ask[\\/]q-[0-9a-f]+[\\/]/.test(path);
+}
+
+/**
+ * The tabs a view shows beside its thread (DESKTOP_PARITY_CLAUDE §4.1). Ask shows only the files of
+ * the question in front (`folder`, its scratch folder), the way the compared app shows what an answer
+ * made in a panel beside it; Work shows every tab except the files of Ask questions. The list itself
+ * stays one, so a tab keeps its place when the view switches back.
+ */
+export function viewTabs<T extends { kind: string; path?: string }>(tabs: T[], view: "ask" | "work", folder: string | null, askRoot: string | null): T[] {
+  if (view === "ask") return folder ? tabs.filter((tab) => tab.kind === "file" && typeof tab.path === "string" && insideFolder(tab.path, folder)) : [];
+  return tabs.filter((tab) => !(tab.kind === "file" && typeof tab.path === "string" && isAskPath(tab.path, askRoot)));
+}
+
+/** What a file an answer made is, in words, for its card. */
+export function fileKindLabel(kind: "markdown" | "image" | "pdf" | "html" | "latex" | null): string {
+  switch (kind) {
+    case "markdown":
+      return "Document";
+    case "image":
+      return "Image";
+    case "pdf":
+      return "PDF";
+    case "html":
+      return "Web page";
+    case "latex":
+      return "LaTeX";
+    default:
+      return "File";
+  }
+}
+
+/** A file's name, from its path. */
+export function baseName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}

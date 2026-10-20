@@ -11,7 +11,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 
-import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, isAskThread, turnInput, type Attached } from "./ask";
+import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
@@ -199,6 +199,8 @@ export function App() {
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [treeShown, setTreeShown] = useState(false);
+  /** Ask's own tree of the question's folder (DESKTOP_PARITY_CLAUDE §4.1), apart from Work's. */
+  const [askTree, setAskTree] = useState(false);
   /** Search files (Ctrl+P) open, with what it starts with (":" for go to line). */
   const [fileSearch, setFileSearch] = useState<string | null>(null);
   const reviewOpen = tabs.some((tab) => tab.kind === "review");
@@ -252,8 +254,6 @@ export function App() {
     if (view !== "work") showView("work");
     if (prefsRef.current.layout === "chat") updatePrefsRef.current({ layout: "split" });
   };
-  /** The tab area shows when a tab is open or the file tree is, and the layout does not hide it (§2.1). */
-  const tabsShown = (tabs.length > 0 || treeShown) && view === "work" && prefs.layout !== "chat";
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [wtSettings, setWtSettings] = useState<WorktreeSettings>(worktreeSettings(null));
   const [newChoice, setNewChoice] = useState<NewThreadChoice>({ mode: "local", base: null, withChanges: true, environment: null });
@@ -467,6 +467,14 @@ export function App() {
 
   // The folder the composer's `@` and `$` look in: the shown thread's, or the new thread's.
   const composeRoot = view === "work" ? (selected?.thread.cwd ?? (newCwd.trim() || null)) : (selected?.thread.cwd ?? null);
+  // The tabs beside the thread are one list; each view shows its own part of it: Ask the files of the
+  // question in front (DESKTOP_PARITY_CLAUDE §4.1), Work everything else.
+  const askFolder = view === "ask" ? (selected?.thread.cwd ?? null) : null;
+  const paneTabs = viewTabs(tabs, view, askFolder, askRoot);
+  const paneActive = paneTabs.find((tab) => tab.key === activeTab) ?? paneTabs[0] ?? null;
+  const paneTree = view === "ask" ? askTree && askFolder !== null : treeShown;
+  /** The tab area shows when a tab is open or the file tree is, and the layout does not hide it (§2.1). */
+  const tabsShown = (paneTabs.length > 0 || paneTree) && prefs.layout !== "chat" && (view === "work" || askFolder !== null);
   useEffect(() => {
     if (state.server !== "ready" || !composeRoot || skills[composeRoot]) return;
     client.request("skills/list", { cwds: [composeRoot] })
@@ -631,6 +639,23 @@ export function App() {
     const started = await client.request("thread/start", params);
     dispatch({ type: "opened", thread: started.thread });
     return started.thread;
+  };
+
+  /**
+   * A question asked from Quick Entry (DESKTOP_PARITY_CLAUDE §4.2): a new Ask thread with this text and
+   * nothing else (no attachment waiting in the composer goes with it); when it cannot be sent, the text
+   * waits in the composer of a new question instead.
+   */
+  const askNow = async (prompt: string) => {
+    try {
+      const thread = await startAsk();
+      await sendMessage(client, { threadId: thread.id, activeTurnId: null, input: turnInput(prompt, []), followUp: prefs.followUp, effort, model: modelChoice, collaborationMode: planFor(thread.id) });
+      promptHistory.push(prompt);
+    } catch (error) {
+      dispatch({ type: "select", threadId: null });
+      setDraft(prompt);
+      notice(error);
+    }
   };
 
   const newQuestion = () => {
@@ -949,11 +974,12 @@ export function App() {
 
   /** Ctrl+W: the frontmost surface beside the thread closes (never the window); Ctrl+Shift+T opens it again. */
   const closeSurface = () => {
-    const front = tabs.find((tab) => tab.key === activeTab) ?? tabs[tabs.length - 1];
+    // Only what this view shows: in Ask a file of the question, never one of Work's tabs behind it.
+    const front = paneActive;
     if (front) {
       closeTabKey(front.key);
       closedSurfaces.close(surfaceOf(front));
-    } else if (prefsRef.current.bottomPanel) {
+    } else if (view === "work" && prefsRef.current.bottomPanel) {
       updatePrefs({ bottomPanel: false });
       closedSurfaces.close("bottomPanel");
     }
@@ -996,9 +1022,12 @@ export function App() {
     reopenTab: reopenSurface,
     closeOtherTabs: () => {
       // The tab in front stays; the others close (and reopen one by one with Ctrl+Shift+T).
-      const keep = tabs.find((tab) => tab.key === activeTab) ?? null;
-      for (const tab of tabs) if (tab !== keep) closedSurfaces.close(surfaceOf(tab));
-      setTabs(keep ? [keep] : []);
+      // Only among the tabs this view shows; the other view's stay as they are.
+      const keep = paneActive;
+      const closing = paneTabs.filter((tab) => tab !== keep);
+      for (const tab of closing) closedSurfaces.close(surfaceOf(tab));
+      setTabs((list) => list.filter((tab) => !closing.includes(tab)));
+      if (view !== "work") return;
       if (prefsRef.current.bottomPanel) closedSurfaces.close("bottomPanel");
       updatePrefs({ bottomPanel: false });
     },
@@ -1012,10 +1041,16 @@ export function App() {
       openPreview("");
     },
     searchFiles: () => {
-      if (view !== "work" || !composeRoot) return notice("Search files looks in a thread's folder: open a thread in Work, or name a project folder.");
+      if (!composeRoot) return notice(view === "ask" ? "Search files looks in a question's folder: open a question first." : "Search files looks in a thread's folder: open a thread in Work, or name a project folder.");
       setFileSearch((open) => (open === null ? "" : null));
     },
     fileTree: () => {
+      // In Ask, the question's own folder (DESKTOP_PARITY_CLAUDE §4.1); with no question shown, Work's tree.
+      if (view === "ask" && askFolder) {
+        if (prefsRef.current.layout === "chat") updatePrefs({ layout: "split" });
+        setAskTree((shown) => !shown || prefsRef.current.layout === "chat");
+        return;
+      }
       if (view !== "work") showView("work");
       if (prefsRef.current.layout === "chat") updatePrefs({ layout: "split" });
       setTreeShown((shown) => !shown || prefsRef.current.layout === "chat");
@@ -1143,10 +1178,12 @@ export function App() {
       setSettingsPage("pets");
       return setSettingsOpen(true);
     }
-    // The pet's quick question: a new Ask question with the text in the composer.
+    // The pet's quick question and `ling://ask`: a new Ask question with the text in the composer;
+    // Quick Entry's (`send`): the question asked at once (DESKTOP_PARITY_CLAUDE §4.2).
     if (target.page === "ask") {
       showView("ask");
-      if (target.prompt) setDraft(target.prompt);
+      if (target.prompt && target.send) void askNow(target.prompt);
+      else if (target.prompt) setDraft(target.prompt);
       return;
     }
     if (target.page === "settings") {
@@ -1662,7 +1699,7 @@ export function App() {
       [keyAction("togglePet"), "togglePet"],
     ];
     // With a preview tab in front, Ctrl+Shift+C copies the page's address (the preview's own key, PreviewTab.tsx).
-    const previewInFront = tabsShown && tabs.find((tab) => tab.key === activeTab)?.kind === "preview";
+    const previewInFront = tabsShown && paneActive?.kind === "preview";
     for (const [action, id] of shellKeys) {
       if ((id === "undoAction" || id === "redoAction") && typing) continue;
       if (id === "copyWorkingDirectory" && previewInFront) continue;
@@ -1673,7 +1710,7 @@ export function App() {
       }
     }
     // Go to line (Ctrl+L) when a file tab is in front; the terminal's Ctrl+L (clear) is the terminal's own.
-    const frontTab = tabs.find((tab) => tab.key === activeTab);
+    const frontTab = paneActive;
     if (matches(event, keyAction("goToLine")) && tabsShown && frontTab?.kind === "file" && !(document.activeElement as HTMLElement | null)?.closest(".terminal-host, .xterm")) {
       event.preventDefault();
       setFileSearch(":");
@@ -1952,6 +1989,15 @@ export function App() {
           {selected ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
           {selected && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
           {POPOUT ? <button className={`icon bar-action${onTop ? " active" : ""}`} aria-pressed={onTop} title="Keep this window above the others" aria-label="Always on top" onClick={() => void bridge.alwaysOnTop(!onTop).then(setOnTop).catch(notice)}><Icon name="pin" size={16} /></button> : null}
+          {askFolder ? (
+            // What the question made, beside the answer (DESKTOP_PARITY_CLAUDE §4.1): its folder's files.
+            <button className={`icon bar-action ask-files${paneTree && tabsShown ? " active" : ""}`} aria-pressed={paneTree && tabsShown} aria-label="Files"
+              title={`This question's files (${shortcutLabel("fileTree")})`} onClick={commands.fileTree}><Icon name="folderTree" size={16} /></button>
+          ) : null}
+          {askFolder && HOST === "electron" ? (
+            <button className="icon bar-action ask-folder" aria-label="Open the folder" title="Open this question's folder in the file manager"
+              onClick={() => void bridge.openFolder(askFolder).catch(notice)}><Icon name="folder" size={16} /></button>
+          ) : null}
           {selected && view === "work" && bridge.git.available() ? (
             <WorktreeHeader link={selectedLink} branch={headerGit?.branch ?? null} inGit={Boolean(headerGit?.root)}
               canHandOff={!selected.activeTurnId} environment={environment}
@@ -1994,7 +2040,7 @@ export function App() {
             <button className="icon" aria-label="Close find" onClick={() => setFindOpen(false)}><Icon name="x" size={14} /></button>
           </div>
         ) : null}
-        <OpenFileContext.Provider value={view === "work" ? { open: openFile, cwd: selected?.thread.cwd ?? null } : null}>
+        <OpenFileContext.Provider value={view === "work" ? { open: openFile, cwd: selected?.thread.cwd ?? null, ask: false } : askFolder ? { open: openFile, cwd: askFolder, ask: true } : null}>
         <div className="turns">
           {info ? (
             <section className="info-panel" aria-label={info.title}>
@@ -2104,23 +2150,23 @@ export function App() {
           onSave={(edited) => bridge.writeEnvironment(envProject, edited).then(() => setEditingEnv(false)).catch(notice)} />
       ) : null}
       {tabsShown ? (
-        <TabArea tabs={tabs} active={activeTab} onSelect={setActiveTab} onClose={(key) => {
+        <TabArea tabs={paneTabs} active={paneActive?.key ?? null} onSelect={setActiveTab} onClose={(key) => {
           const tab = tabs.find((entry) => entry.key === key);
           if (tab) closedSurfaces.close(surfaceOf(tab));
           closeTabKey(key);
         }}
           workspaceLayout={prefs.layout} setWorkspaceLayout={(layout) => updatePrefs({ layout })}
-          treeShown={treeShown} onToggleTree={composeRoot ? () => setTreeShown((shown) => !shown) : null}
-          tree={treeShown && composeRoot ? (
-            <FileTree root={composeRoot} client={client} listen={listen} selected={tabs.find((tab) => tab.key === activeTab && tab.kind === "file")?.key.slice(5) ?? null}
-              onOpen={(path) => openFile(path)} onClose={() => setTreeShown(false)} />
+          treeShown={paneTree} onToggleTree={composeRoot ? () => (view === "ask" ? setAskTree : setTreeShown)((shown) => !shown) : null}
+          tree={paneTree && composeRoot ? (
+            <FileTree root={composeRoot} client={client} listen={listen} selected={paneActive?.kind === "file" ? paneActive.key.slice(5) : null}
+              onOpen={(path) => openFile(path)} onClose={() => (view === "ask" ? setAskTree : setTreeShown)(false)} />
           ) : null}
           render={(tab) => tab.kind === "prs" ? (
             <PullRequestsTab root={composeRoot} thread={selected?.thread.id ?? null} notice={notice}
               onCompose={(text) => setDraft((draft) => (draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text))} />
           ) : tab.kind === "preview" ? (
             <PreviewTab id={tab.id} url={tab.url} thread={selected?.thread.id ?? null} devTools={prefs.previewDevTools}
-              visible={tabsShown && tab.key === (tabs.find((entry) => entry.key === activeTab) ?? tabs[0])?.key && !overlayOpen}
+              visible={tabsShown && tab.key === paneActive?.key && !overlayOpen}
               layoutKey={`${prefs.layout}|${prefs.sidebarHidden}|${prefs.fontScale}|${treeShown}|${prefs.bottomPanel}|${tabs.length}`}
               onTitle={(title, url) => setTabs((list) => list.map((entry) => (entry.key === tab.key && entry.kind === "preview" ? { ...entry, title, url: url || entry.url } : entry)))}
               onAlways={(site, choice) => updatePrefs({ previewSites: { ...prefsRef.current.previewSites, [site]: choice } })}
@@ -2169,7 +2215,7 @@ export function App() {
       {extensions ? <ExtensionsView client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
       {fileSearch !== null && composeRoot ? (
         <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
-          front={(() => { const tab = tabs.find((entry) => entry.key === activeTab); return tab?.kind === "file" && tabsShown ? tab.path : null; })()}
+          front={paneActive?.kind === "file" && tabsShown ? paneActive.path : null}
           onOpen={(path, line) => openFile(path, line)} onClose={() => setFileSearch(null)} />
       ) : null}
       {boardOpen ? (
@@ -2286,8 +2332,27 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
   );
 }
 
-/** Opens a file in a tab (Phase 3 item 1), for the items of the stream; null where there is no tab area (Ask). */
-const OpenFileContext = createContext<{ open: (path: string, line: number | null) => void; cwd: string | null } | null>(null);
+/**
+ * Opens a file in a tab (Phase 3 item 1), for the items of the stream: Work's threads, and Ask's
+ * questions beside their answers (`ask`, DESKTOP_PARITY_CLAUDE §4.1); null with no thread shown.
+ */
+const OpenFileContext = createContext<{ open: (path: string, line: number | null) => void; cwd: string | null; ask: boolean } | null>(null);
+
+/** A file an Ask answer made, as a card that opens it beside the answer, the diff folded under it. */
+function MadeFile(props: { path: string; diff: string; onOpen: () => void }) {
+  const kind = artifactKind(props.path);
+  return (
+    <details className="made-file">
+      <summary>
+        <Icon name="file" size={16} />
+        <span className="made-file-name"><strong>{baseName(props.path)}</strong><span className="made-file-kind">{fileKindLabel(kind)}</span></span>
+        <button className="made-file-open" title="Open it beside the answer" aria-label={`Open ${baseName(props.path)}`}
+          onClick={(event) => { event.preventDefault(); props.onOpen(); }}>Open</button>
+      </summary>
+      <Diff text={props.diff} />
+    </details>
+  );
+}
 
 function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
   const files = useContext(OpenFileContext);
@@ -2314,15 +2379,20 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
           {item.aggregatedOutput ? <pre>{item.aggregatedOutput}</pre> : null}
         </details>
       );
-    case "fileChange":
+    case "fileChange": {
+      const at = (path: string) => (path.startsWith("/") || !files?.cwd ? path : `${files.cwd.replace(/\/+$/, "")}/${path}`);
+      // In Ask, a file the answer made is a card, as the compared app shows what it made (§4.1); edits stay diffs.
+      const made = files?.ask ? item.changes.filter((change) => change.kind.type === "add") : [];
+      const edited = files?.ask ? item.changes.filter((change) => change.kind.type !== "add") : item.changes;
       return (
         <div className={`item files status-${item.status}`}>
-          {item.changes.map((change) => (
+          {made.map((change) => <MadeFile key={change.path} path={change.path} diff={change.diff} onOpen={() => files?.open(at(change.path), null)} />)}
+          {edited.map((change) => (
             <details key={change.path}>
               <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code>{change.path}</code><DiffStat text={change.diff} />
                 {files && change.kind.type !== "delete" ? (
                   <button className="icon open-file" title="Open in a tab" aria-label={`Open ${change.path} in a tab`}
-                    onClick={(event) => { event.preventDefault(); files.open(change.path.startsWith("/") || !files.cwd ? change.path : `${files.cwd.replace(/\/+$/, "")}/${change.path}`, null); }}><Icon name="file" size={13} /></button>
+                    onClick={(event) => { event.preventDefault(); files.open(at(change.path), null); }}><Icon name="file" size={13} /></button>
                 ) : null}
               </summary>
               <Diff text={change.diff} />
@@ -2330,6 +2400,7 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
           ))}
         </div>
       );
+    }
     case "mcpToolCall":
       return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
     case "contextCompaction":

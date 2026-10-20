@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as userFs from "./userfs";
-import { BrowserWindow, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
@@ -37,6 +37,7 @@ import { Notices } from "./notices";
 import { transcribe } from "./voice";
 import { Previews } from "./preview";
 import { PetStatus, fitPet, openPet, petImage, type PetSize, type PetState } from "./pet";
+import { DEFAULT_SHORTCUT, accelerator, openQuick, placeQuick, quickPrompt, shortcutsWork, type QuickStatus } from "./quick";
 import type { SiteChoice } from "./preview-rules";
 import { openWork } from "./work";
 import { themeChoice, windowColours, type Theme } from "./theme";
@@ -127,7 +128,17 @@ export async function main(options: MainOptions): Promise<void> {
     }
     window = openWork({ preload: path.join(__dirname, "preload.cjs"), show, view, theme: shownTheme() });
     window.on("closed", () => (window = null));
+    // Settings › General: closing the window can leave the app in the tray (DESKTOP_PARITY_CLAUDE §4.2),
+    // so Quick Entry and running turns go on; off by default, and never in the audit's session. Quit
+    // (Ctrl+Q, the tray, the menu, a signal) still ends everything.
+    window.on("close", (event) => {
+      if (quitting || options.audit !== null || prefs.read().keepInTray !== true) return;
+      event.preventDefault();
+      window?.hide();
+    });
   };
+  let quitting = false;
+  app.on("before-quit", () => (quitting = true));
   const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };
 
   /** Gives every window the theme shown now: its background, its title bar's symbols, the page's tokens. */
@@ -144,6 +155,7 @@ export async function main(options: MainOptions): Promise<void> {
     }
     deliver({ channel: "theme", payload: theme });
     if (pet && !pet.isDestroyed()) send(pet, { channel: "theme", payload: theme });
+    if (quick && !quick.isDestroyed()) send(quick, { channel: "theme", payload: theme });
   }
 
   // The pet (pet.ts, Phase 3 item 6): a window of its own, shown while Settings › Pets says so.
@@ -212,14 +224,77 @@ export async function main(options: MainOptions): Promise<void> {
     }
   };
 
+  // Quick Entry (quick.ts, DESKTOP_PARITY_CLAUDE §4.2): the box, made the first time it is asked for
+  // and hidden, not closed, after; the system-wide shortcut while Settings › General has it on.
+  let quick: BrowserWindow | null = null;
+  let quickStatus: QuickStatus = { on: false, shortcut: DEFAULT_SHORTCUT, registered: false, problem: null };
+  const hideQuick = () => {
+    if (quick && !quick.isDestroyed() && quick.isVisible()) quick.hide();
+  };
+  const toggleQuick = () => {
+    if (quick && !quick.isDestroyed() && quick.isVisible()) return hideQuick();
+    if (!quick || quick.isDestroyed()) {
+      quick = openQuick(path.join(__dirname, "preload.cjs"), shownTheme());
+      quick.on("blur", hideQuick);
+      quick.on("closed", () => (quick = null));
+    }
+    placeQuick(quick);
+    if (show) {
+      quick.show();
+      quick.focus();
+    }
+    send(quick, { channel: "quick://open", payload: null });
+  };
+  const syncQuick = () => {
+    const stored = prefs.read();
+    globalShortcut.unregisterAll();
+    const shortcut = typeof stored.quickEntryShortcut === "string" && stored.quickEntryShortcut ? stored.quickEntryShortcut : DEFAULT_SHORTCUT;
+    quickStatus = { on: stored.quickEntry === true, shortcut, registered: false, problem: null };
+    if (!quickStatus.on) return;
+    const keys = accelerator(shortcut);
+    if (!keys) {
+      quickStatus.problem = `${shortcut} cannot be a system-wide shortcut: use Ctrl, Alt or Super with a letter, a digit, a function key or Space.`;
+    } else if (!shortcutsWork()) {
+      quickStatus.problem = "On a Wayland session an app cannot take a system-wide shortcut: bind `xdg-open ling://quick` to a key in your desktop's keyboard settings instead.";
+    } else {
+      try {
+        quickStatus.registered = globalShortcut.register(keys, toggleQuick);
+      } catch (error) {
+        quickStatus.problem = error instanceof Error ? error.message : String(error);
+      }
+      if (!quickStatus.registered && !quickStatus.problem) quickStatus.problem = `${shortcut} is taken by another app or by the desktop: choose another.`;
+    }
+  };
+  /** What the box may ask for; nothing else of the app's channel answers it. */
+  const handleQuick = (message: { type?: string; prompt?: unknown }): unknown => {
+    switch (message.type) {
+      case "quick/ask": {
+        const prompt = quickPrompt(message.prompt);
+        hideQuick();
+        if (!prompt) return null;
+        // A new Ask question, sent at once, in the app window brought forward.
+        showView("ask");
+        deliver({ channel: "link", payload: { cwd: null, thread: null, page: "ask", prompt, send: true } });
+        return null;
+      }
+      case "quick/hide":
+        hideQuick();
+        return null;
+      default:
+        throw new Error("the quick question asks for nothing else");
+    }
+  };
+  app.on("will-quit", () => globalShortcut.unregisterAll());
+
   installMenu(actions);
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
-  installTray(path.join(__dirname, "..", "..", "icons"), actions);
+  installTray(path.join(__dirname, "..", "..", "icons"), { ...actions, quickQuestion: toggleQuick });
 
   // The one channel from the page.
   const fromView = new Reassembler();
   ipcMain.handle(CHANNEL_FROM_VIEW, async (event: IpcMainInvokeEvent, data: unknown) => {
     if (pet && !pet.isDestroyed() && event.sender.id === pet.webContents.id) return handlePet(data as { type?: string });
+    if (quick && !quick.isDestroyed() && event.sender.id === quick.webContents.id) return handleQuick(data as { type?: string });
     const own = windowFor(event.sender.id);
     if (!own) throw new Error("only the app's windows talk to the agent");
     let message = data;
@@ -554,12 +629,15 @@ export async function main(options: MainOptions): Promise<void> {
       case "prefs/write": {
         const written = prefs.write(message.values);
         if (["petShown", "petSize", "petImage"].some((key) => key in (message.values ?? {}))) syncPet();
+        if (["quickEntry", "quickEntryShortcut"].some((key) => key in (message.values ?? {}))) syncQuick();
         if ("theme" in (message.values ?? {})) {
           nativeTheme.themeSource = themeChoice(prefs.read().theme);
           paintTheme();
         }
         return written;
       }
+      case "quick/status":
+        return quickStatus;
       case "window/minimize":
         own.minimize();
         return null;
@@ -625,6 +703,8 @@ export async function main(options: MainOptions): Promise<void> {
   app.on("second-instance", (_event, argv, _cwd, data) => {
     const extra = (data as { argv?: string[] } | undefined)?.argv ?? argv.slice(1);
     const asked = require("./args").workTarget(extra) as WorkTarget | null;
+    // `ling://quick`: the box, as the shortcut opens it (a Wayland desktop's own key binding).
+    if (asked?.page === "quick") return toggleQuick();
     if (asked) {
       target = asked;
       showView("work");
@@ -633,7 +713,9 @@ export async function main(options: MainOptions): Promise<void> {
   });
   app.on("open-url", (event, url) => {
     event.preventDefault();
-    target = require("./args").linkTarget(url) as WorkTarget;
+    const asked = require("./args").linkTarget(url) as WorkTarget;
+    if (asked.page === "quick") return toggleQuick();
+    target = asked;
     showView("work");
     deliver({ channel: "link", payload: target });
   });
@@ -671,6 +753,8 @@ export async function main(options: MainOptions): Promise<void> {
   showView(options.work ? "work" : "ask");
   // The pet, when Settings › Pets has it on (never in the egress audit's session).
   if (options.audit === null) syncPet();
+  // Quick Entry's shortcut, when Settings › General has it on (never in the audit's session).
+  if (options.audit === null) syncQuick();
   if (options.audit !== null) {
     try {
       server.start();

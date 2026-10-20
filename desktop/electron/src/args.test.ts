@@ -47,3 +47,12 @@ describe("what ling app asks for", () => {
     expect(auditPreview({})).toBeNull();
   });
 });
+
+describe("Quick Entry's links (DESKTOP_PARITY_CLAUDE §2.9)", () => {
+  it("reads ling://ask with a prompt for the composer, and ling://quick for the box", () => {
+    expect(linkTarget("ling://ask?prompt=What%20is%20NVFP4%3F")).toEqual({ cwd: null, thread: null, page: "ask", prompt: "What is NVFP4?" });
+    expect(linkTarget("ling://ask")).toEqual({ cwd: null, thread: null, page: "ask", prompt: null });
+    expect(linkTarget(`ling://ask?prompt=${"x".repeat(5000)}`).prompt).toHaveLength(4000);
+    expect(linkTarget("ling://quick")).toEqual({ cwd: null, thread: null, page: "quick" });
+  });
+});
