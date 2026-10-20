@@ -183,6 +183,7 @@ pub fn commands() -> Value {
         { "command": "threads", "description": "Your recent threads" },
         { "command": "use", "description": "Continue a thread: /use <n>" },
         { "command": "status", "description": "What Mightling is doing" },
+        { "command": "cavemode", "description": "How terse answers are: /cavemode full" },
         { "command": "help", "description": "What this bot does" },
     ]})
 }

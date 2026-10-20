@@ -107,7 +107,12 @@ def test_the_patches_stay_small():
     # handler's lines and send its model as `AppEvent::UpdateModel`; the handler is in
     # ling-rs/src/adapter.rs, and the hunk headers carry no section names); the series was 44,952
     # bytes before it and is 46,801 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 46_849
+    # Raised to 55,000 on 2026-10-20 by the owner, on top of that series, for 1.7.1 (the sandbox's
+    # host sockets, the vendor names in the TUI) and ling-claude's five TUI hooks (about 3.8 KB).
+    # The first: 0019's sandbox hunk denies the host's control sockets for every managed profile
+    # (`ling_airgapped::host_sockets`, 377 bytes), after a sandboxed command ran `docker restart` on
+    # the host; 47,178 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 55_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

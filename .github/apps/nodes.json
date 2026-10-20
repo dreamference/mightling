@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-nodes",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Nodes & Remote Access team's bot: commits, pull requests and reviews for nodes, pairing, jobs and model sync, the node locator and remote access. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

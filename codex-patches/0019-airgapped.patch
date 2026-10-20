@@ -26,15 +26,19 @@ diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandb
 index 8ef5165..6917a7e 100644
 --- a/codex-rs/linux-sandbox/src/linux_run_main.rs
 +++ b/codex-rs/linux-sandbox/src/linux_run_main.rs
-@@ -394,4 +394,7 @@ fn resolve_permission_profile(
+@@ -394,6 +394,10 @@
  ) -> Result<EffectivePermissions, ResolvePermissionProfileError> {
 -    let permission_profile =
 +    let mut permission_profile =
          permission_profile.ok_or(ResolvePermissionProfileError::MissingConfiguration)?;
+-    let (file_system_sandbox_policy, network_sandbox_policy) =
 +    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut permission_profile && ling_airgapped::sealed_for_command() {
 +        *network = NetworkSandboxPolicy::Restricted;
 +    }
-     let (file_system_sandbox_policy, network_sandbox_policy) =
++    let (mut file_system_sandbox_policy, network_sandbox_policy) =
+         permission_profile.to_runtime_permissions();
++    file_system_sandbox_policy.entries.extend(ling_airgapped::host_sockets().into_iter().filter_map(|p| codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(p).ok()).map(|p| FileSystemSandboxEntry::new(p.into(), FileSystemAccessMode::Deny)));
+     Ok(EffectivePermissions {
 diff --git a/codex-rs/tui/src/chatwidget/permission_popups.rs b/codex-rs/tui/src/chatwidget/permission_popups.rs
 index fc98703..8ff3f28 100644
 --- a/codex-rs/tui/src/chatwidget/permission_popups.rs
