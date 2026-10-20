@@ -567,6 +567,7 @@ mightling_prompt = "default"    # the system prompt new sessions get (ling promp
 mightling_refine = false        # refine mode: study the task first, then solve it (MIGHTLING_REFINE)
 mightling_refine_version = "v1" # its texts: v1 (measured) or v2 (MIGHTLING_REFINE §10)
 mightling_compat = "off"        # claude | off: the compatibility mode (ling compat use; read from this file only)
+mightling_claude_md = false     # outside the mode: CLAUDE.md as Codex's fallback project document
 
 [night]                      # Night Shift, read by `ling-admin night` (NightShiftSettings)
 window = "01:00-07:00"
@@ -606,6 +607,7 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW` | unset | The model's context window in tokens, overriding what the server reports (also `mightling_context_window` in the config file). Without either, `ling` reads `max_model_len`, `context_length` or `max_context_length` from `/v1/models`, then llama.cpp's `/props` `n_ctx`, then its `n_ctx_train`, else assumes 32,768. Ollama reports none, so set it there |
 | `DREAMFERENCE_MIGHTLING_CAVE_MODE` | `lite` (the TUI: `full`) | Cave-mode level for new `ling` sessions (`off`, `lite`, `full`, `ultra`); also the config key `mightling_cave_mode` |
 | `DREAMFERENCE_MIGHTLING_COMPAT` | `off` | The compatibility mode (`claude` or `off`; `--compat` on the command line sets it for the process and what it starts); also the config key `mightling_compat`, which `ling compat use` writes and which is read only from `~/.config/dreamference/config.toml`, never from a repository's `dreamference.toml` or `DREAMFERENCE_CONFIG_PATH`. A value naming no mode stops the start, from the flag or the variable; from the file it is reported and the mode stays off. Fixed for a session's life (`DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §0.4) |
+| `DREAMFERENCE_MIGHTLING_CLAUDE_MD` | `off` | Outside the compatibility mode, makes a folder's `CLAUDE.md` Codex's fallback project document (`project_doc_fallback_filenames` gains `CLAUDE.md` for the session, read only where a folder has no `AGENTS.md`); also the config key `mightling_claude_md`. In the mode, `CLAUDE.md` comes through the memory hook instead (`DREAMFERENCE_MIGHTLING_LING_CLAUDE.md` §9.1) |
 | `DREAMFERENCE_MIGHTLING_PROMPT` | `default` | System prompt for new `ling` sessions (`default`, `offline`, `high-swe`, `ask`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `mightling_prompt`, which `ling prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |
 | `DREAMFERENCE_MIGHTLING_AIRGAPPED` | `off` | How much of the internet a `ling` session may use (`off`, `on`); also the config key `mightling_airgapped` |
 | `DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER` | `true` | Register `ling ledger` as the hook that runs after each compaction of a `ling` session ([MIGHTLING_COMPACTION §11](./DREAMFERENCE_MIGHTLING_COMPACTION.md)); also the config key `mightling_compaction_ledger` |
