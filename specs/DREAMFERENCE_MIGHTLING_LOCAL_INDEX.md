@@ -809,3 +809,114 @@ done), each the simplest choice that is correct:
 - **CI reaches the publishers** during the `ling` job: the build's `docs setup` downloads the
   pinned files (verifying them is a check of its own), and the build does not fail when the
   download does.
+
+## 18. Phase 2: what was built (2026-10-20)
+
+Branch `docs-index/phase2`. Measured on this GB10 with the model server resident and SWE-bench
+night 12 running beside it; nothing called the model server, and every run used a throwaway `HOME`.
+
+### 18.1 The formats
+
+| Module | Files | What it does |
+|---|---|---|
+| `extract/office.rs` | `.docx` `.odt` | The ZIP read by `zip` (stored and deflated entries only), each XML entry streamed through `quick-xml` and refused past **256 MB inflated** (a deflate bomb ends `failed: … inflates past 256 MB (a ZIP bomb?)`, tested). Paragraphs in document order; a heading is told by its **outline level**, never by its style's display name, which Word translates: DOCX takes `w:outlineLvl` from `styles.xml` through the `w:basedOn` chain (and the English internal name `heading N`, which built-in styles keep in every language), ODT the `text:h` level. A table row is one paragraph, its cells joined by ` | `; a table inside a cell becomes the cell's text; text boxes (once: the `mc:Fallback` copy is skipped), list items and notes are paragraphs of their own; DOCX footnotes and endnotes follow under a `Notes` heading. Left out: deleted text of tracked changes, comments, field codes, a table of contents |
+| `extract/html.rs` | `.html` `.htm` `.xhtml` | html5ever through `scraper`, as `ling-fetch` parses pages, with `ling-fetch`'s list of subtrees without prose (a test compares the two lists) less `form` (ASP.NET and shop pages hold their whole body in one); then a readability pass: the `<head>`, `nav`, `footer`, controls, hidden and `role="navigation"` elements, and Wikipedia's navigation boxes, edit links, reference lists and markers. Every block element ends a paragraph, `h1`–`h6` give sections and heading paths, a table row is a paragraph. Charset: the BOM, then `<meta charset>`, then UTF-8, then Windows-1252 (`encoding_rs`) |
+| `extract/mail.rs` | `.eml` `.mbox` | `mail-parser` (MIME, encoded words, legacy charsets; an mbox split at its `From ` lines with `>From` unquoted). A message is one unit: From, To, Cc, Date (RFC 3339), Subject and the attachments' names, then the text body (the HTML body as text when there is no plain one); its subject is the heading. A readable attachment (by name, else MIME type: PDF, DOCX, ODT, HTML, text, Markdown, CSV) goes through the same extractor as a file, **one level deep** (an attached message is read as text, its own attachments not; a `.eml` or `.mbox` attachment is not opened); a PDF attachment is read from memory by PDFium (`FPDF_LoadMemDocument`). A message and its attachments are chunked together and never with another message, as Phase 0 did |
+| `extract/csv.rs` | `.csv` `.tsv` | Phase 0's form: each row `column: value, …` (empty values left out), 20 rows a unit, the header the heading and line 1; the delimiter the one of `, ; Tab |` the first line uses most; at most 100,000 rows, the cut said in the text |
+
+`discover` keeps the new extensions; the sniff wants a ZIP for `.docx`/`.odt` and a `From ` line
+first for `.mbox`. PDFium is bound on the first PDF, a mailbox's attachment included, so a run
+without PDFs never loads it. `ling-docs extract` (and so an Ask thread's attachment, ASK §3.3)
+reads every new kind with no change. No run-time file is added: Phase 2 is the binary alone.
+
+### 18.2 Locators and `read`
+
+Every kind but PDF numbers its text by lines, so `read` serves any range, named in the kind's own
+word: `lines 120-180` (text), `para 12-30` (DOCX, ODT, HTML: a paragraph a line), `rows 2-21`
+(CSV, the header being row 1), `msg 3` and `msg 3 · invoice.pdf p.2` (a message, an attachment;
+a long one windowed as `msg 3, lines 40-60`). A chunk of consecutive units of one word is one range
+(`lines 1-80`, where Phase 1 wrote `lines 1-40 .. lines 41-80` and `read` took only the first
+part); adjacent hits of different messages are never merged. Every passage now carries its
+`section` (heading path, subject, columns) and, for a collection's document, its `cite` link
+(§18.4). `ling docs read` gains `--at <locator>`; `docs_read` takes all of these.
+
+### 18.3 The change watch
+
+`src/watch.rs`: inotify (raw `libc`, no crate) on the folders of every enabled collection that
+discovery would enter, within a budget of a quarter of `fs.inotify.max_user_watches`, at most
+65,536 (this machine allows 65,536 in all, so the index takes 16,384). A readable file written, moved or deleted, or a
+folder created or removed (a new folder is watched at once), marks its collection; once it has
+been quiet for 15 s (or changing for 2 min) the session queues an ordinary index run of it. A
+queue overflow marks every collection. The 10-minute scan is unchanged and stays the source of
+truth; `docs.toml` changing re-watches.
+
+### 18.4 Citations that open
+
+- The link is `docs:<collection>/<document>` (`#page=N` for a PDF's page): an id, never a path.
+  Each passage of `docs_search` and `docs_read` carries it as a ready Markdown line,
+  `cite: [acme-msa.pdf, p.7](docs:documents/42#page=7)`; the prompt block (with tools) and the
+  `ask` prompt tell the model to cite with it. `pdf_search` passages, whose source is a URL or a
+  workspace file, carry none.
+- `ling-docs locate <id or link> [--json]` answers with the file only for a document of a
+  configured, enabled collection, as a regular file whose resolved path lies under the collection's
+  resolved root (a symlink that has come to point outside is refused, tested).
+- The UI (`desktop/ui/src/markdown.ts`) renders exactly that link form as a clickable citation and
+  nothing else (other links stay inert, as before). In the **app**, a click sends `docs/open`
+  through the vetted IPC; the main process (`desktop/electron/src/docs.ts`) runs
+  `ling docs locate` and opens the answer with `shell.openPath` (the viewer's own page handling;
+  Electron cannot pass a page). In **`ling web`**, a click opens `/docs/<collection>/<document>`
+  in a new tab: the route (`ling-rs/web/src/documents.rs`, behind the same credential check as
+  every route) takes no path from the request, runs `ling docs locate`, and serves a PDF inline,
+  plain text inline under `Content-Security-Policy: sandbox`, and everything else (Office files,
+  HTML pages, mail) as a download, so a saved page's scripts never run on `ling web`'s origin.
+
+### 18.5 Acceptance (§12) on the whole set
+
+All 210 documents of `eval/corpus` indexed as one collection by `ling-docs index` (the 15 HTML
+sources of the DOCX files in `corpus/_docx_src/` left out by a `.lingignore`, as Phase 0's
+`build_chunks.py` did); `eval/phase2_acceptance.py`, `eval/results/phase2-acceptance.json`. 103
+fetched files differ from their recorded checksums (Wikipedia's renderings drift), so a few
+answers may have moved or gone with them. The run used `MIGHTLING_DOCS_TEST_HOST=direct` (workers
+as plain children under `RLIMIT_AS`, without bwrap) inside a `CPUQuota=400%` scope beside night 12,
+so its speed is not comparable with §16.5.
+
+| | Questions | R@5 | R@10 | MRR | Query p50 / p95 |
+|---|---|---|---|---|---|
+| **All 181, as ling-docs answers (adjacent chunks merged)** | 181 | **0.878** | **0.934** | **0.752** | 19 / 35 ms |
+| All 181, per chunk (Phase 0's counting) | 181 | 0.845 | 0.917 | 0.702 | 18 / 26 ms |
+| Without the cross-lingual questions, merged | 157 | 0.955 | 0.987 | 0.834 | |
+| The Phase 2 formats (HTML in nine languages, DOCX, mail, CSV), merged | 125 | 0.848 | 0.904 | 0.724 | |
+| Cross-lingual (reported, not gated, §15.3), merged | 24 | 0.375 | 0.583 | 0.211 | |
+
+- **Recall@10 ≥ 0.85 over the whole set: passed** (0.934 merged, 0.917 per chunk; Phase 0's
+  pipeline measured 0.901 with the same model and fusion, §15.3). By group, merged: DOCX 8/8,
+  e-mail 20/20, CSV 5/5, English HTML 19/20, other-language HTML 47/48 in their own language,
+  cross-lingual 14/24 (Phase 0's dense figure exactly); PDF 34/34, Markdown, reST, text all found.
+- Chunks: 7,430 for the 210 documents (Phase 0: 7,477). Indexing the whole set took 14 min 18 s,
+  embedding at 7.0 chunks/s under the CPU cap.
+- **Zero network:** the egress scenario (`--docs`, its fixture now a Markdown note, a text file, a
+  PDF, a web page, a Word file and an e-mail with a CSV attachment) was run on the new binary
+  beside night 12: the extractor ran in its bwrap scope under strace with **no destination and no
+  DNS query**, but admission deferred the embedder for memory (the night's containers), so the
+  verdict was `trace failed`, not `pass`. To re-run once the night has ended.
+
+### 18.6 Not built in Phase 2, and why
+
+- **OCR of scanned PDFs and images, and the Qwen3.8 vision queue.** The route §15.7 measured picks
+  the recognition model per page by Tesseract's OSD; a C++ library with no pinned prebuilt
+  publisher of the kind PDFium and ONNX Runtime have. Beyond it OCR needs PDF rasterisation
+  (pdfium-render's image path), DBNet and CTC post-processing written in Rust, new pinned
+  downloads in `docs_index_setup.py`, the fixtures rebuilt, and the vision queue reaches into
+  Night Shift and the model server. It is a phase of its own with its own gate (OCR recall on the
+  39 scanned fixtures); pages without a text layer keep being counted as `needs OCR`.
+- **The collections settings page** in the desktop app and the web UI: Phase 3 (§13: anything
+  left from Phase 2).
+
+### 18.7 New dependencies and their licences
+
+All pure Rust, pinned in `Cargo.toml` and `Cargo.lock`, compatible with AGPL-3.0-or-later:
+`zip` 9.0.5 (MIT; `flate2` and `zlib-rs`, Zlib; `zopfli`, Apache-2.0, for the archives the tests
+write), `quick-xml` 0.42.0 (MIT), `mail-parser` 0.11.9 (Apache-2.0 OR MIT), `csv` 1.4.0
+(Unlicense OR MIT), `scraper` 0.27.0 and `ego-tree` 0.11.0 (ISC), `html5ever`/`markup5ever` 0.39
+(MIT OR Apache-2.0), `selectors` 0.38 and `cssparser` 0.37 (MPL-2.0), `encoding_rs` 0.8.42
+((Apache-2.0 OR MIT) AND BSD-3-Clause), and their MIT or Apache-2.0 helpers.
