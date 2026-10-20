@@ -61,6 +61,8 @@ pub struct Env<'a> {
     pub exe: PathBuf,
     pub lib_dir: PathBuf,
     pub model_dir: PathBuf,
+    /// The OCR models (§20).
+    pub ocr_dir: PathBuf,
     /// Wrap the workers in choom, nice, ionice and bwrap (false only in tests).
     pub sandbox: bool,
     /// Extra arguments for the index worker (tests: `--test-embedder`).
@@ -78,6 +80,7 @@ impl Env<'_> {
             exe: std::env::current_exe()?.canonicalize()?,
             lib_dir: config::lib_dir(),
             model_dir: config::model_dir(),
+            ocr_dir: config::ocr_dir(),
             sandbox: true,
             worker_args: Vec::new(),
             poll: Duration::from_millis(200),
@@ -265,13 +268,14 @@ pub fn index_collection(env: &Env, collection: &Collection) -> Result<Outcome> {
         return Ok(Outcome::Failed(format!("{} is not there", collection.root.display())));
     }
     let mut conn = store::open_rw(&db)?;
-    let found = discover::walk(collection, &env.user_home);
+    let found = discover::walk(collection, &env.user_home, env.settings.ocr);
     let scan = scan(&mut conn, &found.candidates)?;
     store::set_meta(&conn, "skipped_unopened", &serde_json::to_string(&found.skipped)?)?;
     let missing_vectors: i64 = conn.query_row("SELECT count(*) FROM chunks WHERE vector IS NULL", [], |r| r.get(0))?;
     let pending: i64 = conn.query_row("SELECT count(*) FROM documents WHERE status = 'pending'", [], |r| r.get(0))?;
+    let ocr_due = ocr_ready(env).is_none() && !store::awaiting_ocr(&conn)?.is_empty();
     drop(conn);
-    if scan.jobs.is_empty() && missing_vectors == 0 && pending == 0 {
+    if scan.jobs.is_empty() && missing_vectors == 0 && pending == 0 && !ocr_due {
         return Ok(Outcome::Ok);
     }
     if !env.host.can_create_scopes() {
@@ -312,7 +316,85 @@ fn extract_and_embed(env: &Env, collection: &Collection, db: &Path, scratch: &Pa
         Ok((peak, cap)) => record_peak(db, "embed", peak, cap)?,
         Err(outcome) => return Ok(outcome),
     }
+    // Then OCR, once the text layers are searchable (§20): a stopped OCR scope loses only its
+    // own progress, and what it read is written and embedded like any other text.
+    ocr_stage(env, collection, db, scratch)?;
     Ok(Outcome::Ok)
+}
+
+/// Why OCR cannot run here, if it cannot: switched off, or something not installed (tests use a
+/// stand-in worker under `MIGHTLING_DOCS_TEST_OCR=fake`).
+pub fn ocr_ready(env: &Env) -> Option<String> {
+    if !env.settings.ocr {
+        return Some("OCR is switched off (docs_ocr = false)".into());
+    }
+    if std::env::var("MIGHTLING_DOCS_TEST_OCR").as_deref() == Ok("fake") {
+        return None;
+    }
+    crate::ocr::missing(&env.lib_dir, &env.ocr_dir)
+}
+
+/// The OCR stage: every document with pages OCR has not read, in an admitted OCR scope, then its
+/// pages written into the document and embedded. A stage that cannot run, or is stopped, leaves the
+/// rest for the next run; documents it read or could not read are not read again until they change.
+fn ocr_stage(env: &Env, collection: &Collection, db: &Path, scratch: &Path) -> Result<()> {
+    if ocr_ready(env).is_some() {
+        return Ok(());
+    }
+    let conn = store::open_rw(db)?;
+    let waiting = store::awaiting_ocr(&conn)?;
+    let recorded = store::get_meta(&conn, "ocr_peak_mb").ok().flatten().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    drop(conn);
+    let mut jobs: Vec<(i64, String)> = Vec::new();
+    for (id, rel, kind, mut pages) in waiting {
+        let Some(kind) = discover::Kind::parse(&kind).filter(|k| matches!(k, discover::Kind::Pdf | discover::Kind::Image)) else { continue };
+        pages.truncate(env.settings.ocr_max_pages as usize);
+        if pages.is_empty() {
+            continue;
+        }
+        let job = crate::ocr::worker::OcrJob { id, path: collection.root.join(&rel), kind, pages };
+        jobs.push((id, serde_json::to_string(&job)?));
+    }
+    if jobs.is_empty() {
+        return Ok(());
+    }
+    let events = scratch.join("ocr-events.jsonl");
+    std::fs::write(&events, b"")?;
+    let ocr_dir = env.ocr_dir.canonicalize().unwrap_or_else(|_| env.ocr_dir.clone());
+    let phase = Phase {
+        worker: vec!["ocr-worker".into()],
+        extra: vec!["--ocr-dir".into(), ocr_dir.to_string_lossy().into_owned(), "--threads".into(), env.settings.embed_threads.to_string()],
+        kind: Kind::Ocr,
+        letter: "o",
+        what: "OCR",
+        timeout: Duration::from_secs(env.settings.ocr_timeout_s),
+        read_only: vec![ocr_dir.clone()],
+        failed: |id, error| Event::OcrFailed { id, error },
+    };
+    let stopped = match run_phase(env, &phase, &collection.name, &[collection.root.clone()], scratch, &jobs, &events, recorded)? {
+        Ok((peak, cap)) => {
+            record_peak(db, "ocr", peak, cap)?;
+            None
+        }
+        Err(outcome) => Some(outcome),
+    };
+    // What was read is written, whether or not the stage ran to its end.
+    let read = std::fs::metadata(&events).map(|m| m.len()).unwrap_or(0) > 0;
+    if read {
+        let embed_peak = store::open_ro(db)?.and_then(|c| store::get_meta(&c, "embed_peak_mb").ok().flatten()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        match embed(env, &collection.name, db, scratch, &events, embed_peak)? {
+            Ok((peak, cap)) => record_peak(db, "embed", peak, cap)?,
+            // Not written: the documents keep waiting for OCR, and the next run reads them again.
+            Err(outcome) => {
+                let conn = store::open_rw(db)?;
+                store::set_meta(&conn, "ocr_last_status", &format!("the OCR's text was not written: {}", outcome.status()))?;
+                return Ok(());
+            }
+        }
+    }
+    let conn = store::open_rw(db)?;
+    store::set_meta(&conn, "ocr_last_status", &stopped.map(|o| o.status()).unwrap_or_else(|| "ok".into()))?;
+    Ok(())
 }
 
 fn record_peak(db: &Path, phase: &str, peak: u64, cap: u64) -> Result<()> {
@@ -402,59 +484,90 @@ fn unit_name(collection: &str, phase: &str, n: usize) -> String {
 /// Step 2: every job's file through the extractor, restarted after a file that hangs or kills it.
 /// Returns the highest peak and the cap, or the outcome that stopped the run.
 fn extract_all(env: &Env, name: &str, roots: &[PathBuf], scratch: &Path, jobs: &[Job], events: &Path, recorded_peak_mb: u64) -> Result<std::result::Result<(u64, u64), Outcome>> {
-    let mut remaining: Vec<Job> = jobs.to_vec();
+    let phase = Phase {
+        worker: vec!["extract-worker".into()],
+        extra: Vec::new(),
+        kind: Kind::Extract,
+        letter: "x",
+        what: "the extractor",
+        timeout: Duration::from_secs(env.settings.extract_timeout_s),
+        read_only: Vec::new(),
+        failed: |id, error| Event::Failed { id, error },
+    };
+    let ids: Vec<(i64, String)> = jobs.iter().map(|j| Ok((j.id, serde_json::to_string(j)?))).collect::<Result<_>>()?;
+    run_phase(env, &phase, name, roots, scratch, &ids, events, recorded_peak_mb)
+}
+
+/// A worker run over files in admitted scopes, restarted after a file that hangs or kills it:
+/// the extractor, or OCR (§20).
+struct Phase {
+    /// The worker's subcommand, then arguments after the jobs and events files.
+    worker: Vec<String>,
+    extra: Vec<String>,
+    kind: Kind,
+    letter: &'static str,
+    what: &'static str,
+    /// One file's time limit (OCR: one page's, each page's progress starting it again).
+    timeout: Duration,
+    read_only: Vec<PathBuf>,
+    failed: fn(i64, String) -> Event,
+}
+
+/// Runs the phase's worker over `jobs` (id and JSON line each). Returns the highest peak and the
+/// cap, or the outcome that stopped the run.
+#[allow(clippy::too_many_arguments)]
+fn run_phase(env: &Env, phase: &Phase, name: &str, roots: &[PathBuf], scratch: &Path, jobs: &[(i64, String)], events: &Path, recorded_peak_mb: u64) -> Result<std::result::Result<(u64, u64), Outcome>> {
+    let mut remaining: Vec<(i64, String)> = jobs.to_vec();
     let mut peak_max = 0u64;
     let mut cap_used = 0u64;
     let mut attempt = 0usize;
-    let mut offset = 0u64;
-    let timeout = Duration::from_secs(env.settings.extract_timeout_s);
+    let mut offset = std::fs::metadata(events).map(|m| m.len()).unwrap_or(0);
+    let timeout = phase.timeout;
+    let kind = phase.kind;
     while !remaining.is_empty() {
         attempt += 1;
-        let admitted = match host::admit(env.host, host::need(Kind::Extract, recorded_peak_mb.max(peak_max >> 20)), Kind::Extract.ceiling())? {
+        let admitted = match host::admit(env.host, host::need(kind, recorded_peak_mb.max(peak_max >> 20)), kind.ceiling())? {
             Ok(admitted) => admitted,
-            Err(_) => return Ok(Err(Outcome::Deferred("memory: the host-wide budget cannot cover the extractor now".into()))),
+            Err(_) => return Ok(Err(Outcome::Deferred(format!("memory: the host-wide budget cannot cover {} now", phase.what)))),
         };
         cap_used = admitted.cap;
-        let jobs_file = scratch.join(format!("jobs-{attempt}.jsonl"));
-        let lines: Vec<String> = remaining.iter().map(serde_json::to_string).collect::<std::result::Result<_, _>>()?;
+        let jobs_file = scratch.join(format!("jobs-{}{attempt}.jsonl", phase.letter));
+        let lines: Vec<&str> = remaining.iter().map(|(_, line)| line.as_str()).collect();
         std::fs::write(&jobs_file, lines.join("\n"))?;
-        let peak_file = scratch.join(format!("peak-x{attempt}"));
+        let peak_file = scratch.join(format!("peak-{}{attempt}", phase.letter));
+        let mut argv = vec![env.exe.to_string_lossy().into_owned()];
+        argv.extend(phase.worker.iter().cloned());
+        argv.extend([jobs_file.to_string_lossy().into_owned(), events.to_string_lossy().into_owned(), "--lib-dir".into(), env.lib_dir.to_string_lossy().into_owned()]);
+        argv.extend(phase.extra.iter().cloned());
         let spec = Spec {
             home: env.user_home.clone(),
             scratch: scratch.to_path_buf(),
-            read_only: runtime_paths(env, false).into_iter().chain(roots.iter().cloned()).collect(),
+            read_only: runtime_paths(env, false).into_iter().chain(phase.read_only.iter().cloned()).chain(roots.iter().cloned()).collect(),
             writable: Vec::new(),
             writable_outside_scratch: Vec::new(),
             env: base_env(),
             cwd: scratch.to_path_buf(),
-            argv: vec![
-                env.exe.to_string_lossy().into_owned(),
-                "extract-worker".into(),
-                jobs_file.to_string_lossy().into_owned(),
-                events.to_string_lossy().into_owned(),
-                "--lib-dir".into(),
-                env.lib_dir.to_string_lossy().into_owned(),
-            ],
+            argv,
         };
-        let unit = unit_name(name, "x", attempt);
+        let unit = unit_name(name, phase.letter, attempt);
         let argv = scope_argv(env, spec, &peak_file);
-        let log = scratch.join(format!("extract-{attempt}.log"));
+        let log = scratch.join(format!("{}-{attempt}.log", if kind == Kind::Ocr { "ocr" } else { "extract" }));
         if std::env::var_os("MIGHTLING_DOCS_TRACE_SCOPES").is_some() {
             eprintln!("scope {unit}: {argv:?}");
         }
         let mut child = env.host.start_scope(&unit, admitted.cap, &argv, &log)?;
         admitted.release();
-        let (finished, current, status) = watch(env, &mut child, &unit, events, &mut offset, timeout)?;
+        let (finished, current, status) = watch(env, &mut child, &unit, events, &mut offset, timeout, phase.what)?;
         peak_max = peak_max.max(read_peak(&peak_file));
-        remaining.retain(|j| !finished.contains(&j.id));
+        remaining.retain(|j| !finished.contains(&j.0));
         if remaining.is_empty() {
             break;
         }
         // The worker stopped with files left: the one it was reading is the cause.
         match current {
             Some((id, why)) => {
-                append_event(events, &Event::Failed { id, error: why })?;
-                remaining.retain(|j| j.id != id);
+                append_event(events, &(phase.failed)(id, why))?;
+                remaining.retain(|j| j.0 != id);
             }
             None => {
                 // It stopped before reading anything: the sandbox itself failed, or the scope
@@ -463,7 +576,7 @@ fn extract_all(env: &Env, name: &str, roots: &[PathBuf], scratch: &Path, jobs: &
                 let tail: String = tail.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ");
                 return Ok(Err(match status {
                     Stop::Outside => Outcome::Deferred("stopped (a model load?)".into()),
-                    _ => Outcome::Failed(format!("the extraction sandbox did not start: {tail}")),
+                    _ => Outcome::Failed(format!("the {} sandbox did not start: {tail}", if kind == Kind::Ocr { "OCR" } else { "extraction" })),
                 }));
             }
         }
@@ -486,33 +599,29 @@ enum Stop {
 
 /// Follows a worker's events until it exits or a file takes too long. Returns the ids it
 /// finished, the id it was reading when it stopped (with why), and how it stopped.
-fn watch(env: &Env, child: &mut Child, unit: &str, events: &Path, offset: &mut u64, timeout: Duration) -> Result<(Vec<i64>, Option<(i64, String)>, Stop)> {
+fn watch(env: &Env, child: &mut Child, unit: &str, events: &Path, offset: &mut u64, timeout: Duration, what: &str) -> Result<(Vec<i64>, Option<(i64, String)>, Stop)> {
     let mut finished = Vec::new();
     let mut current: Option<i64> = None;
     let mut since = Instant::now();
     loop {
         for event in read_new(events, offset)? {
-            match event {
-                Event::Start { id } => {
-                    current = Some(id);
-                    since = Instant::now();
-                }
-                Event::Done { id, .. } | Event::Failed { id, .. } => {
-                    finished.push(id);
-                    current = None;
-                    since = Instant::now();
-                }
+            if let Some(id) = event.finished() {
+                finished.push(id);
+                current = None;
+            } else if let Event::Start { id } = event {
+                current = Some(id);
             }
+            // A start, an end or a page read: the time limit starts again.
+            since = Instant::now();
         }
         if let Some(status) = child.try_wait()? {
             // Events written just before the exit.
             for event in read_new(events, offset)? {
-                match event {
-                    Event::Start { id } => current = Some(id),
-                    Event::Done { id, .. } | Event::Failed { id, .. } => {
-                        finished.push(id);
-                        current = None;
-                    }
+                if let Some(id) = event.finished() {
+                    finished.push(id);
+                    current = None;
+                } else if let Event::Start { id } = event {
+                    current = Some(id);
                 }
             }
             use std::os::unix::process::ExitStatusExt;
@@ -528,9 +637,10 @@ fn watch(env: &Env, child: &mut Child, unit: &str, events: &Path, offset: &mut u
                 (None, None) => Stop::Crashed(-1),
             };
             let why = match stop {
+                Stop::Killed if what == "OCR" => "killed: over OCR's memory cap (2 GiB), or out of memory".to_string(),
                 Stop::Killed => "killed: over the extractor's memory cap (1 GiB), or out of memory".to_string(),
-                Stop::Crashed(code) => format!("the extractor crashed on it (exit {code})"),
-                _ => "the extractor stopped while reading it".to_string(),
+                Stop::Crashed(code) => format!("{what} crashed on it (exit {code})"),
+                _ => format!("{what} stopped while reading it"),
             };
             return Ok((finished, current.map(|id| (id, why)), stop));
         }
@@ -539,14 +649,14 @@ fn watch(env: &Env, child: &mut Child, unit: &str, events: &Path, offset: &mut u
             let _ = child.kill();
             let _ = child.wait();
             for event in read_new(events, offset)? {
-                if let Event::Done { id, .. } | Event::Failed { id, .. } = event {
+                if let Some(id) = event.finished() {
                     finished.push(id);
                     if current == Some(id) {
                         current = None;
                     }
                 }
             }
-            let why = format!("timed out after {} s", timeout.as_secs());
+            let why = if what == "OCR" { format!("timed out: a page took over {} s", timeout.as_secs()) } else { format!("timed out after {} s", timeout.as_secs()) };
             return Ok((finished, current.map(|id| (id, why)), Stop::TimedOut));
         }
         std::thread::sleep(env.poll);
@@ -626,6 +736,8 @@ fn start_embed(env: &Env, name: &str, db: &Path, scratch: &Path, events: &Path, 
         env.lib_dir.to_string_lossy().into_owned(),
         "--model-dir".into(),
         env.model_dir.to_string_lossy().into_owned(),
+        "--send-below".into(),
+        env.settings.ocr_send_below.to_string(),
     ];
     argv.extend(env.worker_args.iter().cloned());
     let spec = Spec {
@@ -854,7 +966,7 @@ pub fn extract_one(env: &Env, file: &Path, max_pages: Option<u32>) -> Result<std
         match event {
             Event::Done { result, .. } => return Ok(Ok(result)),
             Event::Failed { error, .. } => return Ok(Err(format!("failed: {error}"))),
-            Event::Start { .. } => {}
+            _ => {}
         }
     }
     Ok(Err("failed: the extractor gave no result".into()))
@@ -864,6 +976,11 @@ pub fn extract_one(env: &Env, file: &Path, max_pages: Option<u32>) -> Result<std
 /// units and chunks, records failures, then embeds every chunk that has no vector yet, one at a
 /// time, committing every few chunks so a stopped run keeps what it did.
 pub fn index_worker(collection: &str, db: &Path, events: &Path, embedder: &dyn crate::embed::Embed, counter: &dyn crate::chunk::TokenCount, log: &mut dyn std::io::Write) -> Result<(usize, usize)> {
+    index_worker_with(collection, db, events, embedder, counter, crate::ocr::SEND_BELOW as f64, log)
+}
+
+/// [`index_worker`] with the confidence under which an OCR page counts as poorly read.
+pub fn index_worker_with(collection: &str, db: &Path, events: &Path, embedder: &dyn crate::embed::Embed, counter: &dyn crate::chunk::TokenCount, send_below: f64, log: &mut dyn std::io::Write) -> Result<(usize, usize)> {
     let mut conn = store::open_rw(db)?;
     let now = now();
     let mut written = 0usize;
@@ -871,8 +988,33 @@ pub fn index_worker(collection: &str, db: &Path, events: &Path, embedder: &dyn c
     for line in std::io::BufReader::new(file).lines() {
         let Ok(event) = serde_json::from_str::<Event>(&line?) else { continue };
         match event {
-            Event::Start { .. } => {}
+            Event::Start { .. } | Event::Progress { .. } => {}
             Event::Failed { id, error } => store::set_status(&conn, id, &format!("failed: {error}"))?,
+            Event::OcrFailed { id, error } => {
+                // The text layer stays; the pages stay unread until the file changes.
+                let record = serde_json::json!({ "read": 0, "low": 0, "failed": error }).to_string();
+                conn.execute("UPDATE documents SET ocr = ? WHERE id = ?", params![record, id])?;
+            }
+            Event::Ocr { id, result } => {
+                let Ok((title, needs)) = conn.query_row("SELECT title, needs_ocr FROM documents WHERE id = ? AND status = 'ok'", [id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else { continue };
+                let read: std::collections::HashSet<u32> = result.pages.iter().map(|p| p.page).collect();
+                let remaining: Vec<u32> = needs.split(',').filter_map(|p| p.parse().ok()).filter(|p| !read.contains(p)).collect();
+                // The read pages' units take their places among the text layer's, by page.
+                let mut units = store::units(&conn, id)?;
+                units.retain(|u| u.page.is_none_or(|p| !read.contains(&p)));
+                units.extend(result.units.iter().cloned());
+                units.sort_by_key(|u| u.page.unwrap_or(0));
+                let low = result.pages.iter().filter(|p| (p.confidence as f64) < send_below).count();
+                let routes: std::collections::BTreeMap<String, usize> = result.pages.iter().fold(Default::default(), |mut m, p| {
+                    *m.entry(p.route.clone()).or_default() += 1;
+                    m
+                });
+                let record = serde_json::json!({ "read": result.pages.len(), "low": low, "routes": routes, "send_below": send_below,
+                    "pages": result.pages.iter().map(|p| (p.page, (p.confidence * 1000.0).round() / 1000.0)).collect::<Vec<_>>() }).to_string();
+                let chunks = crate::chunk::chunk(&units, counter, config::CHUNK_TOKENS, 0.15);
+                store::write_ocr(&mut conn, id, &title, &units, &chunks, &remaining, &record)?;
+                written += 1;
+            }
             Event::Done { id, result } => {
                 let Ok(path) = conn.query_row("SELECT path FROM documents WHERE id = ?", [id], |r| r.get::<_, String>(0)) else { continue };
                 let title = if config::is_pdf_cache_name(collection) {
@@ -977,6 +1119,7 @@ mod tests {
             exe: PathBuf::from("/usr/bin/true"),
             lib_dir: dir.path().join("lib"),
             model_dir: dir.path().join("model"),
+            ocr_dir: dir.path().join("ocr"),
             sandbox: true,
             worker_args: Vec::new(),
             poll: Duration::from_millis(1),

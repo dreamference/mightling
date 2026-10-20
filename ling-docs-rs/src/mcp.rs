@@ -27,7 +27,7 @@ fn tools_list(collections: bool, pdf: bool) -> Value {
     if collections {
         tools.push(json!({
             "name": "docs_search",
-            "description": format!("Search the user's own documents (local collections of PDFs, Word and OpenDocument files, web pages, e-mail, CSV tables, notes and text files) by meaning and keywords. Returns passages with their file, locator (page, lines, paragraphs, rows or message) and an id for docs_read. {}", untrusted::NOTE),
+            "description": format!("Search the user's own documents (local collections of PDFs, scanned pages and images read by OCR, Word and OpenDocument files, spreadsheets, presentations, web pages, e-mail, CSV tables, notes and text files) by meaning and keywords. Returns passages with their file, locator (page, lines, paragraphs, rows or message) and an id for docs_read. {}", untrusted::NOTE),
             "inputSchema": { "type": "object", "properties": {
                 "query": { "type": "string", "description": "What to find, in the documents' language if you can guess it." },
                 "collection": { "type": "string", "description": "Only this collection." },
