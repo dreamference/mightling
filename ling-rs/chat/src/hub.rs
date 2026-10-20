@@ -21,6 +21,8 @@ use crate::agent::CONNECTED;
 use crate::attachments;
 use crate::attachments::Media;
 use crate::attachments::Uploaded;
+use ling_web_server::chat_settings::ChatSettings;
+
 use crate::store::ThreadRef;
 use crate::store::Threads;
 
@@ -91,8 +93,12 @@ pub struct HubConfig {
     /// A draft is resent at least this often while a turn runs (Telegram keeps one 30 s).
     pub draft_refresh: Duration,
     pub max_threads: usize,
-    /// How often the air-gap level is read.
+    /// How often the air-gap level is read (and the chat settings, when `reload_settings`).
     pub airgap_interval: Duration,
+    /// The `[chat]` settings of the user's configuration (`ling_web_server::chat_settings`).
+    pub settings: ChatSettings,
+    /// The user's configuration, read again for the settings with the air gap; None in tests.
+    pub settings_file: Option<PathBuf>,
 }
 
 impl HubConfig {
@@ -104,6 +110,8 @@ impl HubConfig {
             draft_refresh: Duration::from_secs(20),
             max_threads: 10,
             airgap_interval: Duration::from_secs(60),
+            settings: ChatSettings::default(),
+            settings_file: None,
         }
     }
 }
@@ -223,6 +231,22 @@ fn merged(inputs: Vec<Value>) -> Value {
     }
     input.extend(rest);
     Value::Array(input)
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// "45s", "2m10s", "16h00m".
+fn duration(ms: u64) -> String {
+    let s = ms / 1000;
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3600 {
+        format!("{}m{:02}s", s / 60, s % 60)
+    } else {
+        format!("{}h{:02}m", s / 3600, (s % 3600) / 60)
+    }
 }
 
 fn cut(text: &str, limit: usize) -> String {
@@ -376,7 +400,9 @@ impl Hub {
                 let chosen = words.next().and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1)).and_then(|n| recent.get(n).cloned());
                 match chosen {
                     Some(thread) => {
-                        self.threads.chats.entry(chat.to_string()).or_default().current = Some(thread.id.clone());
+                        let entry = self.threads.chats.entry(chat.to_string()).or_default();
+                        entry.current = Some(thread.id.clone());
+                        entry.last_ms = Some(now_ms());
                         let _ = self.threads.save(&self.config.dir);
                         self.notice(chat, format!("Continuing \"{}\".", thread.name));
                     }
@@ -417,6 +443,25 @@ impl Hub {
         }
     }
 
+    /// A message after a long silence goes to a new thread, said in one line (§16.2). Then the
+    /// conversation has moved now.
+    fn fresh_after_silence(&mut self, chat: &str) {
+        let now = now_ms();
+        let gap = self.config.settings.new_thread_after.map(|gap| gap.as_millis() as u64);
+        let running = self.current(chat).is_some_and(|thread| self.thread_running(&thread) || self.queued.contains_key(&thread));
+        let entry = self.threads.chats.entry(chat.to_string()).or_default();
+        let silence = entry.last_ms.map(|last| now.saturating_sub(last));
+        entry.last_ms = Some(now);
+        let Some(gap) = gap else { return };
+        if entry.current.is_none() || running || silence.is_some_and(|silence| silence < gap) {
+            return;
+        }
+        entry.current = None;
+        let _ = self.threads.save(&self.config.dir);
+        let since = silence.map(|ms| format!(" (the last message was {} ago)", duration(ms))).unwrap_or_default();
+        self.notice(chat, format!("New thread{since}; /use 2 to go back."));
+    }
+
     async fn ensure_thread(&mut self, chat: &str, first: &str) -> Result<String, String> {
         if let Some(thread) = self.current(chat) {
             if !self.subscribed.contains(&thread) {
@@ -436,6 +481,7 @@ impl Hub {
     }
 
     async fn message(&mut self, chat: &str, text: &str) {
+        self.fresh_after_silence(chat);
         let thread = match self.ensure_thread(chat, text).await {
             Ok(thread) => thread,
             Err(err) => {
@@ -450,6 +496,7 @@ impl Hub {
     /// turn is built from what came back (attachments.rs). Nothing usable: the bridge says so.
     async fn media(&mut self, chat: &str, text: &str, files: Vec<Media>) {
         let first = if text.trim().is_empty() { "(image)" } else { text.trim() };
+        self.fresh_after_silence(chat);
         let thread = match self.ensure_thread(chat, first).await {
             Ok(thread) => thread,
             Err(err) => {
@@ -574,6 +621,8 @@ impl Hub {
             }
         }
         let chat = turn.chat.clone();
+        self.threads.chats.entry(chat.clone()).or_default().last_ms = Some(now_ms());
+        let _ = self.threads.save(&self.config.dir);
         let answer = turn.answer();
         let status = turn_value.get("status").and_then(Value::as_str).unwrap_or("completed");
         self.send(Outbound::TurnEnded { chat: chat.clone() });
@@ -795,6 +844,9 @@ impl Hub {
         if now.duration_since(self.airgap_read) >= self.config.airgap_interval {
             self.airgapped = (self.airgap)();
             self.airgap_read = now;
+            if let Some(file) = &self.config.settings_file {
+                self.config.settings = ChatSettings::load_from(Some(file));
+            }
         }
         let mut drafts = Vec::new();
         for turn in self.turns.values_mut() {

@@ -15,6 +15,7 @@ pub mod ask;
 pub mod ask_client;
 pub mod assets;
 pub mod auth;
+pub mod chat_settings;
 pub mod cli;
 pub mod devices;
 pub mod documents;
