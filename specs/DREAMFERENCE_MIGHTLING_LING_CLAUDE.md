@@ -699,9 +699,24 @@ The mapping is not exact (§14 Q4): where Claude Code would *allow* without aski
 
 - **Skills**: already done. `~/.claude/skills` and a trusted repository's `.claude/skills` are linked into `ling` today ([SKILLS §15](./DREAMFERENCE_MIGHTLING_SKILLS.md)); the profile changes nothing there.
 - **Custom slash commands** (`.claude/commands/*.md`, `~/.claude/commands/*.md`): Claude Code's docs now say custom commands "have been merged into skills" (§3.4), so converting them into skills is the documented model, not an approximation. They are converted at start into skills in the session folder and linked like `from-claude` skills, using the conversion Codex's own `command_migration.rs` performs, so `/name args` works. Substitutions (`$ARGUMENTS`, `$N`, named arguments, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_SESSION_ID}`) are expanded by the launcher when the skill is invoked; `` !`cmd` `` runs the command in the sandbox, never outside it. `allowed-tools`/`disallowed-tools` become session permission rules while the skill runs where they can be expressed, otherwise a notice; `context: fork` and `agent` run the skill in a subagent (Phase 3).
+- **Built (2026-10-20), subagents**, in `ling-rs/src/compat_agents.rs`, written by the launcher itself rather than through `external-agent-migration`.
+  - **Sources:** `~/.claude/agents` and every `.claude/agents` from the repository root down to the working folder, subfolders included. The nearest definition of a name wins. A repository's agents are read only once the folder is trusted.
+  - **Roles:** each agent becomes a Codex role file under `$CODEX_HOME/compat/claude/<project>/agents/`, rebuilt at every start, and is declared with `-c agents={…}`. The body becomes `developer_instructions`.
+  - **Read-only:** a tool list (or `disallowedTools`) with no editing tool and no `Bash`, or `permissionMode: plan`, makes the role read-only (`sandbox_mode = "read-only"`).
+  - **Other fields:** `effort` becomes `model_reasoning_effort`, and `model` is ignored. Other tool lists, `bypassPermissions`, `maxTurns`, `skills`, `mcpServers`, `hooks`, `memory`, `isolation` and `background` are reported by `doctor` as not honoured.
+  - **Check:** a test parses the written file with Codex's own `parse_agent_role_file_contents`.
 - **Subagents** (`.claude/agents/*.md`, `~/.claude/agents/*.md`, in the documented priority: `name`, `description`, `tools`, `disallowedTools`, `permissionMode`, `maxTurns`, `skills`, `mcpServers`, `hooks`, and the body as the subagent's instructions): converted into Codex agent roles (`agents/*.toml`) in the session folder, through `external-agent-migration`'s `import_subagents_with_rewrite_profile`, called with a rewrite profile that changes nothing (Mightling wants the user's text as written). `model` is ignored (one model).
 
 ### 9.5 Hooks
+
+**Built (2026-10-20)** in `ling-rs/src/compat_hooks.rs`.
+- **Sources:** the managed file, `~/.claude/settings.json`, `.claude/settings.json` and `.claude/settings.local.json`, all merged.
+- **Delivery:** one `-c hooks={…}` table that carries the memory hook too. Each command runs as `ling compat hook-shim -- '<command>'`, readable in `/hooks`.
+- **Trust:** the user's and the managed hooks are trusted beside their groups (session-flags keys, the hash checked against `codex_config::version_for_toml`). A repository's hooks are offered only in a trusted folder and then wait for Codex's own review.
+- **Matchers:** a list of exact names becomes Codex's `|` list (`MultiEdit` → `Edit`), or an anchored expression when a name holds `-`. An expression with look-around or back-references is skipped.
+- **Shim input:** the shim rewrites `apply_patch` into `Write` (`file_path`, `content`) or `Edit` (`file_path`, `old_string`, `new_string`; the first file of a patch), and `spawn_agent` into `Agent`. It sets `CLAUDE_PROJECT_DIR`.
+- **Shim output:** it drops a plain `allow`, an `ask` and a `defer`, so Codex's approval applies, and keeps `allow` with `updatedInput` on `PreToolUse`.
+- **Skipped:** events Codex lacks, non-command handlers, and everything under `disableAllHooks`. `doctor` lists every hook and each skip, and a TUI start says how many were read.
 
 Translated at start from every settings file into Codex hook groups in the session folder:
 
