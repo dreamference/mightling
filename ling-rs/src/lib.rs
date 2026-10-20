@@ -142,6 +142,17 @@ You have web access through two shell commands, run like any other command:
     ling-search --read "your question here"    # search and read the top 3 pages; --pages N (1-5)
     ling-fetch "https://example.com"           # fetch a page as readable text
 
+A plain search asks web search engines and Wikipedia. For anything else, name what you want:
+
+    ling-search -c news -t week "query"        # news; -t day|week|month|year keeps recent results
+    ling-search -c science "query"             # papers: arXiv, PubMed, Semantic Scholar, OpenAlex
+    ling-search -c it "query"                  # code: GitHub, Stack Overflow, crates.io, npm, PyPI, MDN
+    ling-search -c map "place"                 # places and addresses (OpenStreetMap)
+    ling-search -c videos|music|books|files|dictionaries|social|movies "query"
+
+The language is detected from the query, so a question in Portuguese, Ukrainian or German gets
+results and Wikipedia in that language; `-l en` (or `pt`, `uk`, `fr`, `de`, `es`) sets it instead.
+
 Use them whenever the answer depends on something you cannot know from training or from the files
 in front of you: today's weather or tides, current events, release versions, live documentation,
 anything dated. For a quick lookup (a version number, an error message, a URL) use plain
@@ -157,9 +168,10 @@ which looks like the site being down rather than the command being unavailable.
 There is no web search *tool* — do not look for one. Search is a shell command, shown above.
 
 Queries go to a SearXNG instance on this machine, which contacts upstream engines on your behalf:
-no API key, no account, and no query addressed to a search company. For a programming question,
-`!st` at the start of the query searches Stack Overflow and `!gh` GitHub. Repeating a query within
-the hour costs nothing: the answer is kept. If search says it is unavailable, do not try to repair
+no API key, no account, and no query addressed to a search company. Results that several engines
+agree on come first, and the same page is listed once. `!st` at the start of a query searches
+Stack Overflow alone, `!gh` GitHub, `!wp` Wikipedia. Repeating a query within the hour costs
+nothing: the answer is kept. If search says it is unavailable, do not try to repair
 it, restart anything or run docker: read a page you know with `ling-fetch` (Wikipedia, the
 project's documentation) or tell the user that web search is unavailable right now.
 
