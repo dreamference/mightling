@@ -208,8 +208,8 @@ def server():
 def run_ling(server, tmp_path, env_extra=None) -> tuple[subprocess.CompletedProcess, str]:
     home = tmp_path / "home"
     work = tmp_path / "work"
-    for d in (home, work):
-        d.mkdir(exist_ok=True)
+    for d in (home / ".mightling", work):
+        d.mkdir(parents=True, exist_ok=True)
     last = tmp_path / "last.txt"
     env = {
         "PATH": "/usr/bin:/bin",
