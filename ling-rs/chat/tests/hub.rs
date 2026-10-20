@@ -88,6 +88,11 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                     };
                     let _ = reply.send(saved);
                 }
+                // `ling web`'s `/api/cavemode`: echoes what reached it.
+                AgentCommand::Cavemode { thread, text, reply } => {
+                    agent_log.requests.lock().unwrap().push(("cavemode".to_string(), json!({ "thread": thread, "text": text })));
+                    let _ = reply.send(if text == "loud" { Err("Usage: /cavemode".to_string()) } else { Ok(format!("Cave mode: {text}")) });
+                }
             }
         }
     });
@@ -170,6 +175,30 @@ async fn a_first_message_starts_an_ask_thread_and_streams_the_answer() {
     assert_eq!(rig.log.params("turn/start")[1]["threadId"], "th1");
     let saved = std::fs::read_to_string(rig.dir.join("threads.json")).unwrap();
     assert!(saved.contains("\"current\": \"th1\""));
+}
+
+#[tokio::test]
+async fn cavemode_goes_to_ling_web_for_the_current_thread() {
+    let mut rig = rig("cavemode", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "/cavemode default full")).unwrap();
+    assert_eq!(next_settled(&mut rig.telegram).await, Outbound::Notice { chat: CHAT.into(), text: "Cave mode: default full".into() });
+    assert_eq!(rig.log.params("cavemode")[0], json!({ "thread": null, "text": "default full" }));
+    rig.inbound.send(text(CHAT, "first question")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed" } }))).unwrap();
+    settle().await;
+    rig.inbound.send(text(CHAT, "/cavemode off")).unwrap();
+    let said = loop {
+        if let Outbound::Notice { text, .. } = next(&mut rig.telegram).await
+            && text.starts_with("Cave mode")
+        {
+            break text;
+        }
+    };
+    assert_eq!(said, "Cave mode: off");
+    assert_eq!(rig.log.params("cavemode")[1], json!({ "thread": "th1", "text": "off" }));
+    rig.inbound.send(text(CHAT, "/cavemode loud")).unwrap();
+    assert_eq!(next_settled(&mut rig.telegram).await, Outbound::Notice { chat: CHAT.into(), text: "Usage: /cavemode".into() });
 }
 
 #[tokio::test]

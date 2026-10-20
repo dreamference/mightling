@@ -232,6 +232,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
         .route("/api/chat/settings", get(chat_settings))
+        .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/login", get(login))
         .route("/pair", get(pair_page).post(pair))
         .route("/pair.css", get(pair_css))
@@ -460,6 +461,39 @@ async fn websocket(State(server): State<Arc<Server>>, upgrade: WebSocketUpgrade)
 async fn airgapped(State(_server): State<Arc<Server>>) -> Response {
     let resolved = user_airgap_level();
     json_response(StatusCode::OK, json!({ "level": resolved.level.name(), "source": resolved.source.label() }))
+}
+
+/// How terse answers are (cave.rs): the level in force for `?thread=<id>`, or for a new session,
+/// as `ling cavemode --json` reports it.
+async fn cavemode_status(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let thread = query.get("thread").filter(|id| !id.is_empty()).cloned();
+    if thread.as_deref().is_some_and(|id| !ask::valid_thread_id(id)) {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "no such thread" }));
+    }
+    match crate::cave::run(&server.config.launch, &crate::cave::Request::Status { thread }).await {
+        Ok(said) => match serde_json::from_str::<serde_json::Value>(&said) {
+            Ok(value) => json_response(StatusCode::OK, value),
+            Err(_) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": "ling cavemode gave no answer" })),
+        },
+        Err(reason) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": reason })),
+    }
+}
+
+/// Sets the level: `{"level": …}` for new sessions (`built-in` removes the configured one), or
+/// `{"level": …, "thread": …}` for one thread, from its next model request. Answers what
+/// `ling cavemode` said.
+async fn cavemode_change(State(server): State<Arc<Server>>, body: axum::body::Bytes) -> Response {
+    let Ok(body) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send JSON" }));
+    };
+    let request = match crate::cave::Request::change(&body) {
+        Ok(request) => request,
+        Err(reason) => return json_response(StatusCode::BAD_REQUEST, json!({ "error": reason })),
+    };
+    match crate::cave::run(&server.config.launch, &request).await {
+        Ok(said) => json_response(StatusCode::OK, json!({ "said": said })),
+        Err(reason) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": reason })),
+    }
 }
 
 /// How the phone bridges behave, from the `[chat]` table of the user's configuration
