@@ -49,6 +49,8 @@ export function TerminalView(props: { hub: TerminalHub; processId: string; visib
       // Cleared here and not also sent to the shell, whose own Ctrl+L redrew its prompt beside the one kept.
       if (event.type === "keydown" && matches(event, keyAction("clearTerminal"))) {
         terminal.clear();
+        // Ctrl+K is also the command menu's: the window's handler skips a key the terminal took.
+        event.preventDefault();
         return false;
       }
       // The window's own shortcuts are not typed into the shell.

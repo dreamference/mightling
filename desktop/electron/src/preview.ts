@@ -33,7 +33,7 @@ export interface PreviewEvent {
 
 /** Shortcuts the window's tab area answers even while the previewed page has the focus (§2.19's preview keys). */
 const FORWARDED: Record<string, string> = {
-  "Ctrl+W": "closeTab", "Ctrl+T": "previewOpen", "Ctrl+L": "addressBar", "Ctrl+R": "previewReload",
+  "Ctrl+W": "closeTab", "Ctrl+T": "previewOpen", "Ctrl+L": "addressBar", "Ctrl+R": "previewReload", "Ctrl+Shift+R": "previewReloadHard",
   "Alt+ArrowLeft": "previewBack", "Alt+ArrowRight": "previewForward", "Ctrl+Shift+>": "commentMode", "Ctrl+Shift+.": "commentMode",
   "Ctrl+Shift+C": "copyUrl",
 };
@@ -209,11 +209,13 @@ export class Previews {
     this.reload(id);
   }
 
-  reload(id: string): void {
+  /** Loads the page again; `fresh` skips the cache, as Ctrl+Shift+R does (a dev server's stale assets). */
+  reload(id: string, fresh = false): void {
     const preview = this.previews.get(id);
     if (!preview) return;
     this.asked.delete(id);
-    preview.view.webContents.reload();
+    if (fresh) preview.view.webContents.reloadIgnoringCache();
+    else preview.view.webContents.reload();
   }
 
   go(id: string, step: "back" | "forward"): void {
