@@ -23,6 +23,18 @@ working, because its homeserver is on the node and has no route out.
 Telegram's Bot API, not yet against the real services. Signal has been used with a real account and
 is not a preview.
 
+## How a phone chat behaves
+
+- **Text, images and files.** A screenshot or photo is read on the node: its text goes to
+  Mightling as `[Screenshot text: …]`, and the image itself too when the model being served takes
+  images. If nothing can be read from it, the bridge says so ("I can't read this image; describe it
+  or paste the text.") instead of asking Mightling about nothing. A file is saved in the thread's
+  folder. What a bridge cannot take (a voice message, a sticker) is named in one line, never
+  dropped silently.
+- **Reading text in images needs Tesseract** on the node, offline: `ling signal setup` installs it;
+  otherwise `sudo apt install tesseract-ocr`. It reads every installed language; add one with
+  `sudo apt install tesseract-ocr-<code>` (for example `tesseract-ocr-por`).
+
 ## Signal, in Note to Self
 
 The bridge is linked to **your own Signal account** as one more device, the way Signal Desktop is.

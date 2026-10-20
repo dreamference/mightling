@@ -73,6 +73,21 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                     let _ = reply.send(script(&method, &params));
                 }
                 AgentCommand::Respond { id, result } => agent_log.responses.lock().unwrap().push((id, result)),
+                // `ling web`'s upload: a name with "text" in it has text on it; one with "vision"
+                // goes to a model that takes images; "lost" never arrives.
+                AgentCommand::Upload { thread, name, image, bytes: _, reply } => {
+                    agent_log.requests.lock().unwrap().push(("upload".to_string(), json!({ "thread": thread, "name": name, "image": image })));
+                    let saved = if name.starts_with("lost") {
+                        Err("refused".to_string())
+                    } else {
+                        Ok(ling_web_server::ask_client::Saved {
+                            path: format!("/ask/{thread}/{name}"),
+                            text: name.contains("text").then(|| "Quiet 24 dB, HEPA 13".to_string()),
+                            vision: name.contains("vision"),
+                        })
+                    };
+                    let _ = reply.send(saved);
+                }
             }
         }
     });
@@ -400,3 +415,44 @@ async fn an_unreachable_agent_is_said_plainly() {
     let notice = next(&mut rig.telegram).await;
     assert!(matches!(notice, Outbound::Notice { ref text, .. } if text.starts_with("Mightling is not reachable right now")), "{notice:?}");
 }
+
+fn photo(chat: &str, text: &str, name: &str) -> Inbound {
+    let attachments = vec![ling_chat::attachments::Media { name: name.to_string(), mime: "image/jpeg".to_string(), bytes: b"jpeg".to_vec() }];
+    Inbound::Media { chat: chat.to_string(), text: text.to_string(), attachments, dropped: vec![] }
+}
+
+/// The regression of 2026-10-20 (Signal, but the same rule here): an image with nothing the model
+/// can use never becomes an empty turn; the bridge answers itself.
+#[tokio::test]
+async fn an_unreadable_image_alone_is_answered_by_the_bridge_and_starts_no_turn() {
+    let mut rig = rig("unreadable", default_script(), false, |_| {});
+    rig.inbound.send(photo(CHAT, "", "plain.jpg")).unwrap();
+    assert_eq!(next_settled(&mut rig.telegram).await, Outbound::Notice { chat: CHAT.into(), text: ling_chat::attachments::UNREADABLE_IMAGE.into() });
+    settle().await;
+    assert!(!rig.log.methods().contains(&"turn/start".to_string()), "{:?}", rig.log.methods());
+    assert_eq!(rig.log.params("upload")[0]["image"], true);
+}
+
+#[tokio::test]
+async fn a_screenshot_goes_in_as_its_text_and_as_an_image_for_a_model_that_takes_images() {
+    let mut reader = rig("screenshot", default_script(), false, |_| {});
+    reader.inbound.send(photo(CHAT, "compare it", "text-shot.jpg")).unwrap();
+    assert_eq!(next(&mut reader.telegram).await, Outbound::Draft { chat: CHAT.into(), text: String::new() });
+    settle().await;
+    let input = &reader.log.params("turn/start")[0]["input"];
+    assert_eq!(input[0]["text"], "compare it\n\n[Screenshot text: Quiet 24 dB, HEPA 13]");
+    assert_eq!(input.as_array().unwrap().len(), 1, "a text-only model gets no image");
+    assert_eq!(reader.log.params("thread/name/set")[0]["name"], "compare it");
+
+    let mut seeing = rig("vision", default_script(), false, |_| {});
+    seeing.inbound.send(photo(CHAT, "", "vision-text.jpg")).unwrap();
+    assert_eq!(next(&mut seeing.telegram).await, Outbound::Draft { chat: CHAT.into(), text: String::new() });
+    settle().await;
+    let input = &seeing.log.params("turn/start")[0]["input"];
+    assert_eq!(input[1], json!({ "type": "localImage", "path": "/ask/th1/vision-text.jpg" }));
+    // A voice message alone: named as dropped, nothing sent to the agent.
+    seeing.inbound.send(Inbound::Media { chat: CHAT.into(), text: String::new(), attachments: vec![], dropped: vec!["a voice message".into()] }).unwrap();
+    let Outbound::Notice { text, .. } = next_settled(&mut seeing.telegram).await else { panic!() };
+    assert!(text.contains("a voice message"), "{text}");
+}
+

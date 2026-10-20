@@ -2,6 +2,7 @@
 //! signal-cli as a child, keeps one connection to `ling web`, and carries out what the conversation
 //! (`bridge.rs`) decides. Nothing here decides anything: every rule is in `gate.rs` and `bridge.rs`.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -22,6 +23,7 @@ use crate::bridge::Action;
 use crate::bridge::AgentEvent;
 use crate::bridge::Bridge;
 use crate::bridge::Info;
+use crate::bridge::Uploaded;
 use crate::envelope;
 use crate::envelope::Attachment;
 use crate::format::Styled;
@@ -72,6 +74,9 @@ struct Daemon {
     /// and it cannot know the level any other way (§11).
     airgap_known: bool,
     held: Vec<Value>,
+    /// The owner's attachments waiting for their turn's upload; every other downloaded one is
+    /// deleted on arrival (§19.1).
+    held_attachments: HashSet<String>,
 }
 
 /// Why the daemon stopped.
@@ -103,7 +108,6 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
         config.signal_cli.clone(),
         &state_dir.join("signal-cli"),
         &config.account,
-        matches!(config.mode, Mode::Linked { .. }),
         config.signal_cli_env.clone(),
     );
     let (signal, mut messages) = SignalCli::spawn(&launch).map_err(|err| Stop::Failed(format!("could not start signal-cli ({}): {err}", config.signal_cli.display())))?;
@@ -130,7 +134,9 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
         last_error: None,
         airgap_known: false,
         held: Vec::new(),
+        held_attachments: HashSet::new(),
     };
+    daemon.sweep_attachments(SystemTime::now());
     daemon.poll_airgap().await;
     eprintln!("ling-signal {}: started ({} mode)", env!("CARGO_PKG_VERSION"), match daemon.config.mode { Mode::Dedicated => "dedicated", Mode::Linked { .. } => "linked" });
     let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -173,6 +179,9 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
                 daemon.carry_out(actions).await;
                 if now / 1000 % 5 == 0 {
                     daemon.write_status(true);
+                }
+                if now / 1000 % 60 == 0 {
+                    daemon.sweep_attachments(SystemTime::now());
                 }
             }
             _ = airgap.tick() => daemon.poll_airgap().await,
@@ -302,7 +311,12 @@ impl Daemon {
 
     async fn on_signal(&mut self, params: Value) {
         let own = envelope::OwnAccount { uuid: self.config.own_uuid.as_deref(), number: Some(self.config.account.as_str()) };
-        let Some(envelope) = envelope::parse(&params, own) else { return };
+        // Every attachment signal-cli downloaded for this message; only the owner's are kept.
+        let downloaded = envelope::attachment_ids(&params);
+        let Some(envelope) = envelope::parse(&params, own) else {
+            self.forget(&downloaded);
+            return;
+        };
         let sender = envelope.source_uuid.clone().unwrap_or_default();
         // Linked mode needs no identity key (gate.rs, `check_linked`), and asking for one for every
         // message of every conversation on the owner's account would be work done on their mail.
@@ -311,6 +325,7 @@ impl Daemon {
         match self.gate.check(&envelope, &self.config.mode, fingerprint.as_deref(), now) {
             Verdict::Accept(message) => {
                 self.last_owner_message_ms = Some(now);
+                self.held_attachments.extend(message.attachments.iter().map(|a| a.id.clone()));
                 let actions = self.bridge.on_message(message, now);
                 self.carry_out(actions).await;
                 self.save_conversation();
@@ -346,6 +361,7 @@ impl Daemon {
             }
             Verdict::Ignored => {}
         }
+        self.forget(&downloaded);
     }
 
     fn owner(&self) -> Option<String> {
@@ -406,9 +422,13 @@ impl Daemon {
             }
             Action::StartThread => self.request("thread/start", json!({ "prompt": "ask" }), Pending::OpenThread).await,
             Action::ResumeThread(thread) => self.request("thread/resume", json!({ "threadId": thread }), Pending::OpenThread).await,
-            Action::StartTurn { thread, text, attachments } => {
-                let (images, files) = self.upload(&thread, &attachments).await;
-                let input = agent::turn_input(&text, &images, &files);
+            Action::Upload { thread, attachments } => {
+                let uploads = self.upload(&thread, &attachments).await;
+                let actions = self.bridge.on_agent(AgentEvent::Uploaded { thread, uploads }, now_ms());
+                Box::pin(self.carry_out(actions)).await;
+            }
+            Action::StartTurn { thread, text, images } => {
+                let input = agent::turn_input(&text, &images);
                 self.request("turn/start", json!({ "threadId": thread, "input": input }), Pending::StartTurn { thread: thread.clone() }).await;
             }
             Action::Interrupt { thread, turn } => self.request("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Pending::Other).await,
@@ -440,40 +460,76 @@ impl Daemon {
         Box::pin(self.carry_out(actions)).await;
     }
 
-    /// Hands the owner's attachments to `ling web`, which writes them into the thread's Ask folder;
-    /// returns the saved images (sent as images when the model takes them) and the other files.
-    async fn upload(&mut self, thread: &str, attachments: &[Attachment]) -> (Vec<String>, Vec<String>) {
-        let (mut images, mut files) = (Vec::new(), Vec::new());
+    /// Hands the owner's attachments to `ling web`, which writes them into the thread's Ask folder
+    /// and reads an image's text; reports each one, received or not, for the conversation to
+    /// decide what the model gets (`bridge::compose`).
+    async fn upload(&mut self, thread: &str, attachments: &[Attachment]) -> Vec<Uploaded> {
+        let mut uploads = Vec::new();
         for attachment in attachments {
-            let local = self.state_dir.join("signal-cli").join("attachments").join(&attachment.id);
-            let fetched = if self.linked() {
-                // Not downloaded with everything else (--ignore-attachments): fetched for this one.
-                match self.signal.call("getAttachment", rpc::get_attachment_params(&attachment.id, &self.config.account)).await {
+            let local = self.attachments_dir().join(&attachment.id);
+            let name = attachment.filename.clone().unwrap_or_else(|| attachment.id.clone());
+            let mut uploaded = Uploaded { name: name.clone(), image: attachment.is_image(), path: None, text: None, vision: false };
+            // signal-cli has downloaded it into its folder (it is started without
+            // --ignore-attachments, §19.1); `getAttachment` reads that same folder, base64.
+            let fetched = match std::fs::read(&local) {
+                Ok(bytes) => Ok(bytes),
+                Err(_) => match self.signal.call("getAttachment", rpc::get_attachment_params(&attachment.id, &self.config.account)).await {
                     Ok(value) => value.get("data").and_then(Value::as_str).and_then(rpc::base64_decode).ok_or_else(|| "signal-cli sent no data".to_string()),
                     Err(err) => Err(err),
-                }
-            } else {
-                std::fs::read(&local).map_err(|err| err.to_string())
+                },
             };
+            self.held_attachments.remove(&attachment.id);
+            let _ = std::fs::remove_file(&local);
             let bytes = match fetched {
                 Ok(bytes) => bytes,
                 Err(err) => {
                     self.note_error(format!("an attachment could not be read ({}): {err}", attachment.id));
+                    uploads.push(uploaded);
                     continue;
                 }
             };
-            let name = attachment.filename.clone().unwrap_or_else(|| attachment.id.clone());
             match agent::upload(self.config.port, &self.cookie, thread, &name, attachment.is_image(), &bytes).await {
-                Ok(path) if attachment.is_image() && self.config.vision => images.push(path),
-                Ok(path) => files.push(path),
-                Err(err) => {
-                    self.send_text(&Styled::plain(&format!("I couldn't save {name}: {err}"))).await;
+                Ok(saved) => {
+                    uploaded.vision = saved.vision || self.config.vision;
+                    uploaded.text = saved.text;
+                    uploaded.path = Some(saved.path);
                 }
+                Err(err) => self.note_error(format!("could not save {name} in the thread's folder: {err}")),
             }
-            // The copy in signal-cli's folder is not kept: the thread's folder has it now.
-            let _ = std::fs::remove_file(&local);
+            uploads.push(uploaded);
         }
-        (images, files)
+        uploads
+    }
+
+    fn attachments_dir(&self) -> PathBuf {
+        self.state_dir.join("signal-cli").join("attachments")
+    }
+
+    /// signal-cli downloads the attachments of every message the account receives, and in linked
+    /// mode that is all of the owner's conversations. Only the owner's Note to Self attachments
+    /// are kept, until they are uploaded; the rest are deleted as they arrive (`forget`), and this
+    /// sweep removes whatever is left: anything not held after two minutes, anything held after
+    /// an hour (§19.1).
+    fn sweep_attachments(&mut self, now: SystemTime) {
+        let Ok(entries) = std::fs::read_dir(self.attachments_dir()) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let age = entry.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| now.duration_since(t).ok()).unwrap_or_default();
+            let held = self.held_attachments.contains(&name);
+            if (!held && age >= Duration::from_secs(120)) || age >= Duration::from_secs(3600) {
+                let _ = std::fs::remove_file(entry.path());
+                self.held_attachments.remove(&name);
+            }
+        }
+    }
+
+    /// Deletes the downloaded attachments of a message the bridge does not act on.
+    fn forget(&self, ids: &[String]) {
+        for id in ids.iter().filter(|id| !self.held_attachments.contains(*id)) {
+            if !id.contains('/') && !id.starts_with('.') {
+                let _ = std::fs::remove_file(self.attachments_dir().join(id));
+            }
+        }
     }
 
     fn save_conversation(&mut self) {

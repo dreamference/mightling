@@ -64,6 +64,7 @@ pub mod summary_cap;
 
 pub mod update;
 pub mod usage;
+pub mod vision;
 #[cfg(unix)]
 pub mod web;
 
@@ -439,6 +440,10 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let model = wait_for_model(&host).await?;
     // Code Mode's `exec` as a function where the server drops custom tools (exec_tool.rs).
     exec_tool::configure(&model);
+    // Whether it takes images, as the server says (vision.rs): the catalog tells Codex and `ling web`.
+    if let Ok(client) = proxy::direct_client(Duration::from_secs(2)) {
+        vision::set_image_input(vision::served_image_input(&client, &host).await);
+    }
     let codex_home = codex_utils_home_dir::find_codex_home()
         .context("could not resolve CODEX_HOME")?
         .as_path()
@@ -993,6 +998,10 @@ pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Val
     // SWE-bench night 5 asked for, is refused, since the pinned Codex has no such form).
     if let Some(form) = apply_patch_tool_type(model, std::env::var(APPLY_PATCH_ENV).ok().as_deref()) {
         entry["apply_patch_tool_type"] = json!(form);
+    }
+    // What the model reads besides text, when the server said (vision.rs); else Codex's default.
+    if let Some(modalities) = vision::current_input_modalities() {
+        entry["input_modalities"] = modalities;
     }
     json!({"models": [entry]})
 }

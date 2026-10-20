@@ -405,7 +405,10 @@ fn run_refresh(args: &[String], invocation: &Invocation) -> i32 {
     let work = std::env::temp_dir().join(format!("ling-signal-refresh-{}", std::process::id()));
     let java_present = setup::java_home().join("bin/java").exists();
     let signal_cli_present = setup::signal_cli_program().exists() && (arch != "aarch64" || setup::native_dir().join("libsignal_jni.so").exists());
-    let plan = setup::refresh_plan(&bridge, &work, arch, java_present, signal_cli_present, &instances);
+    let mut plan = setup::refresh_plan(&bridge, &work, arch, java_present, signal_cli_present, &instances);
+    if !setup::tesseract_present() {
+        plan.insert(0, setup::ocr_step());
+    }
     let accounts: Vec<String> = instances.iter().map(|i| format!("`{}`", i.account())).collect();
     println!("This installs the current bridge and the pinned signal-cli {} and Java {} for {},", setup::SIGNAL_CLI_VERSION, setup::JAVA_VERSION, accounts.join(", "));
     println!("then restarts {}. The links, the keys and the pairings stay. It runs:\n", if instances.len() > 1 { "each bridge that runs" } else { "it" });
@@ -755,7 +758,10 @@ fn run_setup(args: &[String], invocation: &Invocation) -> i32 {
     // The bridges already here run from the installed binary: it is replaced only when it differs.
     let others: Vec<Instance> = host.instances();
     let installed = setup::installed_bridge(&host.path(unit::BRIDGE_PATH), &bridge);
-    let plan = setup::install_plan(&instance, &bridge, &work, arch, account_exists, java_present, signal_cli_present, linked && !qrencode_present, installed, &others);
+    let mut plan = setup::install_plan(&instance, &bridge, &work, arch, account_exists, java_present, signal_cli_present, linked && !qrencode_present, installed, &others);
+    if !setup::tesseract_present() {
+        plan.insert(usize::from(!account_exists), setup::ocr_step());
+    }
 
     let named = if instance.is_first() { String::new() } else { format!(" `{instance}`") };
     match &number {
