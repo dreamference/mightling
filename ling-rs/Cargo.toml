@@ -48,6 +48,8 @@ rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 semver = { workspace = true }
 serde_json = { workspace = true }
+# Claude Code's agent files: their YAML frontmatter (src/compat_agents.rs).
+serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time"] }
 toml = { workspace = true }
@@ -89,6 +91,8 @@ clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true, features = ["executor"] }
 # Codex's own hook types, to check the trust hashes the launcher computes (refine.rs's tests).
 codex-config = { workspace = true }
+# Codex's own parser of agent role files, to check the ones compat_agents.rs writes.
+codex-agent-roles = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tar = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
