@@ -43,6 +43,7 @@ pub mod cave;
 pub mod chat;
 pub mod code_index;
 pub mod compat;
+pub mod compat_keys;
 pub mod compat_print;
 pub mod compat_tui;
 pub mod compaction;
