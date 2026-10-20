@@ -14,7 +14,7 @@ This document lists every change and where it lives.
 
 | Piece | Location | Role |
 | --- | --- | --- |
-| Fork | `github.com/dgxcoder/codex` | A fork of `openai/codex` that carries upstream's history and tags. |
+| Fork | `github.com/dreamference/codex` | A fork of `openai/codex` that carries upstream's history and tags. |
 | Submodule | `codex/` (shallow) | Pinned to the `rust-v0.158.0` tag commit (`064c6b8`). **Never modified.** |
 | Patches | `codex-patches/00NN-*.patch` | Small unified diffs with one line of context, applied in file-name order: renamed strings, the launcher hook, and one-line switches that hide or reroute commands (§3). Numbers `0003`–`0004` are unused; they belonged to the pre-minimisation series. |
 | Launcher | `ling-rs/` | Mightling's own Rust crate. It is kept as source, not as a patch. |
