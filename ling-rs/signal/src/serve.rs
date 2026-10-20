@@ -440,6 +440,11 @@ impl Daemon {
             }
             Action::StartThread => self.request("thread/start", json!({ "prompt": "chat" }), Pending::OpenThread).await,
             Action::StartAskThread => self.request("thread/start", json!({ "prompt": "ask" }), Pending::OpenThread).await,
+            Action::AddToTurn { thread, turn, text } => {
+                let input = agent::turn_input(&text, &[]);
+                let pending = Pending::Steer { thread: thread.clone(), text };
+                self.request("turn/steer", json!({ "threadId": thread, "input": input, "expectedTurnId": turn }), pending).await;
+            }
             Action::Steer { thread, turn, text } => {
                 let input = agent::turn_input(&text, &[]);
                 self.request("turn/steer", json!({ "threadId": thread, "input": input, "expectedTurnId": turn }), Pending::Other).await;

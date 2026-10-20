@@ -877,3 +877,11 @@ On the morning of 2026-10-20 the owner's Note to Self thread gave useless answer
 - **How a phone thread is recognised:** its scratch folder is `ask/chat-<hex>` instead of `ask/q-<hex>` (`ask::folder_prefix`), so the model gate's extension gives a phone's thread its own output-token cap from the folder alone; nothing extra reaches the model. The desktop app counts both as Ask threads.
 - **Cave mode (§19, item 6).** On the morning of 2026-10-20 ultra applied to phone threads by design (it was the user-level default). Its "answer every question first" did not make the wrong answer: the empty message did, and the model answered the thread's last question. The cave texts are not changed (they are the benchmark's, byte for byte); the phone prompt says instead to ask back about anything referred to but not visible. Since the cave-mode study of the same day (branch `cave/default-study`) the phone starts at `lite` and `/cavemode` works from the phone.
 
+### 19.4 Quick follow-ups join the answer in hand (branch `chat/merge-quick`)
+
+On 2026-10-20 a second message sent while the first was answered became a separate turn of its own, answered after sixteen minutes. Now (`Bridge::merge`) a follow-up joins the question in hand:
+- while its thread opens or its attachments upload, its text (and attachments, while opening) is added to the question;
+- while the answer runs, it is steered in with `turn/steer` (`Action::AddToTurn`), at once, or as soon as the turn's id is known; a steer the server refuses (the turn was ending) comes back as `SteerFailed` and is asked next.
+
+It waits as the next question instead when it cannot join: an attachment after the question has gone, an approval waiting for YES or NO, a stop under way, or the final turn after a time-out (§19.3). Everything that waited is then asked as **one** question, texts joined by blank lines. `/stop` stops the answer and empties the queue, as before; the queue still holds at most five.
+
