@@ -232,6 +232,129 @@ fn a_collection_is_indexed_searched_read_and_kept_current() {
     let _ = server.wait();
 }
 
+/// Base64, wrapped at 76 characters as mail has it.
+fn base64(bytes: &[u8]) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= chunk.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out.as_bytes().chunks(76).map(|l| String::from_utf8_lossy(l).into_owned()).collect::<Vec<_>>().join("\n")
+}
+
+/// A ZIP archive of the given entries (a DOCX or ODT).
+fn zip_of(entries: &[(&str, &str)]) -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut out);
+        let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (name, body) in entries {
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(body.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+    out.into_inner()
+}
+
+#[test]
+fn office_files_pages_mail_and_tables_are_indexed_searched_and_read() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let root = home.join("Documents");
+    std::fs::create_dir_all(&root).unwrap();
+    let w = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
+    let document = format!(
+        r#"<w:document {w}><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Retry policy</w:t></w:r></w:p>
+        <w:p><w:r><w:t>Clients retry a failed upload three times with exponential backoff.</w:t></w:r></w:p></w:body></w:document>"#
+    );
+    let styles = format!(r#"<w:styles {w}><w:style w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>"#);
+    std::fs::write(root.join("design.docx"), zip_of(&[("word/document.xml", &document), ("word/styles.xml", &styles)])).unwrap();
+    let content = r#"<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:h text:outline-level="1">Minutes</text:h><text:p>The board approved the Gothenburg lease.</text:p></office:text></office:body></office:document-content>"#;
+    std::fs::write(root.join("minutes.odt"), zip_of(&[("mimetype", "application/vnd.oasis.opendocument.text"), ("content.xml", content)])).unwrap();
+    std::fs::write(root.join("page.html"), "<html><head><title>T</title></head><body><nav>Home</nav><h1>Volcanoes</h1><p>Basaltic lava flows quietly.</p><h2>Eruptions</h2><p>Plinian eruptions eject pumice high into the stratosphere.</p></body></html>").unwrap();
+    let mbox = "From a@x Tue Mar  4 09:30:00 2025\nFrom: Maria <maria@kestrel.example>\nSubject: Shipment held\n\nThe gripper parts are stuck in Rotterdam customs.\n\nFrom b@x Wed Mar  5 09:30:00 2025\nFrom: Ops <ops@kestrel.example>\nSubject: Price list\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: text/plain\n\nNew prices attached.\n--b\nContent-Type: text/csv\nContent-Disposition: attachment; filename=prices.csv\n\nModel,Price\nRX-40,1490 EUR\n--b--\n";
+    let with_pdf = lib_dir().is_some();
+    let mut mbox = mbox.to_string();
+    if with_pdf {
+        // A PDF attachment goes through PDFium like a PDF file.
+        let pdf = base64(&pdf(&["Credit note", "Acme credits 4200 EUR for the bearing claim."]));
+        mbox.push_str(&format!("\nFrom c@x Thu Mar  6 09:30:00 2025\nFrom: Acme <billing@acme.example>\nSubject: Credit note\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=c\n\n--c\nContent-Type: text/plain\n\nSee attached.\n--c\nContent-Type: application/pdf\nContent-Disposition: attachment; filename=credit.pdf\nContent-Transfer-Encoding: base64\n\n{pdf}\n--c--\n"));
+    }
+    std::fs::write(root.join("inbox.mbox"), mbox).unwrap();
+    let mut csv = String::from("Sensor,Calibrated by,Date\n");
+    for i in 1..=30 {
+        csv.push_str(&format!("TS-{i:04},{},2025-01-{:02}\n", if i == 27 { "Ingrid Berg" } else { "Lab" }, i % 28 + 1));
+    }
+    std::fs::write(root.join("calibration.csv"), csv).unwrap();
+    std::fs::write(root.join("fake.docx"), "not a zip").unwrap();
+
+    let mut docs = DocsToml::default();
+    docs.ensure_defaults(&home);
+    docs.save().unwrap();
+    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let env = env(&host, &home, exe());
+    assert_eq!(index::run(&env, &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    let conn = ling_docs::store::open_ro(&ling_docs::config::db_path("documents")).unwrap().unwrap();
+    let counts = ling_docs::store::counts(&conn).unwrap();
+    assert_eq!((counts.indexed, counts.skipped, counts.failed), (5, 1, 0), "{counts:?}");
+    drop(conn);
+
+    let collections: Vec<_> = docs.enabled().cloned().collect();
+    let mut searcher = Searcher::default();
+    searcher.refresh(&collections).unwrap();
+    let embedder = HashEmbedder { dim: 64 };
+    let mut top = |query: &str| searcher.search(query, 3, &Filters::default(), Some(&embedder), 0.25).unwrap().hits.remove(0);
+    let hit = top("exponential backoff upload");
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("design.docx", "para 1-2", "Retry policy"));
+    // Its citation link opens the file, and only inside the collection.
+    let link = ling_docs::locate::link(&hit.doc_id, None).unwrap();
+    let located = ling_docs::locate::locate(&collections, &link).unwrap();
+    assert_eq!(located.path, root.join("design.docx"));
+    std::fs::rename(root.join("design.docx"), home.join("moved.docx")).unwrap();
+    std::os::unix::fs::symlink(home.join("moved.docx"), root.join("design.docx")).unwrap();
+    assert!(ling_docs::locate::locate(&collections, &link).unwrap_err().to_string().contains("leads out"));
+    let hit = top("Gothenburg lease");
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str()), ("minutes.odt", "para 1-2"));
+    let hit = top("Plinian pumice stratosphere");
+    assert_eq!((hit.rel.as_str(), hit.heading.as_str()), ("page.html", "Volcanoes > Eruptions"));
+    assert!(!hit.text.contains("Home"));
+    let hit = top("gripper parts customs");
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("inbox.mbox", "msg 1", "Shipment held"));
+    let hit = top("RX-40 price");
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str()), ("inbox.mbox", "msg 2"), "the attachment is chunked with its message");
+    assert!(hit.text.contains("Model: RX-40, Price: 1490 EUR"), "{}", hit.text);
+    let mail = hit.doc_id.clone();
+    if with_pdf {
+        let hit = top("bearing claim credit 4200");
+        assert_eq!((hit.rel.as_str(), hit.loc.as_str()), ("inbox.mbox", "msg 3"));
+        let read = ling_docs::read::read(&collections, &mail, Some("msg 3 · credit.pdf p.1"), 6000).unwrap();
+        assert!(read.text.contains("Acme credits 4200 EUR") && !read.text.contains("See attached"), "{}", read.text);
+    }
+    let hit = top("Ingrid Berg calibrated");
+    assert_eq!((hit.rel.as_str(), hit.loc.as_str(), hit.heading.as_str()), ("calibration.csv", "rows 1-31", "Sensor, Calibrated by, Date"), "small row groups are packed together");
+    let table = hit.doc_id.clone();
+
+    // Read back at the locators the search gave, in each kind's own words.
+    let read = ling_docs::read::read(&collections, &mail, Some("msg 2"), 6000).unwrap();
+    assert!(read.text.starts_with("From: Ops <ops@kestrel.example>") && read.text.contains("Model: RX-40"), "{}", read.text);
+    assert!(!read.text.contains("gripper"));
+    let read = ling_docs::read::read(&collections, &mail, Some("msg 2 · prices.csv"), 6000).unwrap();
+    assert_eq!(read.text.trim_end(), "Model, Price\nModel: RX-40, Price: 1490 EUR");
+    let read = ling_docs::read::read(&collections, &table, Some("rows 28-28"), 6000).unwrap();
+    assert_eq!(read.text.trim_end(), "Sensor: TS-0027, Calibrated by: Ingrid Berg, Date: 2025-01-28");
+    assert_eq!((read.loc.as_str(), read.next.as_deref()), ("rows 28-28", Some("rows 29-29")));
+    assert!(ling_docs::read::read(&collections, &table, Some("p.2"), 6000).unwrap_err().to_string().contains("by rows"));
+    // The type filter knows the new kinds.
+    let only = Filters { kind: Some("eml".into()), ..Filters::default() };
+    assert!(searcher.search("gripper", 3, &only, Some(&embedder), 0.25).unwrap().hits.is_empty());
+    let only = Filters { kind: Some("mbox".into()), ..Filters::default() };
+    assert_eq!(searcher.search("gripper", 3, &only, Some(&embedder), 0.25).unwrap().hits[0].rel, "inbox.mbox");
+}
+
 /// A stand-in extractor: hangs on files named `hang*`, dies as the kernel's OOM kill would on
 /// `crash*`, and reads the rest with the real worker; every other command is the real binary.
 fn fake_worker(dir: &Path) -> PathBuf {

@@ -402,3 +402,15 @@ With Matrix alone, the chat bridge talks only to loopback and is not an exceptio
 - The release job runs the crate's tests in the build's export.
 
 **Not verified:** everything §14 lists, apart from compiling the launcher. Also not run: the live egress audit with any bridge on, which needs the model server.
+
+## 16. After the first mornings of real use (2026-10-20)
+
+The owner's Signal thread of 2026-10-20 (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19) showed what a phone chat needs that a browser tab does not. `ling chat` gets the same fixes; each part is its own branch.
+
+### 16.1 Images and other attachments (branch `chat/images`)
+
+- **Telegram:** a photo (its largest size) or a document is downloaded with `getFile` (the Bot API's limit is 20 MB), its caption taken as the text. Voice and audio, video, video messages, animations, stickers, locations, contacts and polls are not taken, and the bridge says so in one line ("I can't take a voice message here, so it was dropped; …").
+- **Matrix:** `m.image` and `m.file` are downloaded from the homeserver's authenticated media endpoint (`/_matrix/client/v1/media/download`, then the older `/_matrix/media/v3/download`), with the Matrix 1.10 caption (`body` beside a `filename`) as the text; `m.audio`, `m.video`, `m.location` and anything else are named as dropped.
+- **The hub** (`attachments.rs`) uploads each file into the thread's Ask folder through the link (`AgentCommand::Upload`, `/api/upload?read=1` with the link's cookie, over HTTP beside the socket), then builds the turn as the Signal bridge does: an image as `localImage` when the served model takes images, its text as `[Screenshot text: …]`, a file named; with nothing usable, "I can't read this image; describe it or paste the text." and no turn. Queued inputs are merged into one turn (their texts joined, then their images).
+- **`ling web`** reads an image's text with Tesseract (`ocr.rs`) and says whether the served model takes images (`vision`, from the catalog's `input_modalities`, which the launcher writes from the model server's `/model_info`). `ling chat start` says how to install Tesseract when it is missing.
+

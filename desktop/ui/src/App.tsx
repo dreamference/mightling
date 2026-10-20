@@ -1703,6 +1703,24 @@ export function App() {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, []);
+  // A citation of the user's documents (markdown.ts) opens the document, wherever it is rendered.
+  useEffect(() => {
+    const open = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Enter") return;
+      const link = (event.target as Element | null)?.closest?.(".doc-link");
+      const doc = link?.getAttribute("data-doc");
+      if (!doc) return;
+      event.preventDefault();
+      const page = link?.getAttribute("data-page");
+      bridge.openDocument(doc, page ? Number(page) : null).catch((error: unknown) => notice(`The document could not be opened: ${error instanceof Error ? error.message : String(error)}`));
+    };
+    document.addEventListener("click", open);
+    document.addEventListener("keydown", open);
+    return () => {
+      document.removeEventListener("click", open);
+      document.removeEventListener("keydown", open);
+    };
+  }, [notice]);
 
   if (state.server !== "ready") {
     return <StartupScreen state={state.server} stderr={state.stderr} protocolErrors={state.protocolErrors} notices={state.notices} onRetry={connect} />;

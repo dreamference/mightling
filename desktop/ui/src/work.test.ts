@@ -173,6 +173,13 @@ describe("a scripted session", () => {
     expect(run([{ type: "opened", thread: thread("t8", "/w", 5000) }], opened).threads.t8.thread.updatedAt).toBe(5000);
   });
 
+  it("an answer to an open without a thread leaves the window as it was", () => {
+    const listed = run([{ type: "threads", list: [thread("t9", "/w", 1000)] }, { type: "select", threadId: "t9" }], opened);
+    const after = run([{ type: "opened", thread: undefined as unknown as Thread }], listed);
+    expect(after).toBe(listed);
+    expect(after.selected).toBe("t9");
+  });
+
   it("an interrupted turn ends, and its streamed items stay", () => {
     const state = run([
       note("turn/started", { threadId: "t1", turn: { id: "u2", status: "inProgress", items: [], error: null } }),
@@ -283,6 +290,15 @@ describe("the agent's markdown", async () => {
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("<img");
     expect(html).toContain('title="https://example.com"');
+  });
+
+  it("makes a citation of the user's documents a link to open, and no other link", async () => {
+    const { docLink } = await import("./markdown");
+    const html = renderMarkdown("See [acme-msa.pdf, p.7](docs:documents/42#page=7) and [notes](docs:documents/../1) and [x](docs:/etc/passwd).");
+    expect(html).toContain('<span class="link doc-link" role="link" tabindex="0" data-doc="documents/42" data-page="7" title="Open documents/42">acme-msa.pdf, p.7</span>');
+    expect(html.match(/doc-link/g)?.length).toBe(1);
+    expect(docLink("docs:design-notes/3")).toEqual({ doc: "design-notes/3", page: null });
+    expect(docLink("docs:documents/3#page=x")).toBeNull();
   });
 
   it("shows the pictures the image_search tool stored, and no other image", () => {

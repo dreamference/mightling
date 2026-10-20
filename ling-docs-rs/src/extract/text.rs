@@ -13,7 +13,7 @@ fn lines(text: &str) -> Vec<&str> {
 }
 
 fn unit(first: usize, last: usize, heading: String, buf: &[&str]) -> Unit {
-    Unit { loc: format!("lines {first}-{last}"), page: None, line_first: Some(first as u32), line_last: Some(last as u32), heading, text: buf.join("\n") }
+    Unit { loc: format!("lines {first}-{last}"), page: None, line_first: Some(first as u32), line_last: Some(last as u32), heading, group: None, text: buf.join("\n") }
 }
 
 fn has_text(buf: &[&str]) -> bool {

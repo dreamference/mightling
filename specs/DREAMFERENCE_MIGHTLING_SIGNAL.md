@@ -221,7 +221,7 @@ Numbers that work: a prepaid SIM, a landline (voice code) or an eSIM data plan w
    - read the contact and group lists that the phone syncs to every linked device, and change the profile.
 
    This is not a narrower key than the phone's; it is the same account. What is done:
-   - **What signal-cli is told to do:** it runs with `--ignore-attachments --ignore-avatars --ignore-stickers --ignore-stories`, so nothing of other conversations is downloaded.
+   - **What signal-cli is told to do:** it runs with `--ignore-avatars --ignore-stickers --ignore-stories`. Until 2026-10-20 it also ran with `--ignore-attachments`, so that nothing of other conversations was downloaded; but signal-cli cannot fetch an attachment later (`getAttachment` only reads one it already downloaded), so no Note to Self image ever reached the agent. Attachments are now downloaded, and the bridge deletes every one that is not the owner's Note to Self as it arrives, and sweeps the folder every minute (§19.1): never kept, rather than never downloaded.
    - **What the bridge does:** it acts on Note to Self alone. Everything else signal-cli decrypts is dropped in memory by the gate, and the bridge never writes message text to disk or to the journal.
    - **What is stored anyway:** signal-cli's own store under `/var/lib/mightling-signal/signal-cli` still holds the account's keys and the synced contact and group lists. It is protected as the keys are (2 below).
 2. **The agent must never reach those keys.** Unchanged from §0.3, and in linked mode it matters more.
@@ -246,7 +246,7 @@ Numbers that work: a prepaid SIM, a landline (voice code) or an eSIM data plan w
 
 **Disappearing messages in Note to Self** (one week, the user's default). Signal keeps one disappearing-message timer per conversation, and a message carries its sender's timer, so the timer cannot be set for the bridge's replies alone. In Note to Self, a one-week timer therefore also applies to the owner's own notes written there from then on, on every device. Notes already there are not affected. Setup says this and asks, with yes as the default. It sets the timer with `updateContact <own number> --expiration 604800`, and if signal-cli refuses that on the account itself, it tells the owner where to set it on the phone (Note to Self → the name at the top → Disappearing messages). That this command works on one's own account is not established (§12).
 
-**Attachments:** the owner's attachments in Note to Self are fetched one at a time with `getAttachment {id, recipient: <own number>}`, which returns the file as base64. They then go to the Ask folder through `/api/upload`. Nothing else is ever downloaded.
+**Attachments:** signal-cli downloads them into its attachment folder in the bridge's state (§19.1). The owner's Note to Self attachments are read from there (`getAttachment` as a fallback, which reads the same folder) and go to the Ask folder through `/api/upload`; every other attachment is deleted as it arrives.
 
 ## 5. The owner, and everyone else
 
@@ -834,4 +834,23 @@ The owner decided on 2026-10-12 to build this proposal once the single-account l
 **Fixes after the first live checks (2026-10-13), none needing a phone:** `start`, `stop`, `trust` and `remove` (and `remove --dry-run`) refuse a bridge not on the node before any sudo; `setup --name N` on a node with no bridge is refused (decision 5); a second `setup` leaves an identical bridge binary alone. `ling-signal` now has 103 unit tests; the three end-to-end tests are unchanged.
 
 **Not done:** the live test of §18.6 (two accounts on gx10-1a2b, the memory of two JVMs beside the model server, `remove` of one leaving the other running). Nothing here was run against the live bridge.
+
+## 19. After the first mornings of real use (2026-10-20)
+
+On the morning of 2026-10-20 the owner's Note to Self thread gave useless answers. What the rollout and the journals show, and what each fix is (the owner's decision of 2026-10-20; `ling chat` has the same fixes, specs/DREAMFERENCE_MIGHTLING_CHAT.md §16):
+
+- **A screenshot reached the model as an empty message.** signal-cli ran with `--ignore-attachments`, so the image was never downloaded; `getAttachment` failed ("Could not find attachment with ID"), the bridge logged it and started the turn with the empty text alone. The model then answered about the thread's previous topic.
+- **The thread was two days old.** The screenshot was answered in the thread of the day before yesterday's questions.
+- **Fifteen minutes "hanging".** Not the command it seemed: the Python command finished at once; the model server then decoded for fifteen minutes (38,000 to 121,000 tokens of context, a repetition loop) without streaming a word, until Codex's stream idle timeout (900 s in the user's config) ended the request. Nothing in the turn could hear anything meanwhile, so only the bridge can bound it (§19.3).
+- **Ninety-two tool calls**, curl on search engines (captchas), sleep-and-retry, and quick messages queued as separate turns.
+
+### 19.1 Images and other attachments (branch `chat/images`)
+
+- **Downloaded, then deleted unless the owner's.** signal-cli runs without `--ignore-attachments` in both modes. Each `receive` notification names its attachments wherever they sit (the message's own, a quote's thumbnail, a link preview's image: `envelope::attachment_ids`); every file the gate does not accept as the owner's is deleted from `signal-cli/attachments` at once, and a sweep every minute (and at start) deletes anything not held after two minutes and anything after an hour. The owner's are held until their turn uploads them. In linked mode this means images from the owner's other conversations touch the bridge's state folder (0700, the system account's) for a moment before they are deleted; this is the trade for images in Note to Self at all.
+- **The conversation decides what the model gets** (`bridge::compose`, a pure function): the bridge uploads each attachment (`Action::Upload`) with `read=1`, and `ling web` answers its path, the text read off an image by the offline reader, and whether the served model takes images. Then:
+  - an image goes to the model as `localImage` when the model takes images, and its text as `[Screenshot text: …]` whenever any was read;
+  - another file is saved and named, as before;
+  - **with nothing usable** (no words, no text read, a model without images), the bridge answers "I can't read this image; describe it or paste the text." and starts no turn; an attachment that never arrived gets "I couldn't receive that attachment; …". **An empty message never reaches the model**: a regression test replays the morning's message.
+- **Whether the model takes images** is asked of the model server, never assumed: the launcher reads `has_image_understanding` from SGLang's `/model_info` (`/get_model_info` on older servers) and writes `input_modalities` into the catalog (`ling-rs/src/vision.rs`); `ling web` reports `vision: true` only when the catalog says `image`. A server that does not say (vLLM, llama.cpp) gets the text alone. `bridge.json`'s `vision` (never set by setup) still forces it on.
+- **The offline reader** is Tesseract, the distribution's package (`tesseract-ocr`): `ling signal setup` and `setup --refresh` install it when it is missing. `ling web` runs it (`ling-rs/web/src/ocr.rs`) with a 30-second limit, one thread and a 1.5 GB address space, in every installed language (`apt install tesseract-ocr-<code>` adds one), and passes at most 4,000 characters on. No cloud service, no network.
 

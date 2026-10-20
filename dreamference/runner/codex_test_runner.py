@@ -35,6 +35,7 @@ from typing import Final, List, Optional
 from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.chat.desktop_runner import DesktopRunner
 from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR, REPO_ROOT, CodexBrandedBuilder
+from dreamference.runner.codex_installer import ADAPTER_ENV
 
 # The skip list: which Codex tests Mightling does not run, and why.
 SKIP_FILE: Final[str] = os.path.join(REPO_ROOT, "codex-tests", "mightling-skips.toml")
@@ -459,6 +460,7 @@ class CodexTestRunner:
             # The launcher leaves the tests' command lines alone (ling-rs, UPSTREAM_TESTS_ENV).
             "MIGHTLING_UPSTREAM_TESTS": "1",
             "DREAMFERENCE_VLLM_HOST": CLOSED_MODEL_HOST,
+            ADAPTER_ENV: "",
             # codex-bwrap compiles a vendored bubblewrap that needs libcap's headers. Mightling does
             # not ship it (the sandbox runs the system's /usr/bin/bwrap), and the crate's build
             # script offers this switch for machines without them.

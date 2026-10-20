@@ -339,6 +339,9 @@ export function reduce(state: WorkState, action: Action): WorkState {
       return { ...state, threads };
     }
     case "opened": {
+      // An answer without a thread changes nothing: thrown here, in the render, it would empty the
+      // whole window (the e2e stand-in once answered thread/resume so, and the composer vanished).
+      if (!action.thread?.id) return state;
       const thread = withLastActivity(action.thread, state.threads[action.thread.id]?.thread ?? null);
       return {
         ...state,

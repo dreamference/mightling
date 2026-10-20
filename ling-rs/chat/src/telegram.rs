@@ -19,6 +19,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
+use crate::attachments::Media;
 use crate::hub::HELP;
 use crate::hub::Inbound;
 use crate::hub::Outbound;
@@ -54,13 +55,41 @@ impl std::fmt::Display for ApiError {
 #[derive(Clone)]
 pub struct TelegramApi {
     base: String,
+    /// Where files are downloaded from: `<root>/file/bot<token>/<file_path>`.
+    files: String,
     http: reqwest::Client,
 }
+
+/// The largest file the Bot API lets a bot download.
+pub const DOWNLOAD_LIMIT: u64 = 20 * 1024 * 1024;
 
 impl TelegramApi {
     /// `root` is `https://api.telegram.org`, or a test's stand-in.
     pub fn new(root: &str, token: &str) -> TelegramApi {
-        TelegramApi { base: format!("{}/bot{token}", root.trim_end_matches('/')), http: reqwest::Client::new() }
+        let root = root.trim_end_matches('/');
+        TelegramApi { base: format!("{root}/bot{token}"), files: format!("{root}/file/bot{token}"), http: reqwest::Client::new() }
+    }
+
+    /// Downloads a file the user sent: `getFile` for its path, then the file itself.
+    pub async fn download(&self, file_id: &str) -> Result<Vec<u8>, ApiError> {
+        let failed = |description: String| ApiError { description, retry_after: None, missing_method: false };
+        let file = self.call("getFile", json!({ "file_id": file_id })).await?;
+        let path = file.get("file_path").and_then(Value::as_str).ok_or_else(|| failed("Telegram named no file path".to_string()))?;
+        let response = self
+            .http
+            .get(format!("{}/{path}", self.files))
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|err| failed(err.without_url().to_string()))?;
+        if !response.status().is_success() {
+            return Err(failed(format!("Telegram refused the download (HTTP {})", response.status().as_u16())));
+        }
+        let bytes = response.bytes().await.map_err(|err| failed(err.without_url().to_string()))?;
+        if bytes.len() as u64 > DOWNLOAD_LIMIT {
+            return Err(failed("the file is larger than a bot may download".to_string()));
+        }
+        Ok(bytes.to_vec())
     }
 
     /// Calls a method. A `retry_after` answer is waited out and retried, up to three times.
@@ -91,6 +120,51 @@ impl TelegramApi {
             missing_method: status.as_u16() == 404,
         })
     }
+}
+
+/// A file in a message, as the Bot API describes it: its id, a name and a type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Attached {
+    pub file_id: String,
+    pub name: String,
+    pub mime: String,
+}
+
+/// What a message carries besides its text: a photo (its largest size) or a document, and the
+/// kinds the bridge does not take, named for the user.
+pub fn attachments_of(message: &Value) -> (Vec<Attached>, Vec<String>) {
+    let mut files = Vec::new();
+    if let Some(sizes) = message.get("photo").and_then(Value::as_array)
+        && let Some(largest) = sizes.iter().max_by_key(|size| size.get("width").and_then(Value::as_u64).unwrap_or(0) * size.get("height").and_then(Value::as_u64).unwrap_or(0))
+        && let Some(id) = largest.get("file_id").and_then(Value::as_str)
+    {
+        files.push(Attached { file_id: id.to_string(), name: "photo.jpg".to_string(), mime: "image/jpeg".to_string() });
+    }
+    if let Some(document) = message.get("document")
+        && let Some(id) = document.get("file_id").and_then(Value::as_str)
+    {
+        files.push(Attached {
+            file_id: id.to_string(),
+            name: document.get("file_name").and_then(Value::as_str).unwrap_or("file").to_string(),
+            mime: document.get("mime_type").and_then(Value::as_str).unwrap_or("application/octet-stream").to_string(),
+        });
+    }
+    let dropped = [
+        ("voice", "a voice message"),
+        ("audio", "an audio file"),
+        ("video", "a video"),
+        ("video_note", "a video message"),
+        ("animation", "an animation"),
+        ("sticker", "a sticker"),
+        ("location", "a location"),
+        ("contact", "a contact"),
+        ("poll", "a poll"),
+    ]
+    .iter()
+    .filter(|(field, _)| message.get(*field).is_some_and(|v| !v.is_null()))
+    .map(|(_, named)| named.to_string())
+    .collect();
+    (files, dropped)
 }
 
 fn chat_key(chat_id: i64) -> String {
@@ -186,11 +260,25 @@ impl Poller {
                 }
                 return;
             }
-            if text.is_empty() {
-                self.reply(chat_id, "Only text messages for now.").await;
+            let (files, dropped) = attachments_of(message);
+            if files.is_empty() && dropped.is_empty() {
+                if text.is_empty() {
+                    self.reply(chat_id, "I read text, images and files here.").await;
+                    return;
+                }
+                let _ = self.hub.send(Inbound::Text { chat: chat_key(chat_id), text });
                 return;
             }
-            let _ = self.hub.send(Inbound::Text { chat: chat_key(chat_id), text });
+            let caption = message.get("caption").and_then(Value::as_str).unwrap_or_default().trim().to_string();
+            let mut attachments = Vec::new();
+            for file in files {
+                match self.api.download(&file.file_id).await {
+                    Ok(bytes) => attachments.push(Media { name: file.name, mime: file.mime, bytes }),
+                    Err(err) => self.reply(chat_id, &format!("I couldn't download {} from Telegram ({err}); send it again.", file.name)).await,
+                }
+            }
+            let text = if text.is_empty() { caption } else { text };
+            let _ = self.hub.send(Inbound::Media { chat: chat_key(chat_id), text, attachments, dropped });
         } else if let Some(query) = update.get("callback_query") {
             let Some(user) = query.pointer("/from/id").and_then(Value::as_i64) else { return };
             if let Some(id) = query.get("id").and_then(Value::as_str) {
