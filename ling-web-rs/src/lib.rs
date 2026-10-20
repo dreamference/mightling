@@ -16,6 +16,7 @@
 //! says so at the function.
 
 pub mod airgapped;
+pub mod cache;
 pub mod fetch;
 pub mod html_text;
 pub mod node_locator;
