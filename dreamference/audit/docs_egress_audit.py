@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from dataclasses import asdict
 from typing import Dict, List, Optional, Tuple
 
@@ -71,7 +72,8 @@ class DocsEgressAudit:
     def make_fixture(cls, home: str) -> str:
         """
         Writes the fixture folder: `~/Documents` (a default collection) with a Markdown note, a
-        text file and a PDF, plus a file of a type the index never opens.
+        text file, a PDF, a saved web page, a Word file and an e-mail with a CSV attachment (every
+        parser the index has), plus a file of a type the index never opens.
 
         Args:
             home (str): The throwaway home.
@@ -87,6 +89,17 @@ class DocsEgressAudit:
             handle.write("Shopping: bread, milk, coffee beans.\n")
         with open(os.path.join(folder, "report.pdf"), "wb") as handle:
             handle.write(cls.fixture_pdf(["Colony survey", "The colony counted 412 breeding pairs this year."]))
+        with open(os.path.join(folder, "terns.html"), "w") as handle:
+            handle.write("<html><body><h1>Terns</h1><p>Arctic terns migrate from pole to pole.</p></body></html>\n")
+        word = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        with zipfile.ZipFile(os.path.join(folder, "gulls.docx"), "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", f"<w:document {word}><w:body><w:p><w:r><w:t>Gulls follow fishing boats.</w:t></w:r></w:p></w:body></w:document>")
+        with open(os.path.join(folder, "survey.eml"), "w") as handle:
+            handle.write(
+                "From: warden@example.org\nSubject: Survey dates\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=b\n\n"
+                "--b\nContent-Type: text/plain\n\nThe survey runs in June.\n--b\nContent-Type: text/csv\n"
+                "Content-Disposition: attachment; filename=counts.csv\n\nSpecies,Pairs\nRazorbill,57\n--b--\n"
+            )
         with open(os.path.join(folder, "installer.deb"), "wb") as handle:
             handle.write(b"never opened")
         return folder

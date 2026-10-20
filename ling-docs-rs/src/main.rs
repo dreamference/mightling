@@ -378,8 +378,15 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Command::Index { collection, rebuild } => {
             let docs = load_docs()?;
-            let host = SystemdHost;
-            let env = index::Env::real(&host)?;
+            // `MIGHTLING_DOCS_TEST_HOST=direct`, as for pdf_search: the workers as plain children
+            // under `RLIMIT_AS`, without bwrap, inside whatever scope runs this (measurements in a
+            // CPU-capped scope of their own; never the product's path).
+            let direct = std::env::var("MIGHTLING_DOCS_TEST_HOST").as_deref() == Ok("direct");
+            let systemd = SystemdHost;
+            let rlimit = ling_docs::host::RlimitHost::in_temp();
+            let host: &dyn ling_docs::host::Host = if direct { &rlimit } else { &systemd };
+            let mut env = index::Env::real(host)?;
+            env.sandbox = !direct;
             let mut failed = false;
             for (name, outcome) in index::run(&env, &docs, collection.as_deref(), rebuild)? {
                 writeln!(out, "{name}: {}", outcome.status())?;

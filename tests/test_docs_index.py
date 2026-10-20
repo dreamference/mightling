@@ -7,6 +7,7 @@ here downloads anything or runs strace: fetches are stubbed, traces are text.
 import hashlib
 import io
 import os
+import zipfile
 import tarfile
 
 import pytest
@@ -130,6 +131,9 @@ def test_any_destination_fails_even_on_loopback():
 def test_the_fixture_is_a_readable_pdf_and_a_folder_the_index_takes(tmp_path):
     folder = DocsEgressAudit.make_fixture(str(tmp_path))
     assert folder == os.path.join(str(tmp_path), "Documents")
+    # Every parser the index has is exercised: a page, a Word file (a ZIP), mail with an attachment.
+    assert sorted(os.listdir(folder)) == ["gulls.docx", "installer.deb", "notes.txt", "report.pdf", "seabirds.md", "survey.eml", "terns.html"]
+    assert zipfile.is_zipfile(os.path.join(folder, "gulls.docx"))
     with open(os.path.join(folder, "report.pdf"), "rb") as handle:
         data = handle.read()
     assert data.startswith(b"%PDF-1.4") and b"startxref" in data

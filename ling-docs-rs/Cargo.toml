@@ -42,7 +42,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 # HTML through html5ever, the parser ling-fetch reads pages with (Phase 2, §7.1). ISC (html5ever
 # MIT OR Apache-2.0; selectors and cssparser MPL-2.0).
 scraper = { version = "=0.27.0", default-features = false }
-# The tree scraper parses into, walked without recursion as ling-fetch does. MIT.
+# The tree scraper parses into, walked without recursion as ling-fetch does. ISC.
 ego-tree = "=0.11.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -52,7 +52,8 @@ tokenizers = { version = "0.22", default-features = false, features = ["fancy-re
 toml = "0.8"
 unicode-bidi = "0.3"
 unicode-normalization = "0.1"
-# DOCX and ODT are ZIP archives; only stored and deflated entries are read (Phase 2, §7.1). MIT.
+# DOCX and ODT are ZIP archives; only stored and deflated entries are read (Phase 2, §7.1). MIT;
+# inflating through zlib-rs (Zlib), the writer the tests build archives with through zopfli (Apache-2.0).
 zip = { version = "=9.0.5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
