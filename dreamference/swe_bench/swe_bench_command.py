@@ -1,5 +1,5 @@
 """
-`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}`
+`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}`
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §3).
 
 The parser and the dispatch live here so the CLI controller only registers and calls them.
@@ -9,9 +9,10 @@ import argparse
 import json
 import shutil
 import time
+from pathlib import Path
 from typing import Any, List, Optional
 
-from dreamference.swe_bench import swe_bench_settings
+from dreamference.swe_bench import swe_bench_settings, swe_bench_shards
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
@@ -22,6 +23,8 @@ from dreamference.swe_bench.swe_bench_hooks import HOOK_SETS
 from dreamference.swe_bench.swe_bench_instance_run import REFINE_VERSIONS, TASK_RULES
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
+from dreamference.swe_bench.swe_bench_shard_merge import SweBenchShardMerge
+from dreamference.swe_bench.swe_bench_shards import SweBenchShards
 
 
 class SweBenchCommand:
@@ -57,7 +60,16 @@ class SweBenchCommand:
         run.add_argument("--limit", type=int, default=None, help="Only the first N selected instances, sorted by id")
         run.add_argument("--name", default=None, help="The run's name (letters, digits, ., _ and -); an existing run of that name is resumed")
         run.add_argument("--eval", action="store_true", help="Grade the predictions when the agent phase ends")
-        run.add_argument("--remove-images", action="store_true", help="With --eval: work one repository at a time and remove its images once it is graded")
+        run.add_argument("--remove-images", action="store_true",
+                         help="With --eval: work one repository at a time, in chunks of at most --image-chunk instances, "
+                              "and remove a chunk's images once it is graded")
+        run.add_argument("--image-chunk", type=int, default=None, metavar="N",
+                         help="With --eval --remove-images: the most instances of one repository whose images are on "
+                              "disk at once (default [swe_bench] image_chunk, 25; 0: the whole repository)")
+        run.add_argument("--shard", default=None, metavar="I/K",
+                         help="A new run covers only the I-th of K shards of the selected instances, balanced by "
+                              "difficulty and repository and the same on every machine, so K machines share one list; "
+                              "`swe-bench merge` puts the K runs back together")
         run.add_argument("--code-index", default="off", choices=["off", "universal", "exact"],
                          help="universal: index each instance's repository on the host and give the agent ling-code (default off); "
                               "exact: the same with the SCIP stores alone and no graph")
@@ -127,8 +139,11 @@ class SweBenchCommand:
                               help="Grade the same predictions again with every test file left out of each patch, "
                                    "as a separate grading (eval-drop-test-hunks/); no agent runs")
         evaluate.add_argument("--remove-images", action="store_true",
-                              help="Grade one repository at a time and remove the images this grading pulled once "
-                                   "their repository is graded")
+                              help="Grade one repository at a time, in chunks of at most --image-chunk instances, and "
+                                   "remove the images this grading pulled once their chunk is graded")
+        evaluate.add_argument("--image-chunk", type=int, default=None, metavar="N",
+                              help="With --remove-images: the most instances of one repository graded at once "
+                                   "(default [swe_bench] image_chunk, 25; 0: the whole repository)")
 
         report = commands.add_parser("report", help="Print the resolved rate and what it was measured with")
         report.add_argument("run", nargs="?", default=None, help="The run (default: the latest)")
@@ -138,6 +153,18 @@ class SweBenchCommand:
                                  "the other run's plain grading is the comparison, which may be the same run's")
 
         commands.add_parser("status", help="Runs, their progress, images and disk")
+
+        shard = commands.add_parser("shard", help="Split a task list into K balanced shards, written as lists of their own")
+        shard.add_argument("list", help="The task list, one instance id per line")
+        shard.add_argument("--shards", type=int, required=True, metavar="K", help="How many shards")
+        shard.add_argument("--out-dir", default=None,
+                           help="Where to write <list>-<I>of<K>.txt (default: beside the list)")
+        shard.add_argument("--dataset", default="verified", help="The dataset the ids are from (default verified)")
+
+        merge = commands.add_parser("merge", help="Put the runs of one list's shards together as one run, which report reads like any other")
+        merge.add_argument("name", help="The merged run's name")
+        merge.add_argument("runs", nargs="+", help="The shards' runs (copy a run made on another machine into this "
+                                                   "machine's runs directory first)")
 
         clean = commands.add_parser("clean", help="Remove a run's containers and scratch; with --images, the instance images")
         clean.add_argument("run", nargs="?", default=None, help="The run (default: every run's containers)")
@@ -173,16 +200,21 @@ class SweBenchCommand:
                 refine_version=args.refine_version or "v1", turn_end_compaction=args.turn_end_compaction,
                 hooks=cls._ids(args.hooks), restart_after_compactions=args.restart_after_compactions,
                 apply_patch=args.apply_patch, exec_tool=args.exec_tool,
-                drop_old_outputs=args.drop_old_outputs)
+                drop_old_outputs=args.drop_old_outputs, shard=args.shard, image_chunk=args.image_chunk)
         if command == "eval":
-            return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
+            return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images,
+                                args.image_chunk)
+        if command == "shard":
+            return cls.shard(Path(args.list), args.shards, Path(args.out_dir) if args.out_dir else None, args.dataset)
+        if command == "merge":
+            return SweBenchShardMerge.merge(args.name, args.runs)
         if command == "report":
             return cls.report(args.run, args.against, DROP_TEST_HUNKS if args.drop_test_hunks else None)
         if command == "status":
             return cls.status()
         if command == "clean":
             return cls.clean(args.run, args.images)
-        print("usage: ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}")
+        print("usage: ling-admin swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}")
         return 2
 
     @classmethod
@@ -325,15 +357,18 @@ class SweBenchCommand:
         return SweBenchRunStore(name)
 
     @classmethod
-    def evaluate(cls, name: Optional[str], variant: Optional[str] = None, remove_images: bool = False) -> int:
+    def evaluate(cls, name: Optional[str], variant: Optional[str] = None, remove_images: bool = False,
+                 image_chunk: Optional[int] = None) -> int:
         """
         Grades a run's predictions that are not graded yet.
 
         Args:
             name: The run; None for the latest.
             variant: A grading series other than the plain one (`drop-test-hunks`), or None.
-            remove_images: Grade one repository at a time and remove the images the grading
-                pulled once their repository is graded.
+            remove_images: Grade one repository at a time, in chunks of at most `image_chunk`
+                instances, and remove the images the grading pulled once their chunk is graded.
+            image_chunk: The most instances of one repository graded at once; None takes
+                `[swe_bench] image_chunk`, 0 the whole repository.
 
         Returns:
             int: 0 when the harness ran.
@@ -349,14 +384,18 @@ class SweBenchCommand:
             print(f"⚠️  Not graded: {available / GIB:.0f} GiB of memory is available and {settings.eval_workers} "
                   f"workers of {settings.eval_memory} plus the 8 GiB reserve need {needed / GIB:.0f}.")
             return 1
+        if image_chunk is not None and image_chunk < 0:
+            print(f"❌ --image-chunk {image_chunk}: a number of instances, 0 for a whole repository.")
+            return 1
         if remove_images:
-            # One repository at a time, as `run --eval --remove-images` does: an image this grading
-            # pulled goes once its repository is graded, so the disk holds one repository's.
+            # One repository at a time, in chunks, as `run --eval --remove-images` does: an image this
+            # grading pulled goes once its chunk is graded, so the disk holds one chunk's.
             manifest = store.manifest() or {}
             rows = {row["instance_id"]: row for row in SweBenchHarness.rows(manifest.get("dataset", "verified"))}
             ids = [prediction["instance_id"] for prediction in store.predictions() if prediction["instance_id"] in rows]
+            chunk = settings.image_chunk if image_chunk is None else image_chunk
             results = {}
-            for group in SweBenchRunner.by_repository(ids, rows).values():
+            for group in SweBenchRunner.image_chunks(ids, rows, chunk):
                 images = [manifest["images"][i]["image"] for i in group if i in manifest.get("images", {})]
                 absent = [image for image in images if SweBenchDocker.image_digest(image) is None]
                 results = SweBenchEvaluator.grade(store, settings, only=group, variant=variant)
@@ -372,6 +411,40 @@ class SweBenchCommand:
             return 0
         print(f"✅ {store.name}: {len(results)} graded, {resolved} resolved. "
               f"`ling-admin swe-bench report {store.name}` prints the report.")
+        return 0
+
+    @classmethod
+    def shard(cls, source: Path, count: int, out_dir: Optional[Path] = None, dataset: str = "verified") -> int:
+        """
+        Writes a task list's shards as lists of their own (`SweBenchShards.write`): the same tasks
+        `run --subset <list> --shard I/K` covers on each machine.
+
+        Args:
+            source: The task list.
+            count: How many shards.
+            out_dir: Where to write them; None for the list's own folder.
+            dataset: The dataset the ids are from, for their repositories.
+
+        Returns:
+            int: 0 when the shards were written.
+        """
+        if SweBenchShards.parse(f"1/{count}") is None:
+            print(f"❌ --shards {count}: from 1 to {swe_bench_shards.MAX_SHARDS}.")
+            return 1
+        try:
+            ids = [line.strip() for line in source.read_text().splitlines() if line.strip() and not line.startswith("#")]
+        except OSError as error:
+            print(f"❌ {source}: {error}")
+            return 1
+        rows = {row["instance_id"]: row for row in SweBenchHarness.rows(dataset)}
+        unknown = sorted(set(ids) - set(rows))
+        if not rows or unknown:
+            print(f"❌ Not in {dataset}: {', '.join(unknown[:5]) or 'the dataset is not downloaded (swe-bench setup)'}.")
+            return 1
+        repos = {instance_id: str(rows[instance_id].get("repo", "")) for instance_id in ids}
+        for path in SweBenchShards.write(source, ids, repos, count, out_dir or source.parent):
+            shard = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]
+            print(f"✅ {path}: {len(shard)} tasks, {SweBenchShards.mix(shard, repos)}")
         return 0
 
     @classmethod

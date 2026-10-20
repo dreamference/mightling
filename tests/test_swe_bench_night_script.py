@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "scripts", "swe_bench_night1.sh")
 
 
-def night(tmp_path, arms):
+def night(tmp_path, arms, **extra):
     """Runs the night's `run` step with `arms`; returns (exit status, recorded admin calls, D)."""
     calls = tmp_path / "calls.txt"
     fake = tmp_path / "python"
@@ -27,7 +27,7 @@ def night(tmp_path, arms):
     folder = tmp_path / "night4"
     folder.mkdir()
     env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder),
-           "NIGHT": "4", "PREFIX": "n4", "ARMS": arms, "REFINE": "0"}
+           "NIGHT": "4", "PREFIX": "n4", "ARMS": arms, "REFINE": "0", **extra}
     result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
     recorded = calls.read_text().splitlines() if calls.exists() else []
     return result.returncode, recorded, folder
@@ -45,8 +45,8 @@ def test_the_restart_arm_reaches_only_the_candidates_round(tmp_path):
     assert "--restart-after-compactions" not in record and "--task-rules" not in record
     assert "--name n4-restart-2 " in candidate and candidate.count("--restart-after-compactions 2") == 1
     assert "--task-rules" not in candidate
-    assert "swe-bench eval n4-default --drop-test-hunks --remove-images" in recorded
-    assert "swe-bench eval n4-restart-2 --drop-test-hunks --remove-images" in recorded
+    assert "swe-bench eval n4-default --drop-test-hunks --remove-images --image-chunk 25" in recorded
+    assert "swe-bench eval n4-restart-2 --drop-test-hunks --remove-images --image-chunk 25" in recorded
     assert "swe-bench report n4-restart-2 --against n4-default" in recorded
     assert (folder / "restart-2-against-default.txt").exists()
 
@@ -182,13 +182,14 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch
     assert not (tmp_path / "night6").exists()
 
 
-def start(tmp_path, arms, smoke_fails=None, task_timeout=""):
+def start(tmp_path, arms, smoke_fails=None, task_timeout="", tasks=("acme__widget-1", "acme__widget-2"),
+          free_gb=None, **extra):
     """
     Runs `start` with stand-ins for everything it reaches: no unit is active (systemctl), git
     succeeds and changes nothing, systemd-run records its arguments, and the venv's Python names a
     fake `ling` and a fake install folder, records every `ling-admin` call and every smoke verdict,
-    and fails the verdict of the arm named in `smoke_fails`. Returns (result, admin calls, verdicts,
-    systemd-run calls, D).
+    and fails the verdict of the arm named in `smoke_fails`. With `free_gb`, `df` says that much is
+    free. Returns (result, admin calls, verdicts, systemd-run calls, D).
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -200,7 +201,10 @@ def start(tmp_path, arms, smoke_fails=None, task_timeout=""):
         (install / "bin" / tool).write_text("#!/bin/bash\n")
         (install / "bin" / tool).chmod(0o755)
     units = tmp_path / "systemd-run.txt"
-    for name, body in (("systemctl", "exit 1"), ("git", "exit 0"), ("systemd-run", f'echo "$*" >> "{units}"')):
+    tools = [("systemctl", "exit 1"), ("git", "exit 0"), ("systemd-run", f'echo "$*" >> "{units}"')]
+    if free_gb is not None:
+        tools.append(("df", f'echo "Avail"; echo " {free_gb}G"'))
+    for name, body in tools:
         tool = bin_dir / name
         tool.write_text(f"#!/bin/bash\n{body}\n")
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
@@ -218,12 +222,12 @@ esac
 """)
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
-    task_list.write_text("acme__widget-1\nacme__widget-2\n")
+    task_list.write_text("".join(f"{task}\n" for task in tasks))
     folder = tmp_path / "night7"
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
            "D": str(folder), "NIGHT": "7", "PREFIX": "n7", "UNIT": "ling-swe-night7-test",
            "LIVE_UNIT": "ling-swe-night6-test", "ARMS": arms, "LIST": str(task_list), "RESERVE_GB": "0",
-           "TASK_TIMEOUT": task_timeout}
+           "TASK_TIMEOUT": task_timeout, **extra}
     result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
     read = lambda path: path.read_text().splitlines() if path.exists() else []  # noqa: E731
     return result, read(calls), read(verdicts), read(units), folder
@@ -362,3 +366,45 @@ def test_without_best_of_the_night_is_the_two_arm_night(tmp_path):
     assert status == 0
     assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n11-default", "n11-apply-patch-function"]
     assert not any("--seed 20261013" in line for line in recorded)
+
+
+def test_every_round_and_regrade_takes_the_image_chunk_and_a_round_its_shard(tmp_path):
+    status, recorded, _ = night(tmp_path, "default tests-v2")
+    assert status == 0
+    assert all("--eval --remove-images --image-chunk 25 " in r and "--shard" not in r for r in runs(recorded))
+    sharded = tmp_path / "sharded"
+    sharded.mkdir()
+    status, recorded, _ = night(sharded, "default tests-v2", IMAGE_CHUNK="10", SHARD="2/3")
+    assert status == 0
+    assert all("--image-chunk 10 --shard 2/3 " in r for r in runs(recorded)), runs(recorded)
+    assert "swe-bench eval n4-tests-v2 --drop-test-hunks --remove-images --image-chunk 10" in recorded
+
+
+def test_start_needs_disk_for_one_chunk_of_the_largest_repository(tmp_path):
+    tasks = [f"django__django-{n}" for n in range(86)] + ["sympy__sympy-1"]
+    # 25 of django's 86 images at 3 GB, no reserve: 75 GB. 70 free is too little, 80 enough.
+    result, recorded, _, units, folder = start(tmp_path, "default tests-v2", tasks=tasks, free_gb=70)
+    assert result.returncode == 1 and runs(recorded) == [] and units == [] and not folder.exists()
+    assert "Tasks: 87; largest repository: 86, at most 25 of its images at once; disk needed about 75G, free 70G." in result.stdout
+    (tmp_path / "enough").mkdir()
+    result, recorded, _, units, folder = start(tmp_path / "enough", "default tests-v2", tasks=tasks, free_gb=80)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "IMAGE_CHUNK=25" in units[0] and "SHARD=" in units[0]
+    # The whole repository at once (IMAGE_CHUNK=0) needs 258 GB.
+    (tmp_path / "whole").mkdir()
+    result, _, _, _, _ = start(tmp_path / "whole", "default tests-v2", tasks=tasks, free_gb=200, IMAGE_CHUNK="0")
+    assert result.returncode == 1 and "at most 86 of its images at once; disk needed about 258G" in result.stdout
+
+
+def test_start_passes_the_shard_to_the_unit_but_never_to_a_smoke(tmp_path):
+    result, recorded, _, units, _ = start(tmp_path, "default tests-v2", free_gb=500, SHARD="1/3")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(runs(recorded)) == 2 and not any("--shard" in r for r in runs(recorded))
+    assert "SHARD=1/3" in units[0] and "(this machine: shard 1/3)" in result.stdout
+
+
+@pytest.mark.parametrize("extra", [{"SHARD": "3"}, {"SHARD": "0/3"}, {"SHARD": "4/3"}, {"SHARD": "a/b"},
+                                   {"IMAGE_CHUNK": "x"}])
+def test_start_refuses_a_malformed_shard_or_chunk_before_anything_runs(tmp_path, extra):
+    result, recorded, _, units, folder = start(tmp_path, "default tests-v2", free_gb=500, **extra)
+    assert result.returncode == 2 and runs(recorded) == [] and units == [] and not folder.exists()
