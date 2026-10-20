@@ -108,6 +108,18 @@
       "default": false,
       "type": "boolean"
     },
+    "quickEntry": {
+      "default": false,
+      "type": "boolean"
+    },
+    "quickEntryShortcut": {
+      "default": "Ctrl+Alt+Space",
+      "type": "string"
+    },
+    "keepInTray": {
+      "default": false,
+      "type": "boolean"
+    },
     "petSize": {
       "default": "medium",
       "enum": ["small", "medium", "large"]

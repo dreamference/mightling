@@ -51,6 +51,12 @@ export interface Prefs {
   previewDevTools: boolean;
   /** The pet (Settings › Pets, Super+Alt+P): shown or not, its size, and a picture of the user's own instead of Mightling's mark. */
   petShown: boolean;
+  /** Quick Entry (DESKTOP_PARITY_CLAUDE §4.2): a question from anywhere through a system-wide shortcut; off by default. */
+  quickEntry: boolean;
+  /** Its shortcut, in the keymap's spelling (`Ctrl+Alt+Space`). */
+  quickEntryShortcut: string;
+  /** Closing the window hides it, the app staying in the tray (so Quick Entry and running turns go on); off by default. */
+  keepInTray: boolean;
   petSize: "small" | "medium" | "large";
   petImage: string | null;
   /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */
