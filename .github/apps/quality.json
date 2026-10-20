@@ -1,0 +1,14 @@
+{
+  "name": "dreamference-quality",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Quality team's bot: commits, pull requests and reviews for the test suite and its guards, the quality ratchets and the team-review gate. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write",
+    "statuses": "write"
+  },
+  "default_events": []
+}
