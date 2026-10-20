@@ -49,3 +49,23 @@ Same model; several other jobs on the server (median `off` run 152.8 s). Spec §
 | `results/drift7.jsonl` | `off`, `ultra_v5t+R` | v5's text with v4's reminder, three sessions each (reps 8–10) |
 
 `levels/lite.txt`, `full.txt` and `ultra.txt` are the shipping texts (`lite_v3`, `full_v4`, `ultra_v4`), with their reminders in `*.reminder.txt`.
+
+## Default study of 2026-10-20
+
+Which level each surface should start at (spec §11). `default_study.py` sets the level the way `ling` ships it (`DREAMFERENCE_MIGHTLING_CAVE_MODE`), runs Ask items with the `ask` prompt in an empty folder and three terminal tasks from `tasks/`, one run per cell; `default_study_judge.py` scores each answer alone with the served model and ranks each item's answers once; `default_study_analyze.py` prints the per-level table.
+
+```bash
+../../.venv/bin/python default_study.py --condition no-network --out results/new-nonet.jsonl
+../../.venv/bin/python default_study_judge.py results/new-nonet.jsonl
+../../.venv/bin/python default_study_analyze.py results/new-nonet.jsonl --judge results/new-nonet-judge.jsonl
+```
+
+| File | What |
+|---|---|
+| `results/default-study-ask-knowledge-nonet.jsonl` | 12 Ask items × 4 levels, `/airgapped on` (search was down), with `-judge` |
+| `results/default-study-ask-lookup-search.jsonl` | 3 lookup items × 4 levels with search, with `-judge` |
+| `results/default-study-ask-lookup-nonet.jsonl` | the same 3 without network, with `-judge` |
+| `results/default-study-terminal.jsonl` | `repoq`, `debug`, `howto` × 4 levels, default prompt, with `-judge` |
+| `results/default-study-ask-knowledge-search-partial.jsonl` | 9 knowledge cells run with search before the engines refused requests; not compared |
+
+Search engines behind SearXNG rate-limit after a few dozen searches; run the search sets in small batches.

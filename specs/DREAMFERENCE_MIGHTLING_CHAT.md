@@ -32,6 +32,7 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 | `/threads` | The last 10 threads started from this chat, numbered, with their names. |
 | `/use <n>` | Continues thread `n` from that list. |
 | `/status` | Model server, air-gap level, the current thread, and whether a turn is running. |
+| `/cavemode [level]` | How terse this thread's answers are, as on Signal (CAVE_MODE §11.7): the level in force, a level for this thread, or `default <level|built-in>` for new ones. |
 | `/help` | This table. |
 | `/pair <code>` | Telegram only: pairs this Telegram account (§4.1). |
 
@@ -253,6 +254,9 @@ ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 | `approval_timeout_s` | 600 | when an unanswered approval is declined |
 | `telegram_draft_interval_ms` | 1000 | minimum gap between draft updates |
 | `max_threads_listed` | 10 | `/threads` |
+| `answer_seconds` | 180 | an answer's time, then "answer now" (§16.3) |
+| `tool_calls` | 25 | an answer's tool calls, the same |
+| `command_seconds` | 60 | one command's time, the same |
 | `new_thread_after_hours` | 4 | a message after this long a silence starts a new thread; 0: never (§16.2; Signal reads it too, through `ling web`) |
 
 ## 11. Phase 0, measured before relying on it
@@ -418,4 +422,10 @@ The owner's Signal thread of 2026-10-20 (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md 
 ### 16.2 A new thread after a long silence (branch `chat/fresh-thread`)
 
 A message after `new_thread_after_hours` (default 4) without the conversation moving (the user's last message or the last answer, `last` per chat in `threads.json`) starts a new thread, with one line: "New thread (the last message was … ago); /use 2 to go back." Never while a turn runs or messages wait for one; `/use` counts as moving. The `[chat]` settings are read again every minute (`ling_web_server::chat_settings`, shared with `ling web`'s `/api/chat/settings`, which the Signal bridge asks).
+
+### 16.3 An answer's bounds, the phone prompt, and the answer the phone gets (branch `chat/bounds`)
+
+- **Bounds and the final turn:** as the Signal bridge (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.3), the hub watches each turn (`limits.rs`, from `item/started` and `item/completed`) every 250 ms: past a bound it steers "answer now", 30 s later it interrupts and starts a final turn without tools, and a final turn past 90 s ends with what it wrote and one line.
+- **The phone prompt:** threads start with `prompt: "chat"` (falling back to `ask` on a `ling web` that refuses it), in a scratch folder named `ask/chat-<hex>`.
+- **The answer:** the turn's final message, or its last; a short last word after a longer earlier message ("The answer above stands.") brings that message with it, because the phone shows only the answer (2 of 56 Ask turns on 2026-10-20 ended so).
 

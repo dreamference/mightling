@@ -1060,6 +1060,14 @@ def test_the_manifest_records_what_was_measured(bench):
         SweBenchRunStore("r1").write_manifest({})
 
 
+def test_the_cave_level_is_pinned_not_the_products_default(bench, monkeypatch):
+    # Cave-mode spec §11.5: the nights keep `ultra` whatever the product's default or the user's
+    # variable says, so a change of default cannot move their baseline.
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_CAVE_MODE", "off")
+    run(bench, instances=["acme__widget-1"])
+    assert SweBenchRunStore("r1").manifest()["cave_mode"] == "ultra"
+
+
 def test_the_report_counts_add_up_and_says_what_the_number_is_not(bench):
     bench["docker"].modes = {"acme__widget-2": "stall", "beta__gadget-7": "error"}
     run(bench)

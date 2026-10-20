@@ -58,6 +58,7 @@ describe("the composer's menus", () => {
     expect(matchCommands("f", { view: "work", hasThread: true }).map((c) => c.name)[0]).toBe("fork");
     expect(parseSlash("/rename  Retry fix ")).toMatchObject({ command: { name: "rename" }, args: "Retry fix" });
     expect(parseSlash("/airgapped default on")).toMatchObject({ command: { name: "airgapped" }, args: "default on" });
+    expect(parseSlash("/cavemode default full")).toMatchObject({ command: { name: "cavemode" }, args: "default full" });
     expect(parseSlash("/nonesuch")).toBeNull();
     expect(parseSlash("an ordinary /message")).toBeNull();
   });

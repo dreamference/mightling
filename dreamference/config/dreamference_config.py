@@ -47,8 +47,10 @@ DEFAULT_MIGHTLING_GMAIL: Final[bool] = True
 DEFAULT_MIGHTLING_COMPACTION_LEDGER: Final[bool] = True
 # How tersely the Mightling agent answers (`/cavemode`, specs/DREAMFERENCE_MIGHTLING_CAVE_MODE.md). Read by
 # the Rust launcher too (DREAMFERENCE_MIGHTLING_CAVE_MODE, then `mightling_cave_mode` in the TOML file);
-# a test keeps this default equal to DEFAULT_MIGHTLING_CAVE_MODE in ling-rs/src/cave.rs.
-DEFAULT_MIGHTLING_CAVE_MODE: Final[str] = "ultra"
+# a test keeps this default equal to DEFAULT_MIGHTLING_CAVE_MODE in ling-rs/src/cave.rs. `lite` since
+# 2026-10-20 (spec §11.5); the TUI's own default (`full`, TUI_DEFAULT in cave.rs) has no Python side,
+# and SWE-bench pins its level itself (SWE_BENCH_CAVE_MODE).
+DEFAULT_MIGHTLING_CAVE_MODE: Final[str] = "lite"
 MIGHTLING_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
 # How much of the internet a Mightling session may use (`/airgapped`,
 # specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md): everything or nothing. The Rust

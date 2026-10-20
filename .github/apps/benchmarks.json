@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-benchmarks",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Benchmarks team's bot: commits, pull requests and reviews for the SWE-bench harness and the measurement scripts and results. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

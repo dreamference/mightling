@@ -96,10 +96,12 @@
   "namedPrompts": [
     "default",
     "ask",
-    "high-swe"
+    "high-swe",
+    "chat"
   ],
   "scratchPrompts": [
-    "ask"
+    "ask",
+    "chat"
   ],
   "scratchFields": [
     "cwd",

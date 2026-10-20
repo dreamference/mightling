@@ -459,12 +459,90 @@ pub fn refusal(
         .map(|root| ("writable_roots", root.display().to_string(), SEAL_ROOT_ALLOWED.to_string()))
 }
 
+/// The host's control sockets that a sandboxed command must not reach, under `/`: talking to
+/// one is acting on the host outside the sandbox. A command ran `docker restart` on the host
+/// from `ling exec`'s workspace-write sandbox (2026-10-20): the user is in the `docker` group,
+/// and a read-only bind mount does not stop a `connect()`. Docker and containerd (root and
+/// rootless), Podman, the D-Bus system and session buses (systemd's API, which starts units),
+/// the systemd user manager's own sockets, snapd, and Mightling's runtime folder (`ling web`'s
+/// app-server socket, which starts threads with any permissions). Whatever exists and this user
+/// can reach is returned, canonical; Codex's sandbox helper denies each one (patch 0019), so
+/// bubblewrap masks it. The air-gap seals' folder is not one of them: commands read the seals.
+pub const HOST_SOCKETS: [&str; 7] = [
+    "run/docker.sock",
+    "run/containerd/containerd.sock",
+    "run/podman",
+    "run/dbus/system_bus_socket",
+    "var/run/dbus/system_bus_socket",
+    "run/snapd.socket",
+    "run/snapd-snap.socket",
+];
+
+/// The same, under the user's runtime folder (`$XDG_RUNTIME_DIR`, else `/run/user/<uid>`).
+pub const HOST_SOCKETS_IN_RUNTIME_DIR: [&str; 7] =
+    ["bus", "systemd", "docker.sock", "docker", "podman", "containerd", "mightling"];
+
+/// [`HOST_SOCKETS`] and [`HOST_SOCKETS_IN_RUNTIME_DIR`] that exist here.
+#[cfg(not(windows))]
+pub fn host_sockets() -> Vec<PathBuf> {
+    host_sockets_in(Path::new("/"), runtime_dir().as_deref())
+}
+
+/// [`host_sockets`] under another root and runtime folder, for tests.
+pub fn host_sockets_in(root: &Path, runtime: Option<&Path>) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = HOST_SOCKETS
+        .iter()
+        .map(|path| root.join(path))
+        .chain(runtime.into_iter().flat_map(|dir| HOST_SOCKETS_IN_RUNTIME_DIR.iter().map(move |name| dir.join(name))))
+        // A folder this user cannot open (root's /run/containerd) holds nothing it can reach.
+        .filter(|path| path.exists() && (!path.is_dir() || std::fs::read_dir(path).is_ok()))
+        .filter_map(|path| std::fs::canonicalize(path).ok())
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn config(path: &str, text: &str) -> (PathBuf, String) {
         (PathBuf::from(path), text.to_string())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_host_control_sockets_that_exist_are_found_canonical() {
+        let root = std::env::temp_dir().join(format!("ling-airgapped-sockets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let runtime = root.join("run/user/1000");
+        for dir in ["run/dbus", "run/user/1000/systemd", "run/user/1000/ling-airgapped", "var"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        // A listening socket stands in for docker's; files for the rest.
+        let docker = std::os::unix::net::UnixListener::bind(root.join("run/docker.sock")).unwrap();
+        for file in ["run/dbus/system_bus_socket", "run/user/1000/bus", "run/user/1000/systemd/private"] {
+            std::fs::write(root.join(file), "").unwrap();
+        }
+        // /var/run is a link to /run on most systems: one entry, at its canonical path.
+        std::os::unix::fs::symlink(root.join("run"), root.join("var/run")).unwrap();
+        let found = host_sockets_in(&root, Some(&runtime));
+        let canonical = |path: &str| std::fs::canonicalize(root.join(path)).unwrap();
+        assert_eq!(
+            found,
+            vec![
+                canonical("run/dbus/system_bus_socket"),
+                canonical("run/docker.sock"),
+                canonical("run/user/1000/bus"),
+                canonical("run/user/1000/systemd"),
+            ]
+        );
+        // The seals' folder stays visible: commands read the seals.
+        assert!(!found.iter().any(|path| path.ends_with("ling-airgapped")));
+        assert!(host_sockets_in(&root.join("none"), None).is_empty());
+        drop(docker);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

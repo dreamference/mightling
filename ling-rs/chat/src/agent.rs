@@ -36,6 +36,9 @@ pub enum AgentCommand {
     Respond { id: Value, result: Value },
     /// An attachment into a thread's Ask folder (`/api/upload`, with the link's cookie).
     Upload { thread: String, name: String, image: bool, bytes: Vec<u8>, reply: oneshot::Sender<Result<Saved, String>> },
+    /// `/cavemode <text>` for a thread (None before the first question), through `ling web`'s
+    /// `/api/cavemode`: what `ling cavemode` printed.
+    Cavemode { thread: Option<String>, text: String, reply: oneshot::Sender<Result<String, String>> },
 }
 
 /// The hub's side of the connection.
@@ -63,6 +66,15 @@ impl AgentHandle {
     /// Answers one of the server's requests (an approval).
     pub fn respond(&self, id: Value, result: Value) {
         let _ = self.tx.send(AgentCommand::Respond { id, result });
+    }
+
+    /// `/cavemode <text>` for `thread`: the lines to show, or why it was refused.
+    pub async fn cavemode(&self, thread: Option<String>, text: String) -> Result<String, String> {
+        let (reply, answer) = oneshot::channel();
+        self.tx
+            .send(AgentCommand::Cavemode { thread, text, reply })
+            .map_err(|_| "the bridge to ling web has stopped".to_string())?;
+        answer.await.map_err(|_| "the connection to ling web was lost".to_string())?
     }
 
     /// Uploads an attachment into `thread`'s Ask folder; `ling web` reads an image's text.
@@ -283,6 +295,7 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                             Some(AgentCommand::Request { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                             Some(AgentCommand::Respond { .. }) => {}
                             Some(AgentCommand::Upload { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
+                            Some(AgentCommand::Cavemode { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                         },
                     }
                 }
@@ -305,6 +318,12 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                         if let Err(err) = session.send_call(json!({ "type": "work/send", "message": message })).await {
                             eprintln!("ling chat: could not answer the agent: {err}");
                         }
+                    }
+                    Some(AgentCommand::Cavemode { thread, text, reply }) => {
+                        let (port, cookie) = (session.port, session.cookie.clone());
+                        tokio::spawn(async move {
+                            let _ = reply.send(ling_web_server::ask_client::cavemode(port, &cookie, thread.as_deref(), &text).await);
+                        });
                     }
                     Some(AgentCommand::Upload { thread, name, image, bytes, reply }) => {
                         // Over HTTP beside the socket, so a large file or a slow read holds nothing up.
