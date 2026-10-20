@@ -46,7 +46,7 @@ the end. Nothing is written anywhere else; the runs are only read.
 Runbook (about an hour of model time; NOT while a run needs the server)
 -----------------------------------------------------------------------
 
-The test runs on this machine (the runs are here) against second-puffin's
+The test runs on this machine (the runs are here) against node-b's
 production server, at a time when nothing else needs that server.
 
 1. Dry run here, no server contacted::
@@ -57,20 +57,20 @@ production server, at a time when nothing else needs that server.
    does to it, and the number of judge calls. For nights 2-4: 13 tasks, the
    filter decides 3, the judge gets 10 at 26 calls at most.
 2. Check the server is free. No SWE-bench run, Night Shift task or ling-engine
-   test may be using second-puffin's model server: a run's model gate refuses
+   test may be using node-b's model server: a run's model gate refuses
    outside requests (the script then stops with the refusal), and a shared
-   server would slow the run. ``ssh second-puffin ling-admin night status``
-   and ``ssh second-puffin ling-admin swe-bench status``; ``ling-admin night
+   server would slow the run. ``ssh node-b ling-admin night status``
+   and ``ssh node-b ling-admin swe-bench status``; ``ling-admin night
    pause`` only if the owner agreed to share it.
 3. Name the server by its node name, never an address (the node's mDNS name;
    ``ling node list`` shows it), and check it answers::
 
-       ling-fetch http://second-puffin.local:8000/v1/models
+       ling-fetch http://node-b.local:8000/v1/models
 
 4. Run::
 
        .venv/bin/python scripts/swe_bench_chooser_test.py \\
-           --server http://second-puffin.local:8000 \\
+           --server http://node-b.local:8000 \\
            --runs n2-default,n3-default,n4-default --seed 20261013 \\
            --out ~/swe-bench-chooser-2026-10
 
@@ -487,7 +487,7 @@ def run_test(args: argparse.Namespace, client_factory: Callable[[str, float], Cl
 def parser() -> argparse.ArgumentParser:
     """The command line."""
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--server", help="the model server's URL, by node name (http://second-puffin.local:8000)")
+    p.add_argument("--server", help="the model server's URL, by node name (http://node-b.local:8000)")
     p.add_argument("--runs", default=DEFAULT_RUNS, help=f"comma-separated run names (default {DEFAULT_RUNS})")
     p.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS_DIR, help="where the runs are (read only)")
     p.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="the local dataset snapshot")

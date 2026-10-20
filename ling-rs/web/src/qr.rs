@@ -108,30 +108,30 @@ mod tests {
 
     #[test]
     fn a_link_names_the_pairing_page_and_the_code() {
-        assert_eq!(pairing_link("192.168.0.105", 3100, "01234567"), "http://192.168.0.105:3100/pair?code=01234567");
+        assert_eq!(pairing_link("192.168.50.105", 3100, "01234567"), "http://192.168.50.105:3100/pair?code=01234567");
         assert_eq!(pairing_link("fe80::1", 3100, "01234567"), "http://[fe80::1]:3100/pair?code=01234567");
     }
 
     #[test]
     fn lan_addresses_come_first_and_container_bridges_late() {
         let names: Vec<String> =
-            ["spark.local", "172.17.0.1", "100.101.102.103", "192.168.0.105", "spark"].iter().map(|n| n.to_string()).collect();
-        assert_eq!(ordered(&names), ["192.168.0.105", "100.101.102.103", "172.17.0.1", "spark.local", "spark"]);
+            ["spark.local", "172.17.0.1", "100.101.102.103", "192.168.50.105", "spark"].iter().map(|n| n.to_string()).collect();
+        assert_eq!(ordered(&names), ["192.168.50.105", "100.101.102.103", "172.17.0.1", "spark.local", "spark"]);
         assert!(is_tailscale("100.101.102.103") && !is_tailscale("100.1.2.3"));
     }
 
     #[test]
     fn the_svg_is_a_whole_code_on_white() {
-        let image = svg("http://192.168.0.105:3100/pair?code=01234567").unwrap();
+        let image = svg("http://192.168.50.105:3100/pair?code=01234567").unwrap();
         assert!(image.starts_with("<svg") && image.ends_with("</svg>"));
         assert!(image.contains("fill=\"#ffffff\"") && image.contains("M4,4h1v1h-1z"), "the finder pattern starts inside the quiet zone");
         // The same text, the same image: nothing random goes in.
-        assert_eq!(image, svg("http://192.168.0.105:3100/pair?code=01234567").unwrap());
+        assert_eq!(image, svg("http://192.168.50.105:3100/pair?code=01234567").unwrap());
     }
 
     #[test]
     fn the_terminal_code_is_square_in_modules() {
-        let text = "http://192.168.0.105:3100/pair?code=01234567";
+        let text = "http://192.168.50.105:3100/pair?code=01234567";
         let qr = encode(text).unwrap();
         let drawn = terminal(text).unwrap();
         let lines: Vec<&str> = drawn.lines().collect();

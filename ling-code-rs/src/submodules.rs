@@ -633,9 +633,9 @@ mod tests {
     #[test]
     fn our_domains_leave_out_public_mail_and_web_flow() {
         let authors = Authors::from_addresses(
-            ["Owner@Dgxcoder.com", "friend@gmail.com", "noreply@github.com", "1+bob@users.noreply.github.com"].map(String::from),
+            ["Owner@Kestrel.example", "friend@gmail.com", "noreply@github.com", "1+bob@users.noreply.github.com"].map(String::from),
         );
-        assert!(authors.wrote("colleague@dgxcoder.com"), "an organisation domain counts");
+        assert!(authors.wrote("colleague@kestrel.example"), "an organisation domain counts");
         assert!(authors.wrote("friend@gmail.com"), "an address counts as itself");
         assert!(!authors.wrote("stranger@gmail.com"), "a public provider's domain does not");
         assert!(authors.wrote("1+bob@users.noreply.github.com") && !authors.wrote("2+eve@users.noreply.github.com"));

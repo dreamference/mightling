@@ -39,7 +39,7 @@
    - relays approvals as yes/no questions.
 
    Voice notes (through the speech sidecar), files *out* and Work threads on repositories are Phase 2.
-10. **Where it runs:** gx10-9428, the node with `ling web` and the model (the user's decision). Approvals are answered from the phone with YES or NO, as designed (§8).
+10. **Where it runs:** gx10-1a2b, the node with `ling web` and the model (the user's decision). Approvals are answered from the phone with YES or NO, as designed (§8).
 
 ---
 
@@ -418,7 +418,7 @@ Signal shows plain text with style ranges: bold, italic, strikethrough, monospac
 
 ## 12. Phase 0: measurements before building on them
 
-Each item is answered on this machine (gx10-9428), not on second-puffin (that machine is for ling-engine alone):
+Each item is answered on this machine (gx10-1a2b), not on node-b (that machine is for ling-engine alone):
 
 1. **Does signal-cli run on arm64:** JRE 25 from apt, with the exquo `libsignal_jni.so` for the bundled libsignal version? Verified by `signal-cli --version` and by `signal-cli link` reaching the provisioning step (it prints a `sgnl://` link; nothing is linked).
 2. **The JVM's memory:** resident memory idle and while receiving, which sets `MemoryMax`.
@@ -430,7 +430,7 @@ Each item is answered on this machine (gx10-9428), not on second-puffin (that ma
 
 ---
 
-### 12.1 Phase 0 results (2026-10-08, gx10-9428)
+### 12.1 Phase 0 results (2026-10-08, gx10-1a2b)
 
 - **Item 1, arm64: works.**
   - **What was run:** signal-cli 0.14.9 with Java 25.0.4 (Temurin, in a scratch folder; Ubuntu's `openjdk-25-jre-headless` 25.0.4 was the package setup installed then; since §17 setup fetches the pinned Temurin JRE instead) and exquo's `libsignal_jni.so` 0.103.0 for aarch64, the version the release bundles as `libsignal-client-0.103.0.jar`.
@@ -498,7 +498,7 @@ All without Signal, without a network, without `ling web` running, and without s
 
 1. **Number:** no new number. The bridge is linked to the owner's own account and talks in Note to Self (§4.2).
 2. **Approvals:** YES or NO from the phone, as designed (§8).
-3. **Machine:** gx10-9428.
+3. **Machine:** gx10-1a2b.
 4. **Disappearing messages:** one week, the default. In Note to Self that timer also covers the owner's own notes, so setup asks first (§4.2).
 
 ---
@@ -695,7 +695,7 @@ The plan's text says so: "Every download is checked before it is unpacked; signa
 
 **When `SIGNAL_CLI_VERSION` moves**, the `.asc` comes from the new release. Setup still checks it against the same pinned key, so a release signed with another key fails closed until the pin is changed here, on the same evidence as above.
 
-### 17.2 First live test against a real account (2026-10-12, gx10-9428)
+### 17.2 First live test against a real account (2026-10-12, gx10-1a2b)
 
 **What was run.** The owner tested the bridge against their own Signal account on this machine, about 21:00 on 2026-10-12, with Mightling 1.6.0 installed from the published release (`ling update`, replacing a source build):
 1. `ling signal remove`, clearing the attempt of 2026-10-11;
@@ -799,7 +799,7 @@ A failed setup leaves no half instance behind: the instance's unit, state and ac
 - **Refusals:** setup without `--name` beside `default`; a fifth instance; a duplicate ACI (from the fixture output of §4.2, including the stderr line signal-cli writes after a link); `remove` or `trust` by a Linux user other than the one served.
 - **Units:** the template unit's text, with `%i` in `User=`, `StateDirectory=` and `RuntimeDirectory=`, and §3's hardening lines unchanged.
 - **The audit:** two enabled instances give two declared exceptions; a disabled one gives none.
-- **Live, before it is called done:** two linked accounts (or one linked and one dedicated) on gx10-9428, each answering only in its own Note to Self; the memory of two JVMs read beside a resident model server; `remove` of one leaving the other running.
+- **Live, before it is called done:** two linked accounts (or one linked and one dedicated) on gx10-1a2b, each answering only in its own Note to Self; the memory of two JVMs read beside a resident model server; `remove` of one leaving the other running.
 
 ### 18.7 For the user to confirm
 
@@ -833,7 +833,7 @@ The owner decided on 2026-10-12 to build this proposal once the single-account l
 
 **Fixes after the first live checks (2026-10-13), none needing a phone:** `start`, `stop`, `trust` and `remove` (and `remove --dry-run`) refuse a bridge not on the node before any sudo; `setup --name N` on a node with no bridge is refused (decision 5); a second `setup` leaves an identical bridge binary alone. `ling-signal` now has 103 unit tests; the three end-to-end tests are unchanged.
 
-**Not done:** the live test of §18.6 (two accounts on gx10-9428, the memory of two JVMs beside the model server, `remove` of one leaving the other running). Nothing here was run against the live bridge.
+**Not done:** the live test of §18.6 (two accounts on gx10-1a2b, the memory of two JVMs beside the model server, `remove` of one leaving the other running). Nothing here was run against the live bridge.
 
 ## 19. After the first mornings of real use (2026-10-20)
 

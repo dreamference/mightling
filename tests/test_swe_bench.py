@@ -1601,7 +1601,7 @@ class BusyHere(QuietMachine):
 
 
 def test_instances_go_to_a_replica_through_a_relay_on_the_gateway(bench, monkeypatch):
-    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.0.106:8000", "parallel": 1, "budget": None}
+    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "parallel": 1, "budget": None}
     monkeypatch.setattr(SweBenchRunner, "admission", BusyHere)
     monkeypatch.setattr(SweBenchRunner, "lanes", classmethod(
         lambda cls, vllm_host, served, settings, parallel: (
@@ -1616,7 +1616,7 @@ def test_instances_go_to_a_replica_through_a_relay_on_the_gateway(bench, monkeyp
         return []
     monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(relays))
     assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
-    assert opened == [("172.30.0.1", "http://192.168.0.106:8000")]
+    assert opened == [("172.30.0.1", "http://192.168.50.106:8000")]
     created = [call for call in bench["docker"].calls if call[0] == "run"]
     hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
              for call in created}
@@ -2374,7 +2374,7 @@ def test_the_report_names_the_instances_that_ran_during_a_pause(bench):
 
 def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
     from dreamference.vllm_server.model_gate import ModelGate
-    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.0.106:8000", "parallel": 1, "budget": None}
+    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "parallel": 1, "budget": None}
     monkeypatch.setattr(SweBenchRunner, "lanes", classmethod(
         lambda cls, vllm_host, served, settings, parallel: (
             [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel, "budget": None},

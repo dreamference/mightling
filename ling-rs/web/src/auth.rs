@@ -392,10 +392,10 @@ mod tests {
         assert!(!local.origin_ok(Some("http://evil.example")));
         assert!(!local.origin_ok(Some("null")));
         assert!(!local.origin_ok(None));
-        let lan = Addresses::new(3100, &["192.168.0.105".to_string(), "gx10-9428.local".to_string()]);
-        assert!(lan.host_ok(Some("192.168.0.105:3100")));
-        assert!(lan.origin_ok(Some("http://gx10-9428.local:3100")));
-        assert!(!local.host_ok(Some("192.168.0.105:3100")), "loopback-only refuses the LAN address");
+        let lan = Addresses::new(3100, &["192.168.50.105".to_string(), "gx10-1a2b.local".to_string()]);
+        assert!(lan.host_ok(Some("192.168.50.105:3100")));
+        assert!(lan.origin_ok(Some("http://gx10-1a2b.local:3100")));
+        assert!(!local.host_ok(Some("192.168.50.105:3100")), "loopback-only refuses the LAN address");
     }
 
     #[test]

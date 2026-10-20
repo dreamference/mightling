@@ -546,8 +546,8 @@ mod tests {
     fn node() -> Node {
         Node {
             node: "7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001".to_string(),
-            name: "gx10-9428".to_string(),
-            address: "192.168.0.105".to_string(),
+            name: "gx10-1a2b".to_string(),
+            address: "192.168.50.105".to_string(),
             model_port: 8000,
             web_port: Some(3000),
             search_port: Some(8888),
@@ -586,13 +586,13 @@ mod tests {
 
     #[test]
     fn a_silent_lan_address_falls_back_to_the_overlay_name_only_while_the_overlay_is_up() {
-        assert_eq!(reachable(enrolled(), |_| true, || true).address, "192.168.0.105");
+        assert_eq!(reachable(enrolled(), |_| true, || true).address, "192.168.50.105");
         assert_eq!(
             reachable(enrolled(), |_| false, || true).model_url(),
             "http://mightling-7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001.netbird.selfhosted:8000"
         );
-        assert_eq!(reachable(enrolled(), |_| false, || false).address, "192.168.0.105", "overlay down: the name is never resolved");
-        assert_eq!(reachable(node(), |_| false, || true).address, "192.168.0.105", "no overlay name, no fallback");
+        assert_eq!(reachable(enrolled(), |_| false, || false).address, "192.168.50.105", "overlay down: the name is never resolved");
+        assert_eq!(reachable(node(), |_| false, || true).address, "192.168.50.105", "no overlay name, no fallback");
     }
 
     #[test]
@@ -626,9 +626,9 @@ mod tests {
 
     #[test]
     fn urls_use_the_address_and_bracket_ipv6() {
-        assert_eq!(node().model_url(), "http://192.168.0.105:8000");
-        assert_eq!(node().search_url().as_deref(), Some("http://192.168.0.105:8888"));
-        assert_eq!(node().web_url().as_deref(), Some("http://192.168.0.105:3000"));
+        assert_eq!(node().model_url(), "http://192.168.50.105:8000");
+        assert_eq!(node().search_url().as_deref(), Some("http://192.168.50.105:8888"));
+        assert_eq!(node().web_url().as_deref(), Some("http://192.168.50.105:3000"));
         let v6 = Node { address: "fe80::1%wlan0".to_string(), ..node() };
         assert_eq!(v6.model_url(), "http://[fe80::1%wlan0]:8000");
         let named = Node { address: "spark.lan".to_string(), ..node() };
