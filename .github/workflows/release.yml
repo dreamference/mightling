@@ -257,7 +257,8 @@ jobs:
       - name: Test the local file index
         working-directory: ling-docs-rs
         run: ~/.cargo/bin/cargo test --release --locked
-      # The messenger bridges' crates (Signal, and Matrix and Telegram through `ling chat`), in the
+      # The messenger bridges' crates (Signal, and Matrix and Telegram through `ling chat`) and the
+      # loop guard's detector (ling-rs/loop-guard), in the
       # export the build above left, with its profile, so nothing is compiled twice. Their
       # stand-ins for signal-cli, `ling web`, the Bot API and the homeserver run on loopback.
       - name: Test the messenger bridges
@@ -265,7 +266,7 @@ jobs:
           cd "$HOME/.cache/dreamference/puffin-codex/src/codex-rs"
           CARGO_TARGET_DIR="$HOME/.cache/dreamference/puffin-codex/target" \
           CARGO_PROFILE_RELEASE_DEBUG=none CARGO_PROFILE_RELEASE_STRIP=debuginfo \
-            ~/.cargo/bin/cargo test --release -p ling-signal -p ling-chat
+            ~/.cargo/bin/cargo test --release -p ling-signal -p ling-chat -p ling-loop-guard
       - name: Package
         run: |
           bin="$(dirname "$(python -c 'from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; print(B.executable_path())')")"

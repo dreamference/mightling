@@ -52,6 +52,7 @@ pub mod help;
 pub mod home;
 pub mod images;
 pub mod ledger;
+pub mod loop_guard;
 pub mod mask;
 pub mod night;
 pub mod node;
@@ -112,7 +113,7 @@ const COMMANDS_WITHOUT_MODEL: &[&str] = &[
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode",
+    "signal", "refine", "compat", "cavemode", "loop-guard",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -434,6 +435,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(compat::run_cli(&user_args[index + 1..]));
     }
+    // `loop-guard` shows the loop guard's settings and what it has stopped (loop_guard.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "loop-guard"
+    {
+        std::process::exit(loop_guard::run_cli(&user_args[index + 1..]));
+    }
     // `refine` shows refine mode's setting, and `refine hook` is its hook in the TUI (refine.rs).
     if let Some(index) = subcommand
         && user_args[index] == "refine"
@@ -616,6 +623,16 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // not Mightling's prompt (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §5). The session's adapter
     // too, as for the TUI; the desktop app names the model in each `turn/start` anyway.
     let app_server = subcommand.is_some_and(|index| user_args[index] == "app-server");
+    // What the loop guard does depends on the kind of process (loop_guard.rs): `exec`, which is how
+    // SWE-bench and Night Shift run the agent, is left as it was unless an arm switches it on.
+    let process = if app_server {
+        loop_guard::Process::AppServer
+    } else if one_shot {
+        loop_guard::Process::Exec
+    } else {
+        loop_guard::Process::Tui
+    };
+    loop_guard::configure(process, &codex_home);
     Ok(if app_server { with_configured_model(args, &session_model) } else { args })
 }
 

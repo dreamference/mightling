@@ -1,5 +1,4 @@
-"""
-One SWE-bench instance, from container to prediction
+"""One SWE-bench instance, from container to prediction
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.1, §12).
 
 The agent runs inside the instance's own image, where the repository sits at `/testbed` with its
@@ -17,14 +16,24 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.config.proxy_bypass import ProxyBypass
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_task_run import ANNOUNCES_WORK, NUDGE, NightShiftTaskRun
-from dreamference.night_shift.refine_prompt import (FIX_RULES, FIX_RULES_V2, NO_REFINED as NO_REFINED_PIECE,
-                                                    REFINED_HEADING, STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS,
-                                                    STUDY_SECTIONS_V2, RefinePrompt)
+from dreamference.night_shift.refine_prompt import (
+    FIX_RULES,
+    FIX_RULES_V2,
+    REFINED_HEADING,
+    STUDY_CODE_INDEX,
+    STUDY_INTRO,
+    STUDY_SECTIONS,
+    STUDY_SECTIONS_V2,
+    RefinePrompt,
+)
+from dreamference.night_shift.refine_prompt import (
+    NO_REFINED as NO_REFINED_PIECE,
+)
 from dreamference.runner.codex_installer import ADAPTER_ENV
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
@@ -35,7 +44,9 @@ from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import CONTAINER_MOUNT
 
 # The whole prompt: the issue and nothing else from the dataset row (§5.4).
-PROMPT: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
+PROMPT: Final[
+    str
+] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
 where something is unclear, make the reasonable choice.
 
 - Fix the issue below by changing the repository's source files.
@@ -49,7 +60,9 @@ Issue:
 # the index unused (0 queries in 24 instances, spec §13.5): an issue text names symptoms, and the
 # model reached for grep. Two sentences, because the arm that carried an unused tool was already
 # the slower one.
-CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before grep: `code_search` with the issue's words, then
+CODE_INDEX_HINT: Final[
+    str
+] = """- Find the code with the `code_*` tools before grep: `code_search` with the issue's words, then
   `code_show` or `code_def`. Before you edit a function, `code_impact` (or `code_callers`) says
   what else uses it and so which tests to run.
 """
@@ -71,7 +84,7 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
 # this dict's order, whatever order `--task-rules` names them in, so `issue-v1` comes first: it
 # is the order of the work (understand the issue, edit, then the test discipline before stopping),
 # and the refusal and the help then list the rules in the same order.
-TASK_RULES: Final[Dict[str, str]] = {
+TASK_RULES: Final[dict[str, str]] = {
     "issue-v1": """- Before you edit, read the whole issue and work out exactly what behaviour it asks for: the
   result it expects, any function, type or code path it names, and every edge case it mentions.
   Change that behaviour and no more: do not widen a condition beyond the case it asks for.
@@ -106,49 +119,65 @@ REFINED_FILE: Final[str] = "refined.md"
 # Both prompts are built from the pieces refine mode shares with the product
 # (dreamference/night_shift/refine_prompt.py, ling-rs/prompts/refine.md), with "issue" for the
 # task; a test pins them byte for byte to the prompts the `im-refine` round was measured with.
-UNATTENDED: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
+UNATTENDED: Final[
+    str
+] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
 where something is unclear, make the reasonable choice."""
 
 REFINE_PROMPT: Final[str] = (
-    UNATTENDED + "\n\n" + RefinePrompt.subject(STUDY_INTRO, "issue") + """
+    UNATTENDED
+    + "\n\n"
+    + RefinePrompt.subject(STUDY_INTRO, "issue")
+    + """
 
 - You may read the code, run it and run the repository's tests. Do not change any file under
   /testbed: every change there is discarded when this step ends. Put scratch files in /tmp.
 - There is no network.
 {code_index}
 Write the description to {refined_path}, in six sections:
-""" + STUDY_SECTIONS + """ When the file is
+"""
+    + STUDY_SECTIONS
+    + """ When the file is
 written, stop.
 
 Issue:
-{problem_statement}""")
+{problem_statement}"""
+)
 
 # The first step's code-index sentence: it is there to find every path, not one.
 REFINE_CODE_INDEX_HINT: Final[str] = RefinePrompt.subject(STUDY_CODE_INDEX, "issue") + "\n"
 
 FIX_PROMPT: Final[str] = (
-    UNATTENDED + """
+    UNATTENDED
+    + """
 
 - Fix the issue below by changing the repository's source files.
 - You may run the repository's tests. There is no network.
 - Do not commit. Your changes are collected when you stop.
-{code_index}{task_rules}""" + RefinePrompt.subject(FIX_RULES, "issue") + """
+{code_index}{task_rules}"""
+    + RefinePrompt.subject(FIX_RULES, "issue")
+    + """
 
 Issue:
 {problem_statement}
 
-""" + REFINED_HEADING + """
-{refined}""")
+"""
+    + REFINED_HEADING
+    + """
+{refined}"""
+)
 
 # refine-v2 (`--refine-version v2`, specs/DREAMFERENCE_MIGHTLING_REFINE.md §10): the same two prompts
 # with v2's sections and rules in place of v1's, which stay the measured ones above.
-REFINE_PROMPTS: Final[Dict[str, str]] = {
+REFINE_PROMPTS: Final[dict[str, str]] = {
     "v1": REFINE_PROMPT,
     "v2": REFINE_PROMPT.replace(STUDY_SECTIONS, STUDY_SECTIONS_V2),
 }
-FIX_PROMPTS: Final[Dict[str, str]] = {
+FIX_PROMPTS: Final[dict[str, str]] = {
     "v1": FIX_PROMPT,
-    "v2": FIX_PROMPT.replace(RefinePrompt.subject(FIX_RULES, "issue"), RefinePrompt.subject(FIX_RULES_V2, "issue")),
+    "v2": FIX_PROMPT.replace(
+        RefinePrompt.subject(FIX_RULES, "issue"), RefinePrompt.subject(FIX_RULES_V2, "issue")
+    ),
 }
 REFINE_VERSIONS: Final[tuple] = tuple(REFINE_PROMPTS)
 
@@ -159,7 +188,7 @@ NO_REFINED: Final[str] = RefinePrompt.subject(NO_REFINED_PIECE, "issue")
 # the arm without it does, so the two arms' fixing steps have the same budget.
 # The study step's own limit, or None for the task's limit (the product's study has none; the
 # user chose that on 2026-10-07, so the benchmark measures it bounded only by the task timeout).
-REFINE_TIMEOUT_S: Final[Optional[int]] = None
+REFINE_TIMEOUT_S: Final[int | None] = None
 
 # Kept in the instance's state; a longer description is cut there, never in the prompt.
 REFINED_STATE_LIMIT: Final[int] = 40000
@@ -167,8 +196,10 @@ REFINED_STATE_LIMIT: Final[int] = 40000
 # The image's default PATH puts conda's *base* environment first, which has none of the
 # repository's dependencies; `conda activate testbed` only happens in the grading script. Without
 # this the agent's `python -m pytest` fails on imports and it spends its budget on a non-problem.
-CONTAINER_PATH: Final[str] = ("/opt/miniconda3/envs/testbed/bin:/opt/miniconda3/bin:"
-                              "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+CONTAINER_PATH: Final[str] = (
+    "/opt/miniconda3/envs/testbed/bin:/opt/miniconda3/bin:"
+    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+)
 
 # Where the instance's scratch directory (CODEX_HOME, HOME, the collected patch) is mounted.
 SCRATCH_MOUNT: Final[str] = "/mightling-scratch"
@@ -251,8 +282,10 @@ git read-tree HEAD
 # What a turn that ended mid-work is resumed with (failure analysis §5.3, §6.4). Night Shift's
 # `NUDGE` is for an agent that announced a change and never made one; this one is for an agent that
 # changed the tree and then stopped mid-reasoning ("Let me check …", "Wait, let me re-read").
-COMPLETION_NUDGE: Final[str] = ("You stopped in the middle of your work. Finish the fix, run the tests for the "
-                                "modules you changed, and end with a short summary.")
+COMPLETION_NUDGE: Final[str] = (
+    "You stopped in the middle of your work. Finish the fix, run the tests for the "
+    "modules you changed, and end with a short summary."
+)
 
 # The review turn (`--review-turn`, FAILURES §9.3 rank 3, spec §19): one more turn of the same
 # session once the agent has stopped with a changed tree, before the patch is collected. The user
@@ -270,17 +303,22 @@ Then stop with a short summary."""
 REVIEW_PROMPT: Final[str] = "Before you finish, review your work:\n" + REVIEW_RULES
 
 # Only when no session was recorded to resume: a fresh session is given the issue and the diff.
-REVIEW_FRESH_PROMPT: Final[str] = UNATTENDED + """
+REVIEW_FRESH_PROMPT: Final[str] = (
+    UNATTENDED
+    + """
 
 An earlier session changed the repository's source files to fix the issue below; its diff follows
 the issue. Treat that work as yours and review it:
-""" + REVIEW_RULES + """
+"""
+    + REVIEW_RULES
+    + """
 
 Issue:
 {problem_statement}
 
 Diff:
 {diff}"""
+)
 
 # How much of the diff a fresh review session is given.
 REVIEW_DIFF_LIMIT: Final[int] = 40000
@@ -312,7 +350,9 @@ PATCH_BEFORE_REVIEW: Final[str] = "patch-before-review.diff"
 # stopped session's diff as a file it may inspect, apply or discard (FailFast-RestartSmart's
 # overlay, not applied for it). The tree is reset first. One restart per task; the deadline stays.
 RESTART_DIFF: Final[str] = "restart-diff.patch"
-RESTART_PREAMBLE: Final[str] = """An earlier session worked on this task and was stopped before it finished. Its changes are not
+RESTART_PREAMBLE: Final[
+    str
+] = """An earlier session worked on this task and was stopped before it finished. Its changes are not
 in the tree: they are the patch in {diff}. Read it first. Apply it with `git apply` only if it is
 right; otherwise take from it what helps, or ignore it."""
 
@@ -335,54 +375,68 @@ COMPACTION_GAP_S: Final[float] = 2.0
 # Drop-first compaction's log, one line per attempt, under the instance's `codex-home`
 # (ling-rs/masking/src/dropping.rs).
 DROP_LOG: Final[str] = "masking/dropped/log.jsonl"
+# The loop guard's events in the scratch `codex-home` (ling-rs/src/loop_guard.rs).
+LOOP_GUARD_LOG: Final[str] = "loop-guard/events.jsonl"
 
 
 class SweBenchInstanceRun:
     """Runs the agent on one instance; `run()` returns the status written."""
 
-    def __init__(self, store: SweBenchRunStore, row: Dict[str, Any], image: str, model_name: str,
-                 settings: "swe_bench_settings.SweBenchSettings", runtime_dir: Path, model_url: str,
-                 deadline: float, extra_env: Optional[Dict[str, str]] = None,
-                 code_index: Optional[Dict[str, Any]] = None,
-                 extra_mounts: Optional[List[str]] = None,
-                 issue: Optional[Dict[str, Any]] = None, refine: bool = False,
-                 task_rules: Optional[List[str]] = None, review_turn: bool = False,
-                 refine_version: str = "v1",
-                 hooks: Optional[List[str]] = None, restart_after_compactions: int = 0,
-                 apply_patch: str = "auto", exec_tool: str = "auto",
-                 turn_end_percent: Optional[int] = None) -> None:
-        """
-        Args:
-            store: The run's files.
-            row: The instance's dataset row.
-            image: The instance image for this machine.
-            model_name: The run's `model_name_or_path`.
-            settings: Benchmark settings.
-            runtime_dir: The relocated `ling` runtime on the host.
-            model_url: The model server as the container reaches it (the network's gateway).
-            deadline: `time.time()` by which the instance must stop (its timeout, or the run's
-                `--until`).
-            extra_env: More environment for the container (the cave-mode and air-gap levels).
-            code_index: How the container is given a code index (`mounts`, `env`, `path`, and
-                the index's `record`); None for the arm without one.
-            extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
-            issue: In a `--strip-names` run, the issue as the agent sees it: `text`, and the
-                names `replaced` (name to phrase). None gives the agent the dataset's text.
-            refine: Run the refine arm's two steps: study and describe, then fix.
-            task_rules: Names of `TASK_RULES` added to the prompt that fixes the issue.
-            review_turn: Resume the agent's session once more (`REVIEW_PROMPT`) after it stops
-                with a changed tree and before the patch is collected, within the task's time
-                limit.
-            refine_version: Which refine texts the two steps get (`REFINE_PROMPTS`).
-            hooks: Hook sets (`HOOK_SETS`) registered in the instance's `CODEX_HOME`: `issue-v1`
-                holds the first edit until what the issue names has been read, and the first
-                stop until the issue's example has been run (spec §20).
-            apply_patch: The form `--apply-patch` asked for (`auto` when it did not; spec §22).
-            exec_tool: The form `--exec-tool` asked for Code Mode's `exec` (`auto` when it did
-                not; spec §23).
-            turn_end_percent: What `model_post_turn_compact_threshold_percent` gets on every exec
-                command line (the turn-end compaction arm, spec §16): 0 for off, None leaves
-                the key alone.
+    def __init__(
+        self,
+        store: SweBenchRunStore,
+        row: dict[str, Any],
+        image: str,
+        model_name: str,
+        settings: "swe_bench_settings.SweBenchSettings",
+        runtime_dir: Path,
+        model_url: str,
+        deadline: float,
+        extra_env: dict[str, str] | None = None,
+        code_index: dict[str, Any] | None = None,
+        extra_mounts: list[str] | None = None,
+        issue: dict[str, Any] | None = None,
+        refine: bool = False,
+        task_rules: list[str] | None = None,
+        review_turn: bool = False,
+        refine_version: str = "v1",
+        hooks: list[str] | None = None,
+        restart_after_compactions: int = 0,
+        apply_patch: str = "auto",
+        exec_tool: str = "auto",
+        turn_end_percent: int | None = None,
+    ) -> None:
+        """Args:
+        store: The run's files.
+        row: The instance's dataset row.
+        image: The instance image for this machine.
+        model_name: The run's `model_name_or_path`.
+        settings: Benchmark settings.
+        runtime_dir: The relocated `ling` runtime on the host.
+        model_url: The model server as the container reaches it (the network's gateway).
+        deadline: `time.time()` by which the instance must stop (its timeout, or the run's
+            `--until`).
+        extra_env: More environment for the container (the cave-mode and air-gap levels).
+        code_index: How the container is given a code index (`mounts`, `env`, `path`, and
+            the index's `record`); None for the arm without one.
+        extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
+        issue: In a `--strip-names` run, the issue as the agent sees it: `text`, and the
+            names `replaced` (name to phrase). None gives the agent the dataset's text.
+        refine: Run the refine arm's two steps: study and describe, then fix.
+        task_rules: Names of `TASK_RULES` added to the prompt that fixes the issue.
+        review_turn: Resume the agent's session once more (`REVIEW_PROMPT`) after it stops
+            with a changed tree and before the patch is collected, within the task's time
+            limit.
+        refine_version: Which refine texts the two steps get (`REFINE_PROMPTS`).
+        hooks: Hook sets (`HOOK_SETS`) registered in the instance's `CODEX_HOME`: `issue-v1`
+            holds the first edit until what the issue names has been read, and the first
+            stop until the issue's example has been run (spec §20).
+        apply_patch: The form `--apply-patch` asked for (`auto` when it did not; spec §22).
+        exec_tool: The form `--exec-tool` asked for Code Mode's `exec` (`auto` when it did
+            not; spec §23).
+        turn_end_percent: What `model_post_turn_compact_threshold_percent` gets on every exec
+            command line (the turn-end compaction arm, spec §16): 0 for off, None leaves
+            the key alone.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -397,12 +451,12 @@ class SweBenchInstanceRun:
         self.deadline = deadline
         self.extra_env = dict(extra_env or {})
         self.code_index = code_index
-        self.extra_mounts: List[str] = list(extra_mounts or [])
+        self.extra_mounts: list[str] = list(extra_mounts or [])
         self.refine = refine
         self.refine_version = refine_version
-        self.task_rules: List[str] = list(task_rules or [])
+        self.task_rules: list[str] = list(task_rules or [])
         self.review_turn = review_turn
-        self.hooks: List[str] = list(hooks or [])
+        self.hooks: list[str] = list(hooks or [])
         # The turn-end compaction arm (spec §16, night 10): Codex's own key on every exec command
         # line of this instance, 0 for off; None leaves it alone (`exec` then never compacts at a
         # turn's end, whatever the launcher's switch says).
@@ -423,22 +477,21 @@ class SweBenchInstanceRun:
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
         self.user: str = f"{os.getuid()}:{os.getgid()}"
-        self.session: Optional[str] = None
+        self.session: str | None = None
         self.nudges_used = 0
-        self.nudge_kinds: List[str] = []
+        self.nudge_kinds: list[str] = []
         self.started = time.time()
-        self.notes: List[str] = []
+        self.notes: list[str] = []
         # What Night Shift's start check reads from a running task: whether it is waiting on the
         # model, and its systemd scope. A container has no scope, so the check assumes it may
         # still grow to its full memory cap, which is the conservative reading.
         self.in_model = False
-        self.current_unit: Optional[str] = None
+        self.current_unit: str | None = None
         self.stop_event = threading.Event()
 
     @classmethod
     def container_name(cls, run: str, instance_id: str) -> str:
-        """
-        Args:
+        """Args:
             run: The run's name.
             instance_id: The instance.
 
@@ -448,10 +501,13 @@ class SweBenchInstanceRun:
         return "mightling-swe-" + re.sub(r"[^a-zA-Z0-9_.-]", "-", f"{run}-{instance_id}".lower())
 
     @classmethod
-    def compose_prompt(cls, problem_statement: str, code_index: bool = False,
-                       task_rules: Optional[List[str]] = None) -> str:
-        """
-        Builds the prompt: the fixed preamble and the issue text, verbatim.
+    def compose_prompt(
+        cls,
+        problem_statement: str,
+        code_index: bool = False,
+        task_rules: list[str] | None = None,
+    ) -> str:
+        """Builds the prompt: the fixed preamble and the issue text, verbatim.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
@@ -461,14 +517,15 @@ class SweBenchInstanceRun:
         Returns:
             str: The prompt.
         """
-        return PROMPT.format(problem_statement=problem_statement,
-                             code_index=CODE_INDEX_HINT if code_index else "",
-                             task_rules=cls.task_rules_text(task_rules))
+        return PROMPT.format(
+            problem_statement=problem_statement,
+            code_index=CODE_INDEX_HINT if code_index else "",
+            task_rules=cls.task_rules_text(task_rules),
+        )
 
     @classmethod
-    def task_rules_text(cls, task_rules: Optional[List[str]]) -> str:
-        """
-        Args:
+    def task_rules_text(cls, task_rules: list[str] | None) -> str:
+        """Args:
             task_rules: Names of `TASK_RULES`.
 
         Returns:
@@ -484,9 +541,10 @@ class SweBenchInstanceRun:
         return "".join(text for name, text in TASK_RULES.items() if name in wanted)
 
     @classmethod
-    def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False, version: str = "v1") -> str:
-        """
-        Builds the refine arm's first prompt: study the issue and write the refined description.
+    def compose_refine_prompt(
+        cls, problem_statement: str, code_index: bool = False, version: str = "v1"
+    ) -> str:
+        """Builds the refine arm's first prompt: study the issue and write the refined description.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
@@ -496,15 +554,22 @@ class SweBenchInstanceRun:
         Returns:
             str: The prompt.
         """
-        return REFINE_PROMPTS[version].format(problem_statement=problem_statement,
-                                              refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
-                                              code_index=REFINE_CODE_INDEX_HINT if code_index else "")
+        return REFINE_PROMPTS[version].format(
+            problem_statement=problem_statement,
+            refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
+            code_index=REFINE_CODE_INDEX_HINT if code_index else "",
+        )
 
     @classmethod
-    def compose_fix_prompt(cls, problem_statement: str, refined: str, code_index: bool = False,
-                           task_rules: Optional[List[str]] = None, version: str = "v1") -> str:
-        """
-        Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
+    def compose_fix_prompt(
+        cls,
+        problem_statement: str,
+        refined: str,
+        code_index: bool = False,
+        task_rules: list[str] | None = None,
+        version: str = "v1",
+    ) -> str:
+        """Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
@@ -516,15 +581,16 @@ class SweBenchInstanceRun:
         Returns:
             str: The prompt.
         """
-        return FIX_PROMPTS[version].format(problem_statement=problem_statement,
-                                           refined=refined.strip() or NO_REFINED,
-                                           code_index=CODE_INDEX_HINT if code_index else "",
-                                           task_rules=cls.task_rules_text(task_rules))
+        return FIX_PROMPTS[version].format(
+            problem_statement=problem_statement,
+            refined=refined.strip() or NO_REFINED,
+            code_index=CODE_INDEX_HINT if code_index else "",
+            task_rules=cls.task_rules_text(task_rules),
+        )
 
     @classmethod
     def compose_review_prompt(cls, problem_statement: str, diff: str, resumed: bool) -> str:
-        """
-        Builds the review turn's prompt.
+        """Builds the review turn's prompt.
 
         Args:
             problem_statement: The issue as the agent saw it.
@@ -537,13 +603,18 @@ class SweBenchInstanceRun:
         """
         if resumed:
             return REVIEW_PROMPT
-        cut = diff if len(diff) <= REVIEW_DIFF_LIMIT else diff[:REVIEW_DIFF_LIMIT] + "\n[diff cut here]\n"
-        return REVIEW_FRESH_PROMPT.format(problem_statement=problem_statement, diff=cut.rstrip("\n"))
+        cut = (
+            diff
+            if len(diff) <= REVIEW_DIFF_LIMIT
+            else diff[:REVIEW_DIFF_LIMIT] + "\n[diff cut here]\n"
+        )
+        return REVIEW_FRESH_PROMPT.format(
+            problem_statement=problem_statement, diff=cut.rstrip("\n")
+        )
 
     @classmethod
     def stopped_mid_work(cls, message: str) -> bool:
-        """
-        Tells whether a turn that changed the tree ended in the middle of the work: the end of
+        """Tells whether a turn that changed the tree ended in the middle of the work: the end of
         its last message announces a next step ("Let me check …", "I'll run the script.")
         instead of reporting. Only the last `MID_WORK_TAIL` characters count, because both
         mid-work stops of the 100-task round ended cut off mid-sentence, a few lines after their
@@ -560,28 +631,38 @@ class SweBenchInstanceRun:
         return bool(tail) and bool(ANNOUNCES_WORK.search(LET_ME_KNOW.sub("", tail)))
 
     def run(self) -> str:
-        """
-        Runs the instance through every step of §5.1 and writes its prediction and state.
+        """Runs the instance through every step of §5.1 and writes its prediction and state.
 
         Returns:
             str: The status written: `done`, `empty`, `stalled`, `timeout` or `error`; or
             `interrupted` when the run itself was stopped, in which case no prediction is
             written and the instance runs again when the run is resumed.
         """
-        state: Dict[str, Any] = {"instance_id": self.instance_id, "image": self.image, "status": "running",
-                                 "started": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(self.started))}
+        state: dict[str, Any] = {
+            "instance_id": self.instance_id,
+            "image": self.image,
+            "status": "running",
+            "started": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(self.started)),
+        }
         if self.code_index:
             # Built before the agent started and outside its time limit; recorded beside it.
             record = self.code_index.get("record", {})
-            state["index"] = {key: record.get(key) for key in ("layers", "seconds", "cached", "bytes")}
+            state["index"] = {
+                key: record.get(key) for key in ("layers", "seconds", "cached", "bytes")
+            }
             if record.get("layers") == ["exact"]:
                 # Which stores the agent had, the indexers that did not finish, and their memory.
-                state["index"].update({key: record.get(key) for key in ("stores", "failed", "peak_mb")})
+                state["index"].update(
+                    {key: record.get(key) for key in ("stores", "failed", "peak_mb")}
+                )
         if self.issue is not None:
             # The text this agent saw, beside its result, so a report can be read without the
             # manifest.
-            state["issue"] = {"stripped": True, "replaced": self.issue.get("replaced", {}),
-                              "text": self.issue["text"]}
+            state["issue"] = {
+                "stripped": True,
+                "replaced": self.issue.get("replaced", {}),
+                "text": self.issue["text"],
+            }
         self.store.write_state(self.instance_id, state)
         patch = ""
         try:
@@ -592,21 +673,31 @@ class SweBenchInstanceRun:
         finally:
             SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
         if self.hooks:
-            state["hooks"] = dict(state.get("hooks") or {}, **SweBenchHooks.outcome(self.scratch / GATE_DIRECTORY))
+            state["hooks"] = dict(
+                state.get("hooks") or {}, **SweBenchHooks.outcome(self.scratch / GATE_DIRECTORY)
+            )
         if self.stop_event.is_set():
             status = "interrupted"
         state["apply_patch"] = {"form": self.apply_patch, "calls": self.apply_patch_calls()}
         state["exec_tool"] = {"form": self.exec_tool, "calls": self.exec_calls()}
         state["compaction"] = self.compaction_record()
-        state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
-                     wall_s=int(time.time() - self.started), patch_bytes=len(patch.encode()),
-                     last_message=self._last_message()[:LAST_MESSAGE_LIMIT], notes=self.notes)
+        state["loop_guard"] = self.loop_guard_record()
+        state.update(
+            status=status,
+            session=self.session,
+            nudges=self.nudges_used,
+            nudge_kinds=self.nudge_kinds,
+            wall_s=int(time.time() - self.started),
+            patch_bytes=len(patch.encode()),
+            last_message=self._last_message()[:LAST_MESSAGE_LIMIT],
+            notes=self.notes,
+        )
         if status != "interrupted":
             self.store.append_prediction(self.instance_id, self.model_name, patch)
         self.store.write_state(self.instance_id, state)
         return status
 
-    def _run(self, state: Dict[str, Any]) -> tuple:
+    def _run(self, state: dict[str, Any]) -> tuple:
         problem = self._start_container()
         if problem:
             self.notes.append(problem)
@@ -614,15 +705,22 @@ class SweBenchInstanceRun:
         scrubbed = self._script(SCRUB_SCRIPT, timeout=900, root=True)
         prepared = self._script(PREPARE_SCRIPT, timeout=300)
         state["base_tree_equal"] = "tree: equal" in prepared.stdout
-        self.notes += [line for line in (scrubbed.stdout + prepared.stdout).splitlines()
-                       if line.startswith("note:")]
+        self.notes += [
+            line
+            for line in (scrubbed.stdout + prepared.stdout).splitlines()
+            if line.startswith("note:")
+        ]
         if scrubbed.returncode != 0:
-            self.notes.append(f"scrubbing /testbed failed ({scrubbed.returncode}): "
-                              f"{(scrubbed.stderr or scrubbed.stdout).strip()[-300:]}")
+            self.notes.append(
+                f"scrubbing /testbed failed ({scrubbed.returncode}): "
+                f"{(scrubbed.stderr or scrubbed.stdout).strip()[-300:]}"
+            )
             return "error", ""
         if prepared.returncode != 0:
-            self.notes.append(f"preparing /testbed failed ({prepared.returncode}): "
-                              f"{(prepared.stderr or prepared.stdout).strip()[-300:]}")
+            self.notes.append(
+                f"preparing /testbed failed ({prepared.returncode}): "
+                f"{(prepared.stderr or prepared.stdout).strip()[-300:]}"
+            )
             return "error", ""
 
         if self.refine:
@@ -632,10 +730,17 @@ class SweBenchInstanceRun:
                 return "error", ""
             if self.stop_event.is_set():
                 return "interrupted", ""
-            prompt = self.compose_fix_prompt(self.problem_statement, refined, bool(self.code_index),
-                                             self.task_rules, self.refine_version)
+            prompt = self.compose_fix_prompt(
+                self.problem_statement,
+                refined,
+                bool(self.code_index),
+                self.task_rules,
+                self.refine_version,
+            )
         else:
-            prompt = self.compose_prompt(self.problem_statement, bool(self.code_index), self.task_rules)
+            prompt = self.compose_prompt(
+                self.problem_statement, bool(self.code_index), self.task_rules
+            )
         if self.hooks:
             # Only now: the refine arm's study step is neither held nor counted.
             self._prepare_gate(state)
@@ -651,7 +756,9 @@ class SweBenchInstanceRun:
                 break
             self.nudges_used += 1
             self.nudge_kinds.append(kind)
-            outcome = self._fix_turn(state, NUDGE if kind == "stall" else COMPLETION_NUDGE, prompt, resume=True)
+            outcome = self._fix_turn(
+                state, NUDGE if kind == "stall" else COMPLETION_NUDGE, prompt, resume=True
+            )
         self.restart_armed = False
         state["exec"] = outcome
         if self.refine:
@@ -677,11 +784,12 @@ class SweBenchInstanceRun:
             return "done", patch
         if outcome == "error":
             return "error", ""
-        return ("stalled" if NightShiftTaskRun.announces_work(self._last_message()) else "empty"), ""
+        return (
+            "stalled" if NightShiftTaskRun.announces_work(self._last_message()) else "empty"
+        ), ""
 
-    def _refine(self, state: Dict[str, Any]) -> tuple:
-        """
-        The refine arm's first step: a session that studies the issue and writes the refined
+    def _refine(self, state: dict[str, Any]) -> tuple:
+        """The refine arm's first step: a session that studies the issue and writes the refined
         description, under its own time limit. The tree is then put back as it was, and the
         second step's clock starts. Records the step in `state["refine"]`.
 
@@ -694,13 +802,19 @@ class SweBenchInstanceRun:
         if REFINE_TIMEOUT_S is not None:
             self.deadline = min(task_deadline, started + REFINE_TIMEOUT_S)
         try:
-            outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index),
-                                                            self.refine_version),
-                                 resume=False)
+            outcome = self._exec(
+                self.compose_refine_prompt(
+                    self.problem_statement, bool(self.code_index), self.refine_version
+                ),
+                resume=False,
+            )
         finally:
             self.deadline = task_deadline
-        record: Dict[str, Any] = {"refine_exec": outcome, "refine_s": int(time.time() - started),
-                                  "refine_session": self.session}
+        record: dict[str, Any] = {
+            "refine_exec": outcome,
+            "refine_s": int(time.time() - started),
+            "refine_session": self.session,
+        }
         state["refine"] = record
         if self.stop_event.is_set():
             return "", None
@@ -714,8 +828,11 @@ class SweBenchInstanceRun:
         record["refine_edited"] = self._changed()
         reset = self._script(RESET_SCRIPT, timeout=600)
         if reset.returncode != 0:
-            return refined, f"resetting /testbed after the refine step failed ({reset.returncode}): " \
-                            f"{(reset.stderr or reset.stdout).strip()[-300:]}"
+            return (
+                refined,
+                f"resetting /testbed after the refine step failed ({reset.returncode}): "
+                f"{(reset.stderr or reset.stdout).strip()[-300:]}",
+            )
         # Where the second step's events start in the log, so the report can split the tokens.
         record["log_offset"] = self.log_path.stat().st_size if self.log_path.exists() else 0
         # The second step is a new session with the full task budget, like the arm without refine.
@@ -723,14 +840,15 @@ class SweBenchInstanceRun:
         self.deadline = time.time() + self.settings.task_timeout_s
         return refined, None
 
-    def _fix_turn(self, state: Dict[str, Any], turn_prompt: str, task_prompt: str, resume: bool) -> str:
+    def _fix_turn(
+        self, state: dict[str, Any], turn_prompt: str, task_prompt: str, resume: bool
+    ) -> str:
         """One turn of the fix session; a turn cut off for a restart becomes the fresh session's."""
         outcome = self._exec(turn_prompt, resume=resume)
         return self._restart(state, task_prompt) if outcome == "restart" else outcome
 
     def compactions_recorded(self) -> int:
-        """
-        Counts the compactions in this instance's sessions: the `compacted` records of every
+        """Counts the compactions in this instance's sessions: the `compacted` records of every
         rollout under its scratch `codex-home` (what `scripts/context_budget_replay.py` counts).
 
         Returns:
@@ -739,7 +857,7 @@ class SweBenchInstanceRun:
         count = 0
         for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
             try:
-                with open(path, "rb") as handle:
+                with Path(path).open("rb") as handle:
                     for line in handle:
                         if b'"compacted"' not in line:
                             continue
@@ -753,9 +871,8 @@ class SweBenchInstanceRun:
                 continue
         return count
 
-    def compaction_record(self) -> Dict[str, Any]:
-        """
-        What this instance's sessions spent on compaction, in every run so two arms compare
+    def compaction_record(self) -> dict[str, Any]:
+        """What this instance's sessions spent on compaction, in every run so two arms compare
         (compaction spec §13): the `compacted` records of its rollouts and the seconds they took,
         each from the last rollout line more than `COMPACTION_GAP_S` before it (the compaction
         request's prefill and the summary's decode, as the compaction survey of 2026-10-13 §1
@@ -768,9 +885,9 @@ class SweBenchInstanceRun:
         """
         compactions, seconds = 0, 0.0
         for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
-            times: List[float] = []
+            times: list[float] = []
             try:
-                with open(path, "rb") as handle:
+                with Path(path).open("rb") as handle:
                     for line in handle:
                         try:
                             record = json.loads(line)
@@ -779,13 +896,21 @@ class SweBenchInstanceRun:
                         if not isinstance(record, dict):
                             continue
                         try:
-                            at: Optional[float] = datetime.fromisoformat(
-                                str(record.get("timestamp")).replace("Z", "+00:00")).timestamp()
+                            at: float | None = datetime.fromisoformat(
+                                str(record.get("timestamp")).replace("Z", "+00:00")
+                            ).timestamp()
                         except ValueError:
                             at = None
                         if record.get("type") == "compacted":
                             compactions += 1
-                            before = next((t for t in reversed(times) if at is not None and t < at - COMPACTION_GAP_S), None)
+                            before = next(
+                                (
+                                    t
+                                    for t in reversed(times)
+                                    if at is not None and t < at - COMPACTION_GAP_S
+                                ),
+                                None,
+                            )
                             seconds += at - before if at is not None and before is not None else 0.0
                         if at is not None:
                             times.append(at)
@@ -808,12 +933,44 @@ class SweBenchInstanceRun:
                 dropped += int(entry.get("outputs") or 0)
             else:
                 declined += 1
-        return {"compactions": compactions, "seconds": round(seconds, 1), "drops": drops,
-                "declined": declined, "dropped_outputs": dropped}
+        return {
+            "compactions": compactions,
+            "seconds": round(seconds, 1),
+            "drops": drops,
+            "declined": declined,
+            "dropped_outputs": dropped,
+        }
+
+    def loop_guard_record(self) -> dict[str, int]:
+        """What the loop guard stopped in this instance's sessions.
+
+        From its log in the scratch `codex-home` (`LOOP_GUARD_LOG`): responses cut and followed by a
+        nudge, turns ended after a second stop, and of all those, how many the server ended (the
+        cap) rather than the detector.
+
+        Returns:
+            Dict[str, int]: `nudged`, `ended`, `capped`.
+        """
+        counts = {"nudged": 0, "ended": 0, "capped": 0}
+        try:
+            lines = (self.scratch / "codex-home" / LOOP_GUARD_LOG).read_text().splitlines()
+        except OSError:
+            return counts
+        for line in lines:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("action") in ("nudged", "ended"):
+                counts[str(entry["action"])] += 1
+            if str(entry.get("check") or "").startswith("incomplete:"):
+                counts["capped"] += 1
+        return counts
 
     def apply_patch_calls(self) -> int:
-        """
-        Counts the agent's `apply_patch` tool calls in this instance's rollouts: `function_call`
+        """Counts the agent's `apply_patch` tool calls in this instance's rollouts: `function_call`
         records named `apply_patch` (the function form) and `custom_tool_call` ones (freeform).
         An edit made through the shell is not counted; it is the behaviour the arm measures against.
 
@@ -823,8 +980,7 @@ class SweBenchInstanceRun:
         return self.tool_calls("apply_patch")
 
     def exec_calls(self) -> int:
-        """
-        Counts the agent's calls to Code Mode's `exec` in this instance's rollouts. A call the
+        """Counts the agent's calls to Code Mode's `exec` in this instance's rollouts. A call the
         model made to the translated function is recorded as the `custom_tool_call` Codex expects
         (`ling-rs/tools`), so the count is the same in either form; a shell command that merely
         mentions `exec` is not a call.
@@ -835,8 +991,7 @@ class SweBenchInstanceRun:
         return self.tool_calls("exec")
 
     def tool_calls(self, name: str) -> int:
-        """
-        Counts the `function_call` and `custom_tool_call` records named `name` in this
+        """Counts the `function_call` and `custom_tool_call` records named `name` in this
         instance's rollouts.
 
         Args:
@@ -849,7 +1004,7 @@ class SweBenchInstanceRun:
         count = 0
         for path in sorted((self.scratch / "codex-home" / "sessions").rglob("rollout*.jsonl")):
             try:
-                with open(path, "rb") as handle:
+                with Path(path).open("rb") as handle:
                     for line in handle:
                         if needle not in line:
                             continue
@@ -858,20 +1013,27 @@ class SweBenchInstanceRun:
                         except ValueError:
                             continue
                         payload = record.get("payload") if isinstance(record, dict) else None
-                        if (isinstance(payload, dict) and payload.get("name") == name
-                                and payload.get("type") in ("function_call", "custom_tool_call")):
+                        if (
+                            isinstance(payload, dict)
+                            and payload.get("name") == name
+                            and payload.get("type") in ("function_call", "custom_tool_call")
+                        ):
                             count += 1
             except OSError:
                 continue
         return count
 
     def _restart_due(self) -> bool:
-        return (self.restart_armed and not self.restarted and self.restart_after_compactions > 0
-                and self.compactions_recorded() - self.compaction_baseline >= self.restart_after_compactions)
+        return (
+            self.restart_armed
+            and not self.restarted
+            and self.restart_after_compactions > 0
+            and self.compactions_recorded() - self.compaction_baseline
+            >= self.restart_after_compactions
+        )
 
-    def _restart(self, state: Dict[str, Any], task_prompt: str) -> str:
-        """
-        The restart (spec §21): the session was stopped at its N-th compaction. Its diff is written
+    def _restart(self, state: dict[str, Any], task_prompt: str) -> str:
+        """The restart (spec §21): the session was stopped at its N-th compaction. Its diff is written
         to `restart-diff.patch` in the scratch folder, the tree is reset, and one fresh session gets
         the task prompt again under `RESTART_PREAMBLE`. Records `state["restart"]`.
 
@@ -884,9 +1046,12 @@ class SweBenchInstanceRun:
             could not be reset; `restart` when the run was interrupted during it.
         """
         self.restarted = True
-        record: Dict[str, Any] = {"compactions": self.compactions_recorded() - self.compaction_baseline,
-                                  "after_s": int(time.time() - self.started), "nudges_before": self.nudges_used,
-                                  "session_before": self.session}
+        record: dict[str, Any] = {
+            "compactions": self.compactions_recorded() - self.compaction_baseline,
+            "after_s": int(time.time() - self.started),
+            "nudges_before": self.nudges_used,
+            "session_before": self.session,
+        }
         state["restart"] = record
         if self.stop_event.is_set():
             return "restart"
@@ -901,18 +1066,23 @@ class SweBenchInstanceRun:
         record["diff_bytes"] = len(diff.encode())
         reset = self._script(RESET_SCRIPT, timeout=600)
         if reset.returncode != 0:
-            self.notes.append(f"resetting /testbed for the restart failed ({reset.returncode}): "
-                              f"{(reset.stderr or reset.stdout).strip()[-300:]}")
+            self.notes.append(
+                f"resetting /testbed for the restart failed ({reset.returncode}): "
+                f"{(reset.stderr or reset.stdout).strip()[-300:]}"
+            )
             return "error"
         self.session = None
         record["log_offset"] = self.log_path.stat().st_size if self.log_path.exists() else 0
-        self.notes.append(f"restarted after {record['compactions']} compaction(s), {record['after_s']} s into the task")
-        fresh = RESTART_PREAMBLE.format(diff=f"{SCRATCH_MOUNT}/{RESTART_DIFF}") + "\n\n" + task_prompt
+        self.notes.append(
+            f"restarted after {record['compactions']} compaction(s), {record['after_s']} s into the task"
+        )
+        fresh = (
+            RESTART_PREAMBLE.format(diff=f"{SCRATCH_MOUNT}/{RESTART_DIFF}") + "\n\n" + task_prompt
+        )
         return self._exec(fresh, resume=False)
 
-    def _review(self, state: Dict[str, Any], outcome: str) -> Optional[str]:
-        """
-        The review turn: once the agent's turns have ended normally with a changed tree, one more
+    def _review(self, state: dict[str, Any], outcome: str) -> str | None:
+        """The review turn: once the agent's turns have ended normally with a changed tree, one more
         turn of the same session (a fresh one with the issue and the diff when no session was
         recorded), under the task's own deadline. Records `state["review"]`: whether it ran or
         why not, whether it resumed, its outcome, time and tokens, and what it changed.
@@ -926,7 +1096,9 @@ class SweBenchInstanceRun:
             did not run.
         """
         if outcome != "ok":
-            state["review"] = {"skipped": f"the agent's turn ended in {'a timeout' if outcome == 'timeout' else 'an error'}"}
+            state["review"] = {
+                "skipped": f"the agent's turn ended in {'a timeout' if outcome == 'timeout' else 'an error'}"
+            }
             return None
         if time.time() >= self.deadline:
             state["review"] = {"skipped": "no time left"}
@@ -944,22 +1116,33 @@ class SweBenchInstanceRun:
         except OSError:
             pass
         resumed = self.session is not None
-        record: Dict[str, Any] = {"resumed": resumed, "patch_bytes_before": len(before.encode()),
-                                  "log_offset": self.log_path.stat().st_size if self.log_path.exists() else 0}
+        record: dict[str, Any] = {
+            "resumed": resumed,
+            "patch_bytes_before": len(before.encode()),
+            "log_offset": self.log_path.stat().st_size if self.log_path.exists() else 0,
+        }
         state["review"] = record
         started = time.time()
-        review = self._exec(self.compose_review_prompt(self.problem_statement, before, resumed), resume=resumed)
+        review = self._exec(
+            self.compose_review_prompt(self.problem_statement, before, resumed), resume=resumed
+        )
         record.update(exec=review, seconds=int(time.time() - started))
         log_end = self.log_path.stat().st_size if self.log_path.exists() else 0
         tokens = self.store.log_stats(self.instance_id, record["log_offset"], log_end)
-        record["tokens"] = {key: tokens[key] for key in ("input_tokens", "cached_input_tokens", "output_tokens")}
+        record["tokens"] = {
+            key: tokens[key] for key in ("input_tokens", "cached_input_tokens", "output_tokens")
+        }
         if review == "timeout" and not self.stop_event.is_set():
             # The container was stopped to end the turn; the diff and the patch need it running.
             SweBenchDocker.run(["start", self.container], timeout=120)
-            self.notes.append("the review turn reached the task's time limit: the patch was collected as it stood")
+            self.notes.append(
+                "the review turn reached the task's time limit: the patch was collected as it stood"
+            )
         if snapshot.returncode != 0:
             record["changed"] = None
-            self.notes.append(f"recording the tree before the review turn failed ({snapshot.returncode})")
+            self.notes.append(
+                f"recording the tree before the review turn failed ({snapshot.returncode})"
+            )
             return review
         added, removed, files = 0, 0, []
         diff = self._script(REVIEW_DIFF_SCRIPT, timeout=300)
@@ -973,9 +1156,8 @@ class SweBenchInstanceRun:
         record.update(changed=bool(files), added=added, removed=removed, files=files[:50])
         return review
 
-    def _prepare_gate(self, state: Dict[str, Any]) -> None:
-        """
-        Writes the `issue-v1` hooks' conditions, which switches them on: the names the issue
+    def _prepare_gate(self, state: dict[str, Any]) -> None:
+        """Writes the `issue-v1` hooks' conditions, which switches them on: the names the issue
         holds, resolved in the container (`SweBenchIssueTargets`), and its runnable examples.
         Records them in `state["hooks"]`. A failed resolution leaves the hooks with nothing to
         read before the first edit; the example check still applies.
@@ -988,19 +1170,28 @@ class SweBenchInstanceRun:
         if listed.returncode != 0:
             self.notes.append(f"resolving what the issue names failed ({listed.returncode})")
         root, _, listing = listed.stdout.partition("\n")
-        conditions = SweBenchIssueTargets.conditions(self.problem_statement, listing if listed.returncode == 0 else "",
-                                                     root.strip() or "/testbed")
+        conditions = SweBenchIssueTargets.conditions(
+            self.problem_statement,
+            listing if listed.returncode == 0 else "",
+            root.strip() or "/testbed",
+        )
         directory = self.scratch / GATE_DIRECTORY
         directory.mkdir(parents=True, exist_ok=True)
         (directory / CONDITIONS_FILE).write_text(json.dumps(conditions, indent=1))
-        state["hooks"] = {"sets": self.hooks, "conditions": {
-            "targets": [{"label": t["label"], "from": t["from"]} for t in conditions["targets"]],
-            "dropped": conditions["dropped"],
-            "examples": [example.get("first") for example in conditions["examples"]]}}
+        state["hooks"] = {
+            "sets": self.hooks,
+            "conditions": {
+                "targets": [
+                    {"label": t["label"], "from": t["from"]} for t in conditions["targets"]
+                ],
+                "dropped": conditions["dropped"],
+                "examples": [example.get("first") for example in conditions["examples"]],
+            },
+        }
 
     # -- steps ---------------------------------------------------------------------------------
 
-    def _start_container(self) -> Optional[str]:
+    def _start_container(self) -> str | None:
         shutil.rmtree(self.scratch, ignore_errors=True)
         for sub in ("codex-home", "home"):
             (self.scratch / sub).mkdir(parents=True, exist_ok=True)
@@ -1026,29 +1217,52 @@ class SweBenchInstanceRun:
         # The model server (the network's gateway, or a relay to a lane there) and loopback never go
         # through a proxy: neither one the host's environment names nor one Docker's client
         # configuration puts into every container. The host's own exemptions are kept.
-        environment.update({key: os.environ[key] for key in ("NO_PROXY", "no_proxy") if key in os.environ})
+        environment.update(
+            {key: os.environ[key] for key in ("NO_PROXY", "no_proxy") if key in os.environ}
+        )
         ProxyBypass.apply(environment, self.model_url)
-        mounts: List[str] = list(self.extra_mounts)
+        mounts: list[str] = list(self.extra_mounts)
         if self.hooks:
             # Registered before the launcher's first start, with their trust entries; the gate
             # does nothing until its conditions are written (`_prepare_gate`).
             (self.scratch / GATE_DIRECTORY).mkdir(parents=True, exist_ok=True)
-            SweBenchHooks.register(self.scratch / "codex-home", f"{SCRATCH_MOUNT}/codex-home",
-                                   f"{SCRATCH_MOUNT}/{GATE_DIRECTORY}")
+            SweBenchHooks.register(
+                self.scratch / "codex-home",
+                f"{SCRATCH_MOUNT}/codex-home",
+                f"{SCRATCH_MOUNT}/{GATE_DIRECTORY}",
+            )
             mounts.append(f"{SweBenchHooks.gate_source()}:{GATE_MOUNT}:ro")
         if self.code_index:
             environment.update(self.code_index["env"])
             environment["PATH"] = f"{self.code_index['path']}:{CONTAINER_PATH}"
             mounts += list(self.code_index["mounts"])
-        command = ["run", "-d", "--init", "--name", self.container,
-                   "--label", f"ling.swe-bench.run={self.store.name}",
-                   "--network", swe_bench_settings.NETWORK_NAME,
-                   "--user", self.user,
-                   "--memory", self.settings.task_memory, "--memory-swap", self.settings.task_memory,
-                   "--cpus", str(self.settings.task_cpus), "--pids-limit", "4096",
-                   "-v", f"{self.runtime_dir}:{CONTAINER_MOUNT}:ro",
-                   "-v", f"{self.scratch}:{SCRATCH_MOUNT}",
-                   "-w", "/testbed"]
+        command = [
+            "run",
+            "-d",
+            "--init",
+            "--name",
+            self.container,
+            "--label",
+            f"ling.swe-bench.run={self.store.name}",
+            "--network",
+            swe_bench_settings.NETWORK_NAME,
+            "--user",
+            self.user,
+            "--memory",
+            self.settings.task_memory,
+            "--memory-swap",
+            self.settings.task_memory,
+            "--cpus",
+            str(self.settings.task_cpus),
+            "--pids-limit",
+            "4096",
+            "-v",
+            f"{self.runtime_dir}:{CONTAINER_MOUNT}:ro",
+            "-v",
+            f"{self.scratch}:{SCRATCH_MOUNT}",
+            "-w",
+            "/testbed",
+        ]
         for mount in mounts:
             command += ["-v", mount]
         for key, value in environment.items():
@@ -1061,9 +1275,20 @@ class SweBenchInstanceRun:
 
     def _exec(self, prompt: str, resume: bool) -> str:
         """Runs one `ling exec` turn in the container; returns `ok`, `error` or `timeout`."""
-        command = ["exec", self.container, f"{CONTAINER_MOUNT}/bin/ling", "exec", "--json",
-                   "-o", f"{SCRATCH_MOUNT}/last.txt", "--dangerously-bypass-approvals-and-sandbox",
-                   "-C", "/testbed", "-c", f"model_auto_compact_token_limit={self.settings.task_context}"]
+        command = [
+            "exec",
+            self.container,
+            f"{CONTAINER_MOUNT}/bin/ling",
+            "exec",
+            "--json",
+            "-o",
+            f"{SCRATCH_MOUNT}/last.txt",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-C",
+            "/testbed",
+            "-c",
+            f"model_auto_compact_token_limit={self.settings.task_context}",
+        ]
         for override in (self.code_index or {}).get("config", []):
             command += ["-c", override]
         if self.turn_end_percent is not None:
@@ -1072,7 +1297,7 @@ class SweBenchInstanceRun:
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0
         self.in_model = True
         try:
-            with open(self.log_path, "ab") as sink:
+            with Path(self.log_path).open("ab") as sink:
                 process = SweBenchDocker.popen(command, sink)
                 code: Any = None
                 while code is None:
@@ -1084,8 +1309,10 @@ class SweBenchInstanceRun:
                         elif time.time() >= self.deadline or self.stop_event.is_set():
                             code = "timeout"
                         if code is not None:
-                            SweBenchDocker.run(["stop", "-t", str(STOP_GRACE_S), self.container],
-                                               timeout=STOP_GRACE_S + 60)
+                            SweBenchDocker.run(
+                                ["stop", "-t", str(STOP_GRACE_S), self.container],
+                                timeout=STOP_GRACE_S + 60,
+                            )
                             try:
                                 process.wait(timeout=STOP_GRACE_S)
                             except subprocess.TimeoutExpired:
@@ -1099,9 +1326,8 @@ class SweBenchInstanceRun:
             return code
         return "ok" if code == 0 else "error"
 
-    def _nudge_kind(self) -> Optional[str]:
-        """
-        Decides whether a turn that ended normally is resumed, and with which nudge: `stall`
+    def _nudge_kind(self) -> str | None:
+        """Decides whether a turn that ended normally is resumed, and with which nudge: `stall`
         when the tree is unchanged and the last message announces work (Night Shift's rule),
         `completion` when the tree changed and the last message stopped mid-work (failure
         analysis §5.3: the stall rule alone could not fire once the agent had edited anything).
@@ -1119,7 +1345,9 @@ class SweBenchInstanceRun:
 
     def _script(self, script: str, timeout: int, root: bool = False) -> Any:
         as_root = ["-u", "0", "-e", "HOME=/root"] if root else []
-        return SweBenchDocker.run(["exec", *as_root, self.container, "bash", "-c", script], timeout=timeout)
+        return SweBenchDocker.run(
+            ["exec", *as_root, self.container, "bash", "-c", script], timeout=timeout
+        )
 
     def _last_message(self) -> str:
         return self._read(self.scratch / "last.txt").strip()
