@@ -497,7 +497,7 @@ Phase 1's code, tested with no model. The first run against the model waits unti
   - `askevals/metrics.py`: loops, language, abstain/ask/answer;
   - `askevals/gate.py`: the slot's hold on the model gate;
   - a `README.md`.
-- **The scenarios.** 29 synthetic scenarios in `scenarios/`, covering failure classes 1 to 8 (S1–S17 of §5.4). S13 runs each question at `off` and at `ultra`.
+- **The scenarios.** 31 synthetic scenarios in `scenarios/`, covering failure classes 1 to 8 (S1–S17 of §5.4). S13 runs each question at `off`, at `lite` (the shipped default for Ask, the bridges and `exec` since 2026-10-20, CAVE_MODE §11.5) and at `ultra`.
 - **The night step.** `ASK_EVALS=1` in `scripts/swe_bench_night1.sh` runs the suite before the arms, with `--model-port 18000 --hold-gate "night N, assistant evals"`, under `timeout ASK_EVALS_LIMIT` (90 min), with the installed binary by its real path (`ASK_EVALS_LING`), so a rebuild mid-slot changes nothing. A stop runs the clean-up: SIGTERM opens the gate and removes the forwarder and its socket. The step is **off by default** (D2), and its result never fails the night.
 - **Tests.** `tests/test_ask_evals.py`, 65 tests:
   - the metrics on known texts;
