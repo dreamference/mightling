@@ -67,7 +67,7 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | Subcommand | Description | Key Args |
 | :--- | :--- | :--- |
 | **`init`** | Download weights, write the config, force a workspace re-index | `[--model] [--vllm-host] [--draft-model] [--agent] [--hf-token]` |
-| **`run`** | Run one task with the selected agent | `PROMPT [--model] [--draft-model] [--agent] [--hf-token] [--debug] [--cave]` |
+| **`run`** | Run one task with the selected agent | `PROMPT [--model] [--draft-model] [--agent] [--hf-token] [--debug] [--cave] [--compat claude\|off]` (`--compat` sets `DREAMFERENCE_MIGHTLING_COMPAT` for that `ling` session; refused for the other agents) |
 | **`status`** | Hardware, vLLM and agent, and context-index panels | — |
 | **`index`** | AST + FTS5 + TF-IDF + embedding workspace index | `[--dir PATH] [--force]` |
 | **`mcp`** | stdio MCP server for JetBrains / VS Code | — |
@@ -91,7 +91,7 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | **`code setup`** | Install the pinned tools the code index (`ling-code`) runs | — |
 | **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`, `pause [--for DURATION]`, `resume` (the model gate during a SWE-bench run); see §4.21 |
 | **`swe-bench …`** | Run `ling` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `smoke`, `run`, `eval`, `report`, `status`, `clean`; see §4.23 |
-| **`audit egress`** | Trace one real `ling` session (or the TUI, the desktop app, `ling web`, the document index) and list every network destination and process, with a verdict | `[--tui \| --app \| --web \| --docs] [--prompt P] [--json]`; see §4.24 |
+| **`audit egress`** | Trace one real `ling` session (or the TUI, the desktop app, `ling web`, the document index) and list every network destination and process, with a verdict | `[--tui \| --app \| --web \| --docs \| --compat claude] [--prompt P] [--json]`; see §4.24 |
 | **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them, copy a model to them and run jobs on them | `enable [--no-web] [--yes]`, `disable`, `status [NAME]`, `id`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`, `sync-model NAME MODEL`, `run NAME [--gpu] … -- CMD`, `jobs`, `logs`, `cancel`, `fetch`, `provision [HOST…]`, `prepare`; see §4.25 |
 | **`host …`** | The host settings a model load is refused without: report them, or apply them with sudo | `check`, `setup [--yes]`; also Wi-Fi power saving, which blocks no load; see §4.26 |
 | **`chat …`** (`onyx …`) | The retired Onyx web chat: remove what an older install left | `remove [--yes] [--delete-data]`, `status`; see §4.19 |
@@ -449,10 +449,10 @@ Files: the harness, dataset, runtime and validation results under `~/.cache/drea
 ### 4.24. `ling-admin audit egress`
 
 ```bash
-ling-admin audit egress [--tui | --app | --web | --docs] [--prompt PROMPT] [--json]
+ling-admin audit egress [--tui | --app | --web | --docs | --compat claude] [--prompt PROMPT] [--json]
 ```
 
-Runs one real `ling exec` session under `strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked of a resolver and every process the session started, with a verdict (`dreamference/audit/`, `DREAMFERENCE_MIGHTLING_EGRESS.md`). `--tui` traces the full-screen interface on a pseudo-terminal instead of `ling exec` (needs `pexpect` and `pyte`); `--app` the desktop app with both windows hidden, on the display `DISPLAY` names; `--web` `ling web serve` answering one Ask thread; `--docs` the document index (`ling-docs index` and `search` over a fixture folder must reach nothing). `codex build` runs the audit after installing a new binary unless `--no-audit`. `--prompt` replaces the default prompt (a one-word reply) and is refused with `--docs`, which runs no session; `--json` also writes the full result to `$CODEX_HOME/audit/<timestamp>-<session>.json` (`exec`, `tui`, `app`, `web` or `docs`). Exit status: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
+Runs one real `ling exec` session under `strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked of a resolver and every process the session started, with a verdict (`dreamference/audit/`, `DREAMFERENCE_MIGHTLING_EGRESS.md`). `--tui` traces the full-screen interface on a pseudo-terminal instead of `ling exec` (needs `pexpect` and `pyte`); `--app` the desktop app with both windows hidden, on the display `DISPLAY` names; `--web` `ling web serve` answering one Ask thread; `--docs` the document index (`ling-docs index` and `search` over a fixture folder must reach nothing). `codex build` runs the audit after installing a new binary unless `--no-audit`. `--prompt` replaces the default prompt (a one-word reply) and is refused with `--docs`, which runs no session; `--json` also writes the full result to `$CODEX_HOME/audit/<timestamp>-<session>.json` (`exec`, `tui`, `app`, `web` or `docs`). Exit status: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed. `--compat claude` traces the compatibility mode's print mode, `ling --compat claude -p "<prompt>" --output-format json`, in a throwaway repository that holds a `CLAUDE.md`, a `.claude/settings.json` with one hook and one permission rule, a `.claude/commands/` file and a `.claude/agents/` file, so every path of the mode that reads them runs inside the trace (`dreamference/audit/compat_print_session.py`). It counts as answered when its last line is a successful `result` with an answer in it. `codex build` also runs this trace after the other two when the user's new sessions start in the mode (`DREAMFERENCE_MIGHTLING_COMPAT=claude` or `mightling_compat = "claude"`), and writes the record as `<timestamp>-claude.json`.
 
 ### 4.25. `ling-admin node`
 

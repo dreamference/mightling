@@ -10,10 +10,11 @@ import json
 import subprocess
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
-from dreamference.audit import EgressAudit, EgressTrace, StraceParser, TuiSession
+from dreamference.audit import CompatPrintSession, EgressAudit, EgressTrace, StraceParser, TuiSession
 from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED
 from dreamference.audit.egress_audit import IMAGE_PROMPT
 
@@ -415,8 +416,9 @@ def after_build(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(TuiSession, "missing_modules", classmethod(lambda cls: []))
 
-    def run(cls, prompt=None, write_json=False, mightling_bin=None, vllm_host=None, tui=False):
-        runs.append({"tui": tui, "write_json": write_json, "vllm_host": vllm_host})
+    def run(cls, write_json=False, vllm_host=None, tui=False, **options):
+        compat = {"compat": True} if options.get("compat") else {}
+        runs.append({"tui": tui, "write_json": write_json, "vllm_host": vllm_host, **compat})
         return state["codes"][tui]
     monkeypatch.setattr(EgressAudit, "run", classmethod(run))
     return state, runs
@@ -867,3 +869,66 @@ def test_remote_access_is_named_with_its_box(monkeypatch, tmp_path):
     assert len(lines) == 1 and lines[0].startswith("Remote access enabled") and "relay.example.org" in lines[0]
     assert "`ling-admin remote remove`" in lines[0]
     assert ["systemctl", "--user", "is-enabled", "--quiet", "mightling-remote-tunnel.service"] in calls
+
+
+def test_after_a_build_the_compatibility_mode_is_traced_when_new_sessions_start_in_it(after_build, monkeypatch):
+    _, runs = after_build
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_COMPAT", "claude")
+    assert EgressAudit.after_build(vllm_host="http://localhost:8000") == 0
+    assert runs[-1] == {"tui": False, "write_json": True, "vllm_host": "http://localhost:8000", "compat": True}
+    assert len(runs) == 3
+
+
+def test_the_mode_counts_as_on_from_the_variable_or_the_users_own_file_only(tmp_path):
+    on = {"DREAMFERENCE_MIGHTLING_COMPAT": "claude"}
+    off = {"DREAMFERENCE_MIGHTLING_COMPAT": "off"}
+    assert CompatPrintSession.on_by_config(on, tmp_path)
+    assert not CompatPrintSession.on_by_config(off, tmp_path)
+    assert not CompatPrintSession.on_by_config({}, tmp_path)
+    config = tmp_path / ".config" / "dreamference" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text('mightling_compat = "claude"\n', encoding="utf-8")
+    assert CompatPrintSession.on_by_config({}, tmp_path)
+    assert not CompatPrintSession.on_by_config(off, tmp_path)
+    config.write_text("mightling_compat = [\n", encoding="utf-8")
+    assert not CompatPrintSession.on_by_config({}, tmp_path)
+
+
+def test_the_compatibility_audit_runs_print_mode_in_a_repository_with_claude_codes_files(tmp_path, monkeypatch, capsys):
+    # A stand-in for strace playing `ling --compat claude -p`: it records the command line and the
+    # repository's files, plays back the recorded trace and prints a result message.
+    calls = tmp_path / "calls.json"
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    recorded = Path(FIXTURES) / "exec_pass.strace"
+    strace.write_text(f"""#!{os.sys.executable}
+import json, os, pathlib, shutil, sys
+args = sys.argv[1:]
+files = sorted(str(p) for p in pathlib.Path(".").rglob("*") if p.is_file() and ".git" not in p.parts)
+json.dump({{"args": args, "files": files}}, open({str(calls)!r}, "w"))
+shutil.copy({str(recorded)!r}, args[args.index("-o") + 1])
+print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "result": "pong"}}))
+""")
+    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    code = EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", compat=True)
+    out = capsys.readouterr().out
+    assert code == 0 and "✅ Egress audit: pass" in out and "compatibility-mode print session" in out
+    call = json.loads(calls.read_text())
+    prompt = "Reply with exactly: pong"
+    assert call["args"][9:] == ["/opt/ling", "--compat", "claude", "-p", prompt, "--output-format", "json"]
+    for name in ("CLAUDE.md", ".claude/settings.json", ".claude/commands/hello.md", ".claude/agents/reviewer.md"):
+        assert name in call["files"], call["files"]
+
+
+def test_a_print_session_replied_only_with_a_successful_result(tmp_path):
+    path = tmp_path / "out.json"
+    init = '{"type":"system","subtype":"init"}'
+    path.write_text(f'{init}\n{{"type":"result","is_error":false,"result":"pong"}}\n', encoding="utf-8")
+    assert CompatPrintSession.replied(path)
+    path.write_text('{"type":"result","is_error":true,"errors":["no server"]}\n', encoding="utf-8")
+    assert not CompatPrintSession.replied(path)
+    path.write_text("not json\n", encoding="utf-8")
+    assert not CompatPrintSession.replied(path)
+    assert not CompatPrintSession.replied(tmp_path / "missing")

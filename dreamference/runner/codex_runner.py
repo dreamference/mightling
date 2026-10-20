@@ -12,10 +12,13 @@ logic here would give the two entry points two setups to keep in step.
 
 import os
 import subprocess
-from typing import List, Optional, Sequence
+from typing import Final, List, Optional, Sequence
 
 from dreamference.config import DreamferenceConfig
 from dreamference.runner.codex_installer import CodexInstaller
+
+# The variable the launcher reads for the compatibility mode (ling-rs/src/compat.rs).
+COMPAT_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_COMPAT"
 
 
 class CodexRunner:
@@ -37,6 +40,7 @@ class CodexRunner:
         prompt: Optional[str] = None,
         debug: bool = False,
         agent_args: Optional[Sequence[str]] = None,
+        compat: str | None = None,
     ) -> int:
         """
         Builds `ling` if it is missing or stale, then runs it.
@@ -45,6 +49,9 @@ class CodexRunner:
             prompt (Optional[str]): Optional initial prompt, passed as Codex's positional PROMPT.
             debug (bool): Enable verbose debug logging.
             agent_args (Optional[Sequence[str]]): Codex command-line arguments forwarded verbatim.
+            compat (str | None): The compatibility mode for this session (`claude` or `off`, which
+                the parser checks), passed in the launcher's variable; None leaves the launcher's
+                own setting.
 
         Returns:
             int: The agent's exit code.
@@ -68,6 +75,8 @@ class CodexRunner:
         env["DREAMFERENCE_VLLM_HOST"] = self.config.vllm_host
         # Same for the Gmail prompt opt-out, which the launcher reads the same way.
         env["DREAMFERENCE_MIGHTLING_GMAIL"] = "true" if self.config.mightling_gmail else "false"
+        if compat is not None:
+            env[COMPAT_ENV] = compat
         if debug:
             # Codex has no --debug flag; verbosity is RUST_LOG. The TUI owns the terminal, so its
             # log goes to logs_2.sqlite in ling's home folder rather than to a file.
