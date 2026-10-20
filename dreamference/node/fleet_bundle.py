@@ -24,11 +24,23 @@ from typing import Final, List, Optional, Tuple
 
 BUNDLE_ROOT: Final[str] = os.path.expanduser("~/.cache/dreamference/fleet")
 
-# The binaries a node needs, as the release names them; the first two are required.
+# The binaries a node needs, as the release names them; the first two are required. The optional
+# ones are `install.sh`'s list on Linux: the local file index and the Signal bridge's daemon
+# joined it in 1.6.0, and a bundle without them left a node with neither.
 REQUIRED_BINARIES: Final[Tuple[str, ...]] = ("ling", "codex-code-mode-host")
-OPTIONAL_BINARIES: Final[Tuple[str, ...]] = ("ling-search", "ling-fetch", "ling-code")
+OPTIONAL_BINARIES: Final[Tuple[str, ...]] = (
+    "ling-search",
+    "ling-fetch",
+    "ling-code",
+    "ling-docs",
+    "ling-signal",
+)
 
-RELEASE_REPO: Final[str] = os.environ.get("MIGHTLING_RELEASE_REPO", "dgxcoder/dgxcoder")
+# The default `--from`: this machine's own build (or, on a release install, its release).
+SOURCE_THIS: Final[str] = "this"
+RELEASE_PREFIX: Final[str] = "release="
+
+RELEASE_REPO: Final[str] = os.environ.get("MIGHTLING_RELEASE_REPO", "dreamference/mightling")
 
 
 class FleetBundle:
@@ -189,6 +201,37 @@ class FleetBundle:
             return None
         (bundle / "VERSION").write_text(f"{tag or 'latest'}\n")
         return bundle
+
+    @classmethod
+    def expected_version(cls, source: str = SOURCE_THIS) -> str | None:
+        """The version a bundle of `source` would record, without building or downloading it.
+
+        A dry run compares it with what a node has.
+
+        Args:
+            source: `this`, `release` or `release=X.Y.Z`.
+
+        Returns:
+            Optional[str]: `this-<digest>` for this checkout's build, `vX.Y.Z` for a named
+            release, or None when it is only known after a download (the latest release).
+        """
+        from dreamference.runner.codex_branded_builder import INSTALL_DIR, CodexBrandedBuilder
+
+        if source == SOURCE_THIS and CodexBrandedBuilder.has_source():
+            binaries = Path(INSTALL_DIR) / "bin"
+            present = [
+                binaries / name
+                for name in (*REQUIRED_BINARIES, *OPTIONAL_BINARIES)
+                if (binaries / name).is_file()
+            ]
+            return f"this-{cls._digest(present)[:12]}" if present else None
+        if source == SOURCE_THIS:
+            from dreamference import __version__
+
+            return f"v{__version__.lstrip('v')}"
+        if source.startswith(RELEASE_PREFIX):
+            return f"v{source.partition('=')[2].lstrip('v')}"
+        return None
 
     @classmethod
     def version(cls, bundle: Path) -> str:

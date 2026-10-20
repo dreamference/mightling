@@ -360,7 +360,7 @@ class NodePairing:
         answer = session.run(f"{REMOTE_ADMIN} node id && hostname")
         lines = answer.stdout.split()
         if answer.returncode != 0 or len(lines) < 2:
-            print(f"❌ {session.host} did not report a node id (is Puffin installed there?).")
+            print(f"❌ {session.host} did not report a node id (is Mightling installed there?).")
             return None
         record = {"node": lines[0], "name": lines[1], "address": session.host,
                   "user": session.user, "ssh_port": session.ssh_port}

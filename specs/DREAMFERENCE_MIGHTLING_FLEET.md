@@ -1,6 +1,6 @@
 # Mightling Fleet: setting up more GB10s from the one you have
 
-**Status:** proposed on 2026-10-02; §15's open questions answered by the user on 2026-10-03. Phases 1–3 and part of 4 built on 2026-10-03 and tested offline only (§16); merged into `main` on 2026-10-08 (`249c262`, ported onto the renamed tree) and released in 1.5.1. A second GB10 has existed since 2026-10-08, but it was installed by hand over SSH, not by `node provision` (MIGHTLING_NODE §18.10), so `node provision` itself has still not run against a machine; Phase 0 (§13) is owed. The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-9428`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
+**Status:** proposed on 2026-10-02; §15's open questions answered by the user on 2026-10-03. Phases 1–3 and part of 4 built on 2026-10-03 and tested offline only (§16); merged into `main` on 2026-10-08 (`249c262`, ported onto the renamed tree) and released in 1.5.1. A second GB10 has existed since 2026-10-08, but it was installed by hand over SSH, not by `node provision` (MIGHTLING_NODE §18.10), so `node provision` itself has still not run against a machine; Phase 0 (§13) is owed. On 2026-10-20 its dry run was run against that machine and what had gone stale was fixed (§17). The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-9428`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
 **Target:** new DGX Spark-class machines (DGX Spark and the partner GB10 units; this one is an ASUS Ascent GX10) on the same local network as an existing Mightling node.
 **Builds on:**
 - the client/node split, discovery and SSH pairing in [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md), in particular §9 (installing), §12.4 (no roles), §13.2 (pairing), §15.1 (control over SSH) and §18.6 (pairing as built);
@@ -528,6 +528,26 @@ Built on branch `fleet/provision`, unit-tested with stand-ins for every machine;
 - `--os-update` is written (stop the server, `apt-get dist-upgrade`, `fwupdmgr`, reboot, wait for SSH, probe again) but is the least tested step: stand-ins only, no reboot ever observed.
 
 **Unverified, and how Phase 0 settles each:** that `sg docker -c` reaches the socket from a multiplexed session (item 4); that `SSH_ASKPASS_REQUIRE=force` with the socket script answers a real password prompt; that `sudo -S -p ''` over `ssh -T` reads the password (item 4); copy throughput (item 5); whether an empty file under `/etc/avahi/services` only makes Avahi log a parse warning until `node enable` fills it; and that the readiness check by `/v1/models` on the node's host name resolves from here (a `.local` name needs mDNS on this machine).
+
+---
+
+## 17. Brought up to date (2026-10-20), before the first new units
+
+Two more GB10s arrive on 2026-10-20. `node provision` had not changed since 2026-10-03, so it was run with `--dry-run` against the one real second machine (`second-puffin`, read-only: the probe of §7.1 step 2 over a key login), and read against everything that moved since. What it found, and what changed:
+
+| Found | Change |
+|---|---|
+| **The probe works on a real machine**: every reading of §16's probe came back as expected from second-puffin (DGX release, GB10, the recorded version, docker group, lingering, the Avahi file, the AppArmor profile, telemetry off, free disk, the hub, the model folders and the SGLang image by digest) | none |
+| **The host key was filed under `~/.ssh/config`'s alias**: second-puffin's entry sets `HostKeyAlias gx10-386b`, so the run's known-hosts file held the key under that name, the fingerprint printed `?`, and pairing would have stopped at "recorded no host key to pin" | `FleetSession` passes `HostKeyAlias=<the host as given>` (a port as `-port-N`, never `[host]:port`), so the key is filed and found under one name whatever the user's config says |
+| **A login with an agent holding many keys never reached the password prompt**: ssh offered all seven of this machine's agent keys and sshd's `MaxAuthTries` (6) ended the login ("Too many authentication failures") | `IdentitiesOnly=yes`: only the keys `~/.ssh/config` names for that host, or the default files, are offered; then the password |
+| **A fresh unit has no python3-venv** (measured on second-puffin's first day, 2026-10-08), and `install.sh` over the session has no terminal for `sudo`, so step 4 could only fail on a new unit | the probe reads `venv`; when it is missing, `sudo apt-get install -y python3-venv` runs over the session before the install (the one root command before `node prepare`, with the held password or at a remote terminal) |
+| **A bare name such as `spark-1a2b` did not resolve** on this LAN's resolver (only `.local` names do, through mDNS), although §5 offers it | a name that does not resolve is reached as `<name>.local`; a paired node's name is tried as its record's name too, and then by a browse for its id |
+| **`--all` connected to each record's remembered address**, the defect of MIGHTLING_NODE §18.10 (an address moved by DHCP, a lane lost) | each paired node is reached by name or by a browse for its id (`NodePairing.resolve`); one that neither finds is reported off the network and its old address is never tried. A paired node is logged into as its record's user unless `--user` is given |
+| **The bundle left out `ling-docs` and `ling-signal`**, which `install.sh` installs on Linux since 1.6.0 | both are bundled when installed here; a test compares the bundle's list with `install.sh`'s |
+| **The dry run said "main-model set, pair, start" for every machine** and nothing about a version to replace | it names only what differs: python3-venv, an install or the version replaced (`this-<digest>` computed without building the bundle), `node prepare` (or that it runs if `host check` fails there), each missing folder and image, SearXNG, the model assignment, the pairing, the start |
+| Unchanged and checked: the SGLang v0.5.21 image is still pulled by the node by digest (§7.4); the model gate needs no image of its own (it runs in the engine's); the AppArmor profile is still `node prepare`'s sandbox step; Wi-Fi power saving is still its one NetworkManager change; `node enable --no-web` still writes `node-advertise.json` as the user | none |
+
+Still unrun against a new machine: everything after the probe. Phase 0 (§13) is measured on the first of the two units.
 
 ---
 
