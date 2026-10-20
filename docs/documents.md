@@ -39,13 +39,21 @@ you add. A `.lingignore` file (gitignore syntax) in a folder can leave out more.
 | Tables | `.csv` `.tsv` | `rows 2-21` |
 | Spreadsheets | `.xlsx` `.xlsm` `.xlsb` `.xls` `.ods` | `sheet Budget, rows 2-21` (the sheet's own rows) |
 | Presentations | `.pptx` `.odp` | `slide 4` (its speaker notes included) |
+| Scanned pages and pictures (OCR) | a PDF page without text, `.png` `.jpg` `.tif` `.webp` `.bmp` `.gif` | `p.7`, or `image` |
 
 Headings give each passage its section (`Delivery > Rates`), a message its subject, a table or a
 sheet its columns, a slide its title. A spreadsheet is read by its stored values (a formula's last
 result). An e-mail's readable attachments (PDF, Word, OpenDocument, HTML, text, CSV) are indexed with
 their message. Other files, such as installers, archives, pictures and videos, are left out without
-being opened. A scanned PDF page with no text layer is counted as needing OCR, which is not built
-yet.
+being opened.
+
+Scanned pages and pictures are read by OCR on this machine, after the rest of a folder is
+searchable: the page's script is recognised first (Latin, Cyrillic, Chinese, Japanese, Korean,
+Arabic), then its text read, about 3 seconds a page. The agent sees such a passage marked as a
+scanned page, since OCR can misread words. `ling docs status` says how many pages were read, how
+many with low confidence, and which pages still have no text and why. Set `docs_ocr = false` in
+`dreamference.toml` to switch it off (pictures are then left out), or `docs_ocr_max_pages` (500) to
+read fewer pages of a long scan.
 
 ## Searching
 
