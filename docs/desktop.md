@@ -150,6 +150,21 @@ sidebar switches between the two views:
   are copied into the question's folder. Search, rename and archive questions in the sidebar.
 - **Work**: projects and their threads, as below.
 
+A file the agent writes for a question (a report, a page, a picture) shows in the answer as a card;
+**Open** shows it beside the answer, and it opens there by itself when **Settings › General › Open a
+document, PDF or image the agent creates** is on (the default). The question's header has **Files**
+(Ctrl+Shift+E), its folder's tree beside the answer, and a button that opens the folder in your file
+manager. Work never shows a question's files, and a question shows only its own.
+
+**Quick Entry** asks a question from any app. Turn it on in **Settings › General › Quick Entry**: its
+shortcut (Ctrl+Alt+Space until you press another in the field) opens a small box above your windows;
+Enter asks the question in Ask and brings the app forward with the answer, Esc closes the box. The
+tray icon's **New question…** opens the same box. On a Wayland session an app cannot take a
+system-wide shortcut: bind `xdg-open ling://quick` to a key in your desktop's keyboard settings
+instead. The shortcut works while the app runs; tick **Keep Mightling in the tray when its window
+closes** so that closing the window leaves it running (Quit still ends it). Both are off until you
+turn them on. `ling://ask?prompt=…` opens a new question with that text in the composer.
+
 The app itself decides what an Ask thread is: the window only names the `ask` prompt, and the app
 composes its text, makes the folder and keeps the thread inside it, with the same rules `ling web`
 applies. So a question asked in the app and one asked in a browser live in the same place.
