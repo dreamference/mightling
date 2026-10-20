@@ -154,11 +154,11 @@ class SweBenchCommand:
         run.add_argument("--test-guard", action="store_true",
                          help="The launcher's test guard in every session: a change that weakens an "
                               "existing test is pointed out, and the first stop while it stands is "
-                              "held once (spec §27)")
+                              "held once (spec §29)")
         run.add_argument("--finish-check", action="store_true",
                          help="The launcher's finish check in every session: the first stop after a "
                               "change no test has run on, mid-work, or calling failures pre-existing "
-                              "unchecked is held once (spec §27)")
+                              "unchecked is held once (spec §29)")
 
     @classmethod
     def dispatch(cls, args: argparse.Namespace) -> int:

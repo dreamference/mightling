@@ -3405,7 +3405,7 @@ def test_the_drop_arm_is_told_apart_by_against_and_parsed(bench, monkeypatch):
     assert seen["drop_old_outputs"] is False
 
 
-# -- the guard arms (`--test-guard`, `--finish-check`, spec §27) ------------------------------------
+# -- the guard arms (`--test-guard`, `--finish-check`, spec §29) ------------------------------------
 
 def test_the_guard_arms_set_the_launchers_switches_and_the_report_counts_their_holds(bench, monkeypatch):
     for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):

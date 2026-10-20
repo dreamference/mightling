@@ -342,7 +342,7 @@ The owner's decision of 2026-10-20: build this analysis's proposals as switchabl
 
 ### 10.1 Built: two guards in the launcher
 
-Most of §6 and §9 were already arms, but in the harness (the task prompt's rules, the runner's resumes, a gate mounted into the container, a regrade), so none of them could become a default for `ling`, `ling exec` or Night Shift. The two built now live in the launcher (`ling-rs/src/guard.rs`, [MIGHTLING_SWE_BENCH §27](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)), are enforced through Codex's hooks with no Codex patch, are off by default, and are switched on per session (`DREAMFERENCE_MIGHTLING_TEST_GUARD`, `DREAMFERENCE_MIGHTLING_FINISH_CHECK`), in the config file (`mightling_test_guard`, `mightling_finish_check`, which Night Shift's sessions read too) or for a run (`swe-bench run --test-guard`, `--finish-check`; night arms `test-guard`, `finish-check`):
+Most of §6 and §9 were already arms, but in the harness (the task prompt's rules, the runner's resumes, a gate mounted into the container, a regrade), so none of them could become a default for `ling`, `ling exec` or Night Shift. The two built now live in the launcher (`ling-rs/src/guard.rs`, [MIGHTLING_SWE_BENCH §29](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)), are enforced through Codex's hooks with no Codex patch, are off by default, and are switched on per session (`DREAMFERENCE_MIGHTLING_TEST_GUARD`, `DREAMFERENCE_MIGHTLING_FINISH_CHECK`), in the config file (`mightling_test_guard`, `mightling_finish_check`, which Night Shift's sessions read too) or for a run (`swe-bench run --test-guard`, `--finish-check`; night arms `test-guard`, `finish-check`):
 
 | Arm | What changes for a user | Proposal it builds | Failures it is for |
 |---|---|---|---|
@@ -366,7 +366,7 @@ Both are read in every run, arm or not: the report's `Weakened tests` line count
 
 ### 10.3 The A/B plan (a proposal for the owner)
 
-The thirds are `fresh-150k-1of3.txt`, `-2of3.txt` and `-3of3.txt` (50 tasks each, balanced by tier, by membership of `fresh-61j.txt` and by repository; committed on branch `bench/chunked-images`, not yet on main, so a guard night needs that branch merged or the lists copied). `<record>` is the night's record arm (`default` unless an earlier night has changed the configuration of record). Every guard night runs a `ling` built from a commit with `guard.rs` (a source build and the egress audit after it, as nights 5 and 6), and its `start` refuses one without.
+The thirds are planned as nights 14 to 16; which arms they carry, G1 to G3 below or others, is the owner's choice. They are `fresh-150k-1of3.txt`, `-2of3.txt` and `-3of3.txt` (50 tasks each, balanced by tier, by membership of `fresh-61j.txt` and by repository; committed on branch `bench/chunked-images`, not yet on main, so a guard night needs that branch merged or the lists copied). `<record>` is the night's record arm (`default` unless an earlier night has changed the configuration of record). Every guard night runs a `ling` built from a commit with `guard.rs` (a source build and the egress audit after it, as nights 5 and 6), and its `start` refuses one without.
 
 | Night | List | `ARMS` | Decided by |
 |---|---|---|---|
