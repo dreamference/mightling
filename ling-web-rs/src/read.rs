@@ -67,6 +67,18 @@ pub fn search_and_read(base_url: &str, query: &str, pages: usize, level: Level) 
     })
 }
 
+/// [`search_and_read`] with a category, a time range and a language.
+pub fn search_and_read_with(
+    base_url: &str,
+    query: &str,
+    pages: usize,
+    level: Level,
+    options: &search::SearchOptions,
+) -> Result<ReadPayload, SearchError> {
+    let node = crate::node_locator::remote_node();
+    search_and_read_options(base_url, query, pages, level, node.as_ref(), options, |url, chars| fetch::fetch(url, chars))
+}
+
 /// [`search_and_read`], told the node (for the hints) and how a page is fetched (for the tests).
 pub fn search_and_read_from(
     base_url: &str,
@@ -76,9 +88,22 @@ pub fn search_and_read_from(
     node: Option<&Node>,
     fetch_page: impl Fn(&str, i64) -> Result<fetch::FetchedPage, String> + Sync,
 ) -> Result<ReadPayload, SearchError> {
+    search_and_read_options(base_url, query, pages, level, node, &search::SearchOptions::default(), fetch_page)
+}
+
+/// [`search_and_read_from`] with search options.
+pub fn search_and_read_options(
+    base_url: &str,
+    query: &str,
+    pages: usize,
+    level: Level,
+    node: Option<&Node>,
+    options: &search::SearchOptions,
+    fetch_page: impl Fn(&str, i64) -> Result<fetch::FetchedPage, String> + Sync,
+) -> Result<ReadPayload, SearchError> {
     let pages = pages.clamp(1, MAX_PAGES);
     // A few more than will be read, so a result that is not a web page can be passed over.
-    let found = search::search_from(base_url, query, (pages + 3) as i64, level, node)?;
+    let found = search::search_with(base_url, query, (pages + 3) as i64, level, node, options)?;
     Ok(read(found, pages, &fetch_page))
 }
 
@@ -262,6 +287,7 @@ mod tests {
             snippet: snippet.into(),
             engine: "e".into(),
             engines: vec![],
+            published: None,
         }
     }
 
