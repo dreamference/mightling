@@ -570,26 +570,6 @@ Set up new GB10s from this one: install Mightling, the root half, the model, pai
 |---|---|
 | `--key` | The connecting key's tag. |
 
-#### `ling-admin node remote`
-
-Enrol clients on the overlay, list them, revoke one.
-
-#### `ling-admin node remote code`
-
-Print a one-time code for `ling node remote join` and wait for it, 10 minutes.
-
-#### `ling-admin node remote peers`
-
-List the overlay's peers and when each was last connected.
-
-#### `ling-admin node remote revoke`
-
-Delete a peer: its key is forgotten at once.
-
-| Option | Description |
-|---|---|
-| `peer` | The peer's name, overlay label or id. |
-
 ### `ling-admin benchmark_server`
 
 Run vLLM serve benchmark using Sonnet dataset.
@@ -777,34 +757,6 @@ Remove the speech-to-text container; its model stays cached.
 #### `ling-admin voice status`
 
 Show whether speech-to-text runs.
-
-### `ling-admin remote`
-
-Reach this node from outside the LAN, by name, over a NetBird overlay it runs itself.
-
-#### `ling-admin remote setup`
-
-Set up (or reconcile) the control plane here and the relay box.
-
-| Option | Description |
-|---|---|
-| `dns_name` | The box's DNS name: the control plane's public name. |
-| `--relay-name` | The relay's DNS name (default: relay.<dns-name>) |
-| `--yes` | Do not ask before changing anything. |
-| `--dry-run` | Print the plan and change nothing. |
-
-#### `ling-admin remote status`
-
-Show the names, the certificates, the control plane, the tunnel and the peers.
-
-#### `ling-admin remote remove`
-
-Take the tunnel and the box's half away; keep the CA and the peers.
-
-| Option | Description |
-|---|---|
-| `--purge` | Also delete the CA and every peer. |
-| `--yes` | Do not ask. |
 
 ### `ling-admin matrix`
 
