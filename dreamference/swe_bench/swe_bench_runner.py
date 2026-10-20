@@ -46,7 +46,7 @@ LOCK_HOLDER: Final[str] = "a SWE-bench run"
 
 # The prompts compiled into `ling` (ling-rs/src/prompt.rs); any other name is a file in
 # `$CODEX_HOME/system-prompts/`. A run's manifest without a prompt ran the default.
-BUILT_IN_PROMPTS: Final[tuple] = ("default", "offline", "high-swe", "ask")
+BUILT_IN_PROMPTS: Final[tuple] = ("default", "offline", "high-swe", "ask", "chat")
 # The apply_patch arm (spec §22): the launcher's override variable (ling-rs/src/lib.rs,
 # `APPLY_PATCH_ENV`), and the manifest value for a run that left the launcher's choice alone.
 APPLY_PATCH_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_APPLY_PATCH"

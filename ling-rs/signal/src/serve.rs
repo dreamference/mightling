@@ -220,6 +220,7 @@ impl Daemon {
     async fn poll_settings(&mut self) {
         if let Ok(settings) = agent::chat_settings(self.config.port, &self.cookie).await {
             self.bridge.new_thread_after_ms = settings.new_thread_after_ms;
+            self.bridge.limits = crate::limits::Limits::from_settings(&settings);
         }
     }
 
@@ -437,7 +438,12 @@ impl Daemon {
                     let _ = self.signal.call("sendReceipt", rpc::receipt_params(&owner, timestamp)).await;
                 }
             }
-            Action::StartThread => self.request("thread/start", json!({ "prompt": "ask" }), Pending::OpenThread).await,
+            Action::StartThread => self.request("thread/start", json!({ "prompt": "chat" }), Pending::OpenThread).await,
+            Action::StartAskThread => self.request("thread/start", json!({ "prompt": "ask" }), Pending::OpenThread).await,
+            Action::Steer { thread, turn, text } => {
+                let input = agent::turn_input(&text, &[]);
+                self.request("turn/steer", json!({ "threadId": thread, "input": input, "expectedTurnId": turn }), Pending::Other).await;
+            }
             Action::ResumeThread(thread) => self.request("thread/resume", json!({ "threadId": thread }), Pending::OpenThread).await,
             Action::Upload { thread, attachments } => {
                 let uploads = self.upload(&thread, &attachments).await;
