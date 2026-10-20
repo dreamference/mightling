@@ -53,7 +53,7 @@ enum Command {
         /// Only documents whose path in the collection matches this glob.
         #[arg(long)]
         path: Option<String>,
-        /// Only documents of this type (pdf, markdown, text, rst, org, tex).
+        /// Only documents of this type (pdf, docx, odt, html, eml, mbox, csv, markdown, text, rst, org, tex) or extension.
         #[arg(long = "type")]
         kind: Option<String>,
         /// Only documents modified on or after this date (YYYY-MM-DD).
@@ -62,14 +62,17 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Read a document a search found, by page or by lines.
+    /// Read a document a search found: by page, by lines, or at a locator a search gave.
     Read {
         doc_id: String,
-        #[arg(long, conflicts_with = "lines")]
+        #[arg(long, conflicts_with_all = ["lines", "at"])]
         page: Option<u32>,
-        /// A range such as 120-180.
-        #[arg(long)]
+        /// A range such as 120-180 (of lines, paragraphs or rows, as the document numbers them).
+        #[arg(long, conflicts_with = "at")]
         lines: Option<String>,
+        /// Any locator a search gave: `para 12-30`, `rows 2-21`, `msg 3`.
+        #[arg(long)]
+        at: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -84,6 +87,13 @@ enum Command {
         /// Characters to print when no page is named.
         #[arg(long, default_value_t = 8000)]
         max_chars: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The file a document id or citation link names (`documents:42`, `docs:documents/42`), only
+    /// inside its collection: what the desktop app opens and `ling web` serves.
+    Locate {
+        doc: String,
         #[arg(long)]
         json: bool,
     },
@@ -337,9 +347,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 }
             }
         }
-        Command::Read { doc_id, page, lines, json } => {
+        Command::Read { doc_id, page, lines, at, json } => {
             let collections = search::collections()?;
-            let locator = page.map(|p| format!("p.{p}")).or(lines.map(|l| format!("lines {l}")));
+            let locator = page.map(|p| format!("p.{p}")).or(lines.map(|l| format!("lines {l}"))).or(at);
             let result = read::read(&collections, &doc_id, locator.as_deref(), read::BUDGET_TOKENS)?;
             if json {
                 writeln!(out, "{}", serde_json::to_string_pretty(&result)?)?;
@@ -347,8 +357,16 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 writeln!(out, "{} {} ({})", result.doc_id, result.path, result.loc)?;
                 writeln!(out, "{}", result.text.trim_end())?;
                 if let Some(next) = result.next {
-                    writeln!(out, "-- more: ling docs read {} {}", result.doc_id, if next.starts_with("p.") { format!("--page {}", &next[2..]) } else { format!("--lines {}", next.trim_start_matches("lines ")) })?;
+                    writeln!(out, "-- more: ling docs read {} {}", result.doc_id, if next.starts_with("p.") { format!("--page {}", &next[2..]) } else { format!("--at '{next}'") })?;
                 }
+            }
+        }
+        Command::Locate { doc, json } => {
+            let located = ling_docs::locate::locate(&search::collections()?, &doc)?;
+            if json {
+                writeln!(out, "{}", serde_json::to_string(&located)?)?;
+            } else {
+                writeln!(out, "{}", located.path.display())?;
             }
         }
         Command::Reindex { name } => {

@@ -35,13 +35,23 @@ pub fn estimate_tokens(text: &str) -> usize {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Locator {
     Page(u32),
+    /// A range of numbered lines: lines, paragraphs or rows, as the kind numbers them.
     Lines(u32, u32),
+    /// A part named by its locator: a message (`msg 3`) or an attachment (`msg 3 · a.pdf`).
+    Part(String),
 }
 
-/// `p.7`, `page 7`, `7`, `lines 120-180`, `120-180`, `L120-L180`, `lines 120`.
+/// `p.7`, `page 7`, `7`, `lines 120-180`, `120-180`, `L120-L180`, `lines 120`, `para 12-30`,
+/// `rows 2-21`, `msg 3`, `msg 3 · invoice.pdf`, `msg 3, lines 40-60`.
 pub fn parse_locator(text: &str) -> Result<Locator> {
-    let t = text.trim().to_lowercase();
-    let t = t.split(" .. ").next().unwrap_or(&t).trim().to_string();
+    let original = text.trim().split(" .. ").next().unwrap_or("").trim().to_string();
+    let t = original.to_lowercase();
+    if t.starts_with("msg ") {
+        match t.split_once(", ") {
+            Some((_, lines)) => return parse_locator(lines),
+            None => return Ok(Locator::Part(original)),
+        }
+    }
     let page = t.strip_prefix("p.").or_else(|| t.strip_prefix("page")).or_else(|| t.strip_prefix('p'));
     if let Some(n) = page.and_then(|p| p.trim().parse::<u32>().ok()) {
         return Ok(Locator::Page(n));
@@ -49,14 +59,15 @@ pub fn parse_locator(text: &str) -> Result<Locator> {
     if let Ok(n) = t.parse::<u32>() {
         return Ok(Locator::Page(n));
     }
-    let lines = t.strip_prefix("lines").or_else(|| t.strip_prefix("line")).unwrap_or(&t).trim().replace('l', "");
+    let words = ["lines", "line", "paragraphs", "paragraph", "para", "rows", "row"];
+    let lines = words.iter().find_map(|w| t.strip_prefix(w)).unwrap_or(&t).trim().replace('l', "");
     let (a, b) = match lines.split_once('-') {
         Some((a, b)) => (a.trim().parse::<u32>(), b.trim().parse::<u32>()),
         None => (lines.trim().parse::<u32>(), lines.trim().parse::<u32>().map(|n| n + 199)),
     };
     match (a, b) {
         (Ok(a), Ok(b)) if a >= 1 && b >= a => Ok(Locator::Lines(a, b)),
-        _ => bail!("`{text}` is not a locator: use p.7 or lines 120-180"),
+        _ => bail!("`{text}` is not a locator: use p.7, lines 120-180 (para, rows) or msg 3"),
     }
 }
 
@@ -93,8 +104,27 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
         bail!("{doc_id} ({rel}) is not indexed: {status}");
     }
     let locator = locator.filter(|l| !l.trim().is_empty()).map(parse_locator).transpose()?;
-    let mut stmt = conn.prepare("SELECT page, line_first, text FROM units WHERE doc_id = ? ORDER BY ord")?;
-    let units: Vec<(Option<u32>, Option<u32>, String)> = stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.filter_map(|r| r.ok()).collect();
+    let mut stmt = conn.prepare("SELECT page, line_first, text, loc, line_last FROM units WHERE doc_id = ? ORDER BY ord")?;
+    let rows: Vec<(Option<u32>, Option<u32>, String, String, Option<u32>)> = stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.filter_map(|r| r.ok()).collect();
+    let word = crate::discover::Kind::parse(&kind).map(|k| k.line_word()).unwrap_or("lines");
+    // A part named by its locator becomes the range of its units' lines.
+    let locator = match locator {
+        Some(Locator::Part(part)) => {
+            let lower = part.to_lowercase();
+            let inside = |loc: &str| {
+                let loc = loc.to_lowercase();
+                loc == lower || loc.strip_prefix(lower.as_str()).is_some_and(|rest| rest.starts_with(' ') || rest.starts_with(','))
+            };
+            let first = rows.iter().filter(|r| inside(&r.3)).filter_map(|r| r.1).min();
+            let last = rows.iter().filter(|r| inside(&r.3)).filter_map(|r| r.4).max();
+            match (first, last) {
+                (Some(a), Some(b)) => Some(Locator::Lines(a, b)),
+                _ => bail!("{doc_id} has no part `{part}`"),
+            }
+        }
+        other => other,
+    };
+    let units: Vec<(Option<u32>, Option<u32>, String)> = rows.into_iter().map(|(p, l, t, _, _)| (p, l, t)).collect();
     let path = collection.root.join(&rel).to_string_lossy().into_owned();
     let mut out = ReadOut { doc_id: doc_id.to_string(), path, title, kind: kind.clone(), pages, loc: String::new(), text: String::new(), next: None };
     if kind == "pdf" {
@@ -102,7 +132,7 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
         let first = match locator {
             Some(Locator::Page(p)) => p,
             None => 1,
-            Some(Locator::Lines(..)) => bail!("{doc_id} is a PDF: read it by page (p.7)"),
+            Some(Locator::Lines(..)) | Some(Locator::Part(_)) => bail!("{doc_id} is a PDF: read it by page (p.7)"),
         };
         if pages.is_some_and(|n| first > n) {
             bail!("{doc_id} has {} pages", pages.unwrap_or(0));
@@ -151,14 +181,15 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
     let (a, b) = match locator {
         Some(Locator::Lines(a, b)) => (a, b),
         None => (1, u32::MAX),
-        Some(Locator::Page(_)) => bail!("{doc_id} is a text file: read it by lines (lines 120-180)"),
+        Some(Locator::Page(_)) => bail!("{doc_id} is not paged: read it by {word} ({word} 120-180)"),
+        Some(Locator::Part(_)) => unreachable!("resolved above"),
     };
     let mut used = 0;
     let mut shown: Option<(u32, u32)> = None;
     for (n, line) in lines.range(a..=b) {
         let cost = estimate_tokens(line) + 1;
         if shown.is_some() && used + cost > budget {
-            out.next = Some(format!("lines {n}-{}", if b == u32::MAX { n + 199 } else { b }));
+            out.next = Some(format!("{word} {n}-{}", if b == u32::MAX { n + 199 } else { b }));
             break;
         }
         out.text.push_str(line);
@@ -168,12 +199,12 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
     }
     if out.next.is_none() && b != u32::MAX {
         if let Some((n, _)) = lines.range(b + 1..).next() {
-            out.next = Some(format!("lines {n}-{}", n + (b - a)));
+            out.next = Some(format!("{word} {n}-{}", n + (b - a)));
         }
     }
-    out.loc = shown.map(|(a, b)| format!("lines {a}-{b}")).unwrap_or_else(|| format!("lines {a}-{a}"));
+    out.loc = shown.map(|(a, b)| format!("{word} {a}-{b}")).unwrap_or_else(|| format!("{word} {a}-{a}"));
     if shown.is_none() {
-        out.text = format!("{doc_id} has no lines in that range");
+        out.text = format!("{doc_id} has no {word} in that range");
     }
     Ok(out)
 }
@@ -207,6 +238,11 @@ mod tests {
         assert_eq!(parse_locator("L5-L9").unwrap(), Locator::Lines(5, 9));
         assert_eq!(parse_locator("p.7 .. p.8").unwrap(), Locator::Page(7));
         assert!(parse_locator("chapter two").is_err());
+        assert_eq!(parse_locator("para 12-30").unwrap(), Locator::Lines(12, 30));
+        assert_eq!(parse_locator("rows 2-21 .. rows 22-41").unwrap(), Locator::Lines(2, 21));
+        assert_eq!(parse_locator("msg 3").unwrap(), Locator::Part("msg 3".into()));
+        assert_eq!(parse_locator("msg 3 · Invoice.pdf p.2").unwrap(), Locator::Part("msg 3 · Invoice.pdf p.2".into()));
+        assert_eq!(parse_locator("msg 3, lines 40-60").unwrap(), Locator::Lines(40, 60));
         assert_eq!(parse_doc_id("documents:42").unwrap(), ("documents".to_string(), 42));
         assert!(parse_doc_id("42").is_err());
     }

@@ -127,6 +127,9 @@ pub struct Hit {
     pub path: String,
     pub rel: String,
     pub loc: String,
+    /// The heading path of the passage's section, the subject of its message, the columns of
+    /// its rows (empty when the document has none).
+    pub heading: String,
     pub page: Option<u32>,
     pub line_first: Option<u32>,
     pub line_last: Option<u32>,
@@ -293,14 +296,14 @@ impl Searcher {
             }
             let opened = &self.opened[*i];
             let row = opened.conn.query_row(
-                "SELECT c.doc_id, c.ord, c.loc, c.page_first, c.line_first, c.line_last, c.text, d.path FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE c.id = ?",
+                "SELECT c.doc_id, c.ord, c.loc, c.page_first, c.line_first, c.line_last, c.text, d.path, c.heading FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE c.id = ?",
                 [id],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u32>>(3)?, r.get::<_, Option<u32>>(4)?, r.get::<_, Option<u32>>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?)),
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u32>>(3)?, r.get::<_, Option<u32>>(4)?, r.get::<_, Option<u32>>(5)?, r.get::<_, String>(6)?, r.get::<_, String>(7)?, r.get::<_, String>(8)?)),
             );
-            let Ok((doc, ord, loc, page, line_first, line_last, text, rel)) = row else { continue };
+            let Ok((doc, ord, loc, page, line_first, line_last, text, rel, heading)) = row else { continue };
             // Adjacent to a result already taken: joined to it.
             let merge = self.merge_adjacent;
-            if let Some(entry) = out.iter_mut().find(|(h, d, last, c)| merge && h.chunk_ids.len() < MERGE_MAX && *c == *i && *d == doc && (ord == *last + 1 || ord + 1 == first_ord(h, *last))) {
+            if let Some(entry) = out.iter_mut().find(|(h, d, last, c)| merge && h.chunk_ids.len() < MERGE_MAX && *c == *i && *d == doc && (ord == *last + 1 || ord + 1 == first_ord(h, *last)) && crate::chunk::same_message(&h.loc, &loc)) {
                 let (hit, _, last, _) = entry;
                 if ord == *last + 1 {
                     hit.text = join_overlapping(&hit.text, &text);
@@ -326,6 +329,7 @@ impl Searcher {
                 path: root.join(&rel).to_string_lossy().into_owned(),
                 rel,
                 loc,
+                heading,
                 page,
                 line_first,
                 line_last,
@@ -345,11 +349,11 @@ fn first_ord(hit: &Hit, last: i64) -> i64 {
     last - hit.chunk_ids.len() as i64 + 1
 }
 
-/// `a .. b` from two locators, collapsing the inner ends.
+/// `a .. b` from two locators, collapsing the inner ends (one range when both are ranges).
 fn span(first: &str, second: &str) -> String {
     let start = first.split(" .. ").next().unwrap_or(first);
     let end = second.rsplit(" .. ").next().unwrap_or(second);
-    if start == end { start.to_string() } else { format!("{start} .. {end}") }
+    crate::chunk::join_locs(start, end)
 }
 
 /// Joins two consecutive chunks, dropping the overlap the second repeats.
@@ -479,6 +483,7 @@ mod tests {
         assert_eq!(join_overlapping(a, b), "one\ntwo\nthe shared tail line here\nthree");
         assert_eq!(span("p.1", "p.2"), "p.1 .. p.2");
         assert_eq!(span("p.1 .. p.2", "p.2 .. p.3"), "p.1 .. p.3");
+        assert_eq!(span("lines 1-40", "lines 35-80"), "lines 1-80");
     }
 
     #[test]
