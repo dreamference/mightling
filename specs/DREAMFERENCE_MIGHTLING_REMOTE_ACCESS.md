@@ -270,9 +270,6 @@ NetBird **0.81.3** (released 2026-10-19, the latest stable on the day). Each val
 - Peer names through the system resolver on macOS (14.2, item 9).
 - Whether a peer that dials `rels://…:443` uses QUIC through the UDP redirect, or falls back to the WebSocket (either works; the redirect is there so the first can).
 - That the control plane needs nothing beyond its internal Docker network (§15: no route out), and that a peer moved to a new box name by `netbird up --management-url` alone keeps its identity.
-- That the box's sshd lets the tunnel account bind `127.0.0.1:10443` under `permitlisten` (`AllowTcpForwarding` must allow remote forwarding for it; a refused bind gives a live SSH session and a dead tunnel, which `ExitOnForwardFailure` turns into a restart loop `remote status` shows).
-- That NetBird's client, run under sudo, reads `--setup-key-file` from a file the user owns (0600).
-- The enrolment listener is IPv4 only (`http.server`): Phase 3's client joins at the node's IPv4 address from the browse.
 
 ---
 
