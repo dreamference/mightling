@@ -59,6 +59,12 @@
       "out": {"id": 10, "method": "thread/start", "params": {"baseInstructions": "PROMPT:ask", "cwd": "SCRATCH/2", "sandbox": "workspace-write"}}
     },
     {
+      "name": "a phone bridge's thread (`chat`) is an Ask thread too: its prompt, a fresh scratch folder as cwd, a sandbox rooted there",
+      "message": {"id": 10, "method": "thread/start", "params": {"prompt": "chat", "cwd": "/home/user", "sandbox": "danger-full-access"}},
+      "accept": true,
+      "out": {"id": 10, "method": "thread/start", "params": {"baseInstructions": "PROMPT:chat", "cwd": "SCRATCH/3", "sandbox": "workspace-write"}}
+    },
+    {
       "name": "a prompt name outside namedPrompts is refused",
       "message": {"id": 11, "method": "thread/start", "params": {"prompt": "my-own"}},
       "accept": false

@@ -10,6 +10,7 @@ pub mod agent;
 pub mod attachments;
 pub mod cli;
 pub mod hub;
+pub mod limits;
 pub mod matrix;
 pub mod render;
 pub mod store;

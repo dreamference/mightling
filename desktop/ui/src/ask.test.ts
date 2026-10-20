@@ -30,6 +30,8 @@ describe("Ask threads", () => {
     expect(isAskThread(thread("d", `${ROOT}/q-0123abcd/sub`, 1), ROOT)).toBe(false);
     // A host that did not name its root: the folder's shape alone.
     expect(isAskThread(thread("e", "/x/.mightling/ask/q-00ff", 1), null)).toBe(true);
+    // A phone bridge's thread (`ling chat`, `ling signal`) is an Ask thread too.
+    expect(isAskThread(thread("f", `${ROOT}/chat-0123abcd0123abcd`, 1), ROOT)).toBe(true);
     expect(isAskThread(thread("f", "/x/project", 1), null)).toBe(false);
   });
 

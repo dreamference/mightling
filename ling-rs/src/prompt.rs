@@ -48,6 +48,10 @@ pub const HIGH_SWE: &str = include_str!("../prompts/high-swe.md");
 /// The `ask` text: answers and research, with sources, in a scratch folder.
 pub const ASK: &str = include_str!("../prompts/ask.md");
 
+/// What `chat` adds to `ask` for a phone chat (specs/DREAMFERENCE_MIGHTLING_CHAT.md §16.3): short,
+/// bounded, `ling-search` first, no sleep-and-retry, and a question back about what it cannot see.
+pub const CHAT_BLOCK: &str = include_str!("../prompts/chat.md");
+
 const BLOCKS_PREFIX: &str = "<!-- ling: blocks=";
 const BLOCKS_SUFFIX: &str = "-->";
 const USAGE: &str =
@@ -135,6 +139,16 @@ impl Prompt {
         }
     }
 
+    /// `ask` for the phone bridges, with [`CHAT_BLOCK`] after it.
+    pub fn chat() -> Prompt {
+        Prompt {
+            name: "chat".to_string(),
+            core: Core::Text(format!("{}\n{CHAT_BLOCK}", ASK.trim_end())),
+            blocks: Blocks::ALL,
+            origin: Origin::BuiltIn("ask, for a phone chat: short and bounded, ling-search first, never sleep-and-retry"),
+        }
+    }
+
     pub fn is_default(&self) -> bool {
         self.name == DEFAULT_PROMPT
     }
@@ -166,7 +180,7 @@ pub struct Installed {
 impl Installed {
     pub fn built_in() -> Installed {
         Installed {
-            prompts: vec![Prompt::default_prompt(), Prompt::offline(), Prompt::high_swe(), Prompt::ask()],
+            prompts: vec![Prompt::default_prompt(), Prompt::offline(), Prompt::high_swe(), Prompt::ask(), Prompt::chat()],
             notes: Vec::new(),
         }
     }
@@ -635,6 +649,9 @@ mod tests {
             assert!(!ASK.contains(absent), "{absent}");
         }
         assert_eq!(Installed::built_in().get("ask"), Some(&Prompt::ask()));
+        // `chat` is `ask` with the phone block after it.
+        let chat = compose(&Prompt::chat(), &parts("", ""));
+        assert!(chat.contains("research assistant") && chat.contains("# On a phone") && chat.contains("Never wait and retry"), "{chat}");
         let code = "\n\n# Code navigation\n\n`ling-code def`\n";
         let email = crate::gmail_access_instructions("a@x.com");
         let text = compose(&Prompt::ask(), &parts(&email, code));
@@ -677,7 +694,7 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), "not a prompt").unwrap();
         let installed = Installed::load(&home);
         let names: Vec<&str> = installed.prompts.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["default", "offline", "high-swe", "ask", "mine", "plain"]);
+        assert_eq!(names, ["default", "offline", "high-swe", "ask", "chat", "mine", "plain"]);
         let mine = installed.get("mine").unwrap();
         assert_eq!(mine.blocks, Blocks { web: true, email: false, code: true });
         assert_eq!(mine.core, Core::Text("Be brief.\n".to_string()));
