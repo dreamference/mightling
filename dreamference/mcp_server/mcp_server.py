@@ -159,7 +159,8 @@ class MCPServer:
             # otherwise a slow site stalls the whole stdio loop and the IDE tools with it.
             from dreamference.mcp_server.web_tools import WebTools
             return await asyncio.to_thread(
-                WebTools.search, str(args.get("query", "")), int(args.get("max_results", 8))
+                WebTools.search, str(args.get("query", "")), int(args.get("max_results", 8)),
+                str(args.get("category") or "general"), "auto", str(args.get("time_range") or ""),
             )
 
         elif tool_name == "web_fetch":
