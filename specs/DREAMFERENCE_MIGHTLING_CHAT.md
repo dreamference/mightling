@@ -257,6 +257,8 @@ ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 | `answer_seconds` | 180 | an answer's time, then "answer now" (§16.3) |
 | `tool_calls` | 25 | an answer's tool calls, the same |
 | `command_seconds` | 60 | one command's time, the same |
+| `telegram_topics` | true | topics as threads when the bot has them (MOONSHOT §14) |
+| `telegram_rich` | false | rich messages built from blocks, until Phase 0 (MOONSHOT §14) |
 | `new_thread_after_hours` | 4 | a message after this long a silence starts a new thread; 0: never (§16.2; Signal reads it too, through `ling web`) |
 
 ## 11. Phase 0, measured before relying on it
@@ -432,4 +434,8 @@ A message after `new_thread_after_hours` (default 4) without the conversation mo
 ### 16.4 Quick follow-ups (branch `chat/merge-quick`)
 
 The hub already steered a message into a running turn and merged the ones that could not steer into one turn when it ended (§3). Two changes: queued inputs keep their images (§16.1), and the final turn after a time-out (§16.3) is never steered into: a message then waits for the next turn.
+
+### 16.5 Telegram's AI-bot platform, Phase 1 (branch `chat/telegram-phase1`)
+
+Topics as threads (a conversation per `telegram:<chat>/<topic>`), rich messages built from blocks (off by default), approvals with colour, a used state and nonce ids, and the partial answer kept on stop and on a time-out in every bridge: specs/DREAMFERENCE_MIGHTLING_TELEGRAM_MOONSHOT.md §14. Approval ids are nonces for Matrix too.
 

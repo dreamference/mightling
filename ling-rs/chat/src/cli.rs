@@ -104,6 +104,25 @@ pub fn chat_setting(text: &str, key: &str) -> Option<u64> {
     None
 }
 
+/// A true/false from the `[chat]` table of the user's config file.
+pub fn chat_flag(text: &str, key: &str) -> Option<bool> {
+    let mut in_chat = false;
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.starts_with('[') {
+            in_chat = line == "[chat]";
+            continue;
+        }
+        if in_chat
+            && let Some((name, value)) = line.split_once('=')
+            && name.trim() == key
+        {
+            return value.trim().parse().ok();
+        }
+    }
+    None
+}
+
 /// The hub's settings: the defaults, with the user's `[chat]` values over them.
 pub fn hub_config(environment: &Environment) -> HubConfig {
     let mut config = HubConfig::new(environment.dir());
@@ -190,7 +209,13 @@ async fn serve(environment: &Environment) -> i32 {
     if let Some(config) = telegram_config {
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let api = telegram::TelegramApi::new(telegram::API_ROOT, &config.token);
-        match telegram::start(api, dir.clone(), inbound_tx.clone(), out_rx).await {
+        let text = std::fs::read_to_string(environment.user_config()).unwrap_or_default();
+        let defaults = telegram::Options::default();
+        let options = telegram::Options {
+            topics: chat_flag(&text, "telegram_topics").unwrap_or(defaults.topics),
+            rich: chat_flag(&text, "telegram_rich").unwrap_or(defaults.rich),
+        };
+        match telegram::start(api, dir.clone(), inbound_tx.clone(), out_rx, options).await {
             Ok(username) => eprintln!("ling chat: Telegram: answering as @{username}"),
             Err(err) if err.description.contains("Unauthorized") => {
                 eprintln!("ling chat: Telegram refused the bot token ({err}); run `ling chat telegram setup` again.")

@@ -218,7 +218,7 @@ fn room_of(key: &str) -> Option<&str> {
 }
 
 /// Approvals the renderer posted, by event id, so a reaction finds its approval: (id, options).
-type Posted = Arc<Mutex<HashMap<String, (u64, usize)>>>;
+type Posted = Arc<Mutex<HashMap<String, (String, usize)>>>;
 
 /// A reply's body without the quoted fallback older clients put above it.
 fn without_reply_fallback(body: &str) -> String {
@@ -378,7 +378,7 @@ impl Syncer {
                     Some("m.reaction") => {
                         let target = event.pointer("/content/m.relates_to/event_id").and_then(Value::as_str).unwrap_or_default();
                         let key = event.pointer("/content/m.relates_to/key").and_then(Value::as_str).unwrap_or_default();
-                        let found = self.posted.lock().await.get(target).copied();
+                        let found = self.posted.lock().await.get(target).cloned();
                         if let Some((approval, options)) = found
                             && let Some(choice) = reaction_choice(key, options)
                         {
@@ -466,6 +466,8 @@ impl Renderer {
                 self.posted.lock().await.retain(|_, (approval, _)| *approval != id);
                 let _ = self.api.send(&room, json!({ "msgtype": "m.notice", "body": outcome })).await;
             }
+            // Matrix rooms here are not split into threads (MOONSHOT §6): nothing to rename.
+            Outbound::ThreadNamed { .. } => {}
         }
     }
 }
