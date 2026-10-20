@@ -15,6 +15,7 @@ from dreamference.hardware.adapter_installer import AdapterInstaller
 from dreamference.hardware.adapter_manifest import AdapterManifest
 from dreamference.hardware.adapter_store import TRUST_THIRD_PARTY, AdapterStore
 from dreamference.hardware.adapter_verifier import AdapterVerifier
+from dreamference.vllm_server.adapter_serving import AdapterServing
 
 ADAPTER_COMMAND: Final[str] = "adapter"
 
@@ -221,6 +222,7 @@ class AdapterCommand:
         if not AdapterInstaller.remove(args.name):
             print(f"❌ No adapter named {args.name} is installed (`ling-admin adapter list`).")
             return 1
+        AdapterServing.withdraw(args.name)
         print(
             f"✅ Removed {args.name}. A session using it is refused at its next request; "
             "`/adapter off` or a new session returns to the base model."
