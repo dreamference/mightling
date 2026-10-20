@@ -129,7 +129,7 @@ export type FromView =
   | { type: "preview/open"; id: string; url: string; thread: string | null }
   | { type: "preview/navigate"; id: string; url: string; thread: string | null }
   | { type: "preview/go"; id: string; step: "back" | "forward" }
-  | { type: "preview/reload"; id: string }
+  | { type: "preview/reload"; id: string; fresh?: boolean }
   | { type: "preview/place"; id: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }
   | { type: "preview/pick"; id: string }
   | { type: "preview/allow-once"; id: string; site: string }
