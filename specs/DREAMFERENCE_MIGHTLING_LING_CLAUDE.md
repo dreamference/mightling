@@ -1,6 +1,6 @@
 # Mightling: Claude Code compatibility mode in `ling` — Claude Code's way of working, on the local model
 
-**Status:** **being built, phase by phase from 2026-10-20: Phase 0 checks done (§16); the switch (§0.4: `--compat`, `DREAMFERENCE_MIGHTLING_COMPAT`, `mightling_compat`, `ling compat status|use|doctor`) built in `ling-rs/src/compat.rs`; the interface settings of §6.5.4 (the renderer and the key map) built in `ling-rs/src/compat_tui.rs`.** Asked for by the owner on 2026-10-19 and written the same day; updated on 2026-10-20 with the owner's six decisions of that day (§0, first block: D1–D3, then D4–D6 answering open questions 12–14) and a black-box study of Claude Code's terminal interface (§6.5). Nothing in this document exists in the code yet; every "today" below was checked against `main` at `a5c0ad7` and the pinned Codex source (`rust-v0.158.0`) on 2026-10-19, and the interface study against `ling` 1.6.4 and the same pin on 2026-10-20.
+**Status:** **being built, phase by phase from 2026-10-20: Phase 0 checks done (§16); the switch (§0.4: `--compat`, `DREAMFERENCE_MIGHTLING_COMPAT`, `mightling_compat`, `ling compat status|use|doctor`) built in `ling-rs/src/compat.rs`; the interface settings of §6.5.4 (the renderer and the key map) built in `ling-rs/src/compat_tui.rs`; print mode (§6.3, §6.4) in `ling-rs/src/compat_print.rs`, `ling-admin run --compat` and `audit egress --compat claude` (§8.2).** Asked for by the owner on 2026-10-19 and written the same day; updated on 2026-10-20 with the owner's six decisions of that day (§0, first block: D1–D3, then D4–D6 answering open questions 12–14) and a black-box study of Claude Code's terminal interface (§6.5). Nothing in this document exists in the code yet; every "today" below was checked against `main` at `a5c0ad7` and the pinned Codex source (`rust-v0.158.0`) on 2026-10-19, and the interface study against `ling` 1.6.4 and the same pin on 2026-10-20.
 
 **Name:** there is **no new product name** (owner, 2026-10-20). This is a **mode of `ling`**, the compatibility mode, switched on with `ling --compat claude`, `DREAMFERENCE_MIGHTLING_COMPAT=claude` or `mightling_compat = "claude"` (§0.4). The file and branch keep the old working name `ling-claude` only as a label; it is never a command, a link or a package.
 
@@ -411,6 +411,11 @@ The launcher accepts the print-mode flags the public CLI reference documents (§
 
 Session ids are Codex's; `ling --compat claude -r` accepts them and prints them in `json` output as `session_id`.
 
+**Built** (`ling-rs/src/compat_print.rs`). The launcher resolves the model server once, checks `--model` against `/v1/models`, and runs the task as a child `ling exec --json --skip-git-repo-check`, because Claude Code's print mode runs in any folder. The child gets the server's address in `DREAMFERENCE_VLLM_HOST`.
+- Input: piped standard input follows the prompt, or is the prompt when none is given.
+- Mapped: `-p`, `--output-format`, `-c`, `-r <id>`, `--max-turns` (the translator counts tool calls and answers as turns, and sends the child Ctrl+C past the limit), `--json-schema` (`--output-schema`, the answer parsed into `structured_output`), `--append-system-prompt[-file]` (`-c developer_instructions=…`), `--add-dir`, `--model`, `--permission-mode default|dontAsk|acceptEdits|bypassPermissions`, `--verbose`, `--debug`, and `--bare` (recorded for later phases' reads). `-C`, `--config` and `--profile` pass through.
+- Refused with their reason: `plan` and `auto`, every flag of the table's refused row, and the flags of later phases (`--allowedTools`, `--tools`, `--input-format`, `--mcp-config`, `--settings`, `--agents`, `--fork-session`, `-w`).
+
 ### 6.4 Output formats
 
 `compat::output` reads `ling exec --json`'s JSON Lines and writes:
@@ -420,6 +425,13 @@ Session ids are Codex's; `ling --compat claude -r` accepts them and prints them 
 - **`stream-json`**: one JSON object per line as events happen: a `system` message of subtype `init` (session id, working folder, the tools offered), assistant and user messages with tool calls and their results, and the final `result` object, using the documented message types only.
 
 The exact field list is pinned by fixtures written from the public reference (§13); the spec does not reproduce it here because the documentation, not this file, is the authority, and it changes.
+
+**Built.** The fields follow the Agent SDK reference's `SDKSystemMessage`, `SDKAssistantMessage`, `SDKUserMessage` and `SDKResultMessage`, read on 2026-10-20.
+- Codex's items become `tool_use` blocks under Claude Code's names: `Bash` (`command`), `Write` or `Edit` (`file_path`), `mcp__<server>__<tool>`, `WebSearch` (`query`) and `Agent` (`prompt`). Their outcomes become `tool_result` blocks.
+- A command the sandbox declined is listed in `permission_denials`.
+- `usage` comes from Codex's token counts: `input_tokens` without the cached part, the cached part as `cache_read_input_tokens`.
+- `modelUsage` has the served model with its context window. `total_cost_usd` and `costUSD` are 0.
+- A failure is a result of subtype `error_during_execution` or `error_max_turns`, with `errors`, and the exit code is 1.
 
 ### 6.5 The terminal interface: what Claude Code does, and how `ling` does the same
 
