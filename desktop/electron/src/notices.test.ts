@@ -29,6 +29,9 @@ describe("notifications", () => {
     expect(notices.take(approval, () => ({}))).toEqual({ title: "Mightling", body: "The agent is waiting for an approval.", threadId: "t", always: false });
     expect(notices.take(approval, () => ({ notifyApprovals: false }))).toBeNull();
     expect(notices.take({ id: 2, method: "item/tool/requestUserInput", params: { threadId: "t" } }, () => ({}))?.body).toBe("The agent is waiting for a question.");
+    // An MCP server's question (item 14) notifies like an approval; the vendor's identity check never shows.
+    expect(notices.take({ id: 3, method: "mcpServer/elicitation/request", params: { threadId: "t", mode: "form" } }, () => ({}))?.body).toBe("The agent is waiting for an answer to an MCP server's question.");
+    expect(notices.take({ id: 4, method: "mcpServer/elicitation/request", params: { threadId: "t", mode: "openai/userVerification" } }, () => ({}))).toBeNull();
     expect(notices.take({ method: "item/started", params: {} }, () => ({}))).toBeNull();
   });
 });
