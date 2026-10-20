@@ -82,6 +82,12 @@ class FleetSession:
             "ControlPersist=yes",
             "-o",
             f"UserKnownHostsFile={self.known_hosts}",
+            # The run's known-hosts file names the key after the host as given here, whatever
+            # `~/.ssh/config` says: an alias there (second-puffin's `HostKeyAlias gx10-386b`) filed
+            # it under that name, the fingerprint printed `?` and pairing found no key to pin
+            # (first dry run against a real machine, 2026-10-20).
+            "-o",
+            f"HostKeyAlias={self._known_host_name()}",
             "-o",
             f"StrictHostKeyChecking={'accept-new' if first_contact else 'yes'}",
             "-o",
@@ -92,6 +98,11 @@ class FleetSession:
             "ClearAllForwardings=yes",
             "-o",
             "PreferredAuthentications=publickey,keyboard-interactive,password",
+            # Only the keys `~/.ssh/config` names for this host (or the default files), never
+            # every key an agent holds: with seven in this machine's agent, sshd's MaxAuthTries
+            # (6) ended the login before the password prompt was ever reached (2026-10-20).
+            "-o",
+            "IdentitiesOnly=yes",
         ]
 
     def target(self) -> str:
@@ -323,7 +334,8 @@ class FleetSession:
     # -- internals --------------------------------------------------------------------------------
 
     def _known_host_name(self) -> str:
-        return self.host if self.ssh_port == 22 else f"[{self.host}]:{self.ssh_port}"
+        """The name the session's host key is filed under: `HostKeyAlias`, so never with a port."""
+        return self.host if self.ssh_port == 22 else f"{self.host}-port-{self.ssh_port}"
 
     @classmethod
     def _spawn(
