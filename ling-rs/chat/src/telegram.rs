@@ -20,6 +20,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
 use crate::attachments::Media;
+use crate::blocks;
 use crate::hub::HELP;
 use crate::hub::Inbound;
 use crate::hub::Outbound;
@@ -31,6 +32,8 @@ pub const API_ROOT: &str = "https://api.telegram.org";
 /// Telegram's limit is 4,096 characters after entities are parsed; this leaves room.
 pub const MESSAGE_LIMIT: usize = 4000;
 const DRAFT_LIMIT: usize = 4096;
+/// Drafts to one chat, every topic together, at most this often (Telegram: one message a second).
+const DRAFT_GAP_MS: u64 = 1_000;
 const POLL_TIMEOUT_S: u64 = 50;
 /// Wrong pairing codes tolerated before every pending code is withdrawn.
 const PAIRING_ATTEMPTS: u32 = 10;
@@ -122,6 +125,17 @@ impl TelegramApi {
     }
 }
 
+/// An approval button's data, `a:<nonce>:<choice>`: the nonce is the hub's, never a counter.
+pub fn approval_callback(data: &str) -> Option<(String, usize)> {
+    let mut parts = data.split(':');
+    if parts.next() != Some("a") {
+        return None;
+    }
+    let nonce = parts.next().filter(|n| !n.is_empty() && n.len() <= 32 && n.chars().all(|c| c.is_ascii_hexdigit()))?;
+    let choice = parts.next()?.parse().ok()?;
+    parts.next().is_none().then(|| (nonce.to_string(), choice))
+}
+
 /// A file in a message, as the Bot API describes it: its id, a name and a type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Attached {
@@ -171,8 +185,27 @@ fn chat_key(chat_id: i64) -> String {
     format!("telegram:{chat_id}")
 }
 
-fn chat_id(key: &str) -> Option<i64> {
-    key.strip_prefix("telegram:")?.parse().ok()
+/// A chat's key, with the topic when the message is in one (MOONSHOT §3.1): each topic is its own
+/// conversation in the hub, with its own thread.
+pub fn topic_key(chat_id: i64, topic: Option<i64>) -> String {
+    match topic {
+        Some(topic) => format!("telegram:{chat_id}/{topic}"),
+        None => chat_key(chat_id),
+    }
+}
+
+/// The chat and the topic a key names.
+pub fn target(key: &str) -> Option<(i64, Option<i64>)> {
+    let rest = key.strip_prefix("telegram:")?;
+    match rest.split_once('/') {
+        Some((chat, topic)) => Some((chat.parse().ok()?, Some(topic.parse().ok()?))),
+        None => Some((rest.parse().ok()?, None)),
+    }
+}
+
+/// The topic a message was sent in, if any.
+fn topic_of_message(message: &Value) -> Option<i64> {
+    (message.get("is_topic_message") == Some(&Value::Bool(true))).then(|| message.get("message_thread_id").and_then(Value::as_i64)).flatten()
 }
 
 /// The commands Telegram offers on `/`.
@@ -193,13 +226,29 @@ pub struct Poller {
     pub api: TelegramApi,
     pub dir: PathBuf,
     pub hub: mpsc::UnboundedSender<Inbound>,
+    /// Whether the bot has topics in private chats (`getMe`'s `has_topics_enabled`) and the user's
+    /// `[chat] telegram_topics` does not turn them off: then `/new` makes a topic (MOONSHOT §3.1).
+    pub topics: bool,
     wrong_codes: u32,
     unpaired_replied: HashMap<i64, Instant>,
 }
 
+/// A new topic's name until the thread's first message names it.
+pub const NEW_TOPIC_NAME: &str = "New thread";
+
 impl Poller {
     pub fn new(api: TelegramApi, dir: PathBuf, hub: mpsc::UnboundedSender<Inbound>) -> Poller {
-        Poller { api, dir, hub, wrong_codes: 0, unpaired_replied: HashMap::new() }
+        Poller { api, dir, hub, topics: false, wrong_codes: 0, unpaired_replied: HashMap::new() }
+    }
+
+    /// `/new` in a chat with topics: a topic, named when its first message arrives, and one line in
+    /// it. False when Telegram refused, so the hub's `/new` happens instead.
+    async fn new_topic(&self, chat_id: i64) -> bool {
+        let Ok(topic) = self.api.call("createForumTopic", json!({ "chat_id": chat_id, "name": NEW_TOPIC_NAME })).await else { return false };
+        let Some(thread) = topic.get("message_thread_id").and_then(Value::as_i64) else { return false };
+        let line = json!({ "chat_id": chat_id, "message_thread_id": thread, "text": "A new thread: ask here." });
+        let _ = self.api.call("sendMessage", line).await;
+        true
     }
 
     async fn reply(&self, chat_id: i64, text: &str) {
@@ -249,6 +298,11 @@ impl Poller {
             }
             let Some(user) = message.pointer("/from/id").and_then(Value::as_i64) else { return };
             let text = message.get("text").and_then(Value::as_str).unwrap_or_default().trim().to_string();
+            let key = topic_key(chat_id, topic_of_message(message));
+            // A topic's service messages (created, renamed, closed) are not questions.
+            if ["forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened"].iter().any(|field| message.get(*field).is_some()) {
+                return;
+            }
             if let Some(code) = text.strip_prefix("/pair") {
                 self.pair(chat_id, user, code.trim(), &paired).await;
                 return;
@@ -267,7 +321,11 @@ impl Poller {
                     self.reply(chat_id, "I read text, images and files here.").await;
                     return;
                 }
-                let _ = self.hub.send(Inbound::Text { chat: chat_key(chat_id), text });
+                let command = text.split_whitespace().next().unwrap_or_default().split('@').next().unwrap_or_default().to_ascii_lowercase();
+                if self.topics && command == "/new" && self.new_topic(chat_id).await {
+                    return;
+                }
+                let _ = self.hub.send(Inbound::Text { chat: key, text });
                 return;
             }
             let caption = message.get("caption").and_then(Value::as_str).unwrap_or_default().trim().to_string();
@@ -279,7 +337,7 @@ impl Poller {
                 }
             }
             let text = if text.is_empty() { caption } else { text };
-            let _ = self.hub.send(Inbound::Media { chat: chat_key(chat_id), text, attachments, dropped });
+            let _ = self.hub.send(Inbound::Media { chat: key, text, attachments, dropped });
         } else if let Some(query) = update.get("callback_query") {
             let Some(user) = query.pointer("/from/id").and_then(Value::as_i64) else { return };
             if let Some(id) = query.get("id").and_then(Value::as_str) {
@@ -289,22 +347,16 @@ impl Poller {
                 return;
             }
             let Some(chat_id) = query.pointer("/message/chat/id").and_then(Value::as_i64) else { return };
+            let key = topic_key(chat_id, query.get("message").and_then(topic_of_message));
             let data = query.get("data").and_then(Value::as_str).unwrap_or_default();
-            let mut parts = data.split(':');
-            if parts.next() != Some("a") {
-                return;
-            }
-            let (Some(approval), Some(choice)) =
-                (parts.next().and_then(|n| n.parse::<u64>().ok()), parts.next().and_then(|n| n.parse::<usize>().ok()))
-            else {
-                return;
-            };
-            let _ = self.hub.send(Inbound::Answer { chat: chat_key(chat_id), approval, choice });
+            let Some((approval, choice)) = approval_callback(data) else { return };
+            let _ = self.hub.send(Inbound::Answer { chat: key, approval, choice });
         } else if let Some(stopped) = update.get("stopped_message_generation") {
             let Some(chat_id) = stopped.pointer("/chat/id").and_then(Value::as_i64) else { return };
             // A private chat's id is its user's id.
             if paired.contains(&chat_id) {
-                let _ = self.hub.send(Inbound::Stop { chat: chat_key(chat_id) });
+                let topic = stopped.get("message_thread_id").and_then(Value::as_i64);
+                let _ = self.hub.send(Inbound::Stop { chat: topic_key(chat_id, topic) });
             }
         }
     }
@@ -337,16 +389,31 @@ impl Poller {
 /// What the renderer remembers per chat and per approval.
 #[derive(Default)]
 struct RenderState {
-    drafts: HashMap<i64, i64>,
+    /// The draft id of each conversation (chat and topic) with a turn running.
+    drafts: HashMap<String, i64>,
     next_draft: i64,
     drafts_unsupported: bool,
-    last_typing: HashMap<i64, Instant>,
-    approvals: HashMap<u64, (i64, i64, String)>,
+    /// Rich messages refused for good (an older Bot API): plain HTML from then on.
+    rich_unsupported: bool,
+    last_typing: HashMap<String, Instant>,
+    /// The last draft sent to each chat, and for which conversation: every topic shares the
+    /// chat's one message a second (one conversation is already paced by the hub).
+    last_draft: HashMap<i64, (Instant, String)>,
+    /// Approvals on screen, by nonce: (chat, topic, message id, text).
+    approvals: HashMap<String, (i64, Option<i64>, i64, String)>,
+}
+
+/// How the renderer draws (`[chat] telegram_rich`; MOONSHOT §3.2).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Style {
+    /// Drafts and answers as rich messages built from blocks; HTML when refused.
+    pub rich: bool,
 }
 
 /// Renders the hub's output into Telegram.
 pub struct Renderer {
     pub api: TelegramApi,
+    pub style: Style,
     state: Arc<Mutex<RenderState>>,
 }
 
@@ -355,9 +422,45 @@ fn tail(text: &str, limit: usize) -> String {
     if count <= limit { text.to_string() } else { text.chars().skip(count - limit).collect() }
 }
 
+/// Adds the topic to a request's parameters.
+fn in_topic(mut params: Value, topic: Option<i64>) -> Value {
+    if let Some(topic) = topic {
+        params["message_thread_id"] = json!(topic);
+    }
+    params
+}
+
+/// An approval's keyboard: the first option green, a last "Decline" red (Bot API 9.4 `style`).
+fn approval_keyboard(id: &str, options: &[String]) -> Value {
+    let last = options.len().saturating_sub(1);
+    let rows: Vec<Value> = options
+        .iter()
+        .enumerate()
+        .map(|(n, label)| {
+            let mut button = json!({ "text": label, "callback_data": format!("a:{id}:{n}") });
+            if n == 0 && options.len() > 1 {
+                button["style"] = json!("success");
+            } else if n == last && label == "Decline" {
+                button["style"] = json!("danger");
+            }
+            json!([button])
+        })
+        .collect();
+    json!({ "inline_keyboard": rows })
+}
+
+/// The keyboard of a closed approval: its outcome as a button that does nothing (10.3 `disabled`).
+fn closed_keyboard(outcome: &str) -> Value {
+    json!({ "inline_keyboard": [[{ "text": outcome.trim_end_matches('.'), "disabled": {} }]] })
+}
+
 impl Renderer {
     pub fn new(api: TelegramApi) -> Renderer {
-        Renderer { api, state: Arc::default() }
+        Renderer::styled(api, Style::default())
+    }
+
+    pub fn styled(api: TelegramApi, style: Style) -> Renderer {
+        Renderer { api, style, state: Arc::default() }
     }
 
     pub async fn run(self, mut outbound: mpsc::UnboundedReceiver<Outbound>) {
@@ -367,95 +470,143 @@ impl Renderer {
     }
 
     /// Sends Markdown as HTML, or as plain text when Telegram cannot parse the HTML.
-    async fn send_markdown(&self, chat_id: i64, markdown: &str) -> Result<Value, ApiError> {
-        let html = json!({ "chat_id": chat_id, "text": render::to_html(markdown), "parse_mode": "HTML", "link_preview_options": { "is_disabled": true } });
+    async fn send_markdown(&self, chat_id: i64, topic: Option<i64>, markdown: &str) -> Result<Value, ApiError> {
+        let html = in_topic(json!({ "chat_id": chat_id, "text": render::to_html(markdown), "parse_mode": "HTML", "link_preview_options": { "is_disabled": true } }), topic);
         match self.api.call("sendMessage", html).await {
-            Err(err) if err.description.contains("can't parse entities") => {
-                self.api.call("sendMessage", json!({ "chat_id": chat_id, "text": markdown })).await
-            }
+            Err(err) if err.description.contains("can't parse entities") => self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": markdown }), topic)).await,
             other => other,
         }
     }
 
-    pub async fn render(&self, out: Outbound) {
-        let Some(chat_id) = chat_id(out.chat()) else { return };
-        match out {
-            Outbound::Draft { text, .. } => {
-                let mut state = self.state.lock().await;
-                if !state.drafts_unsupported {
-                    let draft = match state.drafts.get(&chat_id) {
-                        Some(id) => *id,
-                        None => {
-                            state.next_draft += 1;
-                            let id = state.next_draft;
-                            state.drafts.insert(chat_id, id);
-                            id
-                        }
-                    };
-                    let params = json!({ "chat_id": chat_id, "draft_id": draft, "text": tail(&text, DRAFT_LIMIT), "can_stop": true });
-                    match self.api.call("sendMessageDraft", params).await {
-                        Err(err) if err.missing_method => state.drafts_unsupported = true,
-                        _ => return,
+    /// An answer as rich messages, split between blocks; false when Telegram refused the first, so
+    /// the HTML path sends it instead (a failed render never loses an answer).
+    async fn send_rich(&self, chat_id: i64, topic: Option<i64>, markdown: &str) -> bool {
+        if !self.style.rich || self.state.lock().await.rich_unsupported {
+            return false;
+        }
+        let parts = blocks::split(blocks::to_blocks(markdown), blocks::MESSAGE_CHARS, blocks::MESSAGE_BLOCKS);
+        for (n, part) in parts.into_iter().enumerate() {
+            let params = in_topic(json!({ "chat_id": chat_id, "rich_message": { "blocks": part } }), topic);
+            match self.api.call("sendRichMessage", params).await {
+                Ok(_) => {}
+                Err(err) if n == 0 => {
+                    if err.missing_method {
+                        self.state.lock().await.rich_unsupported = true;
                     }
+                    eprintln!("ling chat: Telegram refused a rich message ({err}); sending it as HTML");
+                    return false;
                 }
-                let due = state.last_typing.get(&chat_id).is_none_or(|at| at.elapsed() >= Duration::from_secs(4));
-                if due {
-                    state.last_typing.insert(chat_id, Instant::now());
-                    let _ = self.api.call("sendChatAction", json!({ "chat_id": chat_id, "action": "typing" })).await;
+                Err(err) => eprintln!("ling chat: Telegram refused part of a rich answer: {err}"),
+            }
+        }
+        true
+    }
+
+    async fn draft(&self, key: &str, chat_id: i64, topic: Option<i64>, text: &str) {
+        let mut state = self.state.lock().await;
+        // Two topics streaming share the chat's limit: a draft within a second of another topic's
+        // waits for the next (the hub sends again on new text and every 20 s).
+        if !text.is_empty() && state.last_draft.get(&chat_id).is_some_and(|(at, from)| from != key && at.elapsed() < Duration::from_millis(DRAFT_GAP_MS)) {
+            return;
+        }
+        if !state.drafts_unsupported {
+            let draft = match state.drafts.get(key) {
+                Some(id) => *id,
+                None => {
+                    state.next_draft += 1;
+                    let id = state.next_draft;
+                    state.drafts.insert(key.to_string(), id);
+                    id
+                }
+            };
+            state.last_draft.insert(chat_id, (Instant::now(), key.to_string()));
+            // The stop button keeps the partial on screen; the hub then sends it as a message (D9).
+            if self.style.rich && !state.rich_unsupported {
+                let content = if text.is_empty() { vec![blocks::thinking()] } else { blocks::to_blocks(&tail(text, blocks::MESSAGE_CHARS)) };
+                let params = in_topic(json!({ "chat_id": chat_id, "draft_id": draft, "rich_message": { "blocks": content }, "can_stop": true, "keep_on_stop": true }), topic);
+                match self.api.call("sendRichMessageDraft", params).await {
+                    Ok(_) => return,
+                    Err(err) if err.missing_method => state.rich_unsupported = true,
+                    Err(_) => {}
                 }
             }
+            let params = in_topic(json!({ "chat_id": chat_id, "draft_id": draft, "text": tail(text, DRAFT_LIMIT), "can_stop": true, "keep_on_stop": true }), topic);
+            match self.api.call("sendMessageDraft", params).await {
+                Err(err) if err.missing_method => state.drafts_unsupported = true,
+                _ => return,
+            }
+        }
+        let due = state.last_typing.get(key).is_none_or(|at| at.elapsed() >= Duration::from_secs(4));
+        if due {
+            state.last_typing.insert(key.to_string(), Instant::now());
+            let _ = self.api.call("sendChatAction", in_topic(json!({ "chat_id": chat_id, "action": "typing" }), topic)).await;
+        }
+    }
+
+    pub async fn render(&self, out: Outbound) {
+        let key = out.chat().to_string();
+        let Some((chat_id, topic)) = target(&key) else { return };
+        match out {
+            Outbound::Draft { text, .. } => self.draft(&key, chat_id, topic, &text).await,
             Outbound::Message { markdown, .. } => {
+                if self.send_rich(chat_id, topic, &markdown).await {
+                    return;
+                }
                 for part in render::split(&markdown, MESSAGE_LIMIT) {
-                    if let Err(err) = self.send_markdown(chat_id, &part).await {
+                    if let Err(err) = self.send_markdown(chat_id, topic, &part).await {
                         eprintln!("ling chat: Telegram refused an answer: {err}");
                     }
                 }
             }
             Outbound::Notice { text, .. } => {
                 for part in render::split(&text, MESSAGE_LIMIT) {
-                    let _ = self.api.call("sendMessage", json!({ "chat_id": chat_id, "text": part })).await;
+                    let _ = self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": part }), topic)).await;
                 }
             }
             Outbound::Approval { id, text, options, .. } => {
-                let keyboard: Vec<Value> =
-                    options.iter().enumerate().map(|(n, label)| json!([{ "text": label, "callback_data": format!("a:{id}:{n}") }])).collect();
-                let params = json!({
-                    "chat_id": chat_id,
-                    "text": render::to_html(&text),
-                    "parse_mode": "HTML",
-                    "reply_markup": { "inline_keyboard": keyboard },
-                });
+                let keyboard = approval_keyboard(&id, &options);
+                let params = in_topic(json!({ "chat_id": chat_id, "text": render::to_html(&text), "parse_mode": "HTML", "reply_markup": keyboard }), topic);
                 // A refused render must not hide the buttons: the request would be declined unseen.
                 let sent = match self.api.call("sendMessage", params).await {
                     Err(err) if err.description.contains("can't parse entities") => {
-                        let plain = json!({ "chat_id": chat_id, "text": text, "reply_markup": { "inline_keyboard": keyboard } });
-                        self.api.call("sendMessage", plain).await
+                        self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": text, "reply_markup": keyboard }), topic)).await
                     }
                     other => other,
                 };
                 if let Ok(sent) = sent
                     && let Some(message_id) = sent.get("message_id").and_then(Value::as_i64)
                 {
-                    self.state.lock().await.approvals.insert(id, (chat_id, message_id, text));
+                    self.state.lock().await.approvals.insert(id, (chat_id, topic, message_id, text));
                 }
             }
             Outbound::ApprovalClosed { id, outcome, .. } => {
                 let remembered = self.state.lock().await.approvals.remove(&id);
                 match remembered {
-                    Some((chat_id, message_id, text)) => {
+                    Some((chat_id, _, message_id, text)) => {
+                        // The request stays readable; its outcome replaces the keyboard as a button
+                        // that does nothing. An older Bot API refuses `disabled`: then no keyboard.
                         let html = format!("{}\n\n<i>{}</i>", render::to_html(&text), render::escape(&outcome));
-                        let params = json!({ "chat_id": chat_id, "message_id": message_id, "text": html, "parse_mode": "HTML" });
-                        let _ = self.api.call("editMessageText", params).await;
+                        let params = json!({ "chat_id": chat_id, "message_id": message_id, "text": html, "parse_mode": "HTML", "reply_markup": closed_keyboard(&outcome) });
+                        if self.api.call("editMessageText", params).await.is_err() {
+                            let bare = json!({ "chat_id": chat_id, "message_id": message_id, "text": html, "parse_mode": "HTML", "reply_markup": { "inline_keyboard": [] } });
+                            let _ = self.api.call("editMessageText", bare).await;
+                        }
                     }
                     None => {
-                        let _ = self.api.call("sendMessage", json!({ "chat_id": chat_id, "text": outcome })).await;
+                        let _ = self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": outcome }), topic)).await;
                     }
+                }
+            }
+            Outbound::ThreadNamed { name, .. } => {
+                if let Some(topic) = topic {
+                    let name: String = name.chars().take(128).collect();
+                    let _ = self.api.call("editForumTopic", json!({ "chat_id": chat_id, "message_thread_id": topic, "name": name })).await;
                 }
             }
             Outbound::TurnEnded { .. } => {
                 let mut state = self.state.lock().await;
-                state.drafts.remove(&chat_id);
-                state.last_typing.remove(&chat_id);
+                state.drafts.remove(&key);
+                state.last_typing.remove(&key);
             }
         }
     }
@@ -469,14 +620,33 @@ pub async fn start(
     dir: PathBuf,
     hub: mpsc::UnboundedSender<Inbound>,
     outbound: mpsc::UnboundedReceiver<Outbound>,
+    options: Options,
 ) -> Result<String, ApiError> {
     let me = api.call("getMe", json!({})).await;
     if me.is_ok() {
         let _ = api.call("setMyCommands", commands()).await;
     }
-    tokio::spawn(Renderer::new(api.clone()).run(outbound));
-    tokio::spawn(Poller::new(api, dir, hub).run());
+    let has_topics = me.as_ref().is_ok_and(|me| me.get("has_topics_enabled") == Some(&Value::Bool(true)));
+    tokio::spawn(Renderer::styled(api.clone(), Style { rich: options.rich }).run(outbound));
+    let mut poller = Poller::new(api, dir, hub);
+    poller.topics = has_topics && options.topics;
+    tokio::spawn(poller.run());
     me.map(|me| me.get("username").and_then(Value::as_str).unwrap_or_default().to_string())
+}
+
+/// The user's choices for Telegram (`[chat] telegram_topics`, `telegram_rich`).
+#[derive(Clone, Copy, Debug)]
+pub struct Options {
+    /// Topics as threads, when the bot has them (default on).
+    pub topics: bool,
+    /// Rich messages (default off until Telegram's Phase 0 check on the owner's clients).
+    pub rich: bool,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options { topics: true, rich: false }
+    }
 }
 
 #[cfg(test)]
@@ -485,8 +655,12 @@ mod tests {
 
     #[test]
     fn chat_keys_round_trip() {
-        assert_eq!(chat_id(&chat_key(-42)), Some(-42));
-        assert_eq!(chat_id("matrix:!a:b"), None);
+        assert_eq!(target(&chat_key(-42)), Some((-42, None)));
+        assert_eq!(target("matrix:!a:b"), None);
+        // A topic is part of the key (MOONSHOT §3.1).
+        assert_eq!(topic_key(111, Some(7)), "telegram:111/7");
+        assert_eq!(target("telegram:111/7"), Some((111, Some(7))));
+        assert_eq!(target("telegram:111/x"), None);
     }
 
     #[test]
