@@ -343,8 +343,13 @@ class SweBenchCommand:
                   f"{settings.build_cpus} CPUs; logs in {swe_bench_settings.BUILD_DIR}")
             outcome = SweBenchImageBuilder.build_all(dataset, wanted, settings, force=force, keep_images=keep_images)
         good = [i for i, problem in outcome.items() if problem is None]
+        archives = list(swe_bench_settings.ARCHIVE_DIR.glob("*.tar.gz"))
+        total = sum(path.stat().st_size for path in archives)
         print(f"✅ {len(good)} of {len(wanted)} validated and archived in {swe_bench_settings.ARCHIVE_DIR}; "
               f"{len(outcome) - len(good)} not usable, {len(wanted) - len(outcome)} not reached.")
+        print(f"📦 The folder holds {len(archives)} archive(s), {total / 1024 ** 3:.1f} GiB"
+              + (f" ({total / len(archives) / 1024 ** 3:.1f} GiB each on average)" if archives else "")
+              + ": the machine that imports them needs that much disk too.")
         print(f"💡 On the machine that runs the benchmark: copy {swe_bench_settings.ARCHIVE_DIR} there "
               f"(e.g. rsync -a <this machine>:{swe_bench_settings.ARCHIVE_DIR}/ <folder>/), then "
               f"`ling-admin swe-bench import <folder> --dataset {dataset}`.")
