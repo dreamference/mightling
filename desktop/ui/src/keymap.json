@@ -67,7 +67,8 @@
    "group": "General",
    "label": "Font size bigger",
    "keys": [
-    "Ctrl+="
+    "Ctrl+=",
+    "Ctrl++"
    ],
    "context": "global",
    "status": "built"
@@ -128,7 +129,8 @@
    "group": "General",
    "label": "Clear terminal",
    "keys": [
-    "Ctrl+L"
+    "Ctrl+L",
+    "Ctrl+K"
    ],
    "context": "terminal",
    "status": "built"
@@ -158,7 +160,8 @@
    "group": "General",
    "label": "Redo the last app action",
    "keys": [
-    "Ctrl+Shift+Z"
+    "Ctrl+Shift+Z",
+    "Ctrl+Y"
    ],
    "context": "global",
    "status": "built"
@@ -168,7 +171,8 @@
    "group": "General",
    "label": "Close tab",
    "keys": [
-    "Ctrl+W"
+    "Ctrl+W",
+    "Ctrl+F4"
    ],
    "context": "global",
    "status": "built"
@@ -218,7 +222,8 @@
    "group": "Chats",
    "label": "New thread",
    "keys": [
-    "Ctrl+N"
+    "Ctrl+N",
+    "Ctrl+Shift+O"
    ],
    "context": "global",
    "status": "built"
@@ -329,7 +334,8 @@
    "label": "Previous thread or tab",
    "keys": [
     "Ctrl+Shift+Tab",
-    "Ctrl+PageUp"
+    "Ctrl+PageUp",
+    "Ctrl+Shift+["
    ],
    "context": "global",
    "status": "built"
@@ -340,7 +346,8 @@
    "label": "Next thread or tab",
    "keys": [
     "Ctrl+Tab",
-    "Ctrl+PageDown"
+    "Ctrl+PageDown",
+    "Ctrl+Shift+]"
    ],
    "context": "global",
    "status": "built"
@@ -791,6 +798,16 @@
    "label": "Preview reload",
    "keys": [
     "Ctrl+R"
+   ],
+   "context": "preview",
+   "status": "built"
+  },
+  {
+   "id": "previewReloadHard",
+   "group": "Workspace",
+   "label": "Reload the previewed page without its cache",
+   "keys": [
+    "Ctrl+Shift+R"
    ],
    "context": "preview",
    "status": "built"

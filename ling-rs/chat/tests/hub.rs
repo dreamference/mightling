@@ -283,7 +283,7 @@ async fn a_message_during_a_turn_steers_it_or_waits_for_the_next() {
     }
 }
 
-async fn open_approval(rig: &mut Rig, method: &str, params: Value) -> (u64, Vec<String>, String) {
+async fn open_approval(rig: &mut Rig, method: &str, params: Value) -> (String, Vec<String>, String) {
     rig.inbound.send(text(CHAT, "do something")).unwrap();
     settle().await;
     let mut params = params;
@@ -304,11 +304,11 @@ async fn a_command_approval_is_answered_with_the_protocols_payload() {
     assert_eq!(options, vec!["Approve once", "Decline"]);
     assert!(text.contains("rm -rf build") && text.contains("clean"));
     // An answer from another chat is ignored.
-    rig.inbound.send(Inbound::Answer { chat: "telegram:8".into(), approval: id, choice: 0 }).unwrap();
+    rig.inbound.send(Inbound::Answer { chat: "telegram:8".into(), approval: id.clone(), choice: 0 }).unwrap();
     settle().await;
     assert!(rig.log.responses.lock().unwrap().is_empty());
-    rig.inbound.send(Inbound::Answer { chat: CHAT.into(), approval: id, choice: 0 }).unwrap();
-    assert_eq!(next_settled(&mut rig.telegram).await, Outbound::ApprovalClosed { chat: CHAT.into(), id, outcome: "Approved.".into() });
+    rig.inbound.send(Inbound::Answer { chat: CHAT.into(), approval: id.clone(), choice: 0 }).unwrap();
+    assert_eq!(next_settled(&mut rig.telegram).await, Outbound::ApprovalClosed { chat: CHAT.into(), id: id.clone(), outcome: "Approved.".into() });
     assert_eq!(*rig.log.responses.lock().unwrap(), vec![(json!(55), json!({ "decision": "accept" }))]);
     // A second answer finds nothing open.
     rig.inbound.send(Inbound::Answer { chat: CHAT.into(), approval: id, choice: 0 }).unwrap();
@@ -622,5 +622,71 @@ async fn a_short_last_word_after_a_longer_answer_brings_the_answer_with_it() {
             break;
         }
     }
+}
+
+/// The stop button keeps what was written (MOONSHOT D9): sent as a message marked stopped, not
+/// left in a draft that vanishes.
+#[tokio::test]
+async fn a_stopped_answer_is_kept_as_a_message_marked_stopped() {
+    let mut rig = rig("keep", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "write a long poem")).unwrap();
+    settle().await;
+    rig.events.send(event("item/agentMessage/delta", json!({ "threadId": "th1", "turnId": "tu1", "itemId": "a", "delta": "Roses are red" }))).unwrap();
+    rig.inbound.send(Inbound::Stop { chat: CHAT.into() }).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("turn/interrupt").len(), 1);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "interrupted", "items": [] } }))).unwrap();
+    let mut outs = Vec::new();
+    loop {
+        let out = next_settled(&mut rig.telegram).await;
+        let message = matches!(out, Outbound::Message { .. });
+        outs.push(out);
+        if message {
+            break;
+        }
+    }
+    assert!(outs.contains(&Outbound::Message { chat: CHAT.into(), markdown: "Roses are red\n\n_(stopped)_".into() }), "{outs:?}");
+    settle().await;
+    assert!(rig.telegram.try_recv().is_err(), "no separate Stopped. line");
+}
+
+/// Topics (MOONSHOT §3.1): each topic is a thread of its own, named after its first message, with
+/// no gap rule inside it; /threads lists the topics.
+#[tokio::test]
+async fn each_topic_is_its_own_thread_and_is_named_after_its_first_message() {
+    let mut rig = rig("topics", default_script(), false, |config| {
+        config.settings.new_thread_after = Some(Duration::from_millis(1));
+    });
+    rig.inbound.send(text("telegram:7/5", "Which purifier is quieter?")).unwrap();
+    settle().await;
+    assert_eq!(next(&mut rig.telegram).await, Outbound::ThreadNamed { chat: "telegram:7/5".into(), name: "Which purifier is quieter?".into() });
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    rig.inbound.send(text("telegram:7/6", "A song")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th2", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    // Long after, inside the first topic: the same thread, no "New thread" line.
+    rig.inbound.send(text("telegram:7/5", "and the price?")).unwrap();
+    settle().await;
+    assert_eq!(rig.log.params("thread/start").len(), 2);
+    assert_eq!(rig.log.params("turn/start")[2]["threadId"], "th1");
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    while rig.telegram.try_recv().is_ok() {}
+    rig.inbound.send(text("telegram:7/5", "/threads")).unwrap();
+    let Outbound::Notice { text: list, .. } = next_settled(&mut rig.telegram).await else { panic!() };
+    assert!(list.contains("• A song") && list.contains("• Which purifier is quieter? (this topic)") && list.contains("open a topic"), "{list}");
+}
+
+/// A button press naming an approval the hub never issued is ignored (MOONSHOT §3.2).
+#[tokio::test]
+async fn a_forged_approval_nonce_is_ignored() {
+    let mut rig = rig("forged", default_script(), false, |_| {});
+    let (id, _, _) = open_approval(&mut rig, "item/commandExecution/requestApproval", json!({ "command": "ls" })).await;
+    assert_eq!(id.len(), 16);
+    assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    rig.inbound.send(Inbound::Answer { chat: CHAT.into(), approval: "0000000000000001".into(), choice: 0 }).unwrap();
+    settle().await;
+    assert!(rig.log.responses.lock().unwrap().is_empty());
+    assert!(rig.telegram.try_recv().is_err(), "not even a reply");
 }
 

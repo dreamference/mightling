@@ -86,7 +86,7 @@ export async function main(options: MainOptions): Promise<void> {
       // a click shows the thread.
       const notice = notices.take(message.payload, () => prefs.read());
       if (notice) {
-        notify(window, notice, () => {
+        notify(windows(), notice, () => {
           showView("work");
           if (notice.threadId) deliver({ channel: "link", payload: { cwd: null, thread: notice.threadId } });
         });
@@ -411,7 +411,7 @@ export async function main(options: MainOptions): Promise<void> {
         return null;
       }
       case "notify/test":
-        notify(own, { title: "Mightling", body: "Notifications reach you like this.", always: true }, () => own.show());
+        notify([own], { title: "Mightling", body: "Notifications reach you like this.", always: true }, () => own.show());
         return null;
       case "insights": {
         const home = codexHome();
@@ -600,7 +600,7 @@ export async function main(options: MainOptions): Promise<void> {
         previews.go(String(message.id), message.step === "forward" ? "forward" : "back");
         return null;
       case "preview/reload":
-        previews.reload(String(message.id));
+        previews.reload(String(message.id), message.fresh === true);
         return null;
       case "preview/place":
         previews.place(String(message.id), message.bounds, Boolean(message.visible));

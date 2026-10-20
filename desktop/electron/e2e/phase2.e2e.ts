@@ -178,6 +178,13 @@ test("6 review pane across threads: nothing of the last repository, and no Rever
     await expect(pane.locator(".review-status")).toHaveText("Reading this folder's repository…");
     await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py", "fetcher/backoff.py"], { timeout: 15_000 });
     await expect(pane.getByRole("button", { name: "Revert all" })).toBeVisible();
+    // A comment written for this thread (§9.3: it went with the pane to the next thread until 1.7.1).
+    const added = pane.locator(".code.add").first();
+    await added.hover();
+    await added.getByRole("button", { name: "Comment on this line" }).click();
+    await pane.getByRole("textbox", { name: "Comment" }).fill("Only for the flaky retry thread.");
+    await pane.getByRole("button", { name: "Add comment" }).click();
+    await expect(pane.getByRole("button", { name: "Send to the composer" })).toBeVisible();
     // Another thread, outside any repository: at once, nothing of fetcher's and nothing to press.
     await page.locator(".thread", { hasText: "Compress the hero" }).click();
     await expect(pane.locator(".review-status")).toHaveText("Reading this folder's repository…", { timeout: 1_000 });
@@ -185,6 +192,11 @@ test("6 review pane across threads: nothing of the last repository, and no Rever
     for (const name of ["Revert all", "Stage all", "Revert", "Stage", "Push"]) await expect(pane.getByRole("button", { name, exact: true })).toHaveCount(0);
     await expect(pane.getByRole("textbox", { name: "Commit message" })).toHaveCount(0);
     await expect(pane.locator(".review-status")).toHaveText("This folder is not in a git repository.", { timeout: 15_000 });
+    await expect(pane.getByText("Only for the flaky retry thread.")).toHaveCount(0);
+    // Back on the first thread: its comment is there again, as it was left.
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py", "fetcher/backoff.py"], { timeout: 15_000 });
+    await expect(pane.getByText("Only for the flaky retry thread.")).toBeVisible();
   } finally {
     await close();
   }
@@ -771,6 +783,27 @@ test("11 plugins and hooks: a skill turned off, a plugin installed from a local 
     await view.getByRole("button", { name: "Hooks" }).click();
     await expect(view).toContainText("ling ledger");
     await shoot("11-hooks.png");
+    // Item 15: a project's hook nobody trusted yet is skipped, and says so; Trust shows the command first.
+    await expect(view.getByRole("button", { name: "Hooks (1 to review)" })).toBeVisible();
+    const audit = view.locator("tr", { hasText: "./scripts/audit.sh" });
+    await expect(audit).toContainText("not trusted yet: skipped");
+    await expect(view.locator("tr", { hasText: "ling ledger" })).toContainText("managed");
+    let asked = "";
+    page.once("dialog", (dialog) => {
+      asked = dialog.message();
+      void dialog.accept();
+    });
+    await audit.getByRole("button", { name: "Trust ./scripts/audit.sh" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "config/batchWrite")?.params).toEqual({
+      edits: [{ keyPath: "hooks.state", value: { "/w/app/.codex/hooks.json:post_tool_use:0:0": { trusted_hash: "sha256:audit-v1" } }, mergeStrategy: "upsert" }],
+      filePath: null, expectedVersion: null, reloadUserConfig: true,
+    });
+    expect(asked).toContain("PostToolUse: ./scripts/audit.sh");
+    await expect(audit).not.toContainText("skipped");
+    await expect(audit).toContainText("on · trusted");
+    await expect(view.getByRole("button", { name: "Hooks", exact: true })).toBeVisible();
+    await audit.getByRole("button", { name: "Turn off" }).click();
+    await expect(audit).toContainText("off · trusted");
   } finally {
     await close();
   }

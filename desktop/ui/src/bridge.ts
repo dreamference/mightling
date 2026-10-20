@@ -504,7 +504,7 @@ export const preview = {
   open: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/open", id, url, thread }),
   navigate: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/navigate", id, url, thread }),
   go: (id: string, step: "back" | "forward") => send<null>({ type: "preview/go", id, step }),
-  reload: (id: string) => send<null>({ type: "preview/reload", id }),
+  reload: (id: string, fresh = false) => send<null>({ type: "preview/reload", id, fresh }),
   place: (id: string, bounds: { x: number; y: number; width: number; height: number }, visible: boolean) => send<null>({ type: "preview/place", id, bounds, visible }),
   pick: (id: string) => send<PickedElement | null>({ type: "preview/pick", id }),
   allowOnce: (id: string, site: string) => send<null>({ type: "preview/allow-once", id, site }),

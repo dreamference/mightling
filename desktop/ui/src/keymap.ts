@@ -95,11 +95,13 @@ interface Chord {
   key: string;
 }
 
-/** Parses one chord such as `Ctrl+Shift+P`, `Ctrl+=` or `Super+Shift+D`. */
+/** Parses one chord such as `Ctrl+Shift+P`, `Ctrl+=`, `Ctrl++` (the plus key itself, as the numeric keypad's) or `Super+Shift+D`. */
 export function parseChord(text: string): Chord {
-  const parts = text.split("+");
-  // `Ctrl++` would end in two empty parts; no binding here uses it.
-  const key = parts.pop() ?? "";
+  // `Ctrl++` ends in two empty parts: its key is `+`.
+  const plus = text === "+" || text.endsWith("++");
+  const parts = (plus ? text.slice(0, -1) : text).split("+");
+  const last = parts.pop() ?? "";
+  const key = plus ? "+" : last;
   const mods = new Set(parts.map((part) => part.toLowerCase()));
   return { ctrl: mods.has("ctrl"), shift: mods.has("shift"), alt: mods.has("alt"), meta: mods.has("super") || mods.has("meta"), key };
 }
@@ -122,8 +124,10 @@ export function matchesChord(event: KeyLike, binding: string, context?: KeyConte
   if (chord.ctrl !== ctrl || chord.alt !== event.altKey || chord.meta !== meta) return false;
   const target = chord.key.length === 1 ? chord.key.toUpperCase() : chord.key;
   if (keyName(event) === target) return chord.shift === event.shiftKey;
-  // Shifted punctuation (`Ctrl+Shift+.` arrives as `>`; `Ctrl+=` is typed as `Ctrl++` on many layouts).
-  return event.shiftKey && UNSHIFTED[event.key] === chord.key;
+  // Shifted punctuation: a binding that names Shift (`Ctrl+Shift+.` arrives as `>`, `Ctrl+Shift+[` as `{`),
+  // and `Ctrl+=`, which many layouts type as Ctrl+Shift+=. Any other unshifted binding is not also its
+  // shifted key, or Ctrl+Shift+[ (the previous thread) would also go back as Ctrl+[ does.
+  return event.shiftKey && UNSHIFTED[event.key] === chord.key && (chord.shift || chord.key === "=");
 }
 
 /** Whether `event` triggers `action` (its single-chord bindings; sequences are handled by their owner). */

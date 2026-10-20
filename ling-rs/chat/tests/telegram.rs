@@ -178,12 +178,12 @@ async fn buttons_and_the_stop_button_come_from_paired_users_only() {
     let (hub, mut inbound) = mpsc::unbounded_channel();
     let mut poller = Poller::new(api, scratch("buttons"), hub);
     let press = |user: i64| {
-        json!({ "update_id": 3, "callback_query": { "id": "cb1", "from": { "id": user }, "data": "a:4:1", "message": { "message_id": 9, "chat": { "id": 111, "type": "private" } } } })
+        json!({ "update_id": 3, "callback_query": { "id": "cb1", "from": { "id": user }, "data": "a:00ff4a:1", "message": { "message_id": 9, "chat": { "id": 111, "type": "private" } } } })
     };
     poller.handle(&press(999)).await;
     assert!(inbound.try_recv().is_err());
     poller.handle(&press(111)).await;
-    assert_eq!(inbound.try_recv().unwrap(), Inbound::Answer { chat: "telegram:111".into(), approval: 4, choice: 1 });
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Answer { chat: "telegram:111".into(), approval: "00ff4a".into(), choice: 1 });
     assert_eq!(stand.bodies("answerCallbackQuery").len(), 2);
     poller.handle(&json!({ "update_id": 4, "stopped_message_generation": { "chat": { "id": 111, "type": "private" }, "draft_id": 1 } })).await;
     assert_eq!(inbound.try_recv().unwrap(), Inbound::Stop { chat: "telegram:111".into() });
@@ -244,20 +244,50 @@ async fn answers_are_html_split_under_the_limit_with_a_plain_fallback() {
 }
 
 #[tokio::test]
-async fn approvals_are_buttons_and_closing_one_edits_it() {
+async fn approvals_are_coloured_buttons_and_closing_one_leaves_its_outcome_as_a_disabled_button() {
     let (stand, api) = stand_in(default_answer()).await;
     let renderer = Renderer::new(api);
     renderer
-        .render(Outbound::Approval { chat: "telegram:111".into(), id: 7, text: "Run `ls`?".into(), options: vec!["Approve once".into(), "Decline".into()] })
+        .render(Outbound::Approval { chat: "telegram:111".into(), id: "9a7f".into(), text: "Run `ls`?".into(), options: vec!["Approve once".into(), "Decline".into()] })
         .await;
     let sent = &stand.bodies("sendMessage")[0];
-    assert_eq!(sent["reply_markup"]["inline_keyboard"][0][0], json!({ "text": "Approve once", "callback_data": "a:7:0" }));
-    assert_eq!(sent["reply_markup"]["inline_keyboard"][1][0]["callback_data"], "a:7:1");
-    renderer.render(Outbound::ApprovalClosed { chat: "telegram:111".into(), id: 7, outcome: "Approved.".into() }).await;
+    assert_eq!(sent["reply_markup"]["inline_keyboard"][0][0], json!({ "text": "Approve once", "callback_data": "a:9a7f:0", "style": "success" }));
+    assert_eq!(sent["reply_markup"]["inline_keyboard"][1][0], json!({ "text": "Decline", "callback_data": "a:9a7f:1", "style": "danger" }));
+    renderer.render(Outbound::ApprovalClosed { chat: "telegram:111".into(), id: "9a7f".into(), outcome: "Approved.".into() }).await;
     let edit = &stand.bodies("editMessageText")[0];
     assert_eq!(edit["message_id"], 900);
     assert!(edit["text"].as_str().unwrap().ends_with("<i>Approved.</i>"));
-    assert!(edit.get("reply_markup").is_none());
+    assert_eq!(edit["reply_markup"], json!({ "inline_keyboard": [[{ "text": "Approved", "disabled": {} }]] }));
+}
+
+/// An older Bot API refuses the disabled button: the keyboard is removed instead, so the closed
+/// request cannot be pressed again.
+#[tokio::test]
+async fn a_bot_api_without_disabled_buttons_gets_no_keyboard() {
+    let old: Answer = Arc::new(|method, body, _| match method {
+        "editMessageText" if body["reply_markup"].to_string().contains("disabled") => {
+            (StatusCode::BAD_REQUEST, json!({ "ok": false, "error_code": 400, "description": "Bad Request: can't parse inline keyboard button" }))
+        }
+        _ => ok(json!({ "message_id": 900 })),
+    });
+    let (stand, api) = stand_in(old).await;
+    let renderer = Renderer::new(api);
+    renderer.render(Outbound::Approval { chat: "telegram:111".into(), id: "ab".into(), text: "Run?".into(), options: vec!["Approve once".into(), "Decline".into()] }).await;
+    renderer.render(Outbound::ApprovalClosed { chat: "telegram:111".into(), id: "ab".into(), outcome: "Declined: no answer in time.".into() }).await;
+    let edits = stand.bodies("editMessageText");
+    assert_eq!(edits.len(), 2);
+    assert_eq!(edits[1]["reply_markup"], json!({ "inline_keyboard": [] }));
+}
+
+/// A callback names a nonce, never a counter; anything else is ignored.
+#[test]
+fn approval_callbacks_carry_a_hex_nonce() {
+    use ling_chat::telegram::approval_callback;
+    assert_eq!(approval_callback("a:0123abcd0123abcd:1"), Some(("0123abcd0123abcd".to_string(), 1)));
+    assert_eq!(approval_callback("a:zz:1"), None);
+    assert_eq!(approval_callback("a::1"), None);
+    assert_eq!(approval_callback("a:ab:1:2"), None);
+    assert_eq!(approval_callback("b:ab:1"), None);
 }
 
 #[tokio::test]
@@ -300,7 +330,7 @@ async fn an_approval_whose_html_is_refused_still_shows_its_buttons() {
     let (stand, api) = stand_in(picky).await;
     let renderer = Renderer::new(api);
     renderer
-        .render(Outbound::Approval { chat: "telegram:111".into(), id: 8, text: "Run <this>?".into(), options: vec!["Approve once".into(), "Decline".into()] })
+        .render(Outbound::Approval { chat: "telegram:111".into(), id: "8".into(), text: "Run <this>?".into(), options: vec!["Approve once".into(), "Decline".into()] })
         .await;
     let sent = stand.bodies("sendMessage");
     assert_eq!(sent.len(), 2);
@@ -316,8 +346,109 @@ async fn telegram_starts_even_when_it_does_not_answer_yet() {
     let api = TelegramApi::new(&format!("http://127.0.0.1:{port}"), TOKEN);
     let (hub, _inbound) = mpsc::unbounded_channel();
     let (out_tx, out_rx) = mpsc::unbounded_channel();
-    let started = ling_chat::telegram::start(api, scratch("unreachable"), hub, out_rx).await;
+    let started = ling_chat::telegram::start(api, scratch("unreachable"), hub, out_rx, ling_chat::telegram::Options::default()).await;
     assert!(started.is_err());
     // The renderer is running all the same: its channel is still open.
     assert!(out_tx.send(Outbound::TurnEnded { chat: "telegram:111".into() }).is_ok());
+}
+
+fn topic_message(user: i64, topic: i64, text: &str) -> Value {
+    json!({ "update_id": 20, "message": { "message_id": 21, "from": { "id": user }, "chat": { "id": user, "type": "private" },
+        "message_thread_id": topic, "is_topic_message": true, "text": text } })
+}
+
+/// Topics as threads (MOONSHOT §3.1): a message in a topic is that topic's conversation; `/new`
+/// makes a topic; the stop button and a button press name their topic; service messages are not
+/// questions.
+#[tokio::test]
+async fn topics_are_conversations_of_their_own_and_new_makes_one() {
+    let answer: Answer = Arc::new(|method, _, _| match method {
+        "createForumTopic" => ok(json!({ "message_thread_id": 77, "name": "New thread", "icon_color": 7322096 })),
+        _ => ok(json!({ "message_id": 1 })),
+    });
+    let (stand, api) = stand_in(answer).await;
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, scratch("topics"), hub);
+    poller.topics = true;
+    poller.handle(&topic_message(111, 5, "about purifiers")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/5".into(), text: "about purifiers".into() });
+    // Outside any topic: the chat itself, as before.
+    poller.handle(&private_message(111, "hello")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111".into(), text: "hello".into() });
+    // /new: a topic, and a line in it; nothing for the hub until its first message.
+    poller.handle(&topic_message(111, 5, "/new")).await;
+    assert!(inbound.try_recv().is_err());
+    assert_eq!(stand.bodies("createForumTopic"), vec![json!({ "chat_id": 111, "name": "New thread" })]);
+    assert_eq!(stand.bodies("sendMessage").last().unwrap()["message_thread_id"], 77);
+    // A service message is not a question.
+    let created = json!({ "update_id": 22, "message": { "message_id": 23, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" },
+        "message_thread_id": 9, "is_topic_message": true, "forum_topic_created": { "name": "Mine", "icon_color": 7322096 } } });
+    poller.handle(&created).await;
+    assert!(inbound.try_recv().is_err());
+    poller.handle(&json!({ "update_id": 24, "stopped_message_generation": { "chat": { "id": 111, "type": "private" }, "message_thread_id": 5, "draft_id": 3 } })).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Stop { chat: "telegram:111/5".into() });
+    let press = json!({ "update_id": 25, "callback_query": { "id": "cb", "from": { "id": 111 }, "data": "a:beef:0",
+        "message": { "message_id": 30, "chat": { "id": 111, "type": "private" }, "message_thread_id": 5, "is_topic_message": true } } });
+    poller.handle(&press).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Answer { chat: "telegram:111/5".into(), approval: "beef".into(), choice: 0 });
+    // Without topics on the bot, /new is the hub's.
+    let mut plain = Poller::new(stand_in(default_answer()).await.1, scratch("notopics"), poller.hub.clone());
+    plain.handle(&private_message(111, "/new")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111".into(), text: "/new".into() });
+}
+
+#[tokio::test]
+async fn a_topics_output_goes_to_its_topic_and_its_thread_names_it() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let renderer = Renderer::new(api);
+    let key = "telegram:111/5".to_string();
+    renderer.render(Outbound::Draft { chat: key.clone(), text: "Part".into() }).await;
+    renderer.render(Outbound::Message { chat: key.clone(), markdown: "Done.".into() }).await;
+    renderer.render(Outbound::Notice { chat: key.clone(), text: "Stopped.".into() }).await;
+    renderer.render(Outbound::ThreadNamed { chat: key.clone(), name: "Two purifiers".into() }).await;
+    assert_eq!(stand.bodies("sendMessageDraft")[0]["message_thread_id"], 5);
+    assert_eq!(stand.bodies("sendMessageDraft")[0]["keep_on_stop"], true);
+    assert!(stand.bodies("sendMessage").iter().all(|m| m["message_thread_id"] == 5));
+    assert_eq!(stand.bodies("editForumTopic"), vec![json!({ "chat_id": 111, "message_thread_id": 5, "name": "Two purifiers" })]);
+    // Another topic of the same chat, within a second: its draft waits (one message a second per chat).
+    renderer.render(Outbound::Draft { chat: "telegram:111/6".into(), text: "Other".into() }).await;
+    assert_eq!(stand.bodies("sendMessageDraft").len(), 1);
+    // The chat without topics is never renamed.
+    renderer.render(Outbound::ThreadNamed { chat: "telegram:111".into(), name: "x".into() }).await;
+    assert_eq!(stand.bodies("editForumTopic").len(), 1);
+}
+
+/// Rich messages (MOONSHOT §3.2, `[chat] telegram_rich`): drafts and answers as blocks the bridge
+/// built, the thinking placeholder first; refused, the answer goes as HTML and nothing is lost.
+#[tokio::test]
+async fn rich_drafts_and_answers_are_blocks_and_a_refusal_falls_back_to_html() {
+    use ling_chat::telegram::Style;
+    let (stand, api) = stand_in(default_answer()).await;
+    let renderer = Renderer::styled(api, Style { rich: true });
+    let key = "telegram:111".to_string();
+    renderer.render(Outbound::Draft { chat: key.clone(), text: String::new() }).await;
+    renderer.render(Outbound::Draft { chat: key.clone(), text: "**Levoit** is quieter".into() }).await;
+    let drafts = stand.bodies("sendRichMessageDraft");
+    assert_eq!(drafts[0]["rich_message"]["blocks"], json!([{ "type": "thinking", "text": "Thinking…" }]));
+    assert_eq!(drafts[1]["rich_message"]["blocks"][0]["text"][0], json!({ "type": "bold", "text": "Levoit" }));
+    assert_eq!((drafts[1]["can_stop"].clone(), drafts[1]["keep_on_stop"].clone()), (json!(true), json!(true)));
+    renderer.render(Outbound::Message { chat: key.clone(), markdown: "| A | B |\n|---|---|\n| 1 | <b>2</b> |".into() }).await;
+    let sent = stand.bodies("sendRichMessage");
+    assert_eq!(sent[0]["rich_message"]["blocks"][0]["type"], "table");
+    assert!(stand.bodies("sendMessage").is_empty(), "no HTML copy");
+    assert!(!sent[0]["rich_message"].as_object().unwrap().contains_key("markdown") && !sent[0]["rich_message"].as_object().unwrap().contains_key("html"));
+
+    let refuse: Answer = Arc::new(|method, _, _| match method {
+        "sendRichMessage" | "sendRichMessageDraft" => (StatusCode::NOT_FOUND, json!({ "ok": false, "error_code": 404, "description": "Not Found" })),
+        _ => ok(json!({ "message_id": 1 })),
+    });
+    let (stand, api) = stand_in(refuse).await;
+    let renderer = Renderer::styled(api, Style { rich: true });
+    renderer.render(Outbound::Message { chat: key.clone(), markdown: "**x**".into() }).await;
+    assert_eq!(stand.bodies("sendMessage")[0]["text"], "<b>x</b>");
+    // Refused once for good (an older Bot API): drafts go plain too.
+    renderer.render(Outbound::Draft { chat: key.clone(), text: "y".into() }).await;
+    assert_eq!(stand.bodies("sendRichMessage").len(), 1);
+    assert!(stand.bodies("sendRichMessageDraft").is_empty());
+    assert_eq!(stand.bodies("sendMessageDraft").len(), 1);
 }
