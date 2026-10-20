@@ -174,7 +174,7 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
     let (frame, reply) = next_frame(&mut app_server).await;
     assert_eq!(frame["method"], "thread/start");
     // The policy, not the bridge, turned `prompt: ask` into the instructions and an Ask folder.
-    assert_eq!(frame["params"]["baseInstructions"], "COMPOSED:ask");
+    assert_eq!(frame["params"]["baseInstructions"], "COMPOSED:chat");
     assert!(frame["params"]["cwd"].as_str().unwrap().contains("/ask/"));
     reply.send(json!({ "id": frame["id"], "result": { "thread": { "id": "thr-1" } } })).unwrap();
     let (frame, reply) = next_frame(&mut app_server).await;
