@@ -1,0 +1,34 @@
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -545,2 +545,3 @@
+             }
++            SlashCommand::Adapter => { let (l, m) = ling_launcher::adapter::command(self.thread_id, self.current_model(), ""); self.add_plain_history_lines(l.into_iter().map(ratatui::text::Line::from).collect()); if let Some(m) = m { self.app_event_tx.send(AppEvent::UpdateModel(m)); } }
+             SlashCommand::DebugConfig => {
+@@ -779,2 +780,3 @@
+             }
++            SlashCommand::Adapter => { let (l, m) = ling_launcher::adapter::command(self.thread_id, self.current_model(), trimmed); self.add_plain_history_lines(l.into_iter().map(ratatui::text::Line::from).collect()); if let Some(m) = m { self.app_event_tx.send(AppEvent::UpdateModel(m)); } }
+             SlashCommand::Cd => self.request_working_directory_change(trimmed),
+@@ -1282,2 +1284,3 @@
+             | SlashCommand::Node
++            | SlashCommand::Adapter
+             | SlashCommand::Pets => QueueDrain::Stop,
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -16,2 +16,3 @@
+     Cavemode,
++    Adapter,
+     Ide,
+@@ -136,2 +137,3 @@
+             SlashCommand::Cavemode => "set how terse Mightling's answers are",
++            SlashCommand::Adapter => "show or switch this session's adapter",
+             SlashCommand::Ide => {
+@@ -196,2 +198,3 @@
+                 | SlashCommand::Cavemode
++                | SlashCommand::Adapter
+                 | SlashCommand::Pets
+@@ -292,2 +295,3 @@
+             | SlashCommand::Cavemode
++            | SlashCommand::Adapter
+             | SlashCommand::DebugConfig
