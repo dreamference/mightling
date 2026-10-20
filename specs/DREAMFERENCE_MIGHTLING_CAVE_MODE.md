@@ -1,7 +1,7 @@
 # Mightling Cave Mode — `/cavemode`
 
 **Status:** implemented (Phase 1) on 2026-10-01: `ling-rs/src/cave.rs`, the level texts in `ling-rs/cave/`, patch `0017-cave-mode`, `DreamferenceConfig.mightling_cave_mode`, and the tests of §8. The three Phase 1 checks ran against the live model (§10). The measurements in §1 were taken for it on 2026-09-30 and 2026-10-01; the §9 proposals that change a level's text are not in, because each needs a Phase 0 re-run first.
-**Default under review (2026-10-20):** §11 studies which level each surface should start at and recommends `lite` for Ask and the phone, `full` for the TUI, never `ultra`; nothing is changed until the owner decides.
+**Defaults changed 2026-10-20 (§11):** the built-in default is `lite` (Ask in the app and `ling web`, the phone bridges, `ling exec`, Night Shift); the TUI starts at `full`; SWE-bench pins `ultra` itself. `ultra` is no longer a default anywhere a person reads. The level is now also set from the app's and `ling web`'s Settings › General, `/cavemode` in the app's composer, and `/cavemode` in Signal, Telegram and Matrix (§11.7).
 **Goal:** `ling` answers tersely by default, so the model spends its slowest tokens (prose, 25.5 tok/s) and the user's reading time only on what the user needs. `/cavemode` switches the level at any moment, mid-turn included.
 **Builds on:**
 - Codex's World State sections and its extension registry: a `ContextContributor` can add a section that reaches the model's history only when its value changes, as the `git-attribution` extension does (`codex-rs/ext/git-attribution/src/world_state.rs`);
@@ -84,7 +84,7 @@ Without a reminder, ultra's three-sentence cap was gone by turn 4 of the first s
 3. **Numbers hold, adjectives do not.** "At most three sentences" is followed; "short", "tight", "about five sentences" barely are. Permissive wording ("articles … may go", v2) did less than directives with an example (v1, v3).
 4. **A level fades over a session unless it is repeated.** One fragment at the start of the conversation is not enough for Qwen3.8 past a few turns. A ~45-token reminder per user turn is, for a level with a hard cap; for `full`, whose budget is soft, it made no measurable difference (§5.2).
 5. **Where Codex's voice sits makes no difference worth its cost.** Cutting the voice out of the system prompt (`B`) measured the same as appending the level to it, and moving the voice into a fragment changed behaviour even at `off`. The system prompt stays untouched (§5.1).
-6. **The default is `ultra`**, by the rule written before the confirmation batch: ultra if it passes at least 35 of 36 checks and its reminded session's turns 5–8 sum to under half of `off`'s, otherwise full. Both held, the second narrowly: 35 of 36, and 740 against 1,517 tokens (0.49). Phase 2 (§7) is where real sessions confirm or reverse it.
+6. **The default is `ultra`**, by the rule written before the confirmation batch: ultra if it passes at least 35 of 36 checks and its reminded session's turns 5–8 sum to under half of `off`'s, otherwise full. Both held, the second narrowly: 35 of 36, and 740 against 1,517 tokens (0.49). Phase 2 (§7) is where real sessions confirm or reverse it. **Reversed on 2026-10-20** for every surface a person reads (§11): the rule measured only code questions at the default prompt.
 
 
 ### 1.3 Re-run of 2026-10-02: ultra v5 (both fixes), rejected
@@ -117,11 +117,11 @@ A fourth set measured v5's text with v4's reminder (`drift7`, three sessions wit
 | Level | What the user gets | Measured on questions (§1.1) |
 |---|---|---|
 | `off` | Codex's own voice, exactly as without this feature: no fragment is ever sent | — |
-| `lite` | Full sentences. Answer first, every question answered, one option, no filler, recaps or closing offers, no code that was not asked for | answers −10–20% |
-| `full` | lite, plus: articles and filler dropped, fragments allowed, about five sentences of prose outside code | answers −25–35%; fades over a session |
-| `ultra` (default) | full, plus: **at most three sentences of prose outside code and one code block**, unless the user asks for more; after a change, only what changed and how it was checked | answers −41–58%, wall −26–59%; holds over a session with the reminder |
+| `lite` (default) | Full sentences. Answer first, every question answered, one option, no filler, recaps or closing offers, no code that was not asked for | answers −10–20% (§1.1); −51% on Ask (§11.3) |
+| `full` (the TUI's default) | lite, plus: articles and filler dropped, fragments allowed, about five sentences of prose outside code | answers −25–35%; fades over a session |
+| `ultra` | full, plus: **at most three sentences of prose outside code and one code block**, unless the user asks for more; after a change, only what changed and how it was checked | answers −41–58%, wall −26–59%; holds over a session with the reminder |
 
-`lite` and `full` are kept as measured, documented fallbacks for users who want more room, not as recommendations. Every level other than `off` carries the exemptions of §4. The texts are in Appendix A, verbatim; each is about 270–430 tokens, and each has a one-line reminder of about 45 tokens.
+Until 2026-10-20 `ultra` was the default and `lite` and `full` were fallbacks; §11 says why that was reversed. Every level other than `off` carries the exemptions of §4. The texts are in Appendix A, verbatim; each is about 270–430 tokens, and each has a one-line reminder of about 45 tokens.
 
 What the same question gets (the traceback task, batch 3, rep 9; real outputs, quoted or described):
 
@@ -139,26 +139,27 @@ And the irreversible-action question (batch 3, rep 8), where every level must st
 
 | Form | Effect |
 |---|---|
-| `/cavemode` | Shows the level in force and where it came from (this session, `DREAMFERENCE_MIGHTLING_CAVE_MODE`, the TOML file, or the built-in default), then the four levels with one line each |
+| `/cavemode` | Shows the level in force and where it came from (this session, `DREAMFERENCE_MIGHTLING_CAVE_MODE`, the TOML file, the terminal's default, or the built-in default), then the four levels with one line each |
 | `/cavemode <level>` | Sets `off`, `lite`, `full` or `ultra` for this session. Takes effect at the next model request, mid-turn included |
 | `/cavemode default <level>` | Also writes `mightling_cave_mode = "<level>"` to the configuration file (§5.3), so new sessions start at it. If `DREAMFERENCE_MIGHTLING_CAVE_MODE` is set, says that the variable still wins |
+| `/cavemode default built-in` | Removes `mightling_cave_mode` from the file, so every surface starts at its own default again (`lite`, the TUI `full`); in a session, the session follows them too |
 | anything else | Prints the usage line. Nothing changes |
 
 What `/cavemode` prints:
 
 ```
-Cave mode: ultra (default)
-  off    Codex's own voice
+Cave mode: full (the terminal's default)
+  off    the normal voice; no cave rules are sent
   lite   full sentences; answer first, one option, no filler
-  full   terse; about five sentences outside code
-  ultra  at most three sentences outside code       ← in force
-More room: /cavemode full (this session) or /cavemode default full (new sessions).
+  full   terse; about five sentences outside code   ← in force
+  ultra  at most three sentences outside code
+Change it: /cavemode <level> (this session) or /cavemode default <level> (new sessions, every surface).
 ```
 
 **Rules:**
 - **The level belongs to the session.** `ling resume` keeps it; a new session, a fork, a side conversation and a subagent start at the default. (A subagent's text goes to the parent model, not to the user, and §4 already keeps text another model reads in normal prose.)
 - **The model cannot change it.** "Explain in detail" gets a full answer to that question (every level says so) but leaves the level alone. Only `/cavemode` and configuration change it.
-- **`ling exec` and scripts** take the default, or `DREAMFERENCE_MIGHTLING_CAVE_MODE=off ling exec …` for one run.
+- **`ling exec` and scripts** take the built-in default (`lite`), or `DREAMFERENCE_MIGHTLING_CAVE_MODE=off ling exec …` for one run. Outside a session, `ling cavemode [--thread <id>] [--json] [<level> | default <level|built-in>]` shows or sets the same thing `/cavemode` does.
 - **Only the terminal agent.** The web chat (Onyx, retired in 1.7.0) had its own assistant prompt (`MIGHTLING_ASSISTANT_INSTRUCTIONS`) and was not covered here; Ask threads use the `ask` prompt. The level still applies to them: the section is registered in the app server, so Ask threads, the app and the phone bridges all get the built-in default (§11.1).
 
 ---
@@ -245,9 +246,9 @@ Resolved before every model request, first match wins:
 1. **This session:** `$CODEX_HOME/cave_mode/<thread-id>`, a file holding the level name, written by `/cavemode <level>`. A file keyed by thread id survives `ling resume` and needs no channel between the TUI and the extension, which may run in another process (`/daemon`).
 2. **`DREAMFERENCE_MIGHTLING_CAVE_MODE`.**
 3. **`mightling_cave_mode`** in the TOML file the launcher already reads (`DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`; `config_file()` in `ling-rs/src/lib.rs`). `/cavemode default` writes here with `toml_edit`, creating the user-level file if there is none.
-4. **`DEFAULT_MIGHTLING_CAVE_MODE`**, `"ultra"` (§1.2, item 6).
+4. **The surface's default:** `TUI_DEFAULT`, `full`, in a process the launcher opened the TUI in (`ling`, `ling resume`, `ling fork`; `cave::set_tui`, a static, so nothing the TUI spawns inherits it); otherwise **`DEFAULT_MIGHTLING_CAVE_MODE`**, `"lite"` (§11.5). Until 2026-10-20 this tier was `"ultra"` everywhere (§1.2, item 6).
 
-An invalid value at any tier is skipped, and `/cavemode` names it and where it was. The Python side mirrors tiers 2–4 exactly as it does `mightling_gmail`: `DreamferenceConfig.mightling_cave_mode`, validated against the four names, written by `save_config()` only when it differs from the default. Session files older than 30 days are deleted by the launcher at start.
+An invalid value at any tier is skipped, and `/cavemode` names it and where it was. The Python side mirrors tiers 2–4 exactly as it does `mightling_gmail`: `DreamferenceConfig.mightling_cave_mode`, validated against the four names, written by `save_config()` only when it differs from the default. The TUI's own default has no Python side. Session files older than 30 days are deleted by the launcher at start.
 
 ### 5.4 The slash command
 
@@ -355,7 +356,7 @@ Not checked: how Qwen3.8's chat template renders the per-turn developer message 
 
 ## 11. Which level should be the default (study of 2026-10-20)
 
-**Why.** An Ask thread on the phone (Signal) gave an answer that made no sense, and the developer message before that turn was ultra's reminder: "Cave mode ultra still applies: answer every question first; at most three sentences of prose outside code and one code block; no alternatives, recaps or closing offers." The owner's position: ultra should not be the default. This section works out what the default should be, surface by surface. **Nothing is changed by it**: the defaults in `ling-rs/src/cave.rs` and `dreamference/config/dreamference_config.py` are still `ultra`.
+**Why.** An Ask thread on the phone (Signal) gave an answer that made no sense, and the developer message before that turn was ultra's reminder: "Cave mode ultra still applies: answer every question first; at most three sentences of prose outside code and one code block; no alternatives, recaps or closing offers." The owner's position: ultra should not be the default. This section works out what the default should be, surface by surface. The owner took §11.5's recommendation the same day; §11.7 is what was built.
 
 ### 11.1 Where each surface gets its level today
 
@@ -441,7 +442,7 @@ Neither was measured here. Two pieces of evidence bear on them:
 - **The narration rule matters for unattended runs.** In the PROMPT spec's pilot ([MIGHTLING_PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md) §6.4), `high-swe` at `off` wrote four to six times as many words before its last edit as at `ultra`, and timed out on both Django instances. That is two instances. "Between tool calls, write nothing unless you need a decision, must warn, or the plan changed" is in `lite` and `full` as well as `ultra`, so leaving `ultra` does not give up that rule.
 - **SWE-bench inherits the product default without saying so.** `swe_bench_runner.py` records `config.mightling_cave_mode` in the manifest and sets it in the container. Changing `DEFAULT_MIGHTLING_CAVE_MODE` would therefore change every later night's arms, and those nights would no longer be comparable with the earlier ones: all 50 manifests on gx10-9428 record `ultra`.
 
-### 11.5 Recommendation (for the owner to decide; nothing is changed)
+### 11.5 Recommendation (decided 2026-10-20, built: §11.7)
 
 | Surface | Default | Why |
 |---|---|---|
@@ -468,6 +469,16 @@ Separately, **the phone and the app have no way to change the level**. A `/cavem
 - **A sandboxed run restarted a host container.** When SearXNG cannot reach any engine, `ling-search` prints "restart the container: docker restart dreamference-searxng". A `workspace-write` `ling exec` in this study ran exactly that, because the Docker socket is reachable from the sandbox. A restart does not lift an upstream rate limit, and the hint invites the agent to touch the host.
 - **`ling chat` (Telegram, Matrix) sends only `final_answer` items** (`hub.rs`, `Turn::answer`). When the model writes its answer as commentary before a tool call and its final reply only refers back to it ("the answer above stands"), the phone gets the reference without the answer. That happened in 2 of 56 Ask turns here, at `lite` and at `full`. Signal joins every agent message's deltas, so it keeps the answer.
 - **Two turns ended badly at levels where it was not the level's doing.** One `off` run ended on "Let me try a more targeted search" with no answer and was re-run. One `ultra` answer stopped mid-sentence with `task_complete`.
+
+### 11.7 What was built (2026-10-20)
+
+- **The defaults.** `DEFAULT_MIGHTLING_CAVE_MODE` is `lite` in `ling-rs/src/cave.rs` and `dreamference/config/dreamference_config.py` (a test keeps them equal and pins both values). `TUI_DEFAULT` is `full`: the launcher calls `cave::set_tui` when it opens the TUI, and tier 4 of §5.3 picks it there. Every configured tier still wins over both. Night Shift sets nothing and gets `lite`.
+- **SWE-bench** records `SWE_BENCH_CAVE_MODE` (`ultra`, `swe_bench_settings.py`) in the manifest and sets it in the container, whatever the product default or the user's variable says; a resumed run keeps its manifest's level.
+- **`ling cavemode`**, a launcher subcommand: `/cavemode`'s forms from outside a session, `--thread <id>` for one session, `--json` for the level in force with the configured one and both defaults. Listed in Night Shift's non-interactive subcommands, so the session probe does not count it. Everything below calls it, so the tiers live in one place.
+- **Settings › General › How long answers are**, in the app and in `ling web`: Built-in (`lite` here and in Ask, `full` in the terminal) or one of the four levels, written to the configuration as `/cavemode default` does. In the app the main process runs `ling cavemode` (`desktop/electron/src/cavemode.ts`, `cave/status` and `cave/set`); in a browser `ling web`'s `/api/cavemode` does (`ling-rs/web/src/cave.rs`).
+- **`/cavemode` in the app's composer**: the level in force for the thread, `/cavemode <level>` for this thread, `/cavemode default <level|built-in>` for new ones.
+- **`/cavemode` on the phone** (Signal, Telegram, Matrix): the same forms for the conversation's current thread, through `ling web`'s `/api/cavemode`, which passes on only `/cavemode`'s own words (at most two, each a level, `default` or `built-in`) and answers with what the terminal's `/cavemode` prints. A thread the silence rule replaces starts at the default again.
+- **Not built:** the reminder skip of §1.3 and the file rule, both still open; the TUI's `full` was not re-measured over a session at its shipped reminder.
 
 ## Sources
 

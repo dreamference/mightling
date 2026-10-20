@@ -19,10 +19,10 @@ def test_the_level_resolves_through_the_four_tiers(tmp_path, monkeypatch):
     monkeypatch.delenv("DREAMFERENCE_MIGHTLING_CAVE_MODE", raising=False)
     cfg_file = tmp_path / "tiers.yaml"
     cfg_file.write_text("vllm_host: http://localhost:8000\n")
-    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "ultra"
-
-    cfg_file.write_text("mightling_cave_mode: lite\n")
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "lite"
+
+    cfg_file.write_text("mightling_cave_mode: ultra\n")
+    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "ultra"
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_CAVE_MODE", "FULL")
     assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "full"
     assert DreamferenceConfig(config_file=str(cfg_file), mightling_cave_mode="off").mightling_cave_mode == "off"
@@ -31,13 +31,13 @@ def test_the_level_resolves_through_the_four_tiers(tmp_path, monkeypatch):
 def test_an_invalid_value_is_skipped_not_adopted(tmp_path, monkeypatch):
     # As in the launcher: a typo in one tier falls through to the next instead of becoming the level.
     cfg_file = tmp_path / "bad.yaml"
-    cfg_file.write_text("mightling_cave_mode: lite\n")
+    cfg_file.write_text("mightling_cave_mode: full\n")
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_CAVE_MODE", "loud")
-    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "lite"
-    assert DreamferenceConfig(config_file=str(cfg_file), mightling_cave_mode="max").mightling_cave_mode == "lite"
+    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "full"
+    assert DreamferenceConfig(config_file=str(cfg_file), mightling_cave_mode="max").mightling_cave_mode == "full"
     cfg_file.write_text("mightling_cave_mode: true\n")
     monkeypatch.delenv("DREAMFERENCE_MIGHTLING_CAVE_MODE")
-    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "ultra"
+    assert DreamferenceConfig(config_file=str(cfg_file)).mightling_cave_mode == "lite"
 
 
 def test_save_config_writes_only_a_non_default_level(tmp_path, monkeypatch):
@@ -58,6 +58,12 @@ def test_the_default_matches_the_launcher():
     assert match, "DEFAULT_MIGHTLING_CAVE_MODE not found in ling-rs/src/cave.rs"
     assert match.group(1) == cfg_mod.DEFAULT_MIGHTLING_CAVE_MODE
     assert cfg_mod.DEFAULT_MIGHTLING_CAVE_MODE in cfg_mod.MIGHTLING_CAVE_MODE_LEVELS
+
+
+def test_the_defaults_are_the_ones_spec_11_recommends():
+    # Spec §11.5, decided 2026-10-20: never `ultra` as a default; the TUI starts at `full`.
+    assert cfg_mod.DEFAULT_MIGHTLING_CAVE_MODE == "lite"
+    assert re.search(r"pub const TUI_DEFAULT: Level = Level::Full;", CAVE_RS.read_text())
 
 
 @pytest.mark.parametrize("name", ["lite", "full", "ultra"])

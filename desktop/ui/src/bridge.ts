@@ -343,6 +343,30 @@ export const docs = {
   remove: (name: string) => docsCall<unknown>({ type: "docs/remove", name }, "POST", "/api/docs/remove", { name }),
   reindex: (name: string) => docsCall<unknown>({ type: "docs/reindex", name }, "POST", "/api/docs/reindex", { name }),
 };
+/** `ling cavemode --json`: the level in force, where it came from, the configured one and the defaults. */
+export interface CaveMode {
+  level: string;
+  source: string;
+  configured: string | null;
+  default: string;
+  tuiDefault: string;
+  levels: { name: string; summary: string }[];
+}
+
+/**
+ * How terse answers are (specs/DREAMFERENCE_MIGHTLING_CAVE_MODE.md §11.5), through `ling cavemode`: in the
+ * app by the main process, in a browser through `ling web`'s `/api/cavemode`. `set` with a thread sets
+ * that thread's level; without, the level new sessions start at (`built-in` drops the configured one).
+ */
+export const cavemode = {
+  status: (thread: string | null) =>
+    docsCall<CaveMode>({ type: "cave/status", thread }, "GET", thread ? `/api/cavemode?thread=${encodeURIComponent(thread)}` : "/api/cavemode"),
+  set: async (level: string, thread: string | null): Promise<string> => {
+    if (host() === "electron") return send<string>({ type: "cave/set", level, thread });
+    const answer = await docsCall<{ said: string }>({}, "POST", "/api/cavemode", thread ? { level, thread } : { level });
+    return answer.said;
+  },
+};
 /** Settings › Pets: a picture for the pet; null when the dialog was cancelled. */
 export const chooseImage = () => send<string | null>({ type: "dialog/open-image" });
 

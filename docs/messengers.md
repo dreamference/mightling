@@ -79,7 +79,8 @@ Setup lists what it will change and asks for your password once (sudo). It then 
   so this applies to your own notes as well as to Mightling's replies.
 
 When setup has finished, open Note to Self and write `/help`. The commands are `/new` (start a new
-thread), `/threads`, `/use N`, `/stop` and `/status`. When Mightling asks to run something, you
+thread), `/threads`, `/use N`, `/stop`, `/status` and `/cavemode` (how terse the answers are: `/cavemode full` for
+this thread, `/cavemode default lite` for new ones). When Mightling asks to run something, you
 answer `YES` or `NO`.
 
 **What linking means.** A linked device can read every message your account receives from now on,
