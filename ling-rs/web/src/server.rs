@@ -231,6 +231,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/docs/{action}", post(docs_change))
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
+        .route("/api/chat/settings", get(chat_settings))
         .route("/login", get(login))
         .route("/pair", get(pair_page).post(pair))
         .route("/pair.css", get(pair_css))
@@ -459,6 +460,12 @@ async fn websocket(State(server): State<Arc<Server>>, upgrade: WebSocketUpgrade)
 async fn airgapped(State(_server): State<Arc<Server>>) -> Response {
     let resolved = user_airgap_level();
     json_response(StatusCode::OK, json!({ "level": resolved.level.name(), "source": resolved.source.label() }))
+}
+
+/// How the phone bridges behave, from the `[chat]` table of the user's configuration
+/// (chat_settings.rs), for the Signal bridge, which cannot read the home folder.
+async fn chat_settings(State(_server): State<Arc<Server>>) -> Response {
+    json_response(StatusCode::OK, crate::chat_settings::ChatSettings::load().to_json())
 }
 
 /// The air-gap level without a session: `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of
