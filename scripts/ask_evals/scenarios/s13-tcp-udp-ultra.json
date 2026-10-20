@@ -1,0 +1,42 @@
+{
+  "id": "s13-tcp-udp-ultra",
+  "family": "S13",
+  "failure": [
+    6
+  ],
+  "turns": [
+    {
+      "text": "What's the difference between TCP and UDP? Give one typical use for each."
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "connection",
+        "handshake",
+        "reliab"
+      ],
+      [
+        "stream",
+        "video",
+        "dns",
+        "gam",
+        "voip",
+        "voice"
+      ]
+    ],
+    "max_tool_calls": 2
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  },
+  "cave": "ultra"
+}

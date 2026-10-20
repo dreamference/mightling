@@ -1,0 +1,40 @@
+{
+  "id": "s13-dict-iteration-off",
+  "family": "S13",
+  "failure": [
+    6
+  ],
+  "turns": [
+    {
+      "text": "Why does my Python loop raise 'RuntimeError: dictionary changed size during iteration', and how do I fix it?"
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "iterat"
+      ],
+      [
+        "list(",
+        "copy",
+        ".keys()",
+        "dict(",
+        "comprehension",
+        "items())"
+      ]
+    ],
+    "max_tool_calls": 2
+  },
+  "web": {
+    "search": {
+      "fault": "captcha"
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  },
+  "cave": "off"
+}

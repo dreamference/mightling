@@ -73,6 +73,16 @@ CHOOSER_SEED=${CHOOSER_SEED:-20261013}
 # The harness commit the night runs: origin/main unless REF pins one (a night is pinned so that work
 # landing on main during the day does not change the harness between two arms or two nights).
 REF=${REF:-origin/main}
+# The assistant suite's slot before the arms (specs/DREAMFERENCE_MIGHTLING_ASSISTANT_EVALS.md §6,
+# the owner's D2): `scripts/ask_evals/run.py` in its jail, holding the model gate, reaching the
+# engine on its loopback port. Off until the owner switches it on after the first clean runs.
+# Its result never fails the night: it is a measurement beside the arms, not a gate on them.
+ASK_EVALS=${ASK_EVALS:-0}
+ASK_EVALS_REPS=${ASK_EVALS_REPS:-1}
+ASK_EVALS_LIMIT=${ASK_EVALS_LIMIT:-90m}
+ASK_EVALS_PORT=${ASK_EVALS_PORT:-18000}
+# The installed binary by its real path, not PATH's link, so a rebuild changes nothing mid-slot.
+ASK_EVALS_LING=${ASK_EVALS_LING:-$HOME/.local/share/dreamference/mightling/bin/ling}
 
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
@@ -349,12 +359,22 @@ best_of_run() {
     log "all done; reports in $D"
 }
 
+ask_evals_slot() {
+    log "assistant evals: $ASK_EVALS_REPS repetition(s), at most $ASK_EVALS_LIMIT"
+    timeout "$ASK_EVALS_LIMIT" "$PY" "$WT/scripts/ask_evals/run.py" --reps "$(seq -s, 1 "$ASK_EVALS_REPS")" \
+        --model-port "$ASK_EVALS_PORT" --ling "$ASK_EVALS_LING" --out "$D/ask-evals.jsonl" \
+        --runs "$HOME/.cache/dreamference/ask-evals/runs/$PREFIX" \
+        --hold-gate "night $NIGHT, assistant evals" > "$D/ask-evals.txt" 2>&1
+    log "assistant evals finished ($?); summary in $D/ask-evals.txt"
+}
+
 run() {
     export PYTHONPATH="$WT"
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
     log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
+    [ "$ASK_EVALS" = 1 ] && ask_evals_slot
     if [ "$BEST_OF" -gt 1 ]; then
         best_of_run
         return
