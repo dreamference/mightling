@@ -619,3 +619,23 @@ The methods Phase 3 adds to `ling-rs/web/policy.json` (items 1 to 3 and 8, one c
 - The vendor's app bundle as read on 2026-10-03 (DESKTOP §1): spawn line, `clientInfo`, bundled extras, telemetry.
 - A public description of the vendor's design language (`nexu-io/open-design`, `design-systems/openai/DESIGN.md`): fonts, weights, radii, spacing, motion. Colours were read and not taken.
 - Mightling: `docs/dev/desktop.md`, `ling-rs/web/policy.json`, `desktop/ui/src/styles.css`, `desktop/electron/src/`, DESKTOP, DESKTOP_ELECTRON and ASK specs.
+
+---
+
+## 9. The parity study of 2026-10-20
+
+> **Status:** study of 2026-10-20 (owner: "study the Codex desktop app … and make Mightling's desktop app as close to it as possible"). §9.1 says what the vendor ships today, §9.2 how it was studied, §9.3 the gaps per screen ranked by user impact; the gaps to build are items 13 and on in §4.5, each with acceptance criteria.
+
+### 9.1 What the vendor ships today
+
+- **There is no standalone Codex desktop app any more.** The Codex app launched on macOS on 2026-02-02 and on Windows (native PowerShell and sandbox, or WSL) on 2026-03-04; on 2026-07-09 it was merged into the vendor's chat desktop app, where Codex is a view beside Chat and Work, with its own history (whats-new, "Use Codex in the ChatGPT desktop app", https://learn.chatgpt.com/docs/whats-new). Its deep links keep the `codex://` scheme "for compatibility" (https://learn.chatgpt.com/docs/reference/commands#deep-links).
+- **Platforms:** macOS 14 or later, Apple silicon or Intel (the vendor's help centre, https://help.openai.com/en/articles/9395554); Windows x64 and ARM64 (https://learn.chatgpt.com/docs/windows/windows-app); Linux in preview since 2026-08-11: `.deb` and `.rpm` for x64 and ARM64, an Arch script, on Ubuntu 24.04 and 26.04, Debian 13, Fedora 43 and 44, installed from a signed vendor package repository, Computer Use not yet available, native Wayland experimental (https://learn.chatgpt.com/docs/linux/linux-app).
+- **Versions:** the desktop app's release notes in the vendor's changelog (https://learn.chatgpt.com/docs/changelog) run 26.928 (2026-09-29), 26.930 (2026-10-01), 26.1002 (2026-10-07) and 26.1007 (2026-10-08), the newest on 2026-10-20; composer predictions shipped on 2026-10-09 as a beta for one paid plan. The CLI the app embeds is at 0.163.0 (2026-10-15); Mightling's `ling` is pinned at 0.158.0.
+- **Since the inventory of 2026-10-14** (§2), the desktop app's own notes add: moving several selected chats to a project at once (26.930); **Remove from section** no longer pins the chat, and the Recent section stays folded when switching chats (26.1002); recovery guidance when a tool call needs approval but the chat's permissions forbid asking, with a link to those permissions (26.1007); queued messages no longer stuck on Sending and Steer restored in secondary windows (26.1007); earlier answers kept visible while new instructions are sent during a task (26.928).
+
+### 9.2 Method, and what could be observed
+
+**Clean room.** Only observable behaviour and public material were used: the vendor's documentation (the Markdown twins of `learn.chatgpt.com/docs/…` listed in §8 and below), its changelog and what's-new pages, its help centre, and the titles and published descriptions of its official videos. Nothing was downloaded and unpacked, decompiled or read from the vendor's app bundle, and none of its icons, images, fonts or strings were taken; every item below is re-implemented from that description. (The 2026-10-03 reading of the bundle that §8 and DESKTOP §1 record is older than this rule; nothing in §9 or §4.5 rests on it.)
+
+**Running the app was not possible within the rules.** The Mac mini runs macOS 12.3, below the app's macOS 14 minimum. The Linux preview would install on this GB10 (arm64) and on the MSI desktop (Ubuntu 26.04, x64), but the app asks for a sign-in with the vendor's account before any surface opens (https://learn.chatgpt.com/docs/linux/linux-app: "then sign in with your ChatGPT account to work with projects, local files, and Codex"), and its installer adds the vendor's package repository to the system; signing in is outside this study. So this study is documentation, release notes and official media only.
+
