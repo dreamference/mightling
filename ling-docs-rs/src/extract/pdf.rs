@@ -241,9 +241,19 @@ impl Pdf {
     /// Every page's text, or the first `max_pages`. Encrypted, damaged or empty files are errors
     /// with a short reason.
     pub fn extract(&self, path: &Path, max_pages: Option<u32>) -> Result<PdfText> {
-        let b = self.bindings.as_ref();
         let file = path.to_str().ok_or_else(|| anyhow!("the path is not UTF-8"))?;
-        let doc = unsafe { b.FPDF_LoadDocument(file, None) };
+        let doc = unsafe { self.bindings.FPDF_LoadDocument(file, None) };
+        self.read(doc, max_pages)
+    }
+
+    /// [`Pdf::extract`] of a PDF held in memory (an e-mail's attachment).
+    pub fn extract_bytes(&self, bytes: &[u8], max_pages: Option<u32>) -> Result<PdfText> {
+        let doc = unsafe { self.bindings.FPDF_LoadMemDocument(bytes, None) };
+        self.read(doc, max_pages)
+    }
+
+    fn read(&self, doc: FPDF_DOCUMENT, max_pages: Option<u32>) -> Result<PdfText> {
+        let b = self.bindings.as_ref();
         if doc.is_null() {
             let code = unsafe { b.FPDF_GetLastError() };
             bail!(match code {

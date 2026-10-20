@@ -42,6 +42,7 @@ use crate::ask;
 use crate::auth;
 use crate::auth::Addresses;
 use crate::devices;
+use crate::documents;
 use crate::policy::BusyTracker;
 use crate::policy::Policy;
 use crate::sidecars;
@@ -225,6 +226,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/transcribe", post(transcribe).layer(DefaultBodyLimit::disable()))
         .route("/api/apps", get(not_built))
         .route("/images/{*path}", get(image))
+        .route("/docs/{collection}/{id}", get(document))
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
         .route("/login", get(login))
@@ -265,7 +267,8 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
 
 fn secured(mut response: Response) -> Response {
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+    // A served document carries a stricter policy of its own (documents.rs).
+    headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(HeaderValue::from_static(CSP));
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
@@ -330,6 +333,33 @@ async fn image(State(server): State<Arc<Server>>, axum::extract::Path(path): axu
         }
         None => not_found().await,
     }
+}
+
+/// A document a citation names (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §8.3), found by the
+/// local file index inside its collection, never by a path from the request (documents.rs).
+async fn document(State(server): State<Arc<Server>>, axum::extract::Path((collection, id)): axum::extract::Path<(String, String)>) -> Response {
+    if !documents::valid(&collection, &id) {
+        return not_found().await;
+    }
+    let located = match documents::locate(&server.config.launch, &collection, &id).await {
+        Ok(located) => located,
+        Err(reason) => return text(StatusCode::NOT_FOUND, &format!("{reason}\n")),
+    };
+    if located.size > documents::DOCUMENT_CAP {
+        return text(StatusCode::PAYLOAD_TOO_LARGE, "This document is too large to open here.\n");
+    }
+    let bytes = match tokio::fs::read(&located.path).await {
+        Ok(bytes) => bytes,
+        Err(_) => return not_found().await,
+    };
+    let (content_type, inline, policy) = documents::presentation(&located.kind);
+    let mut response = (StatusCode::OK, [(header::CONTENT_TYPE, content_type)], bytes).into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(policy));
+    if let Ok(value) = HeaderValue::from_str(&documents::disposition(inline, &located.rel)) {
+        headers.insert(header::CONTENT_DISPOSITION, value);
+    }
+    response
 }
 
 /// The microphone's recording, turned into text by the speech-to-text service on this machine
