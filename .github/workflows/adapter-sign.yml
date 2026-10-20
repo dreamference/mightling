@@ -1,0 +1,177 @@
+# Signs and publishes an adapter's manifest (specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §5.1).
+#
+# A push to main that adds or changes adapters/<name>/<version>/manifest.json (beside it,
+# source.json names the adapter's Hugging Face repository and the commit its weights were uploaded
+# at) ends, with no hand step, in a signed manifest published to that repository and a pull request
+# that adds the new commit to ADAPTER_CATALOG, so the next release pins it. The manifest is checked
+# first: every file's sha256 against the repository's metadata at that commit, the base and the
+# drafter base against the registry's pins and their digests. Any failure stops the job before
+# anything is signed; a signature that does not verify against ling-rs/release-signing.pub stops it
+# before anything is uploaded. The steps are scripts/adapters/sign_manifest.py's stages.
+name: Adapter signing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "adapters/*/*/manifest.json"
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: "The manifest to sign and publish again, e.g. adapters/rust/1.0.0/manifest.json (after a key rotation, or a run that stopped)"
+        required: true
+        type: string
+
+# Read-only by default; only the signing job may write, and only what it needs. Every action is
+# pinned to a commit, with its tag in a comment, as in release.yml.
+permissions:
+  contents: read
+
+# One signing run at a time: two pushes never race each other's upload or catalogue branch.
+concurrency:
+  group: adapter-sign
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    permissions:
+      # The catalogue's branch and its pull request.
+      contents: write
+      pull-requests: write
+      # Build provenance: the OIDC token Sigstore certifies, and the right to store the attestation.
+      id-token: write
+      attestations: write
+    # RELEASE_SIGNING_KEY and HF_ADAPTER_TOKEN live only in this environment, which only `main` and
+    # `release/*` can use: a workflow pushed to any other branch cannot read them. No approval is
+    # asked, as for releases since 2026-10-12. HF_ADAPTER_TOKEN, a write token of the Dreamference
+    # organisation on Hugging Face, is used by this job alone.
+    environment: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The push's own range, to find the manifests it changed.
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        # The adapter modules the script reuses import only the standard library, so the package
+        # itself (and its machine-learning dependencies) is not installed; ruff formats the
+        # catalogue the pull request changes, at the version the quality ratchet pins.
+        run: pip install "huggingface_hub==1.33.0" "ruff==0.16.10"
+      - name: Find the manifests
+        id: find
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          REQUESTED: ${{ inputs.manifest }}
+        run: |
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            printf '%s\n' "$REQUESTED" > manifests.txt
+          elif [[ "$BEFORE" =~ ^0+$ ]]; then
+            git diff-tree --no-commit-id --no-renames --name-only --diff-filter=AM -r "$GITHUB_SHA" -- 'adapters/*/*/manifest.json' > manifests.txt
+          else
+            git diff --no-renames --name-only --diff-filter=AM "$BEFORE" "$GITHUB_SHA" -- 'adapters/*/*/manifest.json' > manifests.txt
+          fi
+          # A version moved with git mv is a new manifest, not a rename: --no-renames lists it as added.
+          # Only the layout's own paths: a name and a version, nothing a shell or a path could misread.
+          while read -r manifest; do
+            if ! [[ "$manifest" =~ ^adapters/[a-z0-9][a-z0-9-]{0,39}/[0-9]+\.[0-9]+\.[0-9]+/manifest\.json$ ]]; then
+              echo "::error::'$manifest' is not adapters/<name>/<version>/manifest.json"
+              exit 1
+            fi
+            if [[ ! -f "$manifest" ]]; then
+              echo "::error::$manifest is not in this commit"
+              exit 1
+            fi
+          done < manifests.txt
+          echo "count=$(grep -c . manifests.txt || true)" >> "$GITHUB_OUTPUT"
+          cat manifests.txt
+      # Every manifest is checked before any is signed: a hash that differs, a base that is not the
+      # registry's or a missing field stops the job with nothing signed.
+      - name: Check
+        if: steps.find.outputs.count != '0'
+        env:
+          HF_ADAPTER_TOKEN: ${{ secrets.HF_ADAPTER_TOKEN }}
+        run: |
+          while read -r manifest; do
+            python scripts/adapters/sign_manifest.py check "$manifest"
+          done < manifests.txt
+      - name: Sign and verify
+        if: steps.find.outputs.count != '0'
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          HF_ADAPTER_TOKEN: ${{ secrets.HF_ADAPTER_TOKEN }}
+        run: |
+          if [[ -z "$RELEASE_SIGNING_KEY" ]]; then
+            echo "::error::The RELEASE_SIGNING_KEY secret is not set; adapters are signed with the release key."
+            exit 1
+          fi
+          # The key exists on disk only for this step, readable by its owner alone, and is removed
+          # however the step ends. `sign` checks the manifest again, signs under mightling-adapter
+          # and verifies the signature against ling-rs/release-signing.pub: a key that is not a
+          # release key stops the job here, before anything is uploaded.
+          key="$(mktemp -d)/release-ed25519"
+          trap 'rm -f "$key"' EXIT
+          ( umask 077 && printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key" )
+          while read -r manifest; do
+            IFS=/ read -r _ name version _ <<< "$manifest"
+            python scripts/adapters/sign_manifest.py sign "$manifest" --key "$key" --out "signed/$name/$version"
+          done < manifests.txt
+          rm -f "$key"
+          # Everything attested: each manifest and its signature.
+          (cd signed && sha256sum */*/manifest.json */*/manifest.json.sig) > attested.sha256
+          cat attested.sha256
+      - name: Attest build provenance
+        if: steps.find.outputs.count != '0'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: attested.sha256
+      # `publish` checks again and verifies the signature again before it uploads; the upload is one
+      # commit on top of exactly the commit that was checked, so a repository that moved since fails it.
+      - name: Publish to Hugging Face
+        if: steps.find.outputs.count != '0'
+        env:
+          HF_ADAPTER_TOKEN: ${{ secrets.HF_ADAPTER_TOKEN }}
+        run: |
+          if [[ -z "$HF_ADAPTER_TOKEN" ]]; then
+            echo "::error::The HF_ADAPTER_TOKEN secret is not set; nothing was published."
+            exit 1
+          fi
+          while read -r manifest; do
+            IFS=/ read -r _ name version _ <<< "$manifest"
+            python scripts/adapters/sign_manifest.py publish "$manifest" \
+              --signature "signed/$name/$version/manifest.json.sig" --entry-out "entries/$name-$version.json"
+          done < manifests.txt
+      # The catalogue entry goes back through review like any change: a pull request, never a push
+      # to main, so the next release carries the pin (§6.1).
+      - name: Open the catalogue pull request
+        if: steps.find.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="adapters/catalogue-$GITHUB_RUN_ID"
+          git switch -c "$branch"
+          titles=()
+          for entry in entries/*.json; do
+            python scripts/adapters/sign_manifest.py catalog "$entry"
+            titles+=("$(basename "$entry" .json)")
+          done
+          ruff format dreamference/hardware/adapter_catalog.py
+          git add dreamference/hardware/adapter_catalog.py
+          git -c user.name=dgxcoder -c user.email=dgxcoder@dreamference.ai \
+            commit -q -m "Adapters: catalogue ${titles[*]}, signed and published by run $GITHUB_RUN_ID"
+          git push origin "$branch"
+          {
+            echo "The adapter signing job signed and published ${titles[*]} (run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+            echo
+            echo "Each entry pins the commit that carries the signed manifest.json and its sha256, so the next release installs exactly that manifest."
+            echo
+            for entry in entries/*.json; do
+              echo '```json'
+              cat "$entry"
+              echo '```'
+            done
+          } > body.md
+          gh pr create --base main --head "$branch" --title "Adapters: catalogue ${titles[*]}" --body-file body.md
