@@ -1,5 +1,5 @@
 //! Guards: checks on the agent's own work, enforced through Codex's hooks, off unless switched
-//! on (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §27; the failure analysis they come from is
+//! on (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §29; the failure analysis they come from is
 //! specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §9).
 //!
 //! - **The test guard** (`DREAMFERENCE_MIGHTLING_TEST_GUARD`, `mightling_test_guard`). When a

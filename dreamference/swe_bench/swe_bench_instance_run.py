@@ -816,7 +816,7 @@ class SweBenchInstanceRun:
                 "declined": declined, "dropped_outputs": dropped}
 
     def guard_record(self) -> dict[str, Any]:
-        """Collects what the launcher's guards did in this instance's sessions (spec §27).
+        """Collects what the launcher's guards did in this instance's sessions (spec §29).
 
         Read from their state files in the scratch `codex-home` (`GUARD_DIR`), the only record,
         since `exec --json` carries no hook events. A run without a guard arm has no files and

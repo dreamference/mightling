@@ -489,7 +489,7 @@ class SweBenchReport:
 
     @classmethod
     def guards_summary(cls, manifest: dict[str, Any], states: dict[str, Any], finished: set[str]) -> dict[str, Any]:
-        """Sums what the launcher's guards did over the finished instances (spec §27).
+        """Sums what the launcher's guards did over the finished instances (spec §29).
 
         Args:
             manifest: The run's manifest.

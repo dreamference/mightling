@@ -80,7 +80,7 @@ log() { echo "$(date -Is) $*"; }
 # or off: `--apply-patch FORM`, spec §22; the pinned Codex has no function form, so ling refuses it), `exec-tool-FORM` (FORM function or freeform:
 # `--exec-tool FORM`, spec §23), `drop-outputs` (drop-first compaction: `--drop-old-outputs`,
 # compaction spec §13), `test-guard` and `finish-check` (the launcher's guards: `--test-guard`,
-# `--finish-check`, spec §27), or several of these joined with `+`
+# `--finish-check`, spec §29), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -250,7 +250,7 @@ start() {
             echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS: rebuild it (\`ling-admin codex build\`) from a commit that has drop-first compaction."; exit 1
         fi ;;
     esac
-    # The guard arms only set the launcher's switches (spec §27); a `ling` built before guard.rs
+    # The guard arms only set the launcher's switches (spec §29); a `ling` built before guard.rs
     # ignores them, and the night would measure the record arm twice.
     for guard in test-guard:TEST_GUARD finish-check:FINISH_CHECK; do
         case "$ARMS" in *"${guard%%:*}"*)

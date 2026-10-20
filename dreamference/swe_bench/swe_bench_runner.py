@@ -56,7 +56,7 @@ AUTO_EXEC_TOOL: Final[str] = "auto"
 # The drop-first compaction arm (compaction spec §13): the launcher's switch (ling-rs/src/compaction.rs,
 # `DROP_ENV`), set to this value only when the run asks.
 DROP_OLD_OUTPUTS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"
-# The guard arms (spec §27): the launcher's switches for the test guard and the finish check
+# The guard arms (spec §29): the launcher's switches for the test guard and the finish check
 # (ling-rs/src/guard.rs), set to "1" only when the run asks.
 TEST_GUARD_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_TEST_GUARD"
 FINISH_CHECK_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_FINISH_CHECK"
@@ -346,7 +346,7 @@ class SweBenchRunner:
 
     @classmethod
     def guard_env(cls, manifest: dict[str, Any]) -> dict[str, str]:
-        """Gives the launcher's guard switches for a run's sessions (spec §27).
+        """Gives the launcher's guard switches for a run's sessions (spec §29).
 
         Each is set only when the run asks, so a run without the arm measures what a user gets;
         a manifest from before the arms has neither key and ran without them.
@@ -486,12 +486,12 @@ class SweBenchRunner:
                 enough (compaction spec §13). Off by default. A new run only, like `code_index`.
             test_guard: The launcher's test guard in every session, through
                 `DREAMFERENCE_MIGHTLING_TEST_GUARD`: a change that weakens an existing test is
-                pointed out, and the first stop while it stands is held once (spec §27). Off by
+                pointed out, and the first stop while it stands is held once (spec §29). Off by
                 default. A new run only, like `code_index`.
             finish_check: The launcher's finish check in every session, through
                 `DREAMFERENCE_MIGHTLING_FINISH_CHECK`: the first stop after a source change that no
                 test has run on is held once, as are a stop mid-work and a failure called
-                pre-existing with no run on the unchanged code (spec §27). Off by default. A new
+                pre-existing with no run on the unchanged code (spec §29). Off by default. A new
                 run only, like `code_index`.
             hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
                 holds the first edit once until the files and functions the issue names have
