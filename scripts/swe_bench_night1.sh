@@ -76,8 +76,8 @@ REF=${REF:-origin/main}
 
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
-# arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM function,
-# freeform or off: `--apply-patch FORM`, spec §22), `exec-tool-FORM` (FORM function or freeform:
+# arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM freeform
+# or off: `--apply-patch FORM`, spec §22; the pinned Codex has no function form, so ling refuses it), `exec-tool-FORM` (FORM function or freeform:
 # `--exec-tool FORM`, spec §23), `drop-outputs` (drop-first compaction: `--drop-old-outputs`,
 # compaction spec §13), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
@@ -91,8 +91,9 @@ arm_flags() {
             turn-end*|turn_end*) echo "❌ Arm $1: write the turn-end compaction arm as turn-end-compaction-on, -off or -N (N a percentage, 1-99)." >&2; return 2 ;;
             restart-[1-9]|restart-[1-9][0-9]) flags="$flags --restart-after-compactions ${part#restart-}" ;;
             restart*) echo "❌ Arm $1: write the restart arm as restart-N (N from 1)." >&2; return 2 ;;
-            apply-patch-function|apply-patch-freeform|apply-patch-off) flags="$flags --apply-patch ${part#apply-patch-}" ;;
-            apply-patch*|apply_patch*) echo "❌ Arm $1: write the apply_patch arm as apply-patch-function, -freeform or -off." >&2; return 2 ;;
+            apply-patch-freeform|apply-patch-off) flags="$flags --apply-patch ${part#apply-patch-}" ;;
+            apply-patch-function) echo "❌ Arm $1: the pinned Codex has no function form of apply_patch (ling refuses it); use apply-patch-freeform or -off." >&2; return 2 ;;
+            apply-patch*|apply_patch*) echo "❌ Arm $1: write the apply_patch arm as apply-patch-freeform or -off." >&2; return 2 ;;
             exec-tool-function|exec-tool-freeform) flags="$flags --exec-tool ${part#exec-tool-}" ;;
             exec-tool*|exec_tool*) echo "❌ Arm $1: write the Code Mode arm as exec-tool-function or exec-tool-freeform." >&2; return 2 ;;
             drop-outputs) flags="$flags --drop-old-outputs" ;;
