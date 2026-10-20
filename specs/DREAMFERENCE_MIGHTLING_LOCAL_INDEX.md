@@ -1,7 +1,8 @@
 # Mightling Local File Index — Specification
 
-**Status:** Phase 1 built (§16) and integrated on the renamed tree for 1.6.0 (§16.7, §17); Phases 2
-and 3 proposed. Part of the plan to drop Onyx while keeping a web UI (Onyx retired 2026-10-18,
+**Status:** Phase 1 built (§16) and integrated on the renamed tree for 1.6.0 (§16.7, §17); Phase 2
+built on 2026-10-20 except OCR, the vision queue and the settings page (§18: DOCX, ODT, HTML,
+e-mail with attachments, CSV, the change watch, citations that open); Phase 3 proposed. Part of the plan to drop Onyx while keeping a web UI (Onyx retired 2026-10-18,
 `eb42c76`, for 1.7.0): the "Ask" threads and
 Mightling's own web server are specified separately; this document covers the index of the user's
 own files that both of them, and the coding agent, search.
@@ -140,10 +141,10 @@ the release says in §17.
 |---|---|---|
 | `.txt .md .rst .org .tex` | UTF-8 text (NUL-byte sniff as in the context engine) | line range, heading path |
 | `.pdf` | PDFium (`pdfium-render`, prebuilt PDFium `chromium/8076` for linux-arm64/x86_64 only: `ling-docs` is Linux-only, §17), text layer only, read character by character with the reading-order pass of §15.2 (stream order for lines, out-of-place runs put back, the bidi algorithm on right-to-left lines) | page number |
-| `.docx .odt` | ZIP + XML (paragraphs, headings, tables as text) | heading path, paragraph index |
-| `.html .htm` | readability-style main-text extraction (the same code as `ling-fetch`) | heading path |
-| `.eml .mbox` | `mail-parser`: headers (From, To, Date, Subject) + text body; attachments one level deep, through the same extractors | message id, attachment name |
-| `.csv` | header + rows as text, capped | row range |
+| `.docx .odt` | ZIP + XML (`zip`, `quick-xml`, streamed): paragraphs, headings by outline level, tables a row a paragraph, text boxes, notes; built in Phase 2 (§18.1) | heading path, paragraph range (`para 12-30`) |
+| `.html .htm .xhtml` | html5ever (`scraper`), as `ling-fetch` parses, with its non-content subtrees and a readability pass dropped (§18.1) | heading path, paragraph range |
+| `.eml .mbox` | `mail-parser`: headers (From, To, Cc, Date, Subject, attachment names) + text body; attachments one level deep, through the same extractors (§18.1) | message (`msg 3`), attachment (`msg 3 · invoice.pdf p.2`) |
+| `.csv .tsv` | header + rows as `column: value` text (Phase 0's form), 20 rows a unit, at most 100,000 rows (§18.1) | row range (`rows 2-21`) |
 
 - Extraction of untrusted files is attack surface (PDF parsers especially). Every extractor runs
   in a **bwrap scope with no network, the collection root read-only, no home directory, a memory
@@ -153,7 +154,8 @@ the release says in §17.
   operators) end as `failed` instead of taking 2–3 GB (§15.2).
 - **Discovery opens nothing it will not index** (§15.8): the walk reads metadata only and keeps the
   formats above by extension; a kept file's first 8 KiB is sniffed (a `.pdf` must say `%PDF-`, a
-  `.docx` must be a ZIP, text must have no NUL), then it is hashed so a browser's `x (1).pdf`
+  `.docx` or `.odt` must be a ZIP, an `.mbox` must start with a `From ` line, text must have no
+  NUL), then it is hashed so a browser's `x (1).pdf`
   duplicates are indexed once. Installers, archives, disk images and videos are never read.
 - A PDF page with no text layer is recorded as `needs OCR` (Phase 2, §13 and §15.7), so `status`
   can say how much of a collection is unsearchable until OCR runs.
@@ -216,7 +218,8 @@ the release says in §17.
 ```
 ling docs add ~/Documents/contracts --name contracts
 ling docs search "notice period acme" [--collection contracts] [--k 8] [--path <glob>] [--type pdf] [--after YYYY-MM-DD] [--json]
-ling docs read <doc-id> [--page 7 | --lines 120-180] [--json]
+ling docs read <doc-id> [--page 7 | --lines 120-180 | --at "msg 3"] [--json]
+ling docs locate <doc-id | docs: link> [--json]          # the cited file, inside its collection (§18.4)
 ling docs status [<name>] [--json]
 ling docs list [--json]
 ling docs reindex <name>
@@ -239,13 +242,17 @@ workers are the binary's own (`session` and the workers hidden).
 - `docs_search` is offered only when at least one collection exists; a prompt block (≤ 150 tokens, measured) says
   which collections exist, what they contain (name + file count), and to cite sources as
   `path` + locator.
+- Each passage carries `path`, `locator`, its `section` (heading path, a message's subject, a
+  table's columns) and, for a collection's document, a `cite` line, the Markdown link the model
+  cites it with (`[acme-msa.pdf, p.7](docs:documents/42#page=7)`, §18.4).
 - Output stays under the launcher's 8,000-token per-tool cap
   ([MIGHTLING_CONTEXT_BUDGET](./DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md)).
 
 ### 8.3 Ask threads, desktop app and web UI
 
-*Not built as of 2026-10-19: neither `ling web` (`ling-rs/web/`) nor the desktop app has citation
-opening or a collections settings page yet (Phase 2, §13).*
+*Citation opening built 2026-10-20 (§18.4): a passage's `cite` link (`docs:documents/42#page=7`),
+opened by the desktop app with the system handler and served by `ling web` at `/docs/`. The
+collections settings page is not built (§18.6).*
 
 - Ask threads use the same tools; citations render as links.
 - **Opening a citation:** the desktop app opens the file with the system handler (PDFs at the page
@@ -260,7 +267,7 @@ opening or a collections settings page yet (Phase 2, §13).*
 - **Change detection:** a periodic scan (default every 10 minutes while a session or the node unit
   runs) comparing path, size and mtime, then a content hash for changed files; `inotify` as an
   accelerator where the watch budget allows (`fs.inotify.max_user_watches`), never as the only
-  source of truth. Deleted files' chunks are removed in the same pass.
+  source of truth (built 2026-10-20, §18.3). Deleted files' chunks are removed in the same pass.
 - **Every run is admitted** against the host-wide ledger (CODE_INDEX §6.4): runs in
   `mightling-index.slice` (renamed with the rest), `choom -n 1000`, a per-run cap; deferred when the
   budget can't cover it. `server start` stops these scopes before its pre-flight, as it does for
@@ -337,7 +344,7 @@ the BM25 weight and the `pdf_*` ones to `ling-docs mcp` (`FORWARDED_ENV`). File 
 |---|---|---|
 | 0 | Measurements: PDFium text quality vs the Python reference (PyMuPDF) on the eval PDFs; the multilingual embedding candidates' quality, speed and memory on 4 cores of the GB10 and on an Apple Silicon laptop; chunk-size sweep; RapidOCR on scanned fixtures; skipping a Downloads folder's unsupported files | **Done 2026-10-07 on the GB10 (§15); Apple Silicon not measured here** |
 | 1 | `ling-docs` with text/Markdown/PDF; collections; hybrid search; CLI; MCP tools; prompt block; admission; egress scenario | §12 acceptance on text + PDF: **built and passed 2026-10-08 (§16)** |
-| 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening; **OCR of scanned PDFs and images with RapidOCR** (Apache-2.0, its PP-OCR ONNX models, CPU, sandboxed); pages with low recognition confidence queued for **Qwen3.8's vision** in Night Shift's idle hours, and any page read by Qwen3.8 on demand when the user asks about it | Same, all formats; OCR recall measured on scanned fixtures |
+| 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening; **OCR of scanned PDFs and images with RapidOCR** (Apache-2.0, its PP-OCR ONNX models, CPU, sandboxed); pages with low recognition confidence queued for **Qwen3.8's vision** in Night Shift's idle hours, and any page read by Qwen3.8 on demand when the user asks about it | Same, all formats; OCR recall measured on scanned fixtures. **Built 2026-10-20 but OCR, the vision queue and the settings page (§18)** |
 | 3 | XLSX; anything left from Phase 2 | Same |
 
 Phase 1 depends on nothing in the Onyx-retirement plan; the Ask threads and web UI consume it when

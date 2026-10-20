@@ -50,6 +50,11 @@ venv/bin/python first_index_probe.py synthetic corpus downloads
 # Phase 1 (spec §16): ling-docs itself. <wrapper> runs the built ling-docs with a throwaway HOME
 # whose only collection is corpus/ (`ling-docs add corpus --name corpus`, then `ling-docs index`).
 venv/bin/python phase1_acceptance.py <wrapper> results/phase1-acceptance.json [--scale <50k-chunk wrapper>]
+# Phase 2 (spec §18): every format. corpus/_docx_src/ holds the HTML the DOCX files were made from;
+# leave it out as Phase 0 did (build_chunks.py) with `echo _docx_src/ > corpus/.lingignore`.
+# MIGHTLING_DOCS_TEST_HOST=direct in the wrapper runs the workers as plain children, so the whole
+# index can run inside a CPU-capped `systemd-run --user --scope` of its own.
+venv/bin/python phase2_acceptance.py <wrapper> results/phase2-acceptance.json
 ```
 
 Every extraction runs in `bwrap --unshare-all` (no network, home hidden) inside a
