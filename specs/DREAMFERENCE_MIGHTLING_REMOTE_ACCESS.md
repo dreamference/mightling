@@ -305,7 +305,7 @@ The helpers report failures through their module loggers (the bare line on stand
 
 - **One name:** `remote.dreamference.ai`, a Cloudflare A record to the box, DNS only. The control plane at `https://remote.dreamference.ai:443`, the relay at `rels://remote.dreamference.ai:33080`. CA scope `dreamference.ai`.
 - **Pins stay 0.80.0** for the first live acceptance. For the next bump, read on 2026-10-20 from NetBird's published checksums and Docker Hub: 0.81.3 client archives (linux amd64 `cbdea310…b63b1`, linux arm64 `980eef93…c22d`, darwin amd64 `95ef6a3f…cac1f`, darwin arm64 `bc37108e…e71`), `netbirdio/netbird-server:0.81.3` index `sha256:541ecef7…7f1d`, `netbirdio/relay:0.81.3` amd64 `sha256:de516151…0324`, arm64 `sha256:f5f7bba0…41c7`; the relay binary's SHA-256 needs one extraction on the node.
-- **The box stays `relay-box`**, with its other services untouched.
+- **The box stays the one already set up**, with its other services untouched.
 
 ### 14.4 The migration of the 10-13 deployment
 
