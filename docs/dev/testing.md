@@ -42,3 +42,43 @@ The suite's time is process start-up and the sleeps the stand-ins play out, not 
 Night Shift and egress-audit tests run several stand-in processes each and take 1 to 4 s; the rest
 is about 0.1 s a test. It was measured at 2 minutes for about 1,080 tests on 2026-10-10 (the
 "8 s" the project guide used to claim dated from a tenth of the suite).
+
+## The code-standard ratchet
+
+The Python standard (`specs/DREAMFERENCE_PYTHON_QUALITY.md`) is checked inside the suite, not in
+a CI job, by two tests built on 2026-10-20 (spec §11):
+
+- `tests/test_code_quality.py` runs `ruff check` and `ruff format --check` over `dreamference/`
+  and `tests/`, plus the project checks no linter knows (`PQ001` a second class in a file, `PQ002`
+  an `__init__.py` without `__all__`, `PQ003` work at import time), and compares the counts per
+  file and per rule with `tests/quality_baseline.json`. A file the formatter would change counts
+  as one `ruff-format` finding: the files unformatted on 2026-10-20 are in the baseline, every
+  other file must stay formatted.
+- `tests/test_typing.py` runs mypy (`[tool.mypy]` in `pyproject.toml`) over `dreamference/` and
+  compares its errors per file and error code with `tests/typing_baseline.json`.
+
+A count above its baseline fails and names the file and the rule; **a file missing from the
+baseline, a new one, counts from zero**, so it is formatted and clean from its first commit.
+In code written in today's house style the findings are mostly ones the tools fix themselves:
+
+```bash
+.venv/bin/ruff format <file> && .venv/bin/ruff check --fix <file>   # then: ruff check <file>
+.venv/bin/mypy                                                       # from the checkout's root
+```
+
+A count below its baseline passes with a warning in the summary; lock the cleanup in with the
+same commit:
+
+```bash
+.venv/bin/python tests/test_code_quality.py --update-baseline
+.venv/bin/python tests/test_typing.py --update-baseline
+```
+
+`--update-baseline` refuses to raise a count. `--allow-raise` writes anyway, for a reviewed
+exception or a re-recording over others' merges, and the commit says why. Both tests fail (they
+never skip) when ruff 0.16.10 or mypy 2.4.0 is missing or another version: the message gives
+`.venv/bin/pip install -e .[dev]`. They add about 1.2 s to the suite; mypy's first run in a fresh
+checkout or worktree fills `.mypy_cache/` and takes about 14 s more.
+
+A branch opened before 2026-10-20 that adds Python files fails here after its rebase until those
+files are formatted and fixed as above.

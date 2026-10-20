@@ -49,7 +49,7 @@ Rust and TypeScript tests, each in its own place:
 - `desktop/electron` and `desktop/ui`: `npm test`; `npm run e2e` in `desktop/electron` needs a display and `npm run package` first.
 - Codex's own tests on the patched tree: `ling-admin codex test`.
 
-There is no linter or formatter configured.
+ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev]`) run inside the suite as a ratchet, `tests/test_code_quality.py` and `tests/test_typing.py`: no count per file and rule may rise, and a new file must be formatted and clean (`.venv/bin/ruff format <file> && .venv/bin/ruff check --fix <file>` fixes most findings). Details: [docs/dev/testing.md](docs/dev/testing.md#the-code-standard-ratchet).
 
 ## Gotchas: the hard rules
 
@@ -64,7 +64,6 @@ There is no linter or formatter configured.
 - **The default model is `qwen3.8-27b-nvfp4-dflash2` on SGLang** (since 2026-09-29), and the only model served. Beside it, the registry holds one candidate, `qwen3.8-27b-minima-nvfp4-dflash2`, which runs only in night 2's A/B (`specs/DREAMFERENCE_MODELS.md` §2.2).
 - **The torch.compile cache is persistent and only partly self-invalidating**: vLLM's hash ignores `num_speculative_tokens`, so `_reset_stale_compile_cache()` keeps its own `model|method|n` signature ([docs/dev/models-and-engines.md](docs/dev/models-and-engines.md#the-torchcompile-cache-is-persistent-and-only-partly-self-invalidating)).
 - **Byte-identical copies** are compared by tests: the air-gap resolver (`ling-rs/airgapped/` and `ling-web-rs/src/airgapped.rs`) and the node locator (`ling-rs/node-locator/` and `ling-web-rs/src/node_locator.rs`). Change both or neither.
-- **`dreamference/<name>.py` shim modules are dead code.** Files like `dreamference/config.py` containing `from dreamference.config.__init__ import *` are shadowed by the same-named package directory: Python resolves packages before modules, so these never execute. Editing them has no effect; edit the package.
 - **Never write the user's choices into the repository** where a clone or the agent could write them: submodule indexing choices live in `$CODEX_HOME/ling-code.toml`, a node's advertisement in `~/.config/dreamference/node-advertise.json`, and for `/airgapped` the strictest of the repository's and the user's config wins.
 - The specification is `specs/`, one document per area, indexed by `specs/README.md` (which also lists the code defects found when the specs were reconciled with the code on 2026-09-28). There is no single `DREAMFERENCE_SPEC.md` any more; read the one document you need.
 - `.gemini/`, `.antigravity/`, `.dreamference/` are gitignored leftovers from other tooling, not part of the project (`.dreamference/` at a workspace root is also where the context engine writes its index).
@@ -155,6 +154,7 @@ Outside the package:
 - Module docstrings and full Google-style Args/Returns docstrings on public methods are the norm; match this density.
 - `typing.Final` annotations on module constants.
 - User-facing output goes through `rich` console or emoji-prefixed `print` (`✅ ⚠️ ❌ 🚀 💡`). Match the existing voice in CLI paths.
+- The standard is [specs/DREAMFERENCE_PYTHON_QUALITY.md](specs/DREAMFERENCE_PYTHON_QUALITY.md), checked by the ratchet above (`.venv/bin/python -m pytest tests/test_code_quality.py tests/test_typing.py -q`). Where today's code and the rules differ, new code follows the rules: `str | None`, not `Optional[str]`; a docstring's summary on its first line.
 
 ## Searching this codebase
 

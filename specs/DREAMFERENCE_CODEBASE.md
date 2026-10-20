@@ -22,7 +22,7 @@
 
 **Architecture:** twelve subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `ling-rs/` (with its member crates: the web UI server, Signal and chat bridges, apps, skills and the leaf crates), the web commands `ling-web-rs/`, the code index `ling-code-rs/`, the document index `ling-docs-rs/`, the Codex fork `codex/` (submodule) with its patches `codex-patches/`, the desktop app `desktop/` (Electron shell `desktop/electron/` and the shared UI `desktop/ui/`), and the `ling-engine/` submodule (the future model server's own repository; nothing here builds it).
 
-**Dead shims:** the top-level `dreamference/<name>.py` modules (`cli.py`, `config.py`, `hardware.py`, …) contain `from dreamference.<name>.__init__ import *`. They **never execute**: Python resolves the same-named package directory first. Editing them has no effect.
+**No shims:** the top-level `dreamference/<name>.py` modules (`cli.py`, `config.py`, `hardware.py`, …), each a `from dreamference.<name>.__init__ import *` that never executed because the same-named package resolves first, were deleted on 2026-10-20; `tests/test_code_quality.py` keeps them from coming back (PYTHON_QUALITY §11).
 
 **Conventions:**
 - one class per file, named after the class;
@@ -55,7 +55,6 @@
 dreamference/
 ├── __init__.py                       # __version__ = "1.5.1" only (no re-exports)
 ├── web_canvas.py                     # CanvasHandler + start_web_canvas_server (ling-admin web)
-├── {cli,config,context_engine,hardware,mcp_server,runner,vllm_server}.py   # dead shims (see §1)
 │
 ├── cli/
 │   ├── dreamference_cli_controller.py    # DreamferenceCLIController, main()
