@@ -1,0 +1,55 @@
+diff --git a/codex-rs/tui/src/app_backtrack.rs b/codex-rs/tui/src/app_backtrack.rs
+--- a/codex-rs/tui/src/app_backtrack.rs
++++ b/codex-rs/tui/src/app_backtrack.rs
+@@ -105,2 +105,7 @@
+         }
++        if let TuiEvent::Key(KeyEvent { code: KeyCode::Char(c), kind: KeyEventKind::Press, .. }) = event && let Some(t) = ling_launcher::compat_keys::transcript(c, self.chat_widget.thread_id()) {
++            self.close_transcript_overlay(tui);
++            match t.lines() { Some(l) => self.chat_widget.add_plain_history_lines(l.into_iter().map(ratatui::text::Line::from).collect()), None => tui.with_restored(|| t.execute()).await }
++            return Ok(true);
++        }
+         self.handle_legacy_transcript_event(tui, app_server, event)
+diff --git a/codex-rs/tui/src/bottom_pane/chat_composer.rs b/codex-rs/tui/src/bottom_pane/chat_composer.rs
+--- a/codex-rs/tui/src/bottom_pane/chat_composer.rs
++++ b/codex-rs/tui/src/bottom_pane/chat_composer.rs
+@@ -1994,2 +1994,9 @@
+ 
++        if key_event.code == KeyCode::Enter && key_event.modifiers.is_empty() && let Some(e) = ling_launcher::compat_keys::enter(self.draft.textarea.text()) {
++            use ling_launcher::compat_keys::Enter::*;
++            let (t, run) = match e { Draft(t) => (t, None), Run(t) => (t, Some(false)), Say(t) => { self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(history_cell::new_info_event(t, None)))); (String::new(), None) } };
++            self.draft.textarea.set_text_clearing_elements(&t);
++            self.draft.textarea.set_cursor(t.len());
++            return run.map_or((InputResult::None, true), |q| self.handle_submission(q));
++        }
+         let result = match &mut self.popups.active {
+diff --git a/codex-rs/tui/src/bottom_pane/mod.rs b/codex-rs/tui/src/bottom_pane/mod.rs
+--- a/codex-rs/tui/src/bottom_pane/mod.rs
++++ b/codex-rs/tui/src/bottom_pane/mod.rs
+@@ -1240,3 +1240,3 @@
+     pub(crate) fn show_quit_shortcut_hint(&mut self, key: KeyBinding) {
+-        if !DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
++        if !ling_launcher::compat_keys::double_press_exit() {
+             return;
+diff --git a/codex-rs/tui/src/chatwidget/interaction.rs b/codex-rs/tui/src/chatwidget/interaction.rs
+--- a/codex-rs/tui/src/chatwidget/interaction.rs
++++ b/codex-rs/tui/src/chatwidget/interaction.rs
+@@ -547,3 +547,3 @@
+ 
+-        if !DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
++        if !ling_launcher::compat_keys::double_press_exit() {
+             if self.is_cancellable_work_active() {
+@@ -581,3 +581,3 @@
+         let key = key_hint::ctrl(KeyCode::Char('d'));
+-        if !DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
++        if !ling_launcher::compat_keys::double_press_exit() {
+             if !self.bottom_pane.composer_is_empty() || !self.bottom_pane.no_modal_or_popup_active()
+diff --git a/codex-rs/tui/src/chatwidget/permission_shortcuts.rs b/codex-rs/tui/src/chatwidget/permission_shortcuts.rs
+--- a/codex-rs/tui/src/chatwidget/permission_shortcuts.rs
++++ b/codex-rs/tui/src/chatwidget/permission_shortcuts.rs
+@@ -6,3 +6,5 @@
+     pub(super) fn handle_permission_shortcut(&mut self, key_event: KeyEvent) -> bool {
+-        let forward = if self.chat_keymap.next_permission_mode.is_pressed(key_event) {
++        let forward = if self.chat_keymap.next_permission_mode.is_pressed(key_event)
++            || key_event.code == KeyCode::BackTab && key_event.kind == KeyEventKind::Press && ling_launcher::compat_keys::shift_tab_cycles_approvals()
++        {
+             true
