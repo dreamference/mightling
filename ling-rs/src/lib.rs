@@ -42,6 +42,7 @@ pub mod code_index;
 pub mod compaction;
 pub mod docs_index;
 pub mod exec_tool;
+pub mod guard;
 pub mod help;
 pub mod home;
 pub mod images;
@@ -307,6 +308,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(ledger::run_cli(&user_args[index + 1..]));
     }
+    // `guard` is the test guard's and the finish check's hook, after each tool call and at each
+    // stop (guard.rs); it reads `git` and a state file and answers.
+    if let Some(index) = subcommand
+        && user_args[index] == "guard"
+    {
+        std::process::exit(guard::run_cli(&user_args[index + 1..]));
+    }
     // `notice` is the hook that shows the start-up lines inside the TUI (notice.rs).
     if let Some(index) = subcommand
         && user_args[index] == "notice"
@@ -491,6 +499,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
     // Refine mode's hook for the interactive session; before the notice, which shows its line.
     refine::register_hook(&codex_home, tui);
+    // The test guard and the finish check, when switched on, for every session, `exec` included
+    // (guard.rs); before the notice, which shows their lines.
+    guard::register(&codex_home, tui);
     notice::publish(&codex_home, tui);
     // The index as tools, when the block just written names them (code_index.rs).
     let args = if code_index::named_in(&code_block) == Some(code_index::TOOLS_NAME) {

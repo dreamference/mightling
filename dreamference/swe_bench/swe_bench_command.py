@@ -112,10 +112,7 @@ class SweBenchCommand:
                          help="How the agent is offered Code Mode's exec tool: function (translated, which SGLang "
                               "serves) or freeform (Codex's custom tool, which only ling-engine serves and SGLang "
                               "drops); the launcher's own choice when absent: function on SGLang and vLLM (spec §23)")
-        run.add_argument("--drop-old-outputs", action="store_true",
-                         help="When a session is about to compact, first drop the output of its older tool calls "
-                              "(the calls stay, the last 10 outputs and short ones are kept) and summarise only if "
-                              "that is not enough; sets the launcher's switch in every session (compaction spec §13)")
+        cls.add_launcher_switches(run)
         run.add_argument("--review-turn", action="store_true",
                          help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
                               "read its diff, run the tests of the modules it changed and fix what does not hold, "
@@ -142,6 +139,26 @@ class SweBenchCommand:
         clean = commands.add_parser("clean", help="Remove a run's containers and scratch; with --images, the instance images")
         clean.add_argument("run", nargs="?", default=None, help="The run (default: every run's containers)")
         clean.add_argument("--images", action="store_true", help="Also remove the instance images")
+
+    @classmethod
+    def add_launcher_switches(cls, run: argparse.ArgumentParser) -> None:
+        """Adds the arms that only switch on a behaviour of the launcher in every session.
+
+        Args:
+            run: The `run` subcommand's parser.
+        """
+        run.add_argument("--drop-old-outputs", action="store_true",
+                         help="When a session is about to compact, first drop the output of its older tool calls "
+                              "(the calls stay, the last 10 outputs and short ones are kept) and summarise only if "
+                              "that is not enough; sets the launcher's switch in every session (compaction spec §13)")
+        run.add_argument("--test-guard", action="store_true",
+                         help="The launcher's test guard in every session: a change that weakens an "
+                              "existing test is pointed out, and the first stop while it stands is "
+                              "held once (spec §27)")
+        run.add_argument("--finish-check", action="store_true",
+                         help="The launcher's finish check in every session: the first stop after a "
+                              "change no test has run on, mid-work, or calling failures pre-existing "
+                              "unchecked is held once (spec §27)")
 
     @classmethod
     def dispatch(cls, args: argparse.Namespace) -> int:
@@ -173,7 +190,8 @@ class SweBenchCommand:
                 refine_version=args.refine_version or "v1", turn_end_compaction=args.turn_end_compaction,
                 hooks=cls._ids(args.hooks), restart_after_compactions=args.restart_after_compactions,
                 apply_patch=args.apply_patch, exec_tool=args.exec_tool,
-                drop_old_outputs=args.drop_old_outputs)
+                drop_old_outputs=args.drop_old_outputs,
+                test_guard=args.test_guard, finish_check=args.finish_check)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":

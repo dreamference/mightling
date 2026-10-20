@@ -10,6 +10,7 @@ import statistics
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
+from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 
 CAVEATS: Final[str] = (
@@ -25,13 +26,18 @@ COMPARED_FIELDS: Final[tuple] = (
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
     "turn_end_compaction",
     "parallelism", "harness", "repository_commit", "review_turn", "hooks", "restart_after_compactions",
-    "apply_patch", "exec_tool", "drop_old_outputs",
+    "apply_patch", "exec_tool", "drop_old_outputs", "test_guard", "finish_check",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
                                "refine_version": "v1", "turn_end_compaction": "auto",
                                "task_rules": [], "review_turn": False, "hooks": [], "restart_after_compactions": 0,
-                               "apply_patch": "auto", "exec_tool": "auto", "drop_old_outputs": False}
+                               "apply_patch": "auto", "exec_tool": "auto", "drop_old_outputs": False,
+                               "test_guard": False, "finish_check": False}
+# The guards' holds in the order a report lists them (ling-rs/src/guard.rs), and the guards' names.
+GUARD_HOLDS: Final[tuple] = ("untested", "pre-existing", "mid-work", "test-edits")
+TEST_GUARD: Final[str] = "test guard"
+FINISH_CHECK: Final[str] = "finish check"
 
 
 class SweBenchReport:
@@ -99,6 +105,8 @@ class SweBenchReport:
             "exec_tool": cls.exec_tool_summary(manifest, states, finished & set(instances)),
             "compaction": cls.drop_compaction_summary(manifest, states, finished & set(instances)),
             "hooks": cls.hooks_summary(manifest, states, finished & set(instances)),
+            "guards": cls.guards_summary(manifest, states, finished & set(instances)),
+            "weakened": cls.weakened_summary(store, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
             "causes": cls.unresolved_causes(store, manifest, number if details else None, variant, results, graded),
             "compactions": cls.compaction_summary(store, states, sorted(finished & set(instances)) if details else [],
@@ -480,6 +488,102 @@ class SweBenchReport:
         return line
 
     @classmethod
+    def guards_summary(cls, manifest: dict[str, Any], states: dict[str, Any], finished: set[str]) -> dict[str, Any]:
+        """Sums what the launcher's guards did over the finished instances (spec §27).
+
+        Args:
+            manifest: The run's manifest.
+            states: The instances' states.
+            finished: The finished instances.
+
+        Returns:
+            dict[str, Any]: `on` (the guards the run switched on), `instances`, `recorded` (the
+            instances with a guard state), `noted` (ids with a test-guard note), `holds` (per
+            kind: `fired` and `complied` instances, `ids`), and over the instances whose last
+            stop saw a change, `changed_at_end` and `tested_at_end`.
+        """
+        on = [name for name, key in ((TEST_GUARD, "test_guard"), (FINISH_CHECK, "finish_check")) if manifest.get(key)]
+        records = {i: (states.get(i) or {}).get("guards") for i in finished}
+        recorded = {i: r for i, r in records.items() if isinstance(r, dict) and r.get("sessions")}
+        holds: dict[str, dict[str, Any]] = {}
+        for instance_id, record in sorted(recorded.items()):
+            for kind, counts in (record.get("holds") or {}).items():
+                entry = holds.setdefault(kind, {"fired": 0, "complied": 0, "ids": []})
+                entry["fired"] += 1
+                entry["complied"] += 1 if counts.get("complied") else 0
+                entry["ids"].append(instance_id)
+        ends: list[dict[str, Any]] = [r["last_stop"] for r in recorded.values() if isinstance(r.get("last_stop"), dict)]
+        changed = [end for end in ends if end.get("edited") and end.get("code_changed")]
+        return {"on": on, "instances": len(records), "recorded": len(recorded),
+                "noted": sorted(i for i, r in recorded.items() if r.get("notes")), "holds": holds,
+                "changed_at_end": len(changed), "tested_at_end": sum(1 for end in changed if end.get("tested_now"))}
+
+    @classmethod
+    def guards_never_ran(cls, *runs: tuple[dict[str, Any], str]) -> list[str]:
+        """Says of each run with a guard on whose hooks never ran that it proves nothing about them.
+
+        Args:
+            runs: Each run's summary and name.
+
+        Returns:
+            list[str]: One line per such run.
+        """
+        return [f"In {name} the guards never ran: this comparison says nothing about them."
+                for summary, name in runs if summary["guards"]["on"] and not summary["guards"]["recorded"]]
+
+    @classmethod
+    def guard_names(cls, guards: dict[str, Any]) -> str:
+        """Names the guards a run switched on, for the side-by-side table."""
+        return ",".join(name.replace(" ", "-") for name in guards["on"]) or "none"
+
+    @classmethod
+    def guards_line(cls, guards: dict[str, Any]) -> str:
+        """One line: which guards were on and, when one was, what they held and whether it worked."""
+        on = guards["on"]
+        switches = (f"{name} {'on' if name in on else 'off'}" for name in (TEST_GUARD, FINISH_CHECK))
+        head = f"{'Guards':<20}" + ", ".join(switches)
+        if not on and not guards["recorded"]:
+            return head
+        if not guards["recorded"]:
+            return head + ": the hooks never ran (no instance has a guard state)" if guards["instances"] else head
+        held = [f"{kind} {entry['fired']} (complied {entry['complied']})"
+                for kind in GUARD_HOLDS if (entry := guards["holds"].get(kind))]
+        return (f"{head}: ran in {guards['recorded']} of {guards['instances']} finished instance(s); "
+                f"notes in {len(guards['noted'])}; holds: {', '.join(held) or 'none'}; "
+                f"tested at the last stop in {guards['tested_at_end']} of {guards['changed_at_end']} "
+                "that changed code")
+
+    @classmethod
+    def weakened_summary(cls, store: SweBenchRunStore, finished: set[str]) -> dict[str, Any]:
+        """Finds the patches that weaken an existing test, in every run, so two arms compare.
+
+        The rule is the launcher's test guard's, read from the patch alone
+        (`SweBenchPatchFilter.weakened_tests`): an assertion removed or rewritten, a test deleted
+        or skipped, in a test file the patch did not create.
+
+        Args:
+            store: The run.
+            finished: The finished instances.
+
+        Returns:
+            dict[str, Any]: `patches` (the finished instances with a non-empty patch), `ids` (the
+            weakening ones) and `files` (per id, the files).
+        """
+        patches = {p["instance_id"]: str(p.get("model_patch") or "") for p in store.predictions()
+                   if p.get("instance_id") in finished}
+        files = {i: sorted(SweBenchPatchFilter.weakened_tests(patch)) for i, patch in patches.items()}
+        files = {i: names for i, names in files.items() if names}
+        return {"patches": sum(1 for patch in patches.values() if patch.strip()), "ids": sorted(files),
+                "files": files}
+
+    @classmethod
+    def weakened_line(cls, weakened: dict[str, Any]) -> str:
+        """One line: how many patches weaken an existing test, and which."""
+        line = (f"{'Weakened tests':<20}{len(weakened['ids'])} of {weakened['patches']} patch(es) "
+                "weaken an existing test (an assertion removed or rewritten, a test deleted or skipped)")
+        return line + (": " + ", ".join(weakened["ids"]) if weakened["ids"] else "")
+
+    @classmethod
     def apply_patch_line(cls, summary: Dict[str, Any]) -> str:
         """One line: the apply_patch form and how much the agent used the tool."""
         return cls.tool_line("Apply patch", "freeform on ling-engine, none on SGLang", summary)
@@ -652,6 +756,8 @@ class SweBenchReport:
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines.append(cls.exec_tool_line(summary["exec_tool"]))
         lines.append(cls.drop_compaction_line(summary["compaction"]))
+        lines.append(cls.guards_line(summary["guards"]))
+        lines.append(cls.weakened_line(summary["weakened"]))
         lines += cls.hooks_lines(summary["hooks"])
         lines += cls.compaction_lines(summary["compactions"])
         not_run = validated - summary["finished"]
@@ -865,6 +971,8 @@ class SweBenchReport:
                 "task rules": ",".join(summary["manifest"].get("task_rules") or []) or "none",
                 "review turn": "on" if summary["review"] is not None else "off",
                 "hooks": ",".join(summary["manifest"].get("hooks") or []) or "none",
+                "guards": cls.guard_names(summary["guards"]),
+                "weakened tests": sum(1 for i in both if i in summary["weakened"]["ids"]),
                 "grading": "test files dropped" if summary.get("variant") == DROP_TEST_HUNKS else "plain",
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
                 "broke a passing test": sum(1 for i in both if i in summary["causes"]["broke"]),
@@ -920,6 +1028,7 @@ class SweBenchReport:
                 elif len(ran) < len(both):
                     lines.append(f"In {run} the hooks ran in {len(ran)} of {len(both)} instances; "
                                  "the others ran as if there were none.")
+        lines += cls.guards_never_ran((ours, name), (theirs, other))
         lines += ["", f"  {'instance':<34} {'resolved in':<16} {name:<28} {other}"] + table
         return lines
 
