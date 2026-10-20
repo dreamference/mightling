@@ -216,6 +216,8 @@ test("6 Revert asks first, and keeps the thread whole when the turn's file chang
     await revert.click();
     await expect(page.locator(".notice").last()).toContainText(/patch|apply|does not/i, { timeout: 10_000 });
     expect(asked).toMatch(/^Remove this turn( and the \d+ after it)? from the thread and undo the file changes it made\?/);
+    // The stand-in's turn ran pytest: what a shell command changed is in no diff, and the question says so.
+    expect(asked).toMatch(/Changes made by shell commands in (this turn|these turns) are not undone\./);
     expect(received(home).some((m) => m.method === "thread/revert")).toBe(false);
   } finally {
     await close();

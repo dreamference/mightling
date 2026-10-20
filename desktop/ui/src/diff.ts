@@ -202,3 +202,25 @@ export function underDirectory(diff: string, directory: string): string {
     return line;
   }).join("\n");
 }
+
+/** What Revert's confirmation needs to know of the turns it removes (a `TurnView`'s fields). */
+export interface RevertedTurn {
+  diff: string | null;
+  items: { type: string }[];
+}
+
+/**
+ * Revert's question for `turns[index]`, which removes it and every later turn and undoes its diff.
+ * The diff holds only the edits the agent made with its own tools: what a shell command it ran
+ * wrote is in no diff, so the question says so when any removed turn ran one (`commandExecution`).
+ */
+export function revertQuestion(turns: RevertedTurn[], index: number): string {
+  const later = turns.length - 1 - index;
+  const removed = turns.slice(index);
+  const what = `${later > 0 ? `this turn and the ${later} after it` : "this turn"} from the thread`;
+  const files = turns[index]?.diff?.trim() ? " and undo the file changes it made" : "; it made no file changes this window knows of, so files stay as they are";
+  const shell = removed.some((turn) => turn.items.some((item) => item.type === "commandExecution"))
+    ? ` Changes made by shell commands in ${later > 0 ? "these turns" : "this turn"} are not undone.`
+    : "";
+  return `Remove ${what}${files}?${shell} The conversation cannot be brought back from here.`;
+}
