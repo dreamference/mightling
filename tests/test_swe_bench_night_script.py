@@ -304,7 +304,8 @@ def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_produc
     assert rounds[1].startswith("http://node-b.local:8300 swe-bench run ")
     assert all("--exec-tool function" in r and "--apply-patch off" in r and "on-" not in r.split("--name")[0] for r in rounds)
     asked = remote.read_text().splitlines()
-    assert [line.split("serve ")[-1] if "serve" in line else "restore" for line in asked] == ["sglang", "engine", "restore", "restore"]
+    # One restore once both rounds have run: the EXIT trap's is cleared then.
+    assert [line.split("serve ")[-1] if "serve" in line else "restore" for line in asked] == ["sglang", "engine", "restore"]
     assert all(line.startswith("-o BatchMode=yes node-b bash -s -- ") for line in asked)
     # The regrades need no model server and run after production is back.
     assert all(line.startswith("local ") for line in recorded if " swe-bench eval " in line)
@@ -356,8 +357,7 @@ def remote(tmp_path):
                                   capture_output=True, text=True, timeout=60)
 
     yield run, calls, lock, ab_dir
-    pid_file = ab_dir / "gpu-lease.pid"
-    if pid_file.exists():
+    for pid_file in tmp_path.glob("ab-*/gpu-lease.pid"):
         subprocess.run(["kill", pid_file.read_text().strip()], capture_output=True)
 
 
@@ -409,3 +409,84 @@ def test_a_lease_no_restore_ends_lets_the_gpu_lock_go_by_itself(remote):
     run, calls, lock, ab_dir = remote
     assert run("serve", "sglang", HOLD_MAX="1").returncode == 0
     assert wait_until(lambda: lock_free(lock), seconds=15)
+
+
+def test_the_night_folder_reaches_the_helper_and_the_unit(tmp_path):
+    calls, remote = tmp_path / "calls.txt", tmp_path / "remote.txt"
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n')
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    ssh = bindir / "ssh"
+    ssh.write_text(f'#!/bin/bash\ncat > /dev/null\necho "$*" >> "{remote}"\n'
+                   'case "$*" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;; *) echo restored ;; esac\n')
+    for path in (fake, ssh):
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    task_list = tmp_path / "list.txt"
+    task_list.write_text("acme__widget-1\n")
+    folder = tmp_path / "night15"
+    folder.mkdir()
+    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder), "NIGHT": "15",
+           "PREFIX": "n15", "ARMS": "default+on-sglang default+on-engine", "REFINE": "0",
+           "REMOTE_AB_DIR": "/home/user/ab-n15", "PATH": f"{bindir}:{os.environ['PATH']}"}
+    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    asked = remote.read_text().splitlines()
+    assert asked and all(line.startswith("-o BatchMode=yes node-b AB_DIR=/home/user/ab-n15 bash -s -- ") for line in asked)
+    # The unit gets the remote's names with the rest of the night's settings.
+    with open(SCRIPT) as script:
+        body = script.read()
+    assert '--setenv=REMOTE_AB_DIR="$REMOTE_AB_DIR"' in body and '--setenv=REMOTE="$REMOTE"' in body
+
+
+def test_restore_keep_stops_the_arms_and_keeps_the_gpu_lock_for_the_night(remote):
+    run, calls, lock, ab_dir = remote
+    assert run("serve", "sglang").returncode == 0
+    kept = run("restore", "keep")
+    assert kept.returncode == 0 and "kept" in kept.stdout, kept.stderr
+    assert not lock_free(lock)
+    assert "start m0-prod8000" not in calls.read_text() and "rm -f ab-n12-sglang" in calls.read_text()
+    assert run("serve", "engine", GPU_LOCK_WAIT="1").stderr.count("already the night's") == 1
+    assert run("restore").returncode == 0
+    assert wait_until(lambda: lock_free(lock))
+
+
+def test_restore_keep_with_no_lease_is_a_plain_restore(remote):
+    run, calls, lock, ab_dir = remote
+    restored = run("restore", "keep")
+    assert restored.returncode == 0 and "restored" in restored.stdout
+    assert wait_until(lambda: "start m0-prod8000" in calls.read_text())
+
+
+def test_the_next_night_adopts_the_lease_so_the_gpu_lock_is_never_let_go(remote, tmp_path):
+    run, calls, lock, earlier = remote
+    later = tmp_path / "ab-n15"
+    later.mkdir()
+    (later / "serve.py").write_text("print('docker run ...')\n")
+    assert run("serve", "sglang").returncode == 0
+    lease = (earlier / "gpu-lease.pid").read_text().strip()
+    adopted = run("adopt", str(earlier), AB_DIR=str(later))
+    assert adopted.returncode == 0 and f"adopted {lease}" in adopted.stdout, adopted.stderr
+    assert (later / "gpu-lease.pid").read_text().strip() == lease
+    decoy = (earlier / "gpu-lease.pid").read_text().strip()
+    assert decoy != lease
+    # The earlier night's restore ends its decoy and brings production back; the lock stays taken.
+    assert run("restore").returncode == 0
+    assert wait_until(lambda: "start m0-prod8000" in calls.read_text() and not (earlier / "gpu-lease.pid").exists())
+    assert subprocess.run(["kill", "-0", decoy], capture_output=True).returncode != 0
+    assert not lock_free(lock)
+    # The later night serves under the adopted lease, with its own SGLang container's name, then lets the lock go.
+    served = run("serve", "sglang", AB_DIR=str(later), GPU_LOCK_WAIT="1")
+    assert served.returncode == 0 and "already the night's" in served.stderr, served.stderr
+    assert "rm -f ab-n15-sglang" in calls.read_text()
+    assert run("restore", AB_DIR=str(later)).returncode == 0
+    assert wait_until(lambda: lock_free(lock))
+
+
+def test_adopt_refuses_without_a_live_lease_to_take(remote, tmp_path):
+    run, calls, lock, earlier = remote
+    later = tmp_path / "ab-n15"
+    later.mkdir()
+    refused = run("adopt", str(earlier), AB_DIR=str(later))
+    assert refused.returncode == 1 and "no live lease" in refused.stderr
+    assert not (later / "gpu-lease.pid").exists()
