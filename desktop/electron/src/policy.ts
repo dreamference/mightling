@@ -8,7 +8,9 @@
 // a thread opener loses the fields that would replace Mightling's prompt, provider or policy, and a
 // named prompt becomes `baseInstructions` here, never from the page's own text. An Ask thread
 // (§3.1) also gets a fresh scratch folder as its `cwd` and a sandbox rooted there, whatever folder
-// the page asked for. No Electron here, so this tests on its own.
+// the page asked for. An import of another agent's setup loses its plugin items: their sources can
+// be cloned from GitHub or fetched from npm, a path the egress audit does not trace
+// (MIGHTLING_LING_CLAUDE §16.4). No Electron here, so this tests on its own.
 
 // Compiled in, as the Rust crate compiles it in: a running app cannot be pointed at a weaker file.
 import policyFile from "../../../ling-rs/web/policy.json";
@@ -37,6 +39,8 @@ export interface Policy {
   scratchPrompts: ReadonlySet<string>;
   scratchFields: readonly string[];
   scratchSandbox: string;
+  importRequest: string;
+  refusedImportItems: ReadonlySet<string>;
 }
 
 const isObject = (value: unknown): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -70,6 +74,8 @@ export function parsePolicy(value: unknown): Policy {
     scratchPrompts: new Set(strings(value, "scratchPrompts")),
     scratchFields: strings(value, "scratchFields"),
     scratchSandbox: string(value, "scratchSandbox"),
+    importRequest: string(value, "importRequest"),
+    refusedImportItems: new Set(strings(value, "refusedImportItems")),
   };
   if (![...policy.scratchPrompts].every((name) => policy.namedPrompts.has(name))) {
     throw new Error("policy.json: every scratch prompt must also be a named prompt");
@@ -122,6 +128,25 @@ function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSo
 }
 
 /**
+ * Removes the items an import may not carry (`refusedImportItems`: plugins, whose sources can be
+ * fetched from the network); the others are imported as asked. An item that does not name its
+ * type, or an import left with nothing to do, is refused rather than guessed at.
+ */
+function vetImportParams(policy: Policy, original: JsonObject): JsonObject {
+  const items = original.migrationItems;
+  if (!Array.isArray(items)) throw new Error("an import must list its migrationItems");
+  const kept = items.filter((item) => {
+    const kind = isObject(item) ? item.itemType : undefined;
+    if (typeof kind !== "string") throw new Error("every migration item must name its itemType");
+    return !policy.refusedImportItems.has(kind);
+  });
+  if (kept.length === 0) {
+    throw new Error("nothing left to import: plugins are not imported here, since their sources can be fetched from the network");
+  }
+  return { ...original, migrationItems: kept };
+}
+
+/**
  * Checks a message the page wants to send, removes or sets what only the policy decides, and
  * returns the message to forward. `pending` holds the ids (as JSON) of server requests not yet
  * answered; answering one removes it, and an answer to anything else is refused, so the page
@@ -141,6 +166,9 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
     }
     if (policy.threadOpeners.has(method) && isObject(object.params)) {
       object.params = vetThreadParams(policy, object.params, prompts);
+    }
+    if (method === policy.importRequest) {
+      object.params = vetImportParams(policy, isObject(object.params) ? object.params : {});
     }
     return object;
   }
