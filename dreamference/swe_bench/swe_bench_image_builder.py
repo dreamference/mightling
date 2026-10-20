@@ -21,7 +21,9 @@ Two differences from the fork, neither of which changes what the image holds:
 An image is built anywhere (`ling-admin swe-bench build`), validated where it was built, and kept
 as an archive (`docker save`, gzip) with the record of its validation, so a machine that runs the
 benchmark loads the very image that was validated (`ling-admin swe-bench import`). After each
-instance the image and its container go, so a build of many instances needs the disk of one.
+instance the image and its container go, so Docker holds one instance image at a time beside the
+base; the archives accumulate, and each is a whole image (`docker save` writes every layer, the
+base's too): a few GB per instance, so a month of 110 is several hundred GB of archives.
 """
 
 import gzip
