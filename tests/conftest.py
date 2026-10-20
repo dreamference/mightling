@@ -141,6 +141,9 @@ def _refuse_real_docker(monkeypatch, request):
     # (2026-09-29). Every real docker command from a test now fails that test;
     # tests that exercise docker paths mock subprocess themselves, which replaces this guard.
     import subprocess
+    # Remote access (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §9, item 5): NetBird's client
+    # in a test is a stand-in under the test's own folder; the real one would join or leave an overlay.
+    scratch = str(request.getfixturevalue("tmp_path_factory").getbasetemp())
 
     def guarded(original):
         def run(*args, **kwargs):
@@ -159,6 +162,8 @@ def _refuse_real_docker(monkeypatch, request):
             # machine's network, which a benchmark night or an SSH session depends on.
             if os.path.basename(str(program)) in ("nmcli", "iw") and _changes_network(argv):
                 raise AssertionError(f"a test tried to change the network: {argv!r}; mock it")
+            if Path(str(program)).name == "netbird" and not str(program).startswith(scratch + os.sep):
+                raise AssertionError(f"a test tried to run the real netbird: {argv!r}; use a stand-in under tmp_path")
             if os.path.basename(str(program)) in ("ssh", "scp", "rsync", "sudo", "sg"):
                 raise AssertionError(f"a test tried to run a real {os.path.basename(str(program))}: {argv!r}; mock it")
             # The suite is offline by construction (AGENTS.md): the installed `ling` and the other
