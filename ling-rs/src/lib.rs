@@ -316,6 +316,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(airgapped::run_cli(&user_args[index + 1..]));
     }
+    // `cavemode` shows or sets how terse answers are (cave.rs), as `/cavemode` does inside a
+    // session; `ling web`, the desktop app and the phone bridges set it through this.
+    if let Some(index) = subcommand
+        && user_args[index] == "cavemode"
+    {
+        std::process::exit(cave::run_cli(&user_args[index + 1..]));
+    }
     // `node` lists, chooses or forgets the Mightling node this machine uses (node.rs).
     if let Some(index) = subcommand
         && user_args[index] == "node"
@@ -546,6 +553,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
+    // The TUI starts at its own cave level when nothing is configured (cave.rs; spec §11.5).
+    cave::set_tui(tui);
     // The compatibility mode's renderer and key map, for this session only (compat_tui.rs).
     let args = if compat_tui::applies(compat_mode.mode, tui) {
         compat_tui::prepare(args, &user_args, &codex_home, &code_index::session_dir(&user_args))

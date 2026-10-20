@@ -32,6 +32,7 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 | `/threads` | The last 10 threads started from this chat, numbered, with their names. |
 | `/use <n>` | Continues thread `n` from that list. |
 | `/status` | Model server, air-gap level, the current thread, and whether a turn is running. |
+| `/cavemode [level]` | How terse this thread's answers are, as on Signal (CAVE_MODE §11.7): the level in force, a level for this thread, or `default <level|built-in>` for new ones. |
 | `/help` | This table. |
 | `/pair <code>` | Telegram only: pairs this Telegram account (§4.1). |
 
