@@ -90,6 +90,9 @@ SIGNAL_UNIT: Final[str] = "mightling-signal.service"
 # only names are read; each is then asked `is-enabled` like the first.
 SIGNAL_INSTANCE_PREFIX: Final[str] = "mightling-signal@"
 SIGNAL_INSTANCE_SUFFIX: Final[str] = ".service"
+
+# Remote access (specs/DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md §6): the node's tunnel to its box.
+REMOTE_TUNNEL_UNIT: Final[str] = "mightling-remote-tunnel.service"
 # The messenger bridge (specs/DREAMFERENCE_MIGHTLING_CHAT.md): `ling chat start`'s user unit, and the
 # loopback proxy socket `ling-admin matrix start` enables in front of the homeserver. Named the
 # same way when on; off, nothing of either runs.
@@ -555,6 +558,9 @@ class EgressAudit:
         - The Matrix homeserver (`ling-admin matrix start`): its loopback proxy socket is enabled
           and `tailscale serve` offers it to the user's tailnet; with push on, push notifications
           can leave the machine.
+        - Remote access (`ling-admin remote setup`, REMOTE_ACCESS §6): the user unit
+          `mightling-remote-tunnel.service` keeps an SSH tunnel to the box, and NetBird's client
+          reaches the box's relay and the peers.
 
         Returns:
             List[str]: One line per enabled exception; empty when there is none.
@@ -578,6 +584,12 @@ class EgressAudit:
             lines.append("Matrix homeserver enabled (`ling-admin matrix`): offered to your tailnet by `tailscale serve`"
                          + ("; push is on, so push notifications (event ids, no text) can leave this machine" if push else ", with no route out")
                          + ". `ling-admin matrix stop` turns it off.")
+        if cls._unit_enabled(REMOTE_TUNNEL_UNIT, user=True):
+            from dreamference.remote.remote_settings import RemoteSettings
+            box = (RemoteSettings.read() or {}).get("dns_name", "the box")
+            lines.append(f"Remote access enabled ({REMOTE_TUNNEL_UNIT}): the node keeps an SSH tunnel to {box}, "
+                         "and NetBird's client reaches its relay and the overlay's peers, outside this trace. "
+                         "`ling-admin remote remove` turns it off.")
         return lines
 
     @classmethod

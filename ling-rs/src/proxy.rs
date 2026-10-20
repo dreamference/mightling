@@ -26,7 +26,13 @@ pub const LOOPBACK: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
 pub fn export() {
     let mut hosts: Vec<String> = Vec::new();
     hosts.extend(crate::configured_vllm_host());
-    hosts.extend(ling_node_locator::remembered().map(|node| node.model_url()));
+    if let Some(node) = ling_node_locator::remembered() {
+        hosts.push(node.model_url());
+        // Its overlay name too (remote access): requests to it must not go to a proxy either.
+        if node.overlay_name_is_its_own() {
+            hosts.push(node.via_overlay().model_url());
+        }
+    }
     let upper = std::env::var("NO_PROXY").ok();
     let lower = std::env::var("no_proxy").ok();
     let merged = merged(upper.as_deref(), lower.as_deref(), &hosts);
