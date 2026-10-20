@@ -3,6 +3,7 @@
 > - **Status:** proposed 2026-10-20 (owner: study the Claude desktop app, "make Mightling's desktop app as close to it as useful"), branch `desktop/parity-claude`. A companion to [DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md](./DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md) (DESKTOP_PARITY), whose direction, parity with the Codex app, stands: this document adds what the Claude desktop app does that a local, private assistant should also do, ranks it, and says which items need the owner. §4 records what this branch built.
 > - **Clean room.** Every claim about the Claude desktop app below is read from the vendor's public pages (help center, documentation, release notes, blog, the public Claude Code changelog), each row with its URL (§7). Nothing was downloaded from the vendor, unpacked, decompiled or read from the app's bundle, and no icon, image, font or string of the app is reused. Where a public page does not state something, the row says **not documented** rather than guessing.
 > - **What could be observed:** nothing of the running app. It has a Linux build now (a beta since the week of 2026-06-29, `.deb` for x86_64 and arm64, Ubuntu 22.04+ and Debian 12+, [LNX]), so this GB10 and the MSI desktop qualify on paper, but (1) installing it needs root and registers the vendor's apt repository, which was not done on the owner's machines without the owner, the MSI's `sudo` asks for a password, and this machine runs the SWE-bench nights; (2) every surface is behind the vendor's sign-in ([LNX] "Launch and sign in"), and no account is used here, so a running copy would show only its sign-in screen. The Mac mini runs macOS 12.3 (`sw_vers`, 2026-10-20) and the app requires macOS 13 ([INSTALL]). §6 question 1 asks whether to install it on the MSI desktop, sign-in screen only.
+> - **Where it stands (2026-10-20):** gap 1 (files and artifacts in Ask) merged to `main` as f77a6fc6 and gap 3 (Quick Entry) as 06c1fab5, both pushed with e13b6c83, after the full desktop gate (UI 139 and main-process 91 unit tests, the e2e suite 42 passed, the Python suite 1640 passed). This document stays on `desktop/parity-claude`, not merged, so the code's comments that cite it (`DESKTOP_PARITY_CLAUDE §4.1`, `§4.2`) point at this branch until the owner decides (§6 question 7).
 > - **Trade dress:** as DESKTOP_PARITY: layout and interaction may follow the compared app; its name, icon, colours, sounds and copy must not.
 
 ---
@@ -25,7 +26,7 @@ Ten gaps ranked by what they would change for a person using Mightling as a priv
 
 ## 2. Gap analysis, screen by screen
 
-Columns: what the Claude desktop app does (with its source), what Mightling does today (with the file or spec), the gap, and the **impact** for a user of a local private assistant: **H** (changes how Ask or Work is used every day), **M** (noticeable), **L** (polish). **Shared** marks a gap DESKTOP_PARITY already lists for the Codex app; those are left to whichever study lands first (`desktop/parity-study` was checked on 2026-10-20, at ceb398c: spec only, nothing built).
+Columns: what the Claude desktop app does (with its source), what Mightling does today (with the file or spec), the gap, and the **impact** for a user of a local private assistant: **H** (changes how Ask or Work is used every day), **M** (noticeable), **L** (polish). **Shared** marks a gap DESKTOP_PARITY already lists for the Codex app, or that the Codex-parity study of the same day put in its Phase 4 (DESKTOP_PARITY §4.5 on `desktop/parity-study`, 1c69f09, items 13 to 40); those are left to whichever lands first. That study's first builds (items 14, 15 and 20 on `desktop/parity-elicitation`, `desktop/parity-hook-trust`, `desktop/parity-fixes`) touch neither Ask's files nor Quick Entry.
 
 ### 2.1 Chat list and projects
 
@@ -112,7 +113,7 @@ Columns: what the Claude desktop app does (with its source), what Mightling does
 
 | Claude desktop app | Mightling | Gap | Impact |
 |---|---|---|---|
-| Menu: Claude › Check for Updates…, Settings…; Help › Troubleshooting › Generate Diagnostic Report, Show Logs ([ENTERPRISE], [WINDEPLOY]); a tray icon, launch at login and close-to-tray are **not documented**; Quick Entry needs the app running in the background ([QUICK]) | File (Ask, Work, Quit), Edit, View, Window; a tray icon with Ask, Work, Quit (`desktop/electron/src/shell.ts`); closing the window quits | Staying in the tray when the window closes, which Quick Entry needs (§4.2 adds it as its own setting, off by default); "Show logs" (the app-server's stderr is shown only on its start-up screen) | M |
+| Menu: Claude › Check for Updates…, Settings…; Help › Troubleshooting › Generate Diagnostic Report, Show Logs ([ENTERPRISE], [WINDEPLOY]); a tray icon, launch at login and close-to-tray are **not documented**; Quick Entry needs the app running in the background ([QUICK]) | File (Ask, Work, Quit), Edit, View, Window; a tray icon with Ask, Work, Quit (`desktop/electron/src/shell.ts`); closing the window quits | Staying in the tray when the window closes, which Quick Entry needs (§4.2 adds it as its own setting, off by default); "Show logs" (the app-server's stderr is shown only on its start-up screen) | M; the menu's and tray's other entries are **Shared** (DESKTOP_PARITY §4.5 item 36) |
 
 ### 2.11 Notifications
 
@@ -124,7 +125,7 @@ Columns: what the Claude desktop app does (with its source), what Mightling does
 
 | Claude desktop app | Mightling | Gap | Impact |
 |---|---|---|---|
-| Sign-in; at first launch a prompt offering to turn Quick Entry's shortcut on ("Turn on shortcut", Continue) ([QUICK]); nothing else documented | A start-up screen while the app-server starts or after it stops (`StartupScreen`); Ask's empty page explains what Ask is | A first-run page naming Ask, Work, the shortcut and `/airgapped` | L |
+| Sign-in; at first launch a prompt offering to turn Quick Entry's shortcut on ("Turn on shortcut", Continue) ([QUICK]); nothing else documented | A start-up screen while the app-server starts or after it stops (`StartupScreen`); Ask's empty page explains what Ask is | A first-run page naming Ask, Work, the shortcut and `/airgapped` | L, **Shared** (DESKTOP_PARITY §4.5 item 29, First run, on `desktop/parity-study`) |
 
 ### 2.13 Theming
 
@@ -162,9 +163,9 @@ Sign-in, plans and usage limits; cloud sessions, Cowork in a virtual machine and
 
 | # | Gap | Impact | What it takes | Status |
 |---|---|---|---|---|
-| 1 | **Files and artifacts beside an Ask answer**, the question's folder listed and opened (§2.3) | H | Window only: the tab area in Ask for files inside the question's folder, the folder's tree, a card per file an answer made | **Built**, §4.1 |
+| 1 | **Files and artifacts beside an Ask answer**, the question's folder listed and opened (§2.3) | H | Window only: the tab area in Ask for files inside the question's folder, the folder's tree, a card per file an answer made | **Built** (`desktop/ask-files`), §4.1 |
 | 2 | **Projects for Ask:** instructions, knowledge files searched through `ling-docs`, questions gathered, a question moved in (§2.1) | H | The policy layer composes a project's instructions into the `ask` prompt and names its collection; the UI a project page | Needs the owner, §6 question 6 |
-| 3 | **Quick Entry:** a system-wide shortcut, a floating box, recent questions, the app kept in the tray (§2.9, §2.10) | H | Window only: `globalShortcut`, a small window, two settings off by default | **Built**, §4.2 |
+| 3 | **Quick Entry:** a system-wide shortcut, a floating box, the app kept in the tray (§2.9, §2.10) | H | Window only: `globalShortcut`, a small window, two settings off by default | **Built** (`desktop/quick-entry`), §4.2; recent questions in the box not built |
 | 4 | **Open a cited source** from an answer (§2.4) | H | The renderer keeps the address; a click opens it in the system browser after showing it; refused at `/airgapped on` like the forge's page | Needs the owner, §6 question 2 |
 | 5 | **Edit an earlier message**, the replaced version kept (§2.2) | M | `thread/fork` at that turn, then `turn/start`; a switch between the versions | Proposed; the version switcher is UI the owner should see first |
 | 6 | **Incognito question** (§2.14) | M | `ephemeral` threads, the folder removed on close (a main-process removal confined to the Ask root) | Needs the owner, §6 question 3 |
@@ -181,11 +182,23 @@ Below the ten: one-file MCP extensions (§6 question 5), seeing and editing memo
 
 ### 4.1 Files and artifacts in Ask (gap 1)
 
-To be filled when merged.
+Branch `desktop/ask-files`, window only (no method added to `policy.json`).
+
+- **A file an answer makes is a card** in the answer: its name, its kind in words (Document, Web page, PDF, Image, File) and **Open**; the diff folds under it. Edits to existing files stay as diffs. (`MadeFile` in `desktop/ui/src/App.tsx`.)
+- **It opens beside the answer**, in the same tab area and artifacts viewer as Work (Markdown, images, PDF, HTML), by itself when a turn creates one and Settings › General's "Open a document, PDF or image the agent creates…" is on (the default), else from the card.
+- **The question's folder:** the header's **Files** button (and Ctrl+Shift+E in Ask) shows the folder's tree beside the answer; **Open the folder** opens it in the file manager. ASK §3.1's "the thread's view lists them, with Reveal in folder" is thereby built in the app.
+- **Each view shows its own tabs** (`viewTabs` in `desktop/ui/src/ask.ts`): Ask only the files of the question in front, Work every tab but an Ask question's files; the list stays one, so a tab is where it was when the view comes back. Ctrl+W, Ctrl+Alt+W, Ctrl+P and Ctrl+L act on what the view shows.
+- **Tests:** `ask.test.ts` (which tabs each view shows, the card's words); `e2e/extras.e2e.ts` (an Ask answer that writes `report.md`: the card, the tab beside the answer, close and Open again, the folder's tree, Work not showing it, another question not showing it, one app-server); the stand-in writes the file when a question says "with a report".
 
 ### 4.2 Quick Entry (gap 3)
 
-To be filled when merged.
+Branch `desktop/quick-entry`, window only (no method added to `policy.json`; two message types on the app's own channel, as the pet has).
+
+- **Settings › General › Quick Entry**, off by default: "Ask a quick question from any app with Ctrl+Alt+Space"; the shortcut is changed by pressing it in the field (Ctrl, Alt or Super with a letter, digit, function key or Space; Shift alone is refused, since it would take typing from other apps). The page says whether the shortcut was taken and, if not, why: taken by another app or the desktop, not a valid shortcut, or a Wayland session.
+- **The box** (`desktop/electron/src/quick.ts`, `desktop/ui/src/QuickView.tsx`): a small frameless window above the others, in the upper third of the screen the pointer is on; Enter asks the text as a **new Ask question at once** and brings the app window forward on it, Shift+Enter starts a new line, Esc or a click elsewhere puts it away. It may ask the main process for `quick/ask` and `quick/hide` only (`handleQuick` in `main.ts`, beside the pet's `handlePet`). Unlike the compared app, it has no list of recent questions and no screen capture (the served model is text-only).
+- **Other ways in:** the tray's **New question…**; `ling://quick` (so a Wayland desktop, where an app cannot take a system-wide key, can bind `xdg-open ling://quick` itself); `ling://ask?prompt=…` puts text in a new question's composer without sending it, as the compared app's `new?q=` does.
+- **Keep Mightling in the tray when its window closes**, off by default (Settings › General): closing hides the window, so the shortcut and running turns go on; Quit (Ctrl+Q, the tray, the menu, a signal) still ends the app. With it off, closing quits as before; the egress audit's session never keeps it.
+- **Tests:** `quick.test.ts` (which shortcuts may be system-wide and their Electron spelling, Wayland, the question trimmed and capped), `args.test.ts` (`ling://ask`, `ling://quick`), `ui/src/quick.test.ts` (the box's keys); `e2e/quick.e2e.ts`: off by default no shortcut is taken; on, the shortcut is registered, the box opened as `ling://quick` opens it asks "What is NVFP4?" as a new Ask question whose answer streams in, closing the window keeps it, a link brings it back, Settings turns the shortcut off and it is released, one app-server.
 
 ---
 
@@ -203,6 +216,7 @@ Each item of §4 lands with its unit tests (`npm test` in `desktop/ui` and `desk
 4. **Recall of earlier questions (gap 7):** may the agent search your earlier Ask questions as a tool (local, read only, off by default, Settings › Memories)?
 5. **One-file MCP extensions (§2.15):** accept `.mcpb` files (an open format) dropped on Skills and tools, after showing what the server runs? They are third-party code; they would be refused at `/airgapped on` if they need the network.
 6. **Projects for Ask (gap 2):** questions gathered in a project with standing instructions and a knowledge folder indexed by `ling-docs`. This is the largest item and changes what the `ask` prompt contains; it wants its own spec section in ASK. Go ahead with that spec?
+7. **This document on `main`?** The code merged for gaps 1 and 3 cites it; merging it (spec only) would keep those references whole. Until then it lives on `desktop/parity-claude`.
 
 ---
 
