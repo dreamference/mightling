@@ -70,13 +70,17 @@ class MCPToolRegistry:
                 "description": (
                     "Searches the public web and returns titles, URLs and snippets. Use this when "
                     "the answer depends on information newer than the model, then pass a returned "
-                    "URL to web_fetch to read the page."
+                    "URL to web_fetch to read the page. category 'news', 'science', 'it', 'map', "
+                    "'videos', 'music', 'books' or 'files' searches those instead of the web; "
+                    "time_range 'day', 'week', 'month' or 'year' keeps only recent results."
                 ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
-                        "max_results": {"type": "integer"}
+                        "max_results": {"type": "integer"},
+                        "category": {"type": "string"},
+                        "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}
                     },
                     "required": ["query"]
                 }

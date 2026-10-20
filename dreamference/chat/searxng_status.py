@@ -242,11 +242,11 @@ class SearxngStatus:
         working = 0
         for name in names:
             if not enabled[name]:
-                report.append(f"   ·  {name:12} off")
+                report.append(f"   ·  {name:16} off")
                 continue
             state, detail = cls.state(events.get(name), now)
             working += state == OK and name not in NOT_WEB_SEARCH
-            report.append(f"   {MARKS[state]} {name:12} {state}: {detail}")
+            report.append(f"   {MARKS[state]} {name:16} {state}: {detail}")
         report.append(
             "💡 SearXNG logs failures only, so ok means no recent error, not a recent success."
         )
