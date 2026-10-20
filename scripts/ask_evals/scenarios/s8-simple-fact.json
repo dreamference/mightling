@@ -1,0 +1,45 @@
+{
+  "id": "s8-simple-fact",
+  "family": "S8",
+  "failure": [
+    3
+  ],
+  "turns": [
+    {
+      "text": "Who maintains the Kettleby Moor lighthouse?"
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "Kettleby Harbour Trust",
+        "Harbour Trust"
+      ]
+    ],
+    "max_tool_calls": 4,
+    "no_engine_scrape": true
+  },
+  "web": {
+    "search": {
+      "results": [
+        {
+          "title": "Kettleby Moor lighthouse",
+          "url": "http://kettleby.example.test/lighthouse",
+          "content": "The Kettleby Moor lighthouse has been maintained by the Kettleby Harbour Trust since 1987."
+        }
+      ]
+    },
+    "pages": {
+      "http://kettleby.example.test/lighthouse": {
+        "status": 200,
+        "body": "<html><body>The Kettleby Moor lighthouse has been maintained by the Kettleby Harbour Trust since 1987.</body></html>"
+      }
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}

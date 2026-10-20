@@ -1,6 +1,6 @@
 # Mightling assistant evals: measuring the phone-chat assistant
 
-**Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built. **Phase 0 done the same day (§9); three industry benchmarks added on the owner's request, planned in §10:** runs happen in a `bwrap --unshare-net` jail that keeps production's sandbox and is offline by construction; nothing else built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
+**Status:** decided 2026-10-20 (the owner's decisions D1–D6, §0.1): `ask-evals` is to be built. **Phase 0 done the same day (§9); three industry benchmarks added on the owner's request, planned in §10; the harness built and tested without a model (§11), its first model run after the nights:** runs happen in a `bwrap --unshare-net` jail that keeps production's sandbox and is offline by construction; nothing else built yet. Proposed the same day as a moonshot spec from research only: no model job was run, no benchmark was downloaded or started, nothing was written to any tracker. It ranks what to adopt, what to build and what to skip.
 **Goal:** measure, every night, the faults that made the phone-chat assistant useless on the morning of 2026-10-20 ([MIGHTLING_SIGNAL §19](./DREAMFERENCE_MIGHTLING_SIGNAL.md), [MIGHTLING_CHAT §16](./DREAMFERENCE_MIGHTLING_CHAT.md)). Each fix then gets a number that shows when it regresses, as SWE-bench gives the coding agent.
 **Builds on:**
 - `scripts/cave_mode_bench/` (`run.py`, `drift.py`): real `ling exec` runs with a fresh `CODEX_HOME`, multi-turn through `exec resume --last`, a `check.py` per task, tokens counted with the served model's tokenizer;
@@ -481,6 +481,42 @@ The owner asked for three more: Terminal-Bench, Aider Polyglot and IFEval. Each 
 | T1 | The IFEval runner (prompt and level as the variable) | known-good and known-bad responses score as the reference scorer does |
 | T2 | The Polyglot runner | the reference solutions (`.meta/`) pass and the stubs fail in every language |
 | T3 | The Harbor agent for `ling` and the Terminal-Bench runner | the oracle agent passes the built tasks; one task end to end with `ling` |
+
+## 11. What was built: the harness (2026-10-20, branch `ask-evals/harness`)
+
+Phase 1's code, tested with no model. The first run against the model waits until the nights are over.
+
+- **`scripts/ask_evals/`.** The parts:
+  - `run.py`: plan, run, rescore and the summary;
+  - `askevals/session.py`: one scenario inside the jail;
+  - `askevals/forward.py`: the model's socket;
+  - `askevals/standins.py`: SearXNG and the proxy, with the faults of §5.3;
+  - `askevals/images.py`: blank, noise, page, faint, chart, tiny, truncated;
+  - `askevals/rollout.py`: a rollout read as turns, calls and per-turn tokens;
+  - `askevals/checks.py`: the rules of §5.5;
+  - `askevals/metrics.py`: loops, language, abstain/ask/answer;
+  - `askevals/gate.py`: the slot's hold on the model gate;
+  - a `README.md`.
+- **The scenarios.** 29 synthetic scenarios in `scenarios/`, covering failure classes 1 to 8 (S1–S17 of §5.4). S13 runs each question at `off` and at `ultra`.
+- **The night step.** `ASK_EVALS=1` in `scripts/swe_bench_night1.sh` runs the suite before the arms, with `--model-port 18000 --hold-gate "night N, assistant evals"`, under `timeout ASK_EVALS_LIMIT` (90 min). It is **off by default** (D2), and its result never fails the night.
+- **Tests.** `tests/test_ask_evals.py`, 64 tests:
+  - the metrics on known texts;
+  - the stand-ins over real loopback HTTP, faults and log included;
+  - every image kind;
+  - rollouts;
+  - the morning's failure shape scored as a failure on every rule it breaks;
+  - every scenario well formed and every failure class covered;
+  - the runner end to end with a stand-in `ling` in good and bad modes;
+  - multi-turn resume;
+  - the jail's command line;
+  - the gate hold;
+  - the night step on and off.
+- **Checked by hand.** The same stand-in `ling` was run once through the real jail in a user unit (`bwrap --unshare-net`, stand-ins inside). It scored as expected: scraping, sleep and the call budget all failed.
+- **Open before the first model run** (Phase 1 acceptance):
+  - Whether `ling exec` takes an empty prompt with an image (S1, S2: the bridge sends an image with no text).
+  - Whether the launcher starts inside the jail as it did outside, with the model reached through the socket.
+  - `faketime` needs one `apt install` before S4's stale thread can run; without it, S4 is reported as skipped.
+  - Each scenario's budgets get set from the first three clean runs.
 
 ## Sources
 

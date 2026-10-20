@@ -1,0 +1,67 @@
+{
+  "id": "s4-stale-thread",
+  "family": "S4",
+  "failure": [
+    2
+  ],
+  "turns": [
+    {
+      "text": "Who wrote the novel The Remains of the Day?",
+      "faketime": "-2d"
+    },
+    {
+      "text": "Different question. I'm looking at the Fellow Ode Gen 2 grinder."
+    },
+    {
+      "text": "compare it with a Baratza Encore ESP"
+    }
+  ],
+  "expect": {
+    "mention": [
+      [
+        "Ode"
+      ],
+      [
+        "Encore"
+      ]
+    ],
+    "not_mention": [
+      "Ishiguro",
+      "Remains of the Day",
+      "novel"
+    ],
+    "max_tool_calls": 8
+  },
+  "web": {
+    "search": {
+      "results": [
+        {
+          "title": "Fellow Ode Gen 2 review",
+          "url": "http://grinders.example.test/ode",
+          "content": "The Fellow Ode Gen 2 is a flat-burr grinder made for filter coffee."
+        },
+        {
+          "title": "Baratza Encore ESP review",
+          "url": "http://grinders.example.test/encore",
+          "content": "The Baratza Encore ESP is a conical-burr grinder that covers espresso and filter."
+        }
+      ]
+    },
+    "pages": {
+      "http://grinders.example.test/ode": {
+        "status": 200,
+        "body": "<html><body>Fellow Ode Gen 2: 64 mm flat burrs, single-dose, filter only, about 250 euros.</body></html>"
+      },
+      "http://grinders.example.test/encore": {
+        "status": 200,
+        "body": "<html><body>Baratza Encore ESP: 40 mm conical burrs, espresso and filter, about 180 euros.</body></html>"
+      }
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}
