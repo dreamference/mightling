@@ -7,6 +7,13 @@ from dreamference.hardware.hardware_telemetry import HardwareTelemetry
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 from dreamference.hardware.model_downloader import ModelDownloader
 from dreamference.hardware.hardware_manager import HardwareManager
+from dreamference.hardware.adapter_base_digest import AdapterBaseDigest
+from dreamference.hardware.adapter_catalog import AdapterCatalog
+from dreamference.hardware.adapter_installer import AdapterInstaller
+from dreamference.hardware.adapter_manifest import AdapterManifest
+from dreamference.hardware.adapter_signature import AdapterSignature
+from dreamference.hardware.adapter_store import AdapterStore
+from dreamference.hardware.adapter_verifier import AdapterVerifier
 
 MODEL_MATRIX = ModelMatrixRegistry.MATRIX
 
@@ -89,6 +96,13 @@ __all__ = [
     "ModelMatrixRegistry",
     "ModelDownloader",
     "HardwareManager",
+    "AdapterBaseDigest",
+    "AdapterCatalog",
+    "AdapterInstaller",
+    "AdapterManifest",
+    "AdapterSignature",
+    "AdapterStore",
+    "AdapterVerifier",
     "MODEL_MATRIX",
     "resolve_model_hf_repo",
     "model_key_for_served_id",

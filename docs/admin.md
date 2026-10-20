@@ -678,6 +678,46 @@ Remove the Google service container; connected accounts stay stored.
 
 Show whether it runs and which accounts hold which apps.
 
+### `ling-admin adapter`
+
+Install and manage LoRA adapters for the served model.
+
+#### `ling-admin adapter list`
+
+Show the installed adapters (no network).
+
+| Option | Description |
+|---|---|
+| `--available` | Also list the adapters this release catalogues. |
+| `--json` | Print JSON. |
+
+#### `ling-admin adapter install`
+
+Download, verify and install an adapter (the only adapter step that uses the network).
+
+| Option | Description |
+|---|---|
+| `name` | A catalogued adapter, as <name> or <name>@<version>. |
+| `--repo` | An adapter published after this release: <org>/<repo>@<commit>. |
+| `--third-party` | Install an adapter that is not signed by Dreamference (asks you to type its name) |
+| `--hf-token` | A Hugging Face token, for a private repository. |
+
+#### `ling-admin adapter remove`
+
+Remove an installed adapter and its files.
+
+| Option | Description |
+|---|---|
+| `name` | The installed adapter. |
+
+#### `ling-admin adapter verify`
+
+Check installed adapters again: signature, files and the served base.
+
+| Option | Description |
+|---|---|
+| `name` | One adapter (default: all) |
+
 ### `ling-admin images`
 
 Manage image search (the image_search tool and /images/).

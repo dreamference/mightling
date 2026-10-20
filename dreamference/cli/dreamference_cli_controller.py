@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from dreamference.cli.adapter_command import ADAPTER_COMMAND, AdapterCommand
 from dreamference.config import DreamferenceConfig, ProxyBypass
 from dreamference.config.dreamference_config import DEFAULT_MODEL, DEFAULT_DIFFUSION_MODEL
 from dreamference.runner import (
@@ -1386,6 +1387,9 @@ class DreamferenceCLIController:
             "status", help="Show whether it runs and which accounts hold which apps"
         )
 
+        # Command: ling-admin adapter (LoRA adapters on the served model; MIGHTLING_ADAPTERS §3)
+        adapter_parser = AdapterCommand.add_parser(subparsers)
+
         # Command: ling-admin images (the image search sidecar and its MCP tool;
         # specs/DREAMFERENCE_MIGHTLING_ASK.md §6)
         images_parser = subparsers.add_parser("images", help="Manage image search (the image_search tool and /images/)")
@@ -1447,6 +1451,7 @@ class DreamferenceCLIController:
             "docs": (docs_parser, "docs_command"),
             "google": (google_parser, "google_command"),
             "images": (images_parser, "images_command"),
+            ADAPTER_COMMAND: (adapter_parser, "adapter_command"),
             "voice": (voice_parser, "voice_command"),
             "matrix": (matrix_parser, "matrix_command"),
         }
@@ -2566,7 +2571,12 @@ class DreamferenceCLIController:
                 sys.exit(NodeRemote.stop(args.name))
             if args.node_command == "sync-model":
                 from dreamference.node import NodeModelSync
-                sys.exit(NodeModelSync.sync(args.name, args.model, address=args.address))
+                from dreamference.node.node_adapter_sync import NodeAdapterSync
+                # The installed adapters signed by Dreamference follow the model (ADAPTERS §6.4).
+                model_code = NodeModelSync.sync(args.name, args.model, address=args.address)
+                synced, lines = NodeAdapterSync.after(model_code, args.name, args.model, args.address)
+                sys.stdout.writelines(f"{line}\n" for line in lines)
+                sys.exit(synced)
             if args.node_command in ("run", "jobs", "logs", "cancel", "fetch", "job-exec"):
                 from dreamference.node import NodeJob, NodeJobSender
                 if args.node_command == "run":
@@ -2778,6 +2788,9 @@ class DreamferenceCLIController:
 
         elif args.command == "images":
             sys.exit(cls._run_images(args, config))
+
+        elif args.command == ADAPTER_COMMAND:
+            sys.exit(AdapterCommand.run(args, config))
 
         elif args.command == "voice":
             sys.exit(cls._run_voice(args.voice_command))
