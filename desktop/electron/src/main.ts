@@ -518,7 +518,7 @@ export async function main(options: MainOptions): Promise<void> {
         previews.go(String(message.id), message.step === "forward" ? "forward" : "back");
         return null;
       case "preview/reload":
-        previews.reload(String(message.id));
+        previews.reload(String(message.id), message.fresh === true);
         return null;
       case "preview/place":
         previews.place(String(message.id), message.bounds, Boolean(message.visible));
