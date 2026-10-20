@@ -18,6 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
+from dreamference.vllm_server.adapter_serving import AdapterServing
 from dreamference.vllm_server.model_gate_service import (
     PAUSE_FILE,
     PROBE_PATH,
@@ -30,6 +31,8 @@ GATE_DIR: Final[Path] = Path(os.path.expanduser("~/.local/state/dreamference/mod
 CONTAINER_STATE_DIR: Final[str] = "/mightling-gate"
 SERVICE_SOURCE: Final[Path] = Path(__file__).with_name("model_gate_service.py")
 SERVICE_COPY: Final[str] = "model_gate_service.py"
+# The adapter rules the service imports, copied beside it.
+ADAPTERS_SOURCE: Final[Path] = Path(__file__).with_name("model_gate_adapters.py")
 
 # The engine's port is the public one plus this, on loopback only (8000 -> 18000).
 ENGINE_PORT_OFFSET: Final[int] = 10000
@@ -95,6 +98,7 @@ class ModelGate:
             "--label", "ling.model-gate=1",
             "-e", "PYTHONDONTWRITEBYTECODE=1",
             "-v", f"{GATE_DIR}:{CONTAINER_STATE_DIR}:ro",
+            *AdapterServing.gate_mounts(),
             "--entrypoint", "python3",
             docker_image,
             f"{CONTAINER_STATE_DIR}/{SERVICE_COPY}",
@@ -118,6 +122,7 @@ class ModelGate:
         """
         GATE_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(SERVICE_SOURCE, GATE_DIR / SERVICE_COPY)
+        shutil.copyfile(ADAPTERS_SOURCE, GATE_DIR / ADAPTERS_SOURCE.name)
         cls.remove(port)
         result = subprocess.run(cls.run_command(port, docker_image), stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE, text=True)

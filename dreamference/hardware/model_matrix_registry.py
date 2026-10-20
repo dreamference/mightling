@@ -184,6 +184,37 @@ QWEN38_LORA_RECIPE: Final[dict[str, Any]] = {
     "max_loras_per_batch": 4,
     # Adapters the engine holds loaded at once; the gate unloads the least recently used past it.
     "max_loaded_loras": 8,
+    # SGLang v0.5.21's /v1/responses, the only endpoint ling speaks, builds its request without the
+    # adapter: it accepted `<base>:<adapter>` and ran the base (the probe). Both places that build
+    # one pass `lora_path` as /v1/chat/completions does. Applied to a copy of the image's file and
+    # mounted over it (SGLangRuntimePatcher); the sha256 is the image's own file, so a new image
+    # serves no adapters until the patch is checked against it.
+    "runtime_patches": [
+        {
+            "path": "/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py",
+            "sha256": "ed490a69c960cafa7fc97129e585d176993fb63dbda66468ac9b86770813a00d",
+            "substitutions": [
+                [
+                    "                        require_reasoning=require_reasoning,\n"
+                    "                    )\n"
+                    "\n"
+                    "                    generator = self._generate_with_builtin_tools(",
+                    "                        require_reasoning=require_reasoning,\n"
+                    "                        lora_path=self._resolve_lora_path(request.model, None),\n"
+                    "                    )\n"
+                    "\n"
+                    "                    generator = self._generate_with_builtin_tools(",
+                ],
+                [
+                    "                require_reasoning=adapted_request.require_reasoning,\n"
+                    "            )\n",
+                    "                require_reasoning=adapted_request.require_reasoning,\n"
+                    "                lora_path=adapted_request.lora_path,\n"
+                    "            )\n",
+                ],
+            ],
+        },
+    ],
 }
 
 
