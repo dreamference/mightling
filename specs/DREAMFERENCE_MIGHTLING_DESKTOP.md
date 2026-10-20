@@ -181,7 +181,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Mightling's** (th
 | Notifications when a turn ends or needs approval | client | **Same:** desktop notification, no bundled sounds | 2 |
 | Prevent sleep while a turn runs | client | **Same:** `systemd-inhibit`-style idle inhibitor while any turn is running | 2 |
 | Settings pages | `config/read`, `config/value/write`, `config/batchWrite` | **Same,** writing `~/.mightling/config.toml` | 1 |
-| Dark mode | client | Later: light only for now (§14 question 3, decided) | 3 |
+| Dark mode | client | Built 2026-10-20 (DESKTOP_PARITY item 11; light only until then, §14 question 3) | 3 |
 
 ### 6.2 Composer and turns
 
@@ -409,7 +409,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 
 1. ~~Fork CodexMonitor or start from scratch?~~ **Settled by the user's direction:** grow `desktop/` in place, CodexMonitor as a parts bin (§4).
 2. ~~Does Chat stay inside the app?~~ **Settled:** Chat is today's window, unchanged (§4.1). **Reversed:** Chat became Ask on 2026-10-08 and a view of the one window on 2026-10-09 (DESKTOP_ELECTRON §11, ASK §18.6).
-3. ~~Dark mode?~~ **Decided by the user (2026-10-03): light only for now.** Work stays light like Chat (`GTK_THEME=Adwaita:light` applies to both, §9); dark mode stays in Phase 3, as one change for both windows.
+3. ~~Dark mode?~~ **Decided by the user (2026-10-03): light only for now.** Reversed 2026-10-20: dark mode approved and built (DESKTOP_PARITY item 11, §3.6). Work stays light like Chat (`GTK_THEME=Adwaita:light` applies to both, §9); dark mode stays in Phase 3, as one change for both windows.
 4. ~~One app-server per app or per project?~~ **Decided (2026-10-03): one per app** (§4.3), as the upstream vendor's app does: one process, one place for the air-gap check of §8.2. Phase 0 item 8 still measures it, to record the cost, not to decide.
 5. ~~Installing the upstream vendor's package for the reference run?~~ **Decided (2026-10-03): yes, installed and kept** for reference comparisons beyond the one run of §4.6. The user runs `sudo apt install ~/Downloads/chatgpt_arm64.deb` from a terminal. Kept means the upstream vendor's apt repository (`/etc/apt/sources.list.d/chatgpt.sources`) and its updater stay, and the app's own `~/.codex` is separate from Mightling's `~/.mightling`. Every reference run still uses a scratch `HOME` and a network namespace reaching only the model server (§4.6, Phase 0 item 6), because the window carries the upstream vendor's telemetry clients and must not reach the upstream vendor while pointed at `ling app-server`.
 

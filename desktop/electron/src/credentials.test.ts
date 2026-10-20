@@ -45,12 +45,13 @@ function offenders(files: string[]): string[] {
 
 describe("credentials stay in the main process", () => {
   it("are not in the preload's sources or Work's page", () => {
-    const preloadSources = ["preload.ts", "api.ts"].map((name) => path.join(ROOT, "src", name));
+    const preloadSources = ["preload.ts", "api.ts", "theme.ts"].map((name) => path.join(ROOT, "src", name));
     expect(offenders([...preloadSources, ...filesUnder(UI_SRC)])).toEqual([]);
-    // The preload imports nothing but the message shapes.
+    // The preload imports nothing but the message shapes and the theme's argument (theme.ts, which imports nothing).
     const preload = fs.readFileSync(path.join(ROOT, "src", "preload.ts"), "utf8");
     const imports = [...preload.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
-    expect(imports.sort()).toEqual(["./api", "electron"]);
+    expect(imports.sort()).toEqual(["./api", "./theme", "electron"]);
+    expect(fs.readFileSync(path.join(ROOT, "src", "theme.ts"), "utf8")).not.toMatch(/^import /m);
   });
 
   it("are not in the built bundles, the main process's included", { skip: !fs.existsSync(PRELOAD_BUNDLE) }, () => {

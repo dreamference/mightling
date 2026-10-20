@@ -7,6 +7,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, failure, isChunk } from "./api";
+import { themeFromArgv } from "./theme";
 
 const incoming = new Reassembler();
 
@@ -42,11 +43,12 @@ contextBridge.exposeInMainWorld("electronBridge", {
 });
 contextBridge.exposeInMainWorld("mightlingWindowType", "electron");
 
-// The theme, set before the first paint: light only (DESKTOP §14 question 3; dark not approved
-// 2026-10-16), whatever the system's. The document element may not exist yet when the preload runs
+// The theme, set before the first paint (theme.ts): the one the main process created the window in,
+// else the system's as the page sees it (nativeTheme.themeSource drives that query too); the page's
+// theme.ts takes over from here. The document element may not exist yet when the preload runs
 // (seen on macOS: "Cannot read properties of null (reading 'dataset')"), so then it is set as soon
 // as the document is parsed.
-const theme = "light";
+const theme = themeFromArgv(process.argv) ?? (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 const applyTheme = () => {
   if (document.documentElement) document.documentElement.dataset.theme = theme;
 };

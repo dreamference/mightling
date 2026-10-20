@@ -1,7 +1,7 @@
 // The settings (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md §2.15; Ctrl+,): pages in a dialog,
 // window settings in the window's preferences and agent settings in config.toml through the
 // server. General, Profile (statistics from the local session files), Keyboard shortcuts (§2.19),
-// Notifications, Appearance (the §3.6 tokens, light base only, a theme shared as a file),
+// Notifications, Appearance (System, Light or Dark, the §3.6 tokens over each, a theme shared as a file),
 // Personalization (`~/.mightling/AGENTS.md`), Archived threads, Git, Project, Worktrees. Pets,
 // Browser, Computer Use and Suggested prompts are not offered here (Phase 3 or not at all).
 
@@ -11,7 +11,8 @@ import * as bridge from "./bridge";
 import { Icon } from "./icons";
 import { chordOf, conflicts, keyLabel, KEYMAP, shortcutLabel, type KeyAction } from "./keymap";
 import { boardOn } from "./board";
-import { cleanAppearance, type Appearance, type Prefs } from "./prefs";
+import { cleanAppearance, type Appearance, type AppearanceColours, type Prefs } from "./prefs";
+import { useShownTheme, type ThemeChoice } from "./theme";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
@@ -267,11 +268,20 @@ function Notifications({ prefs, onChange }: SettingsProps) {
   );
 }
 
-/** Appearance: the accent, canvas and text colours and the fonts over the light base; a theme is a small JSON file. */
+const THEME_LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark" };
+
+/**
+ * Appearance: the theme (System follows the system's, live), then the accent, canvas and text
+ * colours of the theme shown and the fonts of both; a theme is a small JSON file.
+ */
 function AppearancePage({ prefs, onChange, notice }: SettingsProps) {
+  const shown = useShownTheme();
   const set = (values: Appearance) => onChange({ appearance: cleanAppearance({ ...prefs.appearance, ...values }) });
+  // The colours belong to the theme shown: the light set at the top level, the dark one under `dark`.
+  const own: AppearanceColours = shown === "dark" ? { accent: prefs.appearance.dark?.accent ?? prefs.appearance.accent, ...prefs.appearance.dark } : prefs.appearance;
+  const setColour = (values: AppearanceColours) => (shown === "dark" ? set({ dark: { ...prefs.appearance.dark, ...values } }) : set(values));
   const current = getComputedStyle(document.documentElement);
-  const colour = (key: "accent" | "canvas" | "text", token: string) => prefs.appearance[key] ?? (current.getPropertyValue(token).trim() || "#000000");
+  const colour = (key: "accent" | "canvas" | "text", token: string) => own[key] ?? (current.getPropertyValue(token).trim() || "#000000");
   const exportTheme = () => {
     const blob = new Blob([JSON.stringify({ mightlingTheme: 1, ...prefs.appearance }, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
@@ -291,12 +301,23 @@ function AppearancePage({ prefs, onChange, notice }: SettingsProps) {
   return (
     <>
       <h3>Appearance</h3>
-      <p className="dialog-note">The base is light (a dark base is not offered); these colours and fonts go over it.</p>
       <fieldset>
-        <legend>Colours</legend>
-        <label className="colour"><input type="color" value={colour("accent", "--accent")} aria-label="Accent colour" onChange={(event) => set({ accent: event.target.value })} /> Accent</label>
-        <label className="colour"><input type="color" value={colour("canvas", "--canvas")} aria-label="Background colour" onChange={(event) => set({ canvas: event.target.value })} /> Background</label>
-        <label className="colour"><input type="color" value={colour("text", "--text")} aria-label="Text colour" onChange={(event) => set({ text: event.target.value })} /> Text</label>
+        <legend>Theme</legend>
+        <span className="segmented theme-choice" role="radiogroup" aria-label="Theme">
+          {(Object.keys(THEME_LABELS) as ThemeChoice[]).map((choice) => (
+            <button key={choice} role="radio" aria-checked={prefs.theme === choice} className={prefs.theme === choice ? "selected" : ""} onClick={() => onChange({ theme: choice })}>
+              <Icon name={choice === "system" ? "monitor" : choice === "light" ? "sun" : "moon"} size={14} /> {THEME_LABELS[choice]}
+            </button>
+          ))}
+        </span>
+        <p className="dialog-note">{prefs.theme === "system" ? `System follows this computer's theme; it is ${shown} now.` : `${THEME_LABELS[prefs.theme]} whatever this computer's theme is.`}</p>
+      </fieldset>
+      <fieldset>
+        <legend>Colours of the {shown} theme</legend>
+        <label className="colour"><input type="color" value={colour("accent", "--accent")} aria-label="Accent colour" onChange={(event) => setColour({ accent: event.target.value })} /> Accent</label>
+        <label className="colour"><input type="color" value={colour("canvas", "--canvas")} aria-label="Background colour" onChange={(event) => setColour({ canvas: event.target.value })} /> Background</label>
+        <label className="colour"><input type="color" value={colour("text", "--text")} aria-label="Text colour" onChange={(event) => setColour({ text: event.target.value })} /> Text</label>
+        <p className="dialog-note">The {shown === "dark" ? "light" : "dark"} theme keeps colours of its own{shown === "dark" ? "; the accent is the light theme's unless set here" : ""}.</p>
       </fieldset>
       <fieldset>
         <legend>Fonts</legend>

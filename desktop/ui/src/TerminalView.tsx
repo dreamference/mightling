@@ -9,9 +9,10 @@ import "@xterm/xterm/css/xterm.css";
 
 import { keyAction, matches } from "./keymap";
 import type { TerminalHub } from "./terminal";
+import { theme } from "./theme";
 
-/** The terminal's colours: the app's light tokens, read from the page so a theme change follows. */
-function theme(): Record<string, string> {
+/** The terminal's colours: the theme's tokens, read from the page, again at each theme change. */
+function colours(): Record<string, string> {
   const css = getComputedStyle(document.documentElement);
   const token = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
   return {
@@ -37,7 +38,7 @@ export function TerminalView(props: { hub: TerminalHub; processId: string; visib
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: false,
-      theme: theme(),
+      theme: colours(),
     });
     const fitter = new FitAddon();
     terminal.loadAddon(fitter);
@@ -65,7 +66,12 @@ export function TerminalView(props: { hub: TerminalHub; processId: string; visib
       }
     });
     observer.observe(host.current);
+    // A theme change (theme.ts): read after the frame, once Appearance's overrides for it are set too.
+    const unfollow = theme()?.subscribe(() => requestAnimationFrame(() => {
+      if (term.current === terminal) terminal.options.theme = colours();
+    }));
     return () => {
+      unfollow?.();
       observer.disconnect();
       detach();
       typed.dispose();

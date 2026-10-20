@@ -1,5 +1,6 @@
 // The look, as pictures: Ask (empty and with a question) and Work (a thread with a command, a diff
-// and an approval) in the app's one theme, light (dark not approved 2026-10-16), against a scripted
+// and an approval) in both themes, the theme choice left at System and the system's theme set dark
+// then light (Electron's nativeTheme, as the system would), against a scripted
 // stand-in for `ling app-server` whose threads are made up for the purpose. Not a check: it runs only when
 // MIGHTLING_LOOK_DIR names a folder for the PNGs (a person compares them; DESKTOP_PARITY §3), and
 // needs a display and the Vite build like the other end-to-end tests.
@@ -99,6 +100,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   if (m.method === "initialize") return say({ id: m.id, result: { userAgent: "stand-in" } });
   if (m.method === "thread/list") return say({ id: m.id, result: { data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null } });
   if (m.method === "permissionProfile/list") return say({ id: m.id, result: { data: [":read-only", ":workspace", ":danger-full-access"].map((id) => ({ id, allowed: true })) } });
+  // A thread that is not running is read, not resumed (store.ts, 2026-10-19).
+  if (m.method === "thread/read") return say({ id: m.id, result: { thread: threads.find((t) => t.id === m.params.threadId) } });
   if (m.method === "thread/resume") {
     const found = threads.find((t) => t.id === m.params.threadId);
     say({ id: m.id, result: { thread: found } });
@@ -145,11 +148,10 @@ test("the look", async () => {
       await page.waitForTimeout(300);
       await page.screenshot({ path: path.join(out!, name) });
     };
-    // The system's theme is set dark on purpose: the app is light only, so the pictures are light
-    // whatever the system says.
-    await app.evaluate(({ nativeTheme }) => { nativeTheme.themeSource = "dark"; });
-    await page.waitForTimeout(400);
-    for (const theme of ["light"] as const) {
+    // System follows the system's theme: dark first, then light (theme.e2e.ts checks the choice itself).
+    for (const theme of ["dark", "light"] as const) {
+      await app.evaluate(({ nativeTheme }, source) => { nativeTheme.themeSource = source; }, theme);
+      await page.waitForFunction((wanted) => document.documentElement.dataset.theme === wanted, theme);
       await page.getByRole("button", { name: "Ask", exact: true }).click();
       await page.getByRole("button", { name: "New question" }).click();
       await shoot(`ask-empty-${theme}.png`);
@@ -166,6 +168,9 @@ test("the look", async () => {
       window.setSize(400, 860);
     });
     await shoot("work-narrow-light.png");
+    await app.evaluate(({ nativeTheme }) => { nativeTheme.themeSource = "dark"; });
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    await shoot("work-narrow-dark.png");
   } finally {
     await closeApp(app);
     fs.rmSync(home, { recursive: true, force: true });

@@ -17,6 +17,10 @@ The page opens on **Ask**, questions with no project, each in a scratch folder o
 your projects and their threads, is one click away. Every request needs a sign-in, on this machine
 too: `ling web open` signs your browser in with a link that works once.
 
+The page follows the browser's light or dark theme. **Settings › Appearance** can keep it on
+**Light** or **Dark** instead; a browser remembers that choice for itself, so a phone and a computer
+can differ.
+
 ### A phone or another computer
 
 On a node (`ling-admin node enable`, which also starts `ling web` on the local network), other

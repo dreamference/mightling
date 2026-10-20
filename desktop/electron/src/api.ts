@@ -143,6 +143,8 @@ export type ForView =
   /** A preview tab's page moved, loaded, or asked for a site the rules hold back (preview.ts). */
   | { channel: "preview://event"; payload: { id: string; kind: "state" | "ask" | "blocked" | "download" | "key"; key?: string; url?: string; title?: string; loading?: boolean; canGoBack?: boolean; canGoForward?: boolean; site?: string; reason?: string; error?: string | null } }
   /** The pet's state (pet.ts), for the pet's own window. */
+  /** The theme the window shows now (theme.ts): the preference, or for System the system's. */
+  | { channel: "theme"; payload: "light" | "dark" }
   | { channel: "pet://state"; payload: { working: number; waiting: number; finished: number; size: "small" | "medium" | "large"; image: string | null } }
   /** Show Ask or Work: the menu, a second instance or a link asked for one. */
   | { channel: "view"; payload: "ask" | "work" };
