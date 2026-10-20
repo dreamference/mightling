@@ -306,6 +306,43 @@ export const night = {
 };
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
+
+/** One collection of the local file index, as `ling docs status --json` describes it. */
+export interface DocsCollection {
+  name: string;
+  root: string;
+  enabled: boolean;
+  default: boolean;
+  counts: { documents: number; indexed: number; pending: number; failed: number; duplicates: number; skipped: number; chunks: number; embedded: number; needs_ocr_pages: number; needs_ocr_documents: number };
+  last_status: string | null;
+  last_run: number | null;
+  disk_bytes: number;
+}
+
+export interface DocsStatus {
+  collections: DocsCollection[];
+  runtime_missing: string | null;
+}
+
+async function docsCall<T>(electron: object, method: "GET" | "POST", url: string, body?: object): Promise<T> {
+  if (host() === "electron") return send<T>(electron);
+  const response = await fetch(url, { method, credentials: "same-origin", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+  const answer = (await response.json().catch(() => ({}))) as T & { error?: string; said?: string };
+  if (!response.ok) throw new Error(answer.error || `the local file index did not answer (${response.status})`);
+  return answer;
+}
+
+/**
+ * Settings › Your documents (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §8.3): the collections and
+ * their state, adding a folder, removing a collection (its index, never the files) and rebuilding
+ * one, all through `ling docs`: in the app by the main process, in a browser through `ling web`.
+ */
+export const docs = {
+  status: () => docsCall<DocsStatus>({ type: "docs/status" }, "GET", "/api/docs"),
+  add: (folder: string) => docsCall<unknown>({ type: "docs/add", folder }, "POST", "/api/docs/add", { folder }),
+  remove: (name: string) => docsCall<unknown>({ type: "docs/remove", name }, "POST", "/api/docs/remove", { name }),
+  reindex: (name: string) => docsCall<unknown>({ type: "docs/reindex", name }, "POST", "/api/docs/reindex", { name }),
+};
 /** Settings › Pets: a picture for the pet; null when the dialog was cancelled. */
 export const chooseImage = () => send<string | null>({ type: "dialog/open-image" });
 
