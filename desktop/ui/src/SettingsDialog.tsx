@@ -114,6 +114,7 @@ function General({ prefs, onChange }: SettingsProps) {
         <label><input type="checkbox" checked={prefs.preventSleep} onChange={(event) => onChange({ preventSleep: event.target.checked })} /> Keep the machine from sleeping while a turn runs</label>
         <label><input type="checkbox" checked={prefs.openArtifacts} onChange={(event) => onChange({ openArtifacts: event.target.checked })} /> Open a document, PDF or image the agent creates in a tab beside the thread</label>
       </fieldset>
+      {bridge.git.available() ? <QuickEntry prefs={prefs} onChange={onChange} /> : null}
       <fieldset>
         <legend>Text size</legend>
         <label className="field">{Math.round(prefs.fontScale * 100)}% ({shortcutLabel("fontBigger")} bigger, {shortcutLabel("fontSmaller")} smaller, {shortcutLabel("fontReset")} back to 100%)
@@ -121,6 +122,47 @@ function General({ prefs, onChange }: SettingsProps) {
         </label>
       </fieldset>
     </>
+  );
+}
+
+/**
+ * Settings › General › Quick Entry (DESKTOP_PARITY_CLAUDE §4.2), the desktop app's only: a question from
+ * anywhere through a system-wide shortcut, and the app kept in the tray when its window closes. Both off
+ * by default. The main process says whether the shortcut was taken, and why not.
+ */
+function QuickEntry({ prefs, onChange }: Pick<SettingsProps, "prefs" | "onChange">) {
+  const [status, setStatus] = useState<bridge.QuickStatus | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  useEffect(() => {
+    let current = true;
+    // After the main process has taken the new values in (prefs/write, then the shortcut registered).
+    const timer = setTimeout(() => bridge.quickStatus().then((answer) => current && setStatus(answer)).catch(() => {}), 250);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [prefs.quickEntry, prefs.quickEntryShortcut]);
+  return (
+    <fieldset className="quick-entry">
+      <legend>Quick Entry</legend>
+      <label><input type="checkbox" checked={prefs.quickEntry} onChange={(event) => onChange({ quickEntry: event.target.checked })} /> Ask a quick question from any app with {keyLabel(prefs.quickEntryShortcut)}: a small box opens above your windows, Enter asks it in Ask</label>
+      <label className="field">Shortcut
+        <input readOnly value={capturing ? "Press the keys…" : prefs.quickEntryShortcut} aria-label="Quick Entry's shortcut"
+          onFocus={() => setCapturing(true)} onBlur={() => setCapturing(false)}
+          onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+            if (event.key === "Tab") return;
+            event.preventDefault();
+            const chord = chordOf(event.nativeEvent);
+            if (!chord) return;
+            onChange({ quickEntryShortcut: chord });
+            setCapturing(false);
+            event.currentTarget.blur();
+          }} />
+      </label>
+      {prefs.quickEntry && status?.problem ? <p className="dialog-note warning" role="status">{status.problem}</p> : null}
+      {prefs.quickEntry && status?.registered ? <p className="dialog-note" role="status">{status.shortcut} opens the box from any app while Mightling runs. The tray's New question… opens it too.</p> : null}
+      <label><input type="checkbox" checked={prefs.keepInTray} onChange={(event) => onChange({ keepInTray: event.target.checked })} /> Keep Mightling in the tray when its window closes, so Quick Entry and running turns go on (Quit ends it)</label>
+    </fieldset>
   );
 }
 
