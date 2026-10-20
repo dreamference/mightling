@@ -341,23 +341,25 @@ def test_the_container_is_on_the_sidecar_network_published_on_loopback():
 class FakeDocker:
     """Records docker commands and answers `inspect` with a fixed state."""
 
-    def __init__(self, state: str) -> None:
+    def __init__(self, state: str, env: str = "MIGHTLING_GMAIL_SECRET=s3cret") -> None:
         self.state = state
+        self.env = env
         self.commands: list[list[str]] = []
 
     def __call__(self, argv, **kwargs):
         self.commands.append(list(argv))
+        if argv[:2] == ["docker", "rm"]:
+            self.state = ""
         if argv[:2] == ["docker", "inspect"]:
-            return subprocess.CompletedProcess(argv, 0 if self.state else 1, self.state + "\n", "")
+            answer = f"PATH=/usr/bin\n{self.env}" if "Env" in argv[-1] else self.state
+            return subprocess.CompletedProcess(argv, 0 if self.state else 1, answer + "\n", "")
         if argv[:3] == ["docker", "network", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, "dreamference-sidecars\n", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
 
-@pytest.mark.parametrize("state, runs", [("running", False), ("exited", False), ("", True)])
-def test_start_adopts_an_existing_container_and_creates_one_otherwise(
-    monkeypatch, tmp_path, state, runs
-):
+@pytest.fixture
+def staging(monkeypatch, tmp_path):
     from conftest import REAL_GOOGLE_SERVICE_START
 
     import dreamference.chat.gmail_credentials as credentials
@@ -365,16 +367,51 @@ def test_start_adopts_an_existing_container_and_creates_one_otherwise(
     monkeypatch.setattr(GoogleService, "start", REAL_GOOGLE_SERVICE_START)
     monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(tmp_path))
     monkeypatch.setattr(GoogleService, "secret", classmethod(lambda cls: "s3cret"))
-    fake = FakeDocker(state)
+    return tmp_path
+
+
+def _docker(monkeypatch, state: str, env: str = "MIGHTLING_GMAIL_SECRET=s3cret") -> FakeDocker:
+    fake = FakeDocker(state, env)
     monkeypatch.setattr(subprocess, "run", fake)
+    return fake
+
+
+@pytest.mark.parametrize(("state", "runs"), [("running", False), ("exited", False), ("", True)])
+def test_start_adopts_an_existing_container_and_creates_one_otherwise(
+    monkeypatch, staging, state, runs
+):
+    fake = _docker(monkeypatch, state)
     assert GoogleService.start() is True
-    assert (tmp_path / "service.py").is_file() and (
-        tmp_path / "google_workspace_reader.py"
-    ).is_file()
+    assert (staging / "service.py").is_file()
+    assert (staging / "google_workspace_reader.py").is_file()
     ran = [c for c in fake.commands if c[:2] == ["docker", "run"]]
     assert bool(ran) is runs
+    assert not [c for c in fake.commands if c[:2] == ["docker", "rm"]]
     if state == "exited":
         assert ["docker", "start", GOOGLE_CONTAINER_NAME] in fake.commands
+
+
+def test_a_running_service_restarts_only_when_its_staged_code_changed(monkeypatch, staging):
+    # Staging used to leave a running container on its old code until something restarted it:
+    # one served a service from before Drive and Calendar for weeks.
+    fake = _docker(monkeypatch, "running")
+    assert GoogleService.start() is True
+    assert ["docker", "restart", GOOGLE_CONTAINER_NAME] in fake.commands
+    fake = _docker(monkeypatch, "running")
+    assert GoogleService.start() is True
+    assert not [c for c in fake.commands if c[:2] in (["docker", "restart"], ["docker", "run"])]
+
+
+@pytest.mark.parametrize("env", ["PUFFIN_GMAIL_SECRET=s3cret", "MIGHTLING_GMAIL_SECRET=old"])
+def test_a_container_without_todays_secret_is_replaced(monkeypatch, staging, env):
+    # Made before the rename, the container hands the service PUFFIN_GMAIL_SECRET: every client
+    # was told "unauthorised", and the current code started in it would check no secret at all.
+    fake = _docker(monkeypatch, "running", env)
+    assert GoogleService.start() is True
+    removed = fake.commands.index(["docker", "rm", "-f", GOOGLE_CONTAINER_NAME])
+    created = next(i for i, c in enumerate(fake.commands) if c[:2] == ["docker", "run"])
+    assert removed < created
+    assert "MIGHTLING_GMAIL_SECRET=s3cret" in fake.commands[created]
 
 
 def test_server_start_starts_it_only_on_a_node_without_one(monkeypatch):
@@ -392,6 +429,35 @@ def test_server_start_starts_it_only_on_a_node_without_one(monkeypatch):
     monkeypatch.setattr(GoogleService, "state", classmethod(lambda cls: ""))
     assert GoogleService.ensure_on_node() is True
     assert started == [True]
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        (
+            {"email": "a@x.com, b@y.com"},
+            ["  a@x.com: mail.google.com", "  b@y.com: mail.google.com"],
+        ),
+        (
+            {"email": "a@x.com", "accounts": [{"email": "a@x.com", "scopes": [DRIVE_SCOPE]}]},
+            ["  a@x.com: drive"],
+        ),
+    ],
+)
+def test_google_status_names_the_accounts_of_an_old_service_too(
+    monkeypatch, capsys, answer, expected
+):
+    # A service from before Drive and Calendar answers `email` only; status used to print no
+    # account at all for it, as if none were connected.
+    from dreamference.chat.gmail_client import GmailClient
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    monkeypatch.setattr(GoogleService, "state", classmethod(lambda cls: "running"))
+    monkeypatch.setattr(GmailClient, "status", classmethod(lambda cls: dict(answer)))
+    assert DreamferenceCLIController._google_status() == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1 : 1 + len(expected)] == expected
+    assert any("google start" in line for line in lines) is ("accounts" not in answer)
 
 
 def test_the_google_command_group_exists():
