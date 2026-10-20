@@ -27,9 +27,13 @@ codex-prompts = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 ed25519-dalek = { workspace = true }
 flate2 = { workspace = true }
+# The loop guard wraps Codex's response stream (src/loop_guard.rs).
+futures = { workspace = true, features = ["std"] }
 # Pure-Rust mDNS browsing, one code path on Linux, macOS and Windows; no async runtime, no logging.
 mdns-sd = { version = "0.21.4", default-features = false }
 ling-airgapped = { path = "airgapped" }
+# The loop guard's detector: three checks on streamed text (src/loop_guard.rs).
+ling-loop-guard = { path = "loop-guard" }
 # Mightling's apps for `/apps` (patch 0022) and as MCP tools (src/apps.rs).
 ling-apps = { path = "apps" }
 # Observation masking: the rule Codex's core calls (patch 0021); the launcher sets its policy.
@@ -81,6 +85,8 @@ ferrisetw = "1.2"
 
 [dev-dependencies]
 clap = { workspace = true, features = ["derive"] }
+# The loop guard's tests run its stream to the end without a runtime.
+futures = { workspace = true, features = ["executor"] }
 # Codex's own hook types, to check the trust hashes the launcher computes (refine.rs's tests).
 codex-config = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

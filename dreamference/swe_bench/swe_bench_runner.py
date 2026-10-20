@@ -14,7 +14,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Final, Optional
+from typing import Any, BinaryIO, Final, Optional
 from urllib.parse import urlparse
 
 from dreamference.night_shift.night_shift_host import NightShiftHost
@@ -58,6 +58,16 @@ AUTO_EXEC_TOOL: Final[str] = "auto"
 # The drop-first compaction arm (compaction spec §13): the launcher's switch (ling-rs/src/compaction.rs,
 # `DROP_ENV`), set to this value only when the run asks.
 DROP_OLD_OUTPUTS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"
+# The loop guard's arms (docs/dev/loop-guard.md; ling-rs/src/loop_guard.rs): the detector, the cap on
+# each response and the sampling arm, each the launcher's variable. `ling exec` sets none of them by
+# default, so a run without the flags sends what it always sent.
+LOOP_GUARD_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_LOOP_GUARD"
+OUTPUT_BUDGET_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_OUTPUT_BUDGET"
+SAMPLING_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_SAMPLING"
+DEFAULT_SAMPLING: Final[str] = "default"
+SAMPLING_ARMS: Final[tuple[str, ...]] = (DEFAULT_SAMPLING, "nonthinking")
+# The smallest cap the gate applies (`model_gate_guard.MIN_BUDGET`).
+MIN_OUTPUT_BUDGET: Final[int] = 64
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
 # The turn-end compaction arm (spec §16, night 10): Codex's own key, pinned on every `ling exec`
@@ -227,9 +237,7 @@ class SweBenchRunner:
         return min(99, max(1, target * 100 // usable))
 
     @classmethod
-    def wait_for_index_runs(
-        cls, limit_s: int | None = None, poll_s: int | None = None
-    ) -> bool:
+    def wait_for_index_runs(cls, limit_s: int | None = None, poll_s: int | None = None) -> bool:
         """Waits for an active index run (a `mightling-index-*` scope: `ling-code` or `ling-docs`
         indexing started by a session) to end, for up to `limit_s`, polling every `poll_s`. Any
         other heavy job, or an index scope still active at the limit, is left to admission, which
@@ -294,6 +302,9 @@ class SweBenchRunner:
         apply_patch: str | None = None,
         exec_tool: str | None = None,
         drop_old_outputs: bool = False,
+        loop_guard: bool = False,
+        output_budget: int | None = None,
+        sampling: str | None = None,
     ) -> dict[str, Any]:
         """Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -365,6 +376,9 @@ class SweBenchRunner:
             "apply_patch": apply_patch or AUTO_APPLY_PATCH,
             "exec_tool": exec_tool or AUTO_EXEC_TOOL,
             "drop_old_outputs": bool(drop_old_outputs),
+            "loop_guard": bool(loop_guard),
+            "output_budget": int(output_budget or 0),
+            "sampling": sampling or DEFAULT_SAMPLING,
             **({"hooks_gate_sha256": SweBenchHooks.gate_digest()} if hooks else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
@@ -450,6 +464,9 @@ class SweBenchRunner:
         apply_patch: str | None = None,
         exec_tool: str | None = None,
         drop_old_outputs: bool = False,
+        loop_guard: bool = False,
+        output_budget: int | None = None,
+        sampling: str | None = None,
     ) -> int:
         """Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -506,6 +523,13 @@ class SweBenchRunner:
                 `DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS`: when a session is about to compact, its
                 older tool outputs are dropped first and the summary runs only if that is not
                 enough (compaction spec §13). Off by default. A new run only, like `code_index`.
+            loop_guard: The launcher's loop detector in every session (`DREAMFERENCE_MIGHTLING_LOOP_GUARD=on`):
+                a response that repeats itself is cut where the loop began, and the model is told once to
+                stop and answer. Off by default. A new run only, like `code_index`.
+            output_budget: A cap on every response, in tokens (`DREAMFERENCE_MIGHTLING_OUTPUT_BUDGET`), set
+                as `max_output_tokens` by the model gate; None or 0 is no cap. A new run only.
+            sampling: `nonthinking` has the gate fill in the model card's non-thinking sampling
+                (`DREAMFERENCE_MIGHTLING_SAMPLING`); None or `default` leaves the server's. A new run only.
             hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
                 holds the first edit once until the files and functions the issue names have
                 been read, and the first stop once until its example has been run; spec §20).
@@ -625,6 +649,15 @@ class SweBenchRunner:
                     end or datetime.now().astimezone() + timedelta(days=365),
                 )
                 reason = reason or SweBenchEvaluator.disk_problem(settings)
+                # A resumed run keeps the arms it started with; a new one takes the flags.
+                arms = store.manifest() or {
+                    "loop_guard": loop_guard,
+                    "output_budget": output_budget or 0,
+                    "sampling": sampling or DEFAULT_SAMPLING,
+                }
+                reason = reason or cls.loop_guard_refusal(
+                    arms, mightling_bin, cls.gate.probe(vllm_host)
+                )
                 if reason:
                     print(f"⚠️  Not run: {reason}.")
                     return 1
@@ -679,6 +712,9 @@ class SweBenchRunner:
                         apply_patch=apply_patch,
                         exec_tool=exec_tool,
                         drop_old_outputs=drop_old_outputs,
+                        loop_guard=loop_guard,
+                        output_budget=output_budget,
+                        sampling=sampling,
                     )
                     store.write_manifest(manifest)
                 elif (
@@ -732,6 +768,9 @@ class SweBenchRunner:
                 # when the run asks. A run made before the option existed has no key and ran without.
                 if manifest.get("drop_old_outputs"):
                     extra_env[DROP_OLD_OUTPUTS_ENV] = "1"
+                # The loop guard's arms: the launcher's variables, only when the run asks. A run made
+                # before the options existed has no keys and ran with none.
+                extra_env.update(cls.loop_guard_env(manifest))
                 # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
                 # the text a later session of the same instance would start from.
                 custom_prompt = cls.prompt_file(run_prompt)
@@ -924,6 +963,112 @@ class SweBenchRunner:
         return lanes, notes + skipped
 
     @classmethod
+    def needs_gate_guard(cls, arms: dict[str, Any]) -> bool:
+        """Whether a run's arms need the model gate's half of the loop guard (`model_gate_guard.py`).
+
+        Args:
+            arms: The manifest, or the new run's `loop_guard`, `output_budget` and `sampling`.
+
+        Returns:
+            bool: True with a cap or a sampling arm; the detector alone lives in `ling`.
+        """
+        return (
+            int(arms.get("output_budget") or 0) > 0
+            or str(arms.get("sampling") or DEFAULT_SAMPLING) != DEFAULT_SAMPLING
+        )
+
+    @classmethod
+    def loop_guard_env(cls, manifest: dict[str, Any]) -> dict[str, str]:
+        """The launcher's variables for a run's loop-guard arms; empty for a run without them.
+
+        Args:
+            manifest: The run's manifest.
+
+        Returns:
+            Dict[str, str]: Variables for every session's container.
+        """
+        env: dict[str, str] = {}
+        if manifest.get("loop_guard"):
+            env[LOOP_GUARD_ENV] = "on"
+        if int(manifest.get("output_budget") or 0) > 0:
+            env[OUTPUT_BUDGET_ENV] = str(int(manifest["output_budget"]))
+        if str(manifest.get("sampling") or DEFAULT_SAMPLING) != DEFAULT_SAMPLING:
+            env[SAMPLING_ENV] = str(manifest["sampling"])
+        return env
+
+    @classmethod
+    def loop_guard_refusal(
+        cls, arms: dict[str, Any], mightling_bin: str, gate: dict[str, Any] | None
+    ) -> str | None:
+        """Why a run's loop-guard arms cannot be measured here, if they cannot.
+
+        An arm must never silently run as the default: a value the arms do not take, a `ling` that
+        does not read the variables, or a gate that cannot apply them is a reason not to run.
+
+        Args:
+            arms: The manifest, or the new run's `loop_guard`, `output_budget` and `sampling`.
+            mightling_bin: The `ling` the containers get.
+            gate: This machine's gate probe (`ModelGate.probe`), None without a gate.
+
+        Returns:
+            Optional[str]: The reason, or None.
+        """
+        budget = int(arms.get("output_budget") or 0)
+        if str(arms.get("sampling") or DEFAULT_SAMPLING) not in SAMPLING_ARMS:
+            return f"--sampling is one of: {', '.join(SAMPLING_ARMS)}"
+        if 0 < budget < MIN_OUTPUT_BUDGET or budget < 0:
+            return f"--output-budget {budget}: 0 (no cap) or at least {MIN_OUTPUT_BUDGET} tokens"
+        if not cls.loop_guard_env(arms):
+            return None
+        if not cls.ling_reads(mightling_bin, OUTPUT_BUDGET_ENV):
+            return (
+                f"{mightling_bin} does not read {OUTPUT_BUDGET_ENV}: rebuild it (`ling-admin codex build`) "
+                "from a commit that has the loop guard"
+            )
+        if cls.needs_gate_guard(arms) and not (gate or {}).get("loop_guard"):
+            return (
+                "--output-budget and --sampling are applied by the model gate, and the gate in front of the "
+                "model server predates them: they come with the next `ling-admin server start`"
+            )
+        return None
+
+    @classmethod
+    def ling_reads(cls, binary: str, name: str) -> bool:
+        """Whether a `ling` binary names an environment variable, as the night scripts check an arm's switch.
+
+        Args:
+            binary: Its path.
+            name: The variable.
+
+        Returns:
+            bool: True when the name is in the file.
+        """
+        needle = name.encode("ascii")
+        try:
+            with Path(binary).open("rb") as handle:
+                return cls.stream_contains(handle, needle)
+        except OSError:
+            return False
+
+    @classmethod
+    def stream_contains(cls, handle: BinaryIO, needle: bytes) -> bool:
+        """Whether a file holds a byte string, read 4 MiB at a time so a 300 MB binary is never held whole.
+
+        Args:
+            handle: The open file.
+            needle: The bytes looked for.
+
+        Returns:
+            bool: True when found, across chunk boundaries too.
+        """
+        tail = b""
+        for chunk in iter(lambda: handle.read(1 << 22), b""):
+            if needle in tail + chunk:
+                return True
+            tail = chunk[-len(needle) :]
+        return False
+
+    @classmethod
     def open_relays(cls, gateway: str, lanes: list[dict[str, Any]]) -> list[SweBenchRelay]:
         """Gives each replica lane an address its containers can reach: a relay on the gateway.
 
@@ -1021,6 +1166,9 @@ class SweBenchRunner:
                             blocked = (
                                 "its model gate is closed for a benchmark run of its own"
                                 if remote_gate.get("state") == "closed"
+                                else "its model gate cannot apply this run's loop-guard arm (it predates it)"
+                                if cls.needs_gate_guard(manifest)
+                                and not remote_gate.get("loop_guard")
                                 else cls.admission.start_blocker(
                                     candidate["host"], mightling_bin, active, settings, local=False
                                 )

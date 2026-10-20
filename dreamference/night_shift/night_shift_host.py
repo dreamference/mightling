@@ -1,5 +1,4 @@
-"""
-What the night run needs to know about the machine: the model server, memory, and who else is
+"""What the night run needs to know about the machine: the model server, memory, and who else is
 using either (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.2, §5.5).
 
 Every probe reads; none starts, stops or loads anything. The model server may be SGLang (the
@@ -13,7 +12,7 @@ import re
 import subprocess
 import urllib.request
 from pathlib import Path
-from typing import Dict, Final, List, Optional, Tuple
+from typing import Final
 
 from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR
 from dreamference.runner.codex_installer import CodexInstaller
@@ -27,13 +26,55 @@ NIGHT_RUN_ENV: Final[str] = "MIGHTLING_NIGHT_RUN"
 # the servers and bridges that run without a person (`apps serve`, the desktop app's Gmail search, lives as
 # long as its window; `web`, `chat`, `signal`), the hooks Codex runs inside a session (`ledger`, `notice`,
 # `refine hook`) and one-shot commands.
-NON_INTERACTIVE: Final[frozenset] = frozenset({
-    "exec", "e", "app-server", "mcp-server", "mcp", "sandbox", "apply", "a", "completion",
-    "debug", "features", "doctor", "night", "node", "airgapped", "skill", "prompt", "update", "app", "apps", "web", "help",
-    "review", "plugin", "remote-control", "exec-server", "queue", "archive", "unarchive", "delete", "execpolicy",
-    "migrate-rollouts", "responses-api-proxy", "stdio-to-uds", "tcp-tunnel",
-    "audit", "docs", "chat", "signal", "ledger", "notice", "refine", "compat", "cavemode",
-})
+NON_INTERACTIVE: Final[frozenset] = frozenset(
+    {
+        "exec",
+        "e",
+        "app-server",
+        "mcp-server",
+        "mcp",
+        "sandbox",
+        "apply",
+        "a",
+        "completion",
+        "debug",
+        "features",
+        "doctor",
+        "night",
+        "node",
+        "airgapped",
+        "skill",
+        "prompt",
+        "update",
+        "app",
+        "apps",
+        "web",
+        "help",
+        "review",
+        "plugin",
+        "remote-control",
+        "exec-server",
+        "queue",
+        "archive",
+        "unarchive",
+        "delete",
+        "execpolicy",
+        "migrate-rollouts",
+        "responses-api-proxy",
+        "stdio-to-uds",
+        "tcp-tunnel",
+        "audit",
+        "docs",
+        "chat",
+        "signal",
+        "ledger",
+        "notice",
+        "refine",
+        "compat",
+        "cavemode",
+        "loop-guard",
+    }
+)
 
 # Options that print and exit wherever they stand on the command line.
 PRINT_AND_EXIT: Final[frozenset] = frozenset({"--version", "-V", "--help", "-h"})
@@ -41,13 +82,32 @@ PRINT_AND_EXIT: Final[frozenset] = frozenset({"--version", "-V", "--help", "-h"}
 # `ling`'s options before the subcommand that take a value as the next argument (Codex's
 # `MultitoolCli`: `CliConfigOverrides`, `FeatureToggles`, `InteractiveRemoteOptions`, `TuiCli` and its
 # `SharedCliOptions`), so that a value (`-C docs`, `-m exec-model`) is never read as the subcommand.
-VALUE_OPTIONS: Final[frozenset] = frozenset({
-    "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env",
-    "-i", "--image", "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox",
-    "-a", "--ask-for-approval", "-C", "--cd", "--add-dir",
-    # The launcher's own (ling-rs/src/compat.rs), removed before Codex parses the rest.
-    "--compat",
-})
+VALUE_OPTIONS: Final[frozenset] = frozenset(
+    {
+        "-c",
+        "--config",
+        "--enable",
+        "--disable",
+        "--remote",
+        "--remote-auth-token-env",
+        "-i",
+        "--image",
+        "-m",
+        "--model",
+        "--local-provider",
+        "-p",
+        "--profile",
+        "-s",
+        "--sandbox",
+        "-a",
+        "--ask-for-approval",
+        "-C",
+        "--cd",
+        "--add-dir",
+        # The launcher's own (ling-rs/src/compat.rs), removed before Codex parses the rest.
+        "--compat",
+    }
+)
 
 # What `/proc/<pid>/exe` appends to a program whose file has since been removed or replaced, as a
 # `ling` build replaces the installed binary under a running session.
@@ -57,7 +117,7 @@ DELETED_SUFFIX: Final[str] = " (deleted)"
 # (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3); `desktop/electron/src/server.ts` writes it.
 BUSY_DIR_NAME: Final[str] = "busy"
 
-GIB: Final[int] = 1024 ** 3
+GIB: Final[int] = 1024**3
 
 # The part of the KV pool a night run divides between its tasks. Codex compacts after the turn that
 # crosses its limit, so a session can overshoot by one turn's tokens; the rest of the pool absorbs
@@ -73,9 +133,8 @@ class NightShiftHost:
     """Read-only probes of the model server and the host."""
 
     @classmethod
-    def served_model(cls, host: str, timeout: float = 3.0) -> Optional[Tuple[str, int]]:
-        """
-        Asks the model server what it serves.
+    def served_model(cls, host: str, timeout: float = 3.0) -> tuple[str, int] | None:
+        """Asks the model server what it serves.
 
         Args:
             host: The server's base URL.
@@ -86,7 +145,9 @@ class NightShiftHost:
             does not answer.
         """
         try:
-            with urllib.request.urlopen(f"{host.rstrip('/')}/v1/models", timeout=timeout) as response:
+            with urllib.request.urlopen(
+                f"{host.rstrip('/')}/v1/models", timeout=timeout
+            ) as response:
                 data = json.load(response)
             model = data["data"][0]
             return str(model["id"]), int(model.get("max_model_len") or 0)
@@ -94,9 +155,8 @@ class NightShiftHost:
             return None
 
     @classmethod
-    def metrics(cls, host: str, timeout: float = 3.0) -> Optional[Dict[str, float]]:
-        """
-        Reads the engine's request gauges, a request counter and the KV pool from `/metrics`.
+    def metrics(cls, host: str, timeout: float = 3.0) -> dict[str, float] | None:
+        """Reads the engine's request gauges, a request counter and the KV pool from `/metrics`.
 
         Args:
             host: The server's base URL.
@@ -115,9 +175,8 @@ class NightShiftHost:
         return cls.parse_metrics(text)
 
     @classmethod
-    def parse_metrics(cls, text: str) -> Dict[str, float]:
-        """
-        Extracts what `metrics()` returns from Prometheus text.
+    def parse_metrics(cls, text: str) -> dict[str, float]:
+        """Extracts what `metrics()` returns from Prometheus text.
 
         Args:
             text: The `/metrics` body.
@@ -125,7 +184,7 @@ class NightShiftHost:
         Returns:
             Dict[str, float]: See `metrics()`.
         """
-        sums: Dict[str, float] = {}
+        sums: dict[str, float] = {}
         kv_pool = 0.0
         for line in text.splitlines():
             if not line or line.startswith("#"):
@@ -144,17 +203,24 @@ class NightShiftHost:
                 size = re.search(r'block_size="(\d+)"', labels)
                 if blocks and size:
                     kv_pool = float(int(blocks.group(1)) * int(size.group(1)))
-        running = sum(sums.get(name, 0.0) for name in (
-            "sglang:num_running_reqs", "sglang:num_queue_reqs",
-            "vllm:num_requests_running", "vllm:num_requests_waiting"))
-        served = sums.get("sglang:prompt_tokens_total", 0.0) + sums.get("vllm:prompt_tokens_total", 0.0)
+        running = sum(
+            sums.get(name, 0.0)
+            for name in (
+                "sglang:num_running_reqs",
+                "sglang:num_queue_reqs",
+                "vllm:num_requests_running",
+                "vllm:num_requests_waiting",
+            )
+        )
+        served = sums.get("sglang:prompt_tokens_total", 0.0) + sums.get(
+            "vllm:prompt_tokens_total", 0.0
+        )
         kv_pool = kv_pool or sums.get("sglang:max_total_num_tokens", 0.0)
         return {"running": running, "served": served, "kv_pool": kv_pool}
 
     @classmethod
     def parallelism(cls, max_parallel: int, kv_pool: float, task_context: int) -> int:
-        """
-        How many tasks may run at once.
+        """How many tasks may run at once.
 
         Args:
             max_parallel: The configured upper bound.
@@ -168,10 +234,10 @@ class NightShiftHost:
         return max(1, min(max_parallel, by_pool))
 
     @classmethod
-    def task_budget(cls, max_parallel: int, kv_pool: float, task_context: int,
-                    compact_at: Optional[int]) -> Tuple[int, Optional[int]]:
-        """
-        How many night tasks run at once, and the context each may hold, such that together they
+    def task_budget(
+        cls, max_parallel: int, kv_pool: float, task_context: int, compact_at: int | None
+    ) -> tuple[int, int | None]:
+        """How many night tasks run at once, and the context each may hold, such that together they
         fit in the KV pool: `parallel × limit ≤ 90% of the pool`. The limit is enforced by passing
         it to every `ling exec` of a task as its compaction limit.
 
@@ -198,14 +264,14 @@ class NightShiftHost:
 
     @classmethod
     def host_safety_ok(cls) -> bool:
-        """
-        Runs the model server's own pre-load host-safety checks (swap, sysctls, earlyoom), which
+        """Runs the model server's own pre-load host-safety checks (swap, sysctls, earlyoom), which
         print what is wrong and exit when anything is.
 
         Returns:
             bool: True when every check passes.
         """
         from dreamference.vllm_server import VLLMServerManager
+
         try:
             VLLMServerManager.check_host_safety()
         except SystemExit:
@@ -214,11 +280,10 @@ class NightShiftHost:
 
     @classmethod
     def mem_available_bytes(cls) -> int:
+        """Returns:
+        int: `MemAvailable` from `/proc/meminfo`, in bytes.
         """
-        Returns:
-            int: `MemAvailable` from `/proc/meminfo`, in bytes.
-        """
-        with open("/proc/meminfo") as handle:
+        with Path("/proc/meminfo").open() as handle:
             for line in handle:
                 if line.startswith("MemAvailable:"):
                     return int(line.split()[1]) * 1024
@@ -226,11 +291,10 @@ class NightShiftHost:
 
     @classmethod
     def mem_total_bytes(cls) -> int:
+        """Returns:
+        int: `MemTotal` from `/proc/meminfo`, in bytes.
         """
-        Returns:
-            int: `MemTotal` from `/proc/meminfo`, in bytes.
-        """
-        with open("/proc/meminfo") as handle:
+        with Path("/proc/meminfo").open() as handle:
             for line in handle:
                 if line.startswith("MemTotal:"):
                     return int(line.split()[1]) * 1024
@@ -238,8 +302,7 @@ class NightShiftHost:
 
     @classmethod
     def parse_size(cls, size: str) -> int:
-        """
-        Parses a systemd-style size (`8G`, `512M`, bytes).
+        """Parses a systemd-style size (`8G`, `512M`, bytes).
 
         Args:
             size: The size.
@@ -250,13 +313,12 @@ class NightShiftHost:
         match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGT]?)i?B?\s*", size, re.IGNORECASE)
         if not match:
             raise ValueError(f"not a size: {size!r}")
-        factor = {"": 1, "K": 1024, "M": 1024 ** 2, "G": GIB, "T": 1024 ** 4}[match.group(2).upper()]
+        factor = {"": 1, "K": 1024, "M": 1024**2, "G": GIB, "T": 1024**4}[match.group(2).upper()]
         return int(float(match.group(1)) * factor)
 
     @classmethod
     def scope_memory_current(cls, unit: str) -> int:
-        """
-        Memory a running task's scope uses now.
+        """Memory a running task's scope uses now.
 
         Args:
             unit: The scope's unit name.
@@ -267,15 +329,17 @@ class NightShiftHost:
         try:
             output = subprocess.run(
                 ["systemctl", "--user", "show", unit, "-p", "MemoryCurrent", "--value"],
-                capture_output=True, text=True, timeout=10).stdout.strip()
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout.strip()
             return int(output)
         except (OSError, ValueError, subprocess.SubprocessError):
             return 0
 
     @classmethod
-    def interactive_mightling_pids(cls, mightling_bin: str) -> List[int]:
-        """
-        Finds `ling` TUI sessions: processes of the `ling` binary that are not one of a night
+    def interactive_mightling_pids(cls, mightling_bin: str) -> list[int]:
+        """Finds `ling` TUI sessions: processes of the `ling` binary that are not one of a night
         run's own sessions, not a subcommand that runs without a user, and not one of Codex's
         helper re-executions (its sandbox runs as the same binary under another `argv[0]`). A
         session started before a build replaced the binary still counts (`executable_of`).
@@ -405,9 +469,8 @@ class NightShiftHost:
         return True
 
     @classmethod
-    def subcommand(cls, args: List[str]) -> str | None:
-        """
-        Finds the subcommand of a `ling` command line: its first argument that is neither an option
+    def subcommand(cls, args: list[str]) -> str | None:
+        """Finds the subcommand of a `ling` command line: its first argument that is neither an option
         nor an option's value. A prompt in that place is returned as it is; after `--` everything is
         the prompt, so there is no subcommand.
 
@@ -428,9 +491,8 @@ class NightShiftHost:
         return None
 
     @classmethod
-    def is_interactive(cls, args: List[str]) -> bool:
-        """
-        Tells whether a `ling` command line opens the TUI.
+    def is_interactive(cls, args: list[str]) -> bool:
+        """Tells whether a `ling` command line opens the TUI.
 
         Only the subcommand's place counts: a word that names a non-interactive subcommand
         elsewhere, as an option's value (`ling -C docs`) or in a prompt, does not.
@@ -442,15 +504,14 @@ class NightShiftHost:
             bool: False when the subcommand is a non-interactive one, or the line asks for help or
                 the version.
         """
-        options = args[:args.index("--")] if "--" in args else args
+        options = args[: args.index("--")] if "--" in args else args
         if any(arg in PRINT_AND_EXIT for arg in options):
             return False
         return cls.subcommand(args) not in NON_INTERACTIVE
 
     @classmethod
-    def heavy_jobs(cls) -> List[str]:
-        """
-        Names the heavy work already running that a night run must not join: a `ling` build, a
+    def heavy_jobs(cls) -> list[str]:
+        """Names the heavy work already running that a night run must not join: a `ling` build, a
         `ling-admin index` run, a `ling-code` index run, or a Codex test run.
 
         Returns:
@@ -458,8 +519,8 @@ class NightShiftHost:
         """
         found = []
         lock_path = os.path.join(BUILD_CACHE_DIR, ".build.lock")
-        if os.path.exists(lock_path):
-            with open(lock_path, "a") as handle:
+        if Path(lock_path).exists():
+            with Path(lock_path).open("a") as handle:
                 try:
                     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     fcntl.flock(handle, fcntl.LOCK_UN)
@@ -469,8 +530,11 @@ class NightShiftHost:
             if not entry.name.isdigit():
                 continue
             try:
-                args = [arg.decode("utf-8", "replace")
-                        for arg in (entry / "cmdline").read_bytes().split(b"\0") if arg]
+                args = [
+                    arg.decode("utf-8", "replace")
+                    for arg in (entry / "cmdline").read_bytes().split(b"\0")
+                    if arg
+                ]
             except OSError:
                 continue
             names = [os.path.basename(arg) for arg in args[:2]]
@@ -478,13 +542,29 @@ class NightShiftHost:
                 found.append(f"ling-admin index is running (pid {entry.name})")
         try:
             units = subprocess.run(
-                ["systemctl", "--user", "list-units", "--no-legend", "--plain", "--state=active",
-                 "codex-tests-*", "mightling-index-*"], capture_output=True, text=True, timeout=10).stdout
+                [
+                    "systemctl",
+                    "--user",
+                    "list-units",
+                    "--no-legend",
+                    "--plain",
+                    "--state=active",
+                    "codex-tests-*",
+                    "mightling-index-*",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout
         except (OSError, subprocess.SubprocessError):
             units = ""
         for line in units.splitlines():
             if line.strip():
                 unit = line.split()[0]
-                kind = "an index run" if unit.startswith("mightling-index-") else "an upstream test run"
+                kind = (
+                    "an index run"
+                    if unit.startswith("mightling-index-")
+                    else "an upstream test run"
+                )
                 found.append(f"{kind} is active ({unit})")
         return found
