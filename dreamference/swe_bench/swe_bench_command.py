@@ -104,10 +104,10 @@ class SweBenchCommand:
                               "model_post_turn_compact_threshold_percent on the exec command line: on (the launcher's "
                               "rule for the run's limit), off (pinned at 0) or a percentage of the usable window (1-99); "
                               "absent, the key is not set and exec never compacts at a turn's end (spec §16, night 10)")
-        run.add_argument("--apply-patch", choices=("off", "function", "freeform"), default=None, metavar="FORM",
-                         help="How the agent is offered Codex's apply_patch tool: function (a function tool, which "
-                              "SGLang serves), freeform (a custom tool, which only ling-engine serves) or off; "
-                              "the launcher's own choice when absent (spec §22)")
+        run.add_argument("--apply-patch", choices=("off", "freeform"), default=None, metavar="FORM",
+                         help="How the agent is offered Codex's apply_patch tool: freeform (a custom tool, which "
+                              "only ling-engine serves) or off; the launcher's own choice when absent (spec §22). "
+                              "The pinned Codex has no function form, and ling refuses one")
         run.add_argument("--exec-tool", choices=("function", "freeform"), default=None, metavar="FORM",
                          help="How the agent is offered Code Mode's exec tool: function (translated, which SGLang "
                               "serves) or freeform (Codex's custom tool, which only ling-engine serves and SGLang "

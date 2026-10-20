@@ -3119,15 +3119,15 @@ def test_the_restart_arm_is_kept_on_resume_told_apart_by_against_and_parsed(benc
 
 def test_the_apply_patch_arm_sets_the_launchers_override_and_counts_the_calls(bench, monkeypatch):
     monkeypatch.delenv(APPLY_PATCH_ENV, raising=False)
-    assert run(bench, name="fn", instances=["acme__widget-1"], apply_patch="function") == 0
+    assert run(bench, name="fn", instances=["acme__widget-1"], apply_patch="freeform") == 0
     env, _ = container_env(bench)
-    assert env[APPLY_PATCH_ENV] == "function"
+    assert env[APPLY_PATCH_ENV] == "freeform"
     store = SweBenchRunStore("fn")
-    assert store.manifest()["apply_patch"] == "function"
+    assert store.manifest()["apply_patch"] == "freeform"
     state = store.state("acme__widget-1")
-    assert state["status"] == "done" and state["apply_patch"] == {"form": "function", "calls": 1}
+    assert state["status"] == "done" and state["apply_patch"] == {"form": "freeform", "calls": 1}
     assert "FIX" in prediction("fn", "acme__widget-1")
-    assert "Apply patch         function: called in 1 of 1 finished instance(s), 1 call(s): acme__widget-1" in SweBenchReport.render(store)
+    assert "Apply patch         freeform: called in 1 of 1 finished instance(s), 1 call(s): acme__widget-1" in SweBenchReport.render(store)
     # Without the flag the variable is not set, the launcher decides, and the count is still kept.
     bench["docker"].calls.clear()
     assert run(bench, name="auto", instances=["acme__widget-1"]) == 0
@@ -3154,19 +3154,19 @@ def test_the_freeform_form_is_counted_from_custom_tool_calls_and_off_is_passed_t
 def test_the_apply_patch_arm_is_kept_on_resume_told_apart_by_against_and_parsed(bench, monkeypatch):
     monkeypatch.delenv(APPLY_PATCH_ENV, raising=False)
     run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"])
-    assert run(bench, name="fn", instances=["acme__widget-1", "acme__widget-2"], apply_patch="function") == 0
+    assert run(bench, name="fn", instances=["acme__widget-1", "acme__widget-2"], apply_patch="freeform") == 0
     store = SweBenchRunStore("fn")
     kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
     store.predictions_path.write_text("".join(line + "\n" for line in kept))
     bench["docker"].calls.clear()
     assert run(bench, name="fn") == 0
     env, _ = container_env(bench)
-    assert env[APPLY_PATCH_ENV] == "function" and store.manifest()["apply_patch"] == "function"
+    assert env[APPLY_PATCH_ENV] == "freeform" and store.manifest()["apply_patch"] == "freeform"
     assert store.state("acme__widget-2")["apply_patch"]["calls"] == 1
     for name in ("plain", "fn"):
         SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
     text = SweBenchReport.against(SweBenchRunStore("fn"), SweBenchRunStore("plain"))
-    assert "differs: apply_patch: function | auto" in text
+    assert "differs: apply_patch: freeform | auto" in text
     manifest_path = SweBenchRunStore("plain").manifest_path
     manifest = json.loads(manifest_path.read_text())
     del manifest["apply_patch"]
@@ -3177,12 +3177,14 @@ def test_the_apply_patch_arm_is_kept_on_resume_told_apart_by_against_and_parsed(
     monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
     parser = argparse.ArgumentParser()
     SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
-    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--apply-patch", "function", "--name", "x"])) == 0
-    assert seen["apply_patch"] == "function"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--apply-patch", "freeform", "--name", "x"])) == 0
+    assert seen["apply_patch"] == "freeform"
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["apply_patch"] is None
-    with pytest.raises(SystemExit):
-        parser.parse_args(["swe-bench", "run", "--apply-patch", "maybe", "--name", "z"])
+    # `function` is refused like any unknown form: the pinned Codex has none, and ling stops on it.
+    for refused in ("maybe", "function"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["swe-bench", "run", "--apply-patch", refused, "--name", "z"])
 
 
 # -- the Code Mode arm (`--exec-tool`, spec §23) -------------------------------------------------

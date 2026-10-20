@@ -211,8 +211,9 @@ impl ServedModel {
     }
 }
 
-/// Overrides how `apply_patch` is offered, for a benchmark arm: `off`, `function` or `freeform`.
-/// Unset, empty or anything else leaves the automatic choice ([`apply_patch_tool_type`]).
+/// Overrides how `apply_patch` is offered, for a benchmark arm: `off` or `freeform`. Unset, empty
+/// or anything else leaves the automatic choice ([`apply_patch_tool_type`]), except `function`,
+/// which is refused ([`check_apply_patch_setting`]).
 pub const APPLY_PATCH_ENV: &str = "DREAMFERENCE_MIGHTLING_APPLY_PATCH";
 
 /// Codex's `apply_patch_tool_type` for the catalog: the override from [`APPLY_PATCH_ENV`] when it
@@ -220,10 +221,22 @@ pub const APPLY_PATCH_ENV: &str = "DREAMFERENCE_MIGHTLING_APPLY_PATCH";
 /// model then edits through the shell, as it did before the field existed).
 pub fn apply_patch_tool_type(model: &ServedModel, setting: Option<&str>) -> Option<&'static str> {
     match setting.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-        Some("off") => None,
-        Some("function") => Some("function"),
+        Some("off") | Some("function") => None,
         Some("freeform") => Some("freeform"),
         _ => model.runs_custom_tools().then_some("freeform"),
+    }
+}
+
+/// Refuses a [`APPLY_PATCH_ENV`] the pinned Codex cannot start with. Its `ApplyPatchToolType` has
+/// one variant, `freeform`: a catalog naming `function` stopped `ling` before its first line
+/// ("unknown variant `function`, expected `freeform`"), which lost SWE-bench night 5's candidate arm.
+pub fn check_apply_patch_setting(setting: Option<&str>) -> Result<(), String> {
+    match setting.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("function") => Err(format!(
+            "{APPLY_PATCH_ENV}=function: this Codex offers apply_patch only as freeform (a custom tool, which only \
+             ling-engine serves). Use freeform or off, or unset it for the automatic choice."
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -961,7 +974,8 @@ pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Val
     // set). Its freeform form is a `custom` tool, which only ling-engine runs: verified on
     // 2026-10-10 (one `custom_tool_call apply_patch`, applied). On SGLang or vLLM the tool would
     // be dropped by the server, so the field stays absent there and the model edits by shell,
-    // unless a benchmark arm asks for a form (`APPLY_PATCH_ENV`, SWE-bench night 5: `function`).
+    // unless a benchmark arm asks for one (`APPLY_PATCH_ENV`: `freeform` or `off`; `function`, which
+    // SWE-bench night 5 asked for, is refused, since the pinned Codex has no such form).
     if let Some(form) = apply_patch_tool_type(model, std::env::var(APPLY_PATCH_ENV).ok().as_deref()) {
         entry["apply_patch_tool_type"] = json!(form);
     }
@@ -983,6 +997,7 @@ pub fn configure_codex_home(
     parts: &prompt::Parts,
     chosen: &prompt::Prompt,
 ) -> anyhow::Result<Option<PathBuf>> {
+    check_apply_patch_setting(std::env::var(APPLY_PATCH_ENV).ok().as_deref()).map_err(anyhow::Error::msg)?;
     std::fs::create_dir_all(codex_home)?;
     let catalog_path = codex_home.join("model_catalog.json");
     let default_text = prompt::compose(&prompt::Prompt::default_prompt(), parts);
@@ -1374,7 +1389,13 @@ mod tests {
         assert!(!parse_served_model(&json!({"data": [{"id": "m"}]})).unwrap().runs_custom_tools());
         // The override, for an arm: a form by name, `off` for none, anything else is automatic.
         let sglang = ServedModel { id: "m".into(), max_model_len: 65536, owned_by: "sglang".into() };
-        assert_eq!(apply_patch_tool_type(&sglang, Some("function")), Some("function"));
+        // `function` is no form of the pinned Codex's: never written, and refused before anything is.
+        assert_eq!(apply_patch_tool_type(&sglang, Some("function")), None);
+        let refused = check_apply_patch_setting(Some(" Function")).unwrap_err();
+        assert!(refused.contains("only as freeform") && refused.contains(APPLY_PATCH_ENV), "{refused}");
+        for fine in [None, Some("freeform"), Some("off"), Some(""), Some("maybe")] {
+            assert_eq!(check_apply_patch_setting(fine), Ok(()), "{fine:?}");
+        }
         assert_eq!(apply_patch_tool_type(&sglang, Some("FreeForm ")), Some("freeform"));
         assert_eq!(apply_patch_tool_type(&engine, Some("off")), None);
         assert_eq!(apply_patch_tool_type(&engine, Some("")), Some("freeform"));
