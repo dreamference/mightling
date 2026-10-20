@@ -9,6 +9,7 @@ a test write the user's real cache.
 
 import os
 import platform
+import re
 import tomllib
 from pathlib import Path
 from typing import Any, Dict, Final, Optional
@@ -33,6 +34,28 @@ DATASETS: Final[Dict[str, str]] = {
     "lite": "SWE-bench/SWE-bench_Lite",
     "full": "SWE-bench/SWE-bench",
 }
+
+# SWE-rebench (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §27): an extra pool of tasks beside
+# Verified, from the leaderboard dataset's monthly splits. `rebench` is its `test` split (every
+# month), `rebench-YYYY-MM` one month's split `YYYY_MM`. Its tasks are new to this harness's rules,
+# not free of contamination for the model: every published task predates Qwen3.8-27B's release
+# (2026-08-05), which is what `REBENCH_POOL_NOTE` says in every manifest and report.
+REBENCH_DATASET_ID: Final[str] = "nebius/SWE-rebench-leaderboard"
+REBENCH_NAME: Final["re.Pattern[str]"] = re.compile(r"rebench(?:-(\d{4})-(\d{2}))?")
+REBENCH_POOL_NOTE: Final[str] = ("SWE-rebench: an extra task pool, new to this harness's rules; not "
+                                 "contamination-free for the model (its tasks predate the model's release)")
+
+# SWE-rebench publishes x86-64 images only, so on arm64 each instance's image is built from the
+# SWE-rebench fork's recipes for linux/arm64 (`SweBenchImageBuilder`), on any machine, and moves
+# between machines as an archive (`docker save`, gzip) beside the record of its validation.
+BUILT_IMAGE_PREFIX: Final[str] = "mightling-swe-rebench"
+ARCHIVE_DIR: Final[Path] = CACHE_DIR / "rebench-images"
+BUILD_DIR: Final[Path] = CACHE_DIR / "rebench-build"
+# The caps of each build container: the build runs `pip install` and compilers, beside whatever
+# else the machine runs.
+DEFAULT_BUILD_MEMORY: Final[str] = "16G"
+DEFAULT_BUILD_CPUS: Final[int] = 4
+DEFAULT_BUILD_STEP_TIMEOUT: Final[str] = "60m"
 
 # The only source of arm64 instance images: the task repository's own Dockerfiles are pinned to
 # linux/amd64 and an x86-64 Miniconda, so a local build produces images this machine cannot run.
@@ -92,6 +115,9 @@ class SweBenchSettings:
         self.eval_memory: str = str(table.get("eval_memory", DEFAULT_EVAL_MEMORY))
         self.eval_timeout_s: int = duration(table.get("eval_timeout", DEFAULT_EVAL_TIMEOUT))
         self.disk_reserve: str = str(table.get("disk_reserve", DEFAULT_DISK_RESERVE))
+        self.build_memory: str = str(table.get("build_memory", DEFAULT_BUILD_MEMORY))
+        self.build_cpus: int = max(1, int(table.get("build_cpus", DEFAULT_BUILD_CPUS)))
+        self.build_step_timeout_s: int = duration(table.get("build_step_timeout", DEFAULT_BUILD_STEP_TIMEOUT))
         # Paired nodes serving the same model add lanes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3).
         self.nodes: Any = table.get("nodes", "paired")
 
@@ -127,12 +153,45 @@ class SweBenchSettings:
     @classmethod
     def dataset_id(cls, name: str) -> str:
         """
-        Resolves a dataset name.
+        Resolves a dataset name. A split other than `test` is written after the id with a colon,
+        so two months of SWE-rebench are two datasets to every check that compares runs, and the
+        result resolves to itself.
 
         Args:
-            name: `verified`, `lite`, `full`, or a HuggingFace id.
+            name: `verified`, `lite`, `full`, `rebench`, `rebench-YYYY-MM`, or a HuggingFace id
+                (`org/name`, or `org/name:split`).
 
         Returns:
-            str: The HuggingFace dataset id.
+            str: The HuggingFace dataset id, with `:<split>` when the split is not `test`.
         """
-        return DATASETS.get(name.strip().lower(), name)
+        key = name.strip().lower()
+        matched = REBENCH_NAME.fullmatch(key)
+        if matched:
+            year, month = matched.groups()
+            return f"{REBENCH_DATASET_ID}:{year}_{month}" if year else REBENCH_DATASET_ID
+        return DATASETS.get(key, name)
+
+    @classmethod
+    def dataset_source(cls, name: str) -> tuple:
+        """
+        Args:
+            name: A dataset name or id.
+
+        Returns:
+            tuple: `(HuggingFace id, split)`.
+        """
+        resolved = cls.dataset_id(name)
+        repository, _, split = resolved.partition(":")
+        return repository, split or "test"
+
+    @classmethod
+    def is_rebench(cls, name: Optional[str]) -> bool:
+        """
+        Args:
+            name: A dataset name or id; None is Verified.
+
+        Returns:
+            bool: True for SWE-rebench, whose rows carry `install_config` and whose arm64 images
+            are built here.
+        """
+        return bool(name) and cls.dataset_source(str(name))[0] == REBENCH_DATASET_ID

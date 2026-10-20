@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "scripts", "swe_bench_night1.sh")
 
 
-def night(tmp_path, arms):
+def night(tmp_path, arms, **extra):
     """Runs the night's `run` step with `arms`; returns (exit status, recorded admin calls, D)."""
     calls = tmp_path / "calls.txt"
     fake = tmp_path / "python"
@@ -27,7 +27,7 @@ def night(tmp_path, arms):
     folder = tmp_path / "night4"
     folder.mkdir()
     env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder),
-           "NIGHT": "4", "PREFIX": "n4", "ARMS": arms, "REFINE": "0"}
+           "NIGHT": "4", "PREFIX": "n4", "ARMS": arms, "REFINE": "0", **extra}
     result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
     recorded = calls.read_text().splitlines() if calls.exists() else []
     return result.returncode, recorded, folder
@@ -362,3 +362,15 @@ def test_without_best_of_the_night_is_the_two_arm_night(tmp_path):
     assert status == 0
     assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n11-default", "n11-apply-patch-function"]
     assert not any("--seed 20261013" in line for line in recorded)
+
+
+def test_the_rounds_run_on_verified_unless_the_night_names_a_dataset(tmp_path):
+    (tmp_path / "verified").mkdir()
+    (tmp_path / "rebench").mkdir()
+    code, recorded, _ = night(tmp_path / "verified", "default restart-2")
+    assert code == 0 and all(r.startswith("swe-bench run --dataset verified ") for r in runs(recorded))
+    code, recorded, folder = night(tmp_path / "rebench", "default restart-2", DATASET="rebench-2026-03")
+    assert code == 0 and len(runs(recorded)) == 2
+    assert all(r.startswith("swe-bench run --dataset rebench-2026-03 ") for r in runs(recorded))
+    # The regrades read the dataset from each run's manifest.
+    assert all("--dataset" not in r for r in recorded if r.startswith("swe-bench eval "))

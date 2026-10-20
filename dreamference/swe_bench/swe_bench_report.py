@@ -632,6 +632,7 @@ class SweBenchReport:
         lines = [
             f"{manifest.get('model_name_or_path')}       run {store.name}",
             f"{manifest.get('dataset')}, {manifest.get('architecture')}, images: {manifest.get('image_source')}",
+            *([f"Task pool: {manifest['task_pool']}"] if manifest.get("task_pool") else []),
             "",
             f"Resolved            {summary['resolved']} / {validated} validated   {rate}",
             f"Not evaluable       {summary['excluded']} of {selected} selected "
@@ -797,6 +798,8 @@ class SweBenchReport:
         only_ours = sorted(i for i in both if ours["results"][i].get("resolved") and not theirs["results"][i].get("resolved"))
         only_theirs = sorted(i for i in both if theirs["results"][i].get("resolved") and not ours["results"][i].get("resolved"))
         lines = [f"{name} against {other.name}: {len(both)} instance(s) graded in both"]
+        if a.get("task_pool"):
+            lines.append(f"  task pool: {a['task_pool']}")
         for field in COMPARED_FIELDS:
             # Runs made before the code-index arm or named prompts existed have no such field.
             first, second = (m.get(field, MISSING_FIELDS.get(field)) for m in (a, b))

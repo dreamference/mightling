@@ -32,6 +32,10 @@ REPO=${REPO:-$( [ -n "$COMMON" ] && cd "$COMMON/.." && pwd || echo "$HERE")}
 WT=${WT:-$REPO/.claude/worktrees/swe-night1}
 PY=${PY:-$REPO/.venv/bin/python}
 LIST=${LIST:-$HOME/.cache/dreamference/swe-bench/fresh-50.txt}
+# The rounds' dataset (`swe-bench run --dataset`): `verified`, or a SWE-rebench month such as
+# `rebench-2026-03`, whose tasks are an extra pool, not contamination-free (SWE_BENCH spec §27).
+# The smoke check stays on Verified's SMOKE_INSTANCE, which proves each arm starts either way.
+DATASET=${DATASET:-verified}
 D=${D:-$HOME/.local/share/dreamference/swe-bench/night1}
 NIGHT=${NIGHT:-1}
 PREFIX=${PREFIX:-n$NIGHT}
@@ -286,7 +290,7 @@ start() {
     fi
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: $what" \
-        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
+        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=DATASET="$DATASET" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
@@ -316,7 +320,7 @@ best_of_run() {
     for k in $(seq 1 "$BEST_OF"); do
         round="$PREFIX-$name-$k"
         log "round $round (attempt $k of $BEST_OF)"
-        admin swe-bench run --subset "$LIST" --name "$round" --code-index universal --mask off \
+        admin swe-bench run --dataset "$DATASET" --subset "$LIST" --name "$round" --code-index universal --mask off \
             --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
         rc=$?
         log "$round finished ($rc)"
@@ -353,7 +357,7 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), dataset $DATASET, arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
     if [ "$BEST_OF" -gt 1 ]; then
         best_of_run
         return
@@ -372,7 +376,7 @@ run() {
         [ "$REFINE" = 1 ] && extra="$extra --refine"
         log "round $PREFIX-$name"
         # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
-        admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
+        admin swe-bench run --dataset "$DATASET" --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
             --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
         rc=$?
         log "$PREFIX-$name finished ($rc)"

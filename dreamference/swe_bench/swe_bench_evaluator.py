@@ -79,14 +79,21 @@ class SweBenchEvaluator:
             Dict[str, Optional[str]]: Instance id to the reason it is not usable, None when it is.
         """
         rows = {row["instance_id"]: row for row in SweBenchHarness.rows(dataset)}
-        validated, rejected = SweBenchImages.validated(), SweBenchImages.rejected()
-        tags = SweBenchImages.tags()
+        validated, rejected = SweBenchImages.validated(dataset), SweBenchImages.rejected(dataset)
+        rebench = swe_bench_settings.SweBenchSettings.is_rebench(dataset)
+        tags = [] if rebench else SweBenchImages.tags()
         outcome: Dict[str, Optional[str]] = {}
         images: Dict[str, str] = {}
         digests: Dict[str, Optional[str]] = {}
         for instance_id in instance_ids:
             if not force and instance_id in validated:
-                outcome[instance_id] = None
+                image = validated[instance_id].get("image")
+                # A built image is usable only where it or its archive is: a list imported
+                # without its archives validates nothing here.
+                if SweBenchImages.is_built(image) and SweBenchImages.image_for(instance_id, tags, dataset) is None:
+                    outcome[instance_id] = f"validated, but its image is not here ({SweBenchImages.archive_path(image).name})"
+                else:
+                    outcome[instance_id] = None
                 continue
             if not force and instance_id in rejected:
                 outcome[instance_id] = rejected[instance_id]
@@ -94,17 +101,20 @@ class SweBenchEvaluator:
             if instance_id not in rows:
                 outcome[instance_id] = f"not in {dataset}"
                 continue
-            image = SweBenchImages.image_for(instance_id, tags)
+            image = SweBenchImages.image_for(instance_id, tags, dataset, rows[instance_id])
             if image is None:
-                problem = f"no {swe_bench_settings.SweBenchSettings.architecture()} image"
-                SweBenchImages.record_validation(instance_id, None, None, problem)
+                problem = SweBenchImages.missing_reason(dataset)
+                if not rebench:
+                    # Verified's community images are what they are; a SWE-rebench image may be
+                    # built later, so its absence is not recorded as a rejection.
+                    SweBenchImages.record_validation(instance_id, None, None, problem, dataset)
                 outcome[instance_id] = problem
                 continue
             disk = cls.disk_problem(settings)
             if disk and SweBenchDocker.image_digest(image) is None:
                 outcome[instance_id] = f"not validated yet: {disk}"
                 continue
-            digest = SweBenchDocker.ensure_image(image)
+            digest = SweBenchImages.ensure(image)
             if digest is None:
                 outcome[instance_id] = "not validated yet: the image could not be pulled"
                 continue
@@ -130,9 +140,30 @@ class SweBenchEvaluator:
             gold = SweBenchHarness.instance_report(work, VALIDATE_GOLD_RUN, "gold", instance_id)
             noop = SweBenchHarness.instance_report(work, VALIDATE_NOOP_RUN, NOOP_MODEL, instance_id)
             problem = cls.validation_problem(gold, noop)
-            SweBenchImages.record_validation(instance_id, images[instance_id], digests[instance_id], problem)
+            SweBenchImages.record_validation(instance_id, images[instance_id], digests[instance_id], problem, dataset,
+                                             cls.validation_fields(images[instance_id], validated.get(instance_id)))
             outcome[instance_id] = problem
         return outcome
+
+    @classmethod
+    def validation_fields(cls, image: str, earlier: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        What a validation record of a built image keeps from the earlier one (its archive and
+        where it was built) and adds (where it was validated).
+
+        Args:
+            image: The image validated.
+            earlier: The instance's earlier validated record, if any.
+
+        Returns:
+            Dict[str, Any]: The extra fields; empty for a pulled image.
+        """
+        if not SweBenchImages.is_built(image):
+            return {}
+        import platform
+        kept = {key: value for key, value in (earlier or {}).items()
+                if key in ("archive", "built_on", "build_seconds", "recipe")}
+        return dict(kept, validated_on=platform.node())
 
     @classmethod
     def validation_problem(cls, gold: Optional[Dict[str, Any]], noop: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -280,7 +311,7 @@ class SweBenchEvaluator:
             if disk:
                 print(f"⚠️  {instance_id} is not graded yet: {disk}")
                 continue
-            digest = SweBenchDocker.ensure_image(image) if image else None
+            digest = SweBenchImages.ensure(image) if image else None
             if digest is None or instance_id not in rows:
                 print(f"⚠️  {instance_id} is not graded yet: its image is not available")
                 continue

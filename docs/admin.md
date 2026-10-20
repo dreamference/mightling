@@ -293,11 +293,36 @@ Install the harness, download the dataset, build the ling runtime for the instan
 
 | Option | Description |
 |---|---|
-| `--dataset` | verified (default), lite, full, or a HuggingFace id. |
+| `--dataset` | verified (default), lite, full, rebench (every month of SWE-rebench), rebench-YYYY-MM (one month), or a HuggingFace id. |
 | `--validate` | Also check which instances grade correctly here (pulls their images) |
 | `--instances` | With --validate: comma-separated instance ids. |
 | `--limit` | With --validate: only the first N instances, sorted by id. |
 | `--force` | With --validate: check again instances that already have a result. |
+
+#### `ling-admin swe-bench build`
+
+SWE-rebench: build each instance's image for this machine's architecture, validate it, archive it for `import` and remove it (on any machine; no ling or model server needed).
+
+| Option | Description |
+|---|---|
+| `--dataset` | rebench-YYYY-MM (one month) or rebench (every month) |
+| `--instances` | Comma-separated instance ids (default: the dataset's, sorted by id) |
+| `--limit` | Only the first N instances. |
+| `--force` | Build again instances that already have a result. |
+| `--keep-images` | Leave each built image in Docker (default: removed once archived) |
+| `--memory` | Memory cap of each build container (default [swe_bench] build_memory, 16G) |
+| `--cpus` | CPU cap of each build container (default [swe_bench] build_cpus, 4) |
+| `--disk-reserve` | Stop when less disk than this is free (default [swe_bench] disk_reserve) |
+| `--dry-run` | Print the commands the first instance's build would run, and nothing else. |
+
+#### `ling-admin swe-bench import`
+
+SWE-rebench: take in the validated images another machine built (its archive folder).
+
+| Option | Description |
+|---|---|
+| `folder` | A copy of the builder's ~/.cache/dreamference/swe-bench/rebench-images. |
+| `--dataset` | rebench-YYYY-MM or rebench, as built. |
 
 #### `ling-admin swe-bench smoke`
 
@@ -314,7 +339,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 
 | Option | Description |
 |---|---|
-| `--dataset` | verified (default), lite, full, or a HuggingFace id. |
+| `--dataset` | verified (default), lite, full, rebench (every month of SWE-rebench), rebench-YYYY-MM (one month), or a HuggingFace id. |
 | `--instances` | Comma-separated instance ids. |
 | `--subset` | A file of instance ids, one per line. |
 | `--limit` | Only the first N selected instances, sorted by id. |

@@ -66,6 +66,10 @@ The lists the rounds run on are committed under `docs/dev/swe-bench/` (the user'
 
 `scripts/swe_bench_chooser_test.py` (v1: the regression filter and a pairwise judge, no container) and `scripts/swe_bench_chooser_v2.py` (v2: reproduction tests written from the issue, run in each task's image, then the filter, behaviour groups and the judge) choose among the patches of runs already on disk (backlog item 1). v2 reuses `SweBenchDocker`, `SweBenchImages` and the grader's set-up (the row's `eval_script` up to the hidden tests' reset), runs each container with no network, so the grader's `pip install -e .` fails there and the image's editable install (with `/testbed` first on `PYTHONPATH`) is what the tests import, and it never writes under the runs.
 
+## SWE-rebench: a second task pool
+
+`--dataset rebench-YYYY-MM` (spec §27, branch `bench/swe-rebench`) runs the SWE-rebench leaderboard's monthly Python splits. Its tasks are new to this harness's rules, **not contamination-free** for the model (none postdates Qwen3.8-27B's release), and every manifest and report says so. SWE-rebench has x86-64 images only, so each instance's arm64 image is built from the SWE-rebench fork's recipes by `ling-admin swe-bench build` (on any machine with Docker; capped containers, one instance on disk at a time), validated where it is built, archived, and taken in on the benchmark machine with `ling-admin swe-bench import <folder>`. Keep when touching this: the rebench validated list is `validated-arm64-rebench.json`, never Verified's (the fresh-task draw reads Verified's); a built image is loaded from its archive, never rebuilt in a run (a rebuild resolves packages again and is not the image validated); the eval script is written when the snapshot is taken and keeps the one-command reset `per_file_reset` rewrites.
+
 ## Tests
 
 Every `docker` call goes through `SweBenchDocker`, and the cache and results directories are module-level constants, so the tests (`tests/test_swe_bench.py`, where a container is a scratch git repository) never start a container or touch the real cache.

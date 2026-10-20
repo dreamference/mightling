@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, Final, Iterable, List, Optional
 
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
+from dreamference.swe_bench.swe_bench_rebench_rows import SweBenchRebenchRows
 
 # A patch that applies to any repository and fixes nothing.
 NOOP_PATCH: Final[str] = (
@@ -48,12 +49,12 @@ TEST_OUTPUT_START: Final[str] = ">>>>> Start Test Output"
 # harness's cache.
 EVAL_RESET: Final[str] = "per-file"
 
-# Fetches a dataset's `test` split with the harness's own `datasets` package and prints its rows
-# sorted by instance id, with the snapshot's revision on the first line.
+# Fetches a dataset's split (`test` unless named) with the harness's own `datasets` package and
+# prints its rows sorted by instance id, with the snapshot's revision on the first line.
 DATASET_DUMP: Final[str] = """
 import json, sys
 from datasets import load_dataset
-dataset = load_dataset(sys.argv[1], split="test")
+dataset = load_dataset(sys.argv[1], split=sys.argv[2] if len(sys.argv) > 2 else "test")
 try:
     from huggingface_hub import HfApi
     revision = HfApi().dataset_info(sys.argv[1]).sha or ""
@@ -61,7 +62,7 @@ except Exception:
     revision = ""
 print(json.dumps({"revision": revision, "rows": len(dataset)}))
 for row in sorted((dict(row) for row in dataset), key=lambda row: row["instance_id"]):
-    print(json.dumps(row))
+    print(json.dumps(row, default=str))
 """
 
 
@@ -137,16 +138,19 @@ class SweBenchHarness:
             dataset: A dataset name or id.
 
         Returns:
-            Path: The local snapshot of its `test` split, rows sorted by instance id.
+            Path: The local snapshot of its split, rows sorted by instance id (one file per split:
+            `SWE-rebench-leaderboard-2026_03.jsonl`).
         """
-        name = swe_bench_settings.SweBenchSettings.dataset_id(dataset).split("/")[-1]
+        repository, split = swe_bench_settings.SweBenchSettings.dataset_source(dataset)
+        name = repository.split("/")[-1] + ("" if split == "test" else f"-{split}")
         return swe_bench_settings.CACHE_DIR / "datasets" / f"{name}.jsonl"
 
     @classmethod
     def download_dataset(cls, dataset: str, force: bool = False) -> Optional[Dict[str, Any]]:
         """
-        Downloads a dataset's `test` split once and keeps it as a local file, so `run` and
-        `eval` need no network and every run sees the same rows.
+        Downloads a dataset's split once and keeps it as a local file, so `run` and `eval` need
+        no network and every run sees the same rows. SWE-rebench's rows are kept with the eval
+        script, log parser and eval type the pinned harness grades with (`SweBenchRebenchRows`).
 
         Args:
             dataset: A dataset name or id.
@@ -161,16 +165,20 @@ class SweBenchHarness:
             return json.loads(meta_path.read_text())
         path.parent.mkdir(parents=True, exist_ok=True)
         environment = dict(os.environ, HF_HOME=str(path.parent / "hf"))
-        result = cls.execute([cls.tool("python"), "-c", DATASET_DUMP,
-                              swe_bench_settings.SweBenchSettings.dataset_id(dataset)], env=environment)
+        repository, split = swe_bench_settings.SweBenchSettings.dataset_source(dataset)
+        result = cls.execute([cls.tool("python"), "-c", DATASET_DUMP, repository, split], env=environment)
         lines = result.stdout.splitlines()
         if result.returncode != 0 or len(lines) < 2:
             print(f"❌ Could not download {dataset}: {result.stderr.strip()[-400:]}")
             return None
         meta = json.loads(lines[0])
         meta["dataset"] = swe_bench_settings.SweBenchSettings.dataset_id(dataset)
+        rows = lines[1:]
+        if swe_bench_settings.SweBenchSettings.is_rebench(dataset):
+            rows = [json.dumps(SweBenchRebenchRows.adapt(json.loads(line))) for line in rows if line.strip()]
+            meta["task_pool"] = swe_bench_settings.REBENCH_POOL_NOTE
         staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        staging.write_text("\n".join(lines[1:]) + "\n")
+        staging.write_text("\n".join(rows) + "\n")
         os.replace(staging, path)
         meta_path.write_text(json.dumps(meta, indent=2) + "\n")
         return meta
