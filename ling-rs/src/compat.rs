@@ -341,9 +341,56 @@ fn doctor_lines(resolved: &Resolved) -> Vec<String> {
     lines.push(String::new());
     lines.extend(memory_lines(&dir, codex_home.as_deref()));
     lines.push(String::new());
-    lines.push("Not built yet: .claude/ settings, commands, agents and hooks follow phase by phase \
-                (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
+    lines.extend(hooks_and_agents_lines(&dir, codex_home.as_deref()));
+    lines.push(String::new());
+    lines.push("Not built yet: permission rules from the settings files, .claude/commands, .claude/rules and \
+                the discrete tool roster (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
         .to_string());
+    lines
+}
+
+/// The one start-up line of a TUI session in the mode: what it read from Claude Code's files.
+pub fn read_summary(dir: &Path, codex_home: &Path, hooks: &crate::compat_hooks::Plan, agents: usize, agent_notes: usize) -> String {
+    let memory = crate::compat_memory::read(&crate::compat_memory::Places::for_dir(dir, Some(codex_home)));
+    let hook_count: usize = hooks.groups.iter().skip(1).map(|group| group.handlers.len()).sum();
+    let notes = memory.notes.len() + hooks.notes.len() + agent_notes;
+    let mut line = format!(
+        "Claude Code files: CLAUDE.md {}, hooks {hook_count}, agents {agents}",
+        memory.files.len()
+    );
+    if notes > 0 {
+        line.push_str(&format!("; {notes} thing(s) left out, listed by `ling compat doctor`"));
+    }
+    line.push('.');
+    line
+}
+
+/// The hooks and agents part of `ling compat doctor`.
+fn hooks_and_agents_lines(dir: &Path, codex_home: Option<&Path>) -> Vec<String> {
+    let root = crate::compat_tui::project_root(dir);
+    let home = ling_node_locator::home_dir();
+    let trusted = codex_home.is_some_and(|home| ling_skills::catalog::is_trusted(home, &root));
+    let files = crate::compat_hooks::settings_files(&root, home.as_deref(), Path::new(crate::compat_hooks::MANAGED_SETTINGS));
+    let plan = crate::compat_hooks::plan_for(&files, trusted, None, &|command: &str| command.to_string());
+    let mut lines = vec![format!("Hooks: {} group(s) from Claude Code's settings files{}", plan.groups.len(), if plan.groups.is_empty() { "." } else { ":" })];
+    for group in &plan.groups {
+        for handler in &group.handlers {
+            lines.push(format!(
+                "  {}{} -> {}{}",
+                group.event,
+                group.matcher.as_deref().map(|m| format!(" [{m}]")).unwrap_or_default(),
+                handler.command,
+                if group.trusted { "" } else { " (Codex asks before it runs; /hooks)" }
+            ));
+        }
+    }
+    lines.extend(plan.notes.iter().map(|note| format!("  ⚠️  {note}")));
+    let (agents, notes) = crate::compat_agents::discover(dir, &root, home.as_deref(), trusted);
+    lines.push(format!("Agents: {} from .claude/agents and ~/.claude/agents, as Codex roles{}", agents.len(), if agents.is_empty() { "." } else { ":" }));
+    for agent in agents.values() {
+        lines.push(format!("  {}{} ({})", agent.name, if agent.read_only { ", read-only" } else { "" }, agent.source.display()));
+    }
+    lines.extend(notes.iter().map(|note| format!("  ⚠️  {note}")));
     lines
 }
 
@@ -416,9 +463,12 @@ const USAGE: &str = "usage: ling compat [status | use claude|off | doctor]";
 
 /// `ling compat …` from a shell. Returns the exit code. It never waits for a model server.
 pub fn run_cli(args: &[String]) -> i32 {
-    // The memory hook Codex runs inside a session in the mode (compat_memory.rs).
-    if args.first().map(String::as_str) == Some("memory") {
-        return crate::compat_memory::run_hook();
+    // The hooks Codex runs inside a session in the mode: the memory (compat_memory.rs) and the
+    // shim around each of the settings files' hooks (compat_hooks.rs).
+    match args.first().map(String::as_str) {
+        Some("memory") => return crate::compat_memory::run_hook(),
+        Some("hook-shim") => return crate::compat_hooks::run_shim(&args[1..]),
+        _ => {}
     }
     let resolved = match resolve() {
         Ok(resolved) => resolved,
