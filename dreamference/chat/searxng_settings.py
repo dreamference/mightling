@@ -24,6 +24,7 @@ leaves any other file alone: deleting the first line keeps a file of one's own.
 
 import re
 import secrets
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -40,6 +41,7 @@ LEGACY_MARKER: Final[str] = "# Minimal SearXNG settings for Dreamference"
 WRITTEN: Final[str] = "written"
 CURRENT: Final[str] = "current"
 OWN: Final[str] = "own"
+UNWRITTEN: Final[str] = "unwritten"
 
 # The general engines this file turns on or keeps on, in the order `searxng status` lists them.
 GENERAL_ENGINES: Final[tuple[str, ...]] = (
@@ -172,16 +174,22 @@ class SearxngSettings:
         return None
 
     @classmethod
-    def ensure(cls, config_dir: str) -> str:
+    def ensure(
+        cls, config_dir: str, write_as_owner: Callable[[str, str], bool] | None = None
+    ) -> str:
         """Makes `settings.yml` in `config_dir` this version's, unless it is the user's own.
 
         Args:
             config_dir (str): SearXNG's configuration folder (mounted as `/etc/searxng`).
+            write_as_owner (Callable[[str, str], bool] | None): Writes (folder, text) when this
+                user cannot: SearXNG's image gives the folder to its own user at every start,
+                so after the first start only that user (or root) can write in it.
 
         Returns:
             str: "written" when the file was created or rewritten (a running SearXNG needs a
             restart to read it), "current" when it already was this version's or a newer one's,
-            "own" when it is the user's file and was left alone.
+            "own" when it is the user's file and was left alone, "unwritten" when it needed
+            writing and could not be written.
         """
         path = Path(config_dir) / "settings.yml"
         existing = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -194,9 +202,13 @@ class SearxngSettings:
         wanted = cls.render(cls.secret_key_of(existing) or secrets.token_urlsafe(32))
         if existing == wanted:
             return CURRENT
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name("settings.yml.new")
-        temporary.write_text(wanted, encoding="utf-8")
-        temporary.chmod(0o644)
-        temporary.replace(path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name("settings.yml.new")
+            temporary.write_text(wanted, encoding="utf-8")
+            temporary.chmod(0o644)
+            temporary.replace(path)
+        except PermissionError:
+            if write_as_owner is None or not write_as_owner(config_dir, wanted):
+                return UNWRITTEN
         return WRITTEN

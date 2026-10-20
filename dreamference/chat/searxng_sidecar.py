@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Callable
 from typing import Final, List
 
-from dreamference.chat.searxng_settings import OWN, WRITTEN, SearxngSettings
+from dreamference.chat.searxng_settings import OWN, UNWRITTEN, WRITTEN, SearxngSettings
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
 # The name other sidecars (image search) resolve SearXNG by on the sidecar network. SearXNG publishes
@@ -54,6 +54,53 @@ class SearxngSidecar:
                 "-p", f"{NodeSettings.search_bind_address()}:{SEARXNG_HOST_PORT}:8080",
                 "-v", f"{cls.config_dir()}:/etc/searxng",
                 SEARXNG_IMAGE]
+
+    @classmethod
+    def apply_settings(cls, say: Callable[[str], None] | None = None) -> str:
+        """Makes the settings file this version's (`SearxngSettings.ensure`) and says what it did.
+
+        Args:
+            say (Callable[[str], None] | None): Told when the settings were written, kept because
+                they are the user's own, or could not be written.
+
+        Returns:
+            str: What `SearxngSettings.ensure` returned.
+        """
+        settings = SearxngSettings.ensure(cls.config_dir(), cls.write_settings_as_owner)
+        messages = {
+            WRITTEN: f"📝 Wrote SearXNG's settings: {cls.config_dir()}/settings.yml",
+            OWN: "💡 Keeping your own SearXNG settings.yml (it has no ling-admin version line).",
+            UNWRITTEN: f"⚠️  Could not write {cls.config_dir()}/settings.yml; SearXNG keeps its old settings.",
+        }
+        if say and settings in messages:
+            say(messages[settings])
+        return settings
+
+    @classmethod
+    def write_settings_as_owner(cls, config_dir: str, text: str) -> bool:
+        """Writes `settings.yml` as the user SearXNG's image gives its configuration folder to.
+
+        The image's start script hands `/etc/searxng` to its `searxng` user, so once the container
+        has started, the folder on the host belongs to that user and this one cannot write in it.
+        A throwaway container of the same image, as root and with no network, writes the file
+        and gives it to the folder's owner.
+
+        Args:
+            config_dir (str): The folder mounted as `/etc/searxng`.
+            text (str): The settings file.
+
+        Returns:
+            bool: True if the file was written.
+        """
+        script = ("cat > /etc/searxng/settings.yml.new && chmod 644 /etc/searxng/settings.yml.new && "
+                  "chown \"$(stat -c %u:%g /etc/searxng)\" /etc/searxng/settings.yml.new && "
+                  "mv /etc/searxng/settings.yml.new /etc/searxng/settings.yml")
+        result = subprocess.run(
+            ["docker", "run", "--rm", "-i", "--network", "none", "--user", "0", "--entrypoint", "sh",
+             "-v", f"{config_dir}:/etc/searxng", SEARXNG_IMAGE, "-c", script],
+            input=text, capture_output=True, text=True, timeout=300, check=False,
+        )
+        return result.returncode == 0
 
     @classmethod
     def extra_networks(cls) -> List[str]:
@@ -110,11 +157,7 @@ class SearxngSidecar:
             bool: True if the container is running once this returns.
         """
         from dreamference.node.node_settings import NodeSettings
-        settings = SearxngSettings.ensure(cls.config_dir())
-        if say and settings == WRITTEN:
-            say(f"📝 Wrote SearXNG's settings: {cls.config_dir()}/settings.yml")
-        elif say and settings == OWN:
-            say("💡 Keeping your own SearXNG settings.yml (it has no ling-admin version line).")
+        settings = cls.apply_settings(say)
         mode = SidecarNetwork.network_mode(SEARXNG_CONTAINER_NAME)
         on_bridge = bool(mode) and SidecarNetwork.created_on_default_bridge(SEARXNG_CONTAINER_NAME)
         published = cls.published_address() if mode and not on_bridge else ""

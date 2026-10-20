@@ -220,3 +220,43 @@ def test_the_report_lists_every_general_engine_and_says_when_none_answers(monkey
 
     monkeypatch.setattr(SearxngStatus, "container_log", classmethod(lambda cls, name: None))
     assert SearxngStatus.report_lines(SEARXNG_CONTAINER_NAME, "http://127.0.0.1:8888")[1] == 2
+
+
+def test_a_folder_searxng_took_over_is_written_through_its_owner(tmp_path):
+    # SearXNG's image gives /etc/searxng to its own user at every start: after the first start
+    # this user can read the settings but not write them (seen on this machine, 2026-10-20).
+    (tmp_path / "settings.yml").write_text(LEGACY)
+    tmp_path.chmod(0o555)
+    (tmp_path / "settings.yml").chmod(0o444)
+    written = []
+    try:
+        assert SearxngSettings.ensure(str(tmp_path)) == "unwritten"
+        assert (
+            SearxngSettings.ensure(str(tmp_path), lambda folder, text: written.append(text) or True)
+            == "written"
+        )
+        assert SearxngSettings.ensure(str(tmp_path), lambda folder, text: False) == "unwritten"
+    finally:
+        tmp_path.chmod(0o755)
+    assert SearxngSettings.secret_key_of(written[0]) == "zlxoPRWU58tMJ3372nAGMOYMWa0iq9YfQbLmY1Qr"
+    assert read(tmp_path / "settings.yml") == LEGACY
+
+
+def test_the_owner_writes_through_a_throwaway_container_without_network(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        searxng_sidecar.subprocess,
+        "run",
+        lambda argv, **kwargs: (
+            seen.append((argv, kwargs)) or SimpleNamespace(returncode=0, stdout="", stderr="")
+        ),
+    )
+    assert SearxngSidecar.write_settings_as_owner("/home/u/.config/searxng", "settings text")
+    ((argv, kwargs),) = seen
+    assert (
+        argv[:3] == ["docker", "run", "--rm"]
+        and "--network" in argv
+        and argv[argv.index("--network") + 1] == "none"
+    )
+    assert "/home/u/.config/searxng:/etc/searxng" in argv
+    assert kwargs["input"] == "settings text"
