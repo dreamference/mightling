@@ -43,6 +43,7 @@ pub mod cave;
 pub mod chat;
 pub mod code_index;
 pub mod compat;
+pub mod compat_memory;
 pub mod compat_keys;
 pub mod compat_print;
 pub mod compat_tui;
@@ -585,6 +586,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     } else {
         args
     };
+    // Claude Code's memory files through a `SessionStart` hook, in the mode (compat_memory.rs);
+    // outside it, `mightling_claude_md` makes a folder's CLAUDE.md Codex's fallback document.
+    let args = compat_memory::prepare(args, compat_mode.mode, &codex_home);
     // Refine mode's hook for the interactive session; before the notice, which shows its line.
     refine::register_hook(&codex_home, tui);
     notice::publish(&codex_home, tui);

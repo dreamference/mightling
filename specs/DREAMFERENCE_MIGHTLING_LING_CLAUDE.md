@@ -635,6 +635,19 @@ A repository's `.claude/settings.json` can name hook commands, which run on the 
 - **Budget:** one budget for both families (§7.3).
 - **Outside the profile**, plain `ling` gains one small, separate option: `mightling_claude_md = true` adds `CLAUDE.md` to `project_doc_fallback_filenames`, so a repository with only a `CLAUDE.md` gives `ling` its instructions (a folder with an `AGENTS.md` keeps reading only that, which is Codex's rule). It is off by default and costs one `toml_edit` line in the launcher.
 
+**Built (2026-10-20)** in `ling-rs/src/compat_memory.rs`.
+- **Files and order:** as Claude Code's memory page gives them: the managed file, `~/.claude/CLAUDE.md`, then each folder from the filesystem's root down to the working folder with its `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md`.
+- **Imports:** `@path` imports are relative to their file. `~/` is the home folder, four hops at most. An import in a code span or fence, a quoted path, and a path that does not exist are left as text. `\ ` is a space.
+- **Comments:** block-level HTML comments are dropped.
+- **Project imports:** an import in a project's file that leads outside the project is not followed and is reported. Claude Code asks first; there is no dialog here. A user-scope file's imports are followed.
+- **Deduplication:** files are deduplicated against the `AGENTS.md` files Codex reads and against each other, by canonical path. A line that is only an import is replaced by what it imports, so this repository's `CLAUDE.md` (`@AGENTS.md`) adds nothing.
+- **Budget:** the shared budget is Codex's 32 KiB less the `AGENTS.md` bytes; the largest files are cut first, with a notice.
+- **Delivery:** the hook is `ling compat memory`, registered with `-c` and its trust entry for the session's process only. It matches `startup|clear|compact` and has `additionalContextLimit = 0`, so Codex never moves the memory to a file. It is skipped under print mode's `--bare`.
+- **Plain `ling`:** `mightling_claude_md = true` (or `DREAMFERENCE_MIGHTLING_CLAUDE_MD=on`) adds `CLAUDE.md` to Codex's `project_doc_fallback_filenames` for the session, keeping the names the user set there.
+- **Reporting:** `ling compat doctor` lists the files a session in the folder gets, and what was left out.
+- **Skills:** `~/.claude/skills` and a trusted repository's `.claude/skills` were already linked into every session (SKILLS §15) and need nothing from the mode.
+- **Not built yet:** the subfolder files read on first touch and `.claude/rules/`.
+
 **`/memory`** (list and open the memory files) is Phase 3: it opens the chosen file in `$EDITOR` through the external-editor path patch `0025` already uses for `/node`, which needs a one-line hook counted against the cap. A `#` quick-add shortcut is not in the current public docs (§3.5) and is not planned. **`.claude/rules/*.md`** with `paths:` scoping is Phase 3, through the same `PostToolUse` hook as subfolder files. **Auto memory** (`~/.claude/projects/…/memory/`) is not read: it is Claude Code's own store of its sessions.
 
 **Writing memory.** `/init` in the profile writes **`AGENTS.md`** (Codex's behaviour), and, if the project already has a `CLAUDE.md`, says so and offers to make `CLAUDE.md` the one line `@AGENTS.md` (this repository's convention) rather than keeping two copies. It never rewrites a `CLAUDE.md` without asking.
