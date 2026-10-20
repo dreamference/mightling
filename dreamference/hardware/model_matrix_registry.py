@@ -72,6 +72,9 @@ DIFFUSION_ENABLED: Final[bool] = False
 # The production recipe: the SGLang launch of qwen3.8-27b-nvfp4-dflash2. A module constant so an
 # entry measured against it (night 2's all-NVFP4 checkpoint, specs/DREAMFERENCE_MODELS.md §2.2)
 # can take it whole and change only the checkpoint, which is what makes that A/B fair.
+# An adapter's model id is its base's plus this and its name (`RadixArk/Qwen3.8-27B-NVFP4+rust`).
+ADAPTER_SEPARATOR: Final[str] = "+"
+
 QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     "engine": "sglang",
     "docker_image": (
@@ -155,6 +158,35 @@ QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     ],
 }
 
+# LoRA adapters on the production model (specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §8.2), as the
+# probe of 2026-10-19 measured them on the pinned image with DFlash2 (docs/dev, branch
+# research/lora-serving-probe): adapters on the FP8 layers, the 16 full-attention q/k/v/o and the
+# 48 Gated DeltaNet projections, serve with the production launch unchanged (54-56 against 57.7
+# tok/s with an adapter active; a request without one is token for token production's output).
+# Adapters on the NVFP4 MLP crash the start under torch.compile and the fused SiLU+FP4 path, so
+# they are not served. A key of the default entry only, never of QWEN38_SGLANG_RECIPE: Minima
+# spreads that constant, and every one of its layers, the GDN projections included, is NVFP4.
+QWEN38_LORA_RECIPE: Final[dict[str, Any]] = {
+    # The modules an adapter's adapter_config.json may name, in SGLang's names: the GDN input
+    # projection is `in_proj_qkvz` (SGLang stacks q, k, v and z into it and has no rule for the
+    # checkpoint's own `in_proj_qkv` + `in_proj_z`).
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkvz", "out_proj"],
+    # The module names its tensors may carry: the GDN input projection split as in_proj_q/k/v/z.
+    "weight_modules": [
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "in_proj_q", "in_proj_k", "in_proj_v", "in_proj_z", "out_proj",
+    ],
+    # The pool is preallocated at start for every slot at this rank: about 0.17 GiB per slot on
+    # these layers at rank 16, measured. The first adapters are rank 16; a larger one needs a
+    # larger ceiling and a restart.
+    "max_lora_rank": 16,
+    # One slot is the base's: a batch holds the base and three adapters.
+    "max_loras_per_batch": 4,
+    # Adapters the engine holds loaded at once; the gate unloads the least recently used past it.
+    "max_loaded_loras": 8,
+}
+
+
 class ModelMatrixRegistry:
     """
     Registry holding qualified models for NVIDIA GB10 hardware and short alias resolution logic.
@@ -200,7 +232,7 @@ class ModelMatrixRegistry:
                 "reasoning-effort default."
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
-            launch_overrides=QWEN38_SGLANG_RECIPE,
+            launch_overrides={**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE},
             supports_vision=True,
         ),
         # Night 2's candidate (specs/DREAMFERENCE_MODELS.md §2.2), not a default: production
@@ -299,14 +331,29 @@ class ModelMatrixRegistry:
             preferred (Optional[str]): Key to return if it serves that checkpoint.
 
         Returns:
-            Optional[str]: The matching key, or None when no entry serves that checkpoint.
+            Optional[str]: The matching key, or None when no entry serves that checkpoint. An
+            adapter's id, `<base>+<adapter>`, names its base's entry.
         """
+        served_id = served_id.split(ADAPTER_SEPARATOR, 1)[0]
         if preferred and cls.resolve_hf_repo(preferred) == served_id:
             return preferred
         for key in cls.MATRIX:
             if cls.resolve_hf_repo(key) == served_id:
                 return key
         return None
+
+    @classmethod
+    def get_lora_recipe(cls, model_key: str) -> dict[str, Any] | None:
+        """The LoRA settings a model is served with, if it serves adapters at all.
+
+        Args:
+            model_key (str): Model alias, HF repo ID, or display name.
+
+        Returns:
+            dict[str, Any] | None: A copy of the recipe's `lora` key, or None.
+        """
+        lora = cls.get_launch_overrides(model_key).get("lora")
+        return dict(lora) if isinstance(lora, dict) else None
 
     @classmethod
     def resolve_hf_repo(cls, model_key: str) -> str:

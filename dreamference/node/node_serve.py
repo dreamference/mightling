@@ -23,13 +23,16 @@ from typing import Final, List, Optional
 from dreamference.node.node_identity import NodeIdentity
 from dreamference.node.node_pairing import KEY_COMMENT, NodePairing
 
+# A paired sender's copy of one signed adapter (MIGHTLING_ADAPTERS §6.4), after the model.
+RECEIVE_OPERATION: Final[str] = "adapter-receive"
+
 # A model key as the matrix spells them. Checked before the matrix is consulted, so nothing with
 # a space, a slash or an option's leading dash ever reaches a command line.
 MODEL_KEY: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9._-]{1,80}")
 
 REFUSAL: Final[str] = ("ling-admin node serve-job: this key may only ask for Mightling node operations "
-                       "(info, status, start, stop, set-model <key>, model-receive <key>, unpair, jobs "
-                       "and night tasks).")
+                       "(info, status, start, stop, set-model <key>, model-receive <key>, adapter-receive, "
+                       "unpair, jobs and night tasks).")
 
 # The two git services a job's push and fetch ask for, and the only path shape they may name.
 GIT_SERVICES: Final[tuple] = ("git-receive-pack", "git-upload-pack")
@@ -166,6 +169,9 @@ class NodeServe:
         if operation == "model-receive" and len(arguments) == 2 and arguments[1].isdigit():
             from dreamference.node.node_model_sync import NodeModelSync
             return NodeModelSync.receive(arguments[0], int(arguments[1]))
+        if operation == RECEIVE_OPERATION:
+            from dreamference.node.node_adapter_sync import NodeAdapterSync
+            return NodeAdapterSync.receive(arguments)
         if operation in GIT_SERVICES and len(arguments) == 1:
             return cls.git_service(operation, arguments[0])
         if operation.startswith("job-"):
