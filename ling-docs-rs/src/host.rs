@@ -187,6 +187,9 @@ pub enum Kind {
     Extract,
     /// Chunking and embedding, one chunk at a time: 0.9 GB measured with the arctic model (§15.3).
     Embed,
+    /// OCR of scanned pages and images (§20): 0.56 GB measured with three scripts' models in
+    /// turn (one route's loaded at a time, no memory arena), about 1 GB in Phase 0's Python (§15.7).
+    Ocr,
 }
 
 impl Kind {
@@ -195,6 +198,7 @@ impl Kind {
         match self {
             Kind::Extract => 256 * MIB,
             Kind::Embed => 1536 * MIB,
+            Kind::Ocr => GIB,
         }
     }
 
@@ -203,6 +207,7 @@ impl Kind {
         match self {
             Kind::Extract => GIB,
             Kind::Embed => 2 * GIB,
+            Kind::Ocr => 2 * GIB,
         }
     }
 }

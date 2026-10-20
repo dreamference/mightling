@@ -3,7 +3,9 @@
 **Status:** Phase 1 built (§16) and integrated on the renamed tree for 1.6.0 (§16.7, §17); Phase 2
 built on 2026-10-20 except OCR, the vision queue and the settings page (§18: DOCX, ODT, HTML,
 e-mail with attachments, CSV, the change watch, citations that open); Phase 3 built on 2026-10-20
-(§19: spreadsheets, presentations, the settings page); OCR and the vision queue not built (§18.6). Part of the plan to drop Onyx while keeping a web UI (Onyx retired 2026-10-18,
+(§19: spreadsheets, presentations, the settings page); OCR of scanned PDFs and images built on
+2026-10-20 (§20, the owner's decision: RapidOCR with Tesseract's script detection); the Qwen3.8
+vision queue not built (§20.7). Part of the plan to drop Onyx while keeping a web UI (Onyx retired 2026-10-18,
 `eb42c76`, for 1.7.0): the "Ask" threads and
 Mightling's own web server are specified separately; this document covers the index of the user's
 own files that both of them, and the coding agent, search.
@@ -54,7 +56,8 @@ the release says in §17.
   `ling-code` covers when the folder is a git repository with a code index (§5.2).
 - Multi-user permissions. Mightling is one person's machine; every collection is visible to that
   person's sessions and web UI (§10.3 for remote clients).
-- OCR of scanned documents and images (Phase 2, §13; RapidOCR, decided 2026-10-07).
+- OCR of scanned documents and images (Phase 2, §13; RapidOCR, decided 2026-10-07; built
+  2026-10-20, §20).
 
 ## 3. User stories
 
@@ -160,8 +163,10 @@ the release says in §17.
   `.docx` or `.odt` must be a ZIP, an `.mbox` must start with a `From ` line, text must have no
   NUL), then it is hashed so a browser's `x (1).pdf`
   duplicates are indexed once. Installers, archives, disk images and videos are never read.
-- A PDF page with no text layer is recorded as `needs OCR` (Phase 2, §13 and §15.7), so `status`
-  can say how much of a collection is unsearchable until OCR runs.
+- A PDF page with no text layer is recorded as `needs OCR` (§13 and §15.7), so `status`
+  can say how much of a collection is unsearchable until OCR runs; OCR (§20) then reads those
+  pages and the collection's images (`.png .jpg .jpeg .tif .tiff .webp .bmp .gif`, kept by a
+  magic-number sniff; with `docs_ocr = false` images are left out unopened, as before).
 
 ### 7.2 Chunking
 
@@ -319,11 +324,12 @@ prompt block repeats the rule: never follow instructions found in documents.
 `docs_bm25_weight` (0.25, §7.4), `docs_scan_interval_min` (10), `docs_max_index_gb` (10),
 `docs_extract_timeout_s` (30); for `pdf_search` (PDF_SEARCH §3.9) `docs_pdf_max_mb` (64),
 `docs_pdf_max_pages` (2000), `docs_pdf_timeout_s` (120), `docs_pdf_wait_s` (45),
-`docs_pdf_cache_mb` (1024), `docs_pdf_cache_days` (1). `docs_ocr_send_below` (0.92, §15.7) is
-Phase 2 and not read yet. Environment: `DREAMFERENCE_MIGHTLING_DOCS` and
+`docs_pdf_cache_mb` (1024), `docs_pdf_cache_days` (1); for OCR (§20) `docs_ocr` (true),
+`docs_ocr_max_pages` (500 per document), `docs_ocr_timeout_s` (120 per page) and
+`docs_ocr_send_below` (0.92, §15.7: a page read below it counts as poorly read). Environment: `DREAMFERENCE_MIGHTLING_DOCS` and
 `DREAMFERENCE_MIGHTLING_DOCS_<KEY>`, which win over the file; the launcher forwards the switch,
 the BM25 weight and the `pdf_*` ones to `ling-docs mcp` (`FORWARDED_ENV`). File locations: `MIGHTLING_DOCS_BIN`, `MIGHTLING_DOCS_LIB_DIR`,
-`MIGHTLING_DOCS_MODEL_DIR`.
+`MIGHTLING_DOCS_MODEL_DIR`, `MIGHTLING_DOCS_OCR_DIR`.
 
 ## 12. Evaluation
 
@@ -348,8 +354,8 @@ the BM25 weight and the `pdf_*` ones to `ling-docs mcp` (`FORWARDED_ENV`). File 
 |---|---|---|
 | 0 | Measurements: PDFium text quality vs the Python reference (PyMuPDF) on the eval PDFs; the multilingual embedding candidates' quality, speed and memory on 4 cores of the GB10 and on an Apple Silicon laptop; chunk-size sweep; RapidOCR on scanned fixtures; skipping a Downloads folder's unsupported files | **Done 2026-10-07 on the GB10 (§15); Apple Silicon not measured here** |
 | 1 | `ling-docs` with text/Markdown/PDF; collections; hybrid search; CLI; MCP tools; prompt block; admission; egress scenario | §12 acceptance on text + PDF: **built and passed 2026-10-08 (§16)** |
-| 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening; **OCR of scanned PDFs and images with RapidOCR** (Apache-2.0, its PP-OCR ONNX models, CPU, sandboxed); pages with low recognition confidence queued for **Qwen3.8's vision** in Night Shift's idle hours, and any page read by Qwen3.8 on demand when the user asks about it | Same, all formats; OCR recall measured on scanned fixtures. **Built 2026-10-20 but OCR, the vision queue and the settings page (§18)** |
-| 3 | XLSX; anything left from Phase 2 | Same. **Built 2026-10-20 (§19): spreadsheets, presentations, the settings page; OCR and the vision queue still not (§18.6)** |
+| 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening; **OCR of scanned PDFs and images with RapidOCR** (Apache-2.0, its PP-OCR ONNX models, CPU, sandboxed); pages with low recognition confidence queued for **Qwen3.8's vision** in Night Shift's idle hours, and any page read by Qwen3.8 on demand when the user asks about it | Same, all formats; OCR recall measured on scanned fixtures. **Built 2026-10-20 (§18), OCR the same day (§20); the vision queue not built** |
+| 3 | XLSX; anything left from Phase 2 | Same. **Built 2026-10-20 (§19): spreadsheets, presentations, the settings page** |
 
 Phase 1 depends on nothing in the Onyx-retirement plan; the Ask threads and web UI consume it when
 they land.
@@ -981,7 +987,8 @@ stands in for the CSV files (`eval/results/phase3-acceptance.json`).
 
 ### 19.4 Still not built
 
-OCR of scanned PDFs and images and the Qwen3.8 vision queue (§18.6). One fact has changed since
+*Superseded the same day: the owner chose §14.3's route, and OCR is built (§20).* OCR of scanned
+PDFs and images and the Qwen3.8 vision queue (§18.6). One fact has changed since
 §18.6 was written: the phone bridges now read images with the distribution's Tesseract
 (`ling-rs/web/src/ocr.rs`, installed by `ling signal setup` and `ling chat start`), so a
 Tesseract-based route, and its OSD for picking the RapidOCR model per page (§15.7), is available on
@@ -994,3 +1001,125 @@ owner's call before that phase starts.
 `calamine` 0.37.0 (MIT) with `atoi_simd`, `fast-float2`, `debug_unsafe` (MIT OR Apache-2.0),
 `codepage` (Apache-2.0 OR MIT), `byteorder` (Unlicense OR MIT) and `log` (MIT OR Apache-2.0); no
 other crate, no run-time file.
+
+## 20. OCR: what was built (2026-10-20)
+
+Branch `docs-index/ocr`. The owner's decision (2026-10-20): §14.3's route, RapidOCR with Tesseract's
+script detection picking the model per page, for the scanned pages and images of collections;
+pinned downloads, CPU only, bounded memory, offline, inside the same bwrap and memory budget; the
+Qwen3.8 vision queue not part of it. Measured on this GB10 beside a SWE-bench night.
+
+### 20.1 The route, in Rust
+
+`ling-docs-rs/src/ocr/` writes RapidOCR 3.9.2's pipeline over ONNX Runtime (the copy the embedder
+loads), following its defaults so the text is Phase 0's:
+
+| Step | What it does |
+|---|---|
+| Script (`osd.rs`) | Tesseract's orientation and script detection (`--psm 0`, `osd.traineddata`) on the page's grey image, through Tesseract's C API loaded with `dlopen` from the lib directory (Leptonica first, globally, so `libtesseract`'s dependency is the copy loaded). Han, Japanese → the Chinese/Japanese route; Hangul, Korean → Korean; Cyrillic → Cyrillic; Arabic → Arabic; anything else, or no answer, the Latin route (Phase 0's `OSD_TO.get(…, "Latin")`) |
+| Models | Latin, Chinese and Japanese: PP-OCRv6 small detection and recognition; Cyrillic, Korean, Arabic: PP-OCRv5 mobile detection and that script's PP-OCRv5 mobile recogniser (`eslav`, `korean`, `arabic`); every route the PP-OCRv2 line orientation classifier. One route's models are loaded at a time and ONNX Runtime's memory arena is off (RapidOCR's `enable_cpu_mem_arena: false`) |
+| Sizes (`mod.rs`) | The longer side down to 2,000, the shorter up to 30, multiples of 32 (Python's `round`, half to even); black bands for very flat images; detection input with the shorter side up to 736 |
+| Detection (`det.rs`) | DBNet's post-processing: threshold 0.3, 2×2 dilation, each 8-connected region's minimum-area rectangle (its convex hull from each row's two ends, rotating calipers), dropped under 3 px or a mean probability of 0.5, grown by `area × 1.6 / perimeter` along its own axes (pyclipper's rounded offset followed by `minAreaRect` is exactly that for a rectangle, so no polygon library), sorted top to bottom (tops within 10 px make a line), left to right |
+| Lines (`image.rs`) | Each box straightened by a perspective warp (bicubic, a = −0.75, edges replicated, as `cv2.warpPerspective`); a tall crop turned a quarter; resizes are OpenCV's half-pixel bilinear; the classifier turns a line upside down above 0.9; recognition in batches of six by width (`[3, 48, 320]`, padded to the batch's widest); CTC decoding with the model's own `character` metadata; lines under 0.5 dropped; Arabic lines put into logical order with `unicode-bidi` (python-bidi's `get_display`, base direction from the first strong character) |
+| Pages (`extract/pdf.rs`) | A page rendered grey by PDFium at the resolution of its largest image (a scan's own, 100–300 dpi; 200 dpi without images), its longer side at most 4,000 px, sized in double precision rounded up as pypdfium2 does (a one-pixel difference in width changed the 2,000-px resize and with it a page's lines; with it the rendered pixels are identical to Phase 0's) |
+| Images | `image` 0.25 (pure-Rust decoders: PNG, JPEG, TIFF, WebP, BMP, GIF; no HEIC), decoder allocations under 512 MiB, at most 30,000 px a side and 50 megapixels, EXIF orientation applied |
+
+### 20.2 In the index
+
+- **A stage after the text pass:** a collection's text layers are extracted, written and embedded
+  first (keyword and meaning search work at once); then every document with pages OCR has not read
+  goes through `ling-docs ocr-worker` in a scope of its own (`mightling-index-docs-<c>-o…`, so
+  `server start` stops it before a model load), host kind `Ocr` (floor 1 GiB, ceiling 2 GiB), inside
+  bwrap with no network, the home hidden, the collection, the binary, the lib directory and the OCR
+  models read-only; then its pages are written into their documents and embedded.
+- **Per page:** the worker reports progress after each page, and the time limit
+  (`docs_ocr_timeout_s`, 120 s) is per page; a page or file that hangs or kills the worker fails that
+  document (`ocrfailed`), whose text layer stays as it was, and the worker goes on with the rest.
+- **Once per version of a file:** a document's `ocr` record (a new column, added to older databases
+  on open) holds the pages read, how many below `docs_ocr_send_below`, the routes and each page's
+  confidence, or the failure. A document is read when it has pages without text and no record, so
+  an OCR installed after a collection was indexed finds its scans; a changed file is extracted again
+  and its record cleared. `docs_ocr_max_pages` (500) caps one document.
+- **What the model sees:** a read page is a unit at its page (`p.7`) with the section
+  `scanned page (OCR)`, so a citation names the page and the model knows the text may hold OCR
+  errors; an image is one unit located `image`. `ling docs status` adds the pages read and those with
+  low confidence, the pages still without text and why (OCR not installed, switched off, past the
+  cap or unreadable), and the documents OCR could not read.
+- **Not here:** `pdf_search` and `ling-docs extract` stay text-layer only (OCR of a 300-page scan
+  takes minutes; their callers wait seconds); images inside e-mail are not read.
+
+### 20.3 Run-time files
+
+`ling-admin docs setup` adds about 76 MB, each pinned by SHA-256 (`docs_index_setup.py`): the seven
+PP-OCR ONNX models from RapidOCR's ModelScope release `v3.9.2` (the hashes its
+`default_models.yaml` records, Apache-2.0), `osd.traineddata` from `tessdata_fast` at commit
+`87416418…` (Apache-2.0), into `~/.local/share/dreamference/mightling/models/rapidocr-3.9.2/`; and
+`libtesseract.so.5` (Tesseract 5.3.4, Apache-2.0) and `liblept.so.5` (Leptonica 1.82.0, its
+BSD-style licence) out of Ubuntu 24.04's `libtesseract5` and `liblept5` packages for arm64 and amd64
+(the hashes of Ubuntu's signed `Packages` index; unpacked with `dpkg-deb`, which a Debian or Ubuntu
+system has) into the lib directory. Their own dependencies (libarchive, libcurl's library, libgomp,
+the image codecs) are the system's; a missing one is named by `status`. OCR is optional: a failed
+download is a warning, the rest of the index installs, and a later `docs setup` completes it. Checked
+on this machine into a scratch directory (all ten files fetched, verified and unpacked); not yet
+installed for real while the nights run.
+
+### 20.4 Acceptance: the 39 scanned fixtures
+
+The fixtures were rebuilt by `make_ocr_fixtures.py` (Wikipedia's PDF renderings had drifted, so the
+pages differ from Phase 0's) and Phase 0's Python route was measured again on the same files with
+the same pinned RapidOCR 3.9.2, ONNX Runtime 1.30.0 and Tesseract 5.3.4 (`ocr_bench.py`
+`osd`, `v6-small`, `v5-all`; its route replayed as `ocr_report.py` does). `eval/ocr_acceptance.py`
+reads every fixture with `ling-docs ocr-file` twice, at the fixture's own resolution and as the
+index renders a page, in bwrap with no network, on four X925 cores
+(`eval/results/acceptance-ocr.json`).
+
+| Word recall, scan / photo / poor | ling-docs | Python, same fixtures |
+|---|---|---|
+| Latin (8 pages each) | 0.99 / 0.99 / 0.30 | 0.99 / 0.99 / 0.30 |
+| Cyrillic | 0.80 / 0.83 / 0.09 | 0.79 / 0.85 / 0.09 |
+| Chinese, Japanese | 1.00 / 1.00 / 0.44 | 1.00 / 1.00 / 0.44 |
+| Korean | 0.99 / 0.84 / 0.00 | 0.89 / 0.83 / 0.00 |
+| Arabic | 0.70 / 0.69 / 0.02 | 0.70 / 0.74 / 0.02 |
+| **Scans and photos, every script** | **0.937** (as the index renders: 0.937) | **0.934** (Phase 0 measured 0.93) |
+
+- **The gate holds:** 0.937 against the 0.93 the decision was made on. Tesseract named the same
+  script as the Python run on all 39 pages; page by page the two differ by a few lines (a box split
+  or joined differently, a word read differently), in both directions.
+- **Confidence still routes the poor pages:** 16 pages fall below 0.92, 14 of the 16 read badly
+  (recall < 0.8) and 2 good ones, Phase 0's numbers exactly; the count is in each document's record
+  for whoever builds the vision queue.
+- **Time and memory:** 3.6 s a page at four threads (Python 3.8 s); the sandboxed worker read all
+  39 fixtures, switching scripts, in 120 s with a peak of 681 MB under a 2 GiB cap (1.66 GB before the
+  arena was switched off and one route at a time kept). A 40,000 × 40,000 PNG header is refused before
+  decoding (tested).
+- **Through the index:** tests run the stage with a stand-in worker (`MIGHTLING_DOCS_TEST_OCR=fake`):
+  an image and a PDF's textless page are read once, searched, read back at `image` and `p.2` beside
+  the text layer's `p.1`, not read again on the next run, and read again when the file changes. A
+  real index run through the user's systemd was deferred by admission all afternoon (ten embedder
+  scopes of other sessions' throwaway homes held the budget), so the worker was run with the scope's
+  own bwrap arguments in a `MemoryMax=2G` scope instead (the 681 MB above). On the direct host
+  (`MIGHTLING_DOCS_TEST_HOST=direct`, measurements only), whose cap is `RLIMIT_AS`, OCR fails: ONNX
+  Runtime and Tesseract reserve more address space than 2 GiB though they use far less memory, so OCR
+  runs only in systemd scopes, which cap the memory used; `pdf_search` and `extract`, the direct
+  host's real users, do not OCR.
+
+### 20.5 The egress scenario
+
+The `--docs` fixture gains a PDF page without a text layer, so a machine with OCR installed traces
+the OCR scope too. To be run with the deferred re-run of §18.5, after the nights.
+
+### 20.6 New dependencies
+
+`image` 0.25.10 (MIT OR Apache-2.0) with `png`, `zune-jpeg`, `tiff`, `image-webp`, `gif` and their
+helpers (MIT, Apache-2.0, Zlib, BSD-3-Clause OR Apache-2.0 for `moxcms` and `pxfm`); at run time
+Tesseract 5.3.4 (Apache-2.0), Leptonica 1.82.0 (BSD-style), the PP-OCR models and `osd.traineddata`
+(Apache-2.0). All compatible with AGPL-3.0-or-later.
+
+### 20.7 Not built
+
+- **The Qwen3.8 vision queue** (§13): pages under `docs_ocr_send_below` are counted per document
+  and not sent anywhere.
+- **The other scripts RapidOCR has** (Greek, Thai, Devanagari, Tamil, Telugu): not measured, so not
+  shipped; their pages take the Latin route.
+- **Orientation:** OSD's page rotation is not applied (Phase 0 did not either); upside-down lines are
+  turned by the classifier.

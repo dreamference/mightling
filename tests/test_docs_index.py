@@ -7,6 +7,7 @@ import hashlib
 import io
 import os
 import pathlib
+import re
 import tarfile
 import zipfile
 
@@ -68,6 +69,39 @@ def pinned(tmp_path, monkeypatch):
         ] = data
     monkeypatch.setattr(docs_index_setup, "DOCS_LIB_DIR", str(tmp_path / "lib" / "ling-docs"))
     monkeypatch.setattr(docs_index_setup, "DOCS_MODEL_DIR", str(tmp_path / "models" / "m"))
+    monkeypatch.setattr(docs_index_setup, "OCR_DIR", str(tmp_path / "models" / "ocr"))
+    # OCR's files: a model, the script model under tessdata/, and a package whose library is
+    # taken out by the (stubbed) dpkg-deb.
+    files["https://x/det.onnx"] = b"det"
+    files["https://x/osd"] = b"osd"
+    files["https://x/lept.deb"] = b"!<arch> lept"
+    monkeypatch.setattr(
+        docs_index_setup,
+        "OCR_FILES",
+        [
+            ("https://x/det.onnx", sha(b"det"), "det.onnx"),
+            ("https://x/osd", sha(b"osd"), "tessdata/osd.traineddata"),
+        ],
+    )
+    monkeypatch.setattr(
+        docs_index_setup,
+        "TESSERACT_PACKAGES",
+        {
+            "aarch64": [
+                (
+                    "https://x/lept.deb",
+                    sha(b"!<arch> lept"),
+                    "./usr/lib/liblept.so.5.0.4",
+                    "liblept.so.5",
+                )
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        DocsIndexSetup,
+        "deb_member",
+        classmethod(lambda cls, package, member: package + b":" + member.encode()),
+    )
     fetched = []
 
     def fake_fetch(cls, url, expected):
@@ -88,15 +122,33 @@ def test_setup_installs_each_pinned_file_once(pinned):
         "libonnxruntime.so",
         "model.onnx",
         "tokenizer.json",
+        "liblept.so.5",
+        "det.onnx",
+        "tessdata/osd.traineddata",
     ]
     assert DocsIndexSetup.install("aarch64") is True
     assert (tmp_path / "lib" / "ling-docs" / "libpdfium.so").read_bytes() == b"pdfium"
     assert (tmp_path / "lib" / "ling-docs" / "libonnxruntime.so").read_bytes() == b"onnxruntime"
     assert (tmp_path / "models" / "m" / "model.onnx").read_bytes() == b"weights"
-    assert len(fetched) == 4
+    assert (
+        tmp_path / "lib" / "ling-docs" / "liblept.so.5"
+    ).read_bytes() == b"!<arch> lept:./usr/lib/liblept.so.5.0.4"
+    assert (tmp_path / "models" / "ocr" / "tessdata" / "osd.traineddata").read_bytes() == b"osd"
+    assert len(fetched) == 7
     assert DocsIndexSetup.missing("aarch64") == []
     assert DocsIndexSetup.install("aarch64") is True
-    assert len(fetched) == 4, "nothing is fetched again"
+    assert len(fetched) == 7, "nothing is fetched again"
+
+
+def test_a_failed_ocr_download_leaves_the_index_installed(pinned):
+    tmp_path, files, _ = pinned
+    files["https://x/det.onnx"] = b"tampered"
+    assert DocsIndexSetup.install("aarch64") is True, "OCR is optional"
+    assert (tmp_path / "models" / "m" / "model.onnx").read_bytes() == b"weights"
+    assert "det.onnx" in DocsIndexSetup.missing_ocr("aarch64")
+    files["https://x/det.onnx"] = b"det"
+    assert DocsIndexSetup.install("aarch64") is True
+    assert DocsIndexSetup.missing_ocr("aarch64") == [], "a later setup completes OCR"
 
 
 def test_a_file_that_does_not_match_its_pin_is_refused(pinned):
@@ -121,6 +173,24 @@ def test_the_real_pins_cover_both_linux_machines_and_the_measured_model():
     assert docs_index_setup.PDFIUM_RELEASE == "chromium/8076"
     assert [name for *_, name in docs_index_setup.MODEL_FILES] == ["model.onnx", "tokenizer.json"]
     assert docs_index_setup.MODEL_FILES[0][0] == "onnx/model_int8.onnx"
+    # OCR: the libraries per machine, the route's seven models and Tesseract's script model, which
+    # are the files `ling-docs` looks for (ling-docs-rs/src/ocr/mod.rs, MODEL_FILES).
+    assert set(docs_index_setup.TESSERACT_PACKAGES) == {"aarch64", "x86_64"}
+    for entries in docs_index_setup.TESSERACT_PACKAGES.values():
+        assert [name for *_, name in entries] == ["liblept.so.5", "libtesseract.so.5"]
+        for url, sha, member, _ in entries:
+            assert (
+                url.startswith("http://")
+                and url.endswith(".deb")
+                and len(sha) == 64
+                and member.startswith("./usr/lib/")
+            )
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    source = (repo / "ling-docs-rs" / "src" / "ocr" / "mod.rs").read_text()
+    wanted = re.findall(r'pub const \w+: &str = "([^"]+\.(?:onnx|traineddata))";', source)
+    assert sorted(wanted) == sorted(name for *_, name in docs_index_setup.OCR_FILES)
+    assert all(len(sha) == 64 for _, sha, _ in docs_index_setup.OCR_FILES)
+    assert f'RAPIDOCR_VERSION: &str = "{docs_index_setup.RAPIDOCR_VERSION}"' in source
 
 
 # -- the docs egress scenario -------------------------------------------------------------------
@@ -159,6 +229,7 @@ def test_the_fixture_is_a_readable_pdf_and_a_folder_the_index_takes(tmp_path):
         "installer.deb",
         "notes.txt",
         "report.pdf",
+        "scan.pdf",
         "seabirds.md",
         "survey.eml",
         "terns.html",

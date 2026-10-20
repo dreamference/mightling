@@ -138,6 +138,15 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
     let units: Vec<(Option<u32>, Option<u32>, String)> = rows.into_iter().map(|(p, l, t, _, _)| (p, l, t)).collect();
     let path = collection.root.join(&rel).to_string_lossy().into_owned();
     let mut out = ReadOut { doc_id: doc_id.to_string(), path, title, kind: kind.clone(), pages, loc: String::new(), text: String::new(), next: None };
+    if kind == "image" {
+        // An image's text, read by OCR (§20), is one unit.
+        out.loc = crate::ocr::worker::IMAGE_LOC.to_string();
+        out.text = match units.first() {
+            Some((_, _, text)) => clip(text, budget),
+            None => format!("{doc_id} is an image in which OCR found no text, or which OCR has not read yet"),
+        };
+        return Ok(out);
+    }
     if kind == "pdf" {
         let by_page: BTreeMap<u32, &str> = units.iter().filter_map(|(p, _, t)| p.map(|p| (p, t.as_str()))).collect();
         let first = match locator {
@@ -175,7 +184,7 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
             Some(l) if l != first => format!("p.{first} .. p.{l}"),
             Some(_) => format!("p.{first}"),
             None => {
-                out.text = format!("p.{first} has no text layer (it needs OCR, which is not built yet)");
+                out.text = format!("p.{first} has no text: a scanned page that OCR has not read (it may not be installed, the page may be past docs_ocr_max_pages, or it may not have been readable)");
                 format!("p.{first}")
             }
         };

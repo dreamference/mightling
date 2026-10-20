@@ -1391,7 +1391,7 @@ class DreamferenceCLIController:
         # Command: ling-admin docs (what the local file index, ling-docs, loads at run time)
         docs_parser = subparsers.add_parser("docs", help="Manage the local file index's run-time files (ling-docs)")
         docs_subparsers = docs_parser.add_subparsers(dest="docs_command")
-        docs_subparsers.add_parser("setup", help="Install PDFium, ONNX Runtime and the embedding model ling-docs loads (pinned, checked)")
+        docs_subparsers.add_parser("setup", help="Install PDFium, ONNX Runtime, the embedding model and OCR's models and libraries ling-docs loads (pinned, checked)")
 
         # Command: ling-admin searxng (the search container behind ling-search and the web UI)
         searxng_parser = subparsers.add_parser("searxng", help="Manage the local SearXNG search container")
