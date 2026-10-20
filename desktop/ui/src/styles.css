@@ -316,6 +316,7 @@ html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, h
 .markdown img { max-width: 100%; border-radius: var(--radius-sm); }
 .markdown pre, .markdown table { max-width: 100%; overflow-x: auto; }
 .markdown .link, .markdown a { color: var(--accent-text); text-decoration: none; }
+.markdown .doc-link { cursor: pointer; text-decoration: underline dotted; }
 .markdown a:hover { text-decoration: underline; }
 .item.agent .copy { margin-left: -4px; }
 
