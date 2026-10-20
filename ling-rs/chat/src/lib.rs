@@ -7,6 +7,7 @@
 //! Ask thread under the same bridge policy as a browser tab. The bridge opens no port.
 
 pub mod agent;
+pub mod attachments;
 pub mod cli;
 pub mod hub;
 pub mod matrix;

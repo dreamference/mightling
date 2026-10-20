@@ -238,6 +238,9 @@ fn start(environment: &Environment) -> i32 {
         return 1;
     }
     println!("Mightling chat bridge started. `ling chat status` shows what it answers on.");
+    if ling_web_server::ocr::program().is_none() {
+        println!("💡 To read the text in the images you send, install Tesseract (offline): sudo apt install tesseract-ocr");
+    }
     0
 }
 

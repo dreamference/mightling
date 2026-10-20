@@ -411,6 +411,47 @@ async fn uploads_go_to_an_ask_threads_folder_within_the_caps() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+/// A phone bridge's image (`read=1`): its text is read by the offline reader, here a stand-in with
+/// Tesseract's command line, and the answer says whether the served model takes images, as the
+/// launcher's catalog records it; a plain upload's answer is unchanged.
+#[tokio::test]
+async fn a_bridge_upload_reads_an_images_text_and_says_whether_the_model_takes_images() {
+    let scratch = scratch("ocr");
+    let reader = scratch.dir.join("tesseract");
+    std::fs::write(
+        &reader,
+        "#!/bin/sh\nif [ \"$1\" = --list-langs ]; then printf 'List of available languages (2):\\neng\\nosd\\n'; exit 0; fi\n[ \"$2\" = stdout ] && [ \"$3\" = -l ] && [ \"$4\" = eng ] || exit 3\nprintf 'Air purifier   HEPA 13\\n\\n\\n42 dB night mode\\n'\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&reader, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // SAFETY: no other test in this binary reads this variable.
+    unsafe { std::env::set_var(ling_web_server::ocr::OCR_ENV, &reader) };
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let root = server.ask_root();
+    let folder = ling_web_server::ask::new_folder(&root).unwrap();
+    ling_web_server::ask::link_thread(&root, "thr-1", &folder).unwrap();
+    let upload = |uri: &str| request("POST", uri).header(header::ORIGIN, ORIGIN).header(header::COOKIE, &cookie).body(Body::from(b"\xff\xd8jpeg".to_vec())).unwrap();
+    let (status, _, body) = call(&server, upload("/api/upload?thread=thr-1&name=shot.jpg&kind=image&read=1")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let answer: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(answer["text"], json!("Air purifier HEPA 13\n\n42 dB night mode"));
+    assert_eq!(answer["vision"], json!(false), "no catalog: not taken as a yes");
+    std::fs::write(server.config.codex_home.join("model_catalog.json"), r#"{"models":[{"slug":"m","input_modalities":["text","image"]}]}"#).unwrap();
+    let (_, _, body) = call(&server, upload("/api/upload?thread=thr-1&name=shot.jpg&kind=image&read=1")).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["vision"], json!(true));
+    // A file is never read; a plain upload's answer carries neither field.
+    let (_, _, body) = call(&server, upload("/api/upload?thread=thr-1&name=a.pdf&kind=file&read=1")).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["text"], Value::Null);
+    let (_, _, body) = call(&server, upload("/api/upload?thread=thr-1&name=shot.jpg&kind=image")).await;
+    let plain: Value = serde_json::from_str(&body).unwrap();
+    assert!(plain.get("text").is_none() && plain.get("vision").is_none(), "{plain}");
+}
+
 /// The stand-in app-server: one WebSocket connection on the Unix socket, its frames handed to the test.
 async fn fake_app_server(socket: &Path) -> tokio::sync::mpsc::UnboundedReceiver<(Value, tokio::sync::mpsc::UnboundedSender<Value>)> {
     ling_web_server::app_server::prepare_socket_dir(socket).unwrap();

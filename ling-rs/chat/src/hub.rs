@@ -18,6 +18,9 @@ use tokio::sync::mpsc;
 
 use crate::agent::AgentHandle;
 use crate::agent::CONNECTED;
+use crate::attachments;
+use crate::attachments::Media;
+use crate::attachments::Uploaded;
 use crate::store::ThreadRef;
 use crate::store::Threads;
 
@@ -26,6 +29,9 @@ use crate::store::Threads;
 pub enum Inbound {
     /// A message, or a command (`/new`, …).
     Text { chat: String, text: String },
+    /// A message with attachments (its caption as `text`), and what the adapter could not take,
+    /// named for the user ("a voice message").
+    Media { chat: String, text: String, attachments: Vec<Media>, dropped: Vec<String> },
     /// The messenger's own stop control (Telegram's button on a streaming answer).
     Stop { chat: String },
     /// A button pressed or a reaction on an approval: `choice` indexes its options.
@@ -185,8 +191,8 @@ pub struct Hub {
     threads: Threads,
     adapters: HashMap<String, mpsc::UnboundedSender<Outbound>>,
     turns: HashMap<String, Turn>,
-    /// Messages that arrived while a turn ran and could not steer it.
-    queued: HashMap<String, Vec<String>>,
+    /// Messages that arrived while a turn ran and could not steer it, as turn inputs.
+    queued: HashMap<String, Vec<Value>>,
     approvals: HashMap<u64, Pending>,
     next_approval: u64,
     /// Threads this connection is subscribed to (started or resumed since it was made).
@@ -198,6 +204,25 @@ pub struct Hub {
 
 fn text_input(text: &str) -> Value {
     json!([{ "type": "text", "text": text, "text_elements": [] }])
+}
+
+/// Several queued inputs as one turn's: their texts joined by blank lines, then every image.
+fn merged(inputs: Vec<Value>) -> Value {
+    let mut texts = Vec::new();
+    let mut rest = Vec::new();
+    for item in inputs.into_iter().flat_map(|input| input.as_array().cloned().unwrap_or_default()) {
+        match item.get("type").and_then(Value::as_str) {
+            Some("text") => texts.push(item.get("text").and_then(Value::as_str).unwrap_or_default().to_string()),
+            _ => rest.push(item),
+        }
+    }
+    let mut input = Vec::new();
+    let text = texts.into_iter().filter(|t| !t.trim().is_empty()).collect::<Vec<_>>().join("\n\n");
+    if !text.is_empty() {
+        input.push(json!({ "type": "text", "text": text, "text_elements": [] }));
+    }
+    input.extend(rest);
+    Value::Array(input)
 }
 
 fn cut(text: &str, limit: usize) -> String {
@@ -295,6 +320,23 @@ impl Hub {
                     self.command(&chat, trimmed).await;
                 } else if !trimmed.is_empty() {
                     self.message(&chat, trimmed).await;
+                }
+            }
+            Inbound::Media { chat, text, attachments, dropped } => {
+                if adapter_of(&chat) == "telegram" && self.airgapped {
+                    self.notice(
+                        &chat,
+                        "The air gap is on, so Telegram is paused: it would carry this conversation off your machine. Use Matrix, or turn the air gap off on the machine.",
+                    );
+                    return;
+                }
+                if let Some(line) = attachments::dropped_notice(&dropped) {
+                    self.notice(&chat, line);
+                }
+                if !attachments.is_empty() {
+                    self.media(&chat, &text, attachments).await;
+                } else if !text.trim().is_empty() {
+                    self.message(&chat, text.trim()).await;
                 }
             }
             Inbound::Stop { chat } => self.stop(&chat).await,
@@ -401,32 +443,63 @@ impl Hub {
                 return;
             }
         };
-        if let Some(turn) = self.turns.get(&thread) {
+        self.deliver(chat, &thread, text_input(text)).await;
+    }
+
+    /// A message with attachments: each goes into the thread's folder through `ling web`, then the
+    /// turn is built from what came back (attachments.rs). Nothing usable: the bridge says so.
+    async fn media(&mut self, chat: &str, text: &str, files: Vec<Media>) {
+        let first = if text.trim().is_empty() { "(image)" } else { text.trim() };
+        let thread = match self.ensure_thread(chat, first).await {
+            Ok(thread) => thread,
+            Err(err) => {
+                self.notice(chat, format!("Mightling is not reachable right now: {err}"));
+                return;
+            }
+        };
+        let mut uploads = Vec::new();
+        for file in files {
+            let image = file.is_image();
+            let saved = self.agent.upload(&thread, &file.name, image, file.bytes).await;
+            if let Err(err) = &saved {
+                eprintln!("ling chat: could not save {} in the thread's folder: {err}", file.name);
+            }
+            uploads.push(Uploaded { name: file.name, image, saved });
+        }
+        match attachments::compose(text, &uploads) {
+            Ok(input) => self.deliver(chat, &thread, input).await,
+            Err(reply) => self.notice(chat, reply),
+        }
+    }
+
+    /// Steers the running turn with `input`, queues it if it cannot, or starts a turn with it.
+    async fn deliver(&mut self, chat: &str, thread: &str, input: Value) {
+        if let Some(turn) = self.turns.get(thread) {
             let expected = turn.id.clone();
             let steered = match expected {
                 Some(turn_id) => self
                     .agent
-                    .request("turn/steer", json!({ "threadId": thread, "input": text_input(text), "expectedTurnId": turn_id }))
+                    .request("turn/steer", json!({ "threadId": thread, "input": input, "expectedTurnId": turn_id }))
                     .await
                     .is_ok(),
                 None => false,
             };
             if !steered {
-                self.queued.entry(thread).or_default().push(text.to_string());
+                self.queued.entry(thread.to_string()).or_default().push(input);
                 self.notice(chat, "Noted: this goes in as soon as the current answer is done.");
             }
             return;
         }
-        self.start_turn(chat, &thread, text).await;
+        self.start_turn(chat, thread, input).await;
     }
 
-    async fn start_turn(&mut self, chat: &str, thread: &str, text: &str) {
+    async fn start_turn(&mut self, chat: &str, thread: &str, input: Value) {
         self.turns.insert(
             thread.to_string(),
             Turn { chat: chat.to_string(), id: None, items: Vec::new(), error: None, dirty: false, last_draft: Instant::now() },
         );
         self.send(Outbound::Draft { chat: chat.to_string(), text: String::new() });
-        match self.agent.request("turn/start", json!({ "threadId": thread, "input": text_input(text) })).await {
+        match self.agent.request("turn/start", json!({ "threadId": thread, "input": input })).await {
             Ok(result) => {
                 if let (Some(turn), Some(id)) = (self.turns.get_mut(thread), result.pointer("/turn/id").and_then(Value::as_str)) {
                     turn.id.get_or_insert_with(|| id.to_string());
@@ -528,7 +601,7 @@ impl Hub {
         if let Some(queued) = self.queued.remove(thread)
             && !queued.is_empty()
         {
-            self.start_turn(&chat, thread, &queued.join("\n\n")).await;
+            self.start_turn(&chat, thread, merged(queued)).await;
         }
     }
 
