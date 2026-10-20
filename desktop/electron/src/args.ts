@@ -13,7 +13,9 @@ export interface WorkTarget {
   /** Text for the composer of a new thread (`ling://new?prompt=…`). */
   prompt?: string | null;
   /** A page of the window a link names (`ling://settings`, `ling://skills`, …), or `new` for a new thread. */
-  page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask";
+  page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask" | "quick";
+  /** With `page: "ask"`: send the prompt as a new question at once (Quick Entry), rather than leave it in the composer. */
+  send?: boolean;
   /** The plugin `ling://plugins/<id>` names. */
   plugin?: string;
 }
@@ -53,6 +55,12 @@ export function linkTarget(link: string): WorkTarget {
       // `ling://pets` and the vendor's `pets/install` shape: Settings › Pets (a pet is not installed from a link).
       case "pets":
         return { cwd: null, thread: null, page: "pets" };
+      // `ling://ask?prompt=…`: a new Ask question with the text in the composer, not sent (DESKTOP_PARITY_CLAUDE §2.9).
+      case "ask":
+        return { cwd: null, thread: null, page: "ask", prompt: url.searchParams.get("prompt")?.slice(0, 4000) ?? null };
+      // `ling://quick`: Quick Entry's box (quick.ts), for a desktop's own key binding.
+      case "quick":
+        return { cwd: null, thread: null, page: "quick" };
       case "plugins":
         return { cwd: null, thread: null, page: "plugins", ...(rest ? { plugin: rest.slice(0, 200) } : {}) };
       default:

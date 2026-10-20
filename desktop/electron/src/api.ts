@@ -89,6 +89,8 @@ export type FromView =
   /** The window's own preferences (prefs.ts): read whole, or some keys written. */
   | { type: "prefs/read" }
   | { type: "prefs/write"; values: Record<string, unknown> }
+  /** Quick Entry's shortcut: on or off, registered or why not (quick.ts), for Settings › General. */
+  | { type: "quick/status" }
   | { type: "window/minimize" }
   | { type: "window/maximize" }
   | { type: "window/close" }
@@ -147,7 +149,9 @@ export type ForView =
   | { channel: "work://protocol-error"; payload: string }
   | { channel: "work://exit"; payload: number | null }
   /** A link (`ling://…`) or a second `ling app` asked for something: the app window shows it. */
-  | { channel: "link"; payload: { cwd: string | null; thread: string | null; prompt?: string | null; page?: string; plugin?: string } }
+  | { channel: "link"; payload: { cwd: string | null; thread: string | null; prompt?: string | null; page?: string; plugin?: string; send?: boolean } }
+  /** Quick Entry's box was asked for (quick.ts): it clears and takes the focus. */
+  | { channel: "quick://open"; payload: null }
   /** A bottom-panel task started, wrote output, or ended (tasks.ts). */
   | { channel: "task://event"; payload: { id: string; kind: "started" | "output" | "exit"; label?: string; cwd?: string; data?: string; code?: number | null } }
   /** A preview tab's page moved, loaded, or asked for a site the rules hold back (preview.ts). */

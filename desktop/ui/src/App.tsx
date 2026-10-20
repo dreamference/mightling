@@ -636,6 +636,23 @@ export function App() {
     return started.thread;
   };
 
+  /**
+   * A question asked from Quick Entry (DESKTOP_PARITY_CLAUDE §4.2): a new Ask thread with this text and
+   * nothing else (no attachment waiting in the composer goes with it); when it cannot be sent, the text
+   * waits in the composer of a new question instead.
+   */
+  const askNow = async (prompt: string) => {
+    try {
+      const thread = await startAsk();
+      await sendMessage(client, { threadId: thread.id, activeTurnId: null, input: turnInput(prompt, []), followUp: prefs.followUp, effort, model: modelChoice, collaborationMode: planFor(thread.id) });
+      promptHistory.push(prompt);
+    } catch (error) {
+      dispatch({ type: "select", threadId: null });
+      setDraft(prompt);
+      notice(error);
+    }
+  };
+
   const newQuestion = () => {
     dispatch({ type: "select", threadId: null });
     setDrawer(false);
@@ -1156,10 +1173,12 @@ export function App() {
       setSettingsPage("pets");
       return setSettingsOpen(true);
     }
-    // The pet's quick question: a new Ask question with the text in the composer.
+    // The pet's quick question and `ling://ask`: a new Ask question with the text in the composer;
+    // Quick Entry's (`send`): the question asked at once (DESKTOP_PARITY_CLAUDE §4.2).
     if (target.page === "ask") {
       showView("ask");
-      if (target.prompt) setDraft(target.prompt);
+      if (target.prompt && target.send) void askNow(target.prompt);
+      else if (target.prompt) setDraft(target.prompt);
       return;
     }
     if (target.page === "settings") {
