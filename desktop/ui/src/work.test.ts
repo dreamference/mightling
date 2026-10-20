@@ -173,6 +173,13 @@ describe("a scripted session", () => {
     expect(run([{ type: "opened", thread: thread("t8", "/w", 5000) }], opened).threads.t8.thread.updatedAt).toBe(5000);
   });
 
+  it("an answer to an open without a thread leaves the window as it was", () => {
+    const listed = run([{ type: "threads", list: [thread("t9", "/w", 1000)] }, { type: "select", threadId: "t9" }], opened);
+    const after = run([{ type: "opened", thread: undefined as unknown as Thread }], listed);
+    expect(after).toBe(listed);
+    expect(after.selected).toBe("t9");
+  });
+
   it("an interrupted turn ends, and its streamed items stay", () => {
     const state = run([
       note("turn/started", { threadId: "t1", turn: { id: "u2", status: "inProgress", items: [], error: null } }),
