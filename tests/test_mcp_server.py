@@ -79,7 +79,10 @@ def test_web_search_reports_engines_that_all_failed_rather_than_no_results():
     with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response):
         outcome = WebTools.search("python asyncio")
     assert "duckduckgo: HTTP connection error" in outcome["error"]
-    assert "docker restart dreamference-searxng" in outcome["hint"]
+    # The hint sends the model to a known page and to the user, never to repair the container:
+    # the engines refuse upstream, and a restart changes nothing (2026-10-20).
+    assert "web_fetch" in outcome["hint"] and "tell the user" in outcome["hint"]
+    assert "docker" not in outcome["hint"] and "restart the" not in outcome["hint"]
 
     response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "brave"}],
                                   "unresponsive_engines": [["duckduckgo", "timeout"]]}
@@ -138,3 +141,19 @@ def test_code_search_falls_back_to_the_context_engine(tmp_path, monkeypatch):
         assert CodeIndexSearch.search("x") is None
         assert MCPServer().execute_tool("workspace_search_code", {"query": "x"}) == [{"rel_path": "x.py", "score": 1.0}]
     assert engine.index_workspace.call_count == 4
+
+
+def test_web_search_sends_the_category_time_range_and_detected_language():
+    from unittest.mock import MagicMock, patch
+
+    from dreamference.mcp_server.web_tools import WebTools
+
+    response = MagicMock()
+    response.json.return_value = {"results": [], "answers": [], "unresponsive_engines": []}
+    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+        WebTools.search("climate summit", categories="social", time_range="week")
+        WebTools.search("climate summit", time_range="fortnight")
+    first, second = (call.kwargs["params"] for call in get.call_args_list)
+    assert first["categories"] == "social media" and first["time_range"] == "week"
+    assert first["language"] == "auto"
+    assert "time_range" not in second

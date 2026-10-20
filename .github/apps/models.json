@@ -1,0 +1,13 @@
+{
+  "name": "dreamference-models",
+  "url": "https://mightling.dreamference.ai",
+  "description": "The Dreamference Inference & Models team's bot: commits, pull requests and reviews for the model server: the registry, SGLang and vLLM launches, downloads, adapters and host safety. Operated by Dreamference; not a person.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

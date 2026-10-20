@@ -123,7 +123,21 @@ impl Translator {
                         let text = params.get("delta").and_then(Value::as_str).unwrap_or_default();
                         if text.is_empty() { Vec::new() } else { vec![Translated::Event(AgentEvent::Delta { thread, text: text.to_string() })] }
                     }
-                    "item/started" => activity(&params).map(|text| vec![Translated::Event(AgentEvent::Activity { thread, text })]).unwrap_or_default(),
+                    "item/started" => {
+                        let mut events: Vec<Translated> = activity(&params).map(|text| Translated::Event(AgentEvent::Activity { thread: thread.clone(), text })).into_iter().collect();
+                        if let Some(kind) = params.pointer("/item/type").and_then(Value::as_str)
+                            && crate::limits::is_tool(kind)
+                        {
+                            let item = params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default().to_string();
+                            let command = (kind == "commandExecution").then(|| params.pointer("/item/command").and_then(Value::as_str).unwrap_or("a command").to_string());
+                            events.push(Translated::Event(AgentEvent::ToolStarted { thread, item, command }));
+                        }
+                        events
+                    }
+                    "item/completed" => {
+                        let item = params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default().to_string();
+                        vec![Translated::Event(AgentEvent::ToolCompleted { thread, item })]
+                    }
                     "error" => {
                         if params.get("willRetry") != Some(&Value::Bool(true)) {
                             let text = params.pointer("/error/message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| params.to_string());
@@ -255,6 +269,74 @@ pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bo
         return Err(format!("the upload was refused (HTTP {status}): {body}"));
     }
     Ok(saved_from(&body))
+}
+
+/// The chat settings of the user's configuration (`[chat]`), as `ling web` reads them for the
+/// bridge, which cannot (`/api/chat/settings`; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatSettings {
+    /// A question after this long a silence starts a new thread; None: never.
+    pub new_thread_after_ms: Option<u64>,
+    /// An answer's time, tool calls and one command's time (limits.rs); None: no limit.
+    pub answer_ms: Option<u64>,
+    pub tool_calls: Option<u32>,
+    pub command_ms: Option<u64>,
+}
+
+impl Default for ChatSettings {
+    fn default() -> ChatSettings {
+        ChatSettings::from_json(&Value::Null)
+    }
+}
+
+impl ChatSettings {
+    /// `/api/chat/settings`' answer; a missing field keeps the bridge's default (`ling web`'s
+    /// `chat_settings.rs` has the same defaults).
+    pub fn from_json(value: &Value) -> ChatSettings {
+        let millis = |key: &str, default_s: u64| match value.get(key).and_then(Value::as_u64) {
+            Some(0) => None,
+            Some(seconds) => Some(seconds * 1000),
+            None => Some(default_s * 1000),
+        };
+        ChatSettings {
+            new_thread_after_ms: millis("newThreadAfterSeconds", crate::bridge::NEW_THREAD_AFTER_MS / 1000),
+            answer_ms: millis("answerSeconds", 180),
+            command_ms: millis("commandSeconds", 60),
+            tool_calls: match value.get("toolCalls").and_then(Value::as_u64) {
+                Some(0) => None,
+                Some(n) => Some(n.min(10_000) as u32),
+                None => Some(25),
+            },
+        }
+    }
+}
+
+pub async fn chat_settings(port: u16, cookie: &str) -> Result<ChatSettings, String> {
+    let request = format!("GET /api/chat/settings HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");
+    let (status, _, body) = http(port, request.as_bytes()).await?;
+    if status != 200 {
+        return Err(format!("ling web did not report the chat settings (HTTP {status})"));
+    }
+    let value: Value = serde_json::from_slice(&body).map_err(|err| err.to_string())?;
+    Ok(ChatSettings::from_json(&value))
+}
+
+/// `/cavemode <text>` for `thread` (None before the first question), as `ling web` passes it to
+/// `ling cavemode` (`/api/cavemode`, cave-mode spec §11.5): what it printed, or why it was refused.
+pub async fn cavemode(port: u16, cookie: &str, thread: Option<&str>, text: &str) -> Result<String, String> {
+    let body = serde_json::to_vec(&serde_json::json!({ "command": text, "thread": thread })).map_err(|err| err.to_string())?;
+    let mut request = format!(
+        "POST /api/cavemode HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(&body);
+    let (_, _, body) = http(port, &request).await?;
+    let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    match value.get("said").and_then(Value::as_str) {
+        Some(said) => Ok(said.to_string()),
+        None => Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web did not answer").to_string()),
+    }
 }
 
 /// The user-level air-gap level, as `ling web` resolves it (`/api/airgapped`): true for `on`.
@@ -402,8 +484,15 @@ mod tests {
         let mut t = Translator::default();
         assert_eq!(events(&mut t, json!({"method": "turn/started", "params": {"threadId": "a", "turn": {"id": "u"}}})), vec![AgentEvent::TurnStarted { thread: "a".to_string(), turn: "u".to_string() }]);
         assert_eq!(
-            events(&mut t, json!({"method": "item/started", "params": {"threadId": "a", "item": {"type": "commandExecution", "command": "ls -la"}}})),
-            vec![AgentEvent::Activity { thread: "a".to_string(), text: "running `ls -la`".to_string() }]
+            events(&mut t, json!({"method": "item/started", "params": {"threadId": "a", "item": {"type": "commandExecution", "id": "c1", "command": "ls -la"}}})),
+            vec![
+                AgentEvent::Activity { thread: "a".to_string(), text: "running `ls -la`".to_string() },
+                AgentEvent::ToolStarted { thread: "a".to_string(), item: "c1".to_string(), command: Some("ls -la".to_string()) },
+            ]
+        );
+        assert_eq!(
+            events(&mut t, json!({"method": "item/completed", "params": {"threadId": "a", "item": {"type": "commandExecution", "id": "c1"}}})),
+            vec![AgentEvent::ToolCompleted { thread: "a".to_string(), item: "c1".to_string() }]
         );
         assert_eq!(events(&mut t, json!({"method": "item/agentMessage/delta", "params": {"threadId": "a", "delta": "Hi"}})), vec![AgentEvent::Delta { thread: "a".to_string(), text: "Hi".to_string() }]);
         assert_eq!(events(&mut t, json!({"method": "turn/completed", "params": {"threadId": "a", "turn": {"status": "completed"}}})), vec![AgentEvent::TurnCompleted { thread: "a".to_string(), error: None }]);
@@ -444,6 +533,17 @@ mod tests {
         assert_eq!(turn_input("plain", &[]).as_array().unwrap().len(), 1);
         // An image alone: no empty text item beside it.
         assert_eq!(turn_input("  ", &["/a/x.jpg".to_string()]), json!([{"type": "localImage", "path": "/a/x.jpg"}]));
+    }
+
+    #[test]
+    fn chat_settings_come_from_ling_web_with_the_bridges_defaults() {
+        assert_eq!(ChatSettings::from_json(&json!({"newThreadAfterSeconds": 7200})).new_thread_after_ms, Some(7_200_000));
+        assert_eq!(ChatSettings::from_json(&json!({"newThreadAfterSeconds": 0})).new_thread_after_ms, None);
+        assert_eq!(ChatSettings::from_json(&json!({})).new_thread_after_ms, Some(crate::bridge::NEW_THREAD_AFTER_MS));
+        let defaults = ChatSettings::default();
+        assert_eq!((defaults.answer_ms, defaults.tool_calls, defaults.command_ms), (Some(180_000), Some(25), Some(60_000)));
+        let set = ChatSettings::from_json(&json!({"answerSeconds": 60, "toolCalls": 0, "commandSeconds": 30}));
+        assert_eq!((set.answer_ms, set.tool_calls, set.command_ms), (Some(60_000), None, Some(30_000)));
     }
 
     #[test]

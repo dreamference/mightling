@@ -692,6 +692,9 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 .preview-comment .buttons { display: flex; gap: 6px; }
 .preview-surface { flex: 1; min-height: 0; border-top: 1px solid var(--line); background: var(--canvas); }
 .settings-page table.sites td { padding: 2px 8px 2px 0; }
+.settings-list.documents { list-style: none; padding: 0; margin: 8px 0 12px; display: flex; flex-direction: column; gap: 10px; }
+.settings-list.documents li { display: flex; flex-direction: column; gap: 4px; }
+.settings-list.documents code { word-break: break-all; }
 .add-site { display: flex; gap: 6px; margin-top: 6px; }
 
 /* The Activity view (Phase 3 item 5). */

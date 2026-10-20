@@ -110,7 +110,7 @@ struct Packing {
 }
 
 /// `lines 10-40`, `para 3-9`, `rows 2-21`: the word and the range.
-fn range(loc: &str) -> Option<(&str, u32, u32)> {
+pub fn range(loc: &str) -> Option<(&str, u32, u32)> {
     let (word, span) = loc.split_once(' ')?;
     if !matches!(word, "lines" | "para" | "rows") {
         return None;
@@ -119,22 +119,38 @@ fn range(loc: &str) -> Option<(&str, u32, u32)> {
     Some((word, a.parse().ok()?, b.parse().ok()?))
 }
 
-/// The `msg N` a mail unit's locator starts with.
-fn message_of(loc: &str) -> Option<&str> {
-    let rest = loc.strip_prefix("msg ")?;
-    let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-    (digits > 0).then(|| &loc[..4 + digits])
+/// `sheet Budget, rows 2-21`, `msg 3, lines 40-60`: a part, then a range in it.
+pub fn prefixed(loc: &str) -> Option<(&str, &str, u32, u32)> {
+    let (prefix, rest) = loc.rsplit_once(", ")?;
+    let (word, a, b) = range(rest)?;
+    Some((prefix, word, a, b))
 }
 
-/// Whether two locators may be joined into one result: not when they are different messages of
-/// one mailbox.
+/// The part of a file a locator lies in: a message (`msg 3`), a slide (`slide 4`), a sheet
+/// (`sheet Budget`). Chunks of different parts are never joined.
+pub fn part_of(loc: &str) -> Option<&str> {
+    let loc = loc.split(" .. ").next().unwrap_or(loc);
+    for keyword in ["msg ", "slide "] {
+        if let Some(rest) = loc.strip_prefix(keyword) {
+            let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            return (digits > 0).then(|| &loc[..keyword.len() + digits]);
+        }
+    }
+    if loc.starts_with("sheet ") {
+        return Some(prefixed(loc).map(|(prefix, ..)| prefix).unwrap_or(loc));
+    }
+    None
+}
+
+/// Whether two locators may be joined into one result: not when they lie in different parts
+/// (messages of a mailbox, slides, sheets).
 pub fn same_message(a: &str, b: &str) -> bool {
-    message_of(a.split(" .. ").next().unwrap_or(a)) == message_of(b.split(" .. ").next().unwrap_or(b))
+    part_of(a) == part_of(b)
 }
 
 /// The locator of a run of consecutive units or chunks, from its first and last: one range when
-/// both are ranges of the same lines (`lines 1-80`), the message when both are in one (`msg 3`),
-/// else `first .. last`.
+/// both are ranges of the same lines (`lines 1-80`, `sheet Budget, rows 2-41`), the part when
+/// both are in one (`msg 3`), else `first .. last`.
 pub fn join_locs(first: &str, last: &str) -> String {
     if first == last {
         return first.to_string();
@@ -144,7 +160,12 @@ pub fn join_locs(first: &str, last: &str) -> String {
             return format!("{w1} {a}-{b}");
         }
     }
-    if let (Some(m1), Some(m2)) = (message_of(first), message_of(last)) {
+    if let (Some((p1, w1, a, _)), Some((p2, w2, _, b))) = (prefixed(first), prefixed(last)) {
+        if p1 == p2 && w1 == w2 && a <= b {
+            return format!("{p1}, {w1} {a}-{b}");
+        }
+    }
+    if let (Some(m1), Some(m2)) = (part_of(first), part_of(last)) {
         if m1 == m2 {
             return m1.to_string();
         }
@@ -176,9 +197,14 @@ impl Packing {
 /// a page, the page.
 fn window_loc(unit: &Unit, lines: &[u32]) -> String {
     match (unit.line_first, lines.iter().min(), lines.iter().max()) {
-        (Some(_), Some(a), Some(b)) => match range(&unit.loc) {
-            Some((word, ..)) => format!("{word} {a}-{b}"),
-            None => format!("{}, lines {a}-{b}", unit.loc),
+        (Some(first), Some(a), Some(b)) => match (range(&unit.loc), prefixed(&unit.loc)) {
+            (Some((word, ..)), _) => format!("{word} {a}-{b}"),
+            // A part's own numbering (a sheet's rows) is the lines shifted.
+            (None, Some((prefix, word, start, _))) => {
+                let shift = |n: u32| (n + start).saturating_sub(first);
+                format!("{prefix}, {word} {}-{}", shift(*a), shift(*b))
+            }
+            (None, None) => format!("{}, lines {a}-{b}", unit.loc),
         },
         _ => unit.loc.clone(),
     }
@@ -297,6 +323,16 @@ mod tests {
         assert_eq!(join_locs("p.1", "p.2"), "p.1 .. p.2");
         assert_eq!(join_locs("msg 12, lines 3-9", "msg 12 · a.pdf p.2"), "msg 12");
         assert_eq!(join_locs("msg 1", "msg 12"), "msg 1 .. msg 12");
+        assert_eq!(join_locs("sheet Q1, Q2, rows 1-21", "sheet Q1, Q2, rows 22-41"), "sheet Q1, Q2, rows 1-41");
+        assert_eq!(join_locs("slide 3", "slide 3, lines 9-12"), "slide 3");
+        assert!(!same_message("sheet A, rows 1-21", "sheet B, rows 1-21") && same_message("slide 2", "slide 2 .. slide 2"));
+        // A long row group of a sheet is windowed in the sheet's own rows.
+        let text: String = (1..=30).map(|i| format!("Row {i} has a long value here.")).collect::<Vec<_>>().join("\n");
+        let mut sheet = unit("sheet Budget, rows 2-31", 101, &text);
+        sheet.line_last = Some(130);
+        let chunks = chunk(&[sheet], &Words, 50, 0.15);
+        assert!(chunks[0].loc.starts_with("sheet Budget, rows 2-"), "{}", chunks[0].loc);
+        assert!(chunks.last().unwrap().loc.ends_with("-31"), "{}", chunks.last().unwrap().loc);
     }
 
     #[test]

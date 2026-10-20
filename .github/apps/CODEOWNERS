@@ -1,0 +1,163 @@
+# Draft code owners: which team owns which path (specs/DREAMFERENCE_ORGANISATION.md §2 and §4.2).
+#
+# Inert where it is: GitHub reads CODEOWNERS only from the repository's root, docs/ or .github/,
+# so this file changes nothing until rollout Phase 2 moves it to .github/CODEOWNERS, after the
+# teams exist in the organisation. scripts/as_team.py reads it today to say which teams must
+# review a change.
+#
+# Syntax is GitHub's: a pattern, then one or more owners. The last matching line wins, so the
+# fallback comes first and the narrowest paths come last. Every owner is a GitHub team; the
+# teams' bots (dreamference-<team>[bot]) cannot be code owners, because GitHub allows only users
+# and teams here.
+
+# Fallback: anything not named below.
+*                                               @dreamference/quality
+
+# Docs & Specs
+/docs/                                          @dreamference/docs
+/specs/                                         @dreamference/docs
+/website/                                       @dreamference/docs
+/images/                                        @dreamference/docs
+/paper/                                         @dreamference/docs
+/README.md                                      @dreamference/docs
+/AGENTS.md                                      @dreamference/docs
+/mkdocs.yml                                     @dreamference/docs
+/CONTRIBUTING.md                                @dreamference/docs
+/GOVERNANCE.md                                  @dreamference/docs
+/CLA.md                                         @dreamference/docs
+/LICENSE                                        @dreamference/docs
+# Phase 2's community files; a line may name a file that does not exist yet.
+/CODE_OF_CONDUCT.md                             @dreamference/docs
+
+# Quality
+/tests/                                         @dreamference/quality
+/scripts/as_team.py                             @dreamference/quality
+
+# Agent
+/ling-rs/                                       @dreamference/agent
+/codex                                          @dreamference/agent
+/codex-patches/                                 @dreamference/agent
+/codex-tests/                                   @dreamference/agent
+/dreamference/runner/                           @dreamference/agent
+/dreamference/cli/                              @dreamference/agent
+/dreamference/config/                           @dreamference/agent
+/dreamference/__init__.py                       @dreamference/agent
+/dreamference.toml                              @dreamference/agent
+
+# Release & Infra
+/.github/                                       @dreamference/release
+/.github/apps/                                  @dreamference/quality
+/.github/CODEOWNERS                             @dreamference/quality
+/.github/pull_request_template.md               @dreamference/docs
+/.github/ISSUE_TEMPLATE/                        @dreamference/docs
+/install.sh                                     @dreamference/release
+/install.ps1                                    @dreamference/release
+/setup.py                                       @dreamference/release
+/pyproject.toml                                 @dreamference/release
+/Dockerfile                                     @dreamference/release
+/.gitattributes                                 @dreamference/release
+/.gitignore                                     @dreamference/release
+/.gitmodules                                    @dreamference/release
+/scripts/package_mightling.sh                   @dreamference/release
+/scripts/release_notes.py                       @dreamference/release
+/scripts/rename_mightling.py                    @dreamference/release
+/scripts/gen_admin_reference.py                 @dreamference/release
+/specs/DREAMFERENCE_RELEASE_*.md                @dreamference/release
+/specs/DREAMFERENCE_RELEASE_SIGNING.md          @dreamference/release @dreamference/security
+/ling-rs/release-signing.pub                    @dreamference/release @dreamference/security
+/ling-rs/src/update.rs                          @dreamference/release
+/ling-rs/src/release_signature.rs               @dreamference/release @dreamference/security
+/ling-rs/src/rename.rs                          @dreamference/release
+/dreamference/cli/legacy_name_migration.py      @dreamference/release
+
+# Inference & Models
+/dreamference/vllm_server/                      @dreamference/models
+/dreamference/hardware/                         @dreamference/models
+/dreamference/cli/adapter_command.py            @dreamference/models
+/dreamference/cli/model_deep_inspector.py       @dreamference/models
+/scripts/adapters/                              @dreamference/models
+/scripts/install_gb10.sh                        @dreamference/models
+/scripts/run_vllm_gb10.sh                       @dreamference/models
+/scripts/check_nvfp4_fused_scales.py            @dreamference/models
+/scripts/decode_speed.py                        @dreamference/models
+/ling-rs/src/vision.rs                          @dreamference/models
+
+# Engine
+/ling-engine                                    @dreamference/engine
+/paper/ling-engine.*                            @dreamference/engine @dreamference/docs
+
+# Web & Ask
+/ling-rs/web/                                   @dreamference/web
+/ling-web-rs/                                   @dreamference/web
+/dreamference/chat/                             @dreamference/web
+/dreamference/web_canvas.py                     @dreamference/web
+/dreamference/mcp_server/web_tools.py           @dreamference/web
+/ling-rs/src/web.rs                             @dreamference/web
+/ling-rs/src/images.rs                          @dreamference/web
+
+# Desktop
+/desktop/                                       @dreamference/desktop
+/dreamference/chat/desktop_installer.py         @dreamference/desktop
+/dreamference/chat/desktop_protocol_types.py    @dreamference/desktop
+/dreamference/chat/desktop_runner.py            @dreamference/desktop
+/ling-rs/src/app.rs                             @dreamference/desktop
+
+# Code Index
+/ling-code-rs/                                  @dreamference/code-index
+/dreamference/context_engine/                   @dreamference/code-index
+/dreamference/mcp_server/                       @dreamference/code-index
+/dreamference/mcp_server/web_tools.py           @dreamference/web
+/dreamference/cli/code_index_setup.py           @dreamference/code-index
+/ling-rs/src/code_index.rs                      @dreamference/code-index
+
+# Local Index
+/ling-docs-rs/                                  @dreamference/local-index
+/dreamference/runner/docs_index_setup.py        @dreamference/local-index
+/ling-rs/src/docs_index.rs                      @dreamference/local-index
+
+# Messengers
+/ling-rs/chat/                                  @dreamference/messengers
+/ling-rs/signal/                                @dreamference/messengers
+/ling-rs/src/chat.rs                            @dreamference/messengers
+/ling-rs/src/signal.rs                          @dreamference/messengers
+/dreamference/chat/matrix_homeserver.py         @dreamference/messengers
+
+# Night Shift
+/dreamference/night_shift/                      @dreamference/night-shift
+/ling-rs/src/night.rs                           @dreamference/night-shift
+
+# Benchmarks
+/dreamference/swe_bench/                        @dreamference/benchmarks
+/scripts/swe_bench_*                            @dreamference/benchmarks
+/scripts/cave_mode_bench/                       @dreamference/benchmarks
+/scripts/ask_evals/                             @dreamference/benchmarks
+/scripts/context_budget_*                       @dreamference/benchmarks
+/scripts/turn_end_compaction_*                  @dreamference/benchmarks
+/docs/dev/swe-bench/                            @dreamference/benchmarks
+/docs/dev/turn-end-compaction/                  @dreamference/benchmarks
+
+# Nodes & Remote Access
+/dreamference/node/                             @dreamference/nodes
+/ling-rs/node-locator/                          @dreamference/nodes
+/ling-web-rs/src/node_locator.rs                @dreamference/nodes
+/ling-rs/src/node.rs                            @dreamference/nodes
+/ling-rs/src/node_command.rs                    @dreamference/nodes
+/dreamference/vllm_server/model_gate*.py        @dreamference/nodes @dreamference/models
+/dreamference/vllm_server/wifi_power_save.py    @dreamference/nodes
+/dreamference/remote/                            @dreamference/nodes @dreamference/security
+/ling-rs/src/remote_join.rs                     @dreamference/nodes
+
+# Security & Egress: last, so its paths are never shadowed by the area that holds them.
+/SECURITY.md                                    @dreamference/security
+/dreamference/audit/                            @dreamference/security
+/ling-rs/airgapped/                             @dreamference/security
+/ling-web-rs/src/airgapped.rs                   @dreamference/security
+/ling-rs/src/airgapped.rs                       @dreamference/security
+/ling-rs/src/audit.rs                           @dreamference/security
+/ling-rs/web/policy.json                        @dreamference/security @dreamference/web @dreamference/desktop
+/codex-patches/0013-*                           @dreamference/security @dreamference/agent
+/codex-patches/0015-*                           @dreamference/security @dreamference/agent
+/codex-patches/0016-*                           @dreamference/security @dreamference/agent
+/codex-patches/0019-*                           @dreamference/security @dreamference/agent
+/dreamference/vllm_server/sandbox_prerequisite.py   @dreamference/security @dreamference/models
+/.github/workflows/release.yml                  @dreamference/release @dreamference/security

@@ -77,11 +77,11 @@ Runbook (about 2.5-3 hours, at most 4.5; NOT while a run needs the server)
            --out /tmp/chooser-v2-smoke
 
 3. Check the server is free (version 1's runbook, steps 2 and 3): no SWE-bench run, Night Shift
-   task or ling-engine test may be using second-puffin's server; never `night pause` for this.
+   task or ling-engine test may be using node-b's server; never `night pause` for this.
 4. Run, with version 1's runs, seed and server, so the result compares with its 33/44::
 
        .venv/bin/python scripts/swe_bench_chooser_v2.py \\
-           --server http://second-puffin.local:8000 \\
+           --server http://node-b.local:8000 \\
            --runs n2-default,n3-default,n4-default --seed 20261013 \\
            --v1-summary ~/swe-bench-chooser-2026-10/summary.json \\
            --out ~/swe-bench-chooser-v2-2026-10
@@ -984,7 +984,7 @@ def run_test(args: argparse.Namespace, client_factory: Callable[[str, float], An
 def parser() -> argparse.ArgumentParser:
     """The command line: version 1's, plus the containers' and the time cap's."""
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--server", help="the model server's URL, by node name (http://second-puffin.local:8000)")
+    p.add_argument("--server", help="the model server's URL, by node name (http://node-b.local:8000)")
     p.add_argument("--runs", default=v1.DEFAULT_RUNS, help=f"comma-separated run names (default {v1.DEFAULT_RUNS})")
     p.add_argument("--runs-dir", type=Path, default=v1.DEFAULT_RUNS_DIR, help="where the runs are (read only)")
     p.add_argument("--dataset", type=Path, default=v1.DEFAULT_DATASET, help="the local dataset snapshot")

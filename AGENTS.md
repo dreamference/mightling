@@ -58,6 +58,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 - **`ling` is never upstream `codex`.** `CodexInstaller` resolves the built path only; a fallback to a `codex` on PATH would silently bring back the unbranded agent.
 - **Host safety.** On unified memory a model load can freeze the whole host. Keep both layers, `check_host_safety()` before a load and the PSI watchdog during it, when touching `start_server()`; anything that runs beside a resident model server (indexing, sidecars) must bound its memory. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md).
 - **Two install modes.** A checkout has `codex/`, `codex-patches/` and the crates beside the package; a release install has only the wheel and prebuilt binaries. Anything new that reaches for a path under `REPO_ROOT` needs the `has_source()` guard. Details: [docs/dev/install-modes.md](docs/dev/install-modes.md).
+- **No sandboxed command reaches a host control socket** (Docker, containerd, Podman, the D-Bus buses, the systemd user manager): patch 0019 denies them (`ling_airgapped::host_sockets`). Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
 - **Sandbox results need the AppArmor profile.** `kernel.apparmor_restrict_unprivileged_userns` is 1, so `bwrap` (and Chromium's sandbox) need a profile to create a user namespace. Shells under PyCharm run in a permissive profile and pass anyway; units, the Night Shift timer and SSH jobs do not. Check `cat /proc/self/attr/current` before trusting a sandbox result; `ling-admin host setup` installs the profile. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md#bubblewrap-needs-an-apparmor-profile-and-this-machine-now-has-one).
 - **Unattended callers of `ling`** (Night Shift, the egress audit, SWE-bench, the Codex test runner) name the model server in `DREAMFERENCE_VLLM_HOST`: a node browse is a multicast DNS query, which the egress audit counts as a failure.
 - **Launch flags belong in the model registry**, not in the launch builder ([docs/dev/models-and-engines.md](docs/dev/models-and-engines.md)). Ask the *server* which model is running (`model_key_for_served_id`), never the config.
@@ -70,7 +71,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 
 ## Where things live
 
-Twelve packages under `dreamference/` (eleven subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
+Thirteen packages under `dreamference/` (twelve subsystems and `cli/`), each with an `__init__.py` that is a re-export facade with an explicit `__all__`:
 
 | Package | Role |
 | --- | --- |
@@ -85,13 +86,14 @@ Twelve packages under `dreamference/` (eleven subsystems and `cli/`), each with 
 | `node/` | The node half of the client/server split: the advertised service file, the node id, what is published to the LAN, pairing, jobs and model sync over SSH |
 | `swe_bench/` | `ling-admin swe-bench`: `ling` inside each SWE-bench instance's container, A/B runs and reports |
 | `audit/` | `ling-admin audit egress`: the strace-based network audit of a real `ling` session |
+| `remote/` | Remote access: the node's NetBird control plane, its CA, the relay box over SSH, LAN enrolment |
 | `cli/` | `ling-admin`'s parser and dispatch (`dreamference_cli_controller.py`) |
 
 Outside the package:
 
 | Path | What |
 | --- | --- |
-| `codex/` | Submodule: the `dgxcoder/codex` fork, pinned to `CODEX_RELEASE_TAG` (`rust-v0.158.0`); never modified |
+| `codex/` | Submodule: the `dreamference/codex` fork, pinned to `CODEX_RELEASE_TAG` (`rust-v0.158.0`); never modified |
 | `codex-patches/` | The numbered hooks applied to an export of `codex/` |
 | `codex-tests/` | Skips, snapshot overlays and test-only patches for `ling-admin codex test` |
 | `ling-rs/` | The launcher crate compiled into `ling`, plus leaf crates (`airgapped/`, `node-locator/`, `skills/`, `masking/`, `apps/`, `web/`, and the messenger bridges `chat/` and `signal/`) and `prompts/` |
@@ -187,7 +189,7 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/code-index.md](docs/dev/code-index.md): `ling-code`
 - [docs/dev/local-file-index.md](docs/dev/local-file-index.md): `ling-docs`
 - [docs/dev/context-engine.md](docs/dev/context-engine.md): the Python context engine
-- [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay (being built)
+- [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay, its DNS and its migration
 - [docs/dev/adapters.md](docs/dev/adapters.md): LoRA adapters: `ling-admin adapter`, the signature, serving them
 - [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
 - [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree

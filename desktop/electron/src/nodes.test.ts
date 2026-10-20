@@ -34,7 +34,7 @@ describe("Settings › Node", () => {
     const log = path.join(home, "calls.txt");
     const ling = nodeScript(home, "ling", `require("fs").appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(" ") + "\\n");
 if (process.argv[3] === "list") console.log(${JSON.stringify(JSON.stringify(LIST))});
-else console.log("Using node " + process.argv[4] + " at http://192.168.0.106:8000.");
+else console.log("Using node " + process.argv[4] + " at http://192.168.50.106:8000.");
 `);
     const nodes = new Nodes();
     // Nothing listed yet: nothing may be chosen.
@@ -42,7 +42,7 @@ else console.log("Using node " + process.argv[4] + " at http://192.168.0.106:800
     const list = await nodes.list(ling);
     expect(list.nodes).toHaveLength(3);
     await expect(nodes.use(ling, "22222222-bbbb")).resolves.toContain("Using node");
-    for (const refused of ["192.168.0.106", "spark-9", "--help", "spark-1 ; rm", "lab box.local", 7]) {
+    for (const refused of ["192.168.50.106", "spark-9", "--help", "spark-1 ; rm", "lab box.local", 7]) {
       await expect(nodes.use(ling, refused)).rejects.toThrow("from the list");
     }
     expect(fs.readFileSync(log, "utf8").trim().split("\n")).toEqual(["node list --json", "node use 22222222-bbbb"]);

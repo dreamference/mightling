@@ -69,6 +69,11 @@ fn attachment_kind(name: Option<&str>, ctype: Option<(&str, Option<&str>)>) -> O
         ("text", "csv") => Kind::Csv,
         ("application", "vnd.openxmlformats-officedocument.wordprocessingml.document") => Kind::Docx,
         ("application", "vnd.oasis.opendocument.text") => Kind::Odt,
+        ("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet") => Kind::Xlsx,
+        ("application", "vnd.ms-excel") => Kind::Xls,
+        ("application", "vnd.oasis.opendocument.spreadsheet") => Kind::Ods,
+        ("application", "vnd.openxmlformats-officedocument.presentationml.presentation") => Kind::Pptx,
+        ("application", "vnd.oasis.opendocument.presentation") => Kind::Odp,
         _ => return None,
     })
 }

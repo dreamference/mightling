@@ -105,7 +105,7 @@ def test_only_the_runs_network_and_read_only_probes_pass_a_closed_gate():
     closed = {"state": "closed", "networks": ["172.30.0.0/16"]}
     assert ModelGateService.allows(closed, "172.30.0.5", "POST", "/v1/responses")
     assert ModelGateService.allows(closed, "::ffff:172.30.0.5", "POST", "/v1/chat/completions")
-    for peer in ("127.0.0.1", "172.17.0.2", "192.168.0.106", "172.31.0.5"):
+    for peer in ("127.0.0.1", "172.17.0.2", "192.168.50.106", "172.31.0.5"):
         assert not ModelGateService.allows(closed, peer, "POST", "/v1/responses")
     for path in ("/v1/models", "/v1/models/RadixArk/Qwen", "/metrics", "/health", "/get_model_info"):
         assert ModelGateService.allows(closed, "127.0.0.1", "GET", path)

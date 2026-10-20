@@ -59,6 +59,11 @@ DEFAULT_TASK_TIMEOUT: Final[str] = "45m"
 DEFAULT_TASK_MEMORY: Final[str] = "8G"
 DEFAULT_TASK_CPUS: Final[int] = 4
 DEFAULT_NUDGES: Final[int] = 2
+# The cave level every instance's `ling` runs at, pinned here rather than taken from the product's
+# default (`DreamferenceConfig.mightling_cave_mode`), so that a change of that default cannot move
+# the nights' baseline: every run before 2026-10-20 ran at `ultra` (cave-mode spec §11.4, §11.5).
+# Change it only through an A/B arm.
+SWE_BENCH_CAVE_MODE: Final[str] = "ultra"
 DEFAULT_IDLE_MINUTES: Final[int] = 10
 DEFAULT_TASK_CONTEXT: Final[int] = 49_152
 DEFAULT_EVAL_WORKERS: Final[int] = 4

@@ -14,6 +14,7 @@ import { BrowserWindow, app, dialog, ipcMain, nativeTheme, shell, type IpcMainIn
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
+import { cavemodeSet, cavemodeStatus } from "./cavemode";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
 import { codexHome, findLing } from "./bridge";
@@ -27,7 +28,7 @@ import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addTask, dropTask, readReport, readReports, readTasks, runNow } from "./night";
 import { Nodes } from "./nodes";
-import { locate } from "./docs";
+import { docsAdd, docsReindex, docsRemove, docsStatus, locate } from "./docs";
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
@@ -369,6 +370,12 @@ export async function main(options: MainOptions): Promise<void> {
         if (!ling) throw new Error("ling is not installed");
         return setDefault(ling, message.level);
       }
+      case "cave/status":
+      case "cave/set": {
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return message.type === "cave/status" ? cavemodeStatus(ling, message.thread) : cavemodeSet(ling, message.level, message.thread);
+      }
       case "context-menu":
         showContextMenu(own, message);
         return null;
@@ -471,6 +478,18 @@ export async function main(options: MainOptions): Promise<void> {
         const failed = await shell.openPath(await locate(ling, message.doc));
         if (failed) throw new Error(failed);
         return null;
+      }
+      case "docs/status":
+      case "docs/add":
+      case "docs/remove":
+      case "docs/reindex": {
+        // Settings › Your documents: every change goes through `ling docs`, which applies the index's rules.
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        if (message.type === "docs/status") return docsStatus(ling);
+        if (message.type === "docs/add") return docsAdd(ling, message.folder);
+        if (message.type === "docs/remove") return docsRemove(ling, message.name);
+        return docsReindex(ling, message.name);
       }
       case "open/folder": {
         const failed = await shell.openPath(await folder(message.dir));

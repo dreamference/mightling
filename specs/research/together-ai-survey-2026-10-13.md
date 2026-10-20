@@ -313,7 +313,7 @@ Per the owner's decision of 2026-10-13 (ling-engine BACKLOG §19.21), two-node w
 
 | # | Step | Cost | Decides |
 |---|---|---|---|
-| 1 | ScaleSearch on the DFlash2 drafter, acceptance A/B at 12 drafts on the replay set (§2.1) | ~½ day, ~1 GPU-hour on second-puffin | A free +0–3% tokens per step, exact |
+| 1 | ScaleSearch on the DFlash2 drafter, acceptance A/B at 12 drafts on the replay set (§2.1) | ~½ day, ~1 GPU-hour on node-b | A free +0–3% tokens per step, exact |
 | 2 | The selector alone on the 13 tasks where nights 2–4's default runs disagree (§3.1) | ~1 hour of model time, no agent runs | Whether best-of-K is worth building |
 | 3 | The collateral column in `swe-bench report` (§3.2) | a few hours, no GPU | Sharper night comparisons |
 | 4 | Aurora's rejected-token loss and the volume arithmetic written into SELF_SPEEDING §4–§5 (§2.3) | docs | Realistic expectations before training |
@@ -328,7 +328,7 @@ Added by the deeper pass (§8). These are proposals for the owner, not backlog i
 
 | # | Step | Cost | Decides |
 |---|---|---|---|
-| 9 | Step 1 restated (§8.2): the BF16 drafter against the served NVFP4 one, at 12 drafts on the replay, before any re-quantization | ~1 GPU-hour on second-puffin; a model-matrix change and a server restart, no code | Whether there is a gap above noise for ScaleSearch (or anything else) to recover |
+| 9 | Step 1 restated (§8.2): the BF16 drafter against the served NVFP4 one, at 12 drafts on the replay, before any re-quantization | ~1 GPU-hour on node-b; a model-matrix change and a server restart, no code | Whether there is a gap above noise for ScaleSearch (or anything else) to recover |
 | 10 | Step 2's selector built in R2E-Gym's order: regression tests first, then a pairwise judge over patches without the agent's reasoning (§8.4) | inside step 2's hour | Whether the cheap filter alone captures most of the headroom |
 | 11 | YAQA on the *target*, as a model candidate for a night, only if the owner wants a quality lever (§8.6) | 1–30 GPU-hours plus a night; NVFP4 untested by its authors | Quality, not speed |
 | 12 | Voice input biased toward the repository's identifiers from `ling-code`'s symbol index (§8.7) | ~1 day, once voice in `ling web` is the target | Dictating code names, the speech post's failure mode |

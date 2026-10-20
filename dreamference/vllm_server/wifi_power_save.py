@@ -6,7 +6,7 @@ A client finds its node by an mDNS browse for `_mightling-node._tcp` (docs/dev/n
 is multicast. A Wi-Fi radio in power-saving mode sleeps between beacons and its access point
 buffers multicast for it until the next DTIM beacon, and on the MediaTek MT7925 both GB10 machines
 here use that delivery loses most of it: measured 2026-10-11/12, up to ~80% of the queries sent to
-a node went unanswered, so `second-puffin.local` did not resolve and a client could not find its
+a node went unanswered, so `node-b.local` did not resolve and a client could not find its
 node. NetworkManager turns power saving on for every Wi-Fi connection unless the connection says
 otherwise (Ubuntu ships `wifi.powersave = 3` in
 `/etc/NetworkManager/conf.d/default-wifi-powersave-on.conf`, and a connection's own setting is

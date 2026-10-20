@@ -227,8 +227,12 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/apps", get(not_built))
         .route("/images/{*path}", get(image))
         .route("/docs/{collection}/{id}", get(document))
+        .route("/api/docs", get(docs_status))
+        .route("/api/docs/{action}", post(docs_change))
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
+        .route("/api/chat/settings", get(chat_settings))
+        .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/login", get(login))
         .route("/pair", get(pair_page).post(pair))
         .route("/pair.css", get(pair_css))
@@ -362,6 +366,46 @@ async fn document(State(server): State<Arc<Server>>, axum::extract::Path((collec
     response
 }
 
+/// Settings › Your documents: the collections and their state (`ling docs status --json`).
+async fn docs_status(State(server): State<Arc<Server>>) -> Response {
+    match documents::docs_cli(&server.config.launch, &["status", "--json"]).await {
+        Ok(said) => match serde_json::from_str::<serde_json::Value>(&said) {
+            Ok(value) => json_response(StatusCode::OK, value),
+            Err(_) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": "the local file index gave no answer" })),
+        },
+        Err(reason) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": reason })),
+    }
+}
+
+/// Settings › Your documents: add a folder (`{"folder": "/abs/path"}`), remove or rebuild a
+/// collection (`{"name": "notes"}`), each through `ling docs`.
+async fn docs_change(State(server): State<Arc<Server>>, axum::extract::Path(action): axum::extract::Path<String>, body: axum::body::Bytes) -> Response {
+    let bad = |why: &str| json_response(StatusCode::BAD_REQUEST, json!({ "error": why }));
+    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else { return bad("send JSON") };
+    let field = |key: &str| request.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let (args, value) = match action.as_str() {
+        "add" => {
+            let folder = field("folder");
+            if !folder.starts_with('/') || folder.len() > 4096 {
+                return bad("name a folder by its full path");
+            }
+            ("add", folder)
+        }
+        "remove" | "reindex" => {
+            let name = field("name");
+            if !documents::valid_collection(&name) {
+                return bad("not a collection");
+            }
+            (if action == "remove" { "remove" } else { "reindex" }, name)
+        }
+        _ => return not_found().await,
+    };
+    match documents::docs_cli(&server.config.launch, &[args, &value]).await {
+        Ok(said) => json_response(StatusCode::OK, json!({ "said": said })),
+        Err(reason) => json_response(StatusCode::UNPROCESSABLE_ENTITY, json!({ "error": reason })),
+    }
+}
+
 /// The microphone's recording, turned into text by the speech-to-text service on this machine
 /// (§7). The text goes back to the page, which puts it in the composer; nothing is sent to the model.
 async fn transcribe(State(server): State<Arc<Server>>, request: Request) -> Response {
@@ -417,6 +461,45 @@ async fn websocket(State(server): State<Arc<Server>>, upgrade: WebSocketUpgrade)
 async fn airgapped(State(_server): State<Arc<Server>>) -> Response {
     let resolved = user_airgap_level();
     json_response(StatusCode::OK, json!({ "level": resolved.level.name(), "source": resolved.source.label() }))
+}
+
+/// How terse answers are (cave.rs): the level in force for `?thread=<id>`, or for a new session,
+/// as `ling cavemode --json` reports it.
+async fn cavemode_status(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let thread = query.get("thread").filter(|id| !id.is_empty()).cloned();
+    if thread.as_deref().is_some_and(|id| !ask::valid_thread_id(id)) {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "no such thread" }));
+    }
+    match crate::cave::run(&server.config.launch, &crate::cave::Request::Status { thread }).await {
+        Ok(said) => match serde_json::from_str::<serde_json::Value>(&said) {
+            Ok(value) => json_response(StatusCode::OK, value),
+            Err(_) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": "ling cavemode gave no answer" })),
+        },
+        Err(reason) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": reason })),
+    }
+}
+
+/// Sets the level: `{"level": …}` for new sessions (`built-in` removes the configured one), or
+/// `{"level": …, "thread": …}` for one thread, from its next model request. Answers what
+/// `ling cavemode` said.
+async fn cavemode_change(State(server): State<Arc<Server>>, body: axum::body::Bytes) -> Response {
+    let Ok(body) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send JSON" }));
+    };
+    let request = match crate::cave::Request::change(&body) {
+        Ok(request) => request,
+        Err(reason) => return json_response(StatusCode::BAD_REQUEST, json!({ "error": reason })),
+    };
+    match crate::cave::run(&server.config.launch, &request).await {
+        Ok(said) => json_response(StatusCode::OK, json!({ "said": said })),
+        Err(reason) => json_response(StatusCode::BAD_GATEWAY, json!({ "error": reason })),
+    }
+}
+
+/// How the phone bridges behave, from the `[chat]` table of the user's configuration
+/// (chat_settings.rs), for the Signal bridge, which cannot read the home folder.
+async fn chat_settings(State(_server): State<Arc<Server>>) -> Response {
+    json_response(StatusCode::OK, crate::chat_settings::ChatSettings::load().to_json())
 }
 
 /// The air-gap level without a session: `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of

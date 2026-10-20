@@ -9,8 +9,9 @@ import type { UserInput } from "./protocol/v2/UserInput";
 /** The prompt an Ask thread starts with: one of the policy's `namedPrompts`. */
 export const ASK_PROMPT = "ask";
 
-/** A scratch folder's name, as `ling web` makes them (`ask/q-<hex>`, ling-rs/web/src/ask.rs). */
-const SCRATCH_FOLDER = /[\\/]ask[\\/]q-[0-9a-f]+$/;
+/** A scratch folder's name, as `ling web` makes them (`ask/q-<hex>`, or `ask/chat-<hex>` for a
+ * phone bridge's thread; ling-rs/web/src/ask.rs). */
+const SCRATCH_FOLDER = /[\\/]ask[\\/](q|chat)-[0-9a-f]+$/;
 
 /** Whether a thread works in an Ask scratch folder: under the host's Ask root when it named one. */
 export function isAskThread(thread: Pick<Thread, "cwd">, askRoot: string | null): boolean {

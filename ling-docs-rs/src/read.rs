@@ -46,11 +46,12 @@ pub enum Locator {
 pub fn parse_locator(text: &str) -> Result<Locator> {
     let original = text.trim().split(" .. ").next().unwrap_or("").trim().to_string();
     let t = original.to_lowercase();
-    if t.starts_with("msg ") {
-        match t.split_once(", ") {
-            Some((_, lines)) => return parse_locator(lines),
-            None => return Ok(Locator::Part(original)),
-        }
+    if t.starts_with("msg ") || t.starts_with("slide ") || t.starts_with("sheet ") {
+        // A message's or a slide's lines are the file's own; a sheet's rows are the sheet's.
+        return match crate::chunk::prefixed(&t) {
+            Some((_, "lines", ..)) => parse_locator(t.rsplit_once(", ").map(|(_, lines)| lines).unwrap_or(&t)),
+            _ => Ok(Locator::Part(original)),
+        };
     }
     let page = t.strip_prefix("p.").or_else(|| t.strip_prefix("page")).or_else(|| t.strip_prefix('p'));
     if let Some(n) = page.and_then(|p| p.trim().parse::<u32>().ok()) {
@@ -67,7 +68,7 @@ pub fn parse_locator(text: &str) -> Result<Locator> {
     };
     match (a, b) {
         (Ok(a), Ok(b)) if a >= 1 && b >= a => Ok(Locator::Lines(a, b)),
-        _ => bail!("`{text}` is not a locator: use p.7, lines 120-180 (para, rows) or msg 3"),
+        _ => bail!("`{text}` is not a locator: use p.7, lines 120-180 (para, rows), msg 3, slide 4 or sheet Budget"),
     }
 }
 
@@ -109,6 +110,16 @@ pub fn read(collections: &[Collection], doc_id: &str, locator: Option<&str>, bud
     let word = crate::discover::Kind::parse(&kind).map(|k| k.line_word()).unwrap_or("lines");
     // A part named by its locator becomes the range of its units' lines.
     let locator = match locator {
+        // A sheet's rows: shifted by where the sheet's first unit starts.
+        Some(Locator::Part(part)) if crate::chunk::prefixed(&part).is_some_and(|(_, word, ..)| word != "lines") => {
+            let (prefix, _, a, b) = crate::chunk::prefixed(&part).unwrap();
+            let prefix = prefix.to_lowercase();
+            let unit = rows.iter().find(|r| crate::chunk::prefixed(&r.3).is_some_and(|(p, ..)| p.to_lowercase() == prefix));
+            match unit.and_then(|r| Some((r.1?, crate::chunk::prefixed(&r.3)?.2))) {
+                Some((line, start)) => Some(Locator::Lines((a + line).saturating_sub(start).max(1), (b + line).saturating_sub(start).max(1))),
+                None => bail!("{doc_id} has no part `{part}`"),
+            }
+        }
         Some(Locator::Part(part)) => {
             let lower = part.to_lowercase();
             let inside = |loc: &str| {
@@ -243,6 +254,8 @@ mod tests {
         assert_eq!(parse_locator("msg 3").unwrap(), Locator::Part("msg 3".into()));
         assert_eq!(parse_locator("msg 3 · Invoice.pdf p.2").unwrap(), Locator::Part("msg 3 · Invoice.pdf p.2".into()));
         assert_eq!(parse_locator("msg 3, lines 40-60").unwrap(), Locator::Lines(40, 60));
+        assert_eq!(parse_locator("sheet Budget, rows 5-9").unwrap(), Locator::Part("sheet Budget, rows 5-9".into()));
+        assert_eq!(parse_locator("slide 4").unwrap(), Locator::Part("slide 4".into()));
         assert_eq!(parse_doc_id("documents:42").unwrap(), ("documents".to_string(), 42));
         assert!(parse_doc_id("42").is_err());
     }

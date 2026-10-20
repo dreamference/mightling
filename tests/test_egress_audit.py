@@ -111,12 +111,12 @@ def test_strace_strings_and_dns_payloads():
 def test_a_query_whose_name_cannot_be_read_still_fails():
     # glibc connects the socket first; a payload strace cut before the name ended leaves no name.
     trace = StraceParser.parse(
-        '9 connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("192.168.0.1")}, 16) = 0\n'
+        '9 connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("192.168.50.1")}, 16) = 0\n'
         '9 sendto(3, "\\1\\2\\1\\0\\0\\1\\0\\0\\0\\0\\0\\0\\77aaaa"..., 300, MSG_NOSIGNAL, NULL, 0) = 300\n'
         '9 execve("/bin/true", ["true"], 0x0 /* 1 var */) = 0\n')
-    assert trace.dns_names == {} and trace.dns_servers == {"192.168.0.1:53": 1}
+    assert trace.dns_names == {} and trace.dns_servers == {"192.168.50.1:53": 1}
     verdict = EgressAudit.judge(trace, ALLOWED, replied=True)
-    assert verdict.status == FAIL and "192.168.0.1:53" in verdict.problems[0]
+    assert verdict.status == FAIL and "192.168.50.1:53" in verdict.problems[0]
 
 
 def test_git_commands_that_reach_nothing_are_not_flagged():
@@ -857,3 +857,13 @@ def test_the_preview_page_reaches_for_the_internet_every_way_and_records_its_own
             assert b"egress audit's preview page" in answer.read()
         urllib.request.urlopen(page.url + "seen", timeout=5).read()
         assert page.loaded()
+
+def test_remote_access_is_named_with_its_box(monkeypatch, tmp_path):
+    from dreamference.remote import RemoteSettings
+    _chat_files(monkeypatch, tmp_path, {})
+    calls = _fake_units(monkeypatch, {"mightling-remote-tunnel.service"})
+    RemoteSettings.write({"dns_name": "relay.example.org", "overlay_name": "mightling-x.netbird.selfhosted"})
+    lines = EgressAudit.declared_exceptions()
+    assert len(lines) == 1 and lines[0].startswith("Remote access enabled") and "relay.example.org" in lines[0]
+    assert "`ling-admin remote remove`" in lines[0]
+    assert ["systemctl", "--user", "is-enabled", "--quiet", "mightling-remote-tunnel.service"] in calls

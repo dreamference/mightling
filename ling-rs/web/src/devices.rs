@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn the_page_escapes_names_and_never_shows_a_token_hash() {
-        let page = owner_page(&[device("<script>")], &["192.168.0.105".to_string()], None, None, 100);
+        let page = owner_page(&[device("<script>")], &["192.168.50.105".to_string()], None, None, 100);
         assert!(page.contains("&lt;script&gt;") && !page.contains("<script>"));
         assert!(!page.contains("secret-hash"));
         assert!(page.contains("action=\"/devices/pair\"") && page.contains("action=\"/devices/revoke\""));
@@ -177,14 +177,14 @@ mod tests {
 
     #[test]
     fn a_pairing_shows_the_lan_address_first_and_the_others_folded() {
-        let names = vec!["172.17.0.1".to_string(), "100.101.102.103".to_string(), "192.168.0.105".to_string()];
+        let names = vec!["172.17.0.1".to_string(), "100.101.102.103".to_string(), "192.168.50.105".to_string()];
         let pairing = Pairing { code: "01234567", port: 3100, lan_names: &names };
         let page = owner_page(&[], &names, Some(&pairing), None, 0);
         assert!(page.contains("0123 4567"));
         let first = page.find("<svg").unwrap();
         let folded = page.find("<details>").unwrap();
         assert!(first < folded);
-        assert!(page.contains("This code is for 192.168.0.105."));
+        assert!(page.contains("This code is for 192.168.50.105."));
         assert!(page.contains("100.101.102.103 (Tailscale)"));
         assert_eq!(page.matches("<svg").count(), 3);
     }

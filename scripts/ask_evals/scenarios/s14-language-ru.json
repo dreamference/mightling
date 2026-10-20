@@ -1,0 +1,42 @@
+{
+  "id": "s14-language-ru",
+  "family": "S14",
+  "failure": [
+    7
+  ],
+  "turns": [
+    {
+      "text": "How far is Lisbon from Warsaw?"
+    },
+    {
+      "text": "Сколько длится прямой перелёт из Лиссабона в Варшаву?"
+    }
+  ],
+  "expect": {
+    "language": "ru",
+    "max_tool_calls": 4
+  },
+  "web": {
+    "search": {
+      "results": [
+        {
+          "title": "Lisbon to Warsaw flights",
+          "url": "http://flights.example.test/lis-waw",
+          "content": "Direct flights from Lisbon (LIS) to Warsaw (WAW) take about 4 hours 5 minutes."
+        }
+      ]
+    },
+    "pages": {
+      "http://flights.example.test/lis-waw": {
+        "status": 200,
+        "body": "<html><body>Direct flights from Lisbon to Warsaw take about 4 hours 5 minutes; the distance is about 2,750 km.</body></html>"
+      }
+    },
+    "other": {
+      "fault": "captcha"
+    },
+    "connect": {
+      "fault": "forbidden"
+    }
+  }
+}
