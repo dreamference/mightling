@@ -25,6 +25,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header;
 
+use ling_web_server::ask_client::Saved;
+
 /// The event the link sends after every successful (re)connection.
 pub const CONNECTED: &str = "mightling/connected";
 
@@ -32,6 +34,8 @@ pub const CONNECTED: &str = "mightling/connected";
 pub enum AgentCommand {
     Request { method: String, params: Value, reply: oneshot::Sender<Result<Value, String>> },
     Respond { id: Value, result: Value },
+    /// An attachment into a thread's Ask folder (`/api/upload`, with the link's cookie).
+    Upload { thread: String, name: String, image: bool, bytes: Vec<u8>, reply: oneshot::Sender<Result<Saved, String>> },
 }
 
 /// The hub's side of the connection.
@@ -60,6 +64,15 @@ impl AgentHandle {
     pub fn respond(&self, id: Value, result: Value) {
         let _ = self.tx.send(AgentCommand::Respond { id, result });
     }
+
+    /// Uploads an attachment into `thread`'s Ask folder; `ling web` reads an image's text.
+    pub async fn upload(&self, thread: &str, name: &str, image: bool, bytes: Vec<u8>) -> Result<Saved, String> {
+        let (reply, answer) = oneshot::channel();
+        self.tx
+            .send(AgentCommand::Upload { thread: thread.to_string(), name: name.to_string(), image, bytes, reply })
+            .map_err(|_| "the bridge to ling web has stopped".to_string())?;
+        answer.await.map_err(|_| "the connection to ling web was lost".to_string())?
+    }
 }
 
 /// Where `ling web` is: its state folder (for login codes and its port), and how to start it.
@@ -72,7 +85,7 @@ pub struct WebTarget {
 
 type Socket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
 
-async fn open(target: &WebTarget) -> Result<Socket, String> {
+async fn open(target: &WebTarget) -> Result<(Socket, u16, String), String> {
     let port = ling_web_server::cli::running_port(&target.state);
     if ling_web_server::cli::probe(&target.state, port).is_none()
         && let Some(ling) = &target.ling {
@@ -92,13 +105,16 @@ async fn open(target: &WebTarget) -> Result<Socket, String> {
     headers.insert(header::ORIGIN, HeaderValue::from_str(&format!("http://127.0.0.1:{port}")).map_err(|err| err.to_string())?);
     headers.insert(header::COOKIE, HeaderValue::from_str(&cookie).map_err(|err| err.to_string())?);
     let (socket, _) = tokio_tungstenite::client_async(request, stream).await.map_err(|err| format!("ling web refused the bridge: {err}"))?;
-    Ok(socket)
+    Ok((socket, port, cookie))
 }
 
 /// One bridge connection: the frames `ling web`'s relay speaks (`{"call", "message"}` out,
 /// `{"answer", …}` and `{"event": {"channel", "payload"}}` in).
 struct Session {
     socket: Socket,
+    /// `ling web`'s port and this connection's session cookie, for uploads.
+    port: u16,
+    cookie: String,
     next_call: u64,
     next_id: u64,
     calls: HashMap<u64, oneshot::Sender<Result<Value, String>>>,
@@ -237,8 +253,8 @@ impl Session {
 }
 
 async fn connect(target: &WebTarget, events: &mpsc::UnboundedSender<Value>) -> Result<Session, String> {
-    let socket = open(target).await?;
-    let mut session = Session { socket, next_call: 0, next_id: 0, calls: HashMap::new(), requests: HashMap::new(), acks: HashMap::new() };
+    let (socket, port, cookie) = open(target).await?;
+    let mut session = Session { socket, port, cookie, next_call: 0, next_id: 0, calls: HashMap::new(), requests: HashMap::new(), acks: HashMap::new() };
     session.handshake_call(json!({ "type": "work/start" }), events).await?;
     let (tx, rx) = oneshot::channel();
     let info = json!({ "clientInfo": { "name": "ling-chat", "title": null, "version": env!("CARGO_PKG_VERSION") } });
@@ -266,6 +282,7 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                             None => return,
                             Some(AgentCommand::Request { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                             Some(AgentCommand::Respond { .. }) => {}
+                            Some(AgentCommand::Upload { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                         },
                     }
                 }
@@ -288,6 +305,13 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                         if let Err(err) = session.send_call(json!({ "type": "work/send", "message": message })).await {
                             eprintln!("ling chat: could not answer the agent: {err}");
                         }
+                    }
+                    Some(AgentCommand::Upload { thread, name, image, bytes, reply }) => {
+                        // Over HTTP beside the socket, so a large file or a slow read holds nothing up.
+                        let (port, cookie) = (session.port, session.cookie.clone());
+                        tokio::spawn(async move {
+                            let _ = reply.send(ling_web_server::ask_client::upload(port, &cookie, &thread, &name, image, &bytes).await);
+                        });
                     }
                 },
                 frame = session.socket.next() => {
