@@ -31,9 +31,9 @@ class NodeServiceFile:
     service_path: Path = Path("/etc/avahi/services/mightling-node.service")
 
     @classmethod
-    def render(cls, port: int, node_id: str, version: str, state: str = "stopped",
+    def render(cls, port: int, node_id: str, version: str, state: str = "stopped",  # noqa: PLR0913 - one per TXT record
                web_port: Optional[int] = None, search_port: Optional[int] = None,
-               main: bool = False, remote: Optional[str] = None) -> str:
+               main: bool = False, remote: str | None = None) -> str:
         """
         Renders the service file.
 
@@ -136,7 +136,7 @@ class NodeServiceFile:
     @classmethod
     def update(cls, state: Optional[str] = None, port: Optional[int] = None,
                main: Optional[bool] = None, version: Optional[str] = None,
-               web_port: Any = KEEP, search_port: Any = KEEP, remote: Any = KEEP) -> Optional[bool]:
+               web_port: Any = KEEP, search_port: Any = KEEP, remote: object = KEEP) -> Optional[bool]:
         """
         Changes records of the installed file and leaves the others as they are.
 
@@ -164,7 +164,7 @@ class NodeServiceFile:
             web_port=(int(current["web"]) if current.get("web", "").isdigit() else None) if web_port is KEEP else web_port,
             search_port=(int(current["search"]) if current.get("search", "").isdigit() else None) if search_port is KEEP else search_port,
             main=("main" in current) if main is None else main,
-            remote=(current.get("remote") or None) if remote is KEEP else remote,
+            remote=(current.get("remote") or None) if remote is KEEP else (str(remote) if remote else None),
         )
         try:
             if cls.service_path.read_text() == text:
