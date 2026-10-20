@@ -22,7 +22,9 @@ import datetime
 import getpass
 import json
 import os
+import re
 import shutil
+import socket
 import sys
 import time
 import urllib.request
@@ -46,6 +48,13 @@ DEFAULT_START_TIMEOUT_S: Final[int] = 20 * 60
 
 SEARXNG_PORT: Final[int] = 8888
 
+# What the probe prints for a reading that holds, and docker for a running container.
+PROBE_YES: Final[str] = "1"
+CONTAINER_RUNNING: Final[str] = "true"
+
+# A single-label host name (`spark-1a2b`), which this LAN resolves only as `<name>.local`.
+BARE_NAME: Final[re.Pattern] = re.compile(r"[A-Za-z0-9-]+")
+
 
 class NodeProvisioner:
     """One provisioning run over one or more machines."""
@@ -61,6 +70,10 @@ class NodeProvisioner:
         self.hosts = hosts
         self.options = options
         self.user: str = options.get("user") or getpass.getuser()
+        # What each host is connected to (its name resolved by mDNS, or a paired node's address
+        # from a browse for its id) and as whom: never an address remembered from earlier.
+        self.connect: dict[str, str] = {}
+        self.users: dict[str, str] = {}
         self.model: str = options.get("model") or self.configured_model()
         self.run_dir = FleetSession.new_run_dir()
         self.passwords: Dict[str, str] = {}
@@ -121,11 +134,61 @@ class NodeProvisioner:
             if not records:
                 print("❌ No paired nodes: provision new machines by name first.")
                 return False
-            self.hosts = [record["address"] for record in records]
+            self.hosts = [record.get("name") or record["node"][:8] for record in records]
+            for host, record in zip(self.hosts, records, strict=True):
+                self._place(host, record)
             return True
-        if self.hosts:
-            return True
-        return self._choose_from_network()
+        if not self.hosts and not self._choose_from_network():
+            return False
+        for host in self.hosts:
+            self._place(host, NodePairing.find(host, browse=False))
+        return True
+
+    def _place(self, host: str, record: dict[str, Any] | None) -> None:
+        """Decides what to connect to for one host, by name, never by a remembered address.
+
+        The name as given if it resolves, `<name>.local` (mDNS) for a bare name that does not, and
+        for a paired node whose name resolves neither way, the address a browse for its id finds
+        now (`NodePairing.resolve`). A paired node is logged into as its record's user unless
+        `--user` says otherwise.
+
+        Args:
+            host: The name typed (or the paired node's name, under `--all`).
+            record: The paired node's record, or None for a machine not paired here.
+        """
+        if record is not None and not self.options.get("user") and record.get("user"):
+            self.users[host] = record["user"]
+        candidates = [host]
+        if BARE_NAME.fullmatch(host):
+            candidates.append(f"{host}.local")
+        if record is not None and record.get("name") and record["name"] != host:
+            candidates += [record["name"], f"{record['name']}.local"]
+        for candidate in candidates:
+            if self._resolves(candidate):
+                self.connect[host] = candidate
+                return
+        address = NodePairing.resolve(record) if record is not None else None
+        if address is not None:
+            self.connect[host] = address
+        elif record is not None:
+            self._fail(
+                host,
+                "connect",
+                "off the network: its name does not resolve and no browse shows its id "
+                "(its remembered address was not tried)",
+                f"ling-admin node provision {host}",
+            )
+        else:
+            # Not resolvable here: ssh says why, at the connect step.
+            self.connect[host] = candidates[-1]
+
+    @classmethod
+    def _resolves(cls, name: str) -> bool:
+        """Whether this machine's resolver (mDNS for `.local`) finds the name now."""
+        try:
+            return bool(socket.getaddrinfo(name, 22, type=socket.SOCK_STREAM))
+        except (OSError, UnicodeError):
+            return False
 
     def _choose_from_network(self) -> bool:
         from dreamference.node.node_browser import NodeBrowser
@@ -161,6 +224,8 @@ class NodeProvisioner:
             self.askpass = FleetAskpass(self.run_dir, self.passwords)
             self.askpass.start(self._admin_executable())
         for host in self.hosts:
+            if self.results.get(host, {}).get("failed"):
+                continue
             session = self._session_for(host)
             if self._open(session):
                 self.sessions[host] = session
@@ -178,20 +243,29 @@ class NodeProvisioner:
                 )
 
     def _ask_passwords(self) -> None:
+        # Keyed by what each session connects to: that is the name askpass and sudo look up.
         if self.options.get("per_host_password"):
             for host in self.hosts:
-                self.passwords[host] = getpass.getpass(f"Password for {self.user} on {host}: ")
+                self.passwords[self._address(host)] = getpass.getpass(
+                    f"Password for {self._user(host)} on {host}: "
+                )
             return
         shared = getpass.getpass(f"Password for {self.user} on all {len(self.hosts)} machines: ")
-        self.passwords = {host: shared for host in self.hosts}
+        self.passwords = {self._address(host): shared for host in self.hosts}
+
+    def _address(self, host: str) -> str:
+        if self.options.get("via") and len(self.hosts) == 1:
+            return self.options["via"]
+        return self.connect.get(host, host)
+
+    def _user(self, host: str) -> str:
+        return self.users.get(host, self.user)
 
     def _session_for(self, host: str) -> FleetSession:
-        address = (
-            self.options.get("via") if self.options.get("via") and len(self.hosts) == 1 else host
-        )
+        address = self._address(host)
         safe = "".join(ch if ch.isalnum() or ch in "-." else "_" for ch in host)
         log = Path(LOG_DIR) / f"{datetime.date.today().isoformat()}-{safe}.log"
-        session = FleetSession(address, self.user, self.run_dir, log_path=log)
+        session = FleetSession(address, self._user(host), self.run_dir, log_path=log)
         if self.askpass is not None:
             session.askpass_env = self.askpass.environment(address)
         return session
@@ -203,7 +277,7 @@ class NodeProvisioner:
             return False
         # The shared password was refused here: this machine's own, asked once.
         self.passwords[session.host] = getpass.getpass(
-            f"{session.host} refused that password. Its own password for {self.user}: "
+            f"{session.host} refused that password. Its own password for {session.user}: "
         )
         return session.open()
 
@@ -286,6 +360,8 @@ class NodeProvisioner:
         version = FleetBundle.version(self.bundle)
         if self._state(host).get("bundle") == version and self._state(host).get("admin") == "1":
             return True
+        if not self._step_venv(host, session):
+            return False
         remote = f"{REMOTE_BUNDLE_DIR}/{self.bundle.name}"
         copied = session.rsync(self.bundle, remote)
         if copied.returncode != 0:
@@ -303,27 +379,49 @@ class NodeProvisioner:
             return self._fail(
                 host,
                 "install Mightling",
-                installed.stderr.strip()[-200:],
+                (installed.stderr.strip() or installed.stdout.strip())[-200:],
                 f"ling-admin node provision {host}",
             )
         self._done(host, f"Mightling {version} installed")
         return self._reprobe(host, session)
+
+    def _step_venv(self, host: str, session: FleetSession) -> bool:
+        """Installs python3-venv as root when the machine lacks it, before `install.sh` needs it.
+
+        DGX OS ships python3 without it (a fresh GX10, 2026-10-08), and `install.sh` run over the
+        session has no terminal for sudo, so it can only fail there. This is the one root command
+        before `node prepare`, which needs the virtualenv this makes possible.
+        """
+        if self._state(host).get("venv", PROBE_YES) == PROBE_YES:
+            return True
+        installed = session.sudo(
+            "env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y "
+            "python3-venv",
+            self.passwords.get(session.host),
+        )
+        if installed.returncode != 0:
+            return self._fail(
+                host,
+                "install python3-venv",
+                (installed.stdout or installed.stderr or "").strip()[-200:],
+                f"ssh -t {self._user(host)}@{host} sudo apt-get install -y python3-venv",
+            )
+        self._done(host, "python3-venv installed")
+        return True
 
     def _step_prepare(self, host: str, session: FleetSession) -> bool:
         check = session.run_admin(["host", "check"])
         if FleetProbe.prepared(self._state(host)) and check.returncode == 0:
             self.results[host]["host_check"] = "pass"
             return True
-        print(
-            f"🔑 {host}: the root half, `sudo ling-admin node prepare` (it prints each change)."
-        )
+        print(f"🔑 {host}: the root half, `sudo ling-admin node prepare` (it prints each change).")
         prepared = session.sudo(f"{REMOTE_ADMIN} node prepare", self.passwords.get(session.host))
         if prepared.returncode != 0:
             return self._fail(
                 host,
                 "node prepare",
                 (prepared.stdout or prepared.stderr or "").strip()[-300:],
-                f"ssh {self.user}@{host} sudo {REMOTE_ADMIN} node prepare",
+                f"ssh {self._user(host)}@{host} sudo {REMOTE_ADMIN} node prepare",
             )
         self._done(
             host,
@@ -345,7 +443,7 @@ class NodeProvisioner:
                 host,
                 "advertise",
                 enabled.stdout.strip()[-200:],
-                f"ssh {self.user}@{host} ling-admin node enable --no-web",
+                f"ssh {self._user(host)}@{host} ling-admin node enable --no-web",
             )
         self._done(host, "advertised on the LAN")
         return True
@@ -386,7 +484,7 @@ class NodeProvisioner:
                 host,
                 "start SearXNG",
                 searxng.stdout.strip()[-200:],
-                f"ssh {self.user}@{host} ling-admin searxng start",
+                f"ssh {self._user(host)}@{host} ling-admin searxng start",
             )
         return True
 
@@ -413,7 +511,7 @@ class NodeProvisioner:
                     host,
                     "pull an image",
                     pulled.stderr.strip()[-200:],
-                    f"ssh {self.user}@{host} docker pull {image}",
+                    f"ssh {self._user(host)}@{host} docker pull {image}",
                 )
         return True
 
@@ -445,7 +543,7 @@ class NodeProvisioner:
             if record is None:
                 return self._fail(host, "pair", "pairing failed", f"ling-admin node add {host}")
             self._done(host, "paired")
-        record["address"] = host
+        record["address"] = self.connect.get(host, host)
         record["provisioned"] = {
             "bundle": FleetBundle.version(self.bundle) if self.bundle else "",
             "model": self.model,
@@ -465,10 +563,11 @@ class NodeProvisioner:
         if self.options.get("no_start"):
             self.results[host].update(state="stopped", complete=True)
             return
-        running = self._served_model(host, port)
+        address = self.connect.get(host, host)
+        running = self._served_model(address, port)
         if running is None or self.options.get("restart"):
             NodePairing.run(record, "start", capture=True)
-            running = self._wait_for_model(host, port)
+            running = self._wait_for_model(address, port)
         if running is None:
             self._fail(
                 host,
@@ -478,7 +577,7 @@ class NodeProvisioner:
             )
             return
         self.results[host]["state"] = "ready"
-        self.results[host]["verify"] = self._verify(host, port, running)
+        self.results[host]["verify"] = self._verify(address, port, running)
         self.results[host]["complete"] = self.results[host]["verify"] == "ok"
         if not self.results[host]["complete"]:
             self.results[host]["left"] = f"ling-admin node status {host}"
@@ -575,25 +674,61 @@ class NodeProvisioner:
 
     def _describe_dry_run(self, host: str) -> None:
         state = self._state(host)
-        version = "this machine's build"
-        changes = []
-        if state.get("admin") != "1":
-            changes.append(f"install Mightling ({version})")
-        if not FleetProbe.prepared(state):
-            changes.append("sudo ling-admin node prepare")
-        if self.options.get("web"):
-            changes.append("node enable (ling web on the LAN)")
-        elif state.get("advertised") != "1":
-            changes.append("node enable --no-web")
-        for folder in FleetProbe.missing_models(state, self.plan["folders"]):
-            changes.append(f"copy {folder}")
-        for image in FleetProbe.missing_images(
-            state, self.plan["copy_images"] + self.plan["pull_images"]
-        ):
-            changes.append(f"image {image}")
-        changes.append(f"main-model set {self.model}, pair, start")
+        changes = [*self._dry_run_install(state), *self._dry_run_models(state)]
+        node_id = state.get("node_id", "")
+        if not node_id or NodePairing.find(node_id, browse=False) is None:
+            changes.append("pair (node add over the session)")
+        if not self.options.get("no_start"):
+            changes.append(
+                "start the model server and verify"
+                + (" (restarted)" if self.options.get("restart") else " (unless it serves)")
+            )
         print(f"📋 {host} would change: " + "; ".join(changes))
         self.results[host].update(complete=True, left="(dry run)")
+
+    def _dry_run_install(self, state: dict[str, str]) -> list[str]:
+        """The install, root and advertising changes a dry run names for one probed machine."""
+        source = self.options.get("source") or "this"
+        expected = FleetBundle.expected_version(source)
+        changes = []
+        if state.get("venv", PROBE_YES) != PROBE_YES:
+            changes.append("sudo apt-get install python3-venv (DGX OS lacks it)")
+        if state.get("admin") != PROBE_YES:
+            changes.append(f"install Mightling ({expected or source})")
+        elif expected is None or state.get("bundle") != expected:
+            changes.append(
+                f"replace Mightling {state.get('bundle') or '(no version recorded)'} with "
+                f"{expected or 'the bundle of --from ' + source}"
+            )
+        changes.append(
+            "sudo ling-admin node prepare"
+            if not FleetProbe.prepared(state)
+            else "sudo ling-admin node prepare if `host check` fails there"
+        )
+        if self.options.get("web"):
+            changes.append("node enable (ling web on the LAN)")
+        elif state.get("advertised") != PROBE_YES:
+            changes.append("node enable --no-web")
+        return changes
+
+    def _dry_run_models(self, state: dict[str, str]) -> list[str]:
+        """The weights, images, SearXNG and assignment a dry run names for one probed machine."""
+        from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+
+        changes = [
+            f"copy {folder}" for folder in FleetProbe.missing_models(state, self.plan["folders"])
+        ]
+        changes += [
+            f"image {image}"
+            for image in FleetProbe.missing_images(
+                state, self.plan["copy_images"] + self.plan["pull_images"]
+            )
+        ]
+        if state.get("searxng") != CONTAINER_RUNNING:
+            changes.append("searxng start")
+        if (state.get("model") or DEFAULT_MODEL_ALIAS) != self.model:
+            changes.append(f"main-model set {self.model}")
+        return changes
 
     @classmethod
     def configured_model(cls) -> str:
