@@ -98,7 +98,7 @@ fn pieces(unit: &Unit, counter: &dyn TokenCount) -> Vec<Piece> {
     out
 }
 
-/// What is being packed: texts, their locators, pages and lines.
+/// What is being packed: texts, their locators, pages and lines, and the units' group.
 #[derive(Default)]
 struct Packing {
     texts: Vec<String>,
@@ -106,13 +106,57 @@ struct Packing {
     locs: Vec<String>,
     pages: Vec<u32>,
     lines: Vec<u32>,
+    group: Option<u32>,
+}
+
+/// `lines 10-40`, `para 3-9`, `rows 2-21`: the word and the range.
+fn range(loc: &str) -> Option<(&str, u32, u32)> {
+    let (word, span) = loc.split_once(' ')?;
+    if !matches!(word, "lines" | "para" | "rows") {
+        return None;
+    }
+    let (a, b) = span.split_once('-')?;
+    Some((word, a.parse().ok()?, b.parse().ok()?))
+}
+
+/// The `msg N` a mail unit's locator starts with.
+fn message_of(loc: &str) -> Option<&str> {
+    let rest = loc.strip_prefix("msg ")?;
+    let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    (digits > 0).then(|| &loc[..4 + digits])
+}
+
+/// Whether two locators may be joined into one result: not when they are different messages of
+/// one mailbox.
+pub fn same_message(a: &str, b: &str) -> bool {
+    message_of(a.split(" .. ").next().unwrap_or(a)) == message_of(b.split(" .. ").next().unwrap_or(b))
+}
+
+/// The locator of a run of consecutive units or chunks, from its first and last: one range when
+/// both are ranges of the same lines (`lines 1-80`), the message when both are in one (`msg 3`),
+/// else `first .. last`.
+pub fn join_locs(first: &str, last: &str) -> String {
+    if first == last {
+        return first.to_string();
+    }
+    if let (Some((w1, a, _)), Some((w2, _, b))) = (range(first), range(last)) {
+        if w1 == w2 && a <= b {
+            return format!("{w1} {a}-{b}");
+        }
+    }
+    if let (Some(m1), Some(m2)) = (message_of(first), message_of(last)) {
+        if m1 == m2 {
+            return m1.to_string();
+        }
+    }
+    format!("{first} .. {last}")
 }
 
 impl Packing {
     fn emit(&mut self, heading: &str, out: &mut Vec<Chunk>) {
         let text = self.texts.join("\n");
         if !self.texts.is_empty() && !text.trim().is_empty() {
-            let loc = if self.locs.len() == 1 { self.locs[0].clone() } else { format!("{} .. {}", self.locs[0], self.locs[self.locs.len() - 1]) };
+            let loc = if self.locs.len() == 1 { self.locs[0].clone() } else { join_locs(&self.locs[0], &self.locs[self.locs.len() - 1]) };
             out.push(Chunk {
                 loc,
                 page_first: self.pages.iter().min().copied(),
@@ -127,10 +171,15 @@ impl Packing {
     }
 }
 
-/// A unit's locator for a window of its lines: `lines a-b` for line-located units, else its own.
+/// A unit's locator for a window of its lines: the range in the unit's own word (`lines a-b`,
+/// `para a-b`, `rows a-b`), a message's lines after the message (`msg 3, lines a-b`), or for
+/// a page, the page.
 fn window_loc(unit: &Unit, lines: &[u32]) -> String {
     match (unit.line_first, lines.iter().min(), lines.iter().max()) {
-        (Some(_), Some(a), Some(b)) => format!("lines {a}-{b}"),
+        (Some(_), Some(a), Some(b)) => match range(&unit.loc) {
+            Some((word, ..)) => format!("{word} {a}-{b}"),
+            None => format!("{}, lines {a}-{b}", unit.loc),
+        },
         _ => unit.loc.clone(),
     }
 }
@@ -142,9 +191,10 @@ pub fn chunk(units: &[Unit], counter: &dyn TokenCount, target: usize, overlap: f
     let mut heading = String::new();
     for unit in units {
         let tokens = counter.count(&unit.text);
-        if cur.tokens + tokens > target && !cur.texts.is_empty() {
+        if !cur.texts.is_empty() && (cur.tokens + tokens > target || unit.group != cur.group) {
             cur.emit(&heading, &mut out);
         }
+        cur.group = unit.group;
         if !unit.heading.is_empty() {
             heading = unit.heading.clone();
         }
@@ -168,6 +218,7 @@ pub fn chunk(units: &[Unit], counter: &dyn TokenCount, target: usize, overlap: f
                 locs: vec![window_loc(unit, &lines)],
                 pages: unit.page.into_iter().collect(),
                 lines,
+                group: unit.group,
             };
             packing.emit(heading, out);
         };
@@ -201,7 +252,7 @@ mod tests {
 
     fn unit(loc: &str, first: u32, text: &str) -> Unit {
         let n = text.split('\n').count() as u32;
-        Unit { loc: loc.into(), page: None, line_first: Some(first), line_last: Some(first + n - 1), heading: String::new(), text: text.into() }
+        Unit { loc: loc.into(), page: None, line_first: Some(first), line_last: Some(first + n - 1), heading: String::new(), group: None, text: text.into() }
     }
 
     #[test]
@@ -209,7 +260,7 @@ mod tests {
         let units = vec![unit("lines 1-1", 1, "a b c"), unit("lines 2-2", 2, "d e f"), unit("lines 3-3", 3, "g h i j")];
         let chunks = chunk(&units, &Words, 6, 0.15);
         assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].loc, "lines 1-1 .. lines 2-2");
+        assert_eq!(chunks[0].loc, "lines 1-2");
         assert_eq!((chunks[0].line_first, chunks[0].line_last), (Some(1), Some(2)));
         assert_eq!(chunks[1].text, "g h i j");
     }
@@ -226,6 +277,26 @@ mod tests {
         assert_eq!(chunks[0].line_first, Some(10));
         assert!(chunks[0].loc.starts_with("lines 10-"));
         assert_eq!(chunks.last().unwrap().line_last, Some(39));
+    }
+
+    #[test]
+    fn a_message_is_never_packed_with_another_and_its_windows_name_it() {
+        let mut units = vec![unit("msg 1", 1, "a b"), unit("msg 1 · notes.txt", 2, "c d"), unit("msg 2", 3, "e f")];
+        units[0].group = Some(1);
+        units[1].group = Some(1);
+        units[2].group = Some(2);
+        let chunks = chunk(&units, &Words, 100, 0.15);
+        let locs: Vec<&str> = chunks.iter().map(|c| c.loc.as_str()).collect();
+        assert_eq!(locs, ["msg 1", "msg 2"]);
+        let text: String = (1..=30).map(|i| format!("Sentence number {i} is here.")).collect::<Vec<_>>().join("\n");
+        let mut long = unit("msg 4", 10, &text);
+        long.group = Some(4);
+        let chunks = chunk(&[long], &Words, 50, 0.15);
+        assert!(chunks[0].loc.starts_with("msg 4, lines 10-"), "{}", chunks[0].loc);
+        assert_eq!(join_locs("para 1-4", "para 5-9"), "para 1-9");
+        assert_eq!(join_locs("p.1", "p.2"), "p.1 .. p.2");
+        assert_eq!(join_locs("msg 12, lines 3-9", "msg 12 · a.pdf p.2"), "msg 12");
+        assert_eq!(join_locs("msg 1", "msg 12"), "msg 1 .. msg 12");
     }
 
     #[test]

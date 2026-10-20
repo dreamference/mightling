@@ -27,6 +27,7 @@ import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addTask, dropTask, readReport, readReports, readTasks, runNow } from "./night";
 import { Nodes } from "./nodes";
+import { locate } from "./docs";
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
@@ -461,6 +462,14 @@ export async function main(options: MainOptions): Promise<void> {
         if (!editor) throw new Error("no editor was found; choose one in the review pane");
         const { command, args } = openCommand(editor, dir, null);
         git.launch(command, args, dir);
+        return null;
+      }
+      case "docs/open": {
+        // A citation of the user's documents: the id goes to `ling docs locate`, the file it names to the system.
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        const failed = await shell.openPath(await locate(ling, message.doc));
+        if (failed) throw new Error(failed);
         return null;
       }
       case "open/folder": {

@@ -7,8 +7,8 @@
 //! is served only on an advertised node. It calls
 //! nothing on any network: its outbound connections are the app-server's socket and, for the
 //! microphone, the speech-to-text service on loopback (sidecars.rs); the only processes it starts
-//! are `ling app-server`, `ling prompt show --composed` and, for a phone bridge's image, the
-//! offline text reader (ocr.rs).
+//! are `ling app-server`, `ling prompt show --composed`, for a phone bridge's image, the offline
+//! text reader (ocr.rs), and, to open a cited document, `ling docs locate` (documents.rs).
 
 pub mod app_server;
 pub mod ask;
@@ -17,6 +17,7 @@ pub mod assets;
 pub mod auth;
 pub mod cli;
 pub mod devices;
+pub mod documents;
 pub mod ocr;
 pub mod policy;
 pub mod prompts;
