@@ -4,7 +4,9 @@
 // off or on (`skills/config/write`), a plugin of a local or repository marketplace installed or
 // removed (`plugin/install`, `plugin/uninstall`; the vendor's catalogue stays closed, patch 0015),
 // an MCP server added, turned off or on and the servers read again (`config/value/write`,
-// `config/mcpServer/reload`), an app turned off or on.
+// `config/mcpServer/reload`), an app turned off or on, a hook trusted or turned off (`config/batchWrite`
+// on `hooks.state`, as the TUI does: Codex skips a hook that is not managed until its definition is
+// trusted, and again once it changes; DESKTOP_PARITY §4.5 item 15).
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -13,6 +15,8 @@ import { ImportPanel } from "./ImportPanel";
 import type { Listen } from "./turns";
 import type { RpcClient } from "./rpc";
 import type { AppInfo } from "./protocol/v2/AppInfo";
+import type { ConfigBatchWriteParams } from "./protocol/v2/ConfigBatchWriteParams";
+import type { HookMetadata } from "./protocol/v2/HookMetadata";
 import type { HooksListEntry } from "./protocol/v2/HooksListEntry";
 import type { PluginMarketplaceEntry } from "./protocol/v2/PluginMarketplaceEntry";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
@@ -37,6 +41,39 @@ export function skillSource(skill: Pick<SkillMetadata, "scope" | "path">): strin
 
 /** An MCP server's name as config.toml keys it. */
 export const MCP_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Whether Codex skips this hook until it is reviewed: it is not managed and was never trusted, or changed since. */
+export function hookNeedsReview(hook: Pick<HookMetadata, "trustStatus">): boolean {
+  return hook.trustStatus === "untrusted" || hook.trustStatus === "modified";
+}
+
+/** A hook's trust state, in words. */
+export function hookTrustLabel(hook: Pick<HookMetadata, "trustStatus">): string {
+  return { managed: "managed", trusted: "trusted", untrusted: "not trusted yet: skipped", modified: "changed since it was trusted: skipped" }[hook.trustStatus] ?? hook.trustStatus;
+}
+
+/** What a hook runs: its command, the MCP tool it calls, or its kind. */
+export function hookHandler(hook: HookMetadata): string {
+  return hook.handlerType === "command" ? hook.command : hook.handlerType === "mcpTool" ? `${hook.server}.${hook.tool}` : hook.handlerType;
+}
+
+/** The hooks every listed folder shows, once each (a user hook is listed for every folder asked about). */
+export function uniqueHooks(entries: HooksListEntry[]): HookMetadata[] {
+  const seen = new Map<string, HookMetadata>();
+  for (const hook of entries.flatMap((entry) => entry.hooks)) if (!seen.has(hook.key)) seen.set(hook.key, hook);
+  return [...seen.values()];
+}
+
+/** The write that trusts these hooks as they are now: `hooks.state.<key>.trusted_hash` = their current hash, reloaded at once (the TUI's `write_hook_trusts`). */
+export function hookTrustEdit(hooks: Pick<HookMetadata, "key" | "currentHash">[]): ConfigBatchWriteParams {
+  const value = Object.fromEntries(hooks.map((hook) => [hook.key, { trusted_hash: hook.currentHash }]));
+  return { edits: [{ keyPath: "hooks.state", value, mergeStrategy: "upsert" }], filePath: null, expectedVersion: null, reloadUserConfig: true };
+}
+
+/** The write that turns a hook off or on again: `hooks.state.<key>.enabled`. */
+export function hookEnabledEdit(key: string, enabled: boolean): ConfigBatchWriteParams {
+  return { edits: [{ keyPath: "hooks.state", value: { [key]: { enabled } }, mergeStrategy: "upsert" }], filePath: null, expectedVersion: null, reloadUserConfig: true };
+}
 
 /** The config.toml value of a new MCP server: a command with its arguments, or a URL. */
 export function mcpServerValue(kind: "command" | "url", target: string, args: string): Record<string, unknown> {
@@ -77,6 +114,24 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
     }
   };
 
+  /** Trusts hooks (after the user saw each command) or turns one off or on, then reads them again. */
+  const writeHooks = async (params: ConfigBatchWriteParams) => {
+    try {
+      await client.request("config/batchWrite", params);
+      setChanged(true);
+      load();
+    } catch (error) {
+      notice(error);
+    }
+  };
+  const trust = (chosen: HookMetadata[]) => {
+    const commands = chosen.map((hook) => `${hook.eventName}: ${hookHandler(hook)}`).join("\n");
+    if (!window.confirm(`Trust ${chosen.length === 1 ? "this hook" : `these ${chosen.length} hooks`}? ${chosen.length === 1 ? "It runs" : "They run"} at points of every turn, as you, outside the sandbox:\n\n${commands}`)) return;
+    void writeHooks(hookTrustEdit(chosen));
+  };
+  const listedHooks = hooks ? uniqueHooks(hooks) : [];
+  const waiting = listedHooks.filter(hookNeedsReview);
+
   const write = async (keyPath: string, value: unknown) => {
     try {
       await client.request("config/value/write", { keyPath, value: value as never, mergeStrategy: "upsert" });
@@ -94,7 +149,7 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
         <nav className="review-scopes" aria-label="Kinds">
           {(["skills", "plugins", "mcp", "apps", "hooks", "import"] as const).map((tab) => (
             <button key={tab} className={props.tab === tab ? "selected" : ""} aria-pressed={props.tab === tab} onClick={() => props.setTab(tab)}>
-              {{ skills: "Skills", plugins: "Plugins", mcp: "MCP servers", apps: "Apps", hooks: "Hooks", import: "Import" }[tab]}
+              {{ skills: "Skills", plugins: "Plugins", mcp: "MCP servers", apps: "Apps", hooks: waiting.length ? `Hooks (${waiting.length} to review)` : "Hooks", import: "Import" }[tab]}
             </button>
           ))}
         </nav>
@@ -146,15 +201,25 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
         ) : null}
         {props.tab === "hooks" ? (
           <>
-            <p className="dialog-note">Hooks run at points of a turn; listed here to read. Mightling's own ledger hook is among them.</p>
-            {hooks === null ? <p className="empty small">…</p> : hooks.every((entry) => entry.hooks.length === 0) ? <p className="empty small">No hooks.</p> : (
+            <p className="dialog-note">Hooks run at points of a turn, as you and outside the sandbox. One that is not managed runs only once you trust it as it is now, and again after it changes; Mightling's own ledger hook is among them.</p>
+            {waiting.length ? (
+              <div className="notice" role="status">
+                {waiting.length === 1 ? "One hook is" : `${waiting.length} hooks are`} skipped until you review and trust {waiting.length === 1 ? "it" : "them"}.
+                {waiting.length > 1 ? <> <button className="link-button" onClick={() => trust(waiting)}>Trust all {waiting.length}…</button></> : null}
+              </div>
+            ) : null}
+            {hooks === null ? <p className="empty small">…</p> : listedHooks.length === 0 ? <p className="empty small">No hooks.</p> : (
               <table className="shortcut-table">
                 <tbody>
-                  {hooks.flatMap((entry) => entry.hooks).map((hook) => (
-                    <tr key={hook.key}>
+                  {listedHooks.map((hook) => (
+                    <tr key={hook.key} className={hookNeedsReview(hook) ? "hook-review" : undefined}>
                       <td><code>{hook.eventName}</code>{hook.matcher ? <span className="planned-note"> {hook.matcher}</span> : null}</td>
-                      <td>{hook.handlerType === "command" ? <code>{hook.command}</code> : hook.handlerType === "mcpTool" ? `${hook.server}.${hook.tool}` : hook.handlerType}</td>
-                      <td className="planned-note">{hook.enabled ? "on" : "off"}{hook.pluginId ? ` · ${hook.pluginId}` : ""}</td>
+                      <td><code>{hookHandler(hook)}</code><div className="planned-note" title={hook.sourcePath}>{hook.pluginId ? `plugin ${hook.pluginId}` : hook.sourcePath}</div></td>
+                      <td className="planned-note">{hook.enabled ? "on" : "off"} · {hookTrustLabel(hook)}</td>
+                      <td>
+                        {hookNeedsReview(hook) ? <button onClick={() => trust([hook])} aria-label={`Trust ${hookHandler(hook)}`}>Trust…</button> : null}
+                        {hook.isManaged ? null : <button onClick={() => void writeHooks(hookEnabledEdit(hook.key, !hook.enabled))}>{hook.enabled ? "Turn off" : "Turn on"}</button>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
