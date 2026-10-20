@@ -8,6 +8,7 @@
 
 pub mod agent;
 pub mod attachments;
+pub mod blocks;
 pub mod cli;
 pub mod hub;
 pub mod limits;

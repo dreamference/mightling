@@ -231,7 +231,7 @@ async fn answers_are_formatted_typing_is_renewed_and_reactions_answer_approvals(
     assert_eq!(sent[0].1["formatted_body"], "<b>Yes</b>: <code>ls</code>");
 
     renderer
-        .render(Outbound::Approval { chat: chat.clone(), id: 3, text: "Run `make`?".into(), options: vec!["Approve once".into(), "Decline".into()] })
+        .render(Outbound::Approval { chat: chat.clone(), id: "3".into(), text: "Run `make`?".into(), options: vec!["Approve once".into(), "Decline".into()] })
         .await;
     let approval_event = format!("$e{}", stand.calls("PUT", "/send/").len());
     let reaction = |key: &str| {
@@ -243,8 +243,8 @@ async fn answers_are_formatted_typing_is_renewed_and_reactions_answer_approvals(
     syncer.handle(&config, &reaction("🎉"), false).await;
     assert!(inbound.try_recv().is_err());
     syncer.handle(&config, &reaction("❌"), false).await;
-    assert_eq!(inbound.try_recv().unwrap(), Inbound::Answer { chat: chat.clone(), approval: 3, choice: 1 });
-    renderer.render(Outbound::ApprovalClosed { chat: chat.clone(), id: 3, outcome: "Declined.".into() }).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Answer { chat: chat.clone(), approval: "3".into(), choice: 1 });
+    renderer.render(Outbound::ApprovalClosed { chat: chat.clone(), id: "3".into(), outcome: "Declined.".into() }).await;
     // Closed: a late reaction finds nothing.
     syncer.handle(&config, &reaction("✅"), false).await;
     assert!(inbound.try_recv().is_err());
