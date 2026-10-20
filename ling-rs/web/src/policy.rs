@@ -27,7 +27,8 @@ pub trait PromptSource: Send + Sync {
     /// --composed` prints it.
     fn composed(&self, name: &str) -> Result<String, String>;
     /// Creates a new, empty scratch folder for one Ask thread and returns its path.
-    fn new_scratch_folder(&self) -> Result<String, String>;
+    /// A new Ask folder for a thread started with the prompt `prompt` (ask.rs names it after it).
+    fn new_scratch_folder(&self, prompt: &str) -> Result<String, String>;
     /// The scratch folder of an existing Ask thread, or None for any other thread: a resumed or
     /// forked Ask thread stays in its folder, whatever the UI asks for.
     fn scratch_folder_of(&self, thread_id: &str) -> Option<String>;
@@ -184,7 +185,7 @@ impl Policy {
             params.insert("baseInstructions".to_string(), Value::String(prompts.composed(&name)?));
         }
         if self.scratch_prompts.contains(&name) {
-            self.confine(&mut params, prompts.new_scratch_folder()?);
+            self.confine(&mut params, prompts.new_scratch_folder(&name)?);
         }
         Ok(params)
     }
@@ -297,7 +298,7 @@ mod tests {
         fn composed(&self, name: &str) -> Result<String, String> {
             Ok(format!("PROMPT:{name}"))
         }
-        fn new_scratch_folder(&self) -> Result<String, String> {
+        fn new_scratch_folder(&self, _prompt: &str) -> Result<String, String> {
             let mut made = self.made.lock().unwrap();
             *made += 1;
             Ok(format!("SCRATCH/{made}"))

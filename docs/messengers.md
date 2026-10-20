@@ -39,6 +39,17 @@ is not a preview.
   [chat]
   new_thread_after_hours = 4
   ```
+- **Answers are bounded.** An answer that takes over three minutes, uses over 25 tool calls or
+  runs one command over a minute is asked to finish with what it has; if it still runs, it is
+  stopped and asked once more, without tools, and you are told. `/stop` stops it at once. Change the
+  bounds (0 switches one off) in `~/.config/dreamference/config.toml`:
+
+  ```toml
+  [chat]
+  answer_seconds = 180
+  tool_calls = 25
+  command_seconds = 60
+  ```
 - **Reading text in images needs Tesseract** on the node, offline: `ling signal setup` installs it;
   otherwise `sudo apt install tesseract-ocr`. It reads every installed language; add one with
   `sudo apt install tesseract-ocr-<code>` (for example `tesseract-ocr-por`).
