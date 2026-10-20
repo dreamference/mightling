@@ -783,6 +783,27 @@ test("11 plugins and hooks: a skill turned off, a plugin installed from a local 
     await view.getByRole("button", { name: "Hooks" }).click();
     await expect(view).toContainText("ling ledger");
     await shoot("11-hooks.png");
+    // Item 15: a project's hook nobody trusted yet is skipped, and says so; Trust shows the command first.
+    await expect(view.getByRole("button", { name: "Hooks (1 to review)" })).toBeVisible();
+    const audit = view.locator("tr", { hasText: "./scripts/audit.sh" });
+    await expect(audit).toContainText("not trusted yet: skipped");
+    await expect(view.locator("tr", { hasText: "ling ledger" })).toContainText("managed");
+    let asked = "";
+    page.once("dialog", (dialog) => {
+      asked = dialog.message();
+      void dialog.accept();
+    });
+    await audit.getByRole("button", { name: "Trust ./scripts/audit.sh" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "config/batchWrite")?.params).toEqual({
+      edits: [{ keyPath: "hooks.state", value: { "/w/app/.codex/hooks.json:post_tool_use:0:0": { trusted_hash: "sha256:audit-v1" } }, mergeStrategy: "upsert" }],
+      filePath: null, expectedVersion: null, reloadUserConfig: true,
+    });
+    expect(asked).toContain("PostToolUse: ./scripts/audit.sh");
+    await expect(audit).not.toContainText("skipped");
+    await expect(audit).toContainText("on · trusted");
+    await expect(view.getByRole("button", { name: "Hooks", exact: true })).toBeVisible();
+    await audit.getByRole("button", { name: "Turn off" }).click();
+    await expect(audit).toContainText("off · trusted");
   } finally {
     await close();
   }
