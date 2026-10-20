@@ -47,9 +47,10 @@ export class Notices {
       const status = turn.status === "failed" ? "stopped with an error" : turn.status === "interrupted" ? "was stopped" : "finished";
       return { title: "Mightling", body: `A turn ${status}.`, threadId, always: prefs.notifyTurns === "always" };
     }
-    if (method && "id" in message && /requestApproval$|requestUserInput$|^execCommandApproval$|^applyPatchApproval$/.test(method)) {
+    if (method && "id" in message && /requestApproval$|requestUserInput$|^execCommandApproval$|^applyPatchApproval$|^mcpServer\/elicitation\/request$/.test(method)) {
       if (readPrefs().notifyApprovals === false) return null;
-      const what = method.includes("UserInput") ? "a question" : "an approval";
+      if (method === "mcpServer/elicitation/request" && params.mode === "openai/userVerification") return null;
+      const what = method.includes("UserInput") ? "a question" : method.includes("elicitation") ? "an answer to an MCP server's question" : "an approval";
       return { title: "Mightling", body: `The agent is waiting for ${what}.`, threadId, always: false };
     }
     return null;

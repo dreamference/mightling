@@ -211,6 +211,18 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
         say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "userMessage", id: "u" + id, content: p.input || [] } } });
         const asked = String(((p.input || [])[0] || {}).text || "");
         return setTimeout(() => {
+          // An MCP server asking (item 14): a form, or a link to open.
+          if (asked.includes("with a form")) {
+            say({ id: "elicit-1", method: "mcpServer/elicitation/request", params: { threadId: p.threadId, turnId: id, serverName: "tickets", mode: "form", _meta: null,
+              message: "Which ticket should this go under?", requestedSchema: { type: "object", required: ["ticket"], properties: {
+                ticket: { type: "string", title: "Ticket", description: "Its key, such as OPS-12" },
+                urgent: { type: "boolean", title: "Urgent" },
+                team: { type: "string", title: "Team", oneOf: [{ const: "web", title: "Web" }, { const: "infra", title: "Infrastructure" }] } } } } });
+          }
+          if (asked.includes("with a link")) {
+            say({ id: "elicit-2", method: "mcpServer/elicitation/request", params: { threadId: p.threadId, turnId: id, serverName: "tickets", mode: "url", _meta: null,
+              message: "Sign in to the ticket tracker.", url: "http://127.0.0.1:9/login", elicitationId: "e2" } });
+          }
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }
