@@ -913,3 +913,13 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .starting-project { color: var(--muted); }
 .project.server-project h2 .menu-anchor { margin-left: auto; display: inline-flex; }
 .project.server-project h2 .menu-anchor .project-action { margin-left: 0; }
+
+/* A project's page in Ask (ProjectPage.tsx, DESKTOP_PARITY_CLAUDE §4.7). */
+.project-page { max-width: 720px; margin: 24px auto; padding: 0 20px; display: grid; gap: 12px; }
+.project-page header { display: flex; align-items: center; gap: 10px; }
+.project-page header h1 { font-size: 20px; margin: 0; flex: 1; }
+.project-page h2 { font-size: 13px; font-weight: 600; margin: 8px 0 6px; color: var(--muted); }
+.project-instructions-text { white-space: pre-wrap; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); max-height: 220px; overflow: auto; }
+.project-page .project-files li span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-questions { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.project-add-files { display: inline-flex; align-items: center; gap: 6px; justify-self: start; }

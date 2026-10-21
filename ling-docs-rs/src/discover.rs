@@ -21,7 +21,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use sha2::{Digest, Sha256};
 
-use crate::collections::{Collection, SECRET_DIRS};
+use crate::collections::{secret_dirs, Collection};
 
 /// What a file is read as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -200,7 +200,7 @@ pub fn walk(collection: &Collection, user_home: &Path, images: bool) -> Discover
         Err(_) => return out,
     };
     let home = user_home.canonicalize().unwrap_or_else(|_| user_home.to_path_buf());
-    let secret: Vec<PathBuf> = SECRET_DIRS.iter().map(|d| home.join(d)).collect();
+    let secret: Vec<PathBuf> = secret_dirs(&root, &home);
     let include = globs(&collection.include);
     let exclude = globs(&collection.exclude);
     let max_size = collection.max_file_mb.saturating_mul(1 << 20);

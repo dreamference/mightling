@@ -103,6 +103,9 @@ the release says in §17.
   `~/.config`, browser profiles, password-manager stores, `.git/`, `node_modules/`, build trees,
   and files named like secrets (`.env*`, `*.pem`, `*.key`, `id_*`, `*.p12`, `credentials*`). Adding
   `~` or `/` as a root is refused with an explanation.
+- **One exception (2026-10-21, DESKTOP_PARITY_CLAUDE §4.7):** a desktop project's knowledge folder,
+  `$CODEX_HOME/projects/<id>/knowledge`, may be a collection (`project-<id>`), since it holds only the
+  copies a user gave the project to be read; nothing else under `~/.mightling` is indexed.
 - A folder that is a git repository with a `ling-code` index: source files are left to `ling-code`;
   documents (Markdown, PDF, text) in it are indexed.
 - A per-folder `.lingignore` (gitignore syntax) is honoured for *exclusions only*; it can never
