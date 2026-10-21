@@ -9,7 +9,7 @@
 // (ling-rs/web/src/policy.rs) and the desktop app's main process (desktop/electron/src/policy.ts).
 // So both show Ask by default and Work one click away (`#work`).
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 
 import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
 import * as bridge from "./bridge";
@@ -65,7 +65,8 @@ import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
-import { moveToSection, nextAttention, pinnedFirst, recentThreads, stepThread, threadLink, toggled, type Section } from "./threads";
+import { nearBottom } from "./follow";
+import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, stepThread, threadLink, toggled, type Section } from "./threads";
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { ProjectDialog } from "./ProjectDialog";
@@ -455,6 +456,29 @@ export function App() {
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
   const selected = selectedView && isAskThread(selectedView.thread, askRoot) === (view === "ask") ? selectedView : null;
+
+  // The conversation follows its latest message (follow.ts): a thread opens at the end, new output
+  // keeps the view there only while the reader is there, and an info panel opens at the top.
+  const turnsRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
+  const onTurnsScroll = () => {
+    if (turnsRef.current) followRef.current = nearBottom(turnsRef.current);
+  };
+  useLayoutEffect(() => {
+    const element = turnsRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    followRef.current = true;
+  }, [selected?.thread.id]);
+  useLayoutEffect(() => {
+    const element = turnsRef.current;
+    if (element && followRef.current && !info) element.scrollTop = element.scrollHeight;
+  });
+  useLayoutEffect(() => {
+    if (!info || !turnsRef.current) return;
+    turnsRef.current.scrollTop = 0;
+    followRef.current = false;
+  }, [info]);
 
   // The level can differ per thread (`/airgapped` in the TUI writes a session file).
   useEffect(() => {
@@ -921,8 +945,11 @@ export function App() {
   const rename = async (threadId: string, name: string) => {
     setRenaming(null);
     const trimmed = name.trim();
-    if (!trimmed) return;
-    const before = state.threads[threadId]?.thread.name ?? null;
+    const current = state.threads[threadId]?.thread;
+    // Left as it opened (a blur, Enter on the shown title): nothing to rename, and a title taken
+    // from the first question does not harden into a name.
+    if (!trimmed || (current && trimmed === renameStart(current))) return;
+    const before = current?.name ?? null;
     try {
       await setName(threadId, trimmed);
       undoStack.push({ label: "Rename", undo: () => setName(threadId, before ?? ""), redo: () => setName(threadId, trimmed) });
@@ -1344,7 +1371,7 @@ export function App() {
     archiveChat: () => { if (selected) void archive(selected.thread.id); },
     markUnread: () => { if (selected) markUnread(selected.thread.id); },
     pinChat: () => { if (selected) pin(selected.thread.id); },
-    renameChat: () => { if (selected) setRenaming({ id: selected.thread.id, name: selected.thread.name ?? "" }); },
+    renameChat: () => { if (selected) setRenaming({ id: selected.thread.id, name: renameStart(selected.thread) }); },
     sideChat: () => void sideChat(),
     findInChat: () => { setFindOpen(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".find-bar input")?.select()); },
     findNext: () => setFindAt((at) => (findCount ? (at + 1) % findCount : 0)),
@@ -1641,7 +1668,7 @@ export function App() {
           return editPrevious();
         case "rename":
           if (threadId && args) return rename(threadId, args);
-          if (threadId) setRenaming({ id: threadId, name: selected?.thread.name ?? "" });
+          if (threadId) setRenaming({ id: threadId, name: renameStart(state.threads[threadId]?.thread ?? { name: null, preview: "" }) });
           return;
         case "archive":
           if (threadId) return archive(threadId);
@@ -1983,7 +2010,7 @@ export function App() {
             <button className="icon" title="More" aria-label="More" aria-haspopup="menu" onClick={() => setRowMenu(rowMenu === thread.id ? null : thread.id)}><Icon name="more" size={14} /></button>
             {rowMenu === thread.id ? (
               <span className="menu" role="menu" aria-label="Thread" onClick={() => setRowMenu(null)}>
-                <button role="menuitem" onClick={() => setRenaming({ id: thread.id, name: thread.name || label })}>Rename</button>
+                <button role="menuitem" onClick={() => setRenaming({ id: thread.id, name: renameStart(thread) })}>Rename</button>
                 <button role="menuitem" onClick={() => markUnread(thread.id)}>Mark unread</button>
                 {HOST === "electron" ? <button role="menuitem" onClick={() => void bridge.popOut(thread.id).catch(notice)}>Open in a window of its own</button> : null}
                 <button role="menuitem" onClick={() => copyLink(thread.id)}>Copy link</button>
@@ -2074,7 +2101,13 @@ export function App() {
                   </section>
                 ) : null}
                 <section className="project recents">
-                  <h2 onClick={() => updatePrefs({ recentsOpen: !prefs.recentsOpen })} title="The most recent threads of every project">
+                  <h2 onClick={() => updatePrefs({ recentsOpen: !prefs.recentsOpen })} title="The most recent threads of every project"
+                    role="button" tabIndex={0} aria-expanded={prefs.recentsOpen}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      updatePrefs({ recentsOpen: !prefs.recentsOpen });
+                    }}>
                     <Icon name={prefs.recentsOpen ? "chevronDown" : "chevronRight"} size={12} />Recent
                   </h2>
                   {prefs.recentsOpen ? recentThreads(workThreads, 5).map((thread) => threadRow(thread, workLabel(thread))) : null}
@@ -2205,7 +2238,7 @@ export function App() {
           </div>
         ) : null}
         <OpenFileContext.Provider value={view === "work" ? { open: openFile, cwd: selected?.thread.cwd ?? null, ask: false } : askFolder ? { open: openFile, cwd: askFolder, ask: true } : null}>
-        <div className="turns">
+        <div className="turns" ref={turnsRef} onScroll={onTurnsScroll}>
           {info ? (
             <section className="info-panel" aria-label={info.title}>
               <header><strong>{info.title}</strong><button className="icon" aria-label="Close" onClick={() => setInfo(null)}><Icon name="x" size={14} /></button></header>

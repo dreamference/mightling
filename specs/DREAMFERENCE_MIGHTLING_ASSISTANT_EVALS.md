@@ -518,6 +518,52 @@ Phase 1's code, tested with no model. The first run against the model waits unti
   - `faketime` needs one `apt install` before S4's stale thread can run; without it, S4 is reported as skipped.
   - Each scenario's budgets get set from the first three clean runs.
 
+## 12. The industry runners, as built
+
+Built after the `ask-evals` core (§11), each on its own branch, tested with no model, no network and no Docker. Their first runs wait for the model, like the suite's.
+
+### 12.1 T0 and T1: IFEval and IFBench (branch `industry/ifeval`)
+
+- **`scripts/industry_evals/setup_cache.py ifeval`.** This fetches, into `~/.cache/dreamference/industry/`, never into the repository:
+  - IFEval's scorer and data from `google-research` at `e6890f85` (the last commit touching `instruction_following_eval/`);
+  - IFBench as a tarball at `1c40f0c1`;
+  - NLTK's `punkt` and `punkt_tab`.
+
+  It builds a virtualenv for the scorers. The pins come from IFBench's own `uv.lock` (absl-py, langdetect, nltk, immutabledict, emoji, syllapy and their peers), because IFEval's `requirements.txt` names its four unpinned. `manifest.json` records each source, revision and licence.
+- **`scripts/industry_evals/ifeval.py`.** Each prompt is one ask-evals scenario. That means one turn of `ling exec` in the jail, with the prompt (`--prompt`, `ask` by default) and the cave level (`--cave shipped,off,ultra`) as the variables, three at a time.
+  - The answers go to each set's reference scorer in its virtualenv, with no network.
+  - It reports strict and loose, prompt-level and instruction-level, per set and level, plus the count of empty answers.
+  - `--hold-gate LABEL` holds the gate as the suite does, and a stop clears the hold.
+- **Tests** in `tests/test_industry_evals.py`:
+  - the lock pins, and the refusal when a pin is missing;
+  - setup with stand-in downloads and installs;
+  - the accuracy arithmetic;
+  - the runner end to end with the stand-in `ling` and a stand-in scorer;
+  - the refusal of an empty cache.
+
+### 12.2 T0 and T2: Aider Polyglot (branch `industry/polyglot`)
+
+- **`setup_cache.py polyglot`.** Fetches the exercises at `7e0611e7` into the cache and builds `mightling-polyglot:latest` from `scripts/industry_evals/polyglot/Dockerfile`.
+  - The Dockerfile has the toolchains of aider's `benchmark/Dockerfile`, without aider.
+  - At build time it fetches every Java, Rust and Go exercise's dependencies (`gradlew dependencies`, `cargo fetch`, `go mod download`), so the runs need no network. Java and Rust tests then run `--offline`.
+  - `--no-build` fetches only.
+  - The build waits for a day without a night: it downloads toolchains and runs for a long time.
+- **`polyglot.py`.** Aider's procedure with `ling exec` in place of aider's chat:
+  - aider's instructions and its addendum, word for word;
+  - a workspace without the tests and without `.meta/`, where the reference solution lives. Aider's model never sees the tests, and an agent that could read them would be playing an easier game;
+  - the pristine tests copied in only to grade, with Java's `@Disabled` and JavaScript's `xtest` switched on, a 3-minute limit, and the tests taken out again afterwards;
+  - one `resume --last` with the test output and aider's retry text;
+  - `pass_rate_1` and `pass_rate_2`, overall and per language, with tool calls, output tokens and wall time per case.
+- **The container.** Each exercise runs in its own container on the internal network `mightling-industry`, which reaches only the model at its gateway, with 4 GB and 2 CPUs. It mounts SWE-bench's runtime copy of `ling`, which the runner never rebuilds because a night's SWE-bench containers mount the same folder. `--hold-gate` admits only that network's subnet. The ask-evals `GateHold` now takes the networks to admit.
+- **Tests** against a stand-in Docker:
+  - a first-try pass;
+  - a second-try pass, given the test output and the retry text;
+  - the agent never seeing the tests on either try;
+  - `--tries 1`;
+  - Java's switch-on;
+  - the choice of solution files;
+  - setup with a staged build context.
+
 ## Sources
 
 Every page was fetched on 2026-10-20 with `ling-fetch`. arXiv by number: 2506.07982 (τ²-bench), 2509.17158 and 2602.11964 (ARE, Gaia2), 2508.06600 (BrowseComp-Plus), 2504.12516 (BrowseComp), 2311.12983 (GAIA), 2407.15711 (AssistantBench), 2506.21506 (Mind2Web 2), 2408.04682 (ToolSandbox), 2506.13977 (CRITICTOOL), 2504.18851 (When2Call), 2309.15817 (ToolEmu), 2401.08326 (RoTBench), 2503.04479 (ToolFuzz), 2601.06112 (ReliabilityBench), 2604.01508 (ToolMisuseBench), 2608.11977 (Bench2Robust), 2606.25819 (ToolBench-X), 2605.09252, 2605.00737, 2502.11435, 2406.20015 (tool over-use); 2505.06120 (Lost in Conversation), 2501.17399 (MultiChallenge), 2410.10813 (LongMemEval), 2402.17753 (LoCoMo), 2110.00768 (TopiOCQA), 2605.09268 (Beyond Continuity), 2402.14762 (MT-Bench-101), 2409.12640 (Michelangelo / MRCR), 2410.15553 (Multi-IF), 2503.10497 (MMLU-ProX), 2606.24083 (CAVEWOMAN), 2505.11365 (Phare), 2405.12063 (CLAMBER), 2503.22674 (QuestBench), 2512.21120 (ClarifyMT-Bench), 2507.18791 (CodeMixBench), 2603.01423; 2411.04368 (SimpleQA), 2509.07968 (SimpleQA Verified), 2506.09038 (AbstentionBench), 2504.17550 (HalluLens), 2503.03750 (MASK), 2501.03200 (FACTS Grounding), 2403.20331 (MM-UPD), 2403.20330 (MMStar), 2501.00321 (OCRBench v2), 2404.05955 (VisualWebBench), 2410.04107 (TUBench), 2507.17262 (VisionTrap), 2412.02592 (OHRBench), 2401.07927, 2503.13445, 2602.02639 (self-explanation); 1904.09751, 1908.04319, 2206.02369, 2310.10226 (degeneration), 2512.12895, 2601.05693, 2606.13705, 2512.04419, 2511.00640 (loops), 2409.02076, 2409.16191, 2408.07055 (long generation). Repositories and cards: `sierra-research/tau2-bench`, `facebookresearch/meta-agents-research-environments` and `gaia2-cli`, `texttron/BrowseComp-Plus`, `ShishirPatil/gorilla` (BFCL), `apple/ToolSandbox`, `microsoft/lost_in_conversation`, `for-ai/language-confusion`, `facebookresearch/AbstentionBench`, `sgl-project/sglang` (`python/sglang/srt/sampling/sampling_params.py`), `vllm-project/vllm` (`vllm/sampling_params.py`), and the Hugging Face cards named in §3.

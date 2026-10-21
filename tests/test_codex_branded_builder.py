@@ -119,7 +119,13 @@ def test_the_patches_stay_small():
     # DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED), `[` and `v` in the transcript overlay (the conversation into
     # the session's history, or $EDITOR through Tui::with_restored), and Shift+Tab (BackTab) as the approval-
     # mode shortcut.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 55_000
+    # Raised to 58,000 on 2026-10-21 by the owner, for the vendor names (6,881 bytes; 57,523 after):
+    # /apps in the slash-command popup (upstream's popup drops it whatever the connectors gate says)
+    # and the status card's account line in 0001, and 0030-neutral-vendor-names, which rewords every
+    # user-reachable "ChatGPT" and "OpenAI" string the patches had left (the app page, the plugin
+    # install rows, the plugin catalog's "OpenAI Curated", the remote catalogs' sign-in hints, the
+    # model menu's base-URL warning) and the /hooks screen's "Right before Codex ends its turn".
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 58_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

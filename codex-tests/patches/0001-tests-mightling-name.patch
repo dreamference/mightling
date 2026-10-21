@@ -69,7 +69,7 @@ index dc483a4..d272373 100644
 @@ -405,3 +405,3 @@ async fn initial_session_header_starts_at_the_top_of_the_viewport() {
      ╭───────────────────────────────────────╮
 -    │ >_ OpenAI Codex (v<VERSION>)              │
-+    │ >_ Mightling (v<VERSION>)                    │
++    │ >_ Mightling (v<VERSION>)                 │
      │                                       │
 diff --git a/codex-rs/tui/tests/suite/focus_palette.rs b/codex-rs/tui/tests/suite/focus_palette.rs
 index f280efd..39e1fa0 100644

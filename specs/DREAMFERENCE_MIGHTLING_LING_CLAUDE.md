@@ -698,6 +698,13 @@ The mapping is not exact (§14 Q4): where Claude Code would *allow* without aski
 ### 9.4 Commands, skills and subagents
 
 - **Skills**: already done. `~/.claude/skills` and a trusted repository's `.claude/skills` are linked into `ling` today ([SKILLS §15](./DREAMFERENCE_MIGHTLING_SKILLS.md)); the profile changes nothing there.
+- **Built (2026-10-21), custom commands**, in `ling-rs/src/compat_commands.rs`, with no patch and no files written. Codex's custom prompts are gone at the pin, so the command is not converted into a skill: the mode expands it where it is typed.
+  - **Where:** in the `Enter` hook (TUI) and in print mode's prompt.
+  - **Sources:** `~/.claude/commands` and a trusted repository's `.claude/commands`, subfolders as `dir:name`. A project's file wins over the user's, and a skill over a command.
+  - **Expansion:** `/name args` becomes the file's body with `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` and `${CLAUDE_PROJECT_DIR}` put in. A body with no placeholder gets `ARGUMENTS: …` appended.
+  - **Skills:** a Claude Code skill typed as `/name args` becomes `$name args`, the form Codex selects skills by.
+  - **Shell lines:** `` !`cmd` `` is not run, because the TUI's process is outside the sandbox. It becomes a request to run the command with the shell first.
+  - **Name clashes:** a Codex command of the same name wins (the list is checked against the pinned TUI's enum), and `doctor` says so.
 - **Custom slash commands** (`.claude/commands/*.md`, `~/.claude/commands/*.md`): Claude Code's docs now say custom commands "have been merged into skills" (§3.4), so converting them into skills is the documented model, not an approximation. They are converted at start into skills in the session folder and linked like `from-claude` skills, using the conversion Codex's own `command_migration.rs` performs, so `/name args` works. Substitutions (`$ARGUMENTS`, `$N`, named arguments, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_SESSION_ID}`) are expanded by the launcher when the skill is invoked; `` !`cmd` `` runs the command in the sandbox, never outside it. `allowed-tools`/`disallowed-tools` become session permission rules while the skill runs where they can be expressed, otherwise a notice; `context: fork` and `agent` run the skill in a subagent (Phase 3).
 - **Built (2026-10-20), subagents**, in `ling-rs/src/compat_agents.rs`, written by the launcher itself rather than through `external-agent-migration`.
   - **Sources:** `~/.claude/agents` and every `.claude/agents` from the repository root down to the working folder, subfolders included. The nearest definition of a name wins. A repository's agents are read only once the folder is trusted.
