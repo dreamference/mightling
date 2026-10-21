@@ -132,6 +132,46 @@ export function hunkPatch(file: FileDiff, index: number): string {
   return [...header, hunkText(file.hunks[index])].join("\n") + "\n";
 }
 
+/**
+ * Whether a hunk can be edited in place (DESKTOP_PARITY §4.5 item 16): a text file that is still there,
+ * and no "\ No newline at end of file" line in the hunk, whose ending the edit could not keep.
+ */
+export function editable(file: FileDiff, index: number): boolean {
+  const hunk = file.hunks[index];
+  return Boolean(hunk) && !file.binary && file.status !== "deleted" && !hunk.lines.some((line) => line.kind === "note");
+}
+
+/** The lines the hunk covers in the file as it is now: its context and its additions, in order. */
+export function hunkNewText(hunk: Hunk): string {
+  return hunk.lines.filter((line) => line.kind === "context" || line.kind === "add").map((line) => line.text).join("\n");
+}
+
+/**
+ * A patch that changes the hunk's lines, as the file has them now, into `edited`, for `git apply`
+ * (the working tree only; `--recount` counts the lines). Its old side is the file's current text, so
+ * git refuses it, and the file stays as it was, if the file changed since the diff was read. Null when
+ * nothing changed. The header is a plain modification even for a new file, which exists by now.
+ */
+export function editPatch(file: FileDiff, index: number, edited: string): string | null {
+  const hunk = file.hunks[index];
+  if (!hunk || !editable(file, index)) return null;
+  const before = hunkNewText(hunk);
+  const after = edited.replace(/\r\n/g, "\n").replace(/\n$/, "");
+  if (after === before) return null;
+  const oldLines = hunk.lines.filter((line) => line.kind === "context" || line.kind === "add").map((line) => line.text);
+  const newLines = after === "" ? [] : after.split("\n");
+  const start = hunk.newStart;
+  const header = `@@ -${oldLines.length ? start : start - 1},${oldLines.length} +${newLines.length ? start : start - 1},${newLines.length} @@`;
+  return [
+    `diff --git a/${file.path} b/${file.path}`,
+    `--- a/${file.path}`,
+    `+++ b/${file.path}`,
+    header,
+    ...oldLines.map((line) => `-${line}`),
+    ...newLines.map((line) => `+${line}`),
+  ].join("\n") + "\n";
+}
+
 /** The whole file as a patch. */
 export function filePatch(file: FileDiff): string {
   const header = file.header.length ? file.header : [`--- a/${file.oldPath ?? file.path}`, `+++ b/${file.path}`];

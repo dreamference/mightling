@@ -899,3 +899,8 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .quick-hint { margin: 0; color: var(--faint); font-size: 12px; }
 .quick-entry .dialog-note.warning { color: var(--danger); }
 .quick-row textarea, .quick-row textarea:focus, .quick-row textarea:focus-visible { border: none; box-shadow: none; outline: none; padding: 0; border-radius: 0; }
+
+/* Inline diff editing (item 16): a hunk's lines edited in place in the review pane. */
+.hunk-editor { padding: 8px; background: var(--code-bg); }
+.hunk-editor textarea { width: 100%; box-sizing: border-box; font-family: var(--font-code); font-size: 13px; line-height: 1.4; color: var(--text); background: var(--canvas); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 8px; resize: vertical; tab-size: 4; }
+.hunk-editor .buttons { display: flex; gap: 8px; align-items: center; margin-top: 6px; }

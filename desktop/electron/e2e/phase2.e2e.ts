@@ -202,6 +202,44 @@ test("6 review pane across threads: nothing of the last repository, and no Rever
   }
 });
 
+test("item 16: a hunk edited in place in the Unstaged scope, and an edit git refuses when the file changed meanwhile", async () => {
+  const { page, home, close } = await open();
+  const root = scratchRepo(home);
+  const client = path.join(root, "fetcher", "client.py");
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.keyboard.press("Control+Shift+G");
+    const pane = page.getByRole("complementary", { name: "Review" });
+    const first = pane.locator(".review-file").first();
+    await expect(first.locator(".file-name")).toHaveText("fetcher/client.py");
+    // Edit the first hunk: its lines as the file has them now, changed, saved into the working tree.
+    await first.getByRole("button", { name: "Edit", exact: true }).first().click();
+    const editor = first.getByRole("textbox", { name: /^Edit fetcher\/client\.py at line/ });
+    await expect(editor).toHaveValue(/step\(2\)  # retried/);
+    await editor.fill((await editor.inputValue()).replace("# retried", "# retried, at most three times"));
+    await first.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => fs.readFileSync(client, "utf8")).toContain("    step(2)  # retried, at most three times\n");
+    expect(fs.readFileSync(client, "utf8")).toContain("    step(36)  # logged at debug level\n");
+    await expect(first).toContainText("at most three times");
+    // The file changes on disk while the editor is open: the patch no longer fits, git refuses it, and the file keeps the other change.
+    await first.getByRole("button", { name: "Edit", exact: true }).first().click();
+    await editor.fill((await editor.inputValue()).replace("at most three times", "never"));
+    fs.writeFileSync(client, fs.readFileSync(client, "utf8").replace("    step(3)\n", "    step(3)  # changed elsewhere\n"));
+    await first.getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".notice").last()).toContainText(/patch|apply|does not/i, { timeout: 10_000 });
+    expect(fs.readFileSync(client, "utf8")).toContain("# retried, at most three times");
+    expect(fs.readFileSync(client, "utf8")).toContain("# changed elsewhere");
+    // Not offered outside Unstaged.
+    await pane.getByRole("navigation", { name: "Scope" }).getByRole("button", { name: "Staged", exact: true }).click();
+    await expect(pane.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});
+
 test("6 Revert asks first, and keeps the thread whole when the turn's file changes cannot be undone", async () => {
   // One click on a first turn's Revert emptied a thread on a Mac (thread/revert changes the history
   // only, and nothing asked); now it asks, undoes the files first, and stops if they cannot be undone.
