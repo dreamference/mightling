@@ -21,7 +21,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use sha2::{Digest, Sha256};
 
-use crate::collections::{secret_dirs, Collection};
+use crate::collections::{secret_dirs_in, Collection};
 
 /// What a file is read as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -194,13 +194,18 @@ fn globs(patterns: &[String]) -> Option<GlobSet> {
 /// Walks a collection. Images are read only by OCR, so they are kept only when `images` is true
 /// (`docs_ocr`, §20); otherwise they count as a type not read.
 pub fn walk(collection: &Collection, user_home: &Path, images: bool) -> Discovery {
+    walk_in(collection, user_home, &crate::config::home(), images)
+}
+
+/// [`walk`] with the agent's home named (where a project's knowledge folder may be a collection).
+pub fn walk_in(collection: &Collection, user_home: &Path, codex_home: &Path, images: bool) -> Discovery {
     let mut out = Discovery::default();
     let root = match collection.root.canonicalize() {
         Ok(root) => root,
         Err(_) => return out,
     };
     let home = user_home.canonicalize().unwrap_or_else(|_| user_home.to_path_buf());
-    let secret: Vec<PathBuf> = secret_dirs(&root, &home);
+    let secret: Vec<PathBuf> = secret_dirs_in(&root, &home, codex_home);
     let include = globs(&collection.include);
     let exclude = globs(&collection.exclude);
     let max_size = collection.max_file_mb.saturating_mul(1 << 20);
@@ -388,6 +393,37 @@ mod tests {
     fn write(path: &Path, bytes: &[u8]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn a_projects_knowledge_folder_is_walked_but_nothing_it_links_to_outside_it() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let codex = home.join(".mightling");
+        let knowledge = codex.join("projects/p-1/knowledge");
+        write(&knowledge.join("checklist.md"), b"# Checklist");
+        write(&home.join(".ssh/id_ed25519.md"), b"secret");
+        write(&codex.join("sessions/rollout.md"), b"a session");
+        write(&home.join("elsewhere/notes.md"), b"not the project's");
+        std::os::unix::fs::symlink(home.join(".ssh/id_ed25519.md"), knowledge.join("key.md")).unwrap();
+        std::os::unix::fs::symlink(codex.join("sessions"), knowledge.join("sessions")).unwrap();
+        std::os::unix::fs::symlink(home.join("elsewhere/notes.md"), knowledge.join("notes.md")).unwrap();
+        let mut collection = Collection::new("project-p-1", knowledge.clone());
+        let found = walk_in(&collection, &home, &codex, true);
+        let rels: Vec<_> = found.candidates.iter().map(|c| c.rel.clone()).collect();
+        assert_eq!(rels, vec!["checklist.md".to_string()]);
+        assert_eq!(found.skipped["symlink"], 3);
+        // Followed, a link still never leads out of the folder.
+        collection.follow_symlinks = true;
+        let found = walk_in(&collection, &home, &codex, true);
+        assert_eq!(found.candidates.iter().map(|c| c.rel.clone()).collect::<Vec<_>>(), vec!["checklist.md".to_string()]);
+        assert_eq!(found.skipped["symlink out of the collection"], 3);
+        // A sibling of the knowledge folder, and a knowledge folder that is a link to a secret one, stay refused.
+        assert!(crate::collections::validate_root_in(&codex.join("projects/p-1"), &home, &codex).is_err());
+        std::fs::create_dir_all(codex.join("projects/p-2")).unwrap();
+        std::os::unix::fs::symlink(home.join(".ssh"), codex.join("projects/p-2/knowledge")).unwrap();
+        let linked = codex.join("projects/p-2/knowledge").canonicalize().unwrap();
+        assert!(crate::collections::validate_root_in(&linked, &home, &codex).is_err());
     }
 
     #[test]

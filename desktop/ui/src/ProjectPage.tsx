@@ -62,7 +62,7 @@ export function ProjectPage(props: {
         <h1>{props.project.name}</h1>
         <button className="link-button" onClick={props.onEdit}>Edit project…</button>
       </header>
-      <p className="dialog-note">New questions here start with the project's instructions and its knowledge. <button className="link-button" onClick={props.onLeave}>Ask outside it</button></p>
+      <p className="dialog-note starting-project">In the project <strong>{props.project.name}</strong>: new questions start with its instructions and its knowledge. <button className="link-button" onClick={props.onLeave}>Ask outside it</button></p>
       <section>
         <h2>Instructions</h2>
         {instructions ? <p className="project-instructions-text">{instructions}</p> : <p className="empty small">None yet: Edit project… gives the project standing instructions.</p>}
