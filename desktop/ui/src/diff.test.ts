@@ -2,7 +2,7 @@
 // patch; the split view's rows; the comments sent to the composer.
 import { describe, expect, it } from "vitest";
 
-import { commentsMessage, editPatch, editable, filePatch, fingerprint, hunkNewText, hunkPatch, parseDiff, revertQuestion, splitRows, underDirectory } from "./diff";
+import { commentsMessage, editPatch, editable, zeroContext, filePatch, fingerprint, hunkNewText, hunkPatch, parseDiff, revertQuestion, splitRows, underDirectory } from "./diff";
 
 const GIT = `diff --git a/a.txt b/a.txt
 index 1111111..2222222 100644
@@ -141,11 +141,15 @@ describe("an edit in the review pane (item 16)", () => {
     const [file] = parseDiff(diff);
     expect(editable(file, 0)).toBe(true);
     expect(hunkNewText(file.hunks[0])).toBe("    a = 1\n    b = 3\n    c = 4\n    return a");
-    expect(editPatch(file, 0, "    a = 1\n    b = 30\n    c = 4\n    return a\n")).toBe([
+    const patch = editPatch(file, 0, "    a = 1\n    b = 30\n    c = 4\n    return a\n");
+    expect(patch).toBe([
       "diff --git a/app.py b/app.py", "--- a/app.py", "+++ b/app.py", "@@ -3,4 +3,4 @@",
-      "-    a = 1", "-    b = 3", "-    c = 4", "-    return a",
-      "+    a = 1", "+    b = 30", "+    c = 4", "+    return a",
+      "     a = 1", "-    b = 3", "+    b = 30", "     c = 4", "     return a",
     ].join("\n") + "\n");
+    // Context at both ends: git takes it as it is.
+    expect(zeroContext(patch!)).toBe(false);
+    // The hunk's first line changed: no context before it, so --unidiff-zero.
+    expect(zeroContext(editPatch(file, 0, "    a = 10\n    b = 3\n    c = 4\n    return a")!)).toBe(true);
     // Nothing changed: no patch.
     expect(editPatch(file, 0, hunkNewText(file.hunks[0]))).toBeNull();
     // Everything taken out.

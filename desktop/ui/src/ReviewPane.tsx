@@ -9,7 +9,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import * as bridge from "./bridge";
-import { commentsMessage, editable, editPatch, fingerprint, hunkNewText, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
+import { commentsMessage, editable, editPatch, zeroContext, fingerprint, hunkNewText, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
 import { Icon } from "./icons";
 import { keyLabel } from "./keymap";
 
@@ -353,7 +353,7 @@ export function ReviewPane(props: ReviewPaneProps) {
                     setEditing(null);
                     // Applied to the working tree only, as Revert hunk is; git refuses it, and the file
                     // stays as it was, when the file changed since this diff was read.
-                    if (patch) void step("edit", () => bridge.git.apply(root, patch, {}));
+                    if (patch) void step("edit", () => bridge.git.apply(root, patch, { zeroContext: zeroContext(patch) }));
                   }}>Save</button>
                   <button onClick={() => setEditing(null)}>Cancel</button>
                   <span className="planned-note">Lines {hunk.newStart} to {hunk.newStart + hunkNewText(hunk).split("\n").length - 1} of the file as it is now.</span>
