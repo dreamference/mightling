@@ -885,3 +885,7 @@ On 2026-10-20 a second message sent while the first was answered became a separa
 
 It waits as the next question instead when it cannot join: an attachment after the question has gone, an approval waiting for YES or NO, a stop under way, or the final turn after a time-out (§19.3). Everything that waited is then asked as **one** question, texts joined by blank lines. `/stop` stops the answer and empties the queue, as before; the queue still holds at most five.
 
+### 19.5 Voice notes (branch `chat/voice`; owner's approval of 2026-10-21, MOONSHOT §3.4)
+
+A voice note (an `audio/*` attachment) is not uploaded: the bridge sends it to `ling web`'s `/api/transcribe`, which passes it to the speech-to-text service on the node (speaches, `ling-admin voice start`; nothing leaves the machine). What was heard is said back first ("Heard: …"), so a mis-hearing is seen before the answer is trusted, and joins the question's text. A failure is said ("I couldn't transcribe the voice message (…); type the question instead.", with `ling web`'s reason, which names `ling-admin voice start` when the service is not running); a voice note alone then asks nothing.
+

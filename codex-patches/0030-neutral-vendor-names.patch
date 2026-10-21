@@ -1,0 +1,122 @@
+diff --git a/codex-rs/tui/src/bottom_pane/app_link_view.rs b/codex-rs/tui/src/bottom_pane/app_link_view.rs
+--- a/codex-rs/tui/src/bottom_pane/app_link_view.rs
++++ b/codex-rs/tui/src/bottom_pane/app_link_view.rs
+@@ -309,3 +309,3 @@
+                     vec![
+-                        "Manage on ChatGPT",
++                        "Manage in browser",
+                         if self.is_enabled {
+@@ -318,3 +318,3 @@
+                 } else {
+-                    vec!["Install on ChatGPT", "Back"]
++                    vec!["Install in browser", "Back"]
+                 }
+@@ -581,3 +581,3 @@
+                 if is_codex_apps_auth {
+-                    "Sign in to the app on ChatGPT in the browser window that just opened."
++                    "Sign in to the app in the browser window that just opened."
+                 } else {
+@@ -607,3 +607,3 @@
+             for line in wrap(
+-                "Complete app setup on ChatGPT in the browser window that just opened.",
++                "Complete app setup in the browser window that just opened.",
+                 usable_width,
+diff --git a/codex-rs/tui/src/chatwidget/plugins.rs b/codex-rs/tui/src/chatwidget/plugins.rs
+--- a/codex-rs/tui/src/chatwidget/plugins.rs
++++ b/codex-rs/tui/src/chatwidget/plugins.rs
+@@ -864,3 +864,3 @@
+         } else {
+-            "Install the required Apps in ChatGPT to continue:"
++            "Install the required apps to continue:"
+         };
+@@ -892,5 +892,5 @@
+             let install_label = if is_installed {
+-                "Manage on ChatGPT"
++                "Manage in browser"
+             } else {
+-                "Install on ChatGPT"
++                "Install in browser"
+             };
+@@ -898,3 +898,3 @@
+                 name: install_label.to_string(),
+-                description: Some("Open the ChatGPT app management page".to_string()),
++                description: Some("Open the app's management page".to_string()),
+                 selected_description: Some("Open the app page in your browser".to_string()),
+@@ -909,3 +909,3 @@
+             items.push(SelectionItem {
+-                name: "ChatGPT apps link unavailable".to_string(),
++                name: "App link unavailable".to_string(),
+                 description: Some("This app did not provide an install/manage URL".to_string()),
+diff --git a/codex-rs/tui/src/chatwidget/plugin_catalog.rs b/codex-rs/tui/src/chatwidget/plugin_catalog.rs
+--- a/codex-rs/tui/src/chatwidget/plugin_catalog.rs
++++ b/codex-rs/tui/src/chatwidget/plugin_catalog.rs
+@@ -71,3 +71,3 @@
+ const OPENAI_CURATED_LOADING_DESCRIPTION: &str =
+-    "This updates when OpenAI Curated plugins finish loading";
++    "This updates when Curated plugins finish loading";
+ const WORKSPACE_SECTION_TAB_ORDER: u8 = 0;
+@@ -130,3 +130,3 @@
+         match self {
+-            Self::OpenAiCurated => Some("OpenAI Curated"),
++            Self::OpenAiCurated => Some("Curated"),
+             Self::Workspace => Some("Workspace"),
+@@ -787,3 +787,3 @@
+                 (
+-                    "Loading OpenAI Curated plugins...",
++                    "Loading Curated plugins...",
+                     OPENAI_CURATED_LOADING_DESCRIPTION,
+@@ -793,7 +793,7 @@
+             {
+-                ("OpenAI Curated unavailable", section_error.message.as_str())
++                ("Curated unavailable", section_error.message.as_str())
+             } else {
+                 (
+-                    "No OpenAI Curated plugins available",
+-                    "No OpenAI Curated plugins available",
++                    "No Curated plugins available",
++                    "No Curated plugins available",
+                 )
+@@ -809,3 +809,3 @@
+             curated_items.push(remote_section_loading_item(
+-                "OpenAI Curated",
++                "Curated",
+                 OPENAI_CURATED_LOADING_DESCRIPTION,
+@@ -823,6 +823,6 @@
+             id: OPENAI_CURATED_TAB_ID.to_string(),
+-            label: "OpenAI Curated".to_string(),
++            label: "Curated".to_string(),
+             header: plugins_header(
+-                "OpenAI Curated marketplace.".to_string(),
+-                format!("Installed {curated_installed} of {curated_total} OpenAI Curated plugins."),
++                "Curated marketplace.".to_string(),
++                format!("Installed {curated_installed} of {curated_total} Curated plugins."),
+             ),
+diff --git a/codex-rs/tui/src/app/background_requests.rs b/codex-rs/tui/src/app/background_requests.rs
+--- a/codex-rs/tui/src/app/background_requests.rs
++++ b/codex-rs/tui/src/app/background_requests.rs
+@@ -1002,3 +1002,3 @@
+     if err.contains("api key auth is not supported") {
+-        "Sign in with ChatGPT auth; API key auth cannot load remote plugin catalogs"
++        "Remote plugin catalogs need a sign-in Mightling does not use"
+     } else if err.contains("authentication required")
+@@ -1007,3 +1007,3 @@
+     {
+-        "Sign in to ChatGPT, then try loading this section again"
++        "This section needs a sign-in Mightling does not use"
+     } else if err.contains("codex plugins are disabled")
+diff --git a/codex-rs/tui/src/bottom_pane/hooks_browser_view.rs b/codex-rs/tui/src/bottom_pane/hooks_browser_view.rs
+--- a/codex-rs/tui/src/bottom_pane/hooks_browser_view.rs
++++ b/codex-rs/tui/src/bottom_pane/hooks_browser_view.rs
+@@ -716,3 +716,3 @@
+         HookEventName::SubagentStop => "Right before a subagent ends its turn",
+-        HookEventName::Stop => "Right before Codex ends its turn",
++        HookEventName::Stop => "Right before Mightling ends its turn",
+         HookEventName::Interrupt => "Right before an interrupted turn is aborted",
+diff --git a/codex-rs/tui/src/chatwidget/model_popups.rs b/codex-rs/tui/src/chatwidget/model_popups.rs
+--- a/codex-rs/tui/src/chatwidget/model_popups.rs
++++ b/codex-rs/tui/src/chatwidget/model_popups.rs
+@@ -57,3 +57,3 @@
+         let warning = format!(
+-            "Warning: OpenAI base URL is overridden to {base_url}. Selecting models may not be supported or work properly."
++            "Warning: the model server URL is overridden to {base_url}. Selecting models may not be supported or work properly."
+         );

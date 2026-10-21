@@ -18,7 +18,7 @@ Read from the pinned source:
 
 | Piece | Where | What it does |
 |---|---|---|
-| **The gate** | `tui/src/chatwidget/connectors.rs:150` `connectors_enabled()` | `Feature::Apps && has_chatgpt_account`. False hides `/apps` from the popup (`bottom_pane/slash_commands.rs:76`) and makes the command print "Apps are disabled." |
+| **The gate** | `tui/src/chatwidget/connectors.rs:150` `connectors_enabled()` | `Feature::Apps && has_chatgpt_account`. False hides `/apps` from the popup (`bottom_pane/slash_commands.rs:76`) and makes the command print "Apps are disabled." The popup itself (`bottom_pane/command_popup.rs:82`) also dropped `/apps` whatever the gate said, so `/ap` listed nothing while `/apps` Enter worked; patch 0001 removes that filter (1.7.1). |
 | **The list** | app-server `app/list` → `apps_processor.rs` `apps_list_inner` | Returns empty unless `features.apps_enabled_for_auth(uses_codex_backend)`; otherwise merges the upstream vendor's directory (`chatgpt/src/connectors.rs`, a `chatgpt.com` GET that needs "Codex backend auth") with the apps whose tools the `codex_apps` MCP server exposes |
 | **Installed apps for `$` mentions** | app-server `app/installed` (`apps_processor/installed.rs:64`) | Same auth gate |
 | **The tools** | `codex-mcp/src/mcp/mod.rs` | `codex_apps` is an MCP server at `chatgpt.com/backend-api/ps/mcp`, started only when `host_owned_codex_apps_enabled` (the vendor's sign-in) |
