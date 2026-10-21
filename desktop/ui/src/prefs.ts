@@ -26,6 +26,8 @@ export interface Prefs {
   projectContextSent: Record<string, string>;
   /** The sidebar's projects and folders in the order the user dragged them (`project:<id>`, `folder:<path>`; projects.ts `ordered`). */
   projectOrder: string[];
+  /** Whether a new Work thread may read the terminal tabs and the previews' console (windowtools.ts; the owner's decision 5, on by default). */
+  agentReadsWindow: boolean;
   /** Worktrees made permanent: projects of their own, never cleaned up. */
   permanentWorktrees: string[];
   /** The text size, as a factor of the base (Ctrl+= / Ctrl+- / Ctrl+0). */

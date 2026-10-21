@@ -10,7 +10,7 @@
 
 import { BrowserWindow, WebContentsView, session, type Session, type WebContents } from "electron";
 
-import { PICK_SCRIPT, decide, type Decision, type SiteChoice } from "./preview-rules";
+import { PICK_SCRIPT, consoleLine, decide, type Decision, type SiteChoice } from "./preview-rules";
 
 export const PREVIEW_PARTITION = "persist:mightling-preview";
 
@@ -48,7 +48,12 @@ interface Preview {
   window: BrowserWindow;
   thread: string | null;
   airgapOn: boolean;
+  /** The page's recent console messages and errors, oldest first (the agent's console tool, desktop/ui/src/windowtools.ts). */
+  console: string[];
 }
+
+/** How many console lines each preview keeps, and how long one may be. */
+const CONSOLE_KEPT = 400;
 
 export class Previews {
   private readonly previews = new Map<string, Preview>();
@@ -141,7 +146,7 @@ export class Previews {
       },
     });
     this.session();
-    const preview: Preview = { view, window, thread, airgapOn: await this.airgapOn(thread) };
+    const preview: Preview = { view, window, thread, airgapOn: await this.airgapOn(thread), console: [] };
     this.previews.set(id, preview);
     view.setVisible(false);
     window.contentView.addChildView(view);
@@ -178,7 +183,14 @@ export class Previews {
       event.preventDefault();
       this.emit(window, { id, kind: "key", key: action });
     });
+    const keep = (line: string) => {
+      preview.console.push(line);
+      if (preview.console.length > CONSOLE_KEPT) preview.console.splice(0, preview.console.length - CONSOLE_KEPT);
+    };
+    contents.on("console-message", (...args: unknown[]) => keep(consoleLine(args[0], ...args.slice(1))));
+    contents.on("render-process-gone", (_event, details) => keep(`[error] the page's renderer ended: ${details.reason}`));
     contents.on("did-fail-load", (_event, code, description, failed, isMainFrame) => {
+      if (code !== -3) keep(`[error] could not load ${failed}: ${description} (${code})`);
       // -3 is an aborted load (a navigation replaced it, or the rules cancelled it and said why).
       if (isMainFrame && code !== -3) this.state(id, preview, `${description} (${failed})`);
     });
@@ -245,6 +257,13 @@ export class Previews {
     const contents: WebContents | undefined = this.previews.get(id)?.view.webContents;
     if (!contents || !this.settings().devTools) throw new Error("turn on Developer mode in Settings › Browser first, then open a new preview tab");
     contents.openDevTools({ mode: "detach" });
+  }
+
+  /** The console of the previews of a thread (or every preview when it has none), for the agent's console tool. */
+  consoles(thread: string | null): { url: string; lines: string[] }[] {
+    const all = [...this.previews.values()].filter((preview) => !preview.view.webContents.isDestroyed());
+    const own = thread ? all.filter((preview) => preview.thread === thread) : [];
+    return (own.length ? own : all).map((preview) => ({ url: preview.view.webContents.getURL(), lines: [...preview.console] }));
   }
 
   close(id: string): void {

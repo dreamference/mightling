@@ -48,6 +48,10 @@
       "default": [],
       "type": "strings"
     },
+    "agentReadsWindow": {
+      "default": true,
+      "type": "boolean"
+    },
     "permanentWorktrees": {
       "default": [],
       "type": "strings"

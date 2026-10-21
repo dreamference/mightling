@@ -11,6 +11,7 @@
 //! import of another agent's setup loses its plugin items: their sources can be cloned from GitHub
 //! or fetched from npm, a path the egress audit does not trace (MIGHTLING_LING_CLAUDE §16.4).
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
@@ -49,6 +50,11 @@ pub struct Policy {
     pub scratch_sandbox: String,
     pub import_request: String,
     pub refused_import_items: BTreeSet<String>,
+    /// The field of `thread/start` in which the UI names the window's own tools it answers
+    /// (`windowTools`: the terminal's output, the preview's console; DESKTOP_PARITY §4.5, the
+    /// owner's decision 5). The policy, not the UI, writes their definitions as `dynamicTools`.
+    pub window_tools_field: String,
+    pub window_tools: BTreeMap<String, Value>,
 }
 
 fn strings(value: &Value, key: &str) -> Result<Vec<String>, String> {
@@ -86,7 +92,20 @@ impl Policy {
             scratch_sandbox: string(&value, "scratchSandbox")?,
             import_request: string(&value, "importRequest")?,
             refused_import_items: strings(&value, "refusedImportItems")?.into_iter().collect(),
+            window_tools_field: string(&value, "windowToolsField")?,
+            window_tools: value
+                .get("windowTools")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "policy.json: `windowTools` must be an object".to_string())?
+                .iter()
+                .map(|(name, spec)| (name.clone(), spec.clone()))
+                .collect(),
         };
+        for (name, spec) in &policy.window_tools {
+            if spec.get("name").and_then(Value::as_str) != Some(name.as_str()) {
+                return Err(format!("policy.json: the window tool `{name}` must carry its own name"));
+            }
+        }
         if !policy.scratch_prompts.is_subset(&policy.named_prompts) {
             return Err("policy.json: every scratch prompt must also be a named prompt".to_string());
         }
@@ -129,6 +148,13 @@ impl Policy {
                 if names_prompt && !self.prompt_openers.contains(&method) {
                     return Err(format!("a prompt can only be chosen when a thread is started, not by {method}"));
                 }
+                let names_tools = object
+                    .get("params")
+                    .and_then(Value::as_object)
+                    .is_some_and(|params| params.contains_key(&self.window_tools_field));
+                if names_tools && !self.prompt_openers.contains(&method) {
+                    return Err(format!("window tools can only be named when a thread is started, not by {method}"));
+                }
                 if opener {
                     if let Some(Value::Object(params)) = object.get("params") {
                         let params = self.vet_thread_params(params, prompts)?;
@@ -168,6 +194,24 @@ impl Policy {
         let existing = params.get("threadId").and_then(Value::as_str).and_then(|id| prompts.scratch_folder_of(id));
         if let Some(folder) = existing {
             self.confine(&mut params, folder);
+        }
+        if let Some(names) = params.remove(&self.window_tools_field) {
+            let Value::Array(names) = names else {
+                return Err(format!("`{}` must list tool names", self.window_tools_field));
+            };
+            let mut tools = Vec::new();
+            for name in names {
+                let Some(name) = name.as_str() else {
+                    return Err(format!("`{}` must list tool names", self.window_tools_field));
+                };
+                let Some(spec) = self.window_tools.get(name) else {
+                    return Err(format!("no window tool named \"{name}\""));
+                };
+                tools.push(spec.clone());
+            }
+            if !tools.is_empty() {
+                params.insert("dynamicTools".to_string(), Value::Array(tools));
+            }
         }
         let Some(name) = params.remove(&self.prompt_field) else { return Ok(params) };
         let Value::String(name) = name else {
