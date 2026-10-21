@@ -189,6 +189,16 @@ export function openDocument(doc: string, page: number | null): Promise<null> {
   window.open(`/docs/${doc}${page === null ? "" : `#page=${page}`}`, "_blank", "noopener");
   return Promise.resolve(null);
 }
+/**
+ * Opens a web address from an answer, once the user said so (LinkDialog.tsx): in the app in the
+ * system's browser through the main process, which refuses at `/airgapped on`; in a browser on
+ * `ling web` in a new tab, with no opener and no referrer.
+ */
+export function openWebLink(url: string, thread: string | null): Promise<unknown> {
+  if (host() === "electron") return send<string>({ type: "open/url", url, thread });
+  window.open(url, "_blank", "noopener,noreferrer");
+  return Promise.resolve(null);
+}
 export const openEditorAt = (dir: string, editor: string | null) => send<null>({ type: "open/editor", dir, editor });
 
 export interface TaskEvent {
