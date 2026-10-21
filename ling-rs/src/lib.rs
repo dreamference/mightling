@@ -44,6 +44,7 @@ pub mod chat;
 pub mod code_index;
 pub mod compat;
 pub mod compat_agents;
+pub mod compat_commands;
 pub mod compat_hooks;
 pub mod compat_memory;
 pub mod compat_keys;
