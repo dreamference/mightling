@@ -476,7 +476,7 @@ export async function main(options: MainOptions): Promise<void> {
       case "git/discard":
         return git.discard(await git.checkRoot(message.root), message.paths);
       case "git/apply":
-        return git.apply(await git.checkRoot(message.root), message.patch, { cached: message.cached, reverse: message.reverse, index: message.index });
+        return git.apply(await git.checkRoot(message.root), message.patch, { cached: message.cached, reverse: message.reverse, index: message.index, zeroContext: message.zeroContext === true });
       case "git/commit":
         return git.commit(await git.checkRoot(message.root), message.message, Boolean(message.all));
       case "git/push": {

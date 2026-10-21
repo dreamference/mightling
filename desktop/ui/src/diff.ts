@@ -160,6 +160,15 @@ export function editPatch(file: FileDiff, index: number, edited: string): string
   if (after === before) return null;
   const oldLines = hunk.lines.filter((line) => line.kind === "context" || line.kind === "add").map((line) => line.text);
   const newLines = after === "" ? [] : after.split("\n");
+  // The lines the edit kept at either end are the patch's context, as git expects; what is left between
+  // them is replaced. An edit of a hunk's first or last line leaves no context there, which git takes
+  // only with --unidiff-zero (`zeroContext`); the removed lines are still checked against the file.
+  let head = 0;
+  while (head < oldLines.length && head < newLines.length && oldLines[head] === newLines[head]) head++;
+  let tail = 0;
+  while (tail < oldLines.length - head && tail < newLines.length - head && oldLines[oldLines.length - 1 - tail] === newLines[newLines.length - 1 - tail]) tail++;
+  const removed = oldLines.slice(head, oldLines.length - tail);
+  const added = newLines.slice(head, newLines.length - tail);
   const start = hunk.newStart;
   const header = `@@ -${oldLines.length ? start : start - 1},${oldLines.length} +${newLines.length ? start : start - 1},${newLines.length} @@`;
   return [
@@ -167,9 +176,17 @@ export function editPatch(file: FileDiff, index: number, edited: string): string
     `--- a/${file.path}`,
     `+++ b/${file.path}`,
     header,
-    ...oldLines.map((line) => `-${line}`),
-    ...newLines.map((line) => `+${line}`),
+    ...oldLines.slice(0, head).map((line) => ` ${line}`),
+    ...removed.map((line) => `-${line}`),
+    ...added.map((line) => `+${line}`),
+    ...oldLines.slice(oldLines.length - tail).map((line) => ` ${line}`),
   ].join("\n") + "\n";
+}
+
+/** Whether an edit patch has no context line before or after its change, which `git apply` takes only with --unidiff-zero. */
+export function zeroContext(patch: string): boolean {
+  const body = patch.split("\n").filter((line) => /^[ +-]/.test(line) && !/^(---|\+\+\+) /.test(line));
+  return body.length > 0 && (!body[0].startsWith(" ") || !body[body.length - 1].startsWith(" "));
 }
 
 /** The whole file as a patch. */

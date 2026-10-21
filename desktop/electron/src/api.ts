@@ -47,7 +47,7 @@ export type FromView =
   | { type: "git/diff"; root: string; scope: "unstaged" | "staged" | "commit" | "branch"; commit?: string | null }
   | { type: "git/log"; root: string }
   | { type: "git/stage" | "git/unstage" | "git/discard"; root: string; paths: string[] }
-  | { type: "git/apply"; root: string; patch: string; cached?: boolean; reverse?: boolean; index?: boolean }
+  | { type: "git/apply"; root: string; patch: string; cached?: boolean; reverse?: boolean; index?: boolean; zeroContext?: boolean }
   | { type: "git/commit"; root: string; message: string; all: boolean }
   | { type: "git/push"; root: string; force: boolean; thread: string | null }
   | { type: "git/pull-request"; root: string; thread: string | null }
