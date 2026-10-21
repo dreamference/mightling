@@ -541,6 +541,13 @@ Built after the `ask-evals` core (§11), each on its own branch, tested with no 
   - the runner end to end with the stand-in `ling` and a stand-in scorer;
   - the refusal of an empty cache.
 
+- **T0 run, 2026-10-21 (no night active, no model).** `setup_cache.py ifeval` ran here and took 137 MB of cache. Both reference scorers then ran over five prompts each inside `bwrap --unshare-net`, with no network: they scored junk answers near zero, as they should, and fetched nothing. The first try found three faults, now fixed:
+  - the folder at the pinned commit has no `__init__.py`; it is a namespace package, run from the folder above;
+  - IFBench names its results `<responses>-eval_results_*.jsonl`;
+  - IFBench loads NLTK's `stopwords` and `averaged_perceptron_tagger_eng` at run time, so setup now downloads them with `punkt` and `punkt_tab`. Without them it would have scored those checks as failures, silently, offline.
+
+  A run over some of the prompts (`--limit`) now hands the scorer an input file of those rows alone; the scorer looks up an answer for every prompt it is given.
+
 ### 12.2 T0 and T2: Aider Polyglot (branch `industry/polyglot`)
 
 - **`setup_cache.py polyglot`.** Fetches the exercises at `7e0611e7` into the cache and builds `mightling-polyglot:latest` from `scripts/industry_evals/polyglot/Dockerfile`.
