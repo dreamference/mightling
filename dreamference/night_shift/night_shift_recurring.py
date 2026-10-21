@@ -34,6 +34,9 @@ TEMPLATE_ID: Final[re.Pattern[str]] = re.compile(r"^r[0-9a-f]{12}$")
 #: The longest task a template keeps, as ``ling night add`` takes it from the app.
 MAX_TASK_CHARS: Final[int] = 8000
 
+#: How ``ling night add`` starts the line that says it queued the task.
+QUEUED: Final[str] = "Queued "
+
 #: How long ``ling night add`` may take, in seconds.
 ADD_TIMEOUT_S: Final[int] = 60
 
@@ -215,7 +218,9 @@ class NightShiftRecurring:
                 cls._write(night_dir, template)
                 said.append(f"Repeating task {template['id']} not queued: {error}.")
                 continue
-            if done.returncode != 0:
+            # `ling night add` says what it did: a refusal (no git repository, no commit yet) is printed
+            # like a success, so only its "Queued …" line counts as queued.
+            if done.returncode != 0 or not (done.stdout or "").lstrip().startswith(QUEUED):
                 reason = (done.stderr or done.stdout or f"exit {done.returncode}").strip()[
                     :REASON_CHARS
                 ]
