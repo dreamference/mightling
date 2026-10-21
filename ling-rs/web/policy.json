@@ -113,5 +113,42 @@
   "importRequest": "externalAgentConfig/import",
   "refusedImportItems": [
     "PLUGINS"
-  ]
+  ],
+  "windowToolsField": "windowTools",
+  "windowTools": {
+    "mightling_terminal_output": {
+      "type": "function",
+      "name": "mightling_terminal_output",
+      "description": "Read the recent output of the terminal tabs the user has open for this thread in the Mightling app (a dev server, a build, a test run): each tab's command line and its last lines of output, newest last. Use it to see what the user sees in their terminal instead of asking them to paste it. Secrets that look like tokens are masked.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400,
+            "description": "How many of the last lines of each tab to return (default 120)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "mightling_preview_console": {
+      "type": "function",
+      "name": "mightling_preview_console",
+      "description": "Read the browser console of the preview tabs the user has open in the Mightling app (a local dev server's page): each tab's address and its recent console messages and page errors, newest last. Use it to check a web page you changed. Secrets that look like tokens are masked.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400,
+            "description": "How many of the last messages of each tab to return (default 120)."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
 }

@@ -263,6 +263,11 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
               changes: [{ path: report, kind: { type: "add" }, diff: "+# Memory on the GB10\\n" }] } } });
           }
+          // The window's own tools (the owner's decision 5): the agent reads the terminal and the preview's console.
+          if (asked.includes("with the terminal")) {
+            say({ id: "tool-1", method: "item/tool/call", params: { threadId: p.threadId, turnId: id, callId: "call-1", namespace: null, tool: "mightling_terminal_output", arguments: { lines: 5 } } });
+            say({ id: "tool-2", method: "item/tool/call", params: { threadId: p.threadId, turnId: id, callId: "call-2", namespace: null, tool: "mightling_preview_console", arguments: {} } });
+          }
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }

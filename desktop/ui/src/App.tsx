@@ -59,6 +59,7 @@ import { PullRequestsTab } from "./PullRequestsTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { ActivityView } from "./ActivityView";
+import { CONSOLE_TOOL, MAX_LINES, TERMINAL_TOOL, consoleAnswer, linesAsked, terminalAnswer, toolLabel, windowToolNames } from "./windowtools";
 import { suggest } from "./suggestions";
 import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
@@ -307,8 +308,30 @@ export function App() {
     if (typeof window !== "undefined") window.history.replaceState(null, "", next === "work" ? "#work" : "#");
   }, []);
 
+  // The window's own tools (windowtools.ts): the thread's terminal tabs and the previews' console,
+  // read when the agent asks (`item/tool/call`), bounded and with secrets masked.
+  const terminalsRef = useRef(terminals);
+  terminalsRef.current = terminals;
+  const answerTool = useCallback(async (request: ServerRequest & { method: "item/tool/call" }) => {
+    const { threadId, tool, arguments: args } = request.params;
+    const lines = linesAsked(args);
+    const reply = (text: string, success = true) => client.respond(request.id, { contentItems: [{ type: "inputText", text }], success });
+    if (tool === TERMINAL_TOOL) {
+      const tabs = terminalsRef.current.filter((tab) => tab.threadId === threadId)
+        .map((tab) => ({ title: tab.title, cwd: tab.cwd, running: tab.exitCode === null, output: hub.tail(tab.processId, MAX_LINES) }));
+      return reply(terminalAnswer(tabs, lines));
+    }
+    if (tool === CONSOLE_TOOL) {
+      if (bridge.host() !== "electron") return reply("The preview's console is only in the Mightling desktop app.", false);
+      return reply(consoleAnswer(await bridge.preview.console(threadId), lines));
+    }
+    return reply(`Mightling has no tool named ${tool}.`, false);
+  }, [client, hub]);
+
   const answerUnasked = useCallback((request: ServerRequest) => {
     switch (request.method) {
+      case "item/tool/call":
+        return answerTool(request);
       case "currentTime/read":
         return client.respond(request.id, { currentTimeAt: Math.floor(Date.now() / 1000) });
       case "mcpServer/elicitation/request":
@@ -317,7 +340,7 @@ export function App() {
       default:
         return client.respondError(request.id, -32601, `Mightling does not handle ${request.method} here`);
     }
-  }, [client]);
+  }, [client, answerTool]);
 
   const refreshQueue = useCallback((threadId: string) => {
     listQueue(client, threadId).then((items) => dispatch({ type: "queue", threadId, items })).catch(() => {});
@@ -624,6 +647,9 @@ export function App() {
     return { projectId: startingProject.id, ...(work && others.length ? { runtimeWorkspaceRoots: others } : {}) };
   };
 
+  /** A new Work thread may read the window's terminal tabs and previews' console (Settings › Project and terminal; on by default). */
+  const windowToolFields = (): Record<string, unknown> => (prefsRef.current.agentReadsWindow ? { windowTools: windowToolNames(bridge.host() === "electron") } : {});
+
   const startThread = async (): Promise<Thread | null> => {
     const cwd = (startingProject ? primaryFolder(startingProject) : null) ?? newCwd.trim();
     if (startingProject && !primaryFolder(startingProject)) {
@@ -637,7 +663,7 @@ export function App() {
     dispatch({ type: "dropNotice", message: NAME_THE_FOLDER });
     try {
       if (newChoice.mode === "worktree" && bridge.git.available()) return await startInWorktree(cwd);
-      const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile, ...projectFields(true) } as ParamsOf<"thread/start">);
+      const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile, ...projectFields(true), ...windowToolFields() } as ParamsOf<"thread/start">);
       dispatch({ type: "opened", thread: started.thread });
       setDrawer(false);
       return started.thread;
@@ -661,7 +687,7 @@ export function App() {
   /** A new thread in a new managed worktree (§2.6): created, bound to the thread, its setup run, the oldest cleaned up. */
   const startInWorktree = async (cwd: string): Promise<Thread> => {
     const created = await bridge.worktrees.create(cwd, newChoice.base, newChoice.withChanges && !newChoice.base, wtSettings.root);
-    const started = await client.request("thread/start", { cwd: created.cwd, model: servedModel, permissions: profile, ...projectFields(true) } as ParamsOf<"thread/start">);
+    const started = await client.request("thread/start", { cwd: created.cwd, model: servedModel, permissions: profile, ...projectFields(true), ...windowToolFields() } as ParamsOf<"thread/start">);
     await bridge.worktrees.bind(created.root, started.thread.id).catch(notice);
     setLink(started.thread.id, { checkout: created.root, cwd: created.cwd, source: created.sourceRoot, sourceCwd: cwd, location: "worktree", snapshot: null });
     dispatch({ type: "opened", thread: started.thread });
@@ -2637,6 +2663,17 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
     }
     case "mcpToolCall":
       return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
+    case "dynamicToolCall": {
+      // The window's own tools (windowtools.ts) in words, what they returned folded under them.
+      const label = toolLabel(item.tool) ?? item.tool;
+      const text = (item.contentItems ?? []).map((content) => (content.type === "inputText" ? content.text : "")).join("\n").trim();
+      return (
+        <details className={`item tool status-${item.status}`}>
+          <summary>{label}{item.success === false ? " — not available" : ""}</summary>
+          {text ? <pre>{text}</pre> : null}
+        </details>
+      );
+    }
     case "contextCompaction":
       return <div className="item note">Earlier turns were compacted.</div>;
     case "enteredReviewMode":

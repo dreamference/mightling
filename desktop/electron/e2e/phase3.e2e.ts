@@ -808,3 +808,35 @@ test("item 13's order: folders and projects keep their place as threads get busy
     await close();
   }
 });
+
+test("decision 5: a new thread may read its terminal tab and the preview's console when the agent asks, a secret masked", async () => {
+  const { page, home, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("textbox", { name: "Project folder" }).fill(projectFolders(home).fetcher);
+    await page.locator(".composer textarea").fill("Start the dev server.");
+    await page.keyboard.press("Enter");
+    // The policy wrote the two tools' own definitions; the page only named them.
+    await expect.poll(() => (received(home).find((m) => m.method === "thread/start" && Array.isArray(m.params?.dynamicTools))?.params?.dynamicTools as { name: string }[] | undefined)?.map((tool) => tool.name))
+      .toEqual(["mightling_terminal_output", "mightling_preview_console"]);
+    expect(received(home).find((m) => m.method === "thread/start" && m.params?.dynamicTools)?.params).not.toHaveProperty("windowTools");
+    await page.locator(".item.agent").last().waitFor();
+    await page.keyboard.press("Control+`");
+    const panel = page.getByRole("region", { name: "Bottom panel" });
+    await expect(panel.locator(".xterm-rows")).toContainText("stand-in shell in");
+    await page.keyboard.type("echo ready on port 5173 token=abc123secret");
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".xterm-rows")).toContainText("ready on port 5173");
+    await page.locator(".composer textarea").fill("Check it with the terminal.");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => JSON.stringify(received(home).find((m) => m.id === "tool-1")?.result ?? "")).toContain("ready on port 5173");
+    const answer = JSON.stringify(received(home).find((m) => m.id === "tool-1")?.result);
+    expect(answer).toContain("token=[masked]");
+    expect(answer).not.toContain("abc123secret");
+    expect(received(home).find((m) => m.id === "tool-1")?.result).toMatchObject({ success: true });
+    await expect.poll(() => JSON.stringify(received(home).find((m) => m.id === "tool-2")?.result ?? "")).toContain("No preview tab is open");
+  } finally {
+    await close();
+  }
+});
+
