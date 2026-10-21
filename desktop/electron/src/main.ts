@@ -614,6 +614,8 @@ export async function main(options: MainOptions): Promise<void> {
       case "preview/devtools":
         previews.devTools(String(message.id));
         return null;
+      case "preview/console":
+        return previews.consoles(typeof message.thread === "string" ? message.thread : null);
       case "preview/close":
         previews.close(String(message.id));
         return null;

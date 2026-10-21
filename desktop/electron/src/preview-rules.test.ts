@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import { addressOf, decide, reachOf } from "./preview-rules";
+import { consoleLine } from "./preview-rules";
 
 const none = new Set<string>();
 
@@ -51,3 +52,12 @@ describe("the preview tab's rules", () => {
     expect(addressOf("  ")).toBeNull();
   });
 });
+
+describe("a preview's console, for the agent's console tool", () => {
+  it("is one line per message, its level and where it came from, in both of Electron's event forms", () => {
+    expect(consoleLine({ level: "error", message: "Uncaught TypeError: x is undefined", lineNumber: 12, sourceId: "http://127.0.0.1:5173/src/main.js" })).toBe("[error] Uncaught TypeError: x is undefined (main.js:12)");
+    expect(consoleLine({}, 2, "deprecated API", 3, "http://127.0.0.1/app.js")).toBe("[warning] deprecated API (app.js:3)");
+    expect(consoleLine({ level: "info", message: "x".repeat(5000) }).length).toBe(2000);
+  });
+});
+
