@@ -1,6 +1,7 @@
 """T0 for the instruction-following sets (specs/DREAMFERENCE_MIGHTLING_ASSISTANT_EVALS.md §10.3, §10.5).
 
     python setup_cache.py ifeval [--cache DIR]      IFEval's scorer and data, IFBench, NLTK's punkt
+    python setup_cache.py polyglot [--no-build]     Aider Polyglot's exercises and its arm64 image
 
 Everything goes into the cache (`~/.cache/dreamference/industry/` by default), never into the
 repository: the scorers' code is fetched at pinned commits, the data at pinned revisions, and a
@@ -57,6 +58,13 @@ SCORER_PACKAGES: Final[tuple[str, ...]] = (
     "pydantic",
     "pydantic-settings",
 )
+# Aider Polyglot: the exercises at the last commit (checked 2026-10-21), and the image's tag.
+POLYGLOT_COMMIT: Final[str] = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
+POLYGLOT_TARBALL: Final[str] = (
+    f"https://codeload.github.com/Aider-AI/polyglot-benchmark/tar.gz/{POLYGLOT_COMMIT}"
+)
+POLYGLOT_IMAGE: Final[str] = "mightling-polyglot:latest"
+HERE: Final[Path] = Path(__file__).resolve().parent
 MANIFEST: Final[dict] = {
     "ifeval": {
         "source": IFEVAL_RAW,
@@ -71,6 +79,12 @@ MANIFEST: Final[dict] = {
     "nltk_punkt": {
         "source": "nltk.download('punkt', 'punkt_tab')",
         "licence": "Apache-2.0 (NLTK data)",
+    },
+    "polyglot": {
+        "source": POLYGLOT_TARBALL,
+        "revision": POLYGLOT_COMMIT,
+        "licence": "MIT (the Exercism tracks cpp, go, java, javascript, python, rust); the polyglot-benchmark "
+        "repository has no licence file and attributes the exercises to Exercism",
     },
 }
 
@@ -130,18 +144,64 @@ def setup_ifeval(cache: Path, run=subprocess.run, download=fetch) -> dict:
         ],
         check=True,
     )
-    manifest = {**MANIFEST, "packages": pins}
+    for key in ("ifeval", "ifbench", "nltk_punkt"):
+        _manifest(cache, key)
+    manifest = json.loads((cache / "manifest.json").read_text())
+    manifest["packages"] = pins
     (cache / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
 
+def _manifest(cache: Path, key: str) -> None:
+    path = cache / "manifest.json"
+    current = json.loads(path.read_text()) if path.exists() else {}
+    current[key] = MANIFEST[key]
+    path.write_text(json.dumps(current, indent=2) + "\n")
+
+
+def setup_polyglot(cache: Path, build: bool = True, run=subprocess.run, download=fetch) -> Path:
+    """Fetches the exercises into the cache and builds the image from a staged context."""
+    tarball = download(POLYGLOT_TARBALL, cache / "polyglot.tar.gz")
+    with tarfile.open(tarball) as archive:
+        archive.extractall(cache, filter="data")
+    target = cache / "polyglot-benchmark"
+    unpacked = cache / f"polyglot-benchmark-{POLYGLOT_COMMIT}"
+    if unpacked.exists():
+        if target.exists():
+            subprocess.run(["rm", "-rf", str(target)], check=True)
+        unpacked.rename(target)
+    tarball.unlink(missing_ok=True)
+    _manifest(cache, "polyglot")
+    if build:
+        context = cache / "polyglot-context"
+        if context.exists():
+            subprocess.run(["rm", "-rf", str(context)], check=True)
+        context.mkdir(parents=True)
+        for name in ("Dockerfile", "test-js.sh", "test-cpp.sh"):
+            (context / name).write_bytes((HERE / "polyglot" / name).read_bytes())
+            (context / name).chmod(0o755)
+        subprocess.run(["cp", "-a", str(target), str(context / "polyglot-benchmark")], check=True)
+        run(["docker", "build", "-t", POLYGLOT_IMAGE, str(context)], check=True)
+    return target
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("what", choices=["ifeval"])
+    parser.add_argument("what", choices=["ifeval", "polyglot"])
+    parser.add_argument(
+        "--no-build", action="store_true", help="polyglot: fetch the exercises only"
+    )
     parser.add_argument(
         "--cache", default=os.environ.get("DREAMFERENCE_INDUSTRY_CACHE", str(DEFAULT_CACHE))
     )
     args = parser.parse_args(argv)
+    if args.what == "polyglot":
+        target = setup_polyglot(Path(args.cache), build=not args.no_build)
+        print(
+            f"✅ Aider Polyglot's exercises in {target}"
+            + ("" if args.no_build else f", image {POLYGLOT_IMAGE}")
+        )
+        return 0
     manifest = setup_ifeval(Path(args.cache))
     print(
         f"✅ IFEval and IFBench ready in {args.cache} ({len(manifest['packages'])} packages pinned)"
