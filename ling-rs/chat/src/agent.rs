@@ -25,6 +25,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header;
 
+use ling_web_server::ask_client::MadeFile;
 use ling_web_server::ask_client::Saved;
 
 /// The event the link sends after every successful (re)connection.
@@ -38,6 +39,10 @@ pub enum AgentCommand {
     Upload { thread: String, name: String, image: bool, bytes: Vec<u8>, reply: oneshot::Sender<Result<Saved, String>> },
     /// A voice message to text (`/api/transcribe`).
     Transcribe { media: String, bytes: Vec<u8>, reply: oneshot::Sender<Result<String, String>> },
+    /// The files a thread's agent changed since a time (`/api/ask/files`).
+    MadeFiles { thread: String, since_ms: u64, reply: oneshot::Sender<Result<Vec<MadeFile>, String>> },
+    /// One of them (`/api/ask/file`).
+    MadeFile { thread: String, name: String, reply: oneshot::Sender<Result<Vec<u8>, String>> },
     /// `/cavemode <text>` for a thread (None before the first question), through `ling web`'s
     /// `/api/cavemode`: what `ling cavemode` printed.
     Cavemode { thread: Option<String>, text: String, reply: oneshot::Sender<Result<String, String>> },
@@ -75,6 +80,24 @@ impl AgentHandle {
         let (reply, answer) = oneshot::channel();
         self.tx
             .send(AgentCommand::Cavemode { thread, text, reply })
+            .map_err(|_| "the bridge to ling web has stopped".to_string())?;
+        answer.await.map_err(|_| "the connection to ling web was lost".to_string())?
+    }
+
+    /// The files `thread`'s agent changed since `since_ms`.
+    pub async fn made_files(&self, thread: &str, since_ms: u64) -> Result<Vec<MadeFile>, String> {
+        let (reply, answer) = oneshot::channel();
+        self.tx
+            .send(AgentCommand::MadeFiles { thread: thread.to_string(), since_ms, reply })
+            .map_err(|_| "the bridge to ling web has stopped".to_string())?;
+        answer.await.map_err(|_| "the connection to ling web was lost".to_string())?
+    }
+
+    /// One file of `thread`'s folder.
+    pub async fn made_file(&self, thread: &str, name: &str) -> Result<Vec<u8>, String> {
+        let (reply, answer) = oneshot::channel();
+        self.tx
+            .send(AgentCommand::MadeFile { thread: thread.to_string(), name: name.to_string(), reply })
             .map_err(|_| "the bridge to ling web has stopped".to_string())?;
         answer.await.map_err(|_| "the connection to ling web was lost".to_string())?
     }
@@ -307,6 +330,8 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                             Some(AgentCommand::Respond { .. }) => {}
                             Some(AgentCommand::Upload { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                             Some(AgentCommand::Transcribe { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
+                            Some(AgentCommand::MadeFiles { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
+                            Some(AgentCommand::MadeFile { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                             Some(AgentCommand::Cavemode { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                         },
                     }
@@ -335,6 +360,18 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                         let (port, cookie) = (session.port, session.cookie.clone());
                         tokio::spawn(async move {
                             let _ = reply.send(ling_web_server::ask_client::cavemode(port, &cookie, thread.as_deref(), &text).await);
+                        });
+                    }
+                    Some(AgentCommand::MadeFiles { thread, since_ms, reply }) => {
+                        let (port, cookie) = (session.port, session.cookie.clone());
+                        tokio::spawn(async move {
+                            let _ = reply.send(ling_web_server::ask_client::made_files(port, &cookie, &thread, since_ms).await);
+                        });
+                    }
+                    Some(AgentCommand::MadeFile { thread, name, reply }) => {
+                        let (port, cookie) = (session.port, session.cookie.clone());
+                        tokio::spawn(async move {
+                            let _ = reply.send(ling_web_server::ask_client::made_file(port, &cookie, &thread, &name).await);
                         });
                     }
                     Some(AgentCommand::Transcribe { media, bytes, reply }) => {
