@@ -39,7 +39,7 @@ from typing import Final
 HERE: Final[Path] = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "ask_evals"))
 
-from setup_cache import DEFAULT_CACHE, fetch  # noqa: E402
+from setup_cache import DEFAULT_CACHE, BuildGuard, fetch  # noqa: E402
 
 TB_COMMIT: Final[str] = "7131e4375048a0e408a8fb404b5f499d726b695b"
 TB_TARBALL: Final[str] = (
@@ -118,11 +118,31 @@ def docker_image_of(toml_text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def build(cache: Path, only: list[str] | None, run=subprocess.run) -> dict:
-    """Builds each task's image and its verifier layer; returns {task: "ok" | why it failed}."""
+# Room to keep beyond the reserve before starting the next task's build.
+PER_TASK_GB: Final[float] = 5.0
+
+
+def build(
+    cache: Path, only: list[str] | None, run=subprocess.run, guard: BuildGuard | None = None
+) -> dict:
+    """Builds each task's image and its verifier layer; returns {task: "ok" | why it failed}.
+
+    Before each task the guard is asked (no SWE-bench night, the disk reserve kept); a refusal
+    stops the build where it is, and a later `build` carries on with the tasks not yet "ok". After
+    each task the build cache is pruned and the image's size recorded in `sizes.json`.
+    """
     p = paths(cache)
+    guard = guard or BuildGuard(run=run)
     results = json.loads(p["built"].read_text()) if p["built"].exists() else {}
+    sizes_path = p["root"] / "sizes.json"
+    sizes = json.loads(sizes_path.read_text()) if sizes_path.exists() else {}
     for name in only or task_names(p["tasks"]):
+        if results.get(name) == "ok" and not only:
+            continue
+        refusal = guard.refusal(cache, need_gb=PER_TASK_GB)
+        if refusal:
+            print(f"⚠️ Build stopped before {name}: {refusal}.")
+            break
         task = p["tasks"] / name
         env_tag, offline_tag = f"{IMAGE_PREFIX}/{name}:env", f"{IMAGE_PREFIX}/{name}:offline"
         first = run(
@@ -148,7 +168,11 @@ def build(cache: Path, only: list[str] | None, run=subprocess.run) -> dict:
                 if second.returncode == 0
                 else "verifier layer: " + (second.stderr or "")[-300:]
             )
+            if results[name] == "ok":
+                sizes[name] = guard.image_bytes(offline_tag)
+        guard.prune_build_cache()
         p["built"].write_text(json.dumps(results, indent=2) + "\n")
+        sizes_path.write_text(json.dumps(sizes, indent=2) + "\n")
     return results
 
 
@@ -324,7 +348,12 @@ def main(argv: list[str] | None = None, run=subprocess.run) -> int:
     if args.step == "build":
         results = build(cache, args.only.split(",") if args.only else None, run=run)
         failed = {k: v for k, v in results.items() if v != "ok"}
-        print(f"✅ {len(results) - len(failed)} built, ❌ {len(failed)} failed (see {p['built']})")
+        sizes_path = p["root"] / "sizes.json"
+        total = sum(json.loads(sizes_path.read_text()).values()) if sizes_path.exists() else 0
+        print(
+            f"✅ {len(results) - len(failed)} built, ❌ {len(failed)} failed (see {p['built']}); "
+            f"images {total / 1e9:.1f} GB"
+        )
         return 0
     if args.step == "prepare":
         ready = prepare(cache, bridge_address(run))
