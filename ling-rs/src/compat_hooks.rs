@@ -372,7 +372,12 @@ pub fn plan_for(
 }
 
 /// The session's hook settings in the mode: the memory hook, then the settings files' hooks.
-pub fn prepare(args: Vec<std::ffi::OsString>, codex_home: &Path, cwd: &Path) -> (Vec<std::ffi::OsString>, Plan) {
+pub fn prepare(
+    args: Vec<std::ffi::OsString>,
+    codex_home: &Path,
+    cwd: &Path,
+    extra_rules: &[(crate::compat_permissions::Kind, String)],
+) -> (Vec<std::ffi::OsString>, Plan) {
     let bare = std::env::var_os(crate::compat_print::BARE_ENV).is_some();
     let Ok(exe) = std::env::current_exe() else { return (args, Plan::default()) };
     let root = crate::compat_tui::project_root(cwd);
@@ -384,7 +389,21 @@ pub fn prepare(args: Vec<std::ffi::OsString>, codex_home: &Path, cwd: &Path) -> 
     let trusted = ling_skills::catalog::is_trusted(codex_home, &root);
     let memory = (!bare).then(|| memory_group(&crate::compat_memory::hook_command(&exe)));
     let shim = |command: &str| shim_command(&exe, command);
-    let plan = plan_for(&files, trusted, memory, &shim);
+    let mut plan = plan_for(&files, trusted, memory, &shim);
+    // Claude Code's permission rules, enforced by one `PreToolUse` hook (compat_permissions.rs).
+    if !bare {
+        plan.groups.push(Group {
+            event: "PreToolUse".to_string(),
+            matcher: None,
+            handlers: vec![Handler {
+                command: crate::compat_permissions::guard_command(&exe, extra_rules),
+                timeout: DEFAULT_TIMEOUT_S,
+                status_message: None,
+            }],
+            trusted: true,
+            context_limit: None,
+        });
+    }
     let Some(setting) = setting(&plan) else { return (args, plan) };
     let mut args = args.into_iter();
     let mut out: Vec<std::ffi::OsString> = args.next().into_iter().collect();
