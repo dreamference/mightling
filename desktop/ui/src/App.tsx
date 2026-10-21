@@ -75,6 +75,7 @@ import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, 
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { ExportDialog } from "./ExportDialog";
+import { threadContext, withThreadContext } from "./tonight";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectPage } from "./ProjectPage";
 import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollection, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
@@ -1892,7 +1893,9 @@ export function App() {
           if (words) {
             const folder = workFolder ?? composeRoot;
             if (!folder) return notice("Open a thread in a project to queue a task for it.");
-            const said = await bridge.night.add(folder, words[1], null);
+            // From a thread, the task carries what was said there (tonight.ts; the owner's decision 7).
+            const task = selected ? withThreadContext(words[1], workLabel(selected.thread), threadContext(selected)) : words[1];
+            const said = await bridge.night.add(folder, task, null);
             return setInfo({ title: "Night Shift", body: <pre className="info-pre">{said}</pre> });
           }
           return setScheduledOpen(true);
@@ -2636,7 +2639,9 @@ export function App() {
         memoryStatus={memoryStatus} resetMemories={resetMemories} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
-          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
+          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice}
+          fromThread={selected && view === "work" ? { title: workLabel(selected.thread), context: threadContext(selected) } : null}
+          onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }} />
       ) : null}
       {exporting ? <ExportDialog client={client} thread={exporting.thread} title={exporting.title} home={exporting.home} notice={notice} onClose={() => setExporting(null)} /> : null}
       {projectDialog ? (
