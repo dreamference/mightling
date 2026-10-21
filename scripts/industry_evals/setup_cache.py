@@ -31,8 +31,8 @@ IFEVAL_RAW: Final[str] = (
     "https://raw.githubusercontent.com/google-research/google-research/"
     f"{IFEVAL_COMMIT}/instruction_following_eval/"
 )
+# The folder has no __init__.py: the scorer runs as a namespace package from the folder above it.
 IFEVAL_FILES: Final[tuple[str, ...]] = (
-    "__init__.py",
     "evaluation_main.py",
     "evaluation_lib.py",
     "instructions.py",
@@ -65,6 +65,14 @@ POLYGLOT_TARBALL: Final[str] = (
 )
 POLYGLOT_IMAGE: Final[str] = "mightling-polyglot:latest"
 HERE: Final[Path] = Path(__file__).resolve().parent
+# NLTK's data both scorers load: IFEval's sentence splitter, and IFBench's stop words and tagger
+# (found missing by an offline run on 2026-10-21, which would otherwise score those checks as fails).
+NLTK_PACKAGES: Final[tuple[str, ...]] = (
+    "punkt",
+    "punkt_tab",
+    "stopwords",
+    "averaged_perceptron_tagger_eng",
+)
 MANIFEST: Final[dict] = {
     "ifeval": {
         "source": IFEVAL_RAW,
@@ -77,7 +85,7 @@ MANIFEST: Final[dict] = {
         "licence": "Apache-2.0 (code, allenai/IFBench); test set card names no licence",
     },
     "nltk_punkt": {
-        "source": "nltk.download('punkt', 'punkt_tab')",
+        "source": "nltk.download: punkt, punkt_tab, stopwords, averaged_perceptron_tagger_eng",
         "licence": "Apache-2.0 (NLTK data)",
     },
     "polyglot": {
@@ -215,7 +223,9 @@ def setup_ifeval(cache: Path, run=subprocess.run, download=fetch) -> dict:
         [
             str(venv_python(cache)),
             "-c",
-            f"import nltk; nltk.download('punkt', {str(nltk_data)!r}); nltk.download('punkt_tab', {str(nltk_data)!r})",
+            "import nltk, sys; [nltk.download(p, sys.argv[1], raise_on_error=True) for p in "
+            f"{list(NLTK_PACKAGES)!r}]",
+            str(nltk_data),
         ],
         check=True,
     )
