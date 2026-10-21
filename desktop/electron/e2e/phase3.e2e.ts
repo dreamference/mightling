@@ -879,3 +879,35 @@ test("decision 5: a new thread may read its terminal tab and the preview's conso
   }
 });
 
+
+test("decision 6: a thread exported to Markdown, redacted, read before saving, written where the user chose", async () => {
+  const { app, page, home, close } = await open();
+  const file = path.join(home, "export.md");
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    const row = page.locator(".thread-row", { hasText: "flaky retry" }).first();
+    await row.hover();
+    await row.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Export…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Export the thread" });
+    const preview = dialog.getByLabel("What will be saved");
+    await expect(preview).toContainText("# Fix the flaky retry test");
+    await expect(preview).toContainText("The retry test fails one run in ten.");
+    await expect(preview).not.toContainText("pytest tests/test_fetch.py");
+    await dialog.getByRole("checkbox", { name: "Include the commands and their output" }).check();
+    await expect(preview).toContainText("pytest tests/test_fetch.py -q -k retry");
+    expect(await preview.textContent()).not.toContain(home);
+    // The save dialog, answered as a user would.
+    await app.evaluate(({ dialog: electronDialog }, target) => {
+      electronDialog.showSaveDialog = (async () => ({ canceled: false, filePath: target })) as typeof electronDialog.showSaveDialog;
+    }, file);
+    await dialog.getByRole("button", { name: "Save…" }).click();
+    await expect(dialog.getByRole("status")).toContainText(file);
+    const saved = fs.readFileSync(file, "utf8");
+    expect(saved).toContain("# Fix the flaky retry test");
+    expect(saved).toContain("pytest tests/test_fetch.py -q -k retry");
+    expect(saved).not.toContain(home);
+  } finally {
+    await close();
+  }
+});
