@@ -40,6 +40,14 @@
       "default": {},
       "type": "object"
     },
+    "projectContextSent": {
+      "default": {},
+      "type": "object"
+    },
+    "projectOrder": {
+      "default": [],
+      "type": "strings"
+    },
     "permanentWorktrees": {
       "default": [],
       "type": "strings"

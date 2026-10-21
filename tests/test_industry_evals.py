@@ -200,6 +200,23 @@ def test_the_ifeval_runner_refuses_an_empty_cache(tmp_path, capsys):
     assert "setup_cache.py ifeval" in capsys.readouterr().err
 
 
+class FakeGuard:
+    """A build guard that says yes, or no after `allow` builds, and sizes every image at 2 GB."""
+
+    def __init__(self, allow: int = 1000, why: str = "60 GB free on /var/lib/docker"):
+        self.allow, self.why, self.asked, self.pruned = allow, why, 0, 0
+
+    def refusal(self, cache, need_gb=0.0):
+        self.asked += 1
+        return None if self.asked <= self.allow else self.why
+
+    def image_bytes(self, tag):
+        return 2_000_000_000
+
+    def prune_build_cache(self):
+        self.pruned += 1
+
+
 # T2: Aider Polyglot.
 
 POLYGLOT = _load("polyglot")
@@ -366,14 +383,290 @@ def test_polyglot_setup_fetches_the_pinned_exercises_and_builds_from_a_staged_co
         return path
 
     target = SETUP.setup_polyglot(
-        tmp_path, run=lambda command, check: built.append(command), download=download
+        tmp_path,
+        run=lambda command, check: built.append(command),
+        download=download,
+        guard=FakeGuard(),
     )
     assert (target / "rust" / "README.md").exists()
     assert built == [
         ["docker", "build", "-t", SETUP.POLYGLOT_IMAGE, str(tmp_path / "polyglot-context")]
     ]
-    assert (tmp_path / "polyglot-context" / "Dockerfile").exists()
-    assert (tmp_path / "polyglot-context" / "polyglot-benchmark" / "rust" / "README.md").exists()
+    # The staged context is gone after the build, and the image's size is in the manifest.
+    assert not (tmp_path / "polyglot-context").exists()
+    assert (
+        json.loads((tmp_path / "manifest.json").read_text())["polyglot"]["image_bytes"]
+        == 2_000_000_000
+    )
     assert json.loads((tmp_path / "manifest.json").read_text())["polyglot"]["licence"].startswith(
         "MIT"
     )
+
+
+# T3: Terminal-Bench.
+
+TBENCH = _load("tbench")
+TASK_TOML = """[task]
+name = "terminal-bench/regex-log"
+
+[verifier]
+timeout_sec = 900.0
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 600.0
+docker_image = "alexgshaw/regex-log:20251031"
+cpus = 1
+allow_internet = true
+"""
+
+
+def test_an_offline_task_names_its_local_image_and_lets_only_the_model_through():
+    import tomllib
+
+    config = tomllib.loads(
+        TBENCH.offline_toml(TASK_TOML, "mightling-tb21/regex-log:offline", "172.17.0.1")
+    )
+    environment = config["environment"]
+    assert environment["docker_image"] == "mightling-tb21/regex-log:offline"
+    assert environment["network_mode"] == "allowlist" and environment["allowed_hosts"] == [
+        "172.17.0.1"
+    ]
+    assert "allow_internet" not in environment
+    assert (
+        config["verifier"]["network_mode"] == "no-network"
+        and config["verifier"]["timeout_sec"] == 900.0
+    )
+
+
+def _tasks(cache: Path, names: list[str]) -> Path:
+    tasks = TBENCH.paths(cache)["tasks"]
+    for name in names:
+        (tasks / name / "environment").mkdir(parents=True)
+        (tasks / name / "environment" / "Dockerfile").write_text("FROM ubuntu:24.04\n")
+        (tasks / name / "task.toml").write_text(TASK_TOML.replace("regex-log", name))
+    return tasks
+
+
+def test_build_makes_both_layers_and_records_what_failed(tmp_path):
+    _tasks(tmp_path, ["good", "broken"])
+    built = []
+
+    def run(command, capture_output, text, check):
+        built.append(command[3])
+        failed = "broken" in command[3] and command[3].endswith(":env")
+        return subprocess.CompletedProcess(
+            command, 1 if failed else 0, "", "no aarch64 wheel" if failed else ""
+        )
+
+    guard = FakeGuard()
+    results = TBENCH.build(tmp_path, None, run=run, guard=guard)
+    assert results["good"] == "ok" and results["broken"].startswith("environment: no aarch64 wheel")
+    assert built == [
+        "mightling-tb21/broken:env",
+        "mightling-tb21/good:env",
+        "mightling-tb21/good:offline",
+    ]
+    layer = (TBENCH.paths(tmp_path)["root"] / "layers" / "good" / "Dockerfile").read_text()
+    assert (
+        layer.startswith("FROM mightling-tb21/good:env")
+        and "pytest==8.4.1" in layer
+        and "uv/0.9.5" in layer
+    )
+    assert "ENV UV_OFFLINE=1" in layer
+
+
+def test_prepare_takes_only_the_tasks_that_built_and_the_subset_is_drawn_once(tmp_path):
+    _tasks(tmp_path, [f"t{i:02d}" for i in range(40)])
+    p = TBENCH.paths(tmp_path)
+    p["built"].write_text(
+        json.dumps({f"t{i:02d}": "ok" if i < 35 else "environment: x" for i in range(40)})
+    )
+    ready = TBENCH.prepare(tmp_path, "172.17.0.1")
+    assert len(ready) == 35 and not (p["offline"] / "t39").exists()
+    first = TBENCH.draw_subset(tmp_path)
+    assert len(first) == 30 and set(first) <= set(ready)
+    p["built"].write_text(json.dumps({"t00": "ok"}))  # a later build changes nothing already drawn
+    assert TBENCH.draw_subset(tmp_path) == first
+
+
+def test_the_summary_scores_tasks_that_need_the_internet_apart(tmp_path):
+    for name, reward in (("a", 1.0), ("b", 0.0), ("c", 1.0)):
+        trial = tmp_path / f"{name}__x1"
+        trial.mkdir()
+        (trial / "result.json").write_text(
+            json.dumps({"task_name": name, "verifier_result": {"rewards": {"reward": reward}}})
+        )
+    result = TBENCH.summarise(tmp_path, {"c"})
+    assert result["all"] == {"tasks": 3, "resolved": 2, "rate": 66.7}
+    assert result["offline_solvable"] == {"tasks": 2, "resolved": 1, "rate": 50.0}
+    assert result["needs_internet"]["resolved"] == 1
+
+
+def test_the_harbor_command_runs_ling_as_a_custom_agent_with_the_model_at_the_bridge(tmp_path):
+    args = TBENCH.argparse.Namespace(parallel=3, runs=tmp_path / "runs", runtime="/rt")
+    command = TBENCH.harbor_command(tmp_path, args, ["a", "b"], "172.17.0.1")
+    assert command[1:3] == ["run", "-p"] and "ling_agent:LingAgent" in command
+    assert (
+        "MIGHTLING_MODEL_HOST=http://172.17.0.1:8000" in command
+        and "LING_RUNTIME_DIR=/rt" in command
+    )
+    assert command[-4:] == ["-i", "a", "-i", "b"]
+
+
+def _fake_harbor(monkeypatch):
+    """Just enough of Harbor's modules for the agent class to load."""
+    import types
+
+    class BaseAgent:
+        def __init__(self, logs_dir, **_):
+            self.logs_dir = logs_dir
+
+    modules = {
+        "harbor": types.ModuleType("harbor"),
+        "harbor.agents": types.ModuleType("harbor.agents"),
+        "harbor.agents.base": types.SimpleNamespace(BaseAgent=BaseAgent),
+        "harbor.environments": types.ModuleType("harbor.environments"),
+        "harbor.environments.base": types.SimpleNamespace(BaseEnvironment=object),
+        "harbor.models": types.ModuleType("harbor.models"),
+        "harbor.models.agent": types.ModuleType("harbor.models.agent"),
+        "harbor.models.agent.context": types.SimpleNamespace(AgentContext=object),
+    }
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    spec = importlib.util.spec_from_file_location(
+        "ling_agent", INDUSTRY / "tbench" / "ling_agent.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_harbor_agent_brings_its_own_ling_and_reports_its_tokens(tmp_path, monkeypatch):
+    import asyncio
+    import types
+
+    agent_module = _fake_harbor(monkeypatch)
+    runtime = tmp_path / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+    (runtime / "bin" / "ling").write_text("")
+    monkeypatch.setenv("LING_RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("MIGHTLING_MODEL_HOST", "http://172.17.0.1:8000")
+    calls = []
+
+    class Environment:
+        async def exec(self, command, user=None, timeout_sec=None, **_):
+            calls.append(("exec", command, user))
+            return types.SimpleNamespace(return_code=0)
+
+        async def upload_dir(self, source, target):
+            calls.append(("upload", str(source), target))
+
+        async def download_dir(self, source, target):
+            calls.append(("download", source, str(target)))
+            from test_ask_evals import write_rollout
+
+            write_rollout(Path(target), [{"user": "task", "answer": "done", "tokens": 42}])
+
+    agent = agent_module.LingAgent(logs_dir=tmp_path / "logs")
+    context = types.SimpleNamespace(n_output_tokens=None)
+    asyncio.run(agent.setup(Environment()))
+    asyncio.run(agent.run("Fix the regex.", Environment(), context))
+    assert ("upload", str(runtime), "/opt/ling") in calls
+    command = next(c[1] for c in calls if c[0] == "exec" and "ling exec" in c[1])
+    assert "--dangerously-bypass-approvals-and-sandbox" in command and "'Fix the regex.'" in command
+    assert "DREAMFERENCE_VLLM_HOST=http://172.17.0.1:8000" in command
+    assert context.n_output_tokens == 42
+    assert agent_module.LingAgent.name() == "mightling-ling"
+
+
+def test_the_build_guard_refuses_during_a_night_or_under_the_reserve(tmp_path):
+    def run(command, capture_output, text, check):
+        out = ""
+        if command[0] == "systemctl":
+            out = night
+        elif command[:2] == ["docker", "info"]:
+            out = "/var/lib/docker\n"
+        return subprocess.CompletedProcess(command, 0, out, "")
+
+    free = {"gb": 400}
+    usage = lambda path: type("U", (), {"free": free["gb"] * 1e9})()  # noqa: E731
+    night = "ling-swe-night12.service loaded active running SWE-bench night 12\n"
+    guard = SETUP.BuildGuard(run=run, usage=usage)
+    assert "ling-swe-night12.service" in guard.refusal(tmp_path)
+    night = ""
+    assert guard.refusal(tmp_path, need_gb=5) is None
+    free["gb"] = 152
+    assert "keeps 150 GB free" in guard.refusal(tmp_path, need_gb=5)
+
+
+def test_a_refused_build_stops_where_it_is_and_a_later_one_carries_on(tmp_path):
+    _tasks(tmp_path, ["a", "b", "c"])
+
+    def run(command, capture_output, text, check):
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    first = TBENCH.build(tmp_path, None, run=run, guard=FakeGuard(allow=1))
+    assert first == {"a": "ok"}
+    second = TBENCH.build(tmp_path, None, run=run, guard=FakeGuard())
+    assert second == {"a": "ok", "b": "ok", "c": "ok"}
+    sizes = json.loads((TBENCH.paths(tmp_path)["root"] / "sizes.json").read_text())
+    assert sizes == {"a": 2_000_000_000, "b": 2_000_000_000, "c": 2_000_000_000}
+
+
+def test_the_polyglot_image_is_not_built_during_a_night(tmp_path):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        info = tarfile.TarInfo(f"polyglot-benchmark-{SETUP.POLYGLOT_COMMIT}/x")
+        archive.addfile(info, io.BytesIO(b""))
+
+    def download(url, path):
+        path.write_bytes(buffer.getvalue())
+        return path
+
+    built = []
+    guard = FakeGuard(allow=0, why="a SWE-bench night is running (ling-swe-night15.service)")
+    try:
+        SETUP.setup_polyglot(
+            tmp_path, run=lambda c, check: built.append(c), download=download, guard=guard
+        )
+    except SystemExit as error:
+        assert "ling-swe-night15" in str(error)
+    assert built == []
+
+
+def test_a_partial_run_hands_the_scorer_only_its_rows_and_ifbench_names_are_found(tmp_path):
+    rows = [{"key": 1, "prompt": "p1"}, {"key": 2, "prompt": "p2"}]
+    responses = tmp_path / "responses.jsonl"
+    responses.write_text(
+        "".join(json.dumps({"prompt": r["prompt"], "response": "x"}) + "\n" for r in rows)
+    )
+    seen = {}
+
+    def run(command, cwd, env, capture_output, text, check):
+        data = Path(next(a for a in command if a.startswith("--input_data=")).split("=", 1)[1])
+        seen["rows"] = [json.loads(line) for line in data.read_text().splitlines()]
+        out = Path(next(a for a in command if a.startswith("--output_dir=")).split("=", 1)[1])
+        for kind in ("strict", "loose"):  # IFBench's naming: the responses file's stem first
+            (out / f"responses-eval_results_{kind}.jsonl").write_text(
+                json.dumps({"follow_all_instructions": True, "follow_instruction_list": [True]})
+                + "\n"
+            )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    result = IFEVAL.score(
+        tmp_path, "ifbench", responses, tmp_path / "scored", Path("python"), rows=rows, run=run
+    )
+    assert seen["rows"] == rows
+    assert result["strict"] == {"prompts": 1, "prompt_level": 1.0, "instruction_level": 1.0}
+
+
+def test_setup_downloads_every_nltk_package_both_scorers_load():
+    assert set(SETUP.NLTK_PACKAGES) == {
+        "punkt",
+        "punkt_tab",
+        "stopwords",
+        "averaged_perceptron_tagger_eng",
+    }
