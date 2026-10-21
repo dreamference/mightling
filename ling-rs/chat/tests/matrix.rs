@@ -78,6 +78,8 @@ async fn handle(State(stand): State<Stand>, method: Method, uri: Uri, body: Byte
         let mut n = stand.events.lock().unwrap();
         *n += 1;
         json!({ "event_id": format!("$e{n}") })
+    } else if path.starts_with("/_matrix/media/v3/upload") {
+        json!({ "content_uri": "mxc://node.tail.ts.net/up1" })
     } else if path.ends_with("/whoami") {
         json!({ "user_id": BOT })
     } else {
@@ -285,3 +287,16 @@ async fn the_bridge_opens_a_room_per_allowed_user_and_keeps_its_place() {
     let auth_ok = stand.calls.lock().unwrap().iter().all(|(_, p, _)| !p.contains("bot-token"));
     assert!(auth_ok, "the token goes in a header, never in a path");
 }
+
+#[tokio::test]
+async fn a_file_is_uploaded_and_sent_as_a_file_message() {
+    let (stand, root) = stand_in().await;
+    let (dir, _config) = setup("file", &root);
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let (_, renderer) = ling_chat::matrix::pair_for_tests(MatrixApi::new(&root, "bot-token"), dir, BOT, hub);
+    renderer.render(Outbound::File { chat: "matrix:!dm:x".into(), name: "report.md".into(), bytes: b"# r".to_vec() }).await;
+    assert_eq!(stand.calls("POST", "/_matrix/media/v3/upload").len(), 1);
+    let sent = stand.calls("PUT", "/send/m.room.message/");
+    assert_eq!(sent[0].1, json!({ "msgtype": "m.file", "body": "report.md", "filename": "report.md", "url": "mxc://node.tail.ts.net/up1", "info": { "size": 3 } }));
+}
+
