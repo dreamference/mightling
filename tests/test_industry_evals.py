@@ -377,3 +377,181 @@ def test_polyglot_setup_fetches_the_pinned_exercises_and_builds_from_a_staged_co
     assert json.loads((tmp_path / "manifest.json").read_text())["polyglot"]["licence"].startswith(
         "MIT"
     )
+
+
+# T3: Terminal-Bench.
+
+TBENCH = _load("tbench")
+TASK_TOML = """[task]
+name = "terminal-bench/regex-log"
+
+[verifier]
+timeout_sec = 900.0
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 600.0
+docker_image = "alexgshaw/regex-log:20251031"
+cpus = 1
+allow_internet = true
+"""
+
+
+def test_an_offline_task_names_its_local_image_and_lets_only_the_model_through():
+    import tomllib
+
+    config = tomllib.loads(
+        TBENCH.offline_toml(TASK_TOML, "mightling-tb21/regex-log:offline", "172.17.0.1")
+    )
+    environment = config["environment"]
+    assert environment["docker_image"] == "mightling-tb21/regex-log:offline"
+    assert environment["network_mode"] == "allowlist" and environment["allowed_hosts"] == [
+        "172.17.0.1"
+    ]
+    assert "allow_internet" not in environment
+    assert (
+        config["verifier"]["network_mode"] == "no-network"
+        and config["verifier"]["timeout_sec"] == 900.0
+    )
+
+
+def _tasks(cache: Path, names: list[str]) -> Path:
+    tasks = TBENCH.paths(cache)["tasks"]
+    for name in names:
+        (tasks / name / "environment").mkdir(parents=True)
+        (tasks / name / "environment" / "Dockerfile").write_text("FROM ubuntu:24.04\n")
+        (tasks / name / "task.toml").write_text(TASK_TOML.replace("regex-log", name))
+    return tasks
+
+
+def test_build_makes_both_layers_and_records_what_failed(tmp_path):
+    _tasks(tmp_path, ["good", "broken"])
+    built = []
+
+    def run(command, capture_output, text, check):
+        built.append(command[3])
+        failed = "broken" in command[3] and command[3].endswith(":env")
+        return subprocess.CompletedProcess(
+            command, 1 if failed else 0, "", "no aarch64 wheel" if failed else ""
+        )
+
+    results = TBENCH.build(tmp_path, None, run=run)
+    assert results["good"] == "ok" and results["broken"].startswith("environment: no aarch64 wheel")
+    assert built == [
+        "mightling-tb21/broken:env",
+        "mightling-tb21/good:env",
+        "mightling-tb21/good:offline",
+    ]
+    layer = (TBENCH.paths(tmp_path)["root"] / "layers" / "good" / "Dockerfile").read_text()
+    assert (
+        layer.startswith("FROM mightling-tb21/good:env")
+        and "pytest==8.4.1" in layer
+        and "uv/0.9.5" in layer
+    )
+    assert "ENV UV_OFFLINE=1" in layer
+
+
+def test_prepare_takes_only_the_tasks_that_built_and_the_subset_is_drawn_once(tmp_path):
+    _tasks(tmp_path, [f"t{i:02d}" for i in range(40)])
+    p = TBENCH.paths(tmp_path)
+    p["built"].write_text(
+        json.dumps({f"t{i:02d}": "ok" if i < 35 else "environment: x" for i in range(40)})
+    )
+    ready = TBENCH.prepare(tmp_path, "172.17.0.1")
+    assert len(ready) == 35 and not (p["offline"] / "t39").exists()
+    first = TBENCH.draw_subset(tmp_path)
+    assert len(first) == 30 and set(first) <= set(ready)
+    p["built"].write_text(json.dumps({"t00": "ok"}))  # a later build changes nothing already drawn
+    assert TBENCH.draw_subset(tmp_path) == first
+
+
+def test_the_summary_scores_tasks_that_need_the_internet_apart(tmp_path):
+    for name, reward in (("a", 1.0), ("b", 0.0), ("c", 1.0)):
+        trial = tmp_path / f"{name}__x1"
+        trial.mkdir()
+        (trial / "result.json").write_text(
+            json.dumps({"task_name": name, "verifier_result": {"rewards": {"reward": reward}}})
+        )
+    result = TBENCH.summarise(tmp_path, {"c"})
+    assert result["all"] == {"tasks": 3, "resolved": 2, "rate": 66.7}
+    assert result["offline_solvable"] == {"tasks": 2, "resolved": 1, "rate": 50.0}
+    assert result["needs_internet"]["resolved"] == 1
+
+
+def test_the_harbor_command_runs_ling_as_a_custom_agent_with_the_model_at_the_bridge(tmp_path):
+    args = TBENCH.argparse.Namespace(parallel=3, runs=tmp_path / "runs", runtime="/rt")
+    command = TBENCH.harbor_command(tmp_path, args, ["a", "b"], "172.17.0.1")
+    assert command[1:3] == ["run", "-p"] and "ling_agent:LingAgent" in command
+    assert (
+        "MIGHTLING_MODEL_HOST=http://172.17.0.1:8000" in command
+        and "LING_RUNTIME_DIR=/rt" in command
+    )
+    assert command[-4:] == ["-i", "a", "-i", "b"]
+
+
+def _fake_harbor(monkeypatch):
+    """Just enough of Harbor's modules for the agent class to load."""
+    import types
+
+    class BaseAgent:
+        def __init__(self, logs_dir, **_):
+            self.logs_dir = logs_dir
+
+    modules = {
+        "harbor": types.ModuleType("harbor"),
+        "harbor.agents": types.ModuleType("harbor.agents"),
+        "harbor.agents.base": types.SimpleNamespace(BaseAgent=BaseAgent),
+        "harbor.environments": types.ModuleType("harbor.environments"),
+        "harbor.environments.base": types.SimpleNamespace(BaseEnvironment=object),
+        "harbor.models": types.ModuleType("harbor.models"),
+        "harbor.models.agent": types.ModuleType("harbor.models.agent"),
+        "harbor.models.agent.context": types.SimpleNamespace(AgentContext=object),
+    }
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    spec = importlib.util.spec_from_file_location(
+        "ling_agent", INDUSTRY / "tbench" / "ling_agent.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_harbor_agent_brings_its_own_ling_and_reports_its_tokens(tmp_path, monkeypatch):
+    import asyncio
+    import types
+
+    agent_module = _fake_harbor(monkeypatch)
+    runtime = tmp_path / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+    (runtime / "bin" / "ling").write_text("")
+    monkeypatch.setenv("LING_RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("MIGHTLING_MODEL_HOST", "http://172.17.0.1:8000")
+    calls = []
+
+    class Environment:
+        async def exec(self, command, user=None, timeout_sec=None, **_):
+            calls.append(("exec", command, user))
+            return types.SimpleNamespace(return_code=0)
+
+        async def upload_dir(self, source, target):
+            calls.append(("upload", str(source), target))
+
+        async def download_dir(self, source, target):
+            calls.append(("download", source, str(target)))
+            from test_ask_evals import write_rollout
+
+            write_rollout(Path(target), [{"user": "task", "answer": "done", "tokens": 42}])
+
+    agent = agent_module.LingAgent(logs_dir=tmp_path / "logs")
+    context = types.SimpleNamespace(n_output_tokens=None)
+    asyncio.run(agent.setup(Environment()))
+    asyncio.run(agent.run("Fix the regex.", Environment(), context))
+    assert ("upload", str(runtime), "/opt/ling") in calls
+    command = next(c[1] for c in calls if c[0] == "exec" and "ling exec" in c[1])
+    assert "--dangerously-bypass-approvals-and-sandbox" in command and "'Fix the regex.'" in command
+    assert "DREAMFERENCE_VLLM_HOST=http://172.17.0.1:8000" in command
+    assert context.n_output_tokens == 42
+    assert agent_module.LingAgent.name() == "mightling-ling"

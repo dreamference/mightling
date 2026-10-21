@@ -564,6 +564,32 @@ Built after the `ask-evals` core (§11), each on its own branch, tested with no 
   - the choice of solution files;
   - setup with a staged build context.
 
+### 12.3 T0 and T3: Terminal-Bench 2.1 (branch `industry/tbench`)
+
+- **Where 2.1 lives.** `harbor-framework/terminal-bench-2-1` (Apache-2.0), pinned at `7131e437`: 89 tasks under `tasks/`. The tbench.ai post on 2.1 names it the official dataset repository. 2.0's own repository still has 2.1 as an open pull request (#53).
+- **`scripts/industry_evals/tbench.py`.** It works in five steps:
+  - **`setup`:** Harbor 0.24.0 in its own virtualenv, and the tasks from the pinned tarball.
+  - **`build`:** each task's `environment/Dockerfile` built here for arm64. A second layer installs curl, uv 0.9.5, Python 3.13 and the verifier's pinned pytest wheels, then sets `UV_OFFLINE=1`, so the verifier's own `test.sh` grades offline. Every result goes to `built.json`, failures with their reason.
+  - **`prepare`:** a copy of each task that built. Its `task.toml` names the local image and replaces `allow_internet` with Harbor's network policy (D7). The agent's phase is set to `network_mode = "allowlist"` with only the Docker bridge's gateway, where the model gate listens; the verifier to `no-network`. Harbor enforces this with its egress-control sidecar (`docker-compose-egress-control.yaml` in Harbor's source). Whether this kernel supports it is checked by Harbor at start (`_egress_control_kernel_support`); NV here until T0 runs.
+  - **`subset`:** the fixed 30-task subset, drawn once from the tasks that built (seed 20261021) and kept.
+  - **`run`:** `harbor run -p <offline tasks> -a ling_agent:LingAgent`, with SWE-bench's runtime copy of `ling` and the model at the bridge. The summary scores resolved tasks overall, offline-solvable tasks, and the tasks in `needs-internet.txt` apart (D7). `--hold-gate` admits Docker's address range only.
+- **`tbench/ling_agent.py`.** `ling` as a Harbor custom agent (`BaseAgent`).
+  - `setup` uploads the runtime to `/opt/ling`. `run` runs `ling exec --json --dangerously-bypass-approvals-and-sandbox` on the instruction in the task's working folder, with a 30-minute limit and `DREAMFERENCE_VLLM_HOST` set.
+  - The rollout comes back into the trial's logs, and its output tokens into Harbor's context. Nothing is fetched from the network, unlike Harbor's Codex agent, which runs `npm install` in the container.
+- **NV until T0 runs:**
+  - which tasks fail to build for aarch64;
+  - whether Harbor's egress control works on this kernel;
+  - whether a task image that sets a non-root `USER` keeps working after the verifier layer's `USER root`;
+  - the layout of Harbor's `result.json`, which `reward_of` reads defensively.
+- **Tests** in `tests/test_industry_evals.py`:
+  - the rewritten `task.toml`, read back with `tomllib`;
+  - both build layers, with a failure recorded;
+  - `prepare` taking only built tasks;
+  - the subset drawn once and kept;
+  - the summary with internet-needing tasks apart;
+  - the Harbor command;
+  - the agent class against stand-in Harbor modules and environment.
+
 ## Sources
 
 Every page was fetched on 2026-10-20 with `ling-fetch`. arXiv by number: 2506.07982 (τ²-bench), 2509.17158 and 2602.11964 (ARE, Gaia2), 2508.06600 (BrowseComp-Plus), 2504.12516 (BrowseComp), 2311.12983 (GAIA), 2407.15711 (AssistantBench), 2506.21506 (Mind2Web 2), 2408.04682 (ToolSandbox), 2506.13977 (CRITICTOOL), 2504.18851 (When2Call), 2309.15817 (ToolEmu), 2401.08326 (RoTBench), 2503.04479 (ToolFuzz), 2601.06112 (ReliabilityBench), 2604.01508 (ToolMisuseBench), 2608.11977 (Bench2Robust), 2606.25819 (ToolBench-X), 2605.09252, 2605.00737, 2502.11435, 2406.20015 (tool over-use); 2505.06120 (Lost in Conversation), 2501.17399 (MultiChallenge), 2410.10813 (LongMemEval), 2402.17753 (LoCoMo), 2110.00768 (TopiOCQA), 2605.09268 (Beyond Continuity), 2402.14762 (MT-Bench-101), 2409.12640 (Michelangelo / MRCR), 2410.15553 (Multi-IF), 2503.10497 (MMLU-ProX), 2606.24083 (CAVEWOMAN), 2505.11365 (Phare), 2405.12063 (CLAMBER), 2503.22674 (QuestBench), 2512.21120 (ClarifyMT-Bench), 2507.18791 (CodeMixBench), 2603.01423; 2411.04368 (SimpleQA), 2509.07968 (SimpleQA Verified), 2506.09038 (AbstentionBench), 2504.17550 (HalluLens), 2503.03750 (MASK), 2501.03200 (FACTS Grounding), 2403.20331 (MM-UPD), 2403.20330 (MMStar), 2501.00321 (OCRBench v2), 2404.05955 (VisualWebBench), 2410.04107 (TUBench), 2507.17262 (VisionTrap), 2412.02592 (OHRBench), 2401.07927, 2503.13445, 2602.02639 (self-explanation); 1904.09751, 1908.04319, 2206.02369, 2310.10226 (degeneration), 2512.12895, 2601.05693, 2606.13705, 2512.04419, 2511.00640 (loops), 2409.02076, 2409.16191, 2408.07055 (long generation). Repositories and cards: `sierra-research/tau2-bench`, `facebookresearch/meta-agents-research-environments` and `gaia2-cli`, `texttron/BrowseComp-Plus`, `ShishirPatil/gorilla` (BFCL), `apple/ToolSandbox`, `microsoft/lost_in_conversation`, `for-ai/language-confusion`, `facebookresearch/AbstentionBench`, `sgl-project/sglang` (`python/sglang/srt/sampling/sampling_params.py`), `vllm-project/vllm` (`vllm/sampling_params.py`), and the Hugging Face cards named in §3.
