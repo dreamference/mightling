@@ -3,7 +3,7 @@
 > - **Status:** proposed 2026-10-20 (owner: study the Claude desktop app, "make Mightling's desktop app as close to it as useful"), branch `desktop/parity-claude`. A companion to [DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md](./DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md) (DESKTOP_PARITY), whose direction, parity with the Codex app, stands: this document adds what the Claude desktop app does that a local, private assistant should also do, ranks it, and says which items need the owner. §4 records what this branch built.
 > - **Clean room.** Every claim about the Claude desktop app below is read from the vendor's public pages (help center, documentation, release notes, blog, the public Claude Code changelog), each row with its URL (§7). Nothing was downloaded from the vendor, unpacked, decompiled or read from the app's bundle, and no icon, image, font or string of the app is reused. Where a public page does not state something, the row says **not documented** rather than guessing.
 > - **What could be observed:** nothing of the running app. It has a Linux build now (a beta since the week of 2026-06-29, `.deb` for x86_64 and arm64, Ubuntu 22.04+ and Debian 12+, [LNX]), so this GB10 and the MSI desktop qualify on paper, but (1) installing it needs root and registers the vendor's apt repository, which was not done on the owner's machines without the owner, the MSI's `sudo` asks for a password, and this machine runs the SWE-bench nights; (2) every surface is behind the vendor's sign-in ([LNX] "Launch and sign in"), and no account is used here, so a running copy would show only its sign-in screen. The Mac mini runs macOS 12.3 (`sw_vers`, 2026-10-20) and the app requires macOS 13 ([INSTALL]). §6 question 1 asks whether to install it on the MSI desktop, sign-in screen only.
-> - **Where it stands (2026-10-20):** gap 1 (files and artifacts in Ask) merged to `main` as f77a6fc6 and gap 3 (Quick Entry) as 06c1fab5, both pushed with e13b6c83, after the full desktop gate (UI 139 and main-process 91 unit tests, the e2e suite 42 passed, the Python suite 1640 passed). This document stays on `desktop/parity-claude`, not merged, so the code's comments that cite it (`DESKTOP_PARITY_CLAUDE §4.1`, `§4.2`) point at this branch until the owner decides (§6 question 7).
+> - **Where it stands (2026-10-20):** gap 1 (files and artifacts in Ask) merged to `main` as f77a6fc6 and gap 3 (Quick Entry) as 06c1fab5, both pushed with e13b6c83, after the full desktop gate (UI 139 and main-process 91 unit tests, the e2e suite 42 passed, the Python suite 1640 passed). On 2026-10-21 the owner answered §6: links in answers, incognito questions and earlier questions for the agent were built (§4.3 to §4.5), and this document was merged to `main`.
 > - **Trade dress:** as DESKTOP_PARITY: layout and interaction may follow the compared app; its name, icon, colours, sounds and copy must not.
 
 ---
@@ -164,12 +164,12 @@ Sign-in, plans and usage limits; cloud sessions, Cowork in a virtual machine and
 | # | Gap | Impact | What it takes | Status |
 |---|---|---|---|---|
 | 1 | **Files and artifacts beside an Ask answer**, the question's folder listed and opened (§2.3) | H | Window only: the tab area in Ask for files inside the question's folder, the folder's tree, a card per file an answer made | **Built** (`desktop/ask-files`), §4.1 |
-| 2 | **Projects for Ask:** instructions, knowledge files searched through `ling-docs`, questions gathered, a question moved in (§2.1) | H | The policy layer composes a project's instructions into the `ask` prompt and names its collection; the UI a project page | Needs the owner, §6 question 6 |
+| 2 | **Projects for Ask:** instructions, knowledge files searched through `ling-docs`, questions gathered, a question moved in (§2.1) | H | The policy layer composes a project's instructions into the `ask` prompt and names its collection; the UI a project page | Decided 2026-10-21: Projects are the Codex-parity work's (DESKTOP_PARITY, branch `desktop/parity-projects`: one project for Ask and Work, instructions and knowledge files); Ask builds on them, no Ask-only projects |
 | 3 | **Quick Entry:** a system-wide shortcut, a floating box, the app kept in the tray (§2.9, §2.10) | H | Window only: `globalShortcut`, a small window, two settings off by default | **Built** (`desktop/quick-entry`), §4.2; recent questions in the box not built |
-| 4 | **Open a cited source** from an answer (§2.4) | H | The renderer keeps the address; a click opens it in the system browser after showing it; refused at `/airgapped on` like the forge's page | Needs the owner, §6 question 2 |
+| 4 | **Open a cited source** from an answer (§2.4) | H | The renderer keeps the address; a click opens it in the system browser after showing it; refused at `/airgapped on` like the forge's page | **Built** (decided 2026-10-21), §4.5 |
 | 5 | **Edit an earlier message**, the replaced version kept (§2.2) | M | `thread/fork` at that turn, then `turn/start`; a switch between the versions | Proposed; the version switcher is UI the owner should see first |
-| 6 | **Incognito question** (§2.14) | M | `ephemeral` threads, the folder removed on close (a main-process removal confined to the Ask root) | Needs the owner, §6 question 3 |
-| 7 | **The agent recalls earlier questions** (§2.14) | M | A read-only MCP tool over the session files, off by default | Needs the owner, §6 question 4 |
+| 6 | **Incognito question** (§2.14) | M | `ephemeral` threads, the folder removed on close (a main-process removal confined to the Ask root) | **Built** (decided 2026-10-21), §4.3 |
+| 7 | **The agent recalls earlier questions** (§2.14) | M | A read-only MCP tool over the session files, off by default | **Built** (decided 2026-10-21) as a skill over kept copies rather than an MCP tool, §4.4 |
 | 8 | **Per-tool rules for MCP tools** (§2.6) | M | The pinned `ling`'s per-tool approval keys, if any, written through `config/value/write` | Proposed; to check against the pinned Codex's config first |
 | 9 | **Diagrams in answers** (Mermaid, inline charts) (§2.3) | M | Bundle Mermaid in the renderer, no script from the answer | **Shared** with DESKTOP_PARITY §2.4 |
 | 10 | **One context menu on every path** (attach, open in editor, show in folder, copy path) (§2.5) | M | Window only | **Shared** with DESKTOP_PARITY §2.5, §2.8 |
@@ -202,21 +202,52 @@ Branch `desktop/quick-entry`, window only (no method added to `policy.json`; two
 
 ---
 
+### 4.3 Incognito questions (gap 6, decided 2026-10-21)
+
+Branch `desktop/incognito`, the desktop app only (`ling web` shows no switch: deleting a question's folder from a browser needs a route in `ling web`, a later step).
+
+- **The switch:** **Incognito** in the header of a new Ask question (Settings need nothing). Before the first message, and for as long as the question is shown, a dashed frame round the thread and a note say what it means: not saved, out of the history, the memories and later searches, and **deleted for good**, with every file in its folder, when it is left.
+- **Not saved:** the thread starts with `ephemeral: true`, so the server writes no session file and its memory pipeline skips it (Codex: `memories/write/src/start.rs` returns for an ephemeral session); the page lists no ephemeral thread, and an incognito question cannot be forked, popped out or side-chatted (each would make a saved copy).
+- **Deleted when left:** another question, a new one, Work: the page stops its turn, sends `thread/unsubscribe` and asks the main process (`ask/forget`) to delete the folder, its files and its `ask/<thread-id>` link. The main process marks the folder when the question starts (`ask/incognito`, `.mightling-incognito`) and deletes only marked folders (`forgetIncognito`, `desktop/electron/src/ask.ts`); at the app's start and quit it sweeps any marked folder left over (`sweepIncognito`), so a crash or a quit with one open leaves nothing.
+- **Tests:** `ask.test.ts` (a marked question deleted with its files and link, an unmarked one refused, the sweep), `e2e/incognito.e2e.ts` (a crashed app's leftover swept at the start; the switch and its note; started ephemeral, not listed, no fork; its file in the marked folder; leaving deletes folder and link and unsubscribes; a saved question untouched; one open at quit deleted).
+
+### 4.4 Earlier questions for the agent (gap 7, decided 2026-10-21)
+
+Branch `desktop/recall`, the desktop app only. Off by default: **Settings › Memories › Let the agent search your earlier Ask questions**.
+
+- **What the agent gets:** a skill of the user's, `~/.mightling/skills/earlier-questions/SKILL.md`, loaded by every new session as the user's skills are: when the user refers to something asked before, search the copies with `rg` and read them, read only, and say which earlier question it used. Nothing new runs: the agent's own shell, in its own sandbox, on this machine. (An MCP server was the first idea, §3; the clients carry no Python and adding a tool to `ling` means a rebuild, while a skill over plain files needs neither.)
+- **What is kept:** each Ask question of the user's as Markdown under `~/.mightling/ask-history/<thread-id>.md`: its title, when it was asked, its folder, then each question and answer (no commands, diffs or reasoning; 512 KB at most). Written by the page from `thread/list` and `thread/turns/list` (all when the app starts or the switch is turned on, one after each finished turn) through the main process (`recall/write`, refused while the switch is off; `desktop/electron/src/recall.ts`); never an incognito, subagent or Work thread; an archived question's copy removed (`recall/prune`).
+- **Off** deletes the skill and every copy.
+- **Tests:** `recall.test.ts` in both packages (nothing kept while off; the skill names the folder; copies by thread; long ones cut; pruning; off deletes all; what a copy holds and leaves out), `e2e/recall.e2e.ts` (off by default; on, the skill and the Ask question's copy, Work's threads not copied; a new question copied when its turn ends; off deletes both).
+
+### 4.5 Links in answers (gap 4, decided 2026-10-21)
+
+Branch `desktop/answer-links`, the app and `ling web`.
+
+- A web address in a message, a review, a Night Shift report or a pull request's body (http or https, with a host, and no user name or password, which can hide the real host) is a link (`webLink` in `desktop/ui/src/markdown.ts`); every other link stays inert, its address on hover.
+- A click or Enter opens a dialog first: the site on a line of its own, the full address, **Open in your browser**, **Copy the address**, **Cancel** (`LinkDialog.tsx`). The level is read when the link is clicked: at `/airgapped on` the dialog says so and offers the copy only.
+- The app opens it with the system's browser through the main process (`open/url`), which checks the address again (`desktop/electron/src/links.ts`) and refuses at `/airgapped on` as it refuses the forge's page; `ling web` opens it in a new tab with no opener and no referrer.
+- **Tests:** `work.test.ts` (which links act, which stay inert), `links.test.ts` in both packages, `e2e/links.e2e.ts` (the system's browser replaced by a recorder: Cancel and Esc open nothing, Open opens the address once; at `/airgapped on` no Open and the main process refuses; a `file:` address refused).
+
 ## 5. Tests and acceptance
 
 Each item of §4 lands with its unit tests (`npm test` in `desktop/ui` and `desktop/electron`), an e2e case in `desktop/electron/e2e/` against the scripted stand-in, the full e2e run after `npm run package`, and the Python suite. Neither item adds a method to `ling-rs/web/policy.json`, so the Rust conformance run is not needed.
 
 ---
 
-## 6. Questions for the owner
+## 6. Questions for the owner, and the answers
 
-1. **Run the real app once?** Install the Linux beta on the MSI desktop (Ubuntu 26.04, x86_64; needs `sudo` there and registers the vendor's apt repository unless `/etc/default/claude-desktop` says `CLAUDE_DESKTOP_ADD_REPO="false"`, [LNX]) to observe what shows without an account (the sign-in screen, the menus, the tray), then remove it. Signing in stays out unless you provide an account for it.
-2. **Links in answers (gap 4):** may a click on a link in a message open it in the system browser, after a small confirmation that shows the full address, and never at `/airgapped on`? Today nothing in a message can act (`markdown.ts`); a source of an Ask answer can only be read off its tooltip.
-3. **Incognito questions (gap 6):** a "not saved" switch on a new question: the thread ephemeral, its scratch folder (with any attachment) deleted when you leave it, memories not fed. Yes, and is deleting the folder right (it cannot be undone)?
-4. **Recall of earlier questions (gap 7):** may the agent search your earlier Ask questions as a tool (local, read only, off by default, Settings › Memories)?
-5. **One-file MCP extensions (§2.15):** accept `.mcpb` files (an open format) dropped on Skills and tools, after showing what the server runs? They are third-party code; they would be refused at `/airgapped on` if they need the network.
-6. **Projects for Ask (gap 2):** questions gathered in a project with standing instructions and a knowledge folder indexed by `ling-docs`. This is the largest item and changes what the `ask` prompt contains; it wants its own spec section in ASK. Go ahead with that spec?
-7. **This document on `main`?** The code merged for gaps 1 and 3 cites it; merging it (spec only) would keep those references whole. Until then it lives on `desktop/parity-claude`.
+Answered on 2026-10-21:
+
+1. **Run the real app once?** Not now.
+2. **Links in answers:** yes, after a confirmation showing the full address, never at `/airgapped on`: built, §4.5.
+3. **Incognito questions:** yes, the thread and its folder deleted when left, the irreversibility made clear: built, §4.3.
+4. **Recall of earlier questions:** yes, local and read only, off by default, a setting: built, §4.4.
+5. **One-file MCP extensions (`.mcpb`):** not now.
+6. **Projects for Ask:** the Codex-parity work owns Projects (instructions and knowledge files for Ask and Work); Ask builds on them, with no Ask-only projects.
+7. **This document on `main`:** yes, merged.
+
+Still open: composing a project's instructions into the `ask` prompt in the policy layer, and `ling-docs` search over a project's knowledge folder, when Projects land.
 
 ---
 
