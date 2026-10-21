@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  INSTRUCTIONS_KEY, REMOVED_KEY, contextItem, contextStamp, isContextText, isRemoved, nameFromFolder, primaryFolder, projectContext,
+  INSTRUCTIONS_KEY, REMOVED_KEY, contextItem, contextStamp, isContextText, isRemoved, movedBefore, nameFromFolder, ordered, primaryFolder, projectContext,
   secondaryFolders, shownProjects, withMetadata, withPrimary, withoutContext,
 } from "./projects";
 import { userTexts } from "./composer";
@@ -57,4 +57,16 @@ describe("projects", () => {
     const view = { turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: "Fix the retry" }, item] }] }] };
     expect(userTexts(view as never)).toEqual(["Fix the retry"]);
   });
+
+  it("keep a stable order: the user's dragged order first, the rest as they came, and a drag puts one just before another", () => {
+    const keys = (list: string[]) => list;
+    expect(ordered(["a", "b", "c"], (x) => x, [])).toEqual(["a", "b", "c"]);
+    expect(ordered(["a", "b", "c"], (x) => x, ["c", "a"])).toEqual(["c", "a", "b"]);
+    expect(movedBefore(keys(["a", "b", "c"]), [], "c", "a")).toEqual(["c", "a", "b"]);
+    expect(movedBefore(keys(["a", "b", "c"]), ["c", "a", "b"], "a", "b")).toEqual(["c", "a", "b"]);
+    expect(movedBefore(keys(["a", "b", "c"]), ["c", "a", "b"], "c", "b")).toEqual(["a", "c", "b"]);
+    // A key no longer shown leaves the saved order.
+    expect(movedBefore(keys(["a", "b"]), ["gone", "b", "a"], "a", "b")).toEqual(["a", "b"]);
+  });
 });
+

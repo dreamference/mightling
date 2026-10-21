@@ -271,7 +271,7 @@ describe("a scripted session", () => {
 });
 
 describe("the sidebar", () => {
-  it("groups threads by project, newest first, and hides subagents and ephemeral threads", () => {
+  it("groups threads by folder, newest first inside, the groups in the order they were first used, and hides subagents and ephemeral threads", () => {
     const state = run([{
       type: "threads",
       list: [
@@ -283,9 +283,12 @@ describe("the sidebar", () => {
       ],
     }]);
     expect(projects(state).map((p) => [p.cwd, p.threads.map((t) => t.id)])).toEqual([
-      ["/p/two", ["b"]],
       ["/p/one", ["c", "a"]],
+      ["/p/two", ["b"]],
     ]);
+    // A new turn in /p/two does not move it above /p/one.
+    const later = run([{ type: "threads", list: [thread("a", "/p/one", 10), thread("c", "/p/one", 20), { ...thread("b", "/p/two", 30), updatedAt: 99, recencyAt: 99 } as Thread] }]);
+    expect(projects(later).map((p) => p.cwd)).toEqual(["/p/one", "/p/two"]);
   });
 });
 

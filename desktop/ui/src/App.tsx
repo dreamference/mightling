@@ -9,7 +9,7 @@
 // (ling-rs/web/src/policy.rs) and the desktop app's main process (desktop/electron/src/policy.ts).
 // So both show Ask by default and Work one click away (`#work`).
 
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react";
 
 import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
 import * as bridge from "./bridge";
@@ -70,7 +70,7 @@ import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, 
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { ProjectDialog } from "./ProjectDialog";
-import { contextItem, contextStamp, isContextText, isRemoved, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
+import { contextItem, contextStamp, isContextText, isRemoved, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
 import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
@@ -177,6 +177,7 @@ export function App() {
   const [projectDialog, setProjectDialog] = useState<{ project: Project | null; folder: string | null } | null>(null);
   const [newProject, setNewProject] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
+  const draggedHeader = useRef<string | null>(null);
   const loadProjects = useCallback(async () => {
     try {
       const answer = (await client.request("project/list", { limit: 200 })) as { data?: Project[] };
@@ -1941,7 +1942,27 @@ export function App() {
   const allThreads = Object.values(state.threads).map((entry) => entry.thread);
   // Projects (projects.ts): the shown ones, and every thread that belongs to a project the server knows
   // (shown or removed), which leaves the folder groups and the plain question list.
-  const listedProjects = shownProjects(serverProjects);
+  const listedProjects = ordered(shownProjects(serverProjects), (project) => `project:${project.id}`, prefs.projectOrder);
+  const folderGroups = ordered(projects(state, askRoot, (thread) => projectFolder(thread, links)), (group) => `folder:${group.cwd}`, prefs.projectOrder);
+  /** Dragging a project or folder header onto another puts it just before that one, kept in the window's preferences. */
+  const dragHeader = (key: string) => ({
+    draggable: true,
+    onDragStart: (event: DragEvent) => {
+      draggedHeader.current = key;
+      event.dataTransfer.effectAllowed = "move";
+    },
+    onDragOver: (event: DragEvent) => {
+      if (draggedHeader.current && draggedHeader.current !== key) event.preventDefault();
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      const moved = draggedHeader.current;
+      draggedHeader.current = null;
+      if (!moved || moved === key) return;
+      const shownKeys = [...listedProjects.map((project) => `project:${project.id}`), ...folderGroups.map((group) => `folder:${group.cwd}`)];
+      updatePrefs({ projectOrder: movedBefore(shownKeys, prefsRef.current.projectOrder, moved, key) });
+    },
+  });
   const knownProjects = new Set(serverProjects.map((project) => project.id));
   const inProject = (thread: Thread) => Boolean(thread.projectId && knownProjects.has(thread.projectId));
   const asks = found ? found.map((result) => result.thread) : askThreads(allThreads, askRoot).filter((thread) => !inProject(thread));
@@ -1960,7 +1981,7 @@ export function App() {
   /** A project in the sidebar: its name (a click makes it where the next thread or question starts), its menu, its threads. */
   const projectSection = (project: Project, threads: Thread[], where: "ask" | "work") => (
     <section key={`project-${project.id}`} className={`project server-project${newProject === project.id ? " starting" : ""}`}>
-      <h2 title={[project.name, ...project.roots.map((root) => root.path)].join("\n")} onClick={() => {
+      <h2 title={[project.name, ...project.roots.map((root) => root.path)].join("\n")} {...dragHeader(`project:${project.id}`)} onClick={() => {
         setNewProject(project.id);
         const primary = primaryFolder(project);
         if (where === "work" && primary) setNewCwd(primary);
@@ -2133,10 +2154,10 @@ export function App() {
               </>
             )}
             {found ? null : listedProjects.map((project) => projectSection(project, workThreads.filter((thread) => thread.projectId === project.id && !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)), "work"))}
-            {found ? null : pinnedFirst(projects(state, askRoot, (thread) => projectFolder(thread, links)).map((group) => ({ ...group, threads: group.threads.filter((thread) => !inProject(thread)) })), prefs.pinnedProjects, (project) => project.cwd)
+            {found ? null : pinnedFirst(folderGroups.map((group) => ({ ...group, threads: group.threads.filter((thread) => !inProject(thread)) })), prefs.pinnedProjects, (project) => project.cwd)
               .filter((project) => project.threads.some((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)) || prefs.pinnedProjects.includes(project.cwd)).map((project) => (
               <section key={project.cwd} className="project">
-                <h2 title={project.cwd} onClick={() => { setNewProject(null); setNewCwd(project.cwd); }}>
+                <h2 title={project.cwd} {...dragHeader(`folder:${project.cwd}`)} onClick={() => { setNewProject(null); setNewCwd(project.cwd); }}>
                   <Icon name="folder" size={14} />{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}
                   <button className={`icon project-action${prefs.pinnedProjects.includes(project.cwd) ? " on" : ""}`} title={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"} aria-label={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"}
                     onClick={(event) => { event.stopPropagation(); pinProject(project.cwd); }}><Icon name="pin" size={12} /></button>

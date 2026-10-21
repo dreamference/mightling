@@ -782,3 +782,29 @@ test("item 13 in Ask: a project with no folder, a question asked in it with its 
     await close();
   }
 });
+
+test("item 13's order: folders and projects keep their place as threads get busy, and a drag moves one before another, kept", async () => {
+  const { page, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    const folders = page.locator(".sidebar section.project:not(.recents):not(.pinned):not(.server-project) > h2");
+    // By when each folder was first used: the website's thread is the older one.
+    await expect(folders).toHaveText([/website/, /fetcher/]);
+    // A message in a fetcher thread does not move fetcher up.
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.locator(".composer textarea").fill("And the timeout?");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+    await expect(folders).toHaveText([/website/, /fetcher/]);
+    // Dragged: fetcher before website, and still so after the page loads again.
+    await folders.filter({ hasText: "fetcher" }).dragTo(folders.filter({ hasText: "website" }));
+    await expect(folders).toHaveText([/fetcher/, /website/]);
+    await page.reload();
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await expect(folders).toHaveText([/fetcher/, /website/]);
+  } finally {
+    await close();
+  }
+});

@@ -42,6 +42,24 @@ export function shownProjects<T extends Pick<Project, "metadata" | "position">>(
   return projects.filter((project) => !isRemoved(project)).sort((a, b) => a.position - b.position);
 }
 
+/**
+ * Items in the user's order (dragged in the sidebar, kept in the window's preferences by key) and,
+ * after those, the rest in the order they came: a stable order that activity never changes.
+ */
+export function ordered<T>(items: T[], key: (item: T) => string, saved: string[]): T[] {
+  const rank = new Map(saved.map((entry, index) => [entry, index]));
+  const known = items.filter((item) => rank.has(key(item))).sort((a, b) => (rank.get(key(a)) ?? 0) - (rank.get(key(b)) ?? 0));
+  return [...known, ...items.filter((item) => !rank.has(key(item)))];
+}
+
+/** The saved order after dragging `moved` onto `target` (placed just before it), over the keys shown now. */
+export function movedBefore(shown: string[], saved: string[], moved: string, target: string): string[] {
+  const order = [...saved.filter((entry) => shown.includes(entry)), ...shown.filter((entry) => !saved.includes(entry))].filter((entry) => entry !== moved);
+  const at = order.indexOf(target);
+  order.splice(at < 0 ? order.length : at, 0, moved);
+  return order;
+}
+
 /** The roots with `path` made the primary one (the vendor's Make primary). */
 export function withPrimary(roots: Project["roots"], path: string): Project["roots"] {
   const chosen = roots.find((root) => root.path === path);
