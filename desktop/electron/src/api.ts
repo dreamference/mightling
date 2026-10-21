@@ -40,6 +40,10 @@ export type FromView =
   /** An incognito question (DESKTOP_PARITY_CLAUDE §4.3): its folder marked when it starts, deleted with its files when it is left. */
   | { type: "ask/incognito"; thread: string }
   | { type: "ask/forget"; thread: string }
+  /** Earlier questions for the agent (recall.ts): what is kept, keeping one, dropping the rest. */
+  | { type: "recall/index" }
+  | { type: "recall/write"; thread: string; updatedAt: number; markdown: string }
+  | { type: "recall/prune"; keep: string[] }
   /** The microphone's recording, for text (voice.ts); the bytes base64. */
   | { type: "voice/transcribe"; mime: string; data: string }
   | { type: "context-menu"; x: number; y: number; editable: boolean; selection: string }

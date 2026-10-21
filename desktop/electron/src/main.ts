@@ -37,6 +37,7 @@ import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./
 import { Notices } from "./notices";
 import { transcribe } from "./voice";
 import { Previews } from "./preview";
+import { disableRecall, enableRecall, pruneRecall, recallIndex, recallOn, writeRecall } from "./recall";
 import { PetStatus, fitPet, openPet, petImage, type PetSize, type PetState } from "./pet";
 import { DEFAULT_SHORTCUT, accelerator, openQuick, placeQuick, quickPrompt, shortcutsWork, type QuickStatus } from "./quick";
 import type { SiteChoice } from "./preview-rules";
@@ -287,6 +288,18 @@ export async function main(options: MainOptions): Promise<void> {
   };
   app.on("will-quit", () => globalShortcut.unregisterAll());
 
+  /** Puts the skill and the copies' folder in place, or deletes both, as Settings › Memories says. */
+  const syncRecall = () => {
+    const home = codexHome();
+    if (!home) return;
+    try {
+      if (prefs.read().recallQuestions === true) enableRecall(home);
+      else if (recallOn(home) || fs.existsSync(path.join(home, "ask-history"))) disableRecall(home);
+    } catch (error) {
+      console.error(`ling-app: earlier questions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   installMenu(actions);
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
   installTray(path.join(__dirname, "..", "..", "icons"), { ...actions, quickQuestion: toggleQuick });
@@ -435,6 +448,20 @@ export async function main(options: MainOptions): Promise<void> {
         return null;
       case "ask/forget":
         return server.incognito("forget", String(message.thread));
+      case "recall/index": {
+        const home = codexHome();
+        return home && recallOn(home) ? recallIndex(home) : {};
+      }
+      case "recall/write": {
+        const home = codexHome();
+        if (!home || prefs.read().recallQuestions !== true) throw new Error("searching earlier questions is off (Settings › Memories)");
+        writeRecall(home, message.thread, message.updatedAt, message.markdown);
+        return null;
+      }
+      case "recall/prune": {
+        const home = codexHome();
+        return home ? pruneRecall(home, message.keep) : 0;
+      }
       case "voice/transcribe":
         return transcribe(message);
       case "work/stop":
@@ -643,6 +670,7 @@ export async function main(options: MainOptions): Promise<void> {
       case "prefs/write": {
         const written = prefs.write(message.values);
         if (["petShown", "petSize", "petImage"].some((key) => key in (message.values ?? {}))) syncPet();
+        if ("recallQuestions" in (message.values ?? {})) syncRecall();
         if (["quickEntry", "quickEntryShortcut"].some((key) => key in (message.values ?? {}))) syncQuick();
         if ("theme" in (message.values ?? {})) {
           nativeTheme.themeSource = themeChoice(prefs.read().theme);
@@ -780,6 +808,8 @@ export async function main(options: MainOptions): Promise<void> {
   showView(options.work ? "work" : "ask");
   // The pet, when Settings › Pets has it on (never in the egress audit's session).
   if (options.audit === null) syncPet();
+  // Earlier questions (recall.ts): the skill and the copies' folder as Settings › Memories says.
+  if (options.audit === null) syncRecall();
   // Quick Entry's shortcut, when Settings › General has it on (never in the audit's session).
   if (options.audit === null) syncQuick();
   if (options.audit !== null) {
