@@ -79,7 +79,12 @@ def test_due_templates_are_queued_through_ling_night_add_in_their_repository(
 
     def run(args: list[str], **options: Any) -> "subprocess.CompletedProcess[str]":
         calls.append((args, options["cwd"]))
-        return subprocess.CompletedProcess(args, 0, stdout="queued night-1", stderr="")
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="Queued 20261023-2200 on branch night/20261023-2200, from 1a2b3c4.",
+            stderr="",
+        )
 
     said = NightShiftRecurring.queue_due(night, "/opt/ling", date(2026, 10, 23), run=run)
     assert calls == [
@@ -153,3 +158,22 @@ def test_ling_admin_night_every_adds_lists_and_drops(
     with pytest.raises(SystemExit) as again:
         DreamferenceCLIController.run_cli(["night", "every", "drop", template["id"]])
     assert again.value.code == 1
+
+
+def test_a_refusal_printed_by_ling_night_add_is_not_taken_for_queued(tmp_path: Path) -> None:
+    night = tmp_path / "night"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    NightShiftRecurring.add(night, repo, "Update the changelog", "daily")
+
+    def printed(args: list[str], **options: Any) -> "subprocess.CompletedProcess[str]":
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="Night Shift needs a git repository, and this directory is not in one.",
+            stderr="",
+        )
+
+    said = NightShiftRecurring.queue_due(night, "/opt/ling", date(2026, 10, 23), run=printed)
+    assert "not queued" in said[0]
+    assert NightShiftRecurring.templates(night)[0]["last_queued"] is None

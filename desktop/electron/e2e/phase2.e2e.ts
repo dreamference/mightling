@@ -701,7 +701,8 @@ test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task 
     await view.getByRole("button", { name: "Queue" }).click();
     await expect(view.locator(".notice")).toContainText("Queued 20261017-0930");
     await view.getByRole("button", { name: "Drop" }).click();
-    await expect.poll(() => runs(home).filter((args) => args[0] === "night").map((args) => args.join(" "))).toEqual([
+    // (`night every list` is Scheduled reading the repeating tasks, decision 7.)
+    await expect.poll(() => runs(home).filter((args) => args[0] === "night" && args[1] !== "every").map((args) => args.join(" "))).toEqual([
       "night add Update the changelog for 1.7", "night drop 20261016-2215",
     ]);
     await page.keyboard.press("Escape");
