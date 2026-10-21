@@ -229,6 +229,16 @@ Branch `desktop/answer-links`, the app and `ling web`.
 - The app opens it with the system's browser through the main process (`open/url`), which checks the address again (`desktop/electron/src/links.ts`) and refuses at `/airgapped on` as it refuses the forge's page; `ling web` opens it in a new tab with no opener and no referrer.
 - **Tests:** `work.test.ts` (which links act, which stay inert), `links.test.ts` in both packages, `e2e/links.e2e.ts` (the system's browser replaced by a recorder: Cancel and Esc open nothing, Open opens the address once; at `/airgapped on` no Open and the main process refuses; a `file:` address refused).
 
+### 4.6 The composer (decided 2026-10-21)
+
+The owner's four composer items. Two were DESKTOP_PARITY §4.5 item 22 (fork from a message, queue edits), handed to this work the same day.
+
+- **Long pastes as attachments** (branch `desktop/composer-paste-predict`): a paste of 2,000 characters or 40 lines becomes a chip, "Pasted text · N lines", its start on hover (`isLongPaste`, `pasteLabel` in `desktop/ui/src/composer.ts`). In Ask it is uploaded into the question's folder as `pasted-<time>.txt`, the agent reading it as any attachment; in Work nothing is written into the project, and the text goes into the message after the words as a fenced block (`withPastes`). Settings › General turns it off.
+- **One predicted next message** (same branch), replacing Phase 3 item 7's three chips: Settings › Suggested prompts (still off by default) has the served model predict the one message the user is most likely to send next (`predict` in `suggestions.ts`), shown in grey in the empty composer; Tab or → takes it in (`acceptsPrediction`), and it is never sent by itself, as the compared app's Code tab does ([D] "Accept a suggested prompt").
+- **Fork from here, Edit in a new thread** (branch `desktop/fork-queue`): every finished turn offers both (on hover for earlier ones): the first is `thread/fork` through the turn (`lastTurnId`), the second `thread/fork` before it (`beforeTurnId`) with the turn's words in the new thread's composer. The thread itself is left as it is (the last turn's Edit still takes the message back in place), and an incognito question is never copied.
+- **Queue edits** (same branch): a queued message is edited in place (`thread/queue/update`: its words replaced, images and skills kept; Enter keeps, Esc leaves it) and moved up or down (`thread/queue/reorder`).
+- **Tests:** `paste.test.ts`, `suggestions.test.ts`, `queue.test.ts`; `e2e/composer.e2e.ts` (a 60-line paste: a file in Ask's folder, a fenced block in Work and no file in the project, a short paste stays text), the Phase 3 e2e's item 7 (the prediction in grey, Tab takes it, nothing sent), `e2e/forkqueue.e2e.ts` (a fork through the first of two turns, an edit in a new thread before the second with its words in the composer, two queued messages edited and reordered).
+
 ## 5. Tests and acceptance
 
 Each item of §4 lands with its unit tests (`npm test` in `desktop/ui` and `desktop/electron`), an e2e case in `desktop/electron/e2e/` against the scripted stand-in, the full e2e run after `npm run package`, and the Python suite. Neither item adds a method to `ling-rs/web/policy.json`, so the Rust conformance run is not needed.
