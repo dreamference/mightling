@@ -429,6 +429,11 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "ask/upload":
         return server.upload(message);
+      case "ask/incognito":
+        server.incognito("mark", String(message.thread));
+        return null;
+      case "ask/forget":
+        return server.incognito("forget", String(message.thread));
       case "voice/transcribe":
         return transcribe(message);
       case "work/stop":
@@ -725,6 +730,19 @@ export async function main(options: MainOptions): Promise<void> {
     app.quit();
   });
   app.on("before-quit", () => server.stop());
+  // Incognito questions open when the app quits, or left by one that crashed, are deleted
+  // (DESKTOP_PARITY_CLAUDE §4.3); never in the audit's session, which touches no question.
+  const sweep = () => {
+    try {
+      server.incognito("sweep");
+    } catch {
+      // No home folder: no Ask folders either.
+    }
+  };
+  if (options.audit === null) {
+    sweep();
+    app.on("will-quit", sweep);
+  }
   // Node's own teardown, after the last window and before the process ends, waits for every file-system
   // request still pending, and a read a macOS folder-access prompt holds never ends: the main process
   // stayed alive, windowless, after SIGTERM (1.7.0 Mac test), past the fallback below. With such a

@@ -17,7 +17,7 @@ import { command } from "./platform";
 import path from "node:path";
 import readline from "node:readline";
 
-import { MessagePrompts, askRoot, canonicalRoot, composePrompt, isFolder, linkThread, writeUpload, type Upload } from "./ask";
+import { MessagePrompts, askRoot, canonicalRoot, composePrompt, forgetIncognito, isFolder, linkThread, markIncognito, sweepIncognito, writeUpload, type Upload } from "./ask";
 import { BusyTracker, busyMarker, classify, codexHome, findLing, servedModel } from "./bridge";
 import { POLICY, namedPrompt, vetOutgoing } from "./policy";
 import type { ForView, Started } from "./api";
@@ -171,6 +171,16 @@ export class AppServer {
     const home = codexHome();
     if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
     return writeUpload(askRoot(home), upload);
+  }
+
+  /** Incognito questions (DESKTOP_PARITY_CLAUDE §4.3): marks a question's folder, deletes it when left, sweeps what is left over. */
+  incognito(action: "mark" | "forget" | "sweep", thread = ""): boolean | number | string {
+    const home = codexHome();
+    if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
+    const root = askRoot(home);
+    if (action === "mark") return markIncognito(root, thread);
+    if (action === "forget") return forgetIncognito(root, thread);
+    return sweepIncognito(root);
   }
 
   /** Kills the server and removes its busy marker; the next `start` starts a fresh one. */

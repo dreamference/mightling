@@ -108,6 +108,8 @@ const hookOf = (key, base) => {
   return { ...base, key, enabled: state.enabled !== false, trustStatus };
 };
 let asked = false;
+// Ephemeral threads: never listed, still known by id (an incognito question's folder).
+const unlisted = {};
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
   hidden: false, isDefault: true, supportedReasoningEfforts: ["low", "medium", "high"].map((e) => ({ reasoningEffort: e, description: "" })),
@@ -202,15 +204,18 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       return answer({ thread: copy, model: "qwen3.8-27b", modelProvider: "local", cwd: copy.cwd });
     }
     case "thread/start": {
-      const id = (p.ephemeral ? "e" : "n") + next++;
+      // An ephemeral thread in an Ask folder is an incognito question ("i"), answered as a question is;
+      // any other ephemeral one is a helper's ("e": a commit message, suggestions).
+      const id = (p.ephemeral ? (String(p.cwd || "").startsWith(${JSON.stringify(askRoot)}) ? "i" : "e") : "n") + next++;
       const started = { id, cwd: p.cwd, name: null, preview: "", turns: [], status: { type: "idle" }, ephemeral: !!p.ephemeral, parentThreadId: null,
         createdAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), recencyAt: null, model: "qwen3.8-27b", modelProvider: "local" };
       if (!p.ephemeral) threads.push(started);
+      else unlisted[id] = started;
       return answer({ thread: started, model: "qwen3.8-27b", modelProvider: "local", cwd: p.cwd });
     }
     case "turn/start": {
       const id = "turn-" + next++;
-      if (String(p.threadId).startsWith("n")) {
+      if (/^[ni]/.test(String(p.threadId))) {
         // A thread the test started: the turn runs briefly and answers.
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
         say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
@@ -232,7 +237,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           }
           if (asked.includes("with a report")) {
             // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
-            const own = threads.find((t) => t.id === p.threadId);
+            const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
             const report = require("node:path").join((own && own.cwd) || "/tmp", "report.md");
             require("node:fs").writeFileSync(report, "# Memory on the GB10\\n\\nOne pool of LPDDR5X, shared by the CPU and the GPU.\\n");
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
