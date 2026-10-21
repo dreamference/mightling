@@ -675,3 +675,110 @@ test("item 14: an MCP server's question shows in its thread, a form answered and
     await close();
   }
 });
+
+test("item 13: a project with two folders, instructions and a knowledge file; a thread in it, a thread moved in, its chats archived and back, removed and restored", async () => {
+  const { page, home, close } = await open();
+  const { fetcher, website } = projectFolders(home);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("button", { name: "New project" }).click();
+    const dialog = page.getByRole("dialog", { name: "New project" });
+    await dialog.getByRole("textbox", { name: "Project name" }).fill("Launch");
+    for (const folder of [fetcher, website]) {
+      await dialog.getByRole("textbox", { name: "Folder to add" }).fill(folder);
+      await dialog.getByRole("textbox", { name: "Folder to add" }).press("Enter");
+    }
+    await dialog.getByRole("textbox", { name: "Project instructions" }).fill("Write for nurses, not doctors.");
+    await dialog.getByRole("button", { name: "Create project" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "project/create")?.params).toMatchObject({
+      name: "Launch", roots: [{ path: fetcher }, { path: website }], metadata: { "mightling.instructions": "Write for nurses, not doctors." },
+    });
+    await expect(page.locator(".server-project h2", { hasText: "Launch" })).toBeVisible();
+    await expect(page.locator(".empty", { hasText: "A new thread in the project Launch" })).toBeVisible();
+    // A knowledge file, as Add files… would have copied it.
+    const knowledge = path.join(home, ".mightling", "projects", "proj-1", "knowledge");
+    fs.mkdirSync(knowledge, { recursive: true });
+    fs.writeFileSync(path.join(knowledge, "style.md"), "# House style\n");
+
+    // A thread in the project: the primary folder, the other as a workspace root, the project's context with its first message.
+    await page.locator(".composer textarea").fill("Draft the release notes.");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => received(home).find((m) => m.method === "thread/start" && m.params?.projectId)?.params).toMatchObject({ cwd: fetcher, projectId: "proj-1", runtimeWorkspaceRoots: [website] });
+    const first = () => received(home).find((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("Draft the release notes."));
+    await expect.poll(() => JSON.stringify(first()?.params?.input ?? "")).toContain("Write for nurses, not doctors.");
+    expect(JSON.stringify(first()?.params?.input)).toContain(path.join(knowledge, "style.md"));
+    const started = String(first()?.params?.threadId);
+    await expect(page.locator(".item.user").last()).toHaveText("Draft the release notes.");
+    // The next message is not told again: nothing about the project changed.
+    await page.locator(".item.agent").last().waitFor();
+    await page.locator(".composer textarea").fill("Shorter, please.");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => received(home).some((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("Shorter, please."))).toBe(true);
+    expect(JSON.stringify(received(home).find((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("Shorter, please."))?.params?.input)).not.toContain("project_context");
+
+    // Edit project: the website folder made primary.
+    const header = page.locator(".server-project h2", { hasText: "Launch" });
+    await header.hover();
+    await header.getByRole("button", { name: "Project Launch" }).click();
+    await page.getByRole("menuitem", { name: "Edit project…" }).click();
+    const edit = page.getByRole("dialog", { name: "Edit project" });
+    await expect(edit).toContainText("style.md");
+    await edit.locator("li", { hasText: website }).getByRole("button", { name: "Make primary" }).click();
+    await edit.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "project/update").pop()?.params).toMatchObject({ projectId: "proj-1", roots: [{ path: website }, { path: fetcher }] });
+
+    // An older thread moved in from its row's menu.
+    const row = page.locator(".thread-row", { hasText: "flaky retry" }).first();
+    await row.hover();
+    await row.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Move to project Launch" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "thread/metadata/update")?.params).toEqual({ threadId: "w1", projectId: "proj-1" });
+    await expect(page.locator(".server-project", { hasText: "Launch" })).toContainText("flaky retry");
+
+    // Archive chats: both threads, and one Ctrl+Z brings both back.
+    await header.hover();
+    await header.getByRole("button", { name: "Project Launch" }).click();
+    page.once("dialog", (asked) => void asked.accept());
+    await page.getByRole("menuitem", { name: "Archive chats" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "thread/archive").map((m) => m.params?.threadId).sort()).toEqual([started, "w1"].sort());
+    await page.locator(".turns, .empty").first().click({ position: { x: 5, y: 5 } }).catch(() => {});
+    await page.keyboard.press("Control+Z");
+    await expect.poll(() => received(home).filter((m) => m.method === "thread/unarchive").map((m) => m.params?.threadId).sort()).toEqual([started, "w1"].sort());
+
+    // Removed from the sidebar, then restored from Settings › Archived threads.
+    await header.hover();
+    await header.getByRole("button", { name: "Project Launch" }).click();
+    await page.getByRole("menuitem", { name: "Remove from the sidebar" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "project/update").pop()?.params?.metadata).toEqual({ "mightling.instructions": "Write for nurses, not doctors.", "mightling.removed": "1" });
+    await expect(page.locator(".server-project", { hasText: "Launch" })).toHaveCount(0);
+    await page.keyboard.press("Control+,");
+    await page.getByRole("button", { name: "Archived threads" }).click();
+    await page.locator("tr", { hasText: "Launch" }).getByRole("button", { name: "Restore" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "project/update").pop()?.params?.metadata).toEqual({ "mightling.instructions": "Write for nurses, not doctors." });
+  } finally {
+    await close();
+  }
+});
+
+test("item 13 in Ask: a project with no folder, a question asked in it with its instructions, kept in its scratch folder", async () => {
+  const { page, home, close } = await open();
+  try {
+    await page.getByRole("button", { name: "New project" }).click();
+    const dialog = page.getByRole("dialog", { name: "New project" });
+    await dialog.getByRole("textbox", { name: "Project name" }).fill("Reading group");
+    await dialog.getByRole("textbox", { name: "Project instructions" }).fill("Answer in plain words for a book club.");
+    await dialog.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".server-project h2", { hasText: "Reading group" })).toBeVisible();
+    await expect(page.locator(".starting-project")).toContainText("Reading group");
+    await page.locator(".composer textarea").fill("Who narrates the second half?");
+    await page.keyboard.press("Enter");
+    // The policy layer still puts the question in a scratch folder of its own; the project id goes with it.
+    await expect.poll(() => received(home).find((m) => m.method === "thread/start" && m.params?.projectId)?.params).toMatchObject({ projectId: "proj-1" });
+    const start = received(home).find((m) => m.method === "thread/start" && m.params?.projectId)?.params ?? {};
+    expect(String(start.cwd)).toContain(path.join(".mightling", "ask"));
+    await expect.poll(() => JSON.stringify(received(home).find((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("second half"))?.params?.input ?? "")).toContain("Answer in plain words for a book club.");
+    await expect(page.locator(".server-project", { hasText: "Reading group" })).toContainText("Who narrates the second half?");
+  } finally {
+    await close();
+  }
+});
