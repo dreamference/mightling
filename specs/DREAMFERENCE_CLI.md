@@ -426,7 +426,7 @@ ling-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limi
                            [--eval [--remove-images]] [--code-index off|universal|exact] [--prompt <name>]
                            [--mask off|on] [--strip-names] [--refine [--refine-version v1|v2]] [--task-rules tests|tests-v2|issue-v1[,…]] [--review-turn]
                            [--hooks issue-v1] [--restart-after-compactions N] [--turn-end-compaction on|off|1-99]
-                           [--apply-patch off|function|freeform] [--exec-tool function|freeform] [--drop-old-outputs]
+                           [--apply-patch off|function|freeform] [--exec-tool function|freeform] [--compat claude|off] [--drop-old-outputs]
                            [--until HH:MM] [--idle-minutes N] [--ignore-open-sessions] [--label TEXT]
 ling-admin swe-bench eval [RUN] [--drop-test-hunks] [--remove-images]
 ling-admin swe-bench report [RUN] [--against RUN] [--drop-test-hunks]

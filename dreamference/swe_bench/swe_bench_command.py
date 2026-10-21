@@ -30,11 +30,21 @@ class SweBenchCommand:
     def add_output_arms(cls, run: argparse.ArgumentParser) -> None:
         """Adds the arms on what becomes of the model's output to `swe-bench run`.
 
-        Drop-first compaction (compaction spec §13) and the loop guard's three (docs/dev/loop-guard.md).
+        Drop-first compaction (compaction spec §13) and the loop guard's three (docs/dev/loop-guard.md),
+        and the compatibility mode (MIGHTLING_LING_CLAUDE §11), which changes how the session reads
+        and is asked.
 
         Args:
             run: The `run` subcommand's parser.
         """
+        run.add_argument(
+            "--compat",
+            choices=("claude", "off"),
+            default=None,
+            metavar="MODE",
+            help="The compatibility mode for every session (claude: ling working the way Claude Code "
+            "does); the launcher's own setting when absent, which is off in a container",
+        )
         run.add_argument(
             "--drop-old-outputs",
             action="store_true",
@@ -368,6 +378,7 @@ class SweBenchCommand:
                 restart_after_compactions=args.restart_after_compactions,
                 apply_patch=args.apply_patch,
                 exec_tool=args.exec_tool,
+                compat=args.compat,
                 drop_old_outputs=args.drop_old_outputs,
                 loop_guard=args.loop_guard,
                 output_budget=args.output_budget,
