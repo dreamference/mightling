@@ -434,9 +434,14 @@ export function projects(state: WorkState, askRoot: string | null = null, folder
     byCwd.set(folder, list);
   }
   const recency = (thread: Thread) => thread.recencyAt ?? thread.updatedAt;
+  // Threads newest first inside a group; the groups themselves in a stable order, by when each folder
+  // was first used (its oldest thread), so a group never jumps up the sidebar because one of its threads
+  // became active (the vendor's fix in its 26.814; DESKTOP_PARITY §4.5 item 13). The user's own order
+  // (dragged in the sidebar, `prefs.projectOrder`) is laid over it by `ordered` (projects.ts).
+  const first = (threads: Thread[]) => Math.min(...threads.map((thread) => thread.createdAt));
   return [...byCwd.entries()]
     .map(([cwd, threads]) => ({ cwd, threads: threads.sort((a, b) => recency(b) - recency(a)) }))
-    .sort((a, b) => recency(b.threads[0]) - recency(a.threads[0]));
+    .sort((a, b) => first(a.threads) - first(b.threads) || a.cwd.localeCompare(b.cwd));
 }
 
 export interface PermissionChoice {
