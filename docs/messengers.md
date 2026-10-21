@@ -42,6 +42,9 @@ is not a preview.
 - **Voice messages** are transcribed on the node by the local speech-to-text service
   (`ling-admin voice start`; nothing goes to a cloud service). The bridge first says what it heard
   ("Heard: …"), then answers; if it could not transcribe the message, it says so.
+- **Files back.** When Mightling makes a file for you (a table, a report) and names it in the
+  answer, the bridge offers to send it: press "Send it" on Telegram, or reply YES on Signal and
+  Matrix. Nothing is sent unless you say so, and nothing at all while the air gap is on.
 - **Quick follow-ups join the answer.** A message sent while Mightling is answering is added to
   the question it is working on, not answered separately afterwards. `/stop` still stops the answer.
 - **Answers are bounded.** An answer that takes over three minutes, uses over 25 tool calls or
