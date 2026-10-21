@@ -200,6 +200,23 @@ def test_the_ifeval_runner_refuses_an_empty_cache(tmp_path, capsys):
     assert "setup_cache.py ifeval" in capsys.readouterr().err
 
 
+class FakeGuard:
+    """A build guard that says yes, or no after `allow` builds, and sizes every image at 2 GB."""
+
+    def __init__(self, allow: int = 1000, why: str = "60 GB free on /var/lib/docker"):
+        self.allow, self.why, self.asked, self.pruned = allow, why, 0, 0
+
+    def refusal(self, cache, need_gb=0.0):
+        self.asked += 1
+        return None if self.asked <= self.allow else self.why
+
+    def image_bytes(self, tag):
+        return 2_000_000_000
+
+    def prune_build_cache(self):
+        self.pruned += 1
+
+
 # T2: Aider Polyglot.
 
 POLYGLOT = _load("polyglot")
@@ -366,14 +383,21 @@ def test_polyglot_setup_fetches_the_pinned_exercises_and_builds_from_a_staged_co
         return path
 
     target = SETUP.setup_polyglot(
-        tmp_path, run=lambda command, check: built.append(command), download=download
+        tmp_path,
+        run=lambda command, check: built.append(command),
+        download=download,
+        guard=FakeGuard(),
     )
     assert (target / "rust" / "README.md").exists()
     assert built == [
         ["docker", "build", "-t", SETUP.POLYGLOT_IMAGE, str(tmp_path / "polyglot-context")]
     ]
-    assert (tmp_path / "polyglot-context" / "Dockerfile").exists()
-    assert (tmp_path / "polyglot-context" / "polyglot-benchmark" / "rust" / "README.md").exists()
+    # The staged context is gone after the build, and the image's size is in the manifest.
+    assert not (tmp_path / "polyglot-context").exists()
+    assert (
+        json.loads((tmp_path / "manifest.json").read_text())["polyglot"]["image_bytes"]
+        == 2_000_000_000
+    )
     assert json.loads((tmp_path / "manifest.json").read_text())["polyglot"]["licence"].startswith(
         "MIT"
     )
@@ -437,7 +461,8 @@ def test_build_makes_both_layers_and_records_what_failed(tmp_path):
             command, 1 if failed else 0, "", "no aarch64 wheel" if failed else ""
         )
 
-    results = TBENCH.build(tmp_path, None, run=run)
+    guard = FakeGuard()
+    results = TBENCH.build(tmp_path, None, run=run, guard=guard)
     assert results["good"] == "ok" and results["broken"].startswith("environment: no aarch64 wheel")
     assert built == [
         "mightling-tb21/broken:env",
@@ -555,3 +580,58 @@ def test_the_harbor_agent_brings_its_own_ling_and_reports_its_tokens(tmp_path, m
     assert "DREAMFERENCE_VLLM_HOST=http://172.17.0.1:8000" in command
     assert context.n_output_tokens == 42
     assert agent_module.LingAgent.name() == "mightling-ling"
+
+
+def test_the_build_guard_refuses_during_a_night_or_under_the_reserve(tmp_path):
+    def run(command, capture_output, text, check):
+        out = ""
+        if command[0] == "systemctl":
+            out = night
+        elif command[:2] == ["docker", "info"]:
+            out = "/var/lib/docker\n"
+        return subprocess.CompletedProcess(command, 0, out, "")
+
+    free = {"gb": 400}
+    usage = lambda path: type("U", (), {"free": free["gb"] * 1e9})()  # noqa: E731
+    night = "ling-swe-night12.service loaded active running SWE-bench night 12\n"
+    guard = SETUP.BuildGuard(run=run, usage=usage)
+    assert "ling-swe-night12.service" in guard.refusal(tmp_path)
+    night = ""
+    assert guard.refusal(tmp_path, need_gb=5) is None
+    free["gb"] = 152
+    assert "keeps 150 GB free" in guard.refusal(tmp_path, need_gb=5)
+
+
+def test_a_refused_build_stops_where_it_is_and_a_later_one_carries_on(tmp_path):
+    _tasks(tmp_path, ["a", "b", "c"])
+
+    def run(command, capture_output, text, check):
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    first = TBENCH.build(tmp_path, None, run=run, guard=FakeGuard(allow=1))
+    assert first == {"a": "ok"}
+    second = TBENCH.build(tmp_path, None, run=run, guard=FakeGuard())
+    assert second == {"a": "ok", "b": "ok", "c": "ok"}
+    sizes = json.loads((TBENCH.paths(tmp_path)["root"] / "sizes.json").read_text())
+    assert sizes == {"a": 2_000_000_000, "b": 2_000_000_000, "c": 2_000_000_000}
+
+
+def test_the_polyglot_image_is_not_built_during_a_night(tmp_path):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        info = tarfile.TarInfo(f"polyglot-benchmark-{SETUP.POLYGLOT_COMMIT}/x")
+        archive.addfile(info, io.BytesIO(b""))
+
+    def download(url, path):
+        path.write_bytes(buffer.getvalue())
+        return path
+
+    built = []
+    guard = FakeGuard(allow=0, why="a SWE-bench night is running (ling-swe-night15.service)")
+    try:
+        SETUP.setup_polyglot(
+            tmp_path, run=lambda c, check: built.append(c), download=download, guard=guard
+        )
+    except SystemExit as error:
+        assert "ling-swe-night15" in str(error)
+    assert built == []
