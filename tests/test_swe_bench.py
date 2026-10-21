@@ -68,6 +68,7 @@ from dreamference.swe_bench.swe_bench_runner import (
     APPLY_PATCH_ENV,
     BUILT_IN_PROMPTS,
     DROP_OLD_OUTPUTS_ENV,
+    COMPAT_ENV,
     EXEC_TOOL_ENV,
     LOOP_GUARD_ENV,
     OUTPUT_BUDGET_ENV,
@@ -4813,6 +4814,41 @@ def test_the_turn_end_compaction_arm_pins_codexs_key_on_every_exec_command_line(
     assert seen["turn_end_compaction"] == "off"
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["turn_end_compaction"] is None
+
+
+def test_the_compatibility_mode_arm_sets_the_launchers_switch_and_is_recorded(bench, monkeypatch):
+    monkeypatch.delenv(COMPAT_ENV, raising=False)
+    assert run(bench, name="cc", instances=["acme__widget-1"], compat="claude") == 0
+    env, _ = container_env(bench)
+    assert env[COMPAT_ENV] == "claude"
+    store = SweBenchRunStore("cc")
+    assert store.manifest()["compat"] == "claude"
+    assert "Compatibility       claude: every session in the compatibility mode" in SweBenchReport.render(store)
+    # Without the flag the variable is not set, and the manifest says the launcher decided.
+    bench["docker"].calls.clear()
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert COMPAT_ENV not in env
+    plain = SweBenchRunStore("plain")
+    assert plain.manifest()["compat"] == "auto"
+    assert "Compatibility       auto: the launcher's own setting" in SweBenchReport.render(plain)
+    # Two arms on the same tasks: `--against` names the difference.
+    assert "differs: compat: claude | auto" in SweBenchReport.against(store, plain)
+
+
+def test_swe_bench_run_passes_compat_to_the_runner(monkeypatch):
+    import argparse
+
+    from dreamference.swe_bench.swe_bench_command import SweBenchCommand
+
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--compat", "claude", "--name", "x"])) == 0
+    assert seen["compat"] == "claude"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["compat"] is None
 
 
 def test_the_exec_tool_arm_sets_the_launchers_switch_and_counts_the_calls(bench, monkeypatch):
