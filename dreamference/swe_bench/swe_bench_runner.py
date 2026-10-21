@@ -55,6 +55,10 @@ AUTO_APPLY_PATCH: Final[str] = "auto"
 # (ling-rs/src/exec_tool.rs, `ENV`), and the manifest value for a run that left the launcher's choice alone.
 EXEC_TOOL_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_EXEC_TOOL"
 AUTO_EXEC_TOOL: Final[str] = "auto"
+# The compatibility-mode arm (MIGHTLING_LING_CLAUDE §11): the launcher's switch
+# (ling-rs/src/compat.rs), and the manifest value for a run that left it alone.
+COMPAT_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_COMPAT"
+AUTO_COMPAT: Final[str] = "auto"
 # The drop-first compaction arm (compaction spec §13): the launcher's switch (ling-rs/src/compaction.rs,
 # `DROP_ENV`), set to this value only when the run asks.
 DROP_OLD_OUTPUTS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"
@@ -305,6 +309,7 @@ class SweBenchRunner:
         loop_guard: bool = False,
         output_budget: int | None = None,
         sampling: str | None = None,
+        compat: str | None = None,
     ) -> dict[str, Any]:
         """Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -375,6 +380,7 @@ class SweBenchRunner:
             "turn_end_compaction": turn_end_compaction or AUTO_TURN_END,
             "apply_patch": apply_patch or AUTO_APPLY_PATCH,
             "exec_tool": exec_tool or AUTO_EXEC_TOOL,
+            "compat": compat or AUTO_COMPAT,
             "drop_old_outputs": bool(drop_old_outputs),
             "loop_guard": bool(loop_guard),
             "output_budget": int(output_budget or 0),
@@ -463,6 +469,7 @@ class SweBenchRunner:
         restart_after_compactions: int = 0,
         apply_patch: str | None = None,
         exec_tool: str | None = None,
+        compat: str | None = None,
         drop_old_outputs: bool = False,
         loop_guard: bool = False,
         output_budget: int | None = None,
@@ -519,6 +526,10 @@ class SweBenchRunner:
                 through `DREAMFERENCE_MIGHTLING_EXEC_TOOL`: `function` (translated) or `freeform`
                 (Codex's custom tool, which SGLang drops); None leaves the launcher's choice,
                 `function` on SGLang and vLLM (spec §23). A new run only, like `code_index`.
+            compat: The compatibility mode for every session, through
+                `DREAMFERENCE_MIGHTLING_COMPAT`: `claude` or `off`; None leaves the launcher's
+                own setting, which a container's fresh home leaves off (MIGHTLING_LING_CLAUDE §11).
+                A new run only, like `code_index`.
             drop_old_outputs: Drop-first compaction in every session, through
                 `DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS`: when a session is about to compact, its
                 older tool outputs are dropped first and the summary runs only if that is not
@@ -711,6 +722,7 @@ class SweBenchRunner:
                         restart_after_compactions=restart_after_compactions,
                         apply_patch=apply_patch,
                         exec_tool=exec_tool,
+                        compat=compat,
                         drop_old_outputs=drop_old_outputs,
                         loop_guard=loop_guard,
                         output_budget=output_budget,
@@ -764,6 +776,10 @@ class SweBenchRunner:
                 run_exec_tool = str(manifest.get("exec_tool") or AUTO_EXEC_TOOL)
                 if run_exec_tool != AUTO_EXEC_TOOL:
                     extra_env[EXEC_TOOL_ENV] = run_exec_tool
+                # The compatibility-mode arm: the launcher's switch, only when the run asks.
+                run_compat = str(manifest.get("compat") or AUTO_COMPAT)
+                if run_compat != AUTO_COMPAT:
+                    extra_env[COMPAT_ENV] = run_compat
                 # The drop-first compaction arm (compaction spec §13): the launcher's switch, only
                 # when the run asks. A run made before the option existed has no key and ran without.
                 if manifest.get("drop_old_outputs"):

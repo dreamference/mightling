@@ -83,7 +83,12 @@ export function nameFromFolder(folder: string): string {
 }
 
 /** What a project's thread is told before its first message, and again after the project changed: its name, instructions and knowledge files. */
-export function projectContext(project: Pick<Project, "name" | "roots" | "metadata">, files: KnowledgeFile[]): string | null {
+/** The `ling-docs` collection of a project's knowledge (DESKTOP_PARITY_CLAUDE §4.7), named as the main process names it (knowledge.ts). */
+export function knowledgeCollection(projectId: string): string {
+  return `project-${projectId.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`.slice(0, 40);
+}
+
+export function projectContext(project: Pick<Project, "name" | "roots" | "metadata">, files: KnowledgeFile[], searchable: string | null = null): string | null {
   const instructions = instructionsOf(project).trim();
   const secondary = secondaryFolders(project);
   if (!instructions && files.length === 0 && secondary.length === 0) return null;
@@ -91,6 +96,7 @@ export function projectContext(project: Pick<Project, "name" | "roots" | "metada
   if (instructions) parts.push(`The project's standing instructions, which apply to every conversation in it:\n${instructions}`);
   if (secondary.length) parts.push(`Besides the working folder, the project's other folders, which you may read and change: ${secondary.join(", ")}`);
   if (files.length) parts.push(`The project's knowledge files; read the ones that bear on the request before answering:\n${files.map((file) => `- ${file.path}`).join("\n")}`);
+  if (files.length && searchable) parts.push(`They are indexed for search too: docs_search with collection "${searchable}" finds the passages that bear on a question, which is the way into long ones; cite what you use.`);
   return parts.join("\n\n");
 }
 

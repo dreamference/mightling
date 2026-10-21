@@ -3,6 +3,7 @@
 // it was asked, the folder it worked in, then each turn's question and answer; commands, diffs and
 // reasoning are left out. Pure, tested without a window.
 
+import { isContextText } from "./projects";
 import type { Thread } from "./protocol/v2/Thread";
 import type { Turn } from "./protocol/v2/Turn";
 import type { UserInput } from "./protocol/v2/UserInput";
@@ -13,7 +14,8 @@ export function keptQuestions(threads: Thread[], isAsk: (thread: Thread) => bool
 }
 
 const inputText = (input: UserInput): string => {
-  if (input.type === "text") return input.text;
+  // A project's context the window added is not the user's words.
+  if (input.type === "text") return isContextText(input.text) ? "" : input.text;
   if (input.type === "localImage") return `[image: ${input.path.split(/[\\/]/).pop()}]`;
   return "";
 };
