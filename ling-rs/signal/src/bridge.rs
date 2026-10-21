@@ -24,6 +24,46 @@ use crate::limits::Limits;
 use crate::limits::Verdict;
 use crate::limits::Watch;
 
+/// When no repository can take a phone's Night Shift task.
+pub const NO_NIGHT_REPOS: &str = "Night Shift has no repository to queue in from the phone yet. Queue one task from a checkout on the node (`ling`, then /night add), or list it as night_repos = [\"~/path/to/repo\"] under [chat] in ~/.config/dreamference/config.toml.";
+
+/// A phone's Night Shift task with the thread's last exchange after it (the same text as `ling
+/// chat`'s `hub::with_context`).
+pub fn with_context(task: &str, exchange: Option<&(String, String)>) -> String {
+    let cut = |text: &str, limit: usize| -> String {
+        let mut out: String = text.chars().take(limit).collect();
+        if text.chars().count() > limit {
+            out.push('…');
+        }
+        out
+    };
+    let Some((question, answer)) = exchange else { return task.trim().to_string() };
+    let mut text = format!("{}\n\nContext, from the phone conversation this was asked in:", task.trim());
+    if !question.trim().is_empty() {
+        text.push_str(&format!("\n\nQuestion: {}", cut(question.trim(), 1_500)));
+    }
+    if !answer.trim().is_empty() {
+        text.push_str(&format!("\n\nAnswer: {}", cut(answer.trim(), 3_000)));
+    }
+    text
+}
+
+/// `/api/night/status` as lines for the phone (as `ling chat`'s).
+pub fn night_status_text(value: &Value) -> String {
+    let tasks = value.get("tasks").and_then(Value::as_array).cloned().unwrap_or_default();
+    if tasks.is_empty() {
+        return "Night Shift's queue is empty. /night add <task> queues one.".to_string();
+    }
+    let lines: Vec<String> = tasks
+        .iter()
+        .map(|t| {
+            let field = |key: &str| t.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+            format!("• {} — {} [{}] {}", field("id"), field("status"), field("repo"), field("task"))
+        })
+        .collect();
+    format!("Night Shift:\n{}", lines.join("\n"))
+}
+
 /// Files offered back after one answer, at most, and the largest Signal takes (100 MB, with room).
 pub const MAX_OFFERS: usize = 3;
 pub const FILE_LIMIT: u64 = 95 * 1024 * 1024;
@@ -70,6 +110,8 @@ pub enum AgentEvent {
     Approval { id: Value, thread: String, kind: ApprovalKind, command: Option<String>, cwd: Option<String>, reason: Option<String> },
     /// The owner's attachments for this thread's next turn, after [`Action::Upload`].
     Uploaded { thread: String, uploads: Vec<Uploaded> },
+    /// Where a `/night add` task may go: (path, name).
+    NightRepos { task: String, repos: Vec<(String, String)> },
     /// The files the agent changed during a turn (name, bytes), and the answer that may name them.
     Made { thread: String, files: Vec<(String, u64)>, answer: String },
     /// A follow-up the bridge steered into the running turn was refused (the turn was ending): it
@@ -183,6 +225,12 @@ pub enum Action {
     ResumeThread(String),
     /// Tell the running turn something (`turn/steer`): the bounds' "answer now".
     Steer { thread: String, turn: String, text: String },
+    /// Night Shift (§19.7): ask `ling web` where `task` may go, and report [`AgentEvent::NightRepos`].
+    NightRepos { task: String },
+    /// Queue `task` in `repo`; the owner said YES (or chose it).
+    NightAdd { repo: String, task: String },
+    /// Show the queue.
+    NightStatus,
     /// Look for the files the agent changed in `thread` since `since_ms`; report them as
     /// [`AgentEvent::Made`] (§19.6).
     FindFiles { thread: String, since_ms: u64, answer: String },
@@ -217,8 +265,16 @@ struct Approval {
     text: String,
     deadline_ms: u64,
     shown: bool,
-    /// The bridge's own question, not the agent's: a file to send back (thread, name; §19.6).
-    file: Option<(String, String)>,
+    /// The bridge's own question, not the agent's: a file to send back (§19.6) or a Night Shift
+    /// task to queue (§19.7).
+    local: Option<Local>,
+}
+
+#[derive(Clone, Debug)]
+enum Local {
+    File { thread: String, name: String },
+    /// The task, and the repositories it may go to (path, name); one is chosen by YES or a number.
+    Night { task: String, repos: Vec<(String, String)> },
 }
 
 #[derive(Clone, Debug)]
@@ -242,6 +298,8 @@ enum Phase {
         limit_reason: Option<String>,
         /// The owner's quick follow-ups before the turn's id is known: steered in once it is (§19.4).
         added: Vec<String>,
+        /// The question, for a later `/night add`'s context.
+        asked: String,
     },
 }
 
@@ -257,6 +315,8 @@ pub struct Bridge {
     pub current: Option<String>,
     pub recent: Vec<ThreadRef>,
     pub info: Info,
+    /// The current thread's last question and answer, for a `/night add` task's context.
+    last_exchange: Option<(String, String)>,
     /// The names the owner's own attachments were saved under, per thread: never offered back.
     uploaded: std::collections::HashMap<String, HashSet<String>>,
     /// When the conversation last moved: the owner's last question or the last answer. None for a
@@ -338,6 +398,7 @@ impl Bridge {
             recent,
             info,
             uploaded: std::collections::HashMap::new(),
+            last_exchange: None,
             last_activity_ms: None,
             new_thread_after_ms: Some(NEW_THREAD_AFTER_MS),
             limits: Limits::default(),
@@ -382,9 +443,19 @@ impl Bridge {
         match input {
             Input::Yes | Input::No => {
                 if let Some(approval) = self.approvals.pop_front() {
-                    match approval.file {
-                        Some((thread, name)) if input == Input::Yes => actions.push(Action::SendFile { thread, name }),
-                        Some(_) => actions.push(Action::Notice("Not sent; it stays in the thread's folder.".to_string())),
+                    match approval.local {
+                        Some(Local::File { thread, name }) if input == Input::Yes => actions.push(Action::SendFile { thread, name }),
+                        Some(Local::File { .. }) => actions.push(Action::Notice("Not sent; it stays in the thread's folder.".to_string())),
+                        Some(Local::Night { task, repos }) if input == Input::Yes && repos.len() == 1 => {
+                            actions.push(Action::NightAdd { repo: repos[0].0.clone(), task });
+                        }
+                        Some(Local::Night { task, repos }) if input == Input::Yes => {
+                            // Several repositories: YES names none, so the question stays.
+                            actions.push(Action::Notice(format!("Reply with the repository's number (1–{}), or NO.", repos.len())));
+                            self.approvals.push_front(Approval { id: Value::Null, text: String::new(), deadline_ms: approval.deadline_ms, shown: true, local: Some(Local::Night { task, repos }) });
+                            return actions;
+                        }
+                        Some(Local::Night { .. }) => actions.push(Action::Notice("Not queued.".to_string())),
                         None => {
                             let decision = if input == Input::Yes { "accept" } else { "decline" };
                             actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": decision }) });
@@ -412,25 +483,33 @@ impl Bridge {
             },
             Input::Help => actions.push(Action::Notice(command::HELP.to_string())),
             Input::Cavemode(text) => actions.push(Action::Cavemode { thread: self.current.clone(), text }),
-            Input::Question(_) => {
-                if !self.is_busy() && self.queue.is_empty() {
-                    actions.extend(self.fresh_after_silence(now));
-                }
-                self.last_activity_ms = Some(now);
-                if self.connected && self.is_busy() && let Some(merged) = self.merge(message.clone()) {
-                    actions.extend(merged);
-                } else if self.is_busy() || !self.connected {
-                    if self.queue.len() >= QUEUE_LIMIT {
-                        actions.push(Action::Notice(format!("{QUEUE_LIMIT} questions are already waiting; send this again once they're answered.")));
-                    } else {
-                        self.queue.push_back(message);
-                        let why = if self.connected { "I'll take it next. /stop to interrupt." } else { "Mightling's web server isn't answering yet; I'll ask as soon as it is." };
-                        actions.push(Action::Notice(format!("Queued; {why}")));
+            Input::Night(rest) => {
+                let (verb, task) = rest.split_once(char::is_whitespace).map(|(v, t)| (v, t.trim())).unwrap_or((rest.as_str(), ""));
+                match verb {
+                    "add" if !task.is_empty() => {
+                        let task = with_context(task, self.last_exchange.as_ref());
+                        actions.push(Action::NightRepos { task });
                     }
-                } else {
-                    actions.extend(self.begin(message, now));
+                    "status" | "list" => actions.push(Action::NightStatus),
+                    _ => actions.push(Action::Notice("/night add <task> queues a task for Night Shift tonight; /night status shows the queue.".to_string())),
                 }
             }
+            Input::Choice(n) => {
+                // A number answers a pending choice of repository; a pending YES/NO question
+                // takes YES or NO, so the number is asked as a question there.
+                let choosing = matches!(self.approvals.front(), Some(Approval { local: Some(Local::Night { repos, .. }), .. }) if repos.len() > 1);
+                if choosing && let Some(Approval { local: Some(Local::Night { task, repos }), .. }) = self.approvals.pop_front() {
+                    match repos.get(n - 1) {
+                        Some((repo, _)) => actions.push(Action::NightAdd { repo: repo.clone(), task }),
+                        None => actions.push(Action::Notice(format!("There is no repository {n}; nothing was queued."))),
+                    }
+                    self.show_next_approval(&mut actions);
+                } else {
+                    let again = OwnerMessage { text: message.text.clone(), attachments: Vec::new(), timestamp: message.timestamp };
+                    actions.extend(self.question(again, now));
+                }
+            }
+            Input::Question(_) => actions.extend(self.question(message, now)),
         }
         actions
     }
@@ -483,12 +562,36 @@ impl Bridge {
             watch: Watch::new(now),
             limit_reason: None,
             added: Vec::new(),
+            asked: message.text.clone(),
         };
         if with_attachments {
             vec![Action::Typing(true), Action::Upload { thread, attachments: message.attachments }]
         } else {
             vec![Action::Typing(true), Action::StartTurn { thread, text: message.text, images: Vec::new() }]
         }
+    }
+
+    /// A question: to a new thread after a silence, into the answer in hand, queued, or begun.
+    fn question(&mut self, message: OwnerMessage, now: u64) -> Vec<Action> {
+        let mut actions = Vec::new();
+        if !self.is_busy() && self.queue.is_empty() {
+            actions.extend(self.fresh_after_silence(now));
+        }
+        self.last_activity_ms = Some(now);
+        if self.connected && self.is_busy() && let Some(merged) = self.merge(message.clone()) {
+            actions.extend(merged);
+        } else if self.is_busy() || !self.connected {
+            if self.queue.len() >= QUEUE_LIMIT {
+                actions.push(Action::Notice(format!("{QUEUE_LIMIT} questions are already waiting; send this again once they're answered.")));
+            } else {
+                self.queue.push_back(message);
+                let why = if self.connected { "I'll take it next. /stop to interrupt." } else { "Mightling's web server isn't answering yet; I'll ask as soon as it is." };
+                actions.push(Action::Notice(format!("Queued; {why}")));
+            }
+        } else {
+            actions.extend(self.begin(message, now));
+        }
+        actions
     }
 
     /// A quick follow-up joins the question in hand instead of waiting as a turn of its own
@@ -541,7 +644,7 @@ impl Bridge {
         let dropped = self.queue.len();
         self.queue.clear();
         while let Some(approval) = self.approvals.pop_front() {
-            if approval.file.is_none() {
+            if approval.local.is_none() {
                 actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
             }
         }
@@ -656,9 +759,9 @@ impl Bridge {
             }
             AgentEvent::TurnCompleted { thread, error } => {
                 let running = matches!(&self.phase, Phase::Running { thread: t, .. } if *t == thread);
-                if running && let Phase::Running { answer, stopping, watch, limit_reason, started_ms, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
+                if running && let Phase::Running { answer, stopping, watch, limit_reason, started_ms, asked, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
                     // The agent's requests end with its turn; the bridge's own offers stay.
-                    self.approvals.retain(|a| a.file.is_some());
+                    self.approvals.retain(|a| a.local.is_some());
                     self.last_activity_ms = Some(now);
                     // Interrupted by its bounds (limits.rs): a final turn asks for the answer from what
                     // was found; the final turn out of time too ends with what it wrote.
@@ -681,6 +784,7 @@ impl Bridge {
                                 watch: Watch::final_turn(now),
                                 limit_reason: None,
                                 added: Vec::new(),
+                                asked: asked.clone(),
                             };
                             actions.push(Action::StartTurn { thread, text: limits::final_text(&reason), images: Vec::new() });
                             return actions;
@@ -714,6 +818,7 @@ impl Bridge {
                             Some(error) => actions.push(Action::Notice(format!("The answer failed: {error}"))),
                             None if answer.trim().is_empty() => actions.push(Action::Notice("(Mightling finished without writing an answer.)".to_string())),
                             None => {
+                                self.last_exchange = Some((asked.clone(), answer.trim().to_string()));
                                 actions.push(Action::Reply(format::reply(answer.trim())));
                                 // Files it made and named are looked for, to offer back (§19.6).
                                 actions.push(Action::FindFiles { thread: thread.clone(), since_ms: started_ms, answer: answer.trim().to_string() });
@@ -722,6 +827,21 @@ impl Bridge {
                     }
                     actions.extend(self.next(now));
                 }
+            }
+            AgentEvent::NightRepos { task, repos } => {
+                if repos.is_empty() {
+                    actions.push(Action::Notice(NO_NIGHT_REPOS.to_string()));
+                    return actions;
+                }
+                let preview: String = task.chars().take(400).collect();
+                let text = if repos.len() == 1 {
+                    format!("Queue this for Night Shift tonight, in {}?\n\n{preview}\n\nReply YES or NO.", repos[0].1)
+                } else {
+                    let list: Vec<String> = repos.iter().enumerate().map(|(n, (_, name))| format!("{}. {name}", n + 1)).collect();
+                    format!("Queue this for Night Shift tonight?\n\n{preview}\n\nReply with the repository's number, or NO:\n{}", list.join("\n"))
+                };
+                self.approvals.push_back(Approval { id: Value::Null, text, deadline_ms: now + APPROVAL_MS, shown: false, local: Some(Local::Night { task, repos }) });
+                self.show_next_approval(&mut actions);
             }
             AgentEvent::Made { thread, files, answer } => {
                 if self.airgapped() {
@@ -740,7 +860,7 @@ impl Bridge {
                         continue;
                     }
                     let text = format!("Mightling made {name} ({}). Reply YES to get it here, or NO.", size(bytes));
-                    self.approvals.push_back(Approval { id: Value::Null, text, deadline_ms: now + APPROVAL_MS, shown: false, file: Some((thread.clone(), name)) });
+                    self.approvals.push_back(Approval { id: Value::Null, text, deadline_ms: now + APPROVAL_MS, shown: false, local: Some(Local::File { thread: thread.clone(), name }) });
                 }
                 self.show_next_approval(&mut actions);
             }
@@ -831,7 +951,7 @@ impl Bridge {
                         text.push_str(&format!("\n({})", reason.trim()));
                     }
                     text.push_str("\nReply YES or NO.");
-                    self.approvals.push_back(Approval { id, text, deadline_ms: now + APPROVAL_MS, shown: false, file: None });
+                    self.approvals.push_back(Approval { id, text, deadline_ms: now + APPROVAL_MS, shown: false, local: None });
                     self.show_next_approval(&mut actions);
                 }
             }
@@ -847,7 +967,7 @@ impl Bridge {
                 self.airgapped_since = Some(now);
                 self.queue.clear();
                 while let Some(approval) = self.approvals.pop_front() {
-                    if approval.file.is_none() {
+                    if approval.local.is_none() {
                         actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
                     }
                 }
@@ -911,8 +1031,12 @@ impl Bridge {
         }
         while self.approvals.front().is_some_and(|a| now >= a.deadline_ms) {
             let approval = self.approvals.pop_front().unwrap();
-            if approval.file.is_some() {
-                actions.push(Action::Notice("No reply in 10 minutes; the file stays in the thread's folder.".to_string()));
+            if let Some(local) = &approval.local {
+                let line = match local {
+                    Local::File { .. } => "No reply in 10 minutes; the file stays in the thread's folder.",
+                    Local::Night { .. } => "No reply in 10 minutes; not queued.",
+                };
+                actions.push(Action::Notice(line.to_string()));
             } else {
                 actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "decline" }) });
                 actions.push(Action::Notice("No reply in 10 minutes, so I declined it.".to_string()));
@@ -1504,6 +1628,34 @@ mod tests {
         assert_eq!(notices(&b.on_message(msg("no", 3), 13)), vec!["Not sent; it stays in the thread's folder."]);
         b.on_airgap(true, 14);
         assert!(b.on_agent(AgentEvent::Made { thread: "t1".to_string(), files: vec![("report.md".to_string(), 1)], answer: "report.md".to_string() }, 15).is_empty());
+    }
+
+    /// Night Shift from the phone (§19.7): `/night add` carries the last exchange, is confirmed
+    /// before anything is queued (YES for one repository, a number for several), and NO queues nothing.
+    #[test]
+    fn night_add_is_confirmed_and_carries_the_last_exchange() {
+        let mut b = connected();
+        answered(&mut b, "why does the parser drop tabs?", "Because split_whitespace eats them.", 1);
+        let asked = b.on_message(msg("/night add fix it so tabs survive", 2), 10);
+        let Some(Action::NightRepos { task }) = asked.iter().find(|a| matches!(a, Action::NightRepos { .. })).cloned() else { panic!("{asked:?}") };
+        assert!(task.starts_with("fix it so tabs survive\n\nContext, from the phone conversation") && task.contains("Question: why does the parser drop tabs?") && task.contains("Answer: Because split_whitespace"), "{task}");
+        let one = vec![("/w/app".to_string(), "app".to_string())];
+        let confirm = b.on_agent(AgentEvent::NightRepos { task: task.clone(), repos: one }, 11);
+        assert!(notices(&confirm)[0].starts_with("Queue this for Night Shift tonight, in app?") && notices(&confirm)[0].ends_with("Reply YES or NO."));
+        let yes = b.on_message(msg("yes", 3), 12);
+        assert!(yes.contains(&Action::NightAdd { repo: "/w/app".to_string(), task: task.clone() }), "{yes:?}");
+        // Several: a number chooses; YES alone asks again; NO queues nothing.
+        let two = vec![("/w/app".to_string(), "app".to_string()), ("/w/lib".to_string(), "lib".to_string())];
+        let listed = b.on_agent(AgentEvent::NightRepos { task: "t".to_string(), repos: two.clone() }, 13);
+        assert!(notices(&listed)[0].contains("1. app\n2. lib"), "{listed:?}");
+        assert_eq!(notices(&b.on_message(msg("yes", 4), 14)), vec!["Reply with the repository's number (1–2), or NO."]);
+        assert!(b.on_message(msg("2", 5), 15).contains(&Action::NightAdd { repo: "/w/lib".to_string(), task: "t".to_string() }));
+        b.on_agent(AgentEvent::NightRepos { task: "t".to_string(), repos: two }, 16);
+        assert_eq!(notices(&b.on_message(msg("no", 6), 17)), vec!["Not queued."]);
+        // None set up: says how.
+        assert_eq!(notices(&b.on_agent(AgentEvent::NightRepos { task: "t".to_string(), repos: vec![] }, 18)), vec![NO_NIGHT_REPOS]);
+        assert!(b.on_message(msg("/night status", 7), 19).contains(&Action::NightStatus));
+        assert!(notices(&b.on_message(msg("/night", 8), 20))[0].starts_with("/night add <task>"));
     }
 
     #[test]

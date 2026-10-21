@@ -333,6 +333,27 @@ pub async fn made_file(port: u16, cookie: &str, thread: &str, name: &str) -> Res
     Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web refused it").to_string())
 }
 
+/// A JSON request to one of `ling web`'s routes (Night Shift's, §19.7): GET, or POST with a body.
+pub async fn web_json(port: u16, cookie: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+    let request = match body {
+        None => format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"),
+        Some(body) => {
+            let body = body.to_string();
+            format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        }
+    };
+    let (status, _, raw) = http(port, request.as_bytes()).await?;
+    let value: Value = serde_json::from_slice(&raw).map_err(|_| format!("ling web answered HTTP {status} without JSON"))?;
+    if status == 200 {
+        Ok(value)
+    } else {
+        Err(value.get("error").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("ling web refused (HTTP {status})")))
+    }
+}
+
 /// The chat settings of the user's configuration (`[chat]`), as `ling web` reads them for the
 /// bridge, which cannot (`/api/chat/settings`; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -343,6 +364,8 @@ pub struct ChatSettings {
     pub answer_ms: Option<u64>,
     pub tool_calls: Option<u32>,
     pub command_ms: Option<u64>,
+    /// Whether Night Shift's morning report comes here (`[chat] night_report_to`; §19.7).
+    pub night_reports: bool,
 }
 
 impl Default for ChatSettings {
@@ -369,6 +392,7 @@ impl ChatSettings {
                 Some(n) => Some(n.min(10_000) as u32),
                 None => Some(25),
             },
+            night_reports: value.get("nightReportTo").and_then(Value::as_array).map_or(true, |to| to.iter().any(|m| m.as_str() == Some("signal"))),
         }
     }
 }

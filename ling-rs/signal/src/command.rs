@@ -11,9 +11,13 @@ pub enum Input {
     Help,
     /// `/cavemode` and what follows it: how terse this thread's answers are, or new threads'.
     Cavemode(String),
+    /// `/night` and what follows it: Night Shift from the phone (§19.7).
+    Night(String),
     /// Only while an approval is pending; otherwise "yes" is a question like any other.
     Yes,
     No,
+    /// A number, only while a choice is pending (a repository for `/night add`).
+    Choice(usize),
     Question(String),
 }
 
@@ -24,6 +28,7 @@ pub const HELP: &str = "Write a question and Mightling answers it in this conver
 /cavemode [off|lite|full|ultra] — how terse this thread's answers are (/cavemode default <level> for new threads)\n\
 /threads — your recent threads\n\
 /use N — continue thread N\n\
+/night add <task> — queue a task for Night Shift tonight, with this thread's last exchange; /night status — the queue\n\
 /help — this list\n\n\
 When Mightling asks to run something, reply YES or NO.";
 
@@ -34,7 +39,13 @@ pub fn parse(text: &str, approval_pending: bool) -> Input {
         match trimmed.trim_end_matches(['.', '!']).to_ascii_lowercase().as_str() {
             "yes" | "y" => return Input::Yes,
             "no" | "n" => return Input::No,
-            _ => {}
+            number => {
+                if let Ok(n) = number.parse::<usize>()
+                    && (1..=9).contains(&n)
+                {
+                    return Input::Choice(n);
+                }
+            }
         }
     }
     let lower = trimmed.to_ascii_lowercase();
@@ -45,6 +56,9 @@ pub fn parse(text: &str, approval_pending: bool) -> Input {
         "/threads" => return Input::Threads,
         "/help" => return Input::Help,
         _ => {}
+    }
+    if lower == "/night" || lower.starts_with("/night ") {
+        return Input::Night(trimmed["/night".len()..].trim().to_string());
     }
     if lower == "/cavemode" || lower.starts_with("/cavemode ") {
         return Input::Cavemode(trimmed["/cavemode".len()..].trim().to_string());
@@ -86,5 +100,9 @@ mod tests {
         assert_eq!(parse("yes", false), Input::Question("yes".to_string()));
         assert_eq!(parse("yes, but why?", true), Input::Question("yes, but why?".to_string()));
         assert_eq!(parse("/stop", true), Input::Stop);
+        assert_eq!(parse("2", true), Input::Choice(2));
+        assert_eq!(parse("2", false), Input::Question("2".to_string()));
+        assert_eq!(parse("/night add Fix it", false), Input::Night("add Fix it".to_string()));
+        assert_eq!(parse("/nightly", false), Input::Question("/nightly".to_string()));
     }
 }

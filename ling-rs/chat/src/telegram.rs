@@ -262,6 +262,7 @@ pub fn commands(mini_app: bool) -> Value {
         json!({ "command": "use", "description": "Continue a thread: /use <n>" }),
         json!({ "command": "status", "description": "What Mightling is doing" }),
         json!({ "command": "cavemode", "description": "How terse answers are: /cavemode full" }),
+        json!({ "command": "night", "description": "Night Shift: /night add <task>, /night status" }),
     ];
     if mini_app {
         list.push(json!({ "command": "app", "description": "Open Mightling's app, over your own network" }));
