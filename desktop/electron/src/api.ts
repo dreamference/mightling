@@ -147,6 +147,8 @@ export type FromView =
   | { type: "preview/open"; id: string; url: string; thread: string | null }
   | { type: "preview/navigate"; id: string; url: string; thread: string | null }
   | { type: "preview/go"; id: string; step: "back" | "forward" }
+  /** The agent's console tool (windowtools.ts): the recent console of the thread's previews. */
+  | { type: "preview/console"; thread: string | null }
   | { type: "preview/reload"; id: string; fresh?: boolean }
   | { type: "preview/place"; id: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }
   | { type: "preview/pick"; id: string }

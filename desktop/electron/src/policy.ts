@@ -41,6 +41,9 @@ export interface Policy {
   scratchSandbox: string;
   importRequest: string;
   refusedImportItems: ReadonlySet<string>;
+  /** The `thread/start` field naming the window's own tools (the terminal's output, the preview's console); the policy writes their definitions as `dynamicTools`. */
+  windowToolsField: string;
+  windowTools: ReadonlyMap<string, unknown>;
 }
 
 const isObject = (value: unknown): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -76,7 +79,12 @@ export function parsePolicy(value: unknown): Policy {
     scratchSandbox: string(value, "scratchSandbox"),
     importRequest: string(value, "importRequest"),
     refusedImportItems: new Set(strings(value, "refusedImportItems")),
+    windowToolsField: string(value, "windowToolsField"),
+    windowTools: new Map(Object.entries(isObject(value.windowTools) ? value.windowTools : (() => { throw new Error("policy.json: `windowTools` must be an object"); })()) as [string, unknown][]),
   };
+  for (const [name, spec] of policy.windowTools) {
+    if (!isObject(spec) || spec.name !== name) throw new Error(`policy.json: the window tool \`${name}\` must carry its own name`);
+  }
   if (![...policy.scratchPrompts].every((name) => policy.namedPrompts.has(name))) {
     throw new Error("policy.json: every scratch prompt must also be a named prompt");
   }
@@ -113,6 +121,17 @@ function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSo
   // A resumed or forked Ask thread stays where it was started.
   const existing = typeof params.threadId === "string" ? prompts.scratchFolderOf(params.threadId) : null;
   if (existing !== null) confine(policy, params, existing);
+  if (policy.windowToolsField in params) {
+    const names = params[policy.windowToolsField];
+    delete params[policy.windowToolsField];
+    if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) throw new Error(`\`${policy.windowToolsField}\` must list tool names`);
+    const tools = (names as string[]).map((name) => {
+      const spec = policy.windowTools.get(name);
+      if (spec === undefined) throw new Error(`no window tool named "${name}"`);
+      return spec;
+    });
+    if (tools.length) params.dynamicTools = tools;
+  }
   if (!(policy.promptField in params)) return params;
   const name = params[policy.promptField];
   delete params[policy.promptField];
@@ -163,6 +182,10 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
     const namesPrompt = isObject(object.params) && policy.promptField in object.params;
     if (namesPrompt && !policy.promptOpeners.has(method)) {
       throw new Error(`a prompt can only be chosen when a thread is started, not by ${method}`);
+    }
+    const namesTools = isObject(object.params) && policy.windowToolsField in object.params;
+    if (namesTools && !policy.promptOpeners.has(method)) {
+      throw new Error(`window tools can only be named when a thread is started, not by ${method}`);
     }
     if (policy.threadOpeners.has(method) && isObject(object.params)) {
       object.params = vetThreadParams(policy, object.params, prompts);

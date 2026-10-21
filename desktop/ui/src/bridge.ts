@@ -544,6 +544,8 @@ export interface PickedElement {
 
 /** The preview tab (DESKTOP_PARITY §2.9): the desktop app's only; a browser on `ling web` has none. */
 export const preview = {
+  /** The recent console of a thread's previews (or of every preview), for the agent's console tool. */
+  console: (thread: string | null) => send<{ url: string; lines: string[] }[]>({ type: "preview/console", thread }),
   available: () => host() === "electron",
   open: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/open", id, url, thread }),
   navigate: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/navigate", id, url, thread }),

@@ -131,3 +131,19 @@ export const PICK_SCRIPT = `new Promise((resolve) => {
   addEventListener("click", click, true);
   addEventListener("keydown", key, true);
 })`;
+
+/** How long one console line of a preview may be (the agent's console tool). */
+const CONSOLE_LINE = 2000;
+
+/** A console message as one line: its level, its text, where it came from. Both of Electron's event forms. */
+export function consoleLine(first: unknown, ...legacy: unknown[]): string {
+  const details = (typeof first === "object" && first !== null && "message" in first ? first : null) as { level?: unknown; message?: unknown; lineNumber?: unknown; sourceId?: unknown } | null;
+  const levels = ["debug", "info", "warning", "error"];
+  const level = details ? String(details.level ?? "info") : levels[Number(legacy[0])] ?? "info";
+  const message = String(details ? details.message : legacy[1] ?? "");
+  const line = details ? details.lineNumber : legacy[2];
+  const source = String(details ? details.sourceId ?? "" : legacy[3] ?? "");
+  const where = source ? ` (${source.split("/").pop()}${line ? `:${line}` : ""})` : "";
+  return `[${level}] ${message}${where}`.slice(0, CONSOLE_LINE);
+}
+
