@@ -108,6 +108,10 @@
       "default": false,
       "type": "boolean"
     },
+    "recallQuestions": {
+      "default": false,
+      "type": "boolean"
+    },
     "quickEntry": {
       "default": false,
       "type": "boolean"
