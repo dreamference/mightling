@@ -239,6 +239,14 @@ The owner's four composer items. Two were DESKTOP_PARITY §4.5 item 22 (fork fro
 - **Queue edits** (same branch): a queued message is edited in place (`thread/queue/update`: its words replaced, images and skills kept; Enter keeps, Esc leaves it) and moved up or down (`thread/queue/reorder`).
 - **Tests:** `paste.test.ts`, `suggestions.test.ts`, `queue.test.ts`; `e2e/composer.e2e.ts` (a 60-line paste: a file in Ask's folder, a fenced block in Work and no file in the project, a short paste stays text), the Phase 3 e2e's item 7 (the prediction in grey, Tab takes it, nothing sent), `e2e/forkqueue.e2e.ts` (a fork through the first of two turns, an edit in a new thread before the second with its words in the composer, two queued messages edited and reordered).
 
+### 4.7 Projects in Ask: the project's page and its knowledge searched (decided 2026-10-21)
+
+Branch `desktop/project-knowledge`, on the Projects of DESKTOP_PARITY §4.5 item 13 (one project for Ask and Work: folders, standing instructions, knowledge files), the compared app's project knowledge panel and its search of large knowledge ([PROJECTS], [RAG]).
+
+- **The page:** a click on a project in Ask shows its page while a new question would start in it (`ProjectPage.tsx`): its standing instructions, its knowledge files with sizes and how the agent reaches them (searched, being indexed, or read whole), **Add files…**, **Edit project…**, and its questions, each a click away.
+- **Search over the knowledge:** the project's knowledge folder becomes a `ling-docs` collection, `project-<id>`, made with its first file, reindexed as files come and go and removed with its last (`syncKnowledge`, `desktop/electron/src/docs.ts`). Once it is indexed, the project's context tells the agent to use `docs_search` with that collection for the passages a question needs (`projectContext`). `ling-docs` never indexes anything under `~/.mightling`; the owner allowed exactly this folder, `$CODEX_HOME/projects/<id>/knowledge`, on 2026-10-21 (LOCAL_INDEX §5), and a `ling-docs` built before it refuses the collection, in which case the files are read whole as before.
+- **Tests:** `collections.rs` and `discover.rs` (the folder allowed; a sibling, the agent's sessions and a knowledge link into a secret folder refused; links inside skipped and, followed, never leading out), `knowledge.test.ts` in both packages (the collection's name, the context's hint only once indexed, the reach), `e2e/knowledge.e2e.ts` (a project made in Ask with instructions; its page; a file added becomes `ling docs add <folder> --name project-proj-1` and a reindex, the page saying the agent searches it; the first question's context naming the collection; the question listed on the page).
+
 ## 5. Tests and acceptance
 
 Each item of §4 lands with its unit tests (`npm test` in `desktop/ui` and `desktop/electron`), an e2e case in `desktop/electron/e2e/` against the scripted stand-in, the full e2e run after `npm run package`, and the Python suite. Neither item adds a method to `ling-rs/web/policy.json`, so the Rust conformance run is not needed.
@@ -257,7 +265,7 @@ Answered on 2026-10-21:
 6. **Projects for Ask:** the Codex-parity work owns Projects (instructions and knowledge files for Ask and Work); Ask builds on them, with no Ask-only projects.
 7. **This document on `main`:** yes, merged.
 
-Still open: composing a project's instructions into the `ask` prompt in the policy layer, and `ling-docs` search over a project's knowledge folder, when Projects land.
+Still open: composing a project's instructions into the `ask` prompt in the policy layer (today the window sends them as the first turn's context, DESKTOP_PARITY §4.5 item 13); `ling-docs` search over a project's knowledge was built on 2026-10-21, §4.7.
 
 ---
 
