@@ -702,7 +702,7 @@ export function memorySwitches(config: Record<string, unknown>): { enabled: bool
   };
 }
 
-function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories }: SettingsProps) {
+function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories, prefs, onChange }: SettingsProps) {
   const [switches, setSwitches] = useState<ReturnType<typeof memorySwitches> | null>(null);
   const [status, setStatus] = useState<{ v2ConsolidatedThreads: number; v2Ready: boolean } | null>(null);
   useEffect(() => {
@@ -725,6 +725,13 @@ function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories
         <label><input type="checkbox" checked={switches.generate} disabled={!switches.enabled} onChange={(event) => void write("memories.generate_memories", event.target.checked)} /> Threads add to the memories</label>
         <label><input type="checkbox" checked={switches.external} disabled={!switches.enabled} onChange={(event) => void write("memories.disable_on_external_context", !event.target.checked)} /> Including threads that used the web or an MCP server</label>
       </fieldset>
+      {bridge.recall.available() ? (
+        <fieldset className="recall">
+          <legend>Earlier questions</legend>
+          <label><input type="checkbox" checked={prefs.recallQuestions} onChange={(event) => onChange({ recallQuestions: event.target.checked })} /> Let the agent search your earlier Ask questions</label>
+          <p className="dialog-note">Off by default. When on, Mightling keeps a copy of each Ask question and its answers as a Markdown file under ~/.mightling/ask-history/ and gives the agent a skill, earlier-questions, to search and read them on this machine, read only. Incognito questions are never kept, archived ones are removed, and turning this off deletes the copies.</p>
+        </fieldset>
+      ) : null}
       <p className="dialog-note">{status ? `${status.v2ConsolidatedThreads} thread${status.v2ConsolidatedThreads === 1 ? "" : "s"} remembered${status.v2Ready ? "" : "; the memories are still being made"}.` : ""} /memories in a thread turns them off or on for that thread.</p>
       <div className="buttons dialog-buttons">
         <button className="danger-button" onClick={() => window.confirm("Delete everything the agent remembers? This cannot be undone.") && resetMemories().then(() => memoryStatus().then(setStatus)).catch(notice)}>Delete the memories</button>

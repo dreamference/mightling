@@ -51,6 +51,8 @@ export interface Prefs {
   previewDevTools: boolean;
   /** The pet (Settings › Pets, Super+Alt+P): shown or not, its size, and a picture of the user's own instead of Mightling's mark. */
   petShown: boolean;
+  /** The agent may search earlier Ask questions (DESKTOP_PARITY_CLAUDE §4.4): copies kept and a skill in place; off by default. */
+  recallQuestions: boolean;
   /** Quick Entry (DESKTOP_PARITY_CLAUDE §4.2): a question from anywhere through a system-wide shortcut; off by default. */
   quickEntry: boolean;
   /** Its shortcut, in the keymap's spelling (`Ctrl+Alt+Space`). */

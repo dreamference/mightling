@@ -400,6 +400,17 @@ export async function base64(file: Blob): Promise<string> {
  * a browser through `ling web`'s `/api/upload` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1), in the
  * app through its main process, which applies the same checks (desktop/electron/src/ask.ts).
  */
+/**
+ * Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4), the desktop app's only: the copies the
+ * main process keeps while Settings › Memories has it on.
+ */
+export const recall = {
+  available: () => host() === "electron",
+  index: () => send<Record<string, number>>({ type: "recall/index" }),
+  write: (thread: string, updatedAt: number, markdown: string) => send<null>({ type: "recall/write", thread, updatedAt, markdown }),
+  prune: (keep: string[]) => send<number>({ type: "recall/prune", keep }),
+};
+
 export async function upload(thread: string, file: Blob & { name?: string }, kind: "image" | "file", name?: string): Promise<Uploaded> {
   const fileName = name ?? file.name ?? "attachment";
   if (host() === "electron") {
