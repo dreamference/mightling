@@ -45,6 +45,8 @@ export interface Prefs {
   preventSleep: boolean;
   /** Open a document or an image the agent created in a tab when its turn ends (the artifacts viewer, Settings › General). */
   openArtifacts: boolean;
+  /** A long paste becomes an attachment (DESKTOP_PARITY_CLAUDE §4.6); on by default. */
+  pasteAsFile: boolean;
   /** The preview tab's sites outside this machine and the LAN (Settings › Browser): host to allow or block; others ask. */
   previewSites: Record<string, "allow" | "block">;
   /** Developer tools for preview tabs (Settings › Browser › Developer mode); off by default. */

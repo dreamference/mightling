@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseN
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, isLongPaste, keyAnswer, mentionPath, parseSlash, pasteLabel, rememberModel, userTexts, withPastes, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
@@ -61,7 +61,7 @@ import { PullRequestsTab } from "./PullRequestsTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { ActivityView } from "./ActivityView";
-import { suggest } from "./suggestions";
+import { predict } from "./suggestions";
 import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
@@ -108,6 +108,8 @@ interface PendingFile {
   preview: string | null;
   /** Where it already is on disk (a Work image dropped in the app): sent by path, never uploaded. */
   path: string | null;
+  /** A long paste's text (DESKTOP_PARITY_CLAUDE §4.6): uploaded as a file in Ask, written into the message in Work. */
+  text?: string;
 }
 
 /** What a slash command printed, shown above the turns until dismissed. */
@@ -241,8 +243,8 @@ export function App() {
     const request = last.items.filter((item) => item.type === "userMessage").map((item) => (item.type === "userMessage" ? item.content.map(describeInput).join(" ") : "")).join("\n");
     const answer = [...last.items].reverse().find((item) => item.type === "agentMessage");
     if (!request.trim() || !answer || answer.type !== "agentMessage") return;
-    suggest(client, listen, { cwd: view.thread.cwd, model: modelChoice ?? servedModel, request, answer: answer.text })
-      .then((found) => found.length && setSuggestions((known) => ({ ...known, [threadId]: found })))
+    predict(client, listen, { cwd: view.thread.cwd, model: modelChoice ?? servedModel, request, answer: answer.text })
+      .then((found) => found && setSuggestions((known) => ({ ...known, [threadId]: [found] })))
       .catch(() => {});
   };
   const openFileRef = useRef<(path: string) => void>(() => {});
@@ -822,6 +824,15 @@ export function App() {
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData?.files ?? []);
+    // A long paste becomes an attachment (DESKTOP_PARITY_CLAUDE §4.6), so the composer stays readable:
+    // in Ask a file in the question's folder, in Work a chip whose text goes into the message.
+    const pasted = files.length === 0 ? event.clipboardData?.getData("text/plain") ?? "" : "";
+    if (pasted && prefsRef.current.pasteAsFile !== false && isLongPaste(pasted)) {
+      event.preventDefault();
+      const name = `pasted-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "-")}-${nextPendingId}.txt`;
+      setPending((list) => [...list, { id: nextPendingId++, file: new File([pasted], name, { type: "text/plain" }), name, kind: "file", preview: null, path: null, text: pasted }]);
+      return;
+    }
     if (files.length === 0) return;
     // Work sends images by their path, which only a dropped file has: a pasted one goes to Ask.
     if (view !== "ask") return;
@@ -871,7 +882,9 @@ export function App() {
     const target = selected?.thread ?? (await startThread());
     if (!target) return;
     const images = pending.filter((item) => item.kind === "image" && item.path).map((item) => item.path as string);
-    const input = composeInput(message, rootSkills, images);
+    // Long pastes go into the message itself: Work writes nothing into a project for them.
+    const pastes = pending.flatMap((item) => (item.text !== undefined ? [item.text] : []));
+    const input = composeInput(pastes.length ? withPastes(message, pastes) : message, rootSkills, images);
     if (input.length === 0) return;
     setDraftFor(from, "");
     const files = pending;
@@ -1908,7 +1921,7 @@ export function App() {
   const asks = found ? found.map((result) => result.thread) : askThreads(allThreads, askRoot);
   const snippets = new Map((found ?? []).map((result) => [result.thread.id, result.snippet]));
   const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
-  const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.name, preview: item.preview }));
+  const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.text !== undefined ? pasteLabel(item.text) : item.name, preview: item.preview, title: item.text?.slice(0, 600) }));
 
   const unread = new Set(prefs.unreadThreads);
   const waiting = new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id)));
@@ -2207,17 +2220,10 @@ export function App() {
           <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
             onSet={(objective) => setGoal({ objective, status: "active" })} onStatus={(status) => setGoal({ status })} onClear={clearGoal} />
         ) : null}
-        {selected && !selected.activeTurnId && !draft.trim() && suggestions[selected.thread.id]?.length ? (
-          <div className="suggestions" role="group" aria-label="Suggested follow-ups">
-            {suggestions[selected.thread.id].map((text) => (
-              <button key={text} className="suggestion" onClick={() => setDraft(text)} title="Put it in the composer">{text}</button>
-            ))}
-            <button className="icon" aria-label="Dismiss the suggestions" onClick={() => setSuggestions((known) => Object.fromEntries(Object.entries(known).filter(([id]) => id !== selected.thread.id)))}><Icon name="x" size={12} /></button>
-          </div>
-        ) : null}
         {canCompose ? (
           <Composer
             draft={draft} setDraft={setDraft} placeholder={placeholder}
+            prediction={selected && !selected.activeTurnId ? suggestions[selected.thread.id]?.[0] ?? null : null}
             running={Boolean(selected?.activeTurnId)} sending={sending}
             enterBehaviour={prefs.enterBehaviour} followUp={prefs.followUp}
             root={view === "work" ? composeRoot : null}
