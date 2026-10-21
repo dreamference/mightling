@@ -70,7 +70,8 @@ import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, 
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { ProjectDialog } from "./ProjectDialog";
-import { contextItem, contextStamp, isContextText, isRemoved, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
+import { ProjectPage } from "./ProjectPage";
+import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollection, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
 import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
@@ -842,7 +843,12 @@ export function App() {
     const project = projectId ? serverProjects.find((entry) => entry.id === projectId) ?? null : null;
     if (!project) return { input, stamp: null };
     const files: KnowledgeFile[] = bridge.knowledge.available() ? await bridge.knowledge.list(project.id).catch(() => []) : [];
-    const context = projectContext(project, files);
+    // Searched through ling-docs when its collection is indexed (DESKTOP_PARITY_CLAUDE §4.7), read whole otherwise.
+    const collection = knowledgeCollection(project.id);
+    const searchable = files.length
+      ? await bridge.docs.status().then((status) => (status.collections.some((entry) => entry.name === collection && entry.counts.indexed > 0) ? collection : null)).catch(() => null)
+      : null;
+    const context = projectContext(project, files, searchable);
     const stamp = contextStamp(context);
     if (!context || prefsRef.current.projectContextSent[thread.id] === stamp) return { input, stamp: null };
     return { input: [...input, contextItem(context)], stamp };
@@ -2271,10 +2277,13 @@ export function App() {
               onRevert={() => void revertTurn(turn).catch(notice)}
               onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
           )) : view === "ask" ? (
-            <div className="empty ask-empty">
+            startingProject ? (
+              <ProjectPage key={startingProject.id} project={startingProject} title={askTitle} notice={notice}
+                questions={askThreads(Object.values(state.threads).map((entry) => entry.thread), askRoot).filter((thread) => thread.projectId === startingProject.id)}
+                onOpen={(id) => void openThread(id)} onEdit={() => setProjectDialog({ project: startingProject, folder: null })} onLeave={() => setNewProject(null)} />
+            ) : <div className="empty ask-empty">
               <MightlingMark size={56} />
               <h1>Ask Mightling</h1>
-              {startingProject ? <p className="starting-project">In the project <strong>{startingProject.name}</strong>: its instructions and knowledge files go with the question. <button className="link-button" onClick={() => setNewProject(null)}>Ask outside it</button></p> : null}
               <p>A question with no project: Mightling answers in a folder of its own, searching the web when it needs to{airgap?.level === "on" ? ", except that airgapped is on, so web search is off" : ""}. Attach images or files with the paperclip, or paste a screenshot.</p>
             </div>
           ) : <p className="empty">{startingProject ? `A new thread in the project ${startingProject.name}${primaryFolder(startingProject) ? ` (${primaryFolder(startingProject)})` : ""}: write the first message below.` : newCwd.trim() ? `A new thread in ${newCwd.trim()}: write the first message below.` : "Open a thread, or name a project folder for a new one."}</p>}

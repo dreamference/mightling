@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { addKnowledge, knowledgeFolder, listKnowledge, removeKnowledge } from "./knowledge";
+import { addKnowledge, knowledgeCollection, knowledgeFolder, listKnowledge, removeKnowledge } from "./knowledge";
 
 const scratch: string[] = [];
 const folder = () => {
@@ -43,5 +43,13 @@ describe("a project's knowledge files", () => {
     await expect(removeKnowledge(home, "p", "../../config.toml")).rejects.toThrow(/not a file name/);
     await expect(removeKnowledge(home, "p", ".hidden")).rejects.toThrow(/not a file name/);
     expect(() => knowledgeFolder(home, "../x")).toThrow(/not a project id/);
+  });
+});
+
+describe("the knowledge's collection (DESKTOP_PARITY_CLAUDE §4.7)", () => {
+  it("is named as the page names it, and never for a path", () => {
+    expect(knowledgeCollection("p-1A2b")).toBe("project-p-1a2b");
+    expect(knowledgeCollection("0199f3c2-7b1e-7a10-9a5b-3f1c2d4e5f60")).toHaveLength(40);
+    expect(() => knowledgeCollection("../x")).toThrow(/not a project id/);
   });
 });

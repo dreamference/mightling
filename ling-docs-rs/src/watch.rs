@@ -16,7 +16,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::collections::{Collection, SECRET_DIRS};
+use crate::collections::{secret_dirs, Collection};
 use crate::discover::{self, Kind};
 
 /// Watches one session takes at most.
@@ -83,7 +83,7 @@ impl Watcher {
 
     /// Watches `dir` and the folders under it that discovery enters.
     fn add_tree(&mut self, collection: &str, dir: &Path, home: &Path) {
-        let secret: Vec<PathBuf> = SECRET_DIRS.iter().map(|d| home.join(d)).collect();
+        let secret: Vec<PathBuf> = secret_dirs(dir, home);
         let mut stack = vec![dir.to_path_buf()];
         while let Some(dir) = stack.pop() {
             if !self.add(collection, &dir) {

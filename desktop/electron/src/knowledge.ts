@@ -20,6 +20,16 @@ export interface KnowledgeFile {
   size: number;
 }
 
+/**
+ * The `ling-docs` collection a project's knowledge is searched in (DESKTOP_PARITY_CLAUDE §4.7):
+ * `project-` and the id, as a collection name may be (lower case, 40 at most). The page's
+ * `knowledgeCollection` (desktop/ui/src/projects.ts) names it the same way.
+ */
+export function knowledgeCollection(projectId: string): string {
+  if (!PROJECT_ID.test(projectId)) throw new Error(`not a project id: ${projectId}`);
+  return `project-${projectId.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`.slice(0, 40);
+}
+
 export function knowledgeFolder(codexHome: string, projectId: string): string {
   if (!PROJECT_ID.test(projectId)) throw new Error(`not a project id: ${projectId}`);
   return path.join(codexHome, "projects", projectId, "knowledge");

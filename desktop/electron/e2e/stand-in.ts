@@ -79,6 +79,26 @@ const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
 if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
+if (process.argv[2] === "docs") {
+  // ling docs add|remove|reindex|status --json, over a file of collections (a project's knowledge, DESKTOP_PARITY_CLAUDE §4.7).
+  const file = ${JSON.stringify(path.join(home, "docs-collections.json"))};
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : [];
+  const counts = { documents: 1, indexed: 1, pending: 0, failed: 0, duplicates: 0, skipped: 0, chunks: 1, embedded: 1, needs_ocr_pages: 0, needs_ocr_documents: 0 };
+  const verb = process.argv[3];
+  if (verb === "add") {
+    const name = process.argv[process.argv.indexOf("--name") + 1];
+    if (all.some((c) => c.name === name)) { console.error("ling-docs: a collection named " + name + " already exists"); process.exit(1); }
+    all.push({ name, root: process.argv[4], enabled: true, default: false, counts, last_status: "ok", last_run: 0, disk_bytes: 0 });
+  } else if (verb === "remove") {
+    all.splice(all.findIndex((c) => c.name === process.argv[4]), 1);
+  } else if (verb === "status") {
+    console.log(JSON.stringify({ collections: all, runtime_missing: null }));
+    process.exit(0);
+  }
+  fs.writeFileSync(file, JSON.stringify(all));
+  console.log("ok");
+  process.exit(0);
+}
 if (process.argv[2] === "node") {
   // ling node list --json and ling node use <name> (Settings › Node): two nodes, the chosen one remembered in a file.
   const chosen = ${JSON.stringify(path.join(home, "node-choice"))};
