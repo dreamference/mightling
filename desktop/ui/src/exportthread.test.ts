@@ -5,15 +5,15 @@ import { DEFAULT_EXPORT, exportName, redact, threadHtml, threadMarkdown, type Ex
 
 const source: ExportSource = {
   title: "Fix the flaky retry test",
-  cwd: "/home/ana/src/fetcher",
-  home: "/home/ana",
+  cwd: "/home/user/src/fetcher",
+  home: "/home/user",
   turns: [{
     items: [
-      { type: "userMessage", id: "u1", content: [{ type: "text", text: "Why does /home/ana/src/fetcher/tests/test_fetch.py fail? Ask ana@example.org.", text_elements: [] }, { type: "text", text: "<project_context>\nsecret instructions\n</project_context>", text_elements: [] }] },
+      { type: "userMessage", id: "u1", content: [{ type: "text", text: "Why does /home/user/src/fetcher/tests/test_fetch.py fail? Ask someone@example.org.", text_elements: [] }, { type: "text", text: "<project_context>\nsecret instructions\n</project_context>", text_elements: [] }] },
       { type: "reasoning", id: "r1", summary: ["Looking at the retry loop."], content: [] },
-      { type: "commandExecution", id: "c1", command: "pytest -q", cwd: "/home/ana/src/fetcher", processId: null, status: "completed", commandActions: [], exitCode: 1, durationMs: 10, aggregatedOutput: "FAILED with OPENAI_API_KEY=sk-proj-abcdefghijklmnop1234" },
+      { type: "commandExecution", id: "c1", command: "pytest -q", cwd: "/home/user/src/fetcher", processId: null, status: "completed", commandActions: [], exitCode: 1, durationMs: 10, aggregatedOutput: "FAILED with OPENAI_API_KEY=sk-proj-abcdefghijklmnop1234" },
       { type: "fileChange", id: "f1", status: "completed", changes: [{ path: "fetcher/client.py", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-a\n+b" }] },
-      { type: "agentMessage", id: "m1", text: "Fixed in `/opt/tools/bin/runner` and /home/ana/notes.txt." },
+      { type: "agentMessage", id: "m1", text: "Fixed in `/opt/tools/bin/runner` and /home/user/notes.txt." },
     ],
   } as never],
 };
@@ -26,7 +26,7 @@ describe("a thread's export", () => {
     expect(text).toContain("**Changed `fetcher/client.py`**");
     expect(text).toContain("```diff\n@@ -1 +1 @@\n-a\n+b\n```");
     expect(text).toContain("Fixed in `…/runner` and ~/notes.txt.");
-    for (const absent of ["/home/ana", "ana@example.org", "secret instructions", "pytest -q", "Looking at the retry loop"]) expect(text).not.toContain(absent);
+    for (const absent of ["/home/user", "someone@example.org", "secret instructions", "pytest -q", "Looking at the retry loop"]) expect(text).not.toContain(absent);
   });
 
   it("adds commands and thinking when asked, still masking tokens, and keeps everything when nothing is redacted", () => {
@@ -35,8 +35,8 @@ describe("a thread's export", () => {
     expect(text).toContain("OPENAI_API_KEY=[masked]");
     expect(text).toContain("> **Thinking:** Looking at the retry loop.");
     const plain = threadMarkdown(source, { ...DEFAULT_EXPORT, redactPaths: false, redactEmails: false, redactTokens: false, includeCommands: true });
-    expect(plain).toContain("/home/ana/src/fetcher/tests/test_fetch.py");
-    expect(plain).toContain("ana@example.org");
+    expect(plain).toContain("/home/user/src/fetcher/tests/test_fetch.py");
+    expect(plain).toContain("someone@example.org");
     expect(plain).toContain("sk-proj-abcdefghijklmnop1234");
   });
 
@@ -47,6 +47,6 @@ describe("a thread's export", () => {
     expect(html).not.toMatch(/<script/i);
     expect(exportName("Fix: the flaky / retry test?", "markdown")).toBe("Fix-the-flaky-retry-test.md");
     expect(exportName("", "html")).toBe("thread.html");
-    expect(redact("C:\\Users\\ana\\proj\\a.txt", DEFAULT_EXPORT, { cwd: "/x", home: null })).toBe("…/a.txt");
+    expect(redact("C:\\Users\\user\\proj\\a.txt", DEFAULT_EXPORT, { cwd: "/x", home: null })).toBe("…/a.txt");
   });
 });
