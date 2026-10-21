@@ -1,7 +1,7 @@
 // Suggested prompts (DESKTOP_PARITY Phase 3 item 7): what the model is asked and how its answer is read.
 import { describe, expect, it } from "vitest";
 
-import { parseSuggestions, suggestionPrompt } from "./suggestions";
+import { acceptsPrediction, parseSuggestions, suggestionPrompt } from "./suggestions";
 
 describe("suggested prompts", () => {
   it("reads three clean lines from whatever shape the model answers in", () => {
@@ -12,7 +12,18 @@ describe("suggested prompts", () => {
     expect(parseSuggestions(`${"x".repeat(200)}\nShort one`)).toEqual(["Short one"]);
   });
 
-  it("asks with the request and the answer, cut short", () => {
+  it("takes a prediction with Tab or → in the empty composer, and only there (DESKTOP_PARITY_CLAUDE §4.6)", () => {
+    const key = (name: string, extra: Partial<{ shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }> = {}) => ({ key: name, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...extra });
+    expect(acceptsPrediction(key("Tab"), "", "Add a test")).toBe(true);
+    expect(acceptsPrediction(key("ArrowRight"), "", "Add a test")).toBe(true);
+    expect(acceptsPrediction(key("Tab"), "a", "Add a test")).toBe(false);
+    expect(acceptsPrediction(key("Tab"), "", null)).toBe(false);
+    expect(acceptsPrediction(key("Tab", { shiftKey: true }), "", "Add a test")).toBe(false);
+    expect(acceptsPrediction(key("Enter"), "", "Add a test")).toBe(false);
+  });
+
+  it("asks for one message, with the request and the answer, cut short", () => {
+    expect(suggestionPrompt("x", "y")).toContain("the one message the user is most likely to send next");
     const prompt = suggestionPrompt("Fix the retry test", "a".repeat(5_000));
     expect(prompt).toContain("The request:\nFix the retry test");
     expect(prompt).toContain(" …");
