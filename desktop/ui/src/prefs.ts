@@ -22,6 +22,10 @@ export interface Prefs {
   diffLayout: "unified" | "split";
   /** Threads that work in a managed worktree, by thread id (worktrees.ts). */
   worktreeThreads: Record<string, WorktreeLink>;
+  /** The project context (projects.ts) each project thread was last given, by thread id: its stamp, so a thread is told again only after the project changed. */
+  projectContextSent: Record<string, string>;
+  /** The sidebar's projects and folders in the order the user dragged them (`project:<id>`, `folder:<path>`; projects.ts `ordered`). */
+  projectOrder: string[];
   /** Worktrees made permanent: projects of their own, never cleaned up. */
   permanentWorktrees: string[];
   /** The text size, as a factor of the base (Ctrl+= / Ctrl+- / Ctrl+0). */
