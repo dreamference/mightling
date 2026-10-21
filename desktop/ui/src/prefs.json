@@ -40,6 +40,10 @@
       "default": {},
       "type": "object"
     },
+    "projectContextSent": {
+      "default": {},
+      "type": "object"
+    },
     "permanentWorktrees": {
       "default": [],
       "type": "strings"

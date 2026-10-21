@@ -120,6 +120,10 @@ export type FromView =
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" }
+  /** A project's knowledge files (knowledge.ts), by the project's server id; add opens a file dialog. */
+  | { type: "project/knowledge-list"; projectId: string }
+  | { type: "project/knowledge-add"; projectId: string }
+  | { type: "project/knowledge-remove"; projectId: string; name: string }
   /** Settings › Pets: a picture of the user's own for the pet. */
   | { type: "dialog/open-image" }
   /** The pull-request tab (prs.ts): `gh` in the repository, when Settings › Git turns it on; refused at airgapped on. */

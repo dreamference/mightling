@@ -16,6 +16,7 @@ import type { TurnError } from "./protocol/v2/TurnError";
 import type { TurnStatus } from "./protocol/v2/TurnStatus";
 
 import { isAskThread } from "./ask";
+import { isContextText, withoutContext } from "./projects";
 
 export interface TurnView {
   id: string;
@@ -101,8 +102,14 @@ function turnView(turn: Turn): TurnView {
   return { id: turn.id, status: turn.status, items: [...turn.items], error: turn.error, diff: null };
 }
 
-function emptyView(thread: Thread): ThreadView {
+function emptyView(raw: Thread): ThreadView {
+  const thread = cleanPreview(raw);
   return { thread, turns: thread.turns.map(turnView), activeTurnId: activeTurn(thread.turns), usage: null };
+}
+
+/** A thread whose preview (its first message, as the server has it) loses the project context the window added (projects.ts). */
+function cleanPreview(thread: Thread): Thread {
+  return thread.preview && thread.preview.includes("<project_context>") ? { ...thread, preview: withoutContext(thread.preview) } : thread;
 }
 
 function activeTurn(turns: Turn[]): string | null {
@@ -157,7 +164,7 @@ function appendAt(list: string[], index: number, delta: string): string[] {
  */
 function withPreview(view: ThreadView, item: ThreadItem): ThreadView {
   if (view.thread.preview || item.type !== "userMessage") return view;
-  const text = item.content.map((input) => (input.type === "text" ? input.text : "")).join(" ").trim();
+  const text = item.content.map((input) => (input.type === "text" && !isContextText(input.text) ? input.text : "")).join(" ").trim();
   return text ? { ...view, thread: { ...view.thread, preview: text } } : view;
 }
 
@@ -175,6 +182,11 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
     case "thread/name/updated": {
       const { threadId, threadName } = notification.params;
       return withThread(state, threadId, (view) => ({ ...view, thread: { ...view.thread, name: threadName ?? null } }));
+    }
+    case "thread/project/updated": {
+      // A thread moved into a project or out of one (projects.ts; `thread/metadata/update`, or a project deleted elsewhere).
+      const { threadId, projectId } = notification.params;
+      return withThread(state, threadId, (view) => ({ ...view, thread: { ...view.thread, projectId: projectId ?? null } }));
     }
     case "turn/started": {
       const { threadId, turn } = notification.params;
@@ -333,7 +345,7 @@ export function reduce(state: WorkState, action: Action): WorkState {
         // So do its title and first question, when the listing has none yet.
         const known = threads[thread.id]?.thread;
         threads[thread.id] = known
-          ? { ...threads[thread.id], thread: { ...thread, turns: known.turns, preview: thread.preview || known.preview, name: thread.name ?? known.name } }
+          ? { ...threads[thread.id], thread: { ...thread, turns: known.turns, preview: withoutContext(thread.preview || known.preview), name: thread.name ?? known.name } }
           : emptyView(thread);
       }
       return { ...state, threads };
