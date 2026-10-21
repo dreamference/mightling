@@ -906,9 +906,16 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .link-url { margin: 0 0 12px; }
 .link-url code { display: block; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-sm); overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12.5px; }
 .link-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
 /* An incognito question (DESKTOP_PARITY_CLAUDE §4.3): a dashed frame round the thread and a note that leaving deletes it. */
 .thread-pane.incognito { outline: 2px dashed var(--muted); outline-offset: -6px; }
 .incognito-banner { display: flex; gap: 10px; align-items: flex-start; margin: 12px auto 4px; max-width: 760px; padding: 10px 14px; border: 1px dashed var(--muted); border-radius: var(--radius-md); background: var(--panel); color: var(--text); font-size: 13px; line-height: 1.45; }
 .incognito-banner svg { flex: none; margin-top: 2px; }
 .chip.incognito-toggle { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--muted); }
 .chip.incognito-toggle.active { border-style: dashed; border-color: var(--text); color: var(--text); background: var(--selected); }
+
+/* Fork from here, edit in a new thread, and queue edits (DESKTOP_PARITY §4.5 item 22). */
+.turn-actions.earlier { opacity: 0; transition: opacity var(--motion-fast); }
+.turn:hover .turn-actions.earlier, .turn-actions.earlier:focus-within { opacity: 1; }
+.queued-edit { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.queued .icon:disabled { opacity: 0.35; }
