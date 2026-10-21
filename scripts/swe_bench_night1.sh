@@ -42,6 +42,14 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 # and the runner's own check (which stops starting instances below it) use the same number.
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
+# The disk guard (owner, 2026-10-21: night 12 failed on 10-20 when other work's build trees took the disk under it):
+# a round that stops for disk (`swe-bench run` stops below the reserve; its report says instances not run) pauses
+# instead of failing the night: the night waits until RESERVE_GB + DISK_RESUME_GB is free, checking every
+# DISK_POLL_S, then runs the same round again, which resumes it (its finished instances kept). After
+# DISK_PAUSE_MAX_S of waiting in all, or a round that stops with the disk fine, the night fails as before.
+DISK_RESUME_GB=${DISK_RESUME_GB:-20}
+DISK_POLL_S=${DISK_POLL_S:-300}
+DISK_PAUSE_MAX_S=${DISK_PAUSE_MAX_S:-28800}
 REFINE=${REFINE:-0}
 # The per-task time limit (`[swe_bench] task_timeout`, e.g. 60m); the runner's default (45m) when unset.
 TASK_TIMEOUT=${TASK_TIMEOUT:-}
@@ -119,6 +127,20 @@ remote_serve() {
 remote_restore() {
     timeout 30m ssh -o BatchMode=yes "$REMOTE" bash -s -- restore < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
     unset DREAMFERENCE_VLLM_HOST
+}
+free_gb() { df --output=avail -BG "${DISK_PATH:-$HOME/.cache}" | tail -1 | tr -dc '0-9'; }
+# Waits for the disk after a round stopped short; returns non-zero when the disk was not short or never came back.
+disk_pause() {
+    local round=$1 free
+    free=$(free_gb)
+    [ "$free" -lt $(( RESERVE_GB + DISK_RESUME_GB )) ] || return 1
+    log "⏸️  $round paused: ${free}G free, the reserve is ${RESERVE_GB}G (other work took the disk); resuming at $(( RESERVE_GB + DISK_RESUME_GB ))G"
+    while [ "$(free_gb)" -lt $(( RESERVE_GB + DISK_RESUME_GB )) ]; do
+        [ "$DISK_PAUSED" -lt "$DISK_PAUSE_MAX_S" ] || { log "❌ the disk stayed short for $(( DISK_PAUSED / 60 )) min"; return 1; }
+        sleep "$DISK_POLL_S"
+        DISK_PAUSED=$(( DISK_PAUSED + DISK_POLL_S ))
+    done
+    log "▶️  $round resumed: $(free_gb)G free"
 }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
 
@@ -288,6 +310,7 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
+    DISK_PAUSED=0
     log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
     # ARMS names the two arms: the record arm first, then the candidate (spelling: `arm_flags`).
     set -- $ARMS
@@ -312,18 +335,20 @@ run() {
             remote_serve "$server" || fail "serving $server on $REMOTE for $PREFIX-$name" 1
         fi
         log "round $PREFIX-$name"
-        # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
-        admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
-        rc=$?
-        log "$PREFIX-$name finished ($rc)"
-        df -h / | tail -1
-        [ "$rc" -eq 0 ] || fail "round $PREFIX-$name" "$rc"
-        # A round that ran nothing is a failure whatever its status: the report says what was left.
-        if admin swe-bench report "$PREFIX-$name" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet'; then
+        while :; do
+            # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
+            admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
+                --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
+            rc=$?
+            log "$PREFIX-$name finished ($rc)"
+            df -h / | tail -1
+            [ "$rc" -eq 0 ] || fail "round $PREFIX-$name" "$rc"
+            # A round that ran nothing is a failure whatever its status, unless it stopped for disk: the report says
+            # what was left.
+            admin swe-bench report "$PREFIX-$name" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet' || break
             admin swe-bench report "$PREFIX-$name" | grep '^INCOMPLETE'
-            fail "round $PREFIX-$name (instances not run)" 1
-        fi
+            disk_pause "$PREFIX-$name" || fail "round $PREFIX-$name (instances not run)" 1
+        done
     done
     uses_remote && remote_restore
     for name in $rname $cname; do

@@ -409,3 +409,51 @@ def test_a_lease_no_restore_ends_lets_the_gpu_lock_go_by_itself(remote):
     run, calls, lock, ab_dir = remote
     assert run("serve", "sglang", HOLD_MAX="1").returncode == 0
     assert wait_until(lambda: lock_free(lock), seconds=15)
+
+
+def disk_night(tmp_path, free_after_stop, **extra):
+    """A night whose first round stops short once ("3 not run yet") with `free_after_stop` GB left on a stand-in df,
+    which reads 500 GB once the next poll comes. Returns (result, recorded admin calls, D)."""
+    calls, state = tmp_path / "calls.txt", tmp_path / "state"
+    state.mkdir()
+    (state / "free").write_text(f"{free_after_stop}\n")
+    fake = tmp_path / "python"
+    fake.write_text(f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n'
+                    f'case "$*" in "swe-bench report n4-default") '
+                    f'[ -e "{state}/resumed" ] || {{ [ -e "{state}/stopped" ] && echo "INCOMPLETE          3 not run yet"; }} ;;\n'
+                    f'  "swe-bench run "*n4-default\\ *) [ -e "{state}/stopped" ] && touch "{state}/resumed"; touch "{state}/stopped" ;; esac\n')
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "df").write_text(f'#!/bin/bash\necho Avail\necho "$(cat "{state}/free")G"\n')
+    (bindir / "sleep").write_text(f'#!/bin/bash\necho 500 > "{state}/free"\n')
+    for path in (fake, bindir / "df", bindir / "sleep"):
+        path.chmod(0o755)
+    task_list = tmp_path / "list.txt"
+    task_list.write_text("acme__widget-1\n")
+    folder = tmp_path / "night4"
+    folder.mkdir()
+    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder), "NIGHT": "4",
+           "PREFIX": "n4", "ARMS": "default tests-v2", "REFINE": "0", "PATH": f"{bindir}:{os.environ['PATH']}",
+           "DISK_POLL_S": "1", **extra}
+    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    return result, calls.read_text().splitlines(), folder
+
+
+def test_a_round_stopped_for_disk_pauses_the_night_and_resumes_the_same_round(tmp_path):
+    result, recorded, folder = disk_night(tmp_path, 90)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n4-default", "n4-default", "n4-tests-v2"]
+    assert "paused: 90G free, the reserve is 100G" in result.stdout and "n4-default resumed: 500G free" in result.stdout
+    assert not (folder / "failed").exists()
+
+
+def test_a_round_that_stops_short_with_the_disk_fine_still_fails_the_night(tmp_path):
+    result, recorded, folder = disk_night(tmp_path, 300)
+    assert result.returncode == 1 and (folder / "failed").exists()
+    assert "instances not run" in (folder / "failed").read_text() and len(runs(recorded)) == 1
+
+
+def test_a_disk_that_stays_short_fails_the_night_after_the_pause_bound(tmp_path):
+    result, recorded, folder = disk_night(tmp_path, 90, DISK_PAUSE_MAX_S="0")
+    assert result.returncode == 1 and (folder / "failed").exists()
+    assert "the disk stayed short" in result.stdout and len(runs(recorded)) == 1
