@@ -327,6 +327,19 @@ export const night = {
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
 
+/** A project's knowledge files (desktop app only: `ling web` has no main process to keep them). */
+export interface KnowledgeFile {
+  name: string;
+  path: string;
+  size: number;
+}
+export const knowledge = {
+  available: () => host() === "electron",
+  list: (projectId: string) => send<KnowledgeFile[]>({ type: "project/knowledge-list", projectId }),
+  add: (projectId: string) => send<KnowledgeFile[]>({ type: "project/knowledge-add", projectId }),
+  remove: (projectId: string, name: string) => send<KnowledgeFile[]>({ type: "project/knowledge-remove", projectId, name }),
+};
+
 /** One collection of the local file index, as `ling docs status --json` describes it. */
 export interface DocsCollection {
   name: string;

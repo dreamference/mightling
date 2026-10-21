@@ -101,12 +101,25 @@ def accuracy(results: Path) -> dict:
 
 
 def score(
-    cache: Path, name: str, responses: Path, out: Path, python: Path, run=subprocess.run
+    cache: Path,
+    name: str,
+    responses: Path,
+    out: Path,
+    python: Path,
+    rows: list[dict] | None = None,
+    run=subprocess.run,
 ) -> dict:
-    """Runs the set's reference scorer over `responses` and reads its two result files."""
+    """Runs the set's reference scorer over `responses` and reads its two result files.
+
+    The scorer looks up an answer for every prompt of its input file, so a run over some of the
+    prompts (`--limit`) hands it an input file of those rows alone.
+    """
     out.mkdir(parents=True, exist_ok=True)
     spec = SETS[name]
     data = cache / spec["data"]
+    if rows is not None:
+        data = out / "input_data.jsonl"
+        data.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows))
     command = [
         str(python),
         *spec["scorer"],
@@ -125,7 +138,11 @@ def score(
     (out / "scorer.log").write_text((done.stdout or "") + (done.stderr or ""))
     if done.returncode != 0:
         return {"error": f"the scorer exited {done.returncode}; see {out / 'scorer.log'}"}
-    return {kind: accuracy(out / f"eval_results_{kind}.jsonl") for kind in ("strict", "loose")}
+    # IFEval writes `eval_results_<kind>.jsonl`; IFBench prefixes the responses file's name.
+    found = {kind: sorted(out.glob(f"*eval_results_{kind}.jsonl")) for kind in ("strict", "loose")}
+    if not all(found.values()):
+        return {"error": f"the scorer wrote no results; see {out / 'scorer.log'}"}
+    return {kind: accuracy(paths[0]) for kind, paths in found.items()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -209,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
                     "".join(json.dumps(a, ensure_ascii=False) + "\n" for a in answered)
                 )
                 python = Path(args.scorer_python) if args.scorer_python else venv_python(cache)
-                result = score(cache, name, responses, base / "scored", python)
+                result = score(cache, name, responses, base / "scored", python, rows=rows)
                 result["empty_answers"] = sum(1 for a in answered if not a["response"].strip())
                 summary["results"].setdefault(name, {})[level] = result
                 print(json.dumps({"set": name, "cave": level, **result}), flush=True)

@@ -13,6 +13,7 @@ import { chordOf, conflicts, keyLabel, KEYMAP, shortcutLabel, type KeyAction } f
 import { boardOn } from "./board";
 import { cleanAppearance, type Appearance, type AppearanceColours, type Prefs } from "./prefs";
 import { useShownTheme, type ThemeChoice } from "./theme";
+import type { Project } from "./protocol/v2/Project";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
@@ -28,6 +29,9 @@ export interface SettingsProps {
   onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => void;
   /** Archived threads (`thread/list` with `archived`), and bringing one back (`thread/unarchive`). */
   listArchived: () => Promise<Thread[]>;
+  /** Projects removed from the sidebar (projects.ts), and bringing one back. */
+  removedProjects?: Project[];
+  restoreProject?: (project: Project) => void;
   unarchive: (threadId: string) => Promise<void>;
   notice: (error: unknown) => void;
   /** The agent's settings as `config/read` answers them, and a write of one key (`config/value/write`). */
@@ -601,13 +605,29 @@ function NodePage({ notice }: { notice: (error: unknown) => void }) {
   );
 }
 
-function Archived({ listArchived, unarchive, notice }: SettingsProps) {
+function Archived({ listArchived, unarchive, notice, removedProjects, restoreProject }: SettingsProps) {
   const [threads, setThreads] = useState<Thread[] | null>(null);
   useEffect(() => {
     listArchived().then(setThreads).catch((error) => { setThreads([]); notice(error); });
   }, [listArchived, notice]);
   return (
     <>
+      {removedProjects && removedProjects.length > 0 ? (
+        <>
+          <h3>Removed projects</h3>
+          <table className="shortcut-table archived">
+            <tbody>
+              {removedProjects.map((project) => (
+                <tr key={project.id}>
+                  <td>{project.name}</td>
+                  <td className="planned-note">{project.roots.map((root) => root.path.split(/[\\/]/).filter(Boolean).pop()).join(", ") || "no folder"}</td>
+                  <td className="shortcut-actions"><button className="link-button" onClick={() => restoreProject?.(project)}>Restore</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
       <h3>Archived threads</h3>
       {threads === null ? <p className="empty small">…</p> : threads.length === 0 ? <p className="empty small">No archived threads.</p> : (
         <table className="shortcut-table archived">

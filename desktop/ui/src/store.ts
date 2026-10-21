@@ -16,6 +16,7 @@ import type { TurnError } from "./protocol/v2/TurnError";
 import type { TurnStatus } from "./protocol/v2/TurnStatus";
 
 import { isAskThread } from "./ask";
+import { isContextText, withoutContext } from "./projects";
 
 export interface TurnView {
   id: string;
@@ -101,12 +102,43 @@ function turnView(turn: Turn): TurnView {
   return { id: turn.id, status: turn.status, items: [...turn.items], error: turn.error, diff: null };
 }
 
-function emptyView(thread: Thread): ThreadView {
+function emptyView(raw: Thread): ThreadView {
+  const thread = cleanPreview(raw);
   return { thread, turns: thread.turns.map(turnView), activeTurnId: activeTurn(thread.turns), usage: null };
 }
 
-function activeTurn(turns: Turn[]): string | null {
+/** A thread whose preview (its first message, as the server has it) loses the project context the window added (projects.ts). */
+function cleanPreview(thread: Thread): Thread {
+  return thread.preview && thread.preview.includes("<project_context>") ? { ...thread, preview: withoutContext(thread.preview) } : thread;
+}
+
+function activeTurn(turns: Pick<Turn, "id" | "status">[]): string | null {
   return turns.find((turn) => turn.status === "inProgress")?.id ?? null;
+}
+
+/**
+ * A snapshot of a thread (`thread/resume`, `thread/read`) laid over what this window already holds
+ * of it. A snapshot taken while the thread runs can miss what streamed meanwhile, so each turn
+ * keeps the items only the window has, the longer text of an answer both have, and its diff, and
+ * a running turn the snapshot does not list yet stays. Turns the snapshot dropped otherwise (a
+ * revert) go. The vendor's app fixed the same losses (26.928, 26.930: earlier answers stay visible,
+ * reopening a running chat loses nothing).
+ */
+export function mergedTurns(snapshot: TurnView[], known: TurnView[]): TurnView[] {
+  const knownById = new Map(known.map((turn) => [turn.id, turn]));
+  const merged = snapshot.map((turn) => {
+    const before = knownById.get(turn.id);
+    if (!before) return turn;
+    const listed = new Set(turn.items.map((item) => item.id));
+    const items = turn.items.map((item) => {
+      const streamed = before.items.find((existing) => existing.id === item.id);
+      const longer = streamed?.type === "agentMessage" && item.type === "agentMessage" && streamed.text.length > item.text.length;
+      return longer ? streamed : item;
+    });
+    return { ...turn, items: [...items, ...before.items.filter((item) => !listed.has(item.id))], diff: turn.diff ?? before.diff };
+  });
+  const inSnapshot = new Set(snapshot.map((turn) => turn.id));
+  return [...merged, ...known.filter((turn) => turn.status === "inProgress" && !inSnapshot.has(turn.id))];
 }
 
 /** Applies `change` to the thread `threadId`, if this window knows it. */
@@ -157,7 +189,7 @@ function appendAt(list: string[], index: number, delta: string): string[] {
  */
 function withPreview(view: ThreadView, item: ThreadItem): ThreadView {
   if (view.thread.preview || item.type !== "userMessage") return view;
-  const text = item.content.map((input) => (input.type === "text" ? input.text : "")).join(" ").trim();
+  const text = item.content.map((input) => (input.type === "text" && !isContextText(input.text) ? input.text : "")).join(" ").trim();
   return text ? { ...view, thread: { ...view.thread, preview: text } } : view;
 }
 
@@ -175,6 +207,11 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
     case "thread/name/updated": {
       const { threadId, threadName } = notification.params;
       return withThread(state, threadId, (view) => ({ ...view, thread: { ...view.thread, name: threadName ?? null } }));
+    }
+    case "thread/project/updated": {
+      // A thread moved into a project or out of one (projects.ts; `thread/metadata/update`, or a project deleted elsewhere).
+      const { threadId, projectId } = notification.params;
+      return withThread(state, threadId, (view) => ({ ...view, thread: { ...view.thread, projectId: projectId ?? null } }));
     }
     case "turn/started": {
       const { threadId, turn } = notification.params;
@@ -333,7 +370,7 @@ export function reduce(state: WorkState, action: Action): WorkState {
         // So do its title and first question, when the listing has none yet.
         const known = threads[thread.id]?.thread;
         threads[thread.id] = known
-          ? { ...threads[thread.id], thread: { ...thread, turns: known.turns, preview: thread.preview || known.preview, name: thread.name ?? known.name } }
+          ? { ...threads[thread.id], thread: { ...thread, turns: known.turns, preview: withoutContext(thread.preview || known.preview), name: thread.name ?? known.name } }
           : emptyView(thread);
       }
       return { ...state, threads };
@@ -342,10 +379,13 @@ export function reduce(state: WorkState, action: Action): WorkState {
       // An answer without a thread changes nothing: thrown here, in the render, it would empty the
       // whole window (the e2e stand-in once answered thread/resume so, and the composer vanished).
       if (!action.thread?.id) return state;
-      const thread = withLastActivity(action.thread, state.threads[action.thread.id]?.thread ?? null);
+      const known = state.threads[action.thread.id];
+      const thread = withLastActivity(action.thread, known?.thread ?? null);
+      const fresh = emptyView(thread);
+      const turns = known ? mergedTurns(fresh.turns, known.turns) : fresh.turns;
       return {
         ...state,
-        threads: { ...state.threads, [thread.id]: { ...emptyView(thread), usage: state.threads[thread.id]?.usage ?? null } },
+        threads: { ...state.threads, [thread.id]: { ...fresh, turns, activeTurnId: activeTurn(turns), usage: known?.usage ?? null } },
         selected: thread.id,
       };
     }
@@ -394,9 +434,14 @@ export function projects(state: WorkState, askRoot: string | null = null, folder
     byCwd.set(folder, list);
   }
   const recency = (thread: Thread) => thread.recencyAt ?? thread.updatedAt;
+  // Threads newest first inside a group; the groups themselves in a stable order, by when each folder
+  // was first used (its oldest thread), so a group never jumps up the sidebar because one of its threads
+  // became active (the vendor's fix in its 26.814; DESKTOP_PARITY §4.5 item 13). The user's own order
+  // (dragged in the sidebar, `prefs.projectOrder`) is laid over it by `ordered` (projects.ts).
+  const first = (threads: Thread[]) => Math.min(...threads.map((thread) => thread.createdAt));
   return [...byCwd.entries()]
     .map(([cwd, threads]) => ({ cwd, threads: threads.sort((a, b) => recency(b) - recency(a)) }))
-    .sort((a, b) => recency(b.threads[0]) - recency(a.threads[0]));
+    .sort((a, b) => first(a.threads) - first(b.threads) || a.cwd.localeCompare(b.cwd));
 }
 
 export interface PermissionChoice {

@@ -199,6 +199,81 @@ pub async fn cavemode(port: u16, cookie: &str, thread: Option<&str>, text: &str)
     }
 }
 
+/// A GET to `ling web` as a signed-in client: (status, body).
+pub async fn get(port: u16, cookie: &str, path_and_query: &str) -> Result<(u16, Vec<u8>), String> {
+    let request = format!("GET {path_and_query} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n");
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;
+    stream.write_all(request.as_bytes()).await.map_err(|err| err.to_string())?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.map_err(|err| err.to_string())?;
+    let split = response.windows(4).position(|w| w == b"\r\n\r\n").ok_or("ling web sent no HTTP response")?;
+    let head = String::from_utf8_lossy(&response[..split]).into_owned();
+    let status = head.split_whitespace().nth(1).and_then(|code| code.parse().ok()).ok_or("ling web sent no status")?;
+    Ok((status, response[split + 4..].to_vec()))
+}
+
+/// A file an Ask thread's agent made (`/api/ask/files`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MadeFile {
+    pub name: String,
+    pub bytes: u64,
+}
+
+/// The files `thread`'s agent changed since `since_ms` (ask_files.rs).
+pub async fn made_files(port: u16, cookie: &str, thread: &str, since_ms: u64) -> Result<Vec<MadeFile>, String> {
+    let (status, body) = get(port, cookie, &format!("/api/ask/files?thread={}&since={since_ms}", form_escape(thread))).await?;
+    let value: Value = serde_json::from_slice(&body).map_err(|err| err.to_string())?;
+    if status != 200 {
+        return Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web refused").to_string());
+    }
+    Ok(value
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|files| {
+            files
+                .iter()
+                .filter_map(|f| Some(MadeFile { name: f.get("name")?.as_str()?.to_string(), bytes: f.get("bytes")?.as_u64()? }))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// One file of `thread`'s folder (`/api/ask/file`), refused at a user-level `/airgapped on`.
+pub async fn made_file(port: u16, cookie: &str, thread: &str, name: &str) -> Result<Vec<u8>, String> {
+    let (status, body) = get(port, cookie, &format!("/api/ask/file?thread={}&name={}", form_escape(thread), form_escape(name))).await?;
+    if status == 200 {
+        return Ok(body);
+    }
+    let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web refused").to_string())
+}
+
+/// A voice message as text, through `ling web`'s `/api/transcribe` (the speech-to-text service on
+/// this machine; MOONSHOT §3.4): the text, or what `ling web` said went wrong.
+pub async fn transcribe(port: u16, cookie: &str, media: &str, bytes: &[u8]) -> Result<String, String> {
+    let mut request = format!(
+        "POST /api/transcribe HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: {media}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        bytes.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(bytes);
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;
+    stream.write_all(&request).await.map_err(|err| err.to_string())?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.map_err(|err| err.to_string())?;
+    let split = response.windows(4).position(|w| w == b"\r\n\r\n").ok_or("ling web sent no HTTP response")?;
+    let body: Value = serde_json::from_slice(&response[split + 4..]).unwrap_or(Value::Null);
+    match body.get("text").and_then(Value::as_str) {
+        Some(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Some(_) => Err("nothing was heard in it".to_string()),
+        None => Err(body.get("error").and_then(Value::as_str).unwrap_or("ling web did not transcribe it").to_string()),
+    }
+}
+
 /// Asks one question in a new Ask thread; returns the answer, streaming it to stdout.
 pub async fn ask(state: &Path, port: u16, question: &str, limit: Duration) -> Result<String, String> {
     let cookie = sign_in(state, port).await?;

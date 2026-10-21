@@ -78,6 +78,8 @@ async fn handle(State(stand): State<Stand>, method: Method, uri: Uri, body: Byte
         let mut n = stand.events.lock().unwrap();
         *n += 1;
         json!({ "event_id": format!("$e{n}") })
+    } else if path.starts_with("/_matrix/media/v3/upload") {
+        json!({ "content_uri": "mxc://node.tail.ts.net/up1" })
     } else if path.ends_with("/whoami") {
         json!({ "user_id": BOT })
     } else {
@@ -169,7 +171,7 @@ async fn messages_from_allowed_users_reach_the_hub_after_the_first_sync() {
 /// An image (with a caption, Matrix 1.10 style) is downloaded and reaches the hub as media; a
 /// voice message is named as dropped.
 #[tokio::test]
-async fn images_reach_the_hub_downloaded_and_audio_is_named_as_dropped() {
+async fn images_and_audio_reach_the_hub_downloaded_and_video_is_named_as_dropped() {
     let (stand, root) = stand_in().await;
     let (dir, config) = setup("media", &root);
     let (hub, mut inbound) = mpsc::unbounded_channel();
@@ -186,7 +188,13 @@ async fn images_reach_the_hub_downloaded_and_audio_is_named_as_dropped() {
     let mut audio = message("!dm:x", OWNER, "");
     audio["rooms"]["join"]["!dm:x"]["timeline"]["events"][0]["content"] = json!({ "msgtype": "m.audio", "body": "voice.ogg", "url": "mxc://node.tail.ts.net/v1" });
     syncer.handle(&config, &audio, false).await;
-    assert_eq!(inbound.try_recv().unwrap(), Inbound::Media { chat: "matrix:!dm:x".into(), text: String::new(), attachments: vec![], dropped: vec!["an audio message".into()] });
+    let Inbound::Media { attachments, dropped, .. } = inbound.try_recv().unwrap() else { panic!("not media") };
+    assert_eq!((attachments[0].name.as_str(), attachments[0].mime.as_str()), ("voice.ogg", "audio/ogg"));
+    assert!(dropped.is_empty());
+    let mut video = message("!dm:x", OWNER, "");
+    video["rooms"]["join"]["!dm:x"]["timeline"]["events"][0]["content"] = json!({ "msgtype": "m.video", "body": "clip.mp4", "url": "mxc://node.tail.ts.net/c1" });
+    syncer.handle(&config, &video, false).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Media { chat: "matrix:!dm:x".into(), text: String::new(), attachments: vec![], dropped: vec!["a video".into()] });
     let _ = stand;
 }
 
@@ -279,3 +287,16 @@ async fn the_bridge_opens_a_room_per_allowed_user_and_keeps_its_place() {
     let auth_ok = stand.calls.lock().unwrap().iter().all(|(_, p, _)| !p.contains("bot-token"));
     assert!(auth_ok, "the token goes in a header, never in a path");
 }
+
+#[tokio::test]
+async fn a_file_is_uploaded_and_sent_as_a_file_message() {
+    let (stand, root) = stand_in().await;
+    let (dir, _config) = setup("file", &root);
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let (_, renderer) = ling_chat::matrix::pair_for_tests(MatrixApi::new(&root, "bot-token"), dir, BOT, hub);
+    renderer.render(Outbound::File { chat: "matrix:!dm:x".into(), name: "report.md".into(), bytes: b"# r".to_vec() }).await;
+    assert_eq!(stand.calls("POST", "/_matrix/media/v3/upload").len(), 1);
+    let sent = stand.calls("PUT", "/send/m.room.message/");
+    assert_eq!(sent[0].1, json!({ "msgtype": "m.file", "body": "report.md", "filename": "report.md", "url": "mxc://node.tail.ts.net/up1", "info": { "size": 3 } }));
+}
+
