@@ -104,6 +104,10 @@
       "default": true,
       "type": "boolean"
     },
+    "pasteAsFile": {
+      "default": true,
+      "type": "boolean"
+    },
     "previewSites": {
       "default": {},
       "type": "object"
@@ -113,6 +117,10 @@
       "type": "boolean"
     },
     "petShown": {
+      "default": false,
+      "type": "boolean"
+    },
+    "recallQuestions": {
       "default": false,
       "type": "boolean"
     },

@@ -662,6 +662,15 @@ Read, in the documented precedence (managed, then `--settings`, then `.claude/se
 | `hooks` | §9.5 | 1 |
 | MCP servers in `.mcp.json` (project, approved before first use) and `~/.claude.json` (user and local scopes; only its `mcpServers` entries are read) | `-c mcp_servers.<name>…` for the session, `${VAR}` and `${VAR:-default}` expanded; a project server is offered only after the trust prompt; remote (`http`, `sse`, WebSocket) servers are refused at `/airgapped on` | 1 |
 | `attribution` | the commit guidance in the prompt block | 3 |
+
+**MCP servers: built (2026-10-21)** in `ling-rs/src/compat_mcp.rs`, by the owner's decision that each needs the user's approval first.
+- **Scopes:** Claude Code's three, in its precedence (local `~/.claude.json` `projects.<path>.mcpServers`, project `.mcp.json`, user `~/.claude.json` `mcpServers`). A project's `.mcp.json` is read only in a trusted folder.
+- **Approval:** `ling compat mcp approve <name>|--all` records a hash of the server's name, scope, file and definition in `$CODEX_HOME/compat/claude/mcp-approved.json`, which the sandbox cannot write. A changed definition waits again. A TUI start names each server that waits; `ling compat mcp` lists them and `revoke` removes an approval.
+- **stdio servers:** Codex runs `ling compat mcp-run …`, which checks the approval once more at spawn and expands `${VAR}`/`${VAR:-default}` itself. Codex forwards only the named variables through `env_vars`, so no value is on a command line. The wrapper then becomes the server, in the project's root. At a configured `/airgapped on` it runs the server under `bwrap --unshare-net`, or refuses without `bwrap`.
+- **HTTP servers:** Codex connects them with `env_http_headers`, `bearer_token_env_var` or literal headers. A header mixing text and variables is refused. HTTP servers are not offered at `/airgapped on`.
+- **Refused:** SSE and WebSocket servers, names Codex rejects, and Mightling's own server names.
+- **Egress audit:** the `--compat claude` audit's repository has an approved stdio server (it must start and reach nothing) and an unapproved HTTP one (it must never be connected).
+- **Mid-session `/airgapped on`:** stdio servers already running keep what they had at start. Start the session at `on` to have them offline.
 | `env` | set in the session's environment (not the sandbox's network settings; `HTTP_PROXY` and similar are refused at `/airgapped on`) | 1 |
 | `model` | accepted if served, else a notice | 1 |
 | `apiKeyHelper`, Anthropic credentials, `forceLoginMethod` and similar | ignored with a notice ("no vendor sign-in in Mightling") | 1 |

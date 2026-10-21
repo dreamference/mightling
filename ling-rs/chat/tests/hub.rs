@@ -75,6 +75,24 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                 AgentCommand::Respond { id, result } => agent_log.responses.lock().unwrap().push((id, result)),
                 // `ling web`'s upload: a name with "text" in it has text on it; one with "vision"
                 // goes to a model that takes images; "lost" never arrives.
+                // The agent's files: a thread "th-files" made report.md (and a huge one); bytes on request.
+                AgentCommand::MadeFiles { thread, since_ms: _, reply } => {
+                    agent_log.requests.lock().unwrap().push(("madeFiles".to_string(), json!({ "thread": thread })));
+                    let files = if thread == "th1" {
+                        vec![
+                            ling_web_server::ask_client::MadeFile { name: "report.md".to_string(), bytes: 2048 },
+                            ling_web_server::ask_client::MadeFile { name: "huge.bin".to_string(), bytes: 900 * 1024 * 1024 },
+                            ling_web_server::ask_client::MadeFile { name: "scratch.py".to_string(), bytes: 10 },
+                        ]
+                    } else {
+                        vec![]
+                    };
+                    let _ = reply.send(Ok(files));
+                }
+                AgentCommand::MadeFile { thread, name, reply } => {
+                    agent_log.requests.lock().unwrap().push(("madeFile".to_string(), json!({ "thread": thread, "name": name })));
+                    let _ = reply.send(Ok(format!("BYTES:{name}").into_bytes()));
+                }
                 // `ling web`'s speech-to-text: bytes "silence" are refused, anything else heard as is.
                 AgentCommand::Transcribe { media, bytes, reply } => {
                     agent_log.requests.lock().unwrap().push(("transcribe".to_string(), json!({ "media": media })));
@@ -735,5 +753,54 @@ async fn a_voice_message_is_heard_echoed_and_answered_and_a_failure_is_said() {
     assert!(line.starts_with("I couldn't transcribe the voice message (Speech-to-text is not running"), "{line}");
     settle().await;
     assert_eq!(rig.log.params("turn/start").len(), 1, "nothing asked");
+}
+
+/// Files back (MOONSHOT §3.7): a file the agent made and named in its answer is offered and sent
+/// only when the user says so; one it did not name is not offered; one too large is named and kept.
+#[tokio::test]
+async fn a_file_the_agent_made_and_named_is_offered_and_sent_only_when_asked() {
+    let mut rig = rig("files", default_script(), false, |_| {});
+    rig.inbound.send(text(CHAT, "compare them in a table")).unwrap();
+    settle().await;
+    let items = json!([{ "type": "agentMessage", "id": "m", "text": "The table is in report.md; huge.bin has the raw data.", "phase": "final_answer" }]);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": items } }))).unwrap();
+    let mut outs = Vec::new();
+    let offer = loop {
+        let out = next_settled(&mut rig.telegram).await;
+        if let Outbound::Approval { id, text, options, .. } = &out {
+            break (id.clone(), text.clone(), options.clone());
+        }
+        outs.push(out);
+    };
+    assert_eq!(offer.1, "Mightling made report.md (2 KB). Send it here?");
+    assert_eq!(offer.2, vec!["Send it".to_string(), "No".to_string()]);
+    outs.push(next_settled(&mut rig.telegram).await);
+    assert!(outs.iter().any(|o| matches!(o, Outbound::Notice { text, .. } if text.contains("huge.bin") && text.contains("stays in the thread's folder"))), "{outs:?}");
+    assert!(!rig.log.params("madeFile").iter().any(|_| true), "nothing sent before the press");
+    // "yes" sends it (the newest open offer); scratch.py was never named, so never offered.
+    rig.inbound.send(text(CHAT, "yes")).unwrap();
+    let mut sent = None;
+    for _ in 0..4 {
+        if let Outbound::File { name, bytes, .. } = next_settled(&mut rig.telegram).await {
+            sent = Some((name, bytes));
+            break;
+        }
+    }
+    assert_eq!(sent, Some(("report.md".to_string(), b"BYTES:report.md".to_vec())));
+    assert!(rig.log.responses.lock().unwrap().is_empty(), "the agent is not answered for the bridge's own question");
+}
+
+#[tokio::test]
+async fn no_file_is_offered_at_air_gap_on() {
+    let mut rig = rig("files-airgap", default_script(), true, |_| {});
+    rig.inbound.send(text("matrix:!r:x", "make a report")).unwrap();
+    settle().await;
+    let items = json!([{ "type": "agentMessage", "id": "m", "text": "Done: report.md.", "phase": "final_answer" }]);
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": items } }))).unwrap();
+    settle().await;
+    assert!(rig.log.params("madeFiles").is_empty());
+    while let Ok(out) = rig.matrix.try_recv() {
+        assert!(!matches!(out, Outbound::Approval { .. }), "{out:?}");
+    }
 }
 

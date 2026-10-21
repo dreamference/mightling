@@ -32,6 +32,9 @@ The web-access instructions are appended to the system prompt by the launcher (`
 - **Trust:** the user's own hooks are trusted beside them. A repository's hooks appear only in a trusted folder and wait for Codex's `/hooks` review.
 - **Agents:** `.claude/agents` become Codex agent roles written under `$CODEX_HOME/compat/claude/<project>/agents/` and declared with `-c agents={…}` (`src/compat_agents.rs`).
 - **Commands:** Claude Code's custom commands (`.claude/commands`, `~/.claude/commands`) and its skills, typed as `/name args`, are expanded by `src/compat_commands.rs` in the `Enter` hook and in print mode. A command's body gets its arguments; a skill becomes `$name args`. `CODEX_COMMANDS` is the list of Codex's own commands, which win; a test reads the pinned TUI's `SlashCommand` to keep it complete.
+- **MCP servers:** Claude Code's MCP servers (`.mcp.json`, `~/.claude.json`) start only after `ling compat mcp approve`, by hash (`src/compat_mcp.rs`).
+  - **stdio servers** run through `ling compat mcp-run`. It re-checks the approval, expands the variables Codex forwards by name, and at `/airgapped on` runs the server under `bwrap --unshare-net`.
+  - **HTTP servers** are left to Codex and refused at `on`.
 - **Start-up line:** a TUI start names what was read (`Claude Code files: CLAUDE.md n, hooks n, agents n`).
 
 ## `CODEX_HOME` is `~/.mightling`, not `~/.codex`

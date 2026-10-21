@@ -24,6 +24,19 @@ use crate::limits::Limits;
 use crate::limits::Verdict;
 use crate::limits::Watch;
 
+/// Files offered back after one answer, at most, and the largest Signal takes (100 MB, with room).
+pub const MAX_OFFERS: usize = 3;
+pub const FILE_LIMIT: u64 = 95 * 1024 * 1024;
+
+/// "12 KB", "3.4 MB".
+pub fn size(bytes: u64) -> String {
+    if bytes < 1024 * 1024 {
+        format!("{} KB", bytes.div_ceil(1024).max(1))
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 /// Questions held while another is answered.
 pub const QUEUE_LIMIT: usize = 5;
 /// Threads `/threads` lists.
@@ -57,6 +70,8 @@ pub enum AgentEvent {
     Approval { id: Value, thread: String, kind: ApprovalKind, command: Option<String>, cwd: Option<String>, reason: Option<String> },
     /// The owner's attachments for this thread's next turn, after [`Action::Upload`].
     Uploaded { thread: String, uploads: Vec<Uploaded> },
+    /// The files the agent changed during a turn (name, bytes), and the answer that may name them.
+    Made { thread: String, files: Vec<(String, u64)>, answer: String },
     /// A follow-up the bridge steered into the running turn was refused (the turn was ending): it
     /// is asked as the next question instead.
     SteerFailed { thread: String, text: String },
@@ -168,6 +183,11 @@ pub enum Action {
     ResumeThread(String),
     /// Tell the running turn something (`turn/steer`): the bounds' "answer now".
     Steer { thread: String, turn: String, text: String },
+    /// Look for the files the agent changed in `thread` since `since_ms`; report them as
+    /// [`AgentEvent::Made`] (§19.6).
+    FindFiles { thread: String, since_ms: u64, answer: String },
+    /// Send one of them to the owner, who said YES.
+    SendFile { thread: String, name: String },
     /// The owner's follow-up into the running turn (`turn/steer`); refused, it comes back as
     /// [`AgentEvent::SteerFailed`] (§19.4).
     AddToTurn { thread: String, turn: String, text: String },
@@ -197,6 +217,8 @@ struct Approval {
     text: String,
     deadline_ms: u64,
     shown: bool,
+    /// The bridge's own question, not the agent's: a file to send back (thread, name; §19.6).
+    file: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -235,6 +257,8 @@ pub struct Bridge {
     pub current: Option<String>,
     pub recent: Vec<ThreadRef>,
     pub info: Info,
+    /// The names the owner's own attachments were saved under, per thread: never offered back.
+    uploaded: std::collections::HashMap<String, HashSet<String>>,
     /// When the conversation last moved: the owner's last question or the last answer. None for a
     /// conversation saved before this was kept, taken as long ago.
     pub last_activity_ms: Option<u64>,
@@ -313,6 +337,7 @@ impl Bridge {
             current,
             recent,
             info,
+            uploaded: std::collections::HashMap::new(),
             last_activity_ms: None,
             new_thread_after_ms: Some(NEW_THREAD_AFTER_MS),
             limits: Limits::default(),
@@ -357,8 +382,14 @@ impl Bridge {
         match input {
             Input::Yes | Input::No => {
                 if let Some(approval) = self.approvals.pop_front() {
-                    let decision = if input == Input::Yes { "accept" } else { "decline" };
-                    actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": decision }) });
+                    match approval.file {
+                        Some((thread, name)) if input == Input::Yes => actions.push(Action::SendFile { thread, name }),
+                        Some(_) => actions.push(Action::Notice("Not sent; it stays in the thread's folder.".to_string())),
+                        None => {
+                            let decision = if input == Input::Yes { "accept" } else { "decline" };
+                            actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": decision }) });
+                        }
+                    }
                     self.show_next_approval(&mut actions);
                 }
             }
@@ -510,7 +541,9 @@ impl Bridge {
         let dropped = self.queue.len();
         self.queue.clear();
         while let Some(approval) = self.approvals.pop_front() {
-            actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
+            if approval.file.is_none() {
+                actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
+            }
         }
         match &mut self.phase {
             Phase::Running { thread, turn, stopping, .. } => {
@@ -623,8 +656,9 @@ impl Bridge {
             }
             AgentEvent::TurnCompleted { thread, error } => {
                 let running = matches!(&self.phase, Phase::Running { thread: t, .. } if *t == thread);
-                if running && let Phase::Running { answer, stopping, watch, limit_reason, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
-                    self.approvals.clear();
+                if running && let Phase::Running { answer, stopping, watch, limit_reason, started_ms, .. } = std::mem::replace(&mut self.phase, Phase::Idle) {
+                    // The agent's requests end with its turn; the bridge's own offers stay.
+                    self.approvals.retain(|a| a.file.is_some());
                     self.last_activity_ms = Some(now);
                     // Interrupted by its bounds (limits.rs): a final turn asks for the answer from what
                     // was found; the final turn out of time too ends with what it wrote.
@@ -679,11 +713,36 @@ impl Bridge {
                             ))),
                             Some(error) => actions.push(Action::Notice(format!("The answer failed: {error}"))),
                             None if answer.trim().is_empty() => actions.push(Action::Notice("(Mightling finished without writing an answer.)".to_string())),
-                            None => actions.push(Action::Reply(format::reply(answer.trim()))),
+                            None => {
+                                actions.push(Action::Reply(format::reply(answer.trim())));
+                                // Files it made and named are looked for, to offer back (§19.6).
+                                actions.push(Action::FindFiles { thread: thread.clone(), since_ms: started_ms, answer: answer.trim().to_string() });
+                            }
                         }
                     }
                     actions.extend(self.next(now));
                 }
+            }
+            AgentEvent::Made { thread, files, answer } => {
+                if self.airgapped() {
+                    return actions;
+                }
+                let uploaded = self.uploaded.get(&thread).cloned().unwrap_or_default();
+                let mut offered = 0;
+                for (name, bytes) in files {
+                    let base = name.rsplit('/').next().unwrap_or(&name).to_string();
+                    if uploaded.contains(&name) || !answer.contains(&base) || offered >= MAX_OFFERS {
+                        continue;
+                    }
+                    offered += 1;
+                    if bytes > FILE_LIMIT {
+                        actions.push(Action::Notice(format!("Mightling made {name} ({}), larger than Signal takes, so it stays in the thread's folder.", size(bytes))));
+                        continue;
+                    }
+                    let text = format!("Mightling made {name} ({}). Reply YES to get it here, or NO.", size(bytes));
+                    self.approvals.push_back(Approval { id: Value::Null, text, deadline_ms: now + APPROVAL_MS, shown: false, file: Some((thread.clone(), name)) });
+                }
+                self.show_next_approval(&mut actions);
             }
             AgentEvent::SteerFailed { thread: _, text } => {
                 // The turn was ending: the follow-up is the next question, taken when it ends.
@@ -709,6 +768,13 @@ impl Bridge {
                     Phase::Running { thread: running, uploading, stopping, .. } if *running == thread => uploading.take().map(|text| (text, *stopping)),
                     _ => None,
                 };
+                for upload in &uploads {
+                    if let Some(path) = &upload.path
+                        && let Some(name) = std::path::Path::new(path).file_name()
+                    {
+                        self.uploaded.entry(thread.clone()).or_default().insert(name.to_string_lossy().into_owned());
+                    }
+                }
                 if let Some((text, stopping)) = waiting {
                     // Voice notes first: their text joins the question, said back so a mis-hearing
                     // is seen (§19.5); a failure is said, and a voice note alone then asks nothing.
@@ -765,7 +831,7 @@ impl Bridge {
                         text.push_str(&format!("\n({})", reason.trim()));
                     }
                     text.push_str("\nReply YES or NO.");
-                    self.approvals.push_back(Approval { id, text, deadline_ms: now + APPROVAL_MS, shown: false });
+                    self.approvals.push_back(Approval { id, text, deadline_ms: now + APPROVAL_MS, shown: false, file: None });
                     self.show_next_approval(&mut actions);
                 }
             }
@@ -781,7 +847,9 @@ impl Bridge {
                 self.airgapped_since = Some(now);
                 self.queue.clear();
                 while let Some(approval) = self.approvals.pop_front() {
-                    actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
+                    if approval.file.is_none() {
+                        actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
+                    }
                 }
                 if let Phase::Running { thread, turn, stopping, .. } = &mut self.phase {
                     *stopping = true;
@@ -843,8 +911,12 @@ impl Bridge {
         }
         while self.approvals.front().is_some_and(|a| now >= a.deadline_ms) {
             let approval = self.approvals.pop_front().unwrap();
-            actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "decline" }) });
-            actions.push(Action::Notice("No reply in 10 minutes, so I declined it.".to_string()));
+            if approval.file.is_some() {
+                actions.push(Action::Notice("No reply in 10 minutes; the file stays in the thread's folder.".to_string()));
+            } else {
+                actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "decline" }) });
+                actions.push(Action::Notice("No reply in 10 minutes, so I declined it.".to_string()));
+            }
             self.show_next_approval(&mut actions);
         }
         if let Some(since) = self.down_since
@@ -1409,6 +1481,29 @@ mod tests {
         assert_eq!(fallback, vec![Action::StartAskThread]);
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
         assert!(ready.iter().any(|a| matches!(a, Action::StartTurn { .. })));
+    }
+
+    /// Files back (§19.6): a file the agent made and named in its answer is offered after it, and
+    /// sent only on YES; one not named, or the owner's own upload, is not offered; none at air gap on.
+    #[test]
+    fn a_file_the_agent_made_and_named_is_offered_and_sent_only_on_yes() {
+        let mut b = connected();
+        b.on_message(msg("compare them in a table", 1), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 5);
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "The table is in report.md.".to_string() }, 5);
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 9);
+        assert!(done.contains(&Action::FindFiles { thread: "t1".to_string(), since_ms: 5, answer: "The table is in report.md.".to_string() }), "{done:?}");
+        let files = vec![("report.md".to_string(), 2048), ("scratch.py".to_string(), 10), ("huge.bin".to_string(), FILE_LIMIT + 1)];
+        let offered = b.on_agent(AgentEvent::Made { thread: "t1".to_string(), files, answer: "The table is in report.md.".to_string() }, 10);
+        assert_eq!(notices(&offered), vec!["Mightling made report.md (2 KB). Reply YES to get it here, or NO."]);
+        let yes = b.on_message(msg("yes", 2), 11);
+        assert!(yes.contains(&Action::SendFile { thread: "t1".to_string(), name: "report.md".to_string() }), "{yes:?}");
+        assert!(!yes.iter().any(|a| matches!(a, Action::AnswerApproval { .. })), "the agent is not answered");
+        // NO keeps it; at air gap on nothing is offered.
+        b.on_agent(AgentEvent::Made { thread: "t1".to_string(), files: vec![("report.md".to_string(), 1)], answer: "report.md".to_string() }, 12);
+        assert_eq!(notices(&b.on_message(msg("no", 3), 13)), vec!["Not sent; it stays in the thread's folder."]);
+        b.on_airgap(true, 14);
+        assert!(b.on_agent(AgentEvent::Made { thread: "t1".to_string(), files: vec![("report.md".to_string(), 1)], answer: "report.md".to_string() }, 15).is_empty());
     }
 
     #[test]

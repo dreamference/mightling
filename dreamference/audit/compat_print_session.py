@@ -43,7 +43,25 @@ FIXTURE: Final[dict[str, str]] = {
     + "\n",
     ".claude/commands/hello.md": "---\ndescription: Say hello\n---\nSay hello to $ARGUMENTS.\n",
     ".claude/agents/reviewer.md": "---\nname: reviewer\ndescription: Reviews a diff\n---\nReview the diff.\n",
+    # One stdio server the audit approves, which must start without reaching anything, and one
+    # remote server left unapproved, which must never be connected.
+    ".mcp.json": json.dumps(
+        {
+            "mcpServers": {
+                "fixture": {"command": "true"},
+                "remote": {"type": "http", "url": "https://mcp.example.invalid/mcp"},
+            }
+        },
+        indent=2,
+    )
+    + "\n",
 }
+
+# The launcher's flag for the mode, before which the traced command names `ling`.
+COMPAT_FLAG: Final[str] = "--compat"
+
+# The fixture's server the audit approves before the trace (`ling compat mcp approve`).
+APPROVED_SERVER: Final[str] = "fixture"
 
 
 class CompatPrintSession:
@@ -72,7 +90,7 @@ class CompatPrintSession:
         Returns:
             list[str]: The command line.
         """
-        return [*strace, "--compat", CLAUDE_MODE, "-p", prompt, "--output-format", "json"]
+        return [*strace, COMPAT_FLAG, CLAUDE_MODE, "-p", prompt, "--output-format", "json"]
 
     @classmethod
     def run(
@@ -94,6 +112,7 @@ class CompatPrintSession:
             bool: True when it ended with a successful result carrying an answer (replied).
         """
         cls.write_fixture(repo)
+        cls.approve_fixture_server(command, repo, env)
         with out.open("w", encoding="utf-8") as handle:
             try:
                 process = subprocess.Popen(
@@ -112,6 +131,38 @@ class CompatPrintSession:
             except subprocess.TimeoutExpired:
                 cls.stop(process)
         return cls.replied(out)
+
+    @classmethod
+    def approve_fixture_server(cls, command: list[str], repo: Path, env: dict[str, str]) -> None:
+        """Trusts the repository and approves the fixture's stdio server, outside the trace.
+
+        Both go into the throwaway `CODEX_HOME` the session runs with, as a user would do them:
+        the folder's trust (TuiSession.trust) and `ling compat mcp approve`.
+
+        Args:
+            command (list[str]): The traced command line; the `ling` before `--compat` is used.
+            repo (Path): The repository.
+            env (dict[str, str]): The session's environment, with its `CODEX_HOME`.
+        """
+        from dreamference.audit.tui_session import TuiSession
+
+        home = env.get("CODEX_HOME", "")
+        if not home or COMPAT_FLAG not in command:
+            return
+        TuiSession.trust(home, str(repo))
+        ling = command[command.index(COMPAT_FLAG) - 1]
+        try:
+            subprocess.run(
+                [ling, "compat", "mcp", "approve", APPROVED_SERVER],
+                cwd=repo,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                check=False,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return
 
     @classmethod
     def stop(cls, process: subprocess.Popen[bytes]) -> None:
