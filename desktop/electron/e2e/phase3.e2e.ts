@@ -391,6 +391,8 @@ test("5 activity: what the agent did across threads, by kind and project, a row 
     await page.getByRole("button", { name: "Work", exact: true }).click();
     await page.keyboard.press("Control+Alt+u");
     const activity = page.getByRole("dialog", { name: "Activity" });
+    // The timeline is Activity's second tab since item 17.
+    await activity.getByRole("button", { name: "What the agent did" }).click();
     const rows = activity.getByRole("listitem");
     await expect(rows.filter({ hasText: "Ran pytest tests/test_fetch.py -q -k retry (exit 1)" })).toHaveCount(1);
     await expect(rows.filter({ hasText: "Edited client.py" })).toHaveCount(1);
@@ -809,3 +811,40 @@ test("item 13's order: folders and projects keep their place as threads get busy
     await close();
   }
 });
+
+test("item 17: Activity opens on what needs you, a waiting thread first, filters, Mark all as read", async () => {
+  const { page, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    // Opening the flaky retry thread makes its server ask for an approval; then another thread is shown.
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    const other = page.locator(".thread-row", { hasText: "Compress the hero" }).first();
+    await other.locator(".thread").click();
+    // A thread marked unread by hand.
+    const logRow = page.locator(".thread-row", { hasText: "Log every retry" }).first();
+    await logRow.hover();
+    await logRow.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Mark unread" }).click();
+    await expect(page.locator(".activity-button .count")).toHaveText("2");
+    await page.keyboard.press("Control+Alt+u");
+    const activity = page.getByRole("dialog", { name: "Activity" });
+    const rows = activity.getByRole("list", { name: "What needs you" }).getByRole("listitem");
+    await expect(rows.first()).toContainText("Fix the flaky retry test");
+    await expect(rows.first()).toContainText("Waiting for you");
+    await expect(rows.filter({ hasText: "Log every retry" })).toContainText("Unread");
+    // Ask alone: none of these is a question.
+    await activity.getByRole("button", { name: "Ask", exact: true }).click();
+    await expect(rows).toHaveCount(0);
+    await activity.getByRole("button", { name: "Ask", exact: true }).click();
+    await activity.getByRole("button", { name: "Mark all as read" }).click();
+    await expect(rows.filter({ hasText: "Log every retry" })).toHaveCount(0);
+    await expect(rows.filter({ hasText: "Fix the flaky retry test" })).toHaveCount(1);
+    await rows.filter({ hasText: "Fix the flaky retry test" }).click();
+    await expect(activity).toHaveCount(0);
+    await expect(page.locator(".bar .title")).toHaveText("Fix the flaky retry test");
+  } finally {
+    await close();
+  }
+});
+

@@ -937,3 +937,8 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .starting-project { color: var(--muted); }
 .project.server-project h2 .menu-anchor { margin-left: auto; display: inline-flex; }
 .project.server-project h2 .menu-anchor .project-action { margin-left: 0; }
+
+/* Activity's Needs you tab (item 17): why each thread is listed. */
+.attention-state { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--muted); white-space: nowrap; }
+.attention-state.waiting { background: var(--accent-soft); color: var(--accent-text); }
+.activity-filters .spacer { flex: 1; }

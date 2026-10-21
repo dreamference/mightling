@@ -62,6 +62,7 @@ import { PullRequestsTab } from "./PullRequestsTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { ActivityView } from "./ActivityView";
+import { attentionList } from "./attention";
 import { predict } from "./suggestions";
 import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
@@ -2087,6 +2088,8 @@ export function App() {
   const allThreads = Object.values(state.threads).map((entry) => entry.thread);
   // Projects (projects.ts): the shown ones, and every thread that belongs to a project the server knows
   // (shown or removed), which leaves the folder groups and the plain question list.
+  // Threads waiting for the user or unread, counted on the sidebar's Activity row (item 17).
+  const attentionCount = new Set([...state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id)), ...prefs.unreadThreads.filter((id) => state.threads[id] && !state.threads[id].thread.ephemeral)]).size;
   const listedProjects = ordered(shownProjects(serverProjects), (project) => `project:${project.id}`, prefs.projectOrder);
   const folderGroups = ordered(projects(state, askRoot, (thread) => projectFolder(thread, links)), (group) => `folder:${group.cwd}`, prefs.projectOrder);
   /** Dragging a project or folder header onto another puts it just before that one, kept in the window's preferences. */
@@ -2333,7 +2336,7 @@ export function App() {
           </button>
         ) : null}
         {!POPOUT && board.on && HOST === "electron" ? <button className="nav-row board-button" onClick={() => setBoardOpen(true)} title="What subagents posted for each other"><Icon name="messageSquare" size={14} />Message board</button> : null}
-        {!POPOUT ? <button className="nav-row activity-button" onClick={() => setActivityOpen(true)} title={`What the agent did, across threads (${shortcutLabel("activityView")})`}><Icon name="activity" size={14} />Activity</button> : null}
+        {!POPOUT ? <button className="nav-row activity-button" onClick={() => setActivityOpen(true)} title={`What needs you, and what the agent did, across threads (${shortcutLabel("activityView")})`}><Icon name="activity" size={14} />Activity{attentionCount ? <span className="count" aria-label={`${attentionCount} need you`}>{attentionCount}</span> : null}</button> : null}
         {!POPOUT ? <button className="nav-row skills-button" onClick={() => setExtensions("skills")} title="Skills, MCP servers and apps"><Icon name="info" size={14} />Skills and tools</button> : null}
         <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title={`Settings (${shortcutLabel("settings")})`}><Icon name="settings" size={14} />Settings</button>
         {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
@@ -2623,6 +2626,23 @@ export function App() {
       {activityOpen ? (
         <ActivityView client={client} threads={Object.values(state.threads).map((entry) => entry.thread)}
           projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)}
+          needs={{
+            entries: attentionList(Object.values(state.threads).map((entry) => entry.thread), {
+              waiting: new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id))),
+              running: new Set(Object.values(state.threads).filter((entry) => entry.activeTurnId).map((entry) => entry.thread.id)),
+              unread: new Set(prefs.unreadThreads),
+              pinned: new Set(prefs.pinnedThreads),
+              isAsk: (thread) => isAskThread(thread, askRoot),
+            }),
+            scheduled: nightUnseen,
+            label: (thread) => (isAskThread(thread, askRoot) ? askTitle(thread) : workLabel(thread)),
+            onMarkAllRead: () => {
+              // Every unread mark, and Night Shift's finished tasks counted as seen now.
+              updatePrefs({ unreadThreads: [], ...(nightUnseen ? { nightSeen: new Date().toISOString() } : {}) });
+              setNightUnseen(0);
+            },
+            onOpenScheduled: () => setScheduledOpen(true),
+          }}
           onOpen={(threadId) => {
             const thread = state.threads[threadId]?.thread;
             if (thread) setView(isAskThread(thread, askRoot) ? "ask" : "work");
