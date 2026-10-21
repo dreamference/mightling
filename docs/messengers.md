@@ -186,6 +186,31 @@ turn them on with `telegram_rich = true` under `[chat]` in `~/.config/dreamferen
 Approvals show a green and a red button, and stay in the chat with their outcome. Stopping an
 answer keeps what was written, marked "(stopped)".
 
+**Mightling's app inside Telegram** (optional). The bot's menu button, and `/app`, can open
+Mightling's own web page full-screen inside Telegram. The page is loaded by your phone straight from
+your machine over your own network, so what you type in it never passes through Telegram's servers;
+Telegram only learns that you opened it, and its address. It needs your phone on the same private
+network as the machine with an HTTPS name, for example Tailscale:
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:3100   # ling web over HTTPS on your tailnet
+```
+
+(Port 8443, because the Matrix homeserver, if you use it, has 443.)
+
+Then set the address under `[chat]` in `~/.config/dreamference/config.toml` and restart:
+
+```toml
+[chat]
+telegram_mini_app_url = "https://<your machine>.<your tailnet>.ts.net:8443/"
+```
+
+`ling web start` and `ling chat start` restart both with it.
+The page asks you to pair it like any other device (`ling web pair` on the machine), and it starts
+only when Telegram vouches that it was opened from your bot by a paired account. Remove the line to
+take the button away. It works in Telegram's phone and desktop apps, not in web.telegram.org, which
+would have to frame the page.
+
 
 Telegram is the less private choice. Everything you send the bot, and every answer, passes through
 Telegram's servers unencrypted. Answers can include what the agent reads for you, such as mail,
