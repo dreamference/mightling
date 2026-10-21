@@ -11,7 +11,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 
-import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
+import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, insideFolder, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
@@ -200,6 +200,8 @@ export function App() {
   const travelling = useRef(false);
   /** The tab area's tabs (§2.1, §2.8): Review and file tabs, and the one in front. */
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  /** The next new question is incognito (DESKTOP_PARITY_CLAUDE §4.3): the header's switch, before the first message. */
+  const [incognitoNext, setIncognitoNext] = useState(false);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [treeShown, setTreeShown] = useState(false);
   /** Ask's own tree of the question's folder (DESKTOP_PARITY_CLAUDE §4.1), apart from Work's. */
@@ -436,6 +438,24 @@ export function App() {
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
   const selected = selectedView && isAskThread(selectedView.thread, askRoot) === (view === "ask") ? selectedView : null;
+  // An incognito question in front (DESKTOP_PARITY_CLAUDE §4.3): an ephemeral Ask thread. Leaving it, to
+  // another question, a new one, Work or a setting that changes the thread shown, deletes it: its turn
+  // stopped, the server let go of it, its folder and every file in it removed by the main process (which
+  // also removes any left when the app quits).
+  const incognitoShown = selected !== null && view === "ask" && selected.thread.ephemeral ? selected.thread : null;
+  const incognitoRef = useRef<{ id: string; cwd: string } | null>(null);
+  useEffect(() => {
+    const before = incognitoRef.current;
+    incognitoRef.current = incognitoShown ? { id: incognitoShown.id, cwd: incognitoShown.cwd } : null;
+    if (!before || before.id === incognitoShown?.id) return;
+    const active = stateRef.current.threads[before.id]?.activeTurnId;
+    void (async () => {
+      if (active) await client.request("turn/interrupt", { threadId: before.id, turnId: active }).catch(() => {});
+      await client.request("thread/unsubscribe", { threadId: before.id }).catch(() => {});
+      await bridge.incognito.forget(before.id);
+      setTabs((list) => list.filter((tab) => !(tab.kind === "file" && insideFolder(tab.path, before.cwd))));
+    })().catch((error: unknown) => notice(`The incognito question could not be deleted: ${error instanceof Error ? error.message : String(error)}`));
+  }, [incognitoShown?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The level can differ per thread (`/airgapped` in the TUI writes a session file).
   useEffect(() => {
@@ -636,10 +656,24 @@ export function App() {
     }
   };
 
-  /** A new Ask thread: the UI names the prompt, `ling web` sets its text, folder and sandbox. */
-  const startAsk = async (): Promise<Thread> => {
-    const params = { model: servedModel, prompt: ASK_PROMPT } as unknown as ParamsOf<"thread/start">;
+  /**
+   * A new Ask thread: the UI names the prompt, `ling web` sets its text, folder and sandbox. An
+   * incognito one (DESKTOP_PARITY_CLAUDE §4.3) is ephemeral, so the server keeps no session file and
+   * no memory of it, and its folder is marked so that leaving the question deletes it; if the mark
+   * cannot be made, the question is dropped rather than kept.
+   */
+  const startAsk = async (incognito = false): Promise<Thread> => {
+    const params = { model: servedModel, prompt: ASK_PROMPT, ...(incognito ? { ephemeral: true } : {}) } as unknown as ParamsOf<"thread/start">;
     const started = await client.request("thread/start", params);
+    if (incognito) {
+      try {
+        await bridge.incognito.mark(started.thread.id);
+      } catch (error) {
+        await client.request("thread/unsubscribe", { threadId: started.thread.id }).catch(() => {});
+        throw error;
+      }
+      setIncognitoNext(false);
+    }
     dispatch({ type: "opened", thread: started.thread });
     return started.thread;
   };
@@ -816,7 +850,7 @@ export function App() {
     setDraftFor(from, "");
     setPending([]);
     try {
-      const thread = selected?.thread ?? (await startAsk());
+      const thread = selected?.thread ?? (await startAsk(incognitoNext && bridge.incognito.available()));
       // Attachments go into the thread's own folder, which exists once the thread does.
       const attached: Attached[] = await Promise.all(
         files.map(async (item) => ({ kind: item.kind, name: item.name, path: (await bridge.upload(thread.id, item.file, item.kind, item.name)).path })),
@@ -1146,6 +1180,7 @@ export function App() {
   /** Side chat (Ctrl+Alt+S): a copy of the thread asked for a short recap, beside the running one, never interrupting it. */
   const sideChat = async () => {
     if (!selected) return;
+    if (selected.thread.ephemeral) return notice("An incognito question has no side chat: it would be saved.");
     try {
       const thread = await forkThread(client, selected.thread.id, servedModel);
       await client.request("thread/name/set", { threadId: thread.id, name: `Side chat: ${selected.thread.name || selected.thread.preview || "thread"}`.slice(0, 120) });
@@ -1476,6 +1511,7 @@ export function App() {
 
   const fork = async () => {
     if (!selected) return;
+    if (selected.thread.ephemeral) return notice("An incognito question is not copied: a fork would be saved.");
     try {
       const thread = await forkThread(client, selected.thread.id, servedModel);
       dispatch({ type: "opened", thread });
@@ -1873,7 +1909,7 @@ export function App() {
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
   const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null;
-  const title = selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? "New question" : "Mightling";
+  const title = incognitoShown ? "Incognito question" : selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? (incognitoNext ? "New incognito question" : "New question") : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
     ? prefs.followUp === "queue" ? "Queue a follow-up for the next turn…" : "Steer the running turn…"
@@ -2000,7 +2036,7 @@ export function App() {
       </aside>
       <div className="backdrop" onClick={() => setDrawer(false)} />
 
-      <main className="thread-pane">
+      <main className={`thread-pane${incognitoShown || (view === "ask" && !selected && incognitoNext) ? " incognito" : ""}`}>
         <header className="bar" onDoubleClick={() => HOST === "electron" && bridge.windowControl("maximize").catch(() => {})}>
           <button className="icon menu-toggle" aria-label="Threads" onClick={() => setDrawer(!drawer)}><Icon name="panelLeft" size={20} strokeWidth={1.75} /></button>
           <button className="icon sidebar-toggle" aria-label={prefs.sidebarHidden ? "Show the sidebar" : "Hide the sidebar"} title={`${prefs.sidebarHidden ? "Show" : "Hide"} the sidebar (${shortcutLabel("toggleSidebar")})`} onClick={commands.toggleSidebar}><Icon name="panelLeft" size={18} strokeWidth={1.75} /></button>
@@ -2009,8 +2045,14 @@ export function App() {
           <span className="title">{title}</span>
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
-          {selected ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
-          {selected && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
+          {view === "ask" && !selected && bridge.incognito.available() ? (
+            <button className={`chip incognito-toggle${incognitoNext ? " active" : ""}`} aria-pressed={incognitoNext} onClick={() => setIncognitoNext((on) => !on)}
+              title="An incognito question is not saved: not in your history, your memories or a later search. When you leave it, it is deleted for good, with every file in its folder.">
+              <Icon name="eyeOff" size={14} />Incognito
+            </button>
+          ) : null}
+          {selected && !incognitoShown ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
+          {selected && !incognitoShown && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
           {POPOUT ? <button className={`icon bar-action${onTop ? " active" : ""}`} aria-pressed={onTop} title="Keep this window above the others" aria-label="Always on top" onClick={() => void bridge.alwaysOnTop(!onTop).then(setOnTop).catch(notice)}><Icon name="pin" size={16} /></button> : null}
           {askFolder ? (
             // What the question made, beside the answer (DESKTOP_PARITY_CLAUDE §4.1): its folder's files.
@@ -2065,6 +2107,12 @@ export function App() {
         ) : null}
         <OpenFileContext.Provider value={view === "work" ? { open: openFile, cwd: selected?.thread.cwd ?? null, ask: false } : askFolder ? { open: openFile, cwd: askFolder, ask: true } : null}>
         <div className="turns">
+          {incognitoShown || (view === "ask" && !selected && incognitoNext) ? (
+            <div className="incognito-banner" role="note">
+              <Icon name="eyeOff" size={16} />
+              <span><strong>Incognito.</strong> This question is not saved: it stays out of your history, your memories and later searches. When you leave it (another question, a new one, Work, or closing Mightling), the question, its answers and its folder with every file in it are <strong>deleted for good</strong>; nothing can bring them back.</span>
+            </div>
+          ) : null}
           {info ? (
             <section className="info-panel" aria-label={info.title}>
               <header><strong>{info.title}</strong><button className="icon" aria-label="Close" onClick={() => setInfo(null)}><Icon name="x" size={14} /></button></header>
