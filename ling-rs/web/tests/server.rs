@@ -124,6 +124,8 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/apps"),
     ("GET", "/api/airgapped"),
     ("GET", "/api/chat/settings"),
+    ("GET", "/api/ask/files?thread=t"),
+    ("GET", "/api/ask/file?thread=t&name=a"),
     ("GET", "/images/0123456789abcdef.jpg"),
     ("GET", "/docs/documents/1"),
     ("GET", "/api/docs"),
@@ -465,6 +467,34 @@ async fn a_bridge_upload_reads_an_images_text_and_says_whether_the_model_takes_i
     let (_, _, body) = call(&server, upload("/api/upload?thread=thr-1&name=shot.jpg&kind=image")).await;
     let plain: Value = serde_json::from_str(&body).unwrap();
     assert!(plain.get("text").is_none() && plain.get("vision").is_none(), "{plain}");
+}
+
+/// Files back to a phone: the thread's changed files are listed and one is given, only from its
+/// folder, and never at a user-level `/airgapped on`.
+#[tokio::test]
+async fn a_threads_files_are_listed_and_given_and_never_at_air_gap_on() {
+    let scratch = scratch("files");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let root = server.ask_root();
+    let folder = ling_web_server::ask::new_folder(&root).unwrap();
+    ling_web_server::ask::link_thread(&root, "thr-1", &folder).unwrap();
+    std::fs::write(folder.join("report.md"), "# Purifiers").unwrap();
+    // SAFETY: the other tests here accept either level.
+    unsafe { std::env::set_var(ling_airgapped::ENV_VAR, "off") };
+    let get = |uri: &str| request("GET", uri).header(header::COOKIE, &cookie).body(Body::empty()).unwrap();
+    let (status, _, body) = call(&server, get("/api/ask/files?thread=thr-1&since=0")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["files"][0]["name"], "report.md");
+    let (status, _, body) = call(&server, get("/api/ask/file?thread=thr-1&name=report.md")).await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "# Purifiers"));
+    assert_eq!(call(&server, get("/api/ask/file?thread=thr-1&name=../../etc/passwd")).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(call(&server, get("/api/ask/file?thread=thr-other&name=report.md")).await.0, StatusCode::NOT_FOUND);
+    // SAFETY: as above.
+    unsafe { std::env::set_var(ling_airgapped::ENV_VAR, "on") };
+    let (status, _, body) = call(&server, get("/api/ask/file?thread=thr-1&name=report.md")).await;
+    unsafe { std::env::remove_var(ling_airgapped::ENV_VAR) };
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }
 
 /// The stand-in app-server: one WebSocket connection on the Unix socket, its frames handed to the test.
