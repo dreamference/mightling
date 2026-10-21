@@ -77,7 +77,8 @@ export function writeStandIn(home: string, askRoot: string): string {
   fs.writeFileSync(ling, `#!/usr/bin/env node
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
-if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
+// Airgapped on while the test has left a file saying so (links.e2e.ts).
+if (process.argv[2] === "airgapped") { console.log("Airgapped: " + (fs.existsSync(${JSON.stringify(path.join(home, "airgapped-on"))}) ? "on" : "off") + " (default)"); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
 if (process.argv[2] === "docs") {
   // ling docs add|remove|reindex|status --json, over a file of collections (a project's knowledge, DESKTOP_PARITY_CLAUDE §4.7).
@@ -130,6 +131,8 @@ const hookOf = (key, base) => {
   return { ...base, key, enabled: state.enabled !== false, trustStatus };
 };
 let asked = false;
+// Ephemeral threads: never listed, still known by id (an incognito question's folder).
+const unlisted = {};
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
   hidden: false, isDefault: true, supportedReasoningEfforts: ["low", "medium", "high"].map((e) => ({ reasoningEffort: e, description: "" })),
@@ -235,27 +238,46 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       answer({ queuedSubmission: item });
       return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
     }
+    case "thread/queue/update": {
+      const item = (queues[p.threadId] || []).find((q) => q.id === p.queuedSubmissionId);
+      if (item) item.input = p.input;
+      answer({ queuedSubmission: item || null });
+      return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
+    }
+    case "thread/queue/reorder": {
+      const byId = Object.fromEntries((queues[p.threadId] || []).map((q) => [q.id, q]));
+      queues[p.threadId] = p.queuedSubmissionIds.map((id) => byId[id]).filter(Boolean);
+      answer({});
+      return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
+    }
     case "thread/queue/delete":
       queues[p.threadId] = (queues[p.threadId] || []).filter((q) => q.id !== p.queuedSubmissionId);
       answer({});
       return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
     case "thread/fork": {
       const source = threads.find((t) => t.id === p.threadId);
-      const copy = { ...source, id: source.id + "-fork", name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
+      // Through a turn (lastTurnId) or before one (beforeTurnId): the turns cut there.
+      const turns = source.turns || [];
+      const at = turns.findIndex((t) => t.id === (p.lastTurnId || p.beforeTurnId));
+      const cut = at < 0 ? turns : p.lastTurnId ? turns.slice(0, at + 1) : turns.slice(0, at);
+      const copy = { ...source, turns: cut, id: source.id + "-fork" + (p.lastTurnId || p.beforeTurnId ? "-" + next++ : ""), name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
       threads.push(copy);
       return answer({ thread: copy, model: "qwen3.8-27b", modelProvider: "local", cwd: copy.cwd });
     }
     case "thread/start": {
-      const id = (p.ephemeral ? "e" : "n") + next++;
+      // An ephemeral thread in an Ask folder is an incognito question ("i"), answered as a question is;
+      // any other ephemeral one is a helper's ("e": a commit message, suggestions).
+      const id = (p.ephemeral ? (String(p.cwd || "").startsWith(${JSON.stringify(askRoot)}) ? "i" : "e") : "n") + next++;
       const started = { id, cwd: p.cwd, name: null, preview: "", turns: [], status: { type: "idle" }, ephemeral: !!p.ephemeral, parentThreadId: null,
         createdAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), recencyAt: null, model: "qwen3.8-27b", modelProvider: "local",
         projectId: p.projectId || null, runtimeWorkspaceRoots: p.runtimeWorkspaceRoots || [] };
       if (!p.ephemeral) threads.push(started);
+      else unlisted[id] = started;
       return answer({ thread: started, model: "qwen3.8-27b", modelProvider: "local", cwd: p.cwd });
     }
     case "turn/start": {
       const id = "turn-" + next++;
-      if (String(p.threadId).startsWith("n")) {
+      if (/^[ni]/.test(String(p.threadId))) {
         // A thread the test started: the turn runs briefly and answers.
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
         say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
@@ -277,7 +299,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           }
           if (asked.includes("with a report")) {
             // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
-            const own = threads.find((t) => t.id === p.threadId);
+            const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
             const report = require("node:path").join((own && own.cwd) || "/tmp", "report.md");
             require("node:fs").writeFileSync(report, "# Memory on the GB10\\n\\nOne pool of LPDDR5X, shared by the CPU and the GPU.\\n");
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
@@ -286,8 +308,13 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }
-          const answerItem = { type: "agentMessage", id: "m" + id, text: "Done: the retry counter is in fetcher/client.py." };
+          const answerItem = { type: "agentMessage", id: "m" + id, text: asked.includes("with a source")
+            ? "NVFP4 is described on [NVIDIA's developer blog](https://developer.nvidia.com/blog/nvfp4/) [1].\\n\\n[1] https://developer.nvidia.com/blog/nvfp4/"
+            : "Done: the retry counter is in fetcher/client.py." };
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: answerItem } });
+          // Kept, as ling keeps it, so a thread opened again (or forked) has its turns.
+          const kept = threads.find((t) => t.id === p.threadId);
+          if (kept) kept.turns = [...(kept.turns || []), { id, status: "completed", error: null, items: [{ type: "userMessage", id: "u" + id, content: p.input || [] }, answerItem] }];
           // As ling sends it: the completed turn lists the answer alone, not what the turn streamed.
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
         }, 300);

@@ -189,6 +189,16 @@ export function openDocument(doc: string, page: number | null): Promise<null> {
   window.open(`/docs/${doc}${page === null ? "" : `#page=${page}`}`, "_blank", "noopener");
   return Promise.resolve(null);
 }
+/**
+ * Opens a web address from an answer, once the user said so (LinkDialog.tsx): in the app in the
+ * system's browser through the main process, which refuses at `/airgapped on`; in a browser on
+ * `ling web` in a new tab, with no opener and no referrer.
+ */
+export function openWebLink(url: string, thread: string | null): Promise<unknown> {
+  if (host() === "electron") return send<string>({ type: "open/url", url, thread });
+  window.open(url, "_blank", "noopener,noreferrer");
+  return Promise.resolve(null);
+}
 export const openEditorAt = (dir: string, editor: string | null) => send<null>({ type: "open/editor", dir, editor });
 
 export interface TaskEvent {
@@ -407,6 +417,27 @@ export async function base64(file: Blob): Promise<string> {
   }
   return btoa(binary);
 }
+
+/**
+ * An incognito question (DESKTOP_PARITY_CLAUDE §4.3), the desktop app's only: its folder marked when
+ * it starts, and deleted, with every file in it, when the question is left.
+ */
+export const incognito = {
+  available: () => host() === "electron",
+  mark: (thread: string) => send<null>({ type: "ask/incognito", thread }),
+  forget: (thread: string) => send<boolean>({ type: "ask/forget", thread }),
+};
+
+/**
+ * Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4), the desktop app's only: the copies the
+ * main process keeps while Settings › Memories has it on.
+ */
+export const recall = {
+  available: () => host() === "electron",
+  index: () => send<Record<string, number>>({ type: "recall/index" }),
+  write: (thread: string, updatedAt: number, markdown: string) => send<null>({ type: "recall/write", thread, updatedAt, markdown }),
+  prune: (keep: string[]) => send<number>({ type: "recall/prune", keep }),
+};
 
 /**
  * Writes an attachment into an Ask thread's scratch folder, and resolves with where it landed: in

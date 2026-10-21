@@ -151,6 +151,8 @@ pub struct Conversation {
     pub identity_refusals: u64,
     /// When the conversation last moved (§19.2).
     pub last_activity_ms: Option<u64>,
+    /// The last Night Shift report sent here (its file name, §19.7).
+    pub night_seen: Option<String>,
 }
 
 impl Conversation {
@@ -162,6 +164,7 @@ impl Conversation {
             "ignored": self.ignored,
             "identityRefusals": self.identity_refusals,
             "lastActivityMs": self.last_activity_ms,
+            "nightSeen": self.night_seen,
         })
     }
 
@@ -181,6 +184,7 @@ impl Conversation {
             ignored: value.get("ignored").and_then(Value::as_u64).unwrap_or(0),
             identity_refusals: value.get("identityRefusals").and_then(Value::as_u64).unwrap_or(0),
             last_activity_ms: value.get("lastActivityMs").and_then(Value::as_u64),
+            night_seen: value.get("nightSeen").and_then(Value::as_str).map(str::to_string),
         }
     }
 
@@ -288,6 +292,7 @@ mod tests {
             ignored: 4,
             identity_refusals: 1,
             last_activity_ms: Some(1_792_000_000_000),
+            night_seen: Some("2026-10-21.md".to_string()),
         };
         conversation.save(&dir).unwrap();
         assert_eq!(Conversation::load(&dir), conversation);

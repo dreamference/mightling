@@ -236,6 +236,10 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/airgapped", get(airgapped))
         .route("/api/chat/settings", get(chat_settings))
         .route("/api/ask/files", get(ask_files))
+        .route("/api/night/repos", get(night_repos))
+        .route("/api/night/add", post(night_add))
+        .route("/api/night/status", get(night_status))
+        .route("/api/night/reports", get(night_reports))
         .route("/api/ask/file", get(ask_file))
         .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/api/telegram/check", post(telegram_check))
@@ -559,6 +563,57 @@ async fn ask_file(State(server): State<Arc<Server>>, Query(query): Query<HashMap
         Ok(bytes) => ([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response(),
         Err(err) => json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err.to_string() })),
     }
+}
+
+fn night_dir(server: &Server) -> PathBuf {
+    server.config.codex_home.join("night")
+}
+
+fn night_candidates(server: &Server) -> Vec<PathBuf> {
+    let settings = crate::chat_settings::ChatSettings::load();
+    let home = ling_airgapped::user_config_file().and_then(|file| Some(file.parent()?.parent()?.parent()?.to_path_buf()));
+    crate::night_phone::repos(&night_dir(server), &settings.night_repos, home.as_deref())
+}
+
+/// Where a phone's `/night add` may queue (night_phone.rs).
+async fn night_repos(State(server): State<Arc<Server>>) -> Response {
+    let repos: Vec<serde_json::Value> = night_candidates(&server)
+        .iter()
+        .map(|repo| json!({ "path": repo.to_string_lossy(), "name": crate::night_phone::name_of(repo) }))
+        .collect();
+    json_response(StatusCode::OK, json!({ "repos": repos }))
+}
+
+/// Queues a phone's task (`{repo, task}`), in one of the repositories `/api/night/repos` names,
+/// with `ling night add` there; the bridge asked the owner first.
+async fn night_add(State(server): State<Arc<Server>>, body: axum::body::Bytes) -> Response {
+    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send {repo, task}" }));
+    };
+    let (Some(repo), Some(task)) = (request.get("repo").and_then(|v| v.as_str()), request.get("task").and_then(|v| v.as_str())) else {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send {repo, task}" }));
+    };
+    if task.trim().is_empty() {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "the task is empty" }));
+    }
+    let repo = PathBuf::from(repo);
+    if !night_candidates(&server).contains(&repo) {
+        return json_response(StatusCode::FORBIDDEN, json!({ "error": "not a repository Night Shift may queue in from the phone" }));
+    }
+    let (queued, lines) = crate::night_phone::add(&server.config.launch, &repo, task).await;
+    json_response(StatusCode::OK, json!({ "queued": queued, "lines": lines }))
+}
+
+/// The queue, for `/night status` on a phone.
+async fn night_status(State(server): State<Arc<Server>>) -> Response {
+    json_response(StatusCode::OK, json!({ "tasks": crate::night_phone::status(&night_dir(&server), std::time::SystemTime::now()) }))
+}
+
+/// The morning reports after `?after=<name>`, and the newest name, for the bridges' push.
+async fn night_reports(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let after = query.get("after").map(String::as_str).unwrap_or_default();
+    let (reports, latest) = crate::night_phone::reports_after(&night_dir(&server), after);
+    json_response(StatusCode::OK, json!({ "reports": reports, "latest": latest }))
 }
 
 /// The air-gap level without a session: `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of
