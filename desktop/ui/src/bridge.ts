@@ -316,6 +316,8 @@ export const night = {
 };
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
+/** Saves a thread's export where the user chooses (desktop app); the path, or null when cancelled. */
+export const saveText = (name: string, text: string) => send<string | null>({ type: "dialog/save-text", name, text });
 
 /** A project's knowledge files (desktop app only: `ling web` has no main process to keep them). */
 export interface KnowledgeFile {
