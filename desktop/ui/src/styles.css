@@ -913,3 +913,8 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .starting-project { color: var(--muted); }
 .project.server-project h2 .menu-anchor { margin-left: auto; display: inline-flex; }
 .project.server-project h2 .menu-anchor .project-action { margin-left: 0; }
+
+/* Export the thread (exportthread.ts): its options and the exact text it saves. */
+.dialog.export-dialog { width: min(760px, calc(100vw - 32px)); }
+.export-options { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+.export-preview { max-height: 45vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--code-bg); border-radius: var(--radius-sm); padding: 10px 12px; font-family: var(--font-code); font-size: 12.5px; }
