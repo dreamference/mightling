@@ -112,7 +112,8 @@ fn slash(text: &str, dir: &Path) -> Option<Enter> {
         "reload-skills" => say(vec!["Skills are read when a session starts; start a new session to read them again.".to_string()]),
         "effort" => say(vec!["Alt+, lowers the reasoning effort and Alt+. raises it.".to_string()]),
         _ if NOT_IN_THE_MODE.contains(&name) => say(vec![format!("/{name} is not part of the compatibility mode.")]),
-        _ => None,
+        // A custom command (.claude/commands) or a skill, typed the way Claude Code types them.
+        _ => crate::compat_commands::expand_prompt(line, dir).map(Enter::Run),
     }
 }
 
