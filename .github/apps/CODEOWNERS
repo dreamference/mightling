@@ -132,6 +132,7 @@
 /scripts/swe_bench_*                            @dreamference/benchmarks
 /scripts/cave_mode_bench/                       @dreamference/benchmarks
 /scripts/ask_evals/                             @dreamference/benchmarks
+/scripts/industry_evals/                        @dreamference/benchmarks
 /scripts/context_budget_*                       @dreamference/benchmarks
 /scripts/turn_end_compaction_*                  @dreamference/benchmarks
 /docs/dev/swe-bench/                            @dreamference/benchmarks
