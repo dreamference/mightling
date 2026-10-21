@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FILE_CAP, IMAGE_CAP, cleanFileName, composePrompt, folderOf, isFolder, linkThread, newFolder, writeUpload } from "./ask";
+import { FILE_CAP, IMAGE_CAP, INCOGNITO_MARK, cleanFileName, composePrompt, folderOf, forgetIncognito, isFolder, linkThread, markIncognito, newFolder, sweepIncognito, writeUpload } from "./ask";
 import type { ForView } from "./api";
 import { samePath } from "./platform";
 import { AppServer } from "./server";
@@ -169,5 +169,47 @@ describe("an Ask thread in the app", () => {
     } finally {
       server.stop();
     }
+  });
+});
+
+describe("incognito questions (DESKTOP_PARITY_CLAUDE §4.3)", () => {
+  const question = (root: string, id: string) => {
+    const folder = newFolder(root);
+    linkThread(root, id, folder);
+    fs.writeFileSync(path.join(folder, "notes.md"), "a file the agent wrote\n");
+    return folder;
+  };
+
+  it("deletes a marked question's folder, files and link, and nothing else", () => {
+    const root = path.join(scratch("incognito"), "ask");
+    const secret = question(root, "t-secret");
+    const kept = question(root, "t-kept");
+    expect(markIncognito(root, "t-secret")).toBe(secret);
+    expect(fs.existsSync(path.join(secret, INCOGNITO_MARK))).toBe(true);
+    // A question that is not marked is never deleted this way.
+    expect(() => forgetIncognito(root, "t-kept")).toThrow(/not incognito/);
+    expect(forgetIncognito(root, "t-secret")).toBe(true);
+    expect(fs.existsSync(secret)).toBe(false);
+    expect(fs.existsSync(path.join(root, "t-secret"))).toBe(false);
+    expect(() => fs.lstatSync(path.join(root, "t-secret"))).toThrow();
+    expect(fs.readFileSync(path.join(kept, "notes.md"), "utf8")).toContain("agent");
+    expect(folderOf(root, "t-kept")).toBe(kept);
+    // Nothing left: nothing to do; a thread id that could leave the root is refused.
+    expect(forgetIncognito(root, "t-secret")).toBe(false);
+    expect(() => forgetIncognito(root, "../x")).toThrow(/not a thread id/);
+    expect(() => markIncognito(root, "t-unknown")).toThrow(/only an Ask question/);
+  });
+
+  it("sweeps what a closed or crashed app left, keeping every other question", () => {
+    const root = path.join(scratch("sweep"), "ask");
+    const left = question(root, "t-left");
+    const kept = question(root, "t-kept");
+    markIncognito(root, "t-left");
+    expect(sweepIncognito(root)).toBe(1);
+    expect(fs.existsSync(left)).toBe(false);
+    expect(() => fs.lstatSync(path.join(root, "t-left"))).toThrow();
+    expect(folderOf(root, "t-kept")).toBe(kept);
+    expect(sweepIncognito(root)).toBe(0);
+    expect(sweepIncognito(path.join(root, "missing"))).toBe(0);
   });
 });
