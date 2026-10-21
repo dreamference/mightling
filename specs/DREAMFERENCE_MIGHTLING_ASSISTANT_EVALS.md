@@ -465,13 +465,13 @@ The owner asked for three more: Terminal-Bench, Aider Polyglot and IFEval. Each 
 |---|---|---|
 | Nightly slot (D2, off until switched on) | `ask-evals` | ≈ 1 h |
 | Weekly assistant-evals night (D3) | LCB + mixed threads, MMLU-ProX lite, SimpleQA Verified, AbstentionBench, CAVEWOMAN, BrowseComp-Plus subset, **IFEval + IFBench** | ≈ 10–15 h |
-| **Fortnightly coding night (new, D8)** | **Aider Polyglot** (all 225) and **Terminal-Bench 2.1's 30-task subset** | ≈ 7–11 h |
+| **Fortnightly coding night (D8, decided; on a new DGX once paired)** | **Aider Polyglot** (all 225) and **Terminal-Bench 2.1's 30-task subset** | ≈ 7–11 h |
 | Monthly, or at a model, recipe or adapter change | Terminal-Bench 2.1 in full; later 4.0's subset | ≈ 10–15 h |
 
-**Two new decisions for the owner:**
+**The owner's decisions (2026-10-21):**
 
-- **D7. Terminal-Bench offline or online.** Proposed: offline, like every other night (pre-baked verifier, internal network), with the tasks that need the internet listed and scored apart.
-- **D8. The fortnightly coding night**, replacing a SWE-bench night.
+- **D7, offline.** Terminal-Bench runs offline like every other night: the verifier is pre-baked and the network is internal. The tasks that need the internet are listed and scored apart.
+- **D8, yes.** A fortnightly coding night (Aider Polyglot plus Terminal-Bench 2.1's 30-task subset) replaces one SWE-bench night. **It runs on a new DGX once one is paired**, so it takes no night from the GB10's SWE-bench schedule. Until then it runs here.
 
 ### 10.5 Phases for the three
 
