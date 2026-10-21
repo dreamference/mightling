@@ -59,6 +59,18 @@ export function moveToSection(sections: Section[], thread: string, sectionId: st
   }));
 }
 
+/** How long a thread name may be (the TUI's /rename and the side chat's names keep to it). */
+export const NAME_MAX = 120;
+
+/**
+ * What the rename box starts with: the title the sidebar shows, its name or else its first
+ * question, never a placeholder such as "(new thread)" and never empty for a titled thread (the
+ * vendor's app 26.917: titles stay intact in the Rename dialog).
+ */
+export function renameStart(thread: Pick<Thread, "name" | "preview">): string {
+  return (thread.name || thread.preview || "").replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
+}
+
 /** The link that opens a thread in the app (`ling://threads/<id>`, §2.20). */
 export function threadLink(id: string): string {
   return `ling://threads/${encodeURIComponent(id)}`;

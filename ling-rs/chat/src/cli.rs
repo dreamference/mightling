@@ -214,7 +214,11 @@ async fn serve(environment: &Environment) -> i32 {
         let options = telegram::Options {
             topics: chat_flag(&text, "telegram_topics").unwrap_or(defaults.topics),
             rich: chat_flag(&text, "telegram_rich").unwrap_or(defaults.rich),
+            mini_app_url: ling_web_server::telegram_app::mini_app_url(&text),
         };
+        if options.mini_app_url.is_none() && text.contains("telegram_mini_app_url") {
+            eprintln!("ling chat: Telegram: `telegram_mini_app_url` is not a plain https:// address; no app is offered.");
+        }
         match telegram::start(api, dir.clone(), inbound_tx.clone(), out_rx, options).await {
             Ok(username) => eprintln!("ling chat: Telegram: answering as @{username}"),
             Err(err) if err.description.contains("Unauthorized") => {

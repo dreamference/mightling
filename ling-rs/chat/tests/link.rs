@@ -126,6 +126,7 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
         state_dir: state_dir.clone(),
         port,
         lan_names: Vec::new(),
+        public_names: Vec::new(),
     };
     let mut app_server = fake_app_server(&config.socket).await;
     let server = Server::new(config).unwrap();
@@ -222,6 +223,7 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
         state_dir: state_dir.clone(),
         port,
         lan_names: Vec::new(),
+        public_names: Vec::new(),
     };
     let server = Server::new(config).unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();

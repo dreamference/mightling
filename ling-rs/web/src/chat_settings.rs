@@ -8,6 +8,7 @@
 //! answer_seconds = 180         # an answer's time, then the agent is told to answer now; 0: no limit
 //! tool_calls = 25              # an answer's tool calls, the same; 0: no limit
 //! command_seconds = 60         # one command's time in a chat session, the same; 0: no limit
+//! telegram_mini_app_url = "https://…"  # ling web over HTTPS on your own network, as Telegram's app (telegram_app.rs)
 //! ```
 //!
 //! `ling chat` reads the file itself; the Signal bridge, whose system account cannot read the home
