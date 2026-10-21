@@ -711,6 +711,11 @@ async fn run_inner(user_args: &[String]) -> anyhow::Result<i32> {
         eprintln!("print mode needs a prompt: ling --compat claude -p \"…\", or pipe it in.");
         return Ok(2);
     };
+    // A custom command or a skill typed as `/name args`, as at Claude Code's prompt (compat_commands.rs).
+    let prompt = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::compat_commands::expand_prompt(&prompt, &cwd))
+        .unwrap_or(prompt);
     // The model server, found once here and handed to the child, and the model it serves.
     let host = crate::node::resolve_host(false).await?;
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).no_proxy().build()?;
