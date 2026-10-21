@@ -91,6 +91,8 @@ export type FromView =
   | { type: "prefs/write"; values: Record<string, unknown> }
   /** Quick Entry's shortcut: on or off, registered or why not (quick.ts), for Settings › General. */
   | { type: "quick/status" }
+  /** A link in an answer, opened in the system's browser after the page asked (links.ts); refused at /airgapped on. */
+  | { type: "open/url"; url: string; thread: string | null }
   | { type: "window/minimize" }
   | { type: "window/maximize" }
   | { type: "window/close" }

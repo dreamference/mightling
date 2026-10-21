@@ -49,6 +49,7 @@ import { ReviewPane } from "./ReviewPane";
 import { FileTree } from "./FileTree";
 import { FileView } from "./FileView";
 import { ArtifactView } from "./ArtifactView";
+import { LinkDialog } from "./LinkDialog";
 import { artifactKind, createdArtifacts } from "./artifacts";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
@@ -137,6 +138,8 @@ export function App() {
   const [profiles, setProfiles] = useState<PermissionProfileSummary[]>([]);
   const [profile, setProfile] = useState(":workspace");
   const [airgap, setAirgap] = useState<bridge.Airgapped | null>(null);
+  /** A web address clicked in an answer, waiting for the user's yes (LinkDialog.tsx). */
+  const [linkAsked, setLinkAsked] = useState<{ url: string; thread: string | null; airgappedOn: boolean } | null>(null);
   const [newCwd, setNewCwd] = useState("");
   // The folder named, the notice asking for it goes (it stayed until a restart).
   useEffect(() => {
@@ -1783,6 +1786,26 @@ export function App() {
       document.removeEventListener("keydown", open);
     };
   }, [notice]);
+  // A web address in an answer (markdown.ts `webLink`): the dialog shows it in full before anything opens.
+  useEffect(() => {
+    const ask = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Enter") return;
+      const url = (event.target as Element | null)?.closest?.(".web-link")?.getAttribute("data-url");
+      if (!url) return;
+      event.preventDefault();
+      // The level as it is now, for the thread in front (the TUI's /airgapped may have changed it).
+      const thread = selectedRef.current;
+      bridge.airgapped(thread)
+        .then((level) => setLinkAsked({ url, thread, airgappedOn: level.level === "on" }))
+        .catch(() => setLinkAsked({ url, thread, airgappedOn: true }));
+    };
+    document.addEventListener("click", ask);
+    document.addEventListener("keydown", ask);
+    return () => {
+      document.removeEventListener("click", ask);
+      document.removeEventListener("keydown", ask);
+    };
+  }, []);
 
   if (state.server !== "ready") {
     return <StartupScreen state={state.server} stderr={state.stderr} protocolErrors={state.protocolErrors} notices={state.notices} onRetry={connect} />;
@@ -1849,7 +1872,7 @@ export function App() {
   );
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
-  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen;
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null;
   const title = selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? "New question" : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
@@ -2200,6 +2223,14 @@ export function App() {
             )
           )}
         />
+      ) : null}
+      {linkAsked ? (
+        <LinkDialog url={linkAsked.url} airgappedOn={linkAsked.airgappedOn} notice={notice} onClose={() => setLinkAsked(null)}
+          onOpen={() => {
+            const { url, thread } = linkAsked;
+            setLinkAsked(null);
+            bridge.openWebLink(url, thread).catch((error: unknown) => notice(`The link was not opened: ${error instanceof Error ? error.message : String(error)}`));
+          }} />
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice}

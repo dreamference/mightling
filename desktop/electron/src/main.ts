@@ -17,6 +17,7 @@ import { airgapped, setDefault } from "./airgapped";
 import { cavemodeSet, cavemodeStatus } from "./cavemode";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
+import { webUrl } from "./links";
 import { codexHome, findLing } from "./bridge";
 import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
@@ -482,6 +483,14 @@ export async function main(options: MainOptions): Promise<void> {
         const root = await git.checkRoot(message.root);
         await offline(message.thread, "a push");
         return git.push(root, Boolean(message.force));
+      }
+      case "open/url": {
+        // A link in an answer, after the page has shown its full address and the user said open.
+        const url = webUrl(message.url);
+        if (!url) throw new Error("only a web address (http or https) opens in the browser");
+        await offline(message.thread ?? null, "opening a link");
+        await shell.openExternal(url);
+        return url;
       }
       case "git/pull-request": {
         const root = await git.checkRoot(message.root);
