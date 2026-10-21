@@ -406,11 +406,6 @@ export async function base64(file: Blob): Promise<string> {
 }
 
 /**
- * Writes an attachment into an Ask thread's scratch folder, and resolves with where it landed: in
- * a browser through `ling web`'s `/api/upload` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1), in the
- * app through its main process, which applies the same checks (desktop/electron/src/ask.ts).
- */
-/**
  * An incognito question (DESKTOP_PARITY_CLAUDE §4.3), the desktop app's only: its folder marked when
  * it starts, and deleted, with every file in it, when the question is left.
  */
@@ -418,6 +413,9 @@ export const incognito = {
   available: () => host() === "electron",
   mark: (thread: string) => send<null>({ type: "ask/incognito", thread }),
   forget: (thread: string) => send<boolean>({ type: "ask/forget", thread }),
+};
+
+/**
  * Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4), the desktop app's only: the copies the
  * main process keeps while Settings › Memories has it on.
  */
@@ -428,6 +426,11 @@ export const recall = {
   prune: (keep: string[]) => send<number>({ type: "recall/prune", keep }),
 };
 
+/**
+ * Writes an attachment into an Ask thread's scratch folder, and resolves with where it landed: in
+ * a browser through `ling web`'s `/api/upload` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1), in the
+ * app through its main process, which applies the same checks (desktop/electron/src/ask.ts).
+ */
 export async function upload(thread: string, file: Blob & { name?: string }, kind: "image" | "file", name?: string): Promise<Uploaded> {
   const fileName = name ?? file.name ?? "attachment";
   if (host() === "electron") {
