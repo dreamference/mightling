@@ -20,6 +20,11 @@ import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 
 /** An attachment shown above the text: an Ask file still to upload, or a Work image by its path. */
+/** A queued message as its row shows it: the words, other inputs by kind. */
+function queuedText(item: QueuedSubmission): string {
+  return item.input.map((input) => (input.type === "text" ? input.text : `[${input.type}]`)).join(" ");
+}
+
 export interface ComposerAttachment {
   id: number;
   name: string;
@@ -56,6 +61,9 @@ export interface ComposerProps {
   queue: QueuedSubmission[];
   onSteerQueued: (item: QueuedSubmission) => void;
   onDropQueued: (item: QueuedSubmission) => void;
+  /** A queued message's words changed, or the message moved up or down (DESKTOP_PARITY §4.5 item 22). */
+  onEditQueued: (item: QueuedSubmission, text: string) => void;
+  onMoveQueued: (item: QueuedSubmission, by: -1 | 1) => void;
   approvalOpen: boolean;
   onApprovalKey: (key: "approve" | "decline") => void;
   onSend: (text: string, mode: "default" | "steer" | "queue") => void;
@@ -87,6 +95,8 @@ export function Composer(props: ComposerProps) {
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   const [entries, setEntries] = useState<MenuEntry[]>([]);
   const [highlight, setHighlight] = useState(0);
+  /** The queued message being edited, and its words so far. */
+  const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
   const lastEscape = useRef(0);
   const { draft, setDraft, root, context, skills, searchFiles } = props;
 
@@ -243,10 +253,31 @@ export function Composer(props: ComposerProps) {
     <footer className="composer">
       {props.queue.length > 0 ? (
         <div className="queue" aria-label="Queued follow-ups">
-          {props.queue.map((item) => (
+          {props.queue.map((item, index) => (
             <div key={item.id} className="queued">
               <Icon name="clock" size={14} />
-              <span className="queued-text">{item.input.map((input) => (input.type === "text" ? input.text : `[${input.type}]`)).join(" ")}</span>
+              {editingQueued?.id === item.id ? (
+                <input className="queued-edit" value={editingQueued.text} aria-label="The queued message" autoFocus
+                  onChange={(event) => setEditingQueued({ id: item.id, text: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      props.onEditQueued(item, editingQueued.text);
+                      setEditingQueued(null);
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setEditingQueued(null);
+                    }
+                  }}
+                  onBlur={() => setEditingQueued(null)} />
+              ) : (
+                <span className="queued-text">{queuedText(item)}</span>
+              )}
+              <button className="icon" aria-label="Edit the queued message" title="Edit (Enter keeps it, Esc leaves it as it was)" onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setEditingQueued(editingQueued?.id === item.id ? null : { id: item.id, text: item.input.filter((input) => input.type === "text").map((input) => (input.type === "text" ? input.text : "")).join("\n") })}><Icon name="pencil" size={13} /></button>
+              <button className="icon" aria-label="Move up" title="Earlier in the queue" disabled={index === 0} onClick={() => props.onMoveQueued(item, -1)}><Icon name="arrowUp" size={13} /></button>
+              <button className="icon" aria-label="Move down" title="Later in the queue" disabled={index === props.queue.length - 1} onClick={() => props.onMoveQueued(item, 1)}><Icon name="arrowDown" size={13} /></button>
               <button className="link-button" onClick={() => props.onSteerQueued(item)} title="Send it into the running turn now">steer now</button>
               <button className="icon" aria-label="Remove from the queue" onClick={() => props.onDropQueued(item)}><Icon name="x" size={14} /></button>
             </div>

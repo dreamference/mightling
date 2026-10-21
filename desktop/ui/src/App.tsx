@@ -73,7 +73,7 @@ import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./Worktr
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
 import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
-import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
+import { commitMessage, dropQueued, forkAt, forkThread, listQueue, movedQueue, reorderQueued, sendMessage, steerQueued, takeBack, updateQueued, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
 
@@ -1554,6 +1554,24 @@ export function App() {
   };
 
   /** Esc Esc or /edit: the last message comes back into the composer, and its turn is undone. */
+  /**
+   * A new thread from an earlier point (DESKTOP_PARITY §4.5 item 22): through this turn (Fork from
+   * here), or before it with its message in the new thread's composer (Edit in a new thread). The
+   * thread shown is left as it is; an incognito one is never copied.
+   */
+  const forkFrom = async (turn: TurnView, where: "through" | "before") => {
+    if (!selected || selected.thread.ephemeral) return;
+    try {
+      const words = turn.items.flatMap((item) => (item.type === "userMessage" ? item.content.flatMap((input) => (input.type === "text" ? [input.text] : [])) : [])).join("\n");
+      const thread = await forkAt(client, selected.thread.id, turn.id, where, modelChoice ?? servedModel);
+      dispatch({ type: "opened", thread });
+      refreshQueue(thread.id);
+      if (where === "before" && words.trim()) setDraftFor(draftKeyOf(view, thread.id), words);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
   const editPrevious = async () => {
     if (!selected) return;
     try {
@@ -2189,6 +2207,7 @@ export function App() {
           ) : null}
           {selected ? selected.turns.map((turn, index) => (
             <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1} commandOutput={prefs.commandOutput}
+              onFork={selected.thread.ephemeral ? null : (where) => void forkFrom(turn, where)}
               onRevert={() => void revertTurn(turn).catch(notice)}
               onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
           )) : view === "ask" ? (
@@ -2233,6 +2252,11 @@ export function App() {
             queue={queue}
             onSteerQueued={(item) => selected && steerQueued(client, selected.thread.id, selected.activeTurnId, item).then(() => refreshQueue(selected.thread.id)).catch(notice)}
             onDropQueued={(item) => selected && dropQueued(client, selected.thread.id, item).then(() => refreshQueue(selected.thread.id)).catch(notice)}
+            onEditQueued={(item, text) => selected && updateQueued(client, selected.thread.id, item, text).then(() => refreshQueue(selected.thread.id)).catch(notice)}
+            onMoveQueued={(item, by) => {
+              const order = selected ? movedQueue(queue.map((entry) => entry.id), item.id, by) : null;
+              if (selected && order) reorderQueued(client, selected.thread.id, order).then(() => refreshQueue(selected.thread.id)).catch(notice);
+            }}
             approvalOpen={threadRequests.length > 0} onApprovalKey={(key) => void answerByKey(key)}
             onSend={(text, mode) => void send(text, mode)} onStop={stop} onEditPrevious={() => void editPrevious()}
             onCommand={(command) => void runCommand(command)}
@@ -2449,7 +2473,7 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
   );
 }
 
-function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; commandOutput: Prefs["commandOutput"] }) {
+function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; commandOutput: Prefs["commandOutput"] }) {
   const { turn } = props;
   return (
     <section className={`turn turn-${turn.status}`}>
@@ -2462,10 +2486,12 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
           <Diff text={turn.diff} />
         </details>
       ) : null}
-      {turn.status !== "inProgress" && props.last ? (
-        <span className="turn-actions">
-          <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button>
-          {props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Take this message back to edit it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
+      {turn.status !== "inProgress" && (props.last || props.onFork) ? (
+        <span className={`turn-actions${props.last ? "" : " earlier"}`}>
+          {props.last ? <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button> : null}
+          {props.last && props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Take this message back to edit it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
+          {props.onFork ? <button className="icon fork-here" onClick={() => props.onFork?.("through")} title="A new thread with this conversation up to here; this one stays as it is"><Icon name="gitFork" size={14} />Fork from here</button> : null}
+          {props.onFork ? <button className="icon edit-in-new" onClick={() => props.onFork?.("before")} title="A new thread with the conversation before this message, the message in its composer to change; this one stays as it is"><Icon name="squarePen" size={14} />Edit in a new thread</button> : null}
         </span>
       ) : null}
     </section>

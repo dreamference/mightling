@@ -194,13 +194,29 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       answer({ queuedSubmission: item });
       return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
     }
+    case "thread/queue/update": {
+      const item = (queues[p.threadId] || []).find((q) => q.id === p.queuedSubmissionId);
+      if (item) item.input = p.input;
+      answer({ queuedSubmission: item || null });
+      return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
+    }
+    case "thread/queue/reorder": {
+      const byId = Object.fromEntries((queues[p.threadId] || []).map((q) => [q.id, q]));
+      queues[p.threadId] = p.queuedSubmissionIds.map((id) => byId[id]).filter(Boolean);
+      answer({});
+      return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
+    }
     case "thread/queue/delete":
       queues[p.threadId] = (queues[p.threadId] || []).filter((q) => q.id !== p.queuedSubmissionId);
       answer({});
       return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
     case "thread/fork": {
       const source = threads.find((t) => t.id === p.threadId);
-      const copy = { ...source, id: source.id + "-fork", name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
+      // Through a turn (lastTurnId) or before one (beforeTurnId): the turns cut there.
+      const turns = source.turns || [];
+      const at = turns.findIndex((t) => t.id === (p.lastTurnId || p.beforeTurnId));
+      const cut = at < 0 ? turns : p.lastTurnId ? turns.slice(0, at + 1) : turns.slice(0, at);
+      const copy = { ...source, turns: cut, id: source.id + "-fork" + (p.lastTurnId || p.beforeTurnId ? "-" + next++ : ""), name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
       threads.push(copy);
       return answer({ thread: copy, model: "qwen3.8-27b", modelProvider: "local", cwd: copy.cwd });
     }
@@ -251,6 +267,9 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
             ? "NVFP4 is described on [NVIDIA's developer blog](https://developer.nvidia.com/blog/nvfp4/) [1].\\n\\n[1] https://developer.nvidia.com/blog/nvfp4/"
             : "Done: the retry counter is in fetcher/client.py." };
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: answerItem } });
+          // Kept, as ling keeps it, so a thread opened again (or forked) has its turns.
+          const kept = threads.find((t) => t.id === p.threadId);
+          if (kept) kept.turns = [...(kept.turns || []), { id, status: "completed", error: null, items: [{ type: "userMessage", id: "u" + id, content: p.input || [] }, answerItem] }];
           // As ling sends it: the completed turn lists the answer alone, not what the turn streamed.
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
         }, 300);
