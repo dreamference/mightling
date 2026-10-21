@@ -23,13 +23,16 @@ NO_CLIENT_NETWORK: Final[str] = "192.0.2.0/24"
 class GateHold:
     """Closes the gate for a `with` block; `gate` is the `ModelGate` class (a seam for tests)."""
 
-    def __init__(self, label: str, total: int, gate: Any = None) -> None:
+    def __init__(self, label: str, total: int, gate: Any = None, networks: list[str] | None = None) -> None:
         if gate is None:
             from dreamference.vllm_server.model_gate import ModelGate  # noqa: PLC0415
 
             gate = ModelGate
         self.gate = gate
         self.label = label
+        # The suite's own runs come in on loopback past the gate; a runner whose agents sit in a
+        # container (Polyglot, Terminal-Bench) names that container network's subnet instead.
+        self.networks = networks or [NO_CLIENT_NETWORK]
         self.total = total
         self.done = 0
         self.id = secrets.token_hex(8)
@@ -44,7 +47,7 @@ class GateHold:
             "run": "ask-evals",
             "id": self.id,
             "label": self.label,
-            "networks": [NO_CLIENT_NETWORK],
+            "networks": self.networks,
             "heartbeat": time.time(),
             "pid": os.getpid(),
             "started": self.started,
