@@ -48,6 +48,7 @@ COMPARED_FIELDS: Final[tuple] = (
     "restart_after_compactions",
     "apply_patch",
     "exec_tool",
+    "compat",
     "drop_old_outputs",
     "loop_guard",
     "output_budget",
@@ -68,6 +69,7 @@ MISSING_FIELDS: Final[dict] = {
     "restart_after_compactions": 0,
     "apply_patch": "auto",
     "exec_tool": "auto",
+    "compat": "auto",
     "drop_old_outputs": False,
     "loop_guard": False,
     "output_budget": 0,
@@ -676,6 +678,23 @@ class SweBenchReport:
         return cls.tool_line("Apply patch", "freeform on ling-engine, none on SGLang", summary)
 
     @classmethod
+    def compat_line(cls, manifest: dict[str, Any]) -> str:
+        """The compatibility-mode arm's line (MIGHTLING_LING_CLAUDE §11).
+
+        Args:
+            manifest: The run's manifest; one written before the arm existed reads as `auto`.
+
+        Returns:
+            str: The line.
+        """
+        mode = str(manifest.get("compat") or MISSING_FIELDS["compat"])
+        meaning = {
+            "claude": "every session in the compatibility mode (Claude Code's files, hooks and rules read)",
+            "off": "the compatibility mode off in every session",
+        }.get(mode, "the launcher's own setting (off in a container)")
+        return f"Compatibility       {mode}: {meaning}"
+
+    @classmethod
     def exec_tool_line(cls, summary: dict[str, Any]) -> str:
         """One line: the form Code Mode's `exec` was offered in and how much the agent called it."""
         return cls.tool_line(
@@ -881,6 +900,7 @@ class SweBenchReport:
         lines.append(cls.restart_line(summary["restart"]))
         lines.append(cls.apply_patch_line(summary["apply_patch"]))
         lines.append(cls.exec_tool_line(summary["exec_tool"]))
+        lines.append(cls.compat_line(manifest))
         lines.append(cls.drop_compaction_line(summary["compaction"]))
         lines.append(cls.loop_guard_line(summary["loop_guard"]))
         lines += cls.hooks_lines(summary["hooks"])
