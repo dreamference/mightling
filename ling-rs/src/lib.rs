@@ -47,6 +47,7 @@ pub mod compat_agents;
 pub mod compat_commands;
 pub mod compat_hooks;
 pub mod compat_mcp;
+pub mod compat_permissions;
 pub mod compat_memory;
 pub mod compat_keys;
 pub mod compat_print;
@@ -597,7 +598,30 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // agents of .claude/agents as Codex roles (compat_agents.rs), for this session only.
     let args = if compat_mode.mode == compat::Mode::Claude {
         let dir = code_index::session_dir(&user_args);
-        let (args, hook_plan) = compat_hooks::prepare(args, &codex_home, &dir);
+        // Claude Code's --permission-mode, --allowedTools and --disallowedTools in the TUI, and
+        // the rules print mode hands its child (compat_permissions.rs).
+        let (args, mut extra_rules) = if tui {
+            let (args, mode, rules) = compat_permissions::take_tui_flags(args);
+            let args = match mode.as_deref().map(|mode| compat_permissions::tui_mode(mode, configured.level == airgapped::Level::On)) {
+                Some(Err(reason)) => bail!("{reason}"),
+                Some(Ok((options, line))) => {
+                    if let Some(line) = line {
+                        notice::say(&line);
+                    }
+                    let mut args = args.into_iter();
+                    let mut out: Vec<OsString> = args.next().into_iter().collect();
+                    out.extend(options.into_iter().map(OsString::from));
+                    out.extend(args);
+                    out
+                }
+                None => args,
+            };
+            (args, rules)
+        } else {
+            (args, Vec::new())
+        };
+        extra_rules.extend(compat_permissions::rules_from_env());
+        let (args, hook_plan) = compat_hooks::prepare(args, &codex_home, &dir, &extra_rules);
         let (args, agents, agent_notes) = compat_agents::prepare(args, &codex_home, &dir);
         // The approved MCP servers of .mcp.json and ~/.claude.json (compat_mcp.rs).
         let (args, mcp_plan) = compat_mcp::prepare(args, &codex_home, &dir, configured.level == airgapped::Level::On);
