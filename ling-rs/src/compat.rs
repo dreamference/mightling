@@ -343,7 +343,7 @@ fn doctor_lines(resolved: &Resolved) -> Vec<String> {
     lines.push(String::new());
     lines.extend(hooks_and_agents_lines(&dir, codex_home.as_deref()));
     lines.push(String::new());
-    lines.push("Not built yet: permission rules from the settings files, .claude/commands, .claude/rules and \
+    lines.push("Not built yet: permission rules from the settings files, .claude/rules and \
                 the discrete tool roster (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
         .to_string());
     lines
@@ -391,6 +391,15 @@ fn hooks_and_agents_lines(dir: &Path, codex_home: Option<&Path>) -> Vec<String> 
         lines.push(format!("  {}{} ({})", agent.name, if agent.read_only { ", read-only" } else { "" }, agent.source.display()));
     }
     lines.extend(notes.iter().map(|note| format!("  ⚠️  {note}")));
+    let commands = crate::compat_commands::discover(&root, home.as_deref(), trusted);
+    lines.push(format!("Commands: {} from .claude/commands and the Claude Code skills, typed as /name{}", commands.len(), if commands.is_empty() { "." } else { ":" }));
+    for command in commands.values() {
+        let shadowed = crate::compat_commands::CODEX_COMMANDS.contains(&command.name.as_str());
+        lines.push(format!("  /{}{} ({})", command.name, if shadowed { " (Codex's own /command of that name wins)" } else { "" }, command.source.display()));
+    }
+    if !trusted && root.join(".claude").join("commands").is_dir() {
+        lines.push("  ⚠️  this repository's .claude/commands wait until the folder is trusted".to_string());
+    }
     lines
 }
 
