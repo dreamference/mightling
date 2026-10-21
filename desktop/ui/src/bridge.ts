@@ -418,6 +418,14 @@ export const incognito = {
   available: () => host() === "electron",
   mark: (thread: string) => send<null>({ type: "ask/incognito", thread }),
   forget: (thread: string) => send<boolean>({ type: "ask/forget", thread }),
+ * Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4), the desktop app's only: the copies the
+ * main process keeps while Settings › Memories has it on.
+ */
+export const recall = {
+  available: () => host() === "electron",
+  index: () => send<Record<string, number>>({ type: "recall/index" }),
+  write: (thread: string, updatedAt: number, markdown: string) => send<null>({ type: "recall/write", thread, updatedAt, markdown }),
+  prune: (keep: string[]) => send<number>({ type: "recall/prune", keep }),
 };
 
 export async function upload(thread: string, file: Blob & { name?: string }, kind: "image" | "file", name?: string): Promise<Uploaded> {

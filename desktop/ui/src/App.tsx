@@ -34,6 +34,7 @@ import type { PermissionProfileSummary } from "./protocol/v2/PermissionProfileSu
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
+import type { Turn } from "./protocol/v2/Turn";
 import type { ThreadGoal } from "./protocol/v2/ThreadGoal";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
@@ -51,6 +52,7 @@ import { FileView } from "./FileView";
 import { ArtifactView } from "./ArtifactView";
 import { LinkDialog } from "./LinkDialog";
 import { artifactKind, createdArtifacts } from "./artifacts";
+import { keptQuestions, transcript } from "./recall";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
 import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type WorkspaceTab } from "./tabs";
@@ -431,9 +433,62 @@ export function App() {
         const paths = made.get(notification.params.turn.id) ?? [];
         made.delete(notification.params.turn.id);
         if (paths.length && notification.params.threadId === selectedRef.current && prefsRef.current.openArtifacts) openFileRef.current(paths[0]);
+        // Earlier questions (§4.4): the question's copy brought up to date.
+        if (prefsRef.current.recallQuestions) setTimeout(() => void recallRef.current(threadId).catch(() => {}), 500);
+      } else if ((notification.method === "thread/archived" || notification.method === "thread/unarchived") && prefsRef.current.recallQuestions) {
+        // An archived question's copy goes, an unarchived one's comes back.
+        setTimeout(() => void recallRef.current().catch(() => {}), 500);
       }
     });
   }, [listen]);
+
+  // Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4): while Settings › Memories has it on,
+  // each Ask question of the user's (never an incognito one) is kept as the Markdown the agent's
+  // earlier-questions skill searches: all of them when the app starts or it is turned on, one after
+  // each finished turn; archived questions are dropped. The main process keeps the files.
+  const recallRef = useRef<(only?: string) => Promise<void>>(async () => {});
+  recallRef.current = async (only?: string) => {
+    if (!bridge.recall.available() || !prefsRef.current.recallQuestions || stateRef.current.server !== "ready") return;
+    const isAsk = (thread: Thread) => isAskThread(thread, askRoot);
+    const turnsOf = async (threadId: string): Promise<Turn[]> => {
+      const turns: Turn[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 50; page++) {
+        const answer: { data: Turn[]; nextCursor: string | null } = (await client.request("thread/turns/list", { threadId, cursor, limit: 100 })) as { data: Turn[]; nextCursor: string | null };
+        turns.push(...answer.data);
+        cursor = answer.nextCursor;
+        if (!cursor) break;
+      }
+      // Newest first from the server: the copy reads oldest first.
+      return turns.reverse();
+    };
+    if (only) {
+      const thread = stateRef.current.threads[only]?.thread;
+      if (thread && keptQuestions([thread], isAsk).length) await bridge.recall.write(thread.id, thread.updatedAt, transcript(thread, await turnsOf(thread.id)));
+      return;
+    }
+    const listed: Thread[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 20; page++) {
+      const answer = (await client.request("thread/list", { limit: 200, cursor })) as { data: Thread[]; nextCursor: string | null };
+      listed.push(...answer.data);
+      cursor = answer.nextCursor;
+      if (!cursor) break;
+    }
+    const kept = keptQuestions(listed, isAsk);
+    const known = await bridge.recall.index();
+    for (const thread of kept) {
+      if (known[thread.id] === thread.updatedAt) continue;
+      await bridge.recall.write(thread.id, thread.updatedAt, transcript(thread, await turnsOf(thread.id)));
+    }
+    await bridge.recall.prune(kept.map((thread) => thread.id));
+  };
+  useEffect(() => {
+    if (!prefs.recallQuestions || state.server !== "ready" || !bridge.recall.available()) return;
+    // After the main process has put the skill in place (prefs/write), and after the start's own requests.
+    const timer = setTimeout(() => void recallRef.current().catch(notice), 1500);
+    return () => clearTimeout(timer);
+  }, [prefs.recallQuestions, state.server, notice]);
 
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
