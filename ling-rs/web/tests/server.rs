@@ -892,12 +892,28 @@ async fn a_recording_is_passed_to_speech_to_text_and_the_text_comes_back() {
     let sent = service.await.unwrap();
     assert!(sent.starts_with("POST /v1/audio/transcriptions HTTP/1.1\r\n"), "{sent}");
     assert!(sent.contains("Systran/faster-whisper-small") && sent.contains("filename=\"speech.webm\"") && sent.contains("OPUSDATA"));
-    // Not audio, empty, or no service: refused, each saying why.
+    // Not audio, or empty: refused, each saying why.
     assert_eq!(call(&server, post("text/plain", b"hi")).await.0, StatusCode::UNSUPPORTED_MEDIA_TYPE);
     assert_eq!(call(&server, post("audio/webm", b"")).await.0, StatusCode::BAD_REQUEST);
-    let (status, _, body) = call(&server, post("audio/webm", b"again")).await;
+    // No service: an address held bound but not listening, so it refuses and no other test can
+    // take it. The stand-in's own port, once dropped, was sometimes bound by a test running beside
+    // this one, which then answered (about 1 run in 4 of the whole file).
+    let closed = tokio::net::TcpSocket::new_v4().unwrap();
+    closed.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let mut settings = config(&scratch.dir, 3100, Vec::new());
+    settings.speech_addr = closed.local_addr().unwrap().to_string();
+    let no_service = Server::new(settings).unwrap();
+    let cookie = sign_in(&no_service).await;
+    let again = request("POST", "/api/transcribe")
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::CONTENT_TYPE, "audio/webm")
+        .body(Body::from(&b"again"[..]))
+        .unwrap();
+    let (status, _, body) = call(&no_service, again).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert!(body.contains("ling-admin voice start"));
+    drop(closed);
 }
 
 /// Telegram's launch parameters for `user`, signed with `token` the way Telegram signs them.

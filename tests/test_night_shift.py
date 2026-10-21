@@ -652,8 +652,10 @@ def test_the_desktop_apps_bundled_ling_is_recognised_as_an_app_server(tmp_path):
     installed = str(tmp_path / "installed" / "ling")
     busy = tmp_path / "home" / "night" / "busy"
     busy.mkdir(parents=True)
-    server = subprocess.Popen([str(bundled), "-c", "sleep 30", "app-server"])
-    other = subprocess.Popen([str(bundled), "-c", "sleep 30", "exec"])
+    # Two commands, so bash cannot exec `sleep` in its own place: with one it often did, and the
+    # process's exe became /usr/bin/sleep, so the copy was never seen (about 1 run in 3).
+    server = subprocess.Popen([str(bundled), "-c", "sleep 30; true", "app-server"])
+    other = subprocess.Popen([str(bundled), "-c", "sleep 30; true", "exec"])
     try:
         for process in (server, other):
             (busy / str(process.pid)).write_text('{"threads": ["t1"]}')
