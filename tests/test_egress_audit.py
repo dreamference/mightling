@@ -918,7 +918,9 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "r
     call = json.loads(calls.read_text())
     prompt = "Reply with exactly: pong"
     assert call["args"][9:] == ["/opt/ling", "--compat", "claude", "-p", prompt, "--output-format", "json"]
-    for name in ("CLAUDE.md", ".claude/settings.json", ".claude/commands/hello.md", ".claude/agents/reviewer.md"):
+    fixture = ("CLAUDE.md", ".claude/settings.json", ".claude/commands/hello.md",
+               ".claude/agents/reviewer.md", ".mcp.json")
+    for name in fixture:
         assert name in call["files"], call["files"]
 
 
@@ -932,3 +934,24 @@ def test_a_print_session_replied_only_with_a_successful_result(tmp_path):
     path.write_text("not json\n", encoding="utf-8")
     assert not CompatPrintSession.replied(path)
     assert not CompatPrintSession.replied(tmp_path / "missing")
+
+
+def test_the_compatibility_audit_trusts_its_repository_and_approves_only_the_stdio_server(tmp_path, monkeypatch):
+    """The fixture's stdio server is approved as a user would approve it, the remote one never."""
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs.get("cwd"), kwargs.get("env", {}).get("CODEX_HOME")))
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    command = ["strace", "-o", "t", "/opt/ling", "--compat", "claude", "-p", "x"]
+    CompatPrintSession.approve_fixture_server(command, repo, {"CODEX_HOME": str(home)})
+    assert calls == [(["/opt/ling", "compat", "mcp", "approve", "fixture"], repo, str(home))]
+    assert "trust_level = \"trusted\"" in (home / "config.toml").read_text(encoding="utf-8")
+    CompatPrintSession.approve_fixture_server(["/opt/ling", "exec", "x"], repo, {"CODEX_HOME": str(home)})
+    assert len(calls) == 1, "only the compatibility session approves anything"
