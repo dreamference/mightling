@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { occurrences } from "./find";
 import type { Thread } from "./protocol/v2/Thread";
-import { moveToSection, nextAttention, pinnedFirst, recentThreads, stepThread, threadLink, toggled } from "./threads";
+import { NAME_MAX, moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, stepThread, threadLink, toggled } from "./threads";
 
 const thread = (id: string, updatedAt: number) => ({ id, updatedAt, recencyAt: null } as unknown as Thread);
 
@@ -37,6 +37,15 @@ describe("threads in the sidebar", () => {
   it("find every match, whatever its case", () => {
     expect(occurrences("Retry, retry, RETRY", "retry")).toEqual([0, 7, 14]);
     expect(occurrences("abc", "")).toEqual([]);
+  });
+});
+
+describe("the rename box", () => {
+  it("starts with the title the sidebar shows, never a placeholder", () => {
+    expect(renameStart({ name: "Hello script", preview: "Create hello.sh" })).toBe("Hello script");
+    expect(renameStart({ name: null, preview: "Create hello.sh\nand run it" })).toBe("Create hello.sh and run it");
+    expect(renameStart({ name: null, preview: "" })).toBe("");
+    expect(renameStart({ name: null, preview: "x".repeat(500) })).toHaveLength(NAME_MAX);
   });
 });
 
