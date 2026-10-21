@@ -39,6 +39,9 @@ is not a preview.
   [chat]
   new_thread_after_hours = 4
   ```
+- **Voice messages** are transcribed on the node by the local speech-to-text service
+  (`ling-admin voice start`; nothing goes to a cloud service). The bridge first says what it heard
+  ("Heard: …"), then answers; if it could not transcribe the message, it says so.
 - **Quick follow-ups join the answer.** A message sent while Mightling is answering is added to
   the question it is working on, not answered separately afterwards. `/stop` still stops the answer.
 - **Answers are bounded.** An answer that takes over three minutes, uses over 25 tool calls or

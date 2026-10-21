@@ -114,7 +114,7 @@ async fn a_paired_users_message_reaches_the_hub_and_strangers_get_one_reply_a_da
 /// A photo (its largest size) and its caption reach the hub as media; what the bridge does not
 /// take is named, never silently lost, and never sent on as an empty message.
 #[tokio::test]
-async fn a_photo_reaches_the_hub_with_its_caption_and_a_voice_message_is_named_as_dropped() {
+async fn a_photo_and_a_voice_message_reach_the_hub_and_a_sticker_is_named_as_dropped() {
     let answer: Answer = Arc::new(|method, body, _| match method {
         "getFile" => ok(json!({ "file_id": body["file_id"], "file_path": format!("photos/{}.jpg", body["file_id"].as_str().unwrap()) })),
         _ => ok(json!({ "message_id": 1 })),
@@ -133,9 +133,16 @@ async fn a_photo_reaches_the_hub_with_its_caption_and_a_voice_message_is_named_a
     assert_eq!(attachments[0].bytes, b"BYTES:photos/big.jpg");
     assert!(dropped.is_empty());
     assert_eq!(stand.bodies("getFile"), vec![json!({ "file_id": "big" })]);
-    let voice = json!({ "update_id": 8, "message": { "message_id": 9, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" }, "voice": { "file_id": "v", "duration": 3 } } });
+    // A voice message is downloaded to be transcribed on the node (MOONSHOT §3.4).
+    let voice = json!({ "update_id": 8, "message": { "message_id": 9, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" }, "voice": { "file_id": "v", "duration": 3, "mime_type": "audio/ogg" } } });
     poller.handle(&voice).await;
-    assert_eq!(inbound.try_recv().unwrap(), Inbound::Media { chat: "telegram:111".into(), text: String::new(), attachments: vec![], dropped: vec!["a voice message".into()] });
+    let Inbound::Media { attachments, dropped, .. } = inbound.try_recv().unwrap() else { panic!("not media") };
+    assert_eq!((attachments[0].name.as_str(), attachments[0].mime.as_str(), attachments[0].bytes.as_slice()), ("voice.ogg", "audio/ogg", b"BYTES:photos/v.jpg".as_slice()));
+    assert!(dropped.is_empty());
+    // A sticker is named as dropped.
+    let sticker = json!({ "update_id": 10, "message": { "message_id": 11, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" }, "sticker": { "file_id": "s" } } });
+    poller.handle(&sticker).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Media { chat: "telegram:111".into(), text: String::new(), attachments: vec![], dropped: vec!["a sticker".into()] });
 }
 
 #[tokio::test]
