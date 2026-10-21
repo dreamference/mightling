@@ -163,9 +163,19 @@ pub fn attachments_of(message: &Value) -> (Vec<Attached>, Vec<String>) {
             mime: document.get("mime_type").and_then(Value::as_str).unwrap_or("application/octet-stream").to_string(),
         });
     }
+    // A voice message or an audio file is transcribed on this machine (MOONSHOT §3.4).
+    for (field, name) in [("voice", "voice.ogg"), ("audio", "audio")] {
+        if let Some(recording) = message.get(field)
+            && let Some(id) = recording.get("file_id").and_then(Value::as_str)
+        {
+            files.push(Attached {
+                file_id: id.to_string(),
+                name: recording.get("file_name").and_then(Value::as_str).unwrap_or(name).to_string(),
+                mime: recording.get("mime_type").and_then(Value::as_str).unwrap_or("audio/ogg").to_string(),
+            });
+        }
+    }
     let dropped = [
-        ("voice", "a voice message"),
-        ("audio", "an audio file"),
         ("video", "a video"),
         ("video_note", "a video message"),
         ("animation", "an animation"),
@@ -208,17 +218,46 @@ fn topic_of_message(message: &Value) -> Option<i64> {
     (message.get("is_topic_message") == Some(&Value::Bool(true))).then(|| message.get("message_thread_id").and_then(Value::as_i64)).flatten()
 }
 
-/// The commands Telegram offers on `/`.
-pub fn commands() -> Value {
-    json!({ "commands": [
-        { "command": "new", "description": "Start a new thread" },
-        { "command": "stop", "description": "Stop the running answer" },
-        { "command": "threads", "description": "Your recent threads" },
-        { "command": "use", "description": "Continue a thread: /use <n>" },
-        { "command": "status", "description": "What Mightling is doing" },
-        { "command": "cavemode", "description": "How terse answers are: /cavemode full" },
-        { "command": "help", "description": "What this bot does" },
-    ]})
+/// The commands Telegram offers on `/`; `/app` only when a Mini App address is set.
+pub fn commands(mini_app: bool) -> Value {
+    let mut list = vec![
+        json!({ "command": "new", "description": "Start a new thread" }),
+        json!({ "command": "stop", "description": "Stop the running answer" }),
+        json!({ "command": "threads", "description": "Your recent threads" }),
+        json!({ "command": "use", "description": "Continue a thread: /use <n>" }),
+        json!({ "command": "status", "description": "What Mightling is doing" }),
+        json!({ "command": "cavemode", "description": "How terse answers are: /cavemode full" }),
+    ];
+    if mini_app {
+        list.push(json!({ "command": "app", "description": "Open Mightling's app, over your own network" }));
+    }
+    list.push(json!({ "command": "help", "description": "What this bot does" }));
+    json!({ "commands": list })
+}
+
+/// The menu button of a paired user's chat (MOONSHOT §15): Mightling's own page, which the phone
+/// loads straight from the user's HTTPS front (never through Telegram), or Telegram's default.
+pub fn menu_button(chat_id: i64, mini_app_url: Option<&str>) -> Value {
+    let button = match mini_app_url {
+        Some(url) => json!({ "type": "web_app", "text": "Mightling", "web_app": { "url": url } }),
+        None => json!({ "type": "default" }),
+    };
+    json!({ "chat_id": chat_id, "menu_button": button })
+}
+
+/// The answer to `/app`: a button that opens the Mini App, or how to set one up.
+pub fn app_reply(chat_id: i64, mini_app_url: Option<&str>) -> Value {
+    match mini_app_url {
+        Some(url) => json!({
+            "chat_id": chat_id,
+            "text": "Opens Mightling's own app, loaded from your machine over your own network: what you type in it never passes through Telegram.",
+            "reply_markup": { "inline_keyboard": [[{ "text": "Open Mightling", "web_app": { "url": url } }]] },
+        }),
+        None => json!({
+            "chat_id": chat_id,
+            "text": "No app is set up. On the machine, serve `ling web` over HTTPS on your own network (for example `tailscale serve`) and set `telegram_mini_app_url` in the [chat] table of ~/.config/dreamference/config.toml.",
+        }),
+    }
 }
 
 /// Reads updates and hands paired users' messages to the hub.
@@ -229,6 +268,8 @@ pub struct Poller {
     /// Whether the bot has topics in private chats (`getMe`'s `has_topics_enabled`) and the user's
     /// `[chat] telegram_topics` does not turn them off: then `/new` makes a topic (MOONSHOT §3.1).
     pub topics: bool,
+    /// The Mini App's address (`[chat] telegram_mini_app_url`), when set.
+    pub mini_app_url: Option<String>,
     wrong_codes: u32,
     unpaired_replied: HashMap<i64, Instant>,
 }
@@ -238,7 +279,7 @@ pub const NEW_TOPIC_NAME: &str = "New thread";
 
 impl Poller {
     pub fn new(api: TelegramApi, dir: PathBuf, hub: mpsc::UnboundedSender<Inbound>) -> Poller {
-        Poller { api, dir, hub, topics: false, wrong_codes: 0, unpaired_replied: HashMap::new() }
+        Poller { api, dir, hub, topics: false, mini_app_url: None, wrong_codes: 0, unpaired_replied: HashMap::new() }
     }
 
     /// `/new` in a chat with topics: a topic, named when its first message arrives, and one line in
@@ -325,6 +366,10 @@ impl Poller {
                 if self.topics && command == "/new" && self.new_topic(chat_id).await {
                     return;
                 }
+                if command == "/app" {
+                    let _ = self.api.call("sendMessage", app_reply(chat_id, self.mini_app_url.as_deref())).await;
+                    return;
+                }
                 let _ = self.hub.send(Inbound::Text { chat: key, text });
                 return;
             }
@@ -375,6 +420,9 @@ impl Poller {
                 return;
             }
             self.reply(chat_id, &format!("Paired. Send a message to start.\n\n{HELP}")).await;
+            if self.mini_app_url.is_some() {
+                let _ = self.api.call("setChatMenuButton", menu_button(chat_id, self.mini_app_url.as_deref())).await;
+            }
         } else {
             self.wrong_codes += 1;
             if self.wrong_codes >= PAIRING_ATTEMPTS {
@@ -625,28 +673,37 @@ pub async fn start(
 ) -> Result<String, ApiError> {
     let me = api.call("getMe", json!({})).await;
     if me.is_ok() {
-        let _ = api.call("setMyCommands", commands()).await;
+        let _ = api.call("setMyCommands", commands(options.mini_app_url.is_some())).await;
+        // Each paired user's menu button follows the setting, so removing the address removes it.
+        let users = TelegramConfig::load(&dir).map(|config| config.users).unwrap_or_default();
+        for user in users {
+            let _ = api.call("setChatMenuButton", menu_button(user, options.mini_app_url.as_deref())).await;
+        }
     }
     let has_topics = me.as_ref().is_ok_and(|me| me.get("has_topics_enabled") == Some(&Value::Bool(true)));
     tokio::spawn(Renderer::styled(api.clone(), Style { rich: options.rich }).run(outbound));
     let mut poller = Poller::new(api, dir, hub);
     poller.topics = has_topics && options.topics;
+    poller.mini_app_url = options.mini_app_url.clone();
     tokio::spawn(poller.run());
     me.map(|me| me.get("username").and_then(Value::as_str).unwrap_or_default().to_string())
 }
 
-/// The user's choices for Telegram (`[chat] telegram_topics`, `telegram_rich`).
-#[derive(Clone, Copy, Debug)]
+/// The user's choices for Telegram (`[chat] telegram_topics`, `telegram_rich`,
+/// `telegram_mini_app_url`).
+#[derive(Clone, Debug)]
 pub struct Options {
     /// Topics as threads, when the bot has them (default on).
     pub topics: bool,
     /// Rich messages (default off until Telegram's Phase 0 check on the owner's clients).
     pub rich: bool,
+    /// The Mini App's `https://` address on the user's own network (MOONSHOT §15); none: no app.
+    pub mini_app_url: Option<String>,
 }
 
 impl Default for Options {
     fn default() -> Options {
-        Options { topics: true, rich: false }
+        Options { topics: true, rich: false, mini_app_url: None }
     }
 }
 

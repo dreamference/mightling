@@ -1,7 +1,7 @@
 //! What a phone message with attachments becomes (specs/DREAMFERENCE_MIGHTLING_CHAT.md §16).
 //!
 //! An adapter downloads what the user sent ([`Media`]) and names what it could not take
-//! (`dropped`: a voice message, a sticker). The hub uploads each file into the thread's Ask folder
+//! (`dropped`: a video, a sticker). The hub uploads each file into the thread's Ask folder
 //! through `ling web`, which reads an image's text and says whether the served model takes images;
 //! [`compose`] then builds the turn: an image as an image when the model takes images, its text as
 //! `[Screenshot text: …]` whenever any was read, another file named. With nothing the model could
@@ -24,6 +24,21 @@ impl Media {
     pub fn is_image(&self) -> bool {
         self.mime.starts_with("image/")
     }
+
+    /// A voice message or another recording: transcribed, not uploaded (MOONSHOT §3.4).
+    pub fn is_audio(&self) -> bool {
+        self.mime.starts_with("audio/")
+    }
+}
+
+/// The line that shows what was heard, so a mis-hearing is seen before the answer is trusted.
+pub fn heard_notice(text: &str) -> String {
+    format!("Heard: {text}")
+}
+
+/// The line when a recording could not be turned into text.
+pub fn not_heard_notice(reason: &str) -> String {
+    format!("I couldn't transcribe the voice message ({reason}); type the question instead.")
 }
 
 /// An attachment after its upload: its name, whether it is an image, and what `ling web` said.
@@ -37,13 +52,13 @@ pub struct Uploaded {
 pub const UNREADABLE_IMAGE: &str = "I can't read this image; describe it or paste the text.";
 pub const NOT_RECEIVED: &str = "I couldn't receive that attachment; send it again, or describe it or paste the text.";
 
-/// The line saying what an adapter dropped, e.g. "I can't take a voice message here, so it was
+/// The line saying what an adapter dropped, e.g. "I can't take a sticker here, so it was
 /// dropped; send text, an image or a file."
 pub fn dropped_notice(dropped: &[String]) -> Option<String> {
     if dropped.is_empty() {
         return None;
     }
-    Some(format!("I can't take {} here, so it was dropped; send text, an image or a file.", dropped.join(" or ")))
+    Some(format!("I can't take {} here, so it was dropped; send text, a voice message, an image or a file.", dropped.join(" or ")))
 }
 
 /// The turn's input (`turn/start`'s `input`), or the bridge's own reply when nothing is usable.
@@ -137,8 +152,8 @@ mod tests {
         assert_eq!(compose("", &[pdf]).unwrap()[0]["text"], json!("[Attached and saved in this thread's folder: r.pdf]"));
         assert_eq!(dropped_notice(&[]), None);
         assert_eq!(
-            dropped_notice(&["a voice message".to_string()]).unwrap(),
-            "I can't take a voice message here, so it was dropped; send text, an image or a file."
+            dropped_notice(&["a sticker".to_string()]).unwrap(),
+            "I can't take a sticker here, so it was dropped; send text, a voice message, an image or a file."
         );
     }
 }

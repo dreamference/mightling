@@ -173,6 +173,37 @@ describe("a scripted session", () => {
     expect(run([{ type: "opened", thread: thread("t8", "/w", 5000) }], opened).threads.t8.thread.updatedAt).toBe(5000);
   });
 
+  it("reopening a running thread keeps what streamed after the server's snapshot, and a revert still removes turns", () => {
+    const streamed = run([
+      note("turn/started", { threadId: "t1", turn: { id: "u6", status: "inProgress", items: [], error: null } }),
+      note("item/completed", { threadId: "t1", turnId: "u6", item: { type: "userMessage", id: "q6", content: [{ type: "text", text: "Go on", text_elements: [] }] } }),
+      note("item/started", { threadId: "t1", turnId: "u6", item: { type: "agentMessage", id: "a6", text: "", phase: null, memoryCitation: null, delivery: null, questions: null } }),
+      note("item/agentMessage/delta", { threadId: "t1", turnId: "u6", itemId: "a6", delta: "Half of the answer, and more" }),
+      note("item/started", { threadId: "t1", turnId: "u6", item: { type: "commandExecution", id: "c6", command: "ls", aggregatedOutput: null, status: "inProgress", exitCode: null } }),
+      note("turn/diff/updated", { threadId: "t1", turnId: "u6", diff: "diff --git a/x b/x\n" }),
+    ], opened);
+    // The snapshot was taken before the command started and while the answer was shorter.
+    const snapshotTurn = { id: "u6", status: "inProgress", error: null, items: [
+      { type: "userMessage", id: "q6", content: [{ type: "text", text: "Go on", text_elements: [] }] },
+      { type: "agentMessage", id: "a6", text: "Half of", phase: null, memoryCitation: null, delivery: null, questions: null },
+    ] };
+    const reopened = run([{ type: "opened", thread: thread("t1", "/home/u/project", 100, { turns: [snapshotTurn] as unknown as Thread["turns"] }) }], streamed);
+    const turn = reopened.threads.t1.turns.find((entry) => entry.id === "u6")!;
+    expect(turn.items.map((item) => item.id)).toEqual(["q6", "a6", "c6"]);
+    const answer = turn.items[1];
+    expect(answer.type === "agentMessage" && answer.text).toBe("Half of the answer, and more");
+    expect(turn.diff).toBe("diff --git a/x b/x\n");
+    expect(reopened.threads.t1.activeTurnId).toBe("u6");
+    // A snapshot from before the turn started still shows the running turn.
+    const early = run([{ type: "opened", thread: thread("t1", "/home/u/project", 100) }], streamed);
+    expect(early.threads.t1.turns.map((entry) => entry.id)).toEqual(["u6"]);
+    // A finished turn the server no longer lists (reverted) is gone.
+    const finished = run([note("turn/completed", { threadId: "t1", turn: { id: "u6", status: "completed", items: [], error: null } })], streamed);
+    const reverted = run([{ type: "opened", thread: thread("t1", "/home/u/project", 100) }], finished);
+    expect(reverted.threads.t1.turns).toEqual([]);
+    expect(reverted.threads.t1.activeTurnId).toBeNull();
+  });
+
   it("an answer to an open without a thread leaves the window as it was", () => {
     const listed = run([{ type: "threads", list: [thread("t9", "/w", 1000)] }, { type: "select", threadId: "t9" }], opened);
     const after = run([{ type: "opened", thread: undefined as unknown as Thread }], listed);

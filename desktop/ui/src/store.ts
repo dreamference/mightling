@@ -105,8 +105,33 @@ function emptyView(thread: Thread): ThreadView {
   return { thread, turns: thread.turns.map(turnView), activeTurnId: activeTurn(thread.turns), usage: null };
 }
 
-function activeTurn(turns: Turn[]): string | null {
+function activeTurn(turns: Pick<Turn, "id" | "status">[]): string | null {
   return turns.find((turn) => turn.status === "inProgress")?.id ?? null;
+}
+
+/**
+ * A snapshot of a thread (`thread/resume`, `thread/read`) laid over what this window already holds
+ * of it. A snapshot taken while the thread runs can miss what streamed meanwhile, so each turn
+ * keeps the items only the window has, the longer text of an answer both have, and its diff, and
+ * a running turn the snapshot does not list yet stays. Turns the snapshot dropped otherwise (a
+ * revert) go. The vendor's app fixed the same losses (26.928, 26.930: earlier answers stay visible,
+ * reopening a running chat loses nothing).
+ */
+export function mergedTurns(snapshot: TurnView[], known: TurnView[]): TurnView[] {
+  const knownById = new Map(known.map((turn) => [turn.id, turn]));
+  const merged = snapshot.map((turn) => {
+    const before = knownById.get(turn.id);
+    if (!before) return turn;
+    const listed = new Set(turn.items.map((item) => item.id));
+    const items = turn.items.map((item) => {
+      const streamed = before.items.find((existing) => existing.id === item.id);
+      const longer = streamed?.type === "agentMessage" && item.type === "agentMessage" && streamed.text.length > item.text.length;
+      return longer ? streamed : item;
+    });
+    return { ...turn, items: [...items, ...before.items.filter((item) => !listed.has(item.id))], diff: turn.diff ?? before.diff };
+  });
+  const inSnapshot = new Set(snapshot.map((turn) => turn.id));
+  return [...merged, ...known.filter((turn) => turn.status === "inProgress" && !inSnapshot.has(turn.id))];
 }
 
 /** Applies `change` to the thread `threadId`, if this window knows it. */
@@ -342,10 +367,13 @@ export function reduce(state: WorkState, action: Action): WorkState {
       // An answer without a thread changes nothing: thrown here, in the render, it would empty the
       // whole window (the e2e stand-in once answered thread/resume so, and the composer vanished).
       if (!action.thread?.id) return state;
-      const thread = withLastActivity(action.thread, state.threads[action.thread.id]?.thread ?? null);
+      const known = state.threads[action.thread.id];
+      const thread = withLastActivity(action.thread, known?.thread ?? null);
+      const fresh = emptyView(thread);
+      const turns = known ? mergedTurns(fresh.turns, known.turns) : fresh.turns;
       return {
         ...state,
-        threads: { ...state.threads, [thread.id]: { ...emptyView(thread), usage: state.threads[thread.id]?.usage ?? null } },
+        threads: { ...state.threads, [thread.id]: { ...fresh, turns, activeTurnId: activeTurn(turns), usage: known?.usage ?? null } },
         selected: thread.id,
       };
     }
