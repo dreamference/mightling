@@ -742,9 +742,6 @@ html.pet-page body { margin: 0; }
 @keyframes pet-blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
 
 /* Suggested prompts (Phase 3 item 7): chips above the composer. */
-.suggestions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: var(--column); margin: 0 auto; padding: 0 20px 6px; width: 100%; box-sizing: border-box; }
-.suggestion { border: 1px solid var(--line); background: var(--raised); border-radius: var(--radius-pill); padding: 4px 12px; font-size: 13px; color: var(--text); text-align: left; }
-.suggestion:hover { border-color: var(--accent); background: var(--accent-soft); }
 
 /* Skills and tools › Import (Phase 3 item 8). */
 .import-items { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }

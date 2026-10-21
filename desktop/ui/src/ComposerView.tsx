@@ -12,6 +12,7 @@ import {
   type CommandContext, type PromptHistory, type SlashCommand, type Trigger,
 } from "./composer";
 import { Icon } from "./icons";
+import { acceptsPrediction } from "./suggestions";
 import { keyAction, keyLabel, matches, shortcutLabel } from "./keymap";
 import type { FuzzyFileSearchResult } from "./protocol/FuzzyFileSearchResult";
 import type { Model } from "./protocol/v2/Model";
@@ -23,6 +24,8 @@ export interface ComposerAttachment {
   id: number;
   name: string;
   preview: string | null;
+  /** What hovering shows: the start of a long paste. */
+  title?: string;
 }
 
 interface MenuEntry {
@@ -37,6 +40,8 @@ export interface ComposerProps {
   draft: string;
   setDraft: (text: string) => void;
   placeholder: string;
+  /** The predicted next message (DESKTOP_PARITY_CLAUDE §4.6), shown in grey in the empty composer; Tab or → takes it. */
+  prediction?: string | null;
   running: boolean;
   sending: boolean;
   enterBehaviour: "enter" | "ctrlEnter";
@@ -149,6 +154,11 @@ export function Composer(props: ComposerProps) {
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
     const menuOpen = trigger !== null && entries.length > 0;
+    if (!menuOpen && acceptsPrediction(event, draft, props.prediction ?? null)) {
+      event.preventDefault();
+      setDraft(props.prediction as string);
+      return;
+    }
     if (menuOpen) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
@@ -258,7 +268,7 @@ export function Composer(props: ComposerProps) {
         {props.attachments.length > 0 ? (
           <div className="attachments">
             {props.attachments.map((item) => (
-              <span key={item.id} className="attachment">
+              <span key={item.id} className="attachment" title={item.title}>
                 {item.preview ? <img src={item.preview} alt="" /> : null}
                 <span className="attachment-name">{item.name}</span>
                 <button className="icon" aria-label={`Remove ${item.name}`} onClick={() => props.onRemoveAttachment(item.id)}><Icon name="x" size={14} /></button>
@@ -267,7 +277,7 @@ export function Composer(props: ComposerProps) {
           </div>
         ) : null}
         <textarea ref={text} value={draft} rows={3} onPaste={props.onPaste} aria-label="Message"
-          placeholder={props.placeholder}
+          placeholder={props.prediction && !draft ? `${props.prediction}   (Tab to use)` : props.placeholder}
           onChange={(event) => {
             props.history.reset();
             setDraft(event.target.value);

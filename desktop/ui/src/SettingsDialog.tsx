@@ -113,6 +113,7 @@ function General({ prefs, onChange }: SettingsProps) {
         <legend>While the agent works</legend>
         <label><input type="checkbox" checked={prefs.preventSleep} onChange={(event) => onChange({ preventSleep: event.target.checked })} /> Keep the machine from sleeping while a turn runs</label>
         <label><input type="checkbox" checked={prefs.openArtifacts} onChange={(event) => onChange({ openArtifacts: event.target.checked })} /> Open a document, PDF or image the agent creates in a tab beside the thread</label>
+        <label><input type="checkbox" checked={prefs.pasteAsFile} onChange={(event) => onChange({ pasteAsFile: event.target.checked })} /> Make a long paste (2,000 characters or 40 lines) an attachment: a file in Ask, a block after your words in Work</label>
       </fieldset>
       <AnswerLength />
       {bridge.git.available() ? <QuickEntry prefs={prefs} onChange={onChange} /> : null}
@@ -826,10 +827,10 @@ function Suggestions({ prefs, onChange }: SettingsProps) {
   return (
     <>
       <h3>Suggested prompts</h3>
-      <p className="dialog-note">When a turn ends, the served model suggests three follow-ups for the thread; a click puts one in the composer, it is never sent by itself. Each suggestion is one short extra turn on this machine's model, in a read-only thread that is not kept, and only when nothing else is running.</p>
+      <p className="dialog-note">When a turn ends, the served model predicts the message you are most likely to send next. It shows in grey in the empty composer; Tab or → puts it there to edit or send, and typing anything else ignores it. It is never sent by itself. Each prediction is one short extra turn on this machine's model, in a read-only thread that is not kept, and only when nothing else is running.</p>
       <fieldset>
-        <legend>Follow-ups</legend>
-        <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Suggest follow-ups when a turn ends</label>
+        <legend>Next message</legend>
+        <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Predict my next message when a turn ends</label>
       </fieldset>
     </>
   );

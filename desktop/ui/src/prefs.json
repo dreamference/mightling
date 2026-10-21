@@ -96,6 +96,10 @@
       "default": true,
       "type": "boolean"
     },
+    "pasteAsFile": {
+      "default": true,
+      "type": "boolean"
+    },
     "previewSites": {
       "default": {},
       "type": "object"
