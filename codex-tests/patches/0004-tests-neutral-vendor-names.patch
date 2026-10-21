@@ -1,0 +1,44 @@
+diff --git a/codex-rs/tui/src/chatwidget/tests/popups_and_settings.rs b/codex-rs/tui/src/chatwidget/tests/popups_and_settings.rs
+--- a/codex-rs/tui/src/chatwidget/tests/popups_and_settings.rs
++++ b/codex-rs/tui/src/chatwidget/tests/popups_and_settings.rs
+@@ -279,3 +279,3 @@
+         verbose_row,
+-        @"  [-] Verbose Plugin  Available · OpenAI Curated · This description k…"
++        @"  [-] Verbose Plugin  Available · Curated · This description keeps go…"
+     );
+@@ -1250,3 +1250,3 @@
+     let curated_loading_popup =
+-        select_tab_containing(&mut chat, "Loading OpenAI Curated plugins...");
++        select_tab_containing(&mut chat, "Loading Curated plugins...");
+     let workspace_loading_popup = select_tab_containing(&mut chat, "Loading Workspace plugins.");
+@@ -1285,3 +1285,3 @@
+     let remote_curated_empty_popup =
+-        select_tab_containing(&mut remote_chat, "No OpenAI Curated plugins available");
++        select_tab_containing(&mut remote_chat, "No Curated plugins available");
+ 
+@@ -1297,4 +1297,4 @@
+         @r"
+-    OpenAI Curated marketplace.
+-    Loading OpenAI Curated plugins...  This updates when OpenAI Curated plugins finish loading
++    Curated marketplace.
++    Loading Curated plugins...  This updates when Curated plugins finish loading
+ 
+@@ -1309,4 +1309,4 @@
+ 
+-    OpenAI Curated marketplace.
+-    No OpenAI Curated plugins available  No OpenAI Curated plugins available
++    Curated marketplace.
++    No Curated plugins available  No Curated plugins available
+     "
+@@ -1949,4 +1949,4 @@
+     assert!(
+-        popup.contains("OpenAI Curated marketplace."),
+-        "expected OpenAI Curated tab header, got:\n{popup}"
++        popup.contains("Curated marketplace."),
++        "expected Curated tab header, got:\n{popup}"
+     );
+@@ -1954,3 +1954,3 @@
+         popup.contains("Calendar") && !popup.contains("Repo Plugin"),
+-        "expected OpenAI Curated tab to show only official marketplace plugins, got:\n{popup}"
++        "expected Curated tab to show only official marketplace plugins, got:\n{popup}"
+     );
