@@ -16,6 +16,8 @@ Developer notes behind the host-safety rules in `AGENTS.md`. Specs: `specs/DREAM
 
 Host RAM exhaustion and GPU VRAM exhaustion are indistinguishable on GB10; the watchdog exists to make that distinction. Preserve both layers when touching `start_server()`. The SGLang engine runs from the same `docker run` prefix (`_docker_run_prefix`), so the layer is engine-independent.
 
+When ling-engine is the engine (`launch_overrides['engine'] = 'ling'`, not launched by `ling-admin` yet), its footprint includes, besides the weights, the two sessions at full context and the checkpoint store, the prefix KV store's arena (ling-engine BACKLOG 35): one allocation made once at start, `min(--prefix-kv-mb, free device memory - LING_PREFIX_KV_RESERVE_MB)` (4,096 MB and 16 GB by default), off below 512 MB, never grown while serving. The container cap that `_docker_run_prefix` sizes from the memory fraction must count it, and `check_host_safety()` needs nothing new: the arena is decided before the server answers, inside the load the watchdog already covers.
+
 Other memory-safety rules elsewhere: `server start` stops the code index's scopes before its pre-flight ([code-index.md](code-index.md)), the context engine's indexing is bounded because it runs beside a resident model server ([context-engine.md](context-engine.md)), and the diffusion sidecar starts before vLLM when it is switched on ([diffusion.md](diffusion.md)).
 
 ## Wi-Fi power saving, the node's own step
