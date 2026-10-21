@@ -74,6 +74,7 @@ import { nearBottom } from "./follow";
 import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, stepThread, threadLink, toggled, type Section } from "./threads";
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
+import { ExportDialog } from "./ExportDialog";
 import { ProjectDialog } from "./ProjectDialog";
 import { contextItem, contextStamp, isContextText, isRemoved, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
@@ -186,6 +187,8 @@ export function App() {
   const [projectDialog, setProjectDialog] = useState<{ project: Project | null; folder: string | null } | null>(null);
   const [newProject, setNewProject] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
+  /** The thread being exported (exportthread.ts) and the home folder its paths are redacted against. */
+  const [exporting, setExporting] = useState<{ thread: Thread; title: string; home: string | null } | null>(null);
   const draggedHeader = useRef<string | null>(null);
   const loadProjects = useCallback(async () => {
     try {
@@ -2209,6 +2212,7 @@ export function App() {
                 <button role="menuitem" onClick={() => markUnread(thread.id)}>Mark unread</button>
                 {HOST === "electron" ? <button role="menuitem" onClick={() => void bridge.popOut(thread.id).catch(notice)}>Open in a window of its own</button> : null}
                 <button role="menuitem" onClick={() => copyLink(thread.id)}>Copy link</button>
+                <button role="menuitem" onClick={() => void bridge.homeFolder().catch(() => null).then((home) => setExporting({ thread, title: label, home }))}>Export…</button>
                 {view === "work" ? (
                   <>
                     {prefs.sections.map((section) => <button key={section.id} role="menuitem" onClick={() => toSection(thread.id, section.id)}>Move to {section.name}</button>)}
@@ -2625,6 +2629,7 @@ export function App() {
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
           seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
       ) : null}
+      {exporting ? <ExportDialog client={client} thread={exporting.thread} title={exporting.title} home={exporting.home} notice={notice} onClose={() => setExporting(null)} /> : null}
       {projectDialog ? (
         <ProjectDialog client={client} project={projectDialog.project} folder={projectDialog.folder} notice={notice} onClose={() => setProjectDialog(null)}
           onSaved={(saved) => {

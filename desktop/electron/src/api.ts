@@ -129,6 +129,8 @@ export type FromView =
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" }
+  /** A thread's export (desktop/ui/src/exportthread.ts): a save dialog, then the text written there. */
+  | { type: "dialog/save-text"; name: string; text: string }
   /** A project's knowledge files (knowledge.ts), by the project's server id; add opens a file dialog. */
   | { type: "project/knowledge-list"; projectId: string }
   | { type: "project/knowledge-add"; projectId: string }

@@ -416,7 +416,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       return answer({ connectors: [], data: [{ importId: "imp-0", providerId: "mightling_desktop", completedAtMs: Date.now() - 86400000, successes: [{}], failures: [] }] });
     case "thread/turns/list": {
       const found = threads.find((t) => t.id === p.threadId);
-      return answer({ data: found ? [...(found.turns || [])].reverse() : [], nextCursor: null, backwardsCursor: null });
+      const turns = found ? [...(found.turns || [])] : [];
+      return answer({ data: p.sortDirection === "asc" ? turns : turns.reverse(), nextCursor: null, backwardsCursor: null });
     }
     case "fs/readDirectory":
       try {

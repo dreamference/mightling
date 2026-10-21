@@ -942,3 +942,7 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .attention-state { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--muted); white-space: nowrap; }
 .attention-state.waiting { background: var(--accent-soft); color: var(--accent-text); }
 .activity-filters .spacer { flex: 1; }
+/* Export the thread (exportthread.ts): its options and the exact text it saves. */
+.dialog.export-dialog { width: min(760px, calc(100vw - 32px)); }
+.export-options { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+.export-preview { max-height: 45vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--code-bg); border-radius: var(--radius-sm); padding: 10px 12px; font-family: var(--font-code); font-size: 12.5px; }

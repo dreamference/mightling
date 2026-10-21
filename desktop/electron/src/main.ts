@@ -741,6 +741,14 @@ export async function main(options: MainOptions): Promise<void> {
         if (chosen.canceled || chosen.filePaths.length === 0) return knowledge.listKnowledge(home, projectId);
         return knowledge.addKnowledge(home, projectId, chosen.filePaths);
       }
+      case "dialog/save-text": {
+        // Only a file name is suggested (no folder from the page); the user picks where it goes.
+        const name = path.basename(String(message.name)) || "thread.md";
+        const chosen = await dialog.showSaveDialog(own, { title: "Export the thread", defaultPath: path.join(app.getPath("documents"), name) });
+        if (chosen.canceled || !chosen.filePath) return null;
+        await fs.promises.writeFile(chosen.filePath, String(message.text), "utf8");
+        return chosen.filePath;
+      }
       case "dialog/open-folder": {
         const chosen = await dialog.showOpenDialog(own, { title: "Open a project folder", properties: ["openDirectory"] });
         return chosen.canceled ? null : chosen.filePaths[0] ?? null;
