@@ -272,6 +272,33 @@ Work through the queue now, until the window ends.
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing; their requests still pause the run) |
 
+#### `ling-admin night every`
+
+Repeating tasks, queued by each night's run when due.
+
+#### `ling-admin night every add`
+
+Repeat a task in this repository every night or every week.
+
+| Option | Description |
+|---|---|
+| `--daily` | Every night. |
+| `--weekly` | Every week, that day's night. One of: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`. |
+| `--test` | The test command each run uses. |
+| `task` | What to do, in words. |
+
+#### `ling-admin night every list`
+
+The repeating tasks, as JSON lines.
+
+#### `ling-admin night every drop`
+
+Stop repeating a task (what it already queued stays).
+
+| Option | Description |
+|---|---|
+| `id` | The repeating task's id (r...) |
+
 #### `ling-admin night pause`
 
 Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate).
