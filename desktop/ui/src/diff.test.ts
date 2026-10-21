@@ -2,7 +2,7 @@
 // patch; the split view's rows; the comments sent to the composer.
 import { describe, expect, it } from "vitest";
 
-import { commentsMessage, filePatch, fingerprint, hunkPatch, parseDiff, revertQuestion, splitRows, underDirectory } from "./diff";
+import { commentsMessage, editPatch, editable, filePatch, fingerprint, hunkNewText, hunkPatch, parseDiff, revertQuestion, splitRows, underDirectory } from "./diff";
 
 const GIT = `diff --git a/a.txt b/a.txt
 index 1111111..2222222 100644
@@ -120,5 +120,43 @@ describe("Revert's question", () => {
     expect(question).toContain("Changes made by shell commands in these turns are not undone.");
     // The last turn alone: the earlier turns' commands are not its concern.
     expect(revertQuestion([{ diff: null, items: [ran] }, { diff: edit, items: [said("c")] }], 1)).not.toContain("shell");
+  });
+});
+
+describe("an edit in the review pane (item 16)", () => {
+  const diff = [
+    "diff --git a/app.py b/app.py",
+    "index 1111111..2222222 100644",
+    "--- a/app.py",
+    "+++ b/app.py",
+    "@@ -3,3 +3,4 @@ def main():",
+    "     a = 1",
+    "-    b = 2",
+    "+    b = 3",
+    "+    c = 4",
+    "     return a",
+  ].join("\n");
+
+  it("starts from the hunk's lines as the file has them now, and changes only those", () => {
+    const [file] = parseDiff(diff);
+    expect(editable(file, 0)).toBe(true);
+    expect(hunkNewText(file.hunks[0])).toBe("    a = 1\n    b = 3\n    c = 4\n    return a");
+    expect(editPatch(file, 0, "    a = 1\n    b = 30\n    c = 4\n    return a\n")).toBe([
+      "diff --git a/app.py b/app.py", "--- a/app.py", "+++ b/app.py", "@@ -3,4 +3,4 @@",
+      "-    a = 1", "-    b = 3", "-    c = 4", "-    return a",
+      "+    a = 1", "+    b = 30", "+    c = 4", "+    return a",
+    ].join("\n") + "\n");
+    // Nothing changed: no patch.
+    expect(editPatch(file, 0, hunkNewText(file.hunks[0]))).toBeNull();
+    // Everything taken out.
+    expect(editPatch(file, 0, "")?.split("\n")[3]).toBe("@@ -3,4 +2,0 @@");
+  });
+
+  it("is not offered for a deleted file, a binary one, or a hunk that ends without a newline", () => {
+    const [deleted] = parseDiff(["diff --git a/x b/x", "deleted file mode 100644", "--- a/x", "+++ /dev/null", "@@ -1 +0,0 @@", "-gone"].join("\n"));
+    expect(editable(deleted, 0)).toBe(false);
+    const [noNewline] = parseDiff(["diff --git a/y b/y", "--- a/y", "+++ b/y", "@@ -1 +1 @@", "-old", "+new", "\\ No newline at end of file"].join("\n"));
+    expect(editable(noNewline, 0)).toBe(false);
+    expect(editPatch(noNewline, 0, "newer")).toBeNull();
   });
 });
