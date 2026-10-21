@@ -105,7 +105,11 @@ the release says in §17.
   `~` or `/` as a root is refused with an explanation.
 - **One exception (2026-10-21, DESKTOP_PARITY_CLAUDE §4.7):** a desktop project's knowledge folder,
   `$CODEX_HOME/projects/<id>/knowledge`, may be a collection (`project-<id>`), since it holds only the
-  copies a user gave the project to be read; nothing else under `~/.mightling` is indexed.
+  copies a user gave the project to be read; nothing else under `~/.mightling` is indexed (decided by
+  the owner, 2026-10-21). The folder is recognised only exactly (the root resolved, its parent a project
+  id, its grandparent `$CODEX_HOME/projects`), so a sibling such as `projects/<id>` or `sessions`, or a
+  `knowledge` link that resolves into a secret folder, is still refused; a link inside it is skipped,
+  and when links are followed none leads out of it (`collections.rs` and `discover.rs` tests).
 - A folder that is a git repository with a `ling-code` index: source files are left to `ling-code`;
   documents (Markdown, PDF, text) in it are indexed.
 - A per-folder `.lingignore` (gitignore syntax) is honoured for *exclusions only*; it can never
