@@ -635,3 +635,38 @@ def test_the_polyglot_image_is_not_built_during_a_night(tmp_path):
     except SystemExit as error:
         assert "ling-swe-night15" in str(error)
     assert built == []
+
+
+def test_a_partial_run_hands_the_scorer_only_its_rows_and_ifbench_names_are_found(tmp_path):
+    rows = [{"key": 1, "prompt": "p1"}, {"key": 2, "prompt": "p2"}]
+    responses = tmp_path / "responses.jsonl"
+    responses.write_text(
+        "".join(json.dumps({"prompt": r["prompt"], "response": "x"}) + "\n" for r in rows)
+    )
+    seen = {}
+
+    def run(command, cwd, env, capture_output, text, check):
+        data = Path(next(a for a in command if a.startswith("--input_data=")).split("=", 1)[1])
+        seen["rows"] = [json.loads(line) for line in data.read_text().splitlines()]
+        out = Path(next(a for a in command if a.startswith("--output_dir=")).split("=", 1)[1])
+        for kind in ("strict", "loose"):  # IFBench's naming: the responses file's stem first
+            (out / f"responses-eval_results_{kind}.jsonl").write_text(
+                json.dumps({"follow_all_instructions": True, "follow_instruction_list": [True]})
+                + "\n"
+            )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    result = IFEVAL.score(
+        tmp_path, "ifbench", responses, tmp_path / "scored", Path("python"), rows=rows, run=run
+    )
+    assert seen["rows"] == rows
+    assert result["strict"] == {"prompts": 1, "prompt_level": 1.0, "instruction_level": 1.0}
+
+
+def test_setup_downloads_every_nltk_package_both_scorers_load():
+    assert set(SETUP.NLTK_PACKAGES) == {
+        "punkt",
+        "punkt_tab",
+        "stopwords",
+        "averaged_perceptron_tagger_eng",
+    }
