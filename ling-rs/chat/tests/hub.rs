@@ -75,6 +75,12 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                 AgentCommand::Respond { id, result } => agent_log.responses.lock().unwrap().push((id, result)),
                 // `ling web`'s upload: a name with "text" in it has text on it; one with "vision"
                 // goes to a model that takes images; "lost" never arrives.
+                // `ling web`'s speech-to-text: bytes "silence" are refused, anything else heard as is.
+                AgentCommand::Transcribe { media, bytes, reply } => {
+                    agent_log.requests.lock().unwrap().push(("transcribe".to_string(), json!({ "media": media })));
+                    let heard = String::from_utf8_lossy(&bytes).into_owned();
+                    let _ = reply.send(if heard == "silence" { Err("Speech-to-text is not running on this machine".to_string()) } else { Ok(heard) });
+                }
                 AgentCommand::Upload { thread, name, image, bytes: _, reply } => {
                     agent_log.requests.lock().unwrap().push(("upload".to_string(), json!({ "thread": thread, "name": name, "image": image })));
                     let saved = if name.starts_with("lost") {
@@ -488,10 +494,10 @@ async fn a_screenshot_goes_in_as_its_text_and_as_an_image_for_a_model_that_takes
     settle().await;
     let input = &seeing.log.params("turn/start")[0]["input"];
     assert_eq!(input[1], json!({ "type": "localImage", "path": "/ask/th1/vision-text.jpg" }));
-    // A voice message alone: named as dropped, nothing sent to the agent.
-    seeing.inbound.send(Inbound::Media { chat: CHAT.into(), text: String::new(), attachments: vec![], dropped: vec!["a voice message".into()] }).unwrap();
+    // A sticker alone: named as dropped, nothing sent to the agent.
+    seeing.inbound.send(Inbound::Media { chat: CHAT.into(), text: String::new(), attachments: vec![], dropped: vec!["a sticker".into()] }).unwrap();
     let Outbound::Notice { text, .. } = next_settled(&mut seeing.telegram).await else { panic!() };
-    assert!(text.contains("a voice message"), "{text}");
+    assert!(text.contains("a sticker"), "{text}");
 }
 
 
@@ -679,9 +685,16 @@ async fn each_topic_is_its_own_thread_and_is_named_after_its_first_message() {
     assert_eq!(rig.log.params("thread/start").len(), 2);
     assert_eq!(rig.log.params("turn/start")[2]["threadId"], "th1");
     rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    settle().await;
     while rig.telegram.try_recv().is_ok() {}
     rig.inbound.send(text("telegram:7/5", "/threads")).unwrap();
-    let Outbound::Notice { text: list, .. } = next_settled(&mut rig.telegram).await else { panic!() };
+    let list = loop {
+        if let Outbound::Notice { text, .. } = next_settled(&mut rig.telegram).await
+            && text.contains("topic")
+        {
+            break text;
+        }
+    };
     assert!(list.contains("• A song") && list.contains("• Which purifier is quieter? (this topic)") && list.contains("open a topic"), "{list}");
 }
 
@@ -696,5 +709,31 @@ async fn a_forged_approval_nonce_is_ignored() {
     settle().await;
     assert!(rig.log.responses.lock().unwrap().is_empty());
     assert!(rig.telegram.try_recv().is_err(), "not even a reply");
+}
+
+fn voice(chat: &str, caption: &str, heard: &str) -> Inbound {
+    let attachments = vec![ling_chat::attachments::Media { name: "voice.ogg".to_string(), mime: "audio/ogg".to_string(), bytes: heard.as_bytes().to_vec() }];
+    Inbound::Media { chat: chat.to_string(), text: caption.to_string(), attachments, dropped: vec![] }
+}
+
+/// A voice message is transcribed on the node, the text said back ("Heard: …"), and asked
+/// (MOONSHOT §3.4); a failed transcription says so and asks nothing.
+#[tokio::test]
+async fn a_voice_message_is_heard_echoed_and_answered_and_a_failure_is_said() {
+    let mut rig = rig("voice", default_script(), false, |_| {});
+    rig.inbound.send(voice(CHAT, "", "which purifier is quieter")).unwrap();
+    assert_eq!(next_settled(&mut rig.telegram).await, Outbound::Notice { chat: CHAT.into(), text: "Heard: which purifier is quieter".into() });
+    settle().await;
+    assert_eq!(rig.log.params("transcribe")[0]["media"], "audio/ogg");
+    assert_eq!(rig.log.params("turn/start")[0]["input"][0]["text"], "which purifier is quieter");
+    assert!(rig.log.params("upload").is_empty(), "a recording is not uploaded");
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    settle().await;
+    while rig.telegram.try_recv().is_ok() {}
+    rig.inbound.send(voice(CHAT, "", "silence")).unwrap();
+    let Outbound::Notice { text: line, .. } = next_settled(&mut rig.telegram).await else { panic!() };
+    assert!(line.starts_with("I couldn't transcribe the voice message (Speech-to-text is not running"), "{line}");
+    settle().await;
+    assert_eq!(rig.log.params("turn/start").len(), 1, "nothing asked");
 }
 

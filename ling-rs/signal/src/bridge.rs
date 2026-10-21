@@ -76,6 +76,8 @@ pub struct Uploaded {
     pub text: Option<String>,
     /// Whether the served model takes images, as `ling web` reported with the upload.
     pub vision: bool,
+    /// A voice note: what the speech-to-text service heard, or why it could not (§19.5).
+    pub heard: Option<Result<String, String>>,
 }
 
 /// What a message with attachments becomes (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.1).
@@ -708,6 +710,26 @@ impl Bridge {
                     _ => None,
                 };
                 if let Some((text, stopping)) = waiting {
+                    // Voice notes first: their text joins the question, said back so a mis-hearing
+                    // is seen (§19.5); a failure is said, and a voice note alone then asks nothing.
+                    let (recordings, uploads): (Vec<Uploaded>, Vec<Uploaded>) = uploads.into_iter().partition(|u| u.heard.is_some());
+                    let mut text = text;
+                    for recording in &recordings {
+                        match &recording.heard {
+                            Some(Ok(heard)) => {
+                                actions.push(Action::Notice(format!("Heard: {heard}")));
+                                join(&mut text, heard);
+                            }
+                            Some(Err(reason)) => actions.push(Action::Notice(format!("I couldn't transcribe the voice message ({reason}); type the question instead."))),
+                            None => {}
+                        }
+                    }
+                    if !recordings.is_empty() && uploads.is_empty() && text.trim().is_empty() {
+                        self.phase = Phase::Idle;
+                        actions.push(Action::Typing(false));
+                        actions.extend(self.next(now));
+                        return actions;
+                    }
                     match compose(&text, &uploads) {
                         _ if stopping => {
                             self.phase = Phase::Idle;
@@ -1243,7 +1265,30 @@ mod tests {
     }
 
     fn shot(path: Option<&str>, text: Option<&str>, vision: bool) -> Uploaded {
-        Uploaded { name: "shot.jpg".to_string(), image: true, path: path.map(str::to_string), text: text.map(str::to_string), vision }
+        Uploaded { name: "shot.jpg".to_string(), image: true, path: path.map(str::to_string), text: text.map(str::to_string), vision, heard: None }
+    }
+
+    fn voice_note(heard: Result<&str, &str>) -> Uploaded {
+        Uploaded { name: "voice.m4a".to_string(), image: false, path: None, text: None, vision: false, heard: Some(heard.map(str::to_string).map_err(str::to_string)) }
+    }
+
+    /// A voice note is transcribed on the node, said back ("Heard: …") and asked (§19.5); a
+    /// failure is said and, alone, asks nothing.
+    #[test]
+    fn a_voice_note_is_heard_echoed_and_asked_and_a_failure_is_said() {
+        let mut b = connected();
+        let note = Attachment { id: "v.m4a".to_string(), content_type: "audio/aac".to_string(), filename: None, size: None };
+        b.on_message(OwnerMessage { text: String::new(), attachments: vec![note.clone()], timestamp: 1 }, 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        let done = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads: vec![voice_note(Ok("which one is quieter"))] }, 0);
+        assert_eq!(notices(&done), vec!["Heard: which one is quieter"]);
+        assert!(done.contains(&Action::StartTurn { thread: "t1".to_string(), text: "which one is quieter".to_string(), images: vec![] }), "{done:?}");
+        b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 0);
+        b.on_message(OwnerMessage { text: String::new(), attachments: vec![note], timestamp: 2 }, 0);
+        let failed = b.on_agent(AgentEvent::Uploaded { thread: "t1".to_string(), uploads: vec![voice_note(Err("Speech-to-text is not running"))] }, 0);
+        assert!(notices(&failed)[0].starts_with("I couldn't transcribe the voice message (Speech-to-text is not running)"), "{failed:?}");
+        assert!(!failed.iter().any(|a| matches!(a, Action::StartTurn { .. })));
+        assert!(!b.is_busy());
     }
 
     /// The morning of 2026-10-20: a screenshot alone in Note to Self reached the model as an empty
@@ -1292,7 +1337,7 @@ mod tests {
         let Composed::Turn { text, images } = compose("what is this?", &[shot(Some("/p.jpg"), None, false)]) else { panic!() };
         assert!(text.starts_with("what is this?") && text.contains("could not be read") && images.is_empty(), "{text}");
         // A file is saved and named.
-        let pdf = Uploaded { name: "r.pdf".to_string(), image: false, path: Some("/ask/q/r.pdf".to_string()), text: None, vision: true };
+        let pdf = Uploaded { name: "r.pdf".to_string(), image: false, path: Some("/ask/q/r.pdf".to_string()), text: None, vision: true, heard: None };
         assert_eq!(compose("", &[pdf]), Composed::Turn { text: "[Attached and saved in this thread's folder: r.pdf]".to_string(), images: vec![] });
     }
 

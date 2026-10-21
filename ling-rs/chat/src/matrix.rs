@@ -82,7 +82,15 @@ pub fn media_of(content: &Value) -> (Option<(String, String, String)>, Vec<Strin
             // An encrypted file (`file` instead of `url`): rooms here are unencrypted, so not expected.
             None => (None, vec!["an encrypted file".to_string()], caption),
         },
-        "m.audio" => (None, vec!["an audio message".to_string()], caption),
+        // Transcribed on this machine (MOONSHOT §3.4).
+        "m.audio" => match content.get("url").and_then(Value::as_str) {
+            Some(url) => {
+                let name = filename.unwrap_or(if body.is_empty() { "voice.ogg" } else { body }).to_string();
+                let mime = content.pointer("/info/mimetype").and_then(Value::as_str).unwrap_or("audio/ogg").to_string();
+                (Some((url.to_string(), name, mime)), Vec::new(), caption)
+            }
+            None => (None, vec!["an encrypted audio message".to_string()], caption),
+        },
         "m.video" => (None, vec!["a video".to_string()], caption),
         "m.location" => (None, vec!["a location".to_string()], String::new()),
         _ => (None, vec!["this kind of message".to_string()], String::new()),

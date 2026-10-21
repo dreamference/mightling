@@ -274,6 +274,30 @@ pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bo
     Ok(saved_from(&body))
 }
 
+/// A voice note as text, through `ling web`'s `/api/transcribe` (the speech-to-text service on
+/// the node): the text, or what went wrong (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.5).
+pub async fn transcribe(port: u16, cookie: &str, media: &str, bytes: &[u8]) -> Result<String, String> {
+    let media: String = media.split(';').next().unwrap_or_default().chars().filter(|c| c.is_ascii_alphanumeric() || "/-.+".contains(*c)).collect();
+    let mut request = format!(
+        "POST /api/transcribe HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: {media}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        bytes.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(bytes);
+    let (_, _, body) = http(port, &request).await?;
+    heard_from(&body)
+}
+
+/// Reads `/api/transcribe`'s answer: `{text}` or `{error}`.
+pub fn heard_from(body: &[u8]) -> Result<String, String> {
+    let value: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    match value.get("text").and_then(Value::as_str) {
+        Some(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Some(_) => Err("nothing was heard in it".to_string()),
+        None => Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web did not transcribe it").to_string()),
+    }
+}
+
 /// The chat settings of the user's configuration (`[chat]`), as `ling web` reads them for the
 /// bridge, which cannot (`/api/chat/settings`; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -554,6 +578,14 @@ mod tests {
         assert_eq!((defaults.answer_ms, defaults.tool_calls, defaults.command_ms), (Some(180_000), Some(25), Some(60_000)));
         let set = ChatSettings::from_json(&json!({"answerSeconds": 60, "toolCalls": 0, "commandSeconds": 30}));
         assert_eq!((set.answer_ms, set.tool_calls, set.command_ms), (Some(60_000), None, Some(30_000)));
+    }
+
+    #[test]
+    fn transcriptions_are_read_with_their_failures() {
+        assert_eq!(heard_from(br#"{"text":" hello there "}"#), Ok("hello there".to_string()));
+        assert_eq!(heard_from(br#"{"text":"  "}"#), Err("nothing was heard in it".to_string()));
+        assert_eq!(heard_from(br#"{"error":"Speech-to-text is not running on this machine: start it with `ling-admin voice start`."}"#).unwrap_err(), "Speech-to-text is not running on this machine: start it with `ling-admin voice start`.");
+        assert!(heard_from(b"<html>").is_err());
     }
 
     #[test]

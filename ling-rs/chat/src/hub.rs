@@ -36,7 +36,7 @@ pub enum Inbound {
     /// A message, or a command (`/new`, …).
     Text { chat: String, text: String },
     /// A message with attachments (its caption as `text`), and what the adapter could not take,
-    /// named for the user ("a voice message").
+    /// named for the user ("a sticker").
     Media { chat: String, text: String, attachments: Vec<Media>, dropped: Vec<String> },
     /// The messenger's own stop control (Telegram's button on a streaming answer).
     Stop { chat: String },
@@ -608,6 +608,29 @@ impl Hub {
     /// A message with attachments: each goes into the thread's folder through `ling web`, then the
     /// turn is built from what came back (attachments.rs). Nothing usable: the bridge says so.
     async fn media(&mut self, chat: &str, text: &str, files: Vec<Media>) {
+        // Recordings first: each is transcribed on this machine and its text joins the question,
+        // with a line saying what was heard (MOONSHOT §3.4).
+        let (recordings, files): (Vec<Media>, Vec<Media>) = files.into_iter().partition(Media::is_audio);
+        let mut text = text.trim().to_string();
+        for recording in recordings {
+            match self.agent.transcribe(&recording.mime, recording.bytes).await {
+                Ok(heard) => {
+                    self.notice(chat, attachments::heard_notice(&heard));
+                    if !text.is_empty() {
+                        text.push_str("\n\n");
+                    }
+                    text.push_str(&heard);
+                }
+                Err(reason) => self.notice(chat, attachments::not_heard_notice(&reason)),
+            }
+        }
+        if files.is_empty() {
+            if !text.is_empty() {
+                self.message(chat, &text).await;
+            }
+            return;
+        }
+        let text = text.as_str();
         let first = if text.trim().is_empty() { "(image)" } else { text.trim() };
         self.fresh_after_silence(chat);
         let thread = match self.ensure_thread(chat, first).await {

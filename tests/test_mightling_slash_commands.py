@@ -229,7 +229,8 @@ CASES: Dict[str, Case] = {
     "theme": Case("popup"),
     "pets": Case("absent", reason="hidden by patch 0010: pet art is downloaded from OpenAI's CDN"),
     "mcp": Case("inline", expect=("MCP",)),
-    "apps": Case("absent", reason="apps are OpenAI-hosted connectors that need a ChatGPT login"),
+    # Listed in the popup on a node with Mightling's apps (1.7.1); the test's throwaway HOME is no node.
+    "apps": Case("absent", reason="Mightling offers apps only on a node (APPS §3), and the test's HOME is none"),
     "plugins": Case("popup"),
     "logout": Case("absent", reason="hidden by patch 0005: there is no account to sign out of"),
     "quit": Case("exit"),

@@ -44,6 +44,7 @@ pub mod chat;
 pub mod code_index;
 pub mod compat;
 pub mod compat_agents;
+pub mod compat_commands;
 pub mod compat_hooks;
 pub mod compat_memory;
 pub mod compat_keys;
@@ -1232,6 +1233,11 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     let features = table(doc.as_table_mut(), "features");
     set_if_absent(features, "code_mode", true);
     set_if_absent(features, "enable_mcp_apps", false);
+    // Guardian approval ("Approve for me" in /permissions) reviews with the upstream vendor's own
+    // models (`gpt-5.6-luna`, `codex-auto-review`), which no Mightling server serves: on, it only
+    // offered a choice that cannot work and resolved that model at every thread start ("Unknown
+    // model gpt-5.6-luna", 1.7 tests). Only when absent, so a user can turn it back on.
+    set_if_absent(features, "guardian_approval", false);
 
     // Without network access the workspace-write sandbox also blocks DNS, and the web commands in
     // the prompt fail with "Temporary failure in name resolution".
@@ -1750,6 +1756,17 @@ mod tests {
             .and_then(|provider| provider.get("base_url"))
             .and_then(toml::Value::as_str);
         assert_eq!(base_url, Some("http://x:8000/v1"));
+    }
+
+    #[test]
+    fn guardian_approval_is_off_unless_the_user_turned_it_on() {
+        let guardian = |existing: &str| {
+            let text = updated_config(existing, Path::new("/h/c.json"), "http://x:8000").unwrap_or_default();
+            let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+            parsed.get("features").and_then(|features| features.get("guardian_approval")).and_then(toml::Value::as_bool)
+        };
+        assert_eq!(guardian(""), Some(false));
+        assert_eq!(guardian("[features]\nguardian_approval = true\n"), Some(true));
     }
 
     #[test]

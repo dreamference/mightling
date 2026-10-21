@@ -73,6 +73,9 @@ pub struct Config {
     pub port: u16,
     /// The LAN addresses and names served besides loopback; empty on loopback only.
     pub lan_names: Vec<String>,
+    /// Names served behind an HTTPS front on the user's overlay, exactly as the browser sends them
+    /// in `Host` (the Telegram Mini App's address, telegram_app.rs); empty unless one is set.
+    pub public_names: Vec<String>,
     /// The app-server's socket.
     pub socket: PathBuf,
     /// How to start the app-server, and how `--composed` prompts are read.
@@ -99,7 +102,7 @@ impl Server {
     pub fn new(config: Config) -> std::io::Result<Arc<Server>> {
         auth::private_dir(&config.state_dir)?;
         let owner_token = auth::owner_token(&config.state_dir)?;
-        let addresses = Addresses::new(config.port, &config.lan_names);
+        let addresses = Addresses::new(config.port, &config.lan_names).with_public(&config.public_names);
         let app_server = AppServer::new(config.socket.clone(), config.launch.clone());
         Ok(Arc::new(Server {
             policy: Policy::embedded(),
@@ -233,6 +236,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/airgapped", get(airgapped))
         .route("/api/chat/settings", get(chat_settings))
         .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
+        .route("/api/telegram/check", post(telegram_check))
         .route("/login", get(login))
         .route("/pair", get(pair_page).post(pair))
         .route("/pair.css", get(pair_css))
@@ -440,6 +444,21 @@ async fn transcribe(State(server): State<Arc<Server>>, request: Request) -> Resp
         Err(sidecars::SpeechError::Failed(reason)) => {
             json_response(StatusCode::BAD_GATEWAY, json!({ "error": format!("Speech-to-text failed: {reason}") }))
         }
+    }
+}
+
+/// Whether the page was opened from this node's bot by a paired Telegram user (telegram_app.rs).
+/// Behind the credential like every route: the answer lets nothing in on its own.
+async fn telegram_check(State(server): State<Arc<Server>>, body: axum::body::Bytes) -> Response {
+    let request: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    let init_data = request.get("initData").and_then(|value| value.as_str()).unwrap_or_default();
+    let verdict = match crate::telegram_app::bot(&server.config.codex_home) {
+        None => Err(crate::telegram_app::Refusal::NoBot),
+        Some((token, users)) => crate::telegram_app::check_launch(init_data, &token, &users, now_secs()),
+    };
+    match verdict {
+        Ok(_) => json_response(StatusCode::OK, json!({ "ok": true })),
+        Err(refusal) => json_response(StatusCode::OK, json!({ "ok": false, "reason": refusal.reason() })),
     }
 }
 
