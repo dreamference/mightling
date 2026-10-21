@@ -17,7 +17,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, Dict, Final, List, Optional, Tuple
 
@@ -25,6 +25,7 @@ from dreamference.night_shift.night_shift_compaction_audit import NightShiftComp
 from dreamference.night_shift.night_shift_host import GIB, NIGHT_POOL_SHARE, NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE_STATUSES
+from dreamference.night_shift.night_shift_recurring import NightShiftRecurring
 from dreamference.night_shift.night_shift_remote import NightShiftRemote
 from dreamference.night_shift.night_shift_report import NightShiftReport
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
@@ -92,13 +93,16 @@ class NightShiftRunner:
                 print("⚠️  Another night run holds the runner lock.")
                 return 1
             cls.compactions = cls.audit_compactions(night_dir, settings)
+            # Repeating tasks due tonight become ordinary queued tasks first (night_shift_recurring.py);
+            # what they did goes into the morning report's notes.
+            repeating = NightShiftRecurring.queue_due(night_dir, mightling_bin, date.today())
             pending = cls.pending_tasks(night_dir)
             sent = cls.remote.sent_tasks(night_dir)
             if not pending and not sent:
                 print(f"✅ Night Shift: nothing queued.{cls._audit_only_report(night_dir, started)}")
                 return 0
             print(f"🌙 Night Shift: {len(pending)} task(s) queued; window ends {end:%H:%M}.")
-            notes: List[str] = []
+            notes: List[str] = list(repeating)
             # A task queued for another node is handed over whatever this machine's own state: that
             # node's runner admits it by that node's checks.
             sent += cls.remote.hand_off(night_dir, pending, notes)

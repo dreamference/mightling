@@ -933,3 +933,8 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .starting-project { color: var(--muted); }
 .project.server-project h2 .menu-anchor { margin-left: auto; display: inline-flex; }
 .project.server-project h2 .menu-anchor .project-action { margin-left: 0; }
+
+/* Scheduled (item 18, the owner's decision 7): a finished run opened on its result, changes and transcript. */
+.night-details pre { max-height: 40vh; overflow: auto; }
+.night-transcript { white-space: pre-wrap; font-family: var(--font-code); font-size: 12.5px; background: var(--code-bg); border-radius: var(--radius-sm); padding: 8px 10px; }
+.night-context { display: block; margin: 4px 0 8px; color: var(--muted); }

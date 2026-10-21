@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { addTask, dropTask, readReport, readReports, readTasks } from "./night";
+import { taskDetails, transcriptOf } from "./night";
 
 describe("Night Shift for the Scheduled view", () => {
   it("reads the tasks newest first and the reports, and refuses a report name that leaves the folder", () => {
@@ -40,3 +41,33 @@ console.log("Queued 20261017-0900 on branch night/20261017-0900.");
     await expect(dropTask(ling, home, "../x")).rejects.toThrow("not a task");
   });
 });
+
+describe("a finished task's details (the owner's decision 7)", () => {
+  const log = [
+    JSON.stringify({ type: "thread.started", thread_id: "019a-night-1" }),
+    JSON.stringify({ type: "item.completed", item: { id: "1", type: "command_execution", command: "pytest -q", exit_code: 1, aggregated_output: "1 failed" } }),
+    JSON.stringify({ type: "item.completed", item: { id: "2", type: "file_change", changes: [{ path: "fetcher/client.py", kind: "update" }] } }),
+    JSON.stringify({ type: "item.completed", item: { id: "3", type: "agent_message", text: "Fixed the retry." } }),
+    "not json",
+  ].join("\n");
+
+  it("reads a ling exec log as a transcript and finds its session", () => {
+    const { text, session } = transcriptOf(log);
+    expect(session).toBe("019a-night-1");
+    expect(text).toBe("$ pytest -q  (exit 1)\n\nChanged fetcher/client.py\n\nMightling: Fixed the retry.");
+  });
+
+  it("are the chosen attempt's when best-of-N ran: its message, its diff, its transcript", async () => {
+    const night = fs.mkdtempSync(path.join(os.tmpdir(), "night-details-"));
+    fs.mkdirSync(path.join(night, "tasks"));
+    fs.mkdirSync(path.join(night, "logs"));
+    fs.writeFileSync(path.join(night, "tasks", "t1.json"), JSON.stringify({ id: "t1", repo: "/nowhere", base: "abc", task: "Fix it", result: { branch: "night/t1", best_of: { chosen: 2 } } }));
+    fs.writeFileSync(path.join(night, "logs", "t1-a2.last.txt"), "Fixed the retry.\n");
+    fs.writeFileSync(path.join(night, "logs", "t1-a2.diff"), "+b\n");
+    fs.writeFileSync(path.join(night, "logs", "t1-a2.jsonl"), log);
+    expect(await taskDetails(night, "t1")).toEqual({ result: "Fixed the retry.", diff: "+b\n", transcript: expect.stringContaining("Fixed the retry."), session: "019a-night-1" });
+    await expect(taskDetails(night, "../x")).rejects.toThrow(/not a task/);
+    fs.rmSync(night, { recursive: true, force: true });
+  });
+});
+
