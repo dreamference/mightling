@@ -457,3 +457,57 @@ async fn rich_drafts_and_answers_are_blocks_and_a_refusal_falls_back_to_html() {
     assert!(stand.bodies("sendRichMessageDraft").is_empty());
     assert_eq!(stand.bodies("sendMessageDraft").len(), 1);
 }
+
+const MINI_APP: &str = "https://node.example.ts.net/";
+
+/// The Mini App (MOONSHOT §15): with an address set, `/app` is offered and every paired user's
+/// menu button opens it; without one, the buttons go back to Telegram's default.
+#[tokio::test]
+async fn the_mini_app_is_the_paired_users_menu_button_and_follows_the_setting() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let (_out_tx, out_rx) = mpsc::unbounded_channel();
+    let options = ling_chat::telegram::Options { mini_app_url: Some(MINI_APP.to_string()), ..Default::default() };
+    ling_chat::telegram::start(api.clone(), scratch("miniapp-on"), hub.clone(), out_rx, options).await.unwrap();
+    let commands = &stand.bodies("setMyCommands")[0]["commands"];
+    assert!(commands.as_array().unwrap().iter().any(|c| c["command"] == "app"));
+    let buttons = stand.bodies("setChatMenuButton");
+    assert_eq!(buttons, vec![json!({ "chat_id": 111, "menu_button": { "type": "web_app", "text": "Mightling", "web_app": { "url": MINI_APP } } })]);
+
+    let (stand, api) = stand_in(default_answer()).await;
+    let (_out_tx, out_rx) = mpsc::unbounded_channel();
+    ling_chat::telegram::start(api, scratch("miniapp-off"), hub, out_rx, ling_chat::telegram::Options::default()).await.unwrap();
+    assert!(!stand.bodies("setMyCommands")[0]["commands"].as_array().unwrap().iter().any(|c| c["command"] == "app"));
+    assert_eq!(stand.bodies("setChatMenuButton"), vec![json!({ "chat_id": 111, "menu_button": { "type": "default" } })]);
+}
+
+#[tokio::test]
+async fn app_answers_with_a_web_app_button_or_how_to_set_one_up_and_is_no_question() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, scratch("app-cmd"), hub);
+    poller.handle(&private_message(111, "/app")).await;
+    let reply = stand.bodies("sendMessage").pop().unwrap();
+    assert!(reply.get("reply_markup").is_none());
+    assert!(reply["text"].as_str().unwrap().contains("telegram_mini_app_url"));
+    poller.mini_app_url = Some(MINI_APP.to_string());
+    poller.handle(&private_message(111, "/app")).await;
+    let reply = stand.bodies("sendMessage").pop().unwrap();
+    assert_eq!(reply["reply_markup"]["inline_keyboard"][0][0]["web_app"]["url"], MINI_APP);
+    assert!(inbound.try_recv().is_err());
+    // A stranger gets the one unpaired reply, never the button.
+    poller.handle(&private_message(999, "/app")).await;
+    assert_eq!(stand.bodies("sendMessage").pop().unwrap()["text"], ling_chat::telegram::UNPAIRED_REPLY);
+}
+
+#[tokio::test]
+async fn a_newly_paired_user_gets_the_mini_app_button() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let dir = scratch("app-pair");
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, dir.clone(), hub);
+    poller.mini_app_url = Some(MINI_APP.to_string());
+    let code = store::issue_pairing_code(&dir).unwrap();
+    poller.handle(&private_message(333, &format!("/pair {code}"))).await;
+    assert_eq!(stand.bodies("setChatMenuButton")[0]["chat_id"], 333);
+}
