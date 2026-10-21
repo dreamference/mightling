@@ -541,6 +541,13 @@ Built after the `ask-evals` core (§11), each on its own branch, tested with no 
   - the runner end to end with the stand-in `ling` and a stand-in scorer;
   - the refusal of an empty cache.
 
+- **T0 run, 2026-10-21 (no night active, no model).** `setup_cache.py ifeval` ran here and took 137 MB of cache. Both reference scorers then ran over five prompts each inside `bwrap --unshare-net`, with no network: they scored junk answers near zero, as they should, and fetched nothing. The first try found three faults, now fixed:
+  - the folder at the pinned commit has no `__init__.py`; it is a namespace package, run from the folder above;
+  - IFBench names its results `<responses>-eval_results_*.jsonl`;
+  - IFBench loads NLTK's `stopwords` and `averaged_perceptron_tagger_eng` at run time, so setup now downloads them with `punkt` and `punkt_tab`. Without them it would have scored those checks as failures, silently, offline.
+
+  A run over some of the prompts (`--limit`) now hands the scorer an input file of those rows alone; the scorer looks up an answer for every prompt it is given.
+
 ### 12.2 T0 and T2: Aider Polyglot (branch `industry/polyglot`)
 
 - **`setup_cache.py polyglot`.** Fetches the exercises at `7e0611e7` into the cache and builds `mightling-polyglot:latest` from `scripts/industry_evals/polyglot/Dockerfile`.
@@ -563,6 +570,47 @@ Built after the `ask-evals` core (§11), each on its own branch, tested with no 
   - Java's switch-on;
   - the choice of solution files;
   - setup with a staged build context.
+
+### 12.3 T0 and T3: Terminal-Bench 2.1 (branch `industry/tbench`)
+
+- **Where 2.1 lives.** `harbor-framework/terminal-bench-2-1` (Apache-2.0), pinned at `7131e437`: 89 tasks under `tasks/`. The tbench.ai post on 2.1 names it the official dataset repository. 2.0's own repository still has 2.1 as an open pull request (#53).
+- **`scripts/industry_evals/tbench.py`.** It works in five steps:
+  - **`setup`:** Harbor 0.24.0 in its own virtualenv, and the tasks from the pinned tarball.
+  - **`build`:** each task's `environment/Dockerfile` built here for arm64. A second layer installs curl, uv 0.9.5, Python 3.13 and the verifier's pinned pytest wheels, then sets `UV_OFFLINE=1`, so the verifier's own `test.sh` grades offline. Every result goes to `built.json`, failures with their reason.
+  - **`prepare`:** a copy of each task that built. Its `task.toml` names the local image and replaces `allow_internet` with Harbor's network policy (D7). The agent's phase is set to `network_mode = "allowlist"` with only the Docker bridge's gateway, where the model gate listens; the verifier to `no-network`. Harbor enforces this with its egress-control sidecar (`docker-compose-egress-control.yaml` in Harbor's source). Whether this kernel supports it is checked by Harbor at start (`_egress_control_kernel_support`); NV here until T0 runs.
+  - **`subset`:** the fixed 30-task subset, drawn once from the tasks that built (seed 20261021) and kept.
+  - **`run`:** `harbor run -p <offline tasks> -a ling_agent:LingAgent`, with SWE-bench's runtime copy of `ling` and the model at the bridge. The summary scores resolved tasks overall, offline-solvable tasks, and the tasks in `needs-internet.txt` apart (D7). `--hold-gate` admits Docker's address range only.
+- **`tbench/ling_agent.py`.** `ling` as a Harbor custom agent (`BaseAgent`).
+  - `setup` uploads the runtime to `/opt/ling`. `run` runs `ling exec --json --dangerously-bypass-approvals-and-sandbox` on the instruction in the task's working folder, with a 30-minute limit and `DREAMFERENCE_VLLM_HOST` set.
+  - The rollout comes back into the trial's logs, and its output tokens into Harbor's context. Nothing is fetched from the network, unlike Harbor's Codex agent, which runs `npm install` in the container.
+- **NV until T0 runs:**
+  - which tasks fail to build for aarch64;
+  - whether Harbor's egress control works on this kernel;
+  - whether a task image that sets a non-root `USER` keeps working after the verifier layer's `USER root`;
+  - the layout of Harbor's `result.json`, which `reward_of` reads defensively.
+- **Tests** in `tests/test_industry_evals.py`:
+  - the rewritten `task.toml`, read back with `tomllib`;
+  - both build layers, with a failure recorded;
+  - `prepare` taking only built tasks;
+  - the subset drawn once and kept;
+  - the summary with internet-needing tasks apart;
+  - the Harbor command;
+  - the agent class against stand-in Harbor modules and environment.
+
+### 12.4 Disk and nights: the build guard (the owner's rule of 2026-10-21, branch `industry/build-guards`)
+
+A night failed on 2026-10-20 because other work filled this machine's disk. So every heavy build now asks `BuildGuard` (`setup_cache.py`) first, and refuses while either holds:
+
+- **a SWE-bench night is running:** any active `ling-swe-*` user unit;
+- **the disk would go under 150 GB free:** on Docker's root (`docker info`) or on the cache.
+
+How each build uses it:
+
+- **Terminal-Bench.** The guard is asked before every task, with 5 GB of headroom. A refusal stops the build where it is, and the next `build` carries on with the tasks not yet built.
+- **Polyglot.** The guard is asked once, with 20 GB of headroom.
+- **Afterwards.** Docker's build cache is pruned after each build, and Polyglot's staged context is removed. The image sizes are recorded: `tbench/sizes.json` per task, and `image_bytes` in the manifest for Polyglot. That is the disk used per suite.
+
+**Where the builds run.** The owner prefers a new DGX for the heavy builds once one is paired (D8). On 2026-10-21 this machine had about 213 GB free, so the 150 GB reserve leaves room for only part of Terminal-Bench's 89 images (NV until their sizes are known). The guard stops the build at the reserve rather than fill the disk.
 
 ## Sources
 

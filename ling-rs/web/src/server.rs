@@ -235,6 +235,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/healthz", get(healthz))
         .route("/api/airgapped", get(airgapped))
         .route("/api/chat/settings", get(chat_settings))
+        .route("/api/ask/files", get(ask_files))
+        .route("/api/ask/file", get(ask_file))
         .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/api/telegram/check", post(telegram_check))
         .route("/login", get(login))
@@ -519,6 +521,44 @@ async fn cavemode_change(State(server): State<Arc<Server>>, body: axum::body::By
 /// (chat_settings.rs), for the Signal bridge, which cannot read the home folder.
 async fn chat_settings(State(_server): State<Arc<Server>>) -> Response {
     json_response(StatusCode::OK, crate::chat_settings::ChatSettings::load().to_json())
+}
+
+/// The files an Ask thread's agent changed since a time (`?thread=<id>&since=<ms>`), for a phone
+/// bridge to offer back (ask_files.rs).
+async fn ask_files(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let thread = query.get("thread").map(String::as_str).unwrap_or_default();
+    let Some(folder) = ask::folder_of(&server.ask_root(), thread) else {
+        return json_response(StatusCode::NOT_FOUND, json!({ "error": "not an Ask thread" }));
+    };
+    let since = query.get("since").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    json_response(StatusCode::OK, json!({ "files": crate::ask_files::changed_since(&folder, since) }))
+}
+
+/// One file of an Ask thread's folder (`?thread=<id>&name=<relative name>`), never at a user-level
+/// `/airgapped on`: sent back, it would leave the machine (ask_files.rs).
+async fn ask_file(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
+    if user_airgap_level().level == ling_airgapped::Level::On {
+        return json_response(StatusCode::FORBIDDEN, json!({ "error": "The air gap is on, so no file is sent off this machine." }));
+    }
+    let thread = query.get("thread").map(String::as_str).unwrap_or_default();
+    let Some(folder) = ask::folder_of(&server.ask_root(), thread) else {
+        return json_response(StatusCode::NOT_FOUND, json!({ "error": "not an Ask thread" }));
+    };
+    let name = query.get("name").map(String::as_str).unwrap_or_default();
+    let Some(path) = crate::ask_files::file_in(&folder, name) else {
+        return json_response(StatusCode::NOT_FOUND, json!({ "error": "no such file in the thread's folder" }));
+    };
+    match tokio::fs::metadata(&path).await {
+        Ok(metadata) if metadata.len() > crate::ask_files::MAX_FILE_BYTES => {
+            return json_response(StatusCode::PAYLOAD_TOO_LARGE, json!({ "error": "the file is too large to send" }));
+        }
+        Err(err) => return json_response(StatusCode::NOT_FOUND, json!({ "error": err.to_string() })),
+        _ => {}
+    }
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => ([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response(),
+        Err(err) => json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err.to_string() })),
+    }
 }
 
 /// The air-gap level without a session: `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of

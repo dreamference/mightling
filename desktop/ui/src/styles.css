@@ -742,9 +742,6 @@ html.pet-page body { margin: 0; }
 @keyframes pet-blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
 
 /* Suggested prompts (Phase 3 item 7): chips above the composer. */
-.suggestions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: var(--column); margin: 0 auto; padding: 0 20px 6px; width: 100%; box-sizing: border-box; }
-.suggestion { border: 1px solid var(--line); background: var(--raised); border-radius: var(--radius-pill); padding: 4px 12px; font-size: 13px; color: var(--text); text-align: left; }
-.suggestion:hover { border-color: var(--accent); background: var(--accent-soft); }
 
 /* Skills and tools › Import (Phase 3 item 8). */
 .import-items { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -899,6 +896,29 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .quick-hint { margin: 0; color: var(--faint); font-size: 12px; }
 .quick-entry .dialog-note.warning { color: var(--danger); }
 .quick-row textarea, .quick-row textarea:focus, .quick-row textarea:focus-visible { border: none; box-shadow: none; outline: none; padding: 0; border-radius: 0; }
+
+/* A link in an answer (LinkDialog.tsx, DESKTOP_PARITY_CLAUDE §2.4): clickable, and the dialog that shows it in full first. */
+.markdown .web-link { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.markdown .web-link:focus-visible { outline: 2px solid var(--focus-ring); border-radius: 2px; }
+.link-dialog { width: min(560px, calc(100vw - 32px)); }
+.link-dialog h3 { margin: 0 0 10px; }
+.link-site { margin: 0 0 4px; font-weight: 600; font-size: 15px; }
+.link-url { margin: 0 0 12px; }
+.link-url code { display: block; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-sm); overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12.5px; }
+.link-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* An incognito question (DESKTOP_PARITY_CLAUDE §4.3): a dashed frame round the thread and a note that leaving deletes it. */
+.thread-pane.incognito { outline: 2px dashed var(--muted); outline-offset: -6px; }
+.incognito-banner { display: flex; gap: 10px; align-items: flex-start; margin: 12px auto 4px; max-width: 760px; padding: 10px 14px; border: 1px dashed var(--muted); border-radius: var(--radius-md); background: var(--panel); color: var(--text); font-size: 13px; line-height: 1.45; }
+.incognito-banner svg { flex: none; margin-top: 2px; }
+.chip.incognito-toggle { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--muted); }
+.chip.incognito-toggle.active { border-style: dashed; border-color: var(--text); color: var(--text); background: var(--selected); }
+
+/* Fork from here, edit in a new thread, and queue edits (DESKTOP_PARITY §4.5 item 22). */
+.turn-actions.earlier { opacity: 0; transition: opacity var(--motion-fast); }
+.turn:hover .turn-actions.earlier, .turn-actions.earlier:focus-within { opacity: 1; }
+.queued-edit { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.queued .icon:disabled { opacity: 0.35; }
 
 /* Projects (projects.ts, ProjectDialog.tsx): the dialog's folders and files, and the project a new thread starts in. */
 .dialog.project-dialog { width: min(560px, calc(100vw - 32px)); }

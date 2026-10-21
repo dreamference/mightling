@@ -379,4 +379,5 @@ Against stand-ins only (a stand-in Bot API, a `ling web` in a scratch home, `bri
 ## 16. Phase 2, as built (owner's approval of 2026-10-21)
 
 - **Voice (§3.4), branch `chat/voice`:** every bridge transcribes voice messages on the node through `ling web`'s `/api/transcribe` and says back "Heard: …" (D4); Telegram's OGG/Opus goes to speaches as it comes. CHAT §16.6, SIGNAL §19.5.
+- **Files back (§3.7), branch `chat/files-back`:** a file the agent made and named is offered with a "Send it" button and sent by `sendDocument` only on a press (CHAT §16.7, SIGNAL §19.6).
 

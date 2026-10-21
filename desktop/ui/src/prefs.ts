@@ -49,12 +49,16 @@ export interface Prefs {
   preventSleep: boolean;
   /** Open a document or an image the agent created in a tab when its turn ends (the artifacts viewer, Settings › General). */
   openArtifacts: boolean;
+  /** A long paste becomes an attachment (DESKTOP_PARITY_CLAUDE §4.6); on by default. */
+  pasteAsFile: boolean;
   /** The preview tab's sites outside this machine and the LAN (Settings › Browser): host to allow or block; others ask. */
   previewSites: Record<string, "allow" | "block">;
   /** Developer tools for preview tabs (Settings › Browser › Developer mode); off by default. */
   previewDevTools: boolean;
   /** The pet (Settings › Pets, Super+Alt+P): shown or not, its size, and a picture of the user's own instead of Mightling's mark. */
   petShown: boolean;
+  /** The agent may search earlier Ask questions (DESKTOP_PARITY_CLAUDE §4.4): copies kept and a skill in place; off by default. */
+  recallQuestions: boolean;
   /** Quick Entry (DESKTOP_PARITY_CLAUDE §4.2): a question from anywhere through a system-wide shortcut; off by default. */
   quickEntry: boolean;
   /** Its shortcut, in the keymap's spelling (`Ctrl+Alt+Space`). */

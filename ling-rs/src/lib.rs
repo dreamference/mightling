@@ -46,6 +46,7 @@ pub mod compat;
 pub mod compat_agents;
 pub mod compat_commands;
 pub mod compat_hooks;
+pub mod compat_mcp;
 pub mod compat_memory;
 pub mod compat_keys;
 pub mod compat_print;
@@ -598,8 +599,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         let dir = code_index::session_dir(&user_args);
         let (args, hook_plan) = compat_hooks::prepare(args, &codex_home, &dir);
         let (args, agents, agent_notes) = compat_agents::prepare(args, &codex_home, &dir);
+        // The approved MCP servers of .mcp.json and ~/.claude.json (compat_mcp.rs).
+        let (args, mcp_plan) = compat_mcp::prepare(args, &codex_home, &dir, configured.level == airgapped::Level::On);
         if tui {
-            notice::say(&compat::read_summary(&dir, &codex_home, &hook_plan, agents, agent_notes.len()));
+            notice::say(&compat::read_summary(&dir, &codex_home, &hook_plan, agents, agent_notes.len() + mcp_plan.notes.len(), mcp_plan.offered.len()));
+            for note in mcp_plan.notes.iter().filter(|note| note.contains("waits for your approval")) {
+                notice::say(&format!("⚠️  {note}."));
+            }
         }
         args
     } else {

@@ -165,6 +165,31 @@ instead. The shortcut works while the app runs; tick **Keep Mightling in the tra
 closes** so that closing the window leaves it running (Quit still ends it). Both are off until you
 turn them on. `ling://ask?prompt=…` opens a new question with that text in the composer.
 
+**Links in answers.** A web address in an answer (a cited source, a page the agent mentions) is a
+link. Clicking it first shows its site and its full address; **Open in your browser** opens it in
+your usual browser, **Copy the address** copies it. With `/airgapped on` nothing opens: the dialog
+offers the copy only. In `ling web` the link opens in a new tab after the same question.
+
+**Incognito questions.** **Incognito** in the header of a new question starts one that is not
+saved: it is not listed, not kept as a session, not fed to the memories and not found by later
+searches. A dashed frame and a note stay on it as a reminder. When you leave it (another question,
+a new one, Work, or closing the app), the question, its answers and its folder with every file in
+it are deleted for good. The desktop app only.
+
+**Earlier questions.** In **Settings › Memories**, **Let the agent search your earlier Ask
+questions** (off until you turn it on) keeps a copy of each Ask question and its answers under
+`~/.mightling/ask-history/` and gives the agent a skill to search and read them, on this machine and
+read only, when you refer to something asked before. Incognito questions are never kept, archived
+ones are removed, and turning it off deletes the copies.
+
+**The composer.** A long paste (2,000 characters or 40 lines) becomes an attachment chip: in Ask a
+file in the question's folder, in Work a block after your words (Settings › General turns this
+off). With **Settings › Suggested prompts** on, the message you are likely to send next shows in
+grey in the empty composer; Tab takes it. Every finished turn offers **Fork from here** (a new
+thread with the conversation up to there) and **Edit in a new thread** (the conversation before
+that message, the message in the composer to change), leaving the thread as it is. A queued
+message can be edited and moved up or down.
+
 The app itself decides what an Ask thread is: the window only names the `ask` prompt, and the app
 composes its text, makes the folder and keeps the thread inside it, with the same rules `ling web`
 applies. So a question asked in the app and one asked in a browser live in the same place.

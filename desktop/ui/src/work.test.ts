@@ -323,7 +323,7 @@ describe("the agent's markdown", async () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("<img");
-    expect(html).toContain('title="https://example.com"');
+    expect(html).toContain('title="https://example.com/"');
   });
 
   it("makes a citation of the user's documents a link to open, and no other link", async () => {
@@ -333,6 +333,23 @@ describe("the agent's markdown", async () => {
     expect(html.match(/doc-link/g)?.length).toBe(1);
     expect(docLink("docs:design-notes/3")).toEqual({ doc: "design-notes/3", page: null });
     expect(docLink("docs:documents/3#page=x")).toBeNull();
+  });
+
+  it("makes a web address a link that asks before it opens, and nothing else (DESKTOP_PARITY_CLAUDE §2.4)", async () => {
+    const { webLink, WEB_LINK_MAX } = await import("./markdown");
+    const html = renderMarkdown("[NVIDIA](https://www.nvidia.com/en-us/ \"x\") <https://example.com/a?b=1&c=2> [js](javascript:alert(1)) [file](file:///etc/passwd) [mixed](https://bank.example@evil.example/) [rel](/relative)");
+    expect(html).toContain('<span class="link web-link" role="link" tabindex="0" data-url="https://www.nvidia.com/en-us/" title="https://www.nvidia.com/en-us/">NVIDIA</span>');
+    expect(html).toContain('data-url="https://example.com/a?b=1&amp;c=2"');
+    expect(html.match(/web-link/g)?.length).toBe(2);
+    expect(html).not.toContain("<a ");
+    // The others stay inert, their address shown on hover only.
+    expect(html).toContain('<span class="link" title="javascript:alert(1)">js</span>');
+    expect(html).not.toMatch(/data-url="(javascript|file|https:\/\/bank)/);
+    expect(webLink("HTTP://Example.COM")).toBe("http://example.com/");
+    expect(webLink("ftp://example.com/x")).toBeNull();
+    expect(webLink("https://user:pw@example.com/")).toBeNull();
+    expect(webLink(`https://example.com/${"a".repeat(WEB_LINK_MAX)}`)).toBeNull();
+    expect(webLink("not a url")).toBeNull();
   });
 
   it("shows the pictures the image_search tool stored, and no other image", () => {

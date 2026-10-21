@@ -144,6 +144,27 @@ impl MatrixApi {
         Duration::from_secs(30)
     }
 
+    /// Uploads a file to the homeserver's media store; returns its `mxc://` URI.
+    pub async fn upload(&self, name: &str, bytes: Vec<u8>) -> Result<String, MatrixError> {
+        let failed = |error: String| MatrixError { errcode: "M_UNKNOWN".to_string(), error };
+        let response = self
+            .http
+            .post(format!("{}/_matrix/media/v3/upload?filename={}", self.base, encode(name)))
+            .bearer_auth(&self.token)
+            .header("Content-Type", "application/octet-stream")
+            .body(bytes)
+            .timeout(Duration::from_secs(300))
+            .send()
+            .await
+            .map_err(|err| MatrixError { errcode: "M_UNREACHABLE".to_string(), error: err.without_url().to_string() })?;
+        let status = response.status();
+        let value: Value = response.json().await.unwrap_or(Value::Null);
+        match value.get("content_uri").and_then(Value::as_str) {
+            Some(uri) if status.is_success() => Ok(uri.to_string()),
+            _ => Err(failed(value.get("error").and_then(Value::as_str).unwrap_or("the homeserver refused the file").to_string())),
+        }
+    }
+
     /// Downloads the file an `mxc://<server>/<id>` URI names: the authenticated media endpoint,
     /// then the older unauthenticated one for a homeserver without it.
     pub async fn download(&self, mxc: &str) -> Result<Vec<u8>, MatrixError> {
@@ -476,6 +497,16 @@ impl Renderer {
             }
             // Matrix rooms here are not split into threads (MOONSHOT §6): nothing to rename.
             Outbound::ThreadNamed { .. } => {}
+            Outbound::File { name, bytes, .. } => {
+                let size = bytes.len();
+                let sent = match self.api.upload(&name, bytes).await {
+                    Ok(uri) => self.api.send(&room, json!({ "msgtype": "m.file", "body": name, "filename": name, "url": uri, "info": { "size": size } })).await.map(|_| ()),
+                    Err(err) => Err(err),
+                };
+                if let Err(err) = sent {
+                    let _ = self.api.send(&room, json!({ "msgtype": "m.notice", "body": format!("The homeserver refused {name}: {}", err.error) })).await;
+                }
+            }
         }
     }
 }
