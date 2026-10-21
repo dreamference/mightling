@@ -77,6 +77,9 @@ struct Daemon {
     /// The owner's attachments waiting for their turn's upload; every other downloaded one is
     /// deleted on arrival (§19.1).
     held_attachments: HashSet<String>,
+    /// The last Night Shift report sent (§19.7), and whether reports come here at all.
+    night_seen: Option<String>,
+    night_reports: bool,
 }
 
 /// Why the daemon stopped.
@@ -136,6 +139,8 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
         airgap_known: false,
         held: Vec::new(),
         held_attachments: HashSet::new(),
+        night_seen: conversation.night_seen.clone(),
+        night_reports: true,
     };
     daemon.sweep_attachments(SystemTime::now());
     daemon.poll_airgap().await;
@@ -186,6 +191,9 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
                     daemon.sweep_attachments(SystemTime::now());
                     daemon.poll_settings().await;
                 }
+                if now / 1000 % 300 == 150 {
+                    daemon.push_reports().await;
+                }
             }
             _ = airgap.tick() => daemon.poll_airgap().await,
             _ = stop.recv() => {
@@ -221,6 +229,30 @@ impl Daemon {
         if let Ok(settings) = agent::chat_settings(self.config.port, &self.cookie).await {
             self.bridge.new_thread_after_ms = settings.new_thread_after_ms;
             self.bridge.limits = crate::limits::Limits::from_settings(&settings);
+            self.night_reports = settings.night_reports;
+        }
+    }
+
+    /// Night Shift's morning reports since the last one sent, into the conversation (§19.7); the
+    /// first look after a fresh start only notes the newest, so nothing old is repeated. Not at
+    /// `/airgapped on`, and not when `[chat] night_report_to` leaves Signal out.
+    async fn push_reports(&mut self) {
+        if !self.night_reports || self.bridge.airgapped() || self.config.owner.is_none() {
+            return;
+        }
+        let after = self.night_seen.clone().unwrap_or_default();
+        let Ok(value) = agent::web_json(self.config.port, &self.cookie, &format!("/api/night/reports?after={after}"), None).await else { return };
+        if self.night_seen.is_none() {
+            self.night_seen = value.get("latest").and_then(Value::as_str).map(str::to_string).or_else(|| Some(String::new()));
+            self.save_conversation();
+            return;
+        }
+        for report in value.get("reports").and_then(Value::as_array).cloned().unwrap_or_default() {
+            let (Some(name), Some(text)) = (report.get("name").and_then(Value::as_str), report.get("text").and_then(Value::as_str)) else { continue };
+            let reply = crate::format::reply(&format!("**Night Shift's report** ({})\n\n{text}", name.trim_end_matches(".md")));
+            self.carry_out(vec![Action::Reply(reply)]).await;
+            self.night_seen = Some(name.to_string());
+            self.save_conversation();
         }
     }
 
@@ -440,6 +472,38 @@ impl Daemon {
             }
             Action::StartThread => self.request("thread/start", json!({ "prompt": "chat" }), Pending::OpenThread).await,
             Action::StartAskThread => self.request("thread/start", json!({ "prompt": "ask" }), Pending::OpenThread).await,
+            Action::NightRepos { task } => {
+                let repos = match agent::web_json(self.config.port, &self.cookie, "/api/night/repos", None).await {
+                    Ok(value) => value
+                        .get("repos")
+                        .and_then(Value::as_array)
+                        .map(|repos| repos.iter().filter_map(|r| Some((r.get("path")?.as_str()?.to_string(), r.get("name")?.as_str()?.to_string()))).take(9).collect())
+                        .unwrap_or_default(),
+                    Err(err) => {
+                        self.send_text(&Styled::plain(&format!("Night Shift's repositories could not be read: {err}"))).await;
+                        return;
+                    }
+                };
+                let actions = self.bridge.on_agent(AgentEvent::NightRepos { task, repos }, now_ms());
+                Box::pin(self.carry_out(actions)).await;
+            }
+            Action::NightAdd { repo, task } => {
+                let text = match agent::web_json(self.config.port, &self.cookie, "/api/night/add", Some(&json!({ "repo": repo, "task": task }))).await {
+                    Ok(value) => {
+                        let lines: Vec<String> = value.get("lines").and_then(Value::as_array).map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+                        if value.get("queued") == Some(&Value::Bool(true)) { lines.join("\n") } else { format!("Night Shift did not queue it: {}", lines.join(" ")) }
+                    }
+                    Err(err) => format!("Night Shift did not queue it: {err}"),
+                };
+                self.send_text(&Styled::plain(&text)).await;
+            }
+            Action::NightStatus => {
+                let text = match agent::web_json(self.config.port, &self.cookie, "/api/night/status", None).await {
+                    Ok(value) => crate::bridge::night_status_text(&value),
+                    Err(err) => format!("Night Shift's queue could not be read: {err}"),
+                };
+                self.send_text(&Styled::plain(&text)).await;
+            }
             Action::FindFiles { thread, since_ms, answer } => {
                 if let Ok(files) = agent::made_files(self.config.port, &self.cookie, &thread, since_ms.saturating_sub(1_000)).await
                     && !files.is_empty()
@@ -593,6 +657,7 @@ impl Daemon {
             ignored: self.gate.ignored,
             identity_refusals: self.gate.identity_refusals,
             last_activity_ms: self.bridge.last_activity_ms,
+            night_seen: self.night_seen.clone(),
         };
         if let Err(err) = conversation.save(&self.state_dir) {
             self.note_error(format!("could not save conversation.json: {err}"));
