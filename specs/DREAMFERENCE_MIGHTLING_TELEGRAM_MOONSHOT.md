@@ -380,4 +380,5 @@ Against stand-ins only (a stand-in Bot API, a `ling web` in a scratch home, `bri
 
 - **Voice (§3.4), branch `chat/voice`:** every bridge transcribes voice messages on the node through `ling web`'s `/api/transcribe` and says back "Heard: …" (D4); Telegram's OGG/Opus goes to speaches as it comes. CHAT §16.6, SIGNAL §19.5.
 - **Files back (§3.7), branch `chat/files-back`:** a file the agent made and named is offered with a "Send it" button and sent by `sendDocument` only on a press (CHAT §16.7, SIGNAL §19.6).
+- **Night Shift (§3.5), branch `chat/night`:** `/night add` confirmed by a button, `/night status`, and the morning report pushed to the chats `[chat] night_report_to` names (Telegram only when named; D5). CHAT §16.8, SIGNAL §19.7.
 

@@ -11,11 +11,11 @@
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react";
 
-import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
+import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, insideFolder, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, keyAnswer, mentionPath, parseSlash, rememberModel, userTexts, type SlashCommand } from "./composer";
+import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, isLongPaste, keyAnswer, mentionPath, parseSlash, pasteLabel, rememberModel, userTexts, withPastes, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
@@ -34,6 +34,7 @@ import type { PermissionProfileSummary } from "./protocol/v2/PermissionProfileSu
 import type { QueuedSubmission } from "./protocol/v2/QueuedSubmission";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { Thread } from "./protocol/v2/Thread";
+import type { Turn } from "./protocol/v2/Turn";
 import type { ThreadGoal } from "./protocol/v2/ThreadGoal";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
@@ -50,7 +51,9 @@ import { ReviewPane } from "./ReviewPane";
 import { FileTree } from "./FileTree";
 import { FileView } from "./FileView";
 import { ArtifactView } from "./ArtifactView";
+import { LinkDialog } from "./LinkDialog";
 import { artifactKind, createdArtifacts } from "./artifacts";
+import { keptQuestions, transcript } from "./recall";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
 import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type WorkspaceTab } from "./tabs";
@@ -59,7 +62,7 @@ import { PullRequestsTab } from "./PullRequestsTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
 import { ActivityView } from "./ActivityView";
-import { suggest } from "./suggestions";
+import { predict } from "./suggestions";
 import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
@@ -75,7 +78,7 @@ import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollectio
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
 import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
-import { commitMessage, dropQueued, forkThread, listQueue, sendMessage, steerQueued, takeBack, type Listen } from "./turns";
+import { commitMessage, dropQueued, forkAt, forkThread, listQueue, movedQueue, reorderQueued, sendMessage, steerQueued, takeBack, updateQueued, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
 
@@ -110,6 +113,8 @@ interface PendingFile {
   preview: string | null;
   /** Where it already is on disk (a Work image dropped in the app): sent by path, never uploaded. */
   path: string | null;
+  /** A long paste's text (DESKTOP_PARITY_CLAUDE §4.6): uploaded as a file in Ask, written into the message in Work. */
+  text?: string;
 }
 
 /** What a slash command printed, shown above the turns until dismissed. */
@@ -142,6 +147,8 @@ export function App() {
   const [profiles, setProfiles] = useState<PermissionProfileSummary[]>([]);
   const [profile, setProfile] = useState(":workspace");
   const [airgap, setAirgap] = useState<bridge.Airgapped | null>(null);
+  /** A web address clicked in an answer, waiting for the user's yes (LinkDialog.tsx). */
+  const [linkAsked, setLinkAsked] = useState<{ url: string; thread: string | null; airgappedOn: boolean } | null>(null);
   const [newCwd, setNewCwd] = useState("");
   // The folder named, the notice asking for it goes (it stayed until a restart).
   useEffect(() => {
@@ -217,6 +224,8 @@ export function App() {
   const travelling = useRef(false);
   /** The tab area's tabs (§2.1, §2.8): Review and file tabs, and the one in front. */
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  /** The next new question is incognito (DESKTOP_PARITY_CLAUDE §4.3): the header's switch, before the first message. */
+  const [incognitoNext, setIncognitoNext] = useState(false);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [treeShown, setTreeShown] = useState(false);
   /** Ask's own tree of the question's folder (DESKTOP_PARITY_CLAUDE §4.1), apart from Work's. */
@@ -254,8 +263,8 @@ export function App() {
     const request = last.items.filter((item) => item.type === "userMessage").map((item) => (item.type === "userMessage" ? item.content.map(describeInput).join(" ") : "")).join("\n");
     const answer = [...last.items].reverse().find((item) => item.type === "agentMessage");
     if (!request.trim() || !answer || answer.type !== "agentMessage") return;
-    suggest(client, listen, { cwd: view.thread.cwd, model: modelChoice ?? servedModel, request, answer: answer.text })
-      .then((found) => found.length && setSuggestions((known) => ({ ...known, [threadId]: found })))
+    predict(client, listen, { cwd: view.thread.cwd, model: modelChoice ?? servedModel, request, answer: answer.text })
+      .then((found) => found && setSuggestions((known) => ({ ...known, [threadId]: [found] })))
       .catch(() => {});
   };
   const openFileRef = useRef<(path: string) => void>(() => {});
@@ -451,13 +460,84 @@ export function App() {
         const paths = made.get(notification.params.turn.id) ?? [];
         made.delete(notification.params.turn.id);
         if (paths.length && notification.params.threadId === selectedRef.current && prefsRef.current.openArtifacts) openFileRef.current(paths[0]);
+        // Earlier questions (§4.4): the question's copy brought up to date.
+        if (prefsRef.current.recallQuestions) setTimeout(() => void recallRef.current(threadId).catch(() => {}), 500);
+      } else if ((notification.method === "thread/archived" || notification.method === "thread/unarchived") && prefsRef.current.recallQuestions) {
+        // An archived question's copy goes, an unarchived one's comes back.
+        setTimeout(() => void recallRef.current().catch(() => {}), 500);
       }
     });
   }, [listen]);
 
+  // Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4): while Settings › Memories has it on,
+  // each Ask question of the user's (never an incognito one) is kept as the Markdown the agent's
+  // earlier-questions skill searches: all of them when the app starts or it is turned on, one after
+  // each finished turn; archived questions are dropped. The main process keeps the files.
+  const recallRef = useRef<(only?: string) => Promise<void>>(async () => {});
+  recallRef.current = async (only?: string) => {
+    if (!bridge.recall.available() || !prefsRef.current.recallQuestions || stateRef.current.server !== "ready") return;
+    const isAsk = (thread: Thread) => isAskThread(thread, askRoot);
+    const turnsOf = async (threadId: string): Promise<Turn[]> => {
+      const turns: Turn[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 50; page++) {
+        const answer: { data: Turn[]; nextCursor: string | null } = (await client.request("thread/turns/list", { threadId, cursor, limit: 100 })) as { data: Turn[]; nextCursor: string | null };
+        turns.push(...answer.data);
+        cursor = answer.nextCursor;
+        if (!cursor) break;
+      }
+      // Newest first from the server: the copy reads oldest first.
+      return turns.reverse();
+    };
+    if (only) {
+      const thread = stateRef.current.threads[only]?.thread;
+      if (thread && keptQuestions([thread], isAsk).length) await bridge.recall.write(thread.id, thread.updatedAt, transcript(thread, await turnsOf(thread.id)));
+      return;
+    }
+    const listed: Thread[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 20; page++) {
+      const answer = (await client.request("thread/list", { limit: 200, cursor })) as { data: Thread[]; nextCursor: string | null };
+      listed.push(...answer.data);
+      cursor = answer.nextCursor;
+      if (!cursor) break;
+    }
+    const kept = keptQuestions(listed, isAsk);
+    const known = await bridge.recall.index();
+    for (const thread of kept) {
+      if (known[thread.id] === thread.updatedAt) continue;
+      await bridge.recall.write(thread.id, thread.updatedAt, transcript(thread, await turnsOf(thread.id)));
+    }
+    await bridge.recall.prune(kept.map((thread) => thread.id));
+  };
+  useEffect(() => {
+    if (!prefs.recallQuestions || state.server !== "ready" || !bridge.recall.available()) return;
+    // After the main process has put the skill in place (prefs/write), and after the start's own requests.
+    const timer = setTimeout(() => void recallRef.current().catch(notice), 1500);
+    return () => clearTimeout(timer);
+  }, [prefs.recallQuestions, state.server, notice]);
+
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
   const selected = selectedView && isAskThread(selectedView.thread, askRoot) === (view === "ask") ? selectedView : null;
+  // An incognito question in front (DESKTOP_PARITY_CLAUDE §4.3): an ephemeral Ask thread. Leaving it, to
+  // another question, a new one, Work or a setting that changes the thread shown, deletes it: its turn
+  // stopped, the server let go of it, its folder and every file in it removed by the main process (which
+  // also removes any left when the app quits).
+  const incognitoShown = selected !== null && view === "ask" && selected.thread.ephemeral ? selected.thread : null;
+  const incognitoRef = useRef<{ id: string; cwd: string } | null>(null);
+  useEffect(() => {
+    const before = incognitoRef.current;
+    incognitoRef.current = incognitoShown ? { id: incognitoShown.id, cwd: incognitoShown.cwd } : null;
+    if (!before || before.id === incognitoShown?.id) return;
+    const active = stateRef.current.threads[before.id]?.activeTurnId;
+    void (async () => {
+      if (active) await client.request("turn/interrupt", { threadId: before.id, turnId: active }).catch(() => {});
+      await client.request("thread/unsubscribe", { threadId: before.id }).catch(() => {});
+      await bridge.incognito.forget(before.id);
+      setTabs((list) => list.filter((tab) => !(tab.kind === "file" && insideFolder(tab.path, before.cwd))));
+    })().catch((error: unknown) => notice(`The incognito question could not be deleted: ${error instanceof Error ? error.message : String(error)}`));
+  }, [incognitoShown?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The conversation follows its latest message (follow.ts): a thread opens at the end, new output
   // keeps the view there only while the reader is there, and an info panel opens at the top.
@@ -694,10 +774,24 @@ export function App() {
     }
   };
 
-  /** A new Ask thread: the UI names the prompt, `ling web` sets its text, folder and sandbox. */
-  const startAsk = async (): Promise<Thread> => {
-    const params = { model: servedModel, prompt: ASK_PROMPT, ...projectFields(false) } as unknown as ParamsOf<"thread/start">;
+  /**
+   * A new Ask thread: the UI names the prompt, `ling web` sets its text, folder and sandbox. An
+   * incognito one (DESKTOP_PARITY_CLAUDE §4.3) is ephemeral, so the server keeps no session file and
+   * no memory of it, and its folder is marked so that leaving the question deletes it; if the mark
+   * cannot be made, the question is dropped rather than kept. An incognito question joins no project.
+   */
+  const startAsk = async (incognito = false): Promise<Thread> => {
+    const params = { model: servedModel, prompt: ASK_PROMPT, ...(incognito ? { ephemeral: true } : projectFields(false)) } as unknown as ParamsOf<"thread/start">;
     const started = await client.request("thread/start", params);
+    if (incognito) {
+      try {
+        await bridge.incognito.mark(started.thread.id);
+      } catch (error) {
+        await client.request("thread/unsubscribe", { threadId: started.thread.id }).catch(() => {});
+        throw error;
+      }
+      setIncognitoNext(false);
+    }
     dispatch({ type: "opened", thread: started.thread });
     return started.thread;
   };
@@ -791,6 +885,15 @@ export function App() {
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData?.files ?? []);
+    // A long paste becomes an attachment (DESKTOP_PARITY_CLAUDE §4.6), so the composer stays readable:
+    // in Ask a file in the question's folder, in Work a chip whose text goes into the message.
+    const pasted = files.length === 0 ? event.clipboardData?.getData("text/plain") ?? "" : "";
+    if (pasted && prefsRef.current.pasteAsFile !== false && isLongPaste(pasted)) {
+      event.preventDefault();
+      const name = `pasted-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "-")}-${nextPendingId}.txt`;
+      setPending((list) => [...list, { id: nextPendingId++, file: new File([pasted], name, { type: "text/plain" }), name, kind: "file", preview: null, path: null, text: pasted }]);
+      return;
+    }
     if (files.length === 0) return;
     // Work sends images by their path, which only a dropped file has: a pasted one goes to Ask.
     if (view !== "ask") return;
@@ -864,7 +967,9 @@ export function App() {
     const target = selected?.thread ?? (await startThread());
     if (!target) return;
     const images = pending.filter((item) => item.kind === "image" && item.path).map((item) => item.path as string);
-    const typed = composeInput(message, rootSkills, images);
+    // Long pastes go into the message itself: Work writes nothing into a project for them.
+    const pastes = pending.flatMap((item) => (item.text !== undefined ? [item.text] : []));
+    const typed = composeInput(pastes.length ? withPastes(message, pastes) : message, rootSkills, images);
     if (typed.length === 0) return;
     const shownActive = selected?.thread.id === target.id ? selected.activeTurnId : null;
     const { input, stamp } = shownActive ? { input: typed, stamp: null } : await withProjectContext(target, typed, starting);
@@ -902,7 +1007,7 @@ export function App() {
     setPending([]);
     try {
       const starting = !selected;
-      const thread = selected?.thread ?? (await startAsk());
+      const thread = selected?.thread ?? (await startAsk(incognitoNext && bridge.incognito.available()));
       // Attachments go into the thread's own folder, which exists once the thread does.
       const attached: Attached[] = await Promise.all(
         files.map(async (item) => ({ kind: item.kind, name: item.name, path: (await bridge.upload(thread.id, item.file, item.kind, item.name)).path })),
@@ -1298,6 +1403,7 @@ export function App() {
   /** Side chat (Ctrl+Alt+S): a copy of the thread asked for a short recap, beside the running one, never interrupting it. */
   const sideChat = async () => {
     if (!selected) return;
+    if (selected.thread.ephemeral) return notice("An incognito question has no side chat: it would be saved.");
     try {
       const thread = await forkThread(client, selected.thread.id, servedModel);
       await client.request("thread/name/set", { threadId: thread.id, name: `Side chat: ${selected.thread.name || selected.thread.preview || "thread"}`.slice(0, 120) });
@@ -1603,6 +1709,24 @@ export function App() {
   };
 
   /** Esc Esc or /edit: the last message comes back into the composer, and its turn is undone. */
+  /**
+   * A new thread from an earlier point (DESKTOP_PARITY §4.5 item 22): through this turn (Fork from
+   * here), or before it with its message in the new thread's composer (Edit in a new thread). The
+   * thread shown is left as it is; an incognito one is never copied.
+   */
+  const forkFrom = async (turn: TurnView, where: "through" | "before") => {
+    if (!selected || selected.thread.ephemeral) return;
+    try {
+      const words = turn.items.flatMap((item) => (item.type === "userMessage" ? item.content.flatMap((input) => (input.type === "text" ? [input.text] : [])) : [])).join("\n");
+      const thread = await forkAt(client, selected.thread.id, turn.id, where, modelChoice ?? servedModel);
+      dispatch({ type: "opened", thread });
+      refreshQueue(thread.id);
+      if (where === "before" && words.trim()) setDraftFor(draftKeyOf(view, thread.id), words);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
   const editPrevious = async () => {
     if (!selected) return;
     try {
@@ -1628,6 +1752,7 @@ export function App() {
 
   const fork = async () => {
     if (!selected) return;
+    if (selected.thread.ephemeral) return notice("An incognito question is not copied: a fork would be saved.");
     try {
       const thread = await forkThread(client, selected.thread.id, servedModel);
       dispatch({ type: "opened", thread });
@@ -1938,6 +2063,26 @@ export function App() {
       document.removeEventListener("keydown", open);
     };
   }, [notice]);
+  // A web address in an answer (markdown.ts `webLink`): the dialog shows it in full before anything opens.
+  useEffect(() => {
+    const ask = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Enter") return;
+      const url = (event.target as Element | null)?.closest?.(".web-link")?.getAttribute("data-url");
+      if (!url) return;
+      event.preventDefault();
+      // The level as it is now, for the thread in front (the TUI's /airgapped may have changed it).
+      const thread = selectedRef.current;
+      bridge.airgapped(thread)
+        .then((level) => setLinkAsked({ url, thread, airgappedOn: level.level === "on" }))
+        .catch(() => setLinkAsked({ url, thread, airgappedOn: true }));
+    };
+    document.addEventListener("click", ask);
+    document.addEventListener("keydown", ask);
+    return () => {
+      document.removeEventListener("click", ask);
+      document.removeEventListener("keydown", ask);
+    };
+  }, []);
 
   if (state.server !== "ready") {
     return <StartupScreen state={state.server} stderr={state.stderr} protocolErrors={state.protocolErrors} notices={state.notices} onRetry={connect} />;
@@ -1975,7 +2120,7 @@ export function App() {
   const askOfProject = (projectId: string) => askThreads(allThreads, askRoot).filter((thread) => thread.projectId === projectId);
   const snippets = new Map((found ?? []).map((result) => [result.thread.id, result.snippet]));
   const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
-  const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.name, preview: item.preview }));
+  const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.text !== undefined ? pasteLabel(item.text) : item.name, preview: item.preview, title: item.text?.slice(0, 600) }));
 
   const unread = new Set(prefs.unreadThreads);
   const waiting = new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id)));
@@ -2061,8 +2206,8 @@ export function App() {
   );
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
-  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen;
-  const title = selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? "New question" : "Mightling";
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null;
+  const title = incognitoShown ? "Incognito question" : selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? (incognitoNext ? "New incognito question" : "New question") : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
     ? prefs.followUp === "queue" ? "Queue a follow-up for the next turn…" : "Steer the running turn…"
@@ -2201,7 +2346,7 @@ export function App() {
       </aside>
       <div className="backdrop" onClick={() => setDrawer(false)} />
 
-      <main className="thread-pane">
+      <main className={`thread-pane${incognitoShown || (view === "ask" && !selected && incognitoNext) ? " incognito" : ""}`}>
         <header className="bar" onDoubleClick={() => HOST === "electron" && bridge.windowControl("maximize").catch(() => {})}>
           <button className="icon menu-toggle" aria-label="Threads" onClick={() => setDrawer(!drawer)}><Icon name="panelLeft" size={20} strokeWidth={1.75} /></button>
           <button className="icon sidebar-toggle" aria-label={prefs.sidebarHidden ? "Show the sidebar" : "Hide the sidebar"} title={`${prefs.sidebarHidden ? "Show" : "Hide"} the sidebar (${shortcutLabel("toggleSidebar")})`} onClick={commands.toggleSidebar}><Icon name="panelLeft" size={18} strokeWidth={1.75} /></button>
@@ -2210,8 +2355,14 @@ export function App() {
           <span className="title">{title}</span>
           {selected && view === "work" ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
-          {selected ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
-          {selected && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
+          {view === "ask" && !selected && bridge.incognito.available() ? (
+            <button className={`chip incognito-toggle${incognitoNext ? " active" : ""}`} aria-pressed={incognitoNext} onClick={() => setIncognitoNext((on) => !on)}
+              title="An incognito question is not saved: not in your history, your memories or a later search. When you leave it, it is deleted for good, with every file in its folder.">
+              <Icon name="eyeOff" size={14} />Incognito
+            </button>
+          ) : null}
+          {selected && !incognitoShown ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
+          {selected && !incognitoShown && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
           {POPOUT ? <button className={`icon bar-action${onTop ? " active" : ""}`} aria-pressed={onTop} title="Keep this window above the others" aria-label="Always on top" onClick={() => void bridge.alwaysOnTop(!onTop).then(setOnTop).catch(notice)}><Icon name="pin" size={16} /></button> : null}
           {askFolder ? (
             // What the question made, beside the answer (DESKTOP_PARITY_CLAUDE §4.1): its folder's files.
@@ -2266,6 +2417,12 @@ export function App() {
         ) : null}
         <OpenFileContext.Provider value={view === "work" ? { open: openFile, cwd: selected?.thread.cwd ?? null, ask: false } : askFolder ? { open: openFile, cwd: askFolder, ask: true } : null}>
         <div className="turns" ref={turnsRef} onScroll={onTurnsScroll}>
+          {incognitoShown || (view === "ask" && !selected && incognitoNext) ? (
+            <div className="incognito-banner" role="note">
+              <Icon name="eyeOff" size={16} />
+              <span><strong>Incognito.</strong> This question is not saved: it stays out of your history, your memories and later searches. When you leave it (another question, a new one, Work, or closing Mightling), the question, its answers and its folder with every file in it are <strong>deleted for good</strong>; nothing can bring them back.</span>
+            </div>
+          ) : null}
           {info ? (
             <section className="info-panel" aria-label={info.title}>
               <header><strong>{info.title}</strong><button className="icon" aria-label="Close" onClick={() => setInfo(null)}><Icon name="x" size={14} /></button></header>
@@ -2274,6 +2431,7 @@ export function App() {
           ) : null}
           {selected ? selected.turns.map((turn, index) => (
             <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1} commandOutput={prefs.commandOutput}
+              onFork={selected.thread.ephemeral ? null : (where) => void forkFrom(turn, where)}
               onRevert={() => void revertTurn(turn).catch(notice)}
               onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
           )) : view === "ask" ? (
@@ -2309,17 +2467,10 @@ export function App() {
           <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
             onSet={(objective) => setGoal({ objective, status: "active" })} onStatus={(status) => setGoal({ status })} onClear={clearGoal} />
         ) : null}
-        {selected && !selected.activeTurnId && !draft.trim() && suggestions[selected.thread.id]?.length ? (
-          <div className="suggestions" role="group" aria-label="Suggested follow-ups">
-            {suggestions[selected.thread.id].map((text) => (
-              <button key={text} className="suggestion" onClick={() => setDraft(text)} title="Put it in the composer">{text}</button>
-            ))}
-            <button className="icon" aria-label="Dismiss the suggestions" onClick={() => setSuggestions((known) => Object.fromEntries(Object.entries(known).filter(([id]) => id !== selected.thread.id)))}><Icon name="x" size={12} /></button>
-          </div>
-        ) : null}
         {canCompose ? (
           <Composer
             draft={draft} setDraft={setDraft} placeholder={placeholder}
+            prediction={selected && !selected.activeTurnId ? suggestions[selected.thread.id]?.[0] ?? null : null}
             running={Boolean(selected?.activeTurnId)} sending={sending}
             enterBehaviour={prefs.enterBehaviour} followUp={prefs.followUp}
             root={view === "work" ? composeRoot : null}
@@ -2329,6 +2480,11 @@ export function App() {
             queue={queue}
             onSteerQueued={(item) => selected && steerQueued(client, selected.thread.id, selected.activeTurnId, item).then(() => refreshQueue(selected.thread.id)).catch(notice)}
             onDropQueued={(item) => selected && dropQueued(client, selected.thread.id, item).then(() => refreshQueue(selected.thread.id)).catch(notice)}
+            onEditQueued={(item, text) => selected && updateQueued(client, selected.thread.id, item, text).then(() => refreshQueue(selected.thread.id)).catch(notice)}
+            onMoveQueued={(item, by) => {
+              const order = selected ? movedQueue(queue.map((entry) => entry.id), item.id, by) : null;
+              if (selected && order) reorderQueued(client, selected.thread.id, order).then(() => refreshQueue(selected.thread.id)).catch(notice);
+            }}
             approvalOpen={threadRequests.length > 0} onApprovalKey={(key) => void answerByKey(key)}
             onSend={(text, mode) => void send(text, mode)} onStop={stop} onEditPrevious={() => void editPrevious()}
             onCommand={(command) => void runCommand(command)}
@@ -2428,6 +2584,14 @@ export function App() {
             )
           )}
         />
+      ) : null}
+      {linkAsked ? (
+        <LinkDialog url={linkAsked.url} airgappedOn={linkAsked.airgappedOn} notice={notice} onClose={() => setLinkAsked(null)}
+          onOpen={() => {
+            const { url, thread } = linkAsked;
+            setLinkAsked(null);
+            bridge.openWebLink(url, thread).catch((error: unknown) => notice(`The link was not opened: ${error instanceof Error ? error.message : String(error)}`));
+          }} />
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice}
@@ -2552,7 +2716,7 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
   );
 }
 
-function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; commandOutput: Prefs["commandOutput"] }) {
+function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; commandOutput: Prefs["commandOutput"] }) {
   const { turn } = props;
   return (
     <section className={`turn turn-${turn.status}`}>
@@ -2565,10 +2729,12 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
           <Diff text={turn.diff} />
         </details>
       ) : null}
-      {turn.status !== "inProgress" && props.last ? (
-        <span className="turn-actions">
-          <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button>
-          {props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Take this message back to edit it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
+      {turn.status !== "inProgress" && (props.last || props.onFork) ? (
+        <span className={`turn-actions${props.last ? "" : " earlier"}`}>
+          {props.last ? <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button> : null}
+          {props.last && props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Take this message back to edit it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
+          {props.onFork ? <button className="icon fork-here" onClick={() => props.onFork?.("through")} title="A new thread with this conversation up to here; this one stays as it is"><Icon name="gitFork" size={14} />Fork from here</button> : null}
+          {props.onFork ? <button className="icon edit-in-new" onClick={() => props.onFork?.("before")} title="A new thread with the conversation before this message, the message in its composer to change; this one stays as it is"><Icon name="squarePen" size={14} />Edit in a new thread</button> : null}
         </span>
       ) : null}
     </section>

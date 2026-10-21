@@ -77,6 +77,56 @@ export async function dropQueued(client: RpcClient, threadId: string, item: Queu
 }
 
 /**
+ * A queued message with its words edited (DESKTOP_PARITY §4.5 item 22): the text inputs become the
+ * new text, in the first one's place; images, skills and mentions stay as they were.
+ */
+export function editedInput(input: UserInput[], text: string): UserInput[] {
+  const words: UserInput = { type: "text", text, text_elements: [] };
+  const result: UserInput[] = [];
+  let placed = false;
+  for (const entry of input) {
+    if (entry.type !== "text") {
+      result.push(entry);
+      continue;
+    }
+    if (!placed && text.trim()) result.push(words);
+    placed = true;
+  }
+  if (!placed && text.trim()) result.unshift(words);
+  return result;
+}
+
+/** The queue's order with one message moved up (-1) or down (1); null when it cannot move. */
+export function movedQueue(ids: string[], id: string, by: -1 | 1): string[] | null {
+  const at = ids.indexOf(id);
+  const to = at + by;
+  if (at < 0 || to < 0 || to >= ids.length) return null;
+  const order = [...ids];
+  [order[at], order[to]] = [order[to], order[at]];
+  return order;
+}
+
+export async function updateQueued(client: RpcClient, threadId: string, item: QueuedSubmission, text: string): Promise<void> {
+  const input = editedInput(item.input, text);
+  if (input.length === 0) await client.request("thread/queue/delete", { threadId, queuedSubmissionId: item.id });
+  else await client.request("thread/queue/update", { threadId, queuedSubmissionId: item.id, input });
+}
+
+export async function reorderQueued(client: RpcClient, threadId: string, ids: string[]): Promise<void> {
+  await client.request("thread/queue/reorder", { threadId, queuedSubmissionIds: ids });
+}
+
+/**
+ * A new thread from an earlier point of this one (DESKTOP_PARITY §4.5 item 22, DESKTOP_PARITY_CLAUDE
+ * §4.6): through a turn, inclusive (Fork from here), or with the turns before it only (Edit in a new
+ * thread, whose message then waits in the composer). The thread itself is left as it is.
+ */
+export async function forkAt(client: RpcClient, threadId: string, turnId: string, where: "through" | "before", model: string | null): Promise<Thread> {
+  const params = where === "through" ? { threadId, lastTurnId: turnId, model } : { threadId, beforeTurnId: turnId, model };
+  return ((await client.request("thread/fork", params)) as { thread: Thread }).thread;
+}
+
+/**
  * Takes the last message back (Esc Esc, `/edit`): the thread is reverted to before that turn, which
  * also undoes what the turn changed, and its text comes back for editing. Null when there is nothing
  * to take back or a turn is running.

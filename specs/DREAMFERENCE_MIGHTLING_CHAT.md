@@ -259,6 +259,8 @@ ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 | `command_seconds` | 60 | one command's time, the same |
 | `telegram_topics` | true | topics as threads when the bot has them (MOONSHOT §14) |
 | `telegram_rich` | false | rich messages built from blocks, until Phase 0 (MOONSHOT §14) |
+| `night_repos` | [] | repositories `/night add` may queue in, besides every one already queued in (§16.8) |
+| `night_report_to` | ["signal", "matrix"] | which messengers get Night Shift's morning report; Telegram only when named (§16.8) |
 | `new_thread_after_hours` | 4 | a message after this long a silence starts a new thread; 0: never (§16.2; Signal reads it too, through `ling web`) |
 
 ## 11. Phase 0, measured before relying on it
@@ -446,4 +448,8 @@ Telegram's `voice` and `audio` and Matrix's `m.audio` are downloaded like images
 ### 16.7 Files back (branch `chat/files-back`)
 
 As SIGNAL §19.6: after a completed answer the hub lists the files the agent changed during the turn (`AgentCommand::MadeFiles`), offers each one the answer names (not the user's uploads, at most three) as the bridge's own approval ("Send it" / "No": Telegram buttons, Matrix ✅/❌ or yes/no), and on "Send it" fetches it (`MadeFile`) and sends it: Telegram `sendDocument` (50 MB), Matrix an upload to the homeserver and an `m.file` (20 MB). Too large: named and kept. Nothing is offered at `/airgapped on`, and `ling web`'s `/api/ask/file` refuses at a user-level `on`.
+
+### 16.8 Night Shift from the phone (branch `chat/night`)
+
+As SIGNAL §19.7, in the hub: `/night add <task>` (the last exchange read back with `thread/turns/list`) is the bridge's own approval: "Queue it" / "Cancel" for one repository, the repositories' names and "Cancel" for several (Telegram buttons, Matrix numbers or yes/no), and only the answer queues it through `ling web` (`AgentCommand::Web`). `/night status` reads the queue. Every five minutes the hub looks for new reports and sends each to every chat of the messengers `[chat] night_report_to` names (Signal and Matrix by default; Telegram only when named, because the report's repository and task names would then be on Telegram's servers), once (`~/.mightling/chat/night-report-seen`). `ling web`'s routes are `night_phone.rs`.
 

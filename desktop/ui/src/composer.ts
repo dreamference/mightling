@@ -293,3 +293,30 @@ export function reviewTarget(args: string): { type: "uncommittedChanges" } | { t
   if (commit) return { type: "commit", sha: commit[1], title: null };
   return { type: "custom", instructions: words };
 }
+
+/** A paste this long becomes an attachment (DESKTOP_PARITY_CLAUDE §4.6): characters, or lines. */
+export const LONG_PASTE = { chars: 2_000, lines: 40 };
+
+/** Whether pasted text is long enough to go in as an attachment rather than into the text. */
+export function isLongPaste(text: string): boolean {
+  return text.length >= LONG_PASTE.chars || text.split("\n").length >= LONG_PASTE.lines;
+}
+
+/** A pasted text's chip: its lines, or its characters when it is one long line. */
+export function pasteLabel(text: string): string {
+  const lines = text.replace(/\n+$/, "").split("\n").length;
+  return lines > 1 ? `Pasted text · ${lines} lines` : `Pasted text · ${text.length.toLocaleString("en")} characters`;
+}
+
+/**
+ * A Work message with its pasted texts (Work writes no attachment into a project): each after the
+ * words, as a fenced block long enough not to be closed by a fence inside it.
+ */
+export function withPastes(message: string, pastes: string[]): string {
+  const blocks = pastes.map((text, index) => {
+    const longest = Math.max(2, ...Array.from(text.matchAll(/`{3,}/g), (found) => found[0].length));
+    const fence = "`".repeat(longest + 1);
+    return `Pasted text ${index + 1}:\n${fence}\n${text.replace(/\n+$/, "")}\n${fence}`;
+  });
+  return [message.trim(), ...blocks].filter(Boolean).join("\n\n");
+}

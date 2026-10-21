@@ -18,6 +18,7 @@ import { airgapped, setDefault } from "./airgapped";
 import { cavemodeSet, cavemodeStatus } from "./cavemode";
 import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
+import { webUrl } from "./links";
 import { codexHome, findLing } from "./bridge";
 import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
@@ -37,6 +38,7 @@ import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./
 import { Notices } from "./notices";
 import { transcribe } from "./voice";
 import { Previews } from "./preview";
+import { disableRecall, enableRecall, pruneRecall, recallIndex, recallOn, writeRecall } from "./recall";
 import { PetStatus, fitPet, openPet, petImage, type PetSize, type PetState } from "./pet";
 import { DEFAULT_SHORTCUT, accelerator, openQuick, placeQuick, quickPrompt, shortcutsWork, type QuickStatus } from "./quick";
 import type { SiteChoice } from "./preview-rules";
@@ -287,6 +289,18 @@ export async function main(options: MainOptions): Promise<void> {
   };
   app.on("will-quit", () => globalShortcut.unregisterAll());
 
+  /** Puts the skill and the copies' folder in place, or deletes both, as Settings › Memories says. */
+  const syncRecall = () => {
+    const home = codexHome();
+    if (!home) return;
+    try {
+      if (prefs.read().recallQuestions === true) enableRecall(home);
+      else if (recallOn(home) || fs.existsSync(path.join(home, "ask-history"))) disableRecall(home);
+    } catch (error) {
+      console.error(`ling-app: earlier questions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   installMenu(actions);
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
   installTray(path.join(__dirname, "..", "..", "icons"), { ...actions, quickQuestion: toggleQuick });
@@ -430,6 +444,25 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "ask/upload":
         return server.upload(message);
+      case "ask/incognito":
+        server.incognito("mark", String(message.thread));
+        return null;
+      case "ask/forget":
+        return server.incognito("forget", String(message.thread));
+      case "recall/index": {
+        const home = codexHome();
+        return home && recallOn(home) ? recallIndex(home) : {};
+      }
+      case "recall/write": {
+        const home = codexHome();
+        if (!home || prefs.read().recallQuestions !== true) throw new Error("searching earlier questions is off (Settings › Memories)");
+        writeRecall(home, message.thread, message.updatedAt, message.markdown);
+        return null;
+      }
+      case "recall/prune": {
+        const home = codexHome();
+        return home ? pruneRecall(home, message.keep) : 0;
+      }
       case "voice/transcribe":
         return transcribe(message);
       case "work/stop":
@@ -483,6 +516,14 @@ export async function main(options: MainOptions): Promise<void> {
         const root = await git.checkRoot(message.root);
         await offline(message.thread, "a push");
         return git.push(root, Boolean(message.force));
+      }
+      case "open/url": {
+        // A link in an answer, after the page has shown its full address and the user said open.
+        const url = webUrl(message.url);
+        if (!url) throw new Error("only a web address (http or https) opens in the browser");
+        await offline(message.thread ?? null, "opening a link");
+        await shell.openExternal(url);
+        return url;
       }
       case "git/pull-request": {
         const root = await git.checkRoot(message.root);
@@ -630,6 +671,7 @@ export async function main(options: MainOptions): Promise<void> {
       case "prefs/write": {
         const written = prefs.write(message.values);
         if (["petShown", "petSize", "petImage"].some((key) => key in (message.values ?? {}))) syncPet();
+        if ("recallQuestions" in (message.values ?? {})) syncRecall();
         if (["quickEntry", "quickEntryShortcut"].some((key) => key in (message.values ?? {}))) syncQuick();
         if ("theme" in (message.values ?? {})) {
           nativeTheme.themeSource = themeChoice(prefs.read().theme);
@@ -747,6 +789,19 @@ export async function main(options: MainOptions): Promise<void> {
     app.quit();
   });
   app.on("before-quit", () => server.stop());
+  // Incognito questions open when the app quits, or left by one that crashed, are deleted
+  // (DESKTOP_PARITY_CLAUDE §4.3); never in the audit's session, which touches no question.
+  const sweep = () => {
+    try {
+      server.incognito("sweep");
+    } catch {
+      // No home folder: no Ask folders either.
+    }
+  };
+  if (options.audit === null) {
+    sweep();
+    app.on("will-quit", sweep);
+  }
   // Node's own teardown, after the last window and before the process ends, waits for every file-system
   // request still pending, and a read a macOS folder-access prompt holds never ends: the main process
   // stayed alive, windowless, after SIGTERM (1.7.0 Mac test), past the fallback below. With such a
@@ -775,6 +830,8 @@ export async function main(options: MainOptions): Promise<void> {
   showView(options.work ? "work" : "ask");
   // The pet, when Settings › Pets has it on (never in the egress audit's session).
   if (options.audit === null) syncPet();
+  // Earlier questions (recall.ts): the skill and the copies' folder as Settings › Memories says.
+  if (options.audit === null) syncRecall();
   // Quick Entry's shortcut, when Settings › General has it on (never in the audit's session).
   if (options.audit === null) syncQuick();
   if (options.audit !== null) {
