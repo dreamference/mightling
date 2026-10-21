@@ -317,12 +317,30 @@ export const nodes = {
 };
 
 /** The Scheduled view over Night Shift (desktop/electron/src/night.ts). */
+/** A repeating Night Shift task (desktop/electron/src/night.ts). */
+export interface RepeatingTask {
+  id: string;
+  repo: string;
+  task: string;
+  test: string | null;
+  cadence: "daily" | "weekly";
+  weekday: string | null;
+  lastQueued: string | null;
+  lastError: string | null;
+}
 export const night = {
   list: () => send<{ tasks: NightTask[]; reports: { name: string; modified: number }[] }>({ type: "night/list" }),
   report: (name: string) => send<string>({ type: "night/report", name }),
   add: (repo: string, task: string, test: string | null) => send<string>({ type: "night/add", repo, task, test }),
   drop: (repo: string, id: string) => send<string>({ type: "night/drop", repo, id }),
   runNow: () => send<null>({ type: "night/run" }),
+  /** Repeating tasks: every night, or every week on one day (ling-admin night every). */
+  every: (repo: string, task: string, test: string | null, cadence: "daily" | "weekly", weekday: string | null) =>
+    send<string>({ type: "night/every-add", repo, task, test, cadence, weekday }),
+  repeating: () => send<RepeatingTask[]>({ type: "night/every-list" }),
+  dropRepeating: (id: string) => send<string>({ type: "night/every-drop", id }),
+  /** A finished task's last message, diff and transcript, and the session it ran as. */
+  details: (id: string) => send<{ result: string | null; diff: string | null; transcript: string | null; session: string | null }>({ type: "night/details", id }),
 };
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });

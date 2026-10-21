@@ -40,7 +40,7 @@ async function open(prepare?: (home: string) => void, extraEnv: (home: string) =
   const ling = writeStandIn(home, askRoot);
   const app = await launch({
     args: [main],
-    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv(home) },
+    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_ADMIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv(home) },
   });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");

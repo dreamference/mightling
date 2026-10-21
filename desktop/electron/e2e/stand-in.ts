@@ -109,6 +109,22 @@ if (process.argv[2] === "node") {
   console.log(JSON.stringify({ thisMachine: "client", nodes: [node("spark-1", "11111111-aaaa", "RadixArk/Qwen3.8-27B-NVFP4"), node("spark-2", "22222222-bbbb", null)], rememberedAway: null, hint: null }));
   process.exit(0);
 }
+// ling-admin night every add|list|drop (MIGHTLING_ADMIN is this script too): templates kept in a file.
+if (process.argv[2] === "night" && process.argv[3] === "every") {
+  const kept = ${JSON.stringify(path.join(home, "repeating.json"))};
+  const list = fs.existsSync(kept) ? JSON.parse(fs.readFileSync(kept, "utf8")) : [];
+  if (process.argv[4] === "list") { for (const entry of list) console.log(JSON.stringify(entry)); process.exit(0); }
+  if (process.argv[4] === "drop") { fs.writeFileSync(kept, JSON.stringify(list.filter((entry) => entry.id !== process.argv[5]))); console.log("Repeating task " + process.argv[5] + " dropped."); process.exit(0); }
+  const args = process.argv.slice(5);
+  const weekly = args[0] === "--weekly" ? args[1] : null;
+  const test = args.includes("--test") ? args[args.indexOf("--test") + 1] : null;
+  const task = args.slice(args.indexOf("--") + 1).join(" ");
+  const id = "r" + String(list.length + 1).padStart(12, "0");
+  list.push({ id, repo: process.cwd(), task, test, cadence: weekly ? "weekly" : "daily", weekday: weekly, created: "2026-10-21T12:00:00+01:00", last_queued: null, last_error: null });
+  fs.writeFileSync(kept, JSON.stringify(list));
+  console.log("Repeating task " + id + ", " + (weekly ? "every " + weekly : "every night") + ".");
+  process.exit(0);
+}
 if (process.argv[2] === "night") { console.log(process.argv[3] === "add" ? "Queued 20261017-0930 on branch night/20261017-0930, from 1a2b3c4d5e." : "Dropped " + process.argv[4] + "."); process.exit(0); }
 const threads = ${JSON.stringify(threads(home, askRoot))};
 const files = ${JSON.stringify(FILES)};
