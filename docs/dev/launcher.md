@@ -35,6 +35,7 @@ The web-access instructions are appended to the system prompt by the launcher (`
 - **MCP servers:** Claude Code's MCP servers (`.mcp.json`, `~/.claude.json`) start only after `ling compat mcp approve`, by hash (`src/compat_mcp.rs`).
   - **stdio servers** run through `ling compat mcp-run`. It re-checks the approval, expands the variables Codex forwards by name, and at `/airgapped on` runs the server under `bwrap --unshare-net`.
   - **HTTP servers** are left to Codex and refused at `on`.
+- **Permission rules:** Claude Code's permission rules and `--allowedTools`/`--disallowedTools` are enforced by `ling compat guard`, a trusted `PreToolUse` hook in the same table (`src/compat_permissions.rs`). Deny and ask refuse (ask cannot prompt in Codex); allow is the sandbox's. Print mode hands its rules to the child in `DREAMFERENCE_MIGHTLING_COMPAT_RULES`, and `--permission-mode` maps to Codex options in the TUI.
 - **Start-up line:** a TUI start names what was read (`Claude Code files: CLAUDE.md n, hooks n, agents n`).
 
 ## `CODEX_HOME` is `~/.mightling`, not `~/.codex`
