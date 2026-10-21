@@ -496,7 +496,7 @@ impl Daemon {
         for attachment in attachments {
             let local = self.attachments_dir().join(&attachment.id);
             let name = attachment.filename.clone().unwrap_or_else(|| attachment.id.clone());
-            let mut uploaded = Uploaded { name: name.clone(), image: attachment.is_image(), path: None, text: None, vision: false };
+            let mut uploaded = Uploaded { name: name.clone(), image: attachment.is_image(), path: None, text: None, vision: false, heard: None };
             // signal-cli has downloaded it into its folder (it is started without
             // --ignore-attachments, §19.1); `getAttachment` reads that same folder, base64.
             let fetched = match std::fs::read(&local) {
@@ -516,6 +516,12 @@ impl Daemon {
                     continue;
                 }
             };
+            // A voice note is transcribed on this machine through `ling web`, not uploaded (§19.5).
+            if attachment.content_type.starts_with("audio/") {
+                uploaded.heard = Some(agent::transcribe(self.config.port, &self.cookie, &attachment.content_type, &bytes).await);
+                uploads.push(uploaded);
+                continue;
+            }
             match agent::upload(self.config.port, &self.cookie, thread, &name, attachment.is_image(), &bytes).await {
                 Ok(saved) => {
                     uploaded.vision = saved.vision || self.config.vision;

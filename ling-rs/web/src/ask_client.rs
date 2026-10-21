@@ -199,6 +199,30 @@ pub async fn cavemode(port: u16, cookie: &str, thread: Option<&str>, text: &str)
     }
 }
 
+/// A voice message as text, through `ling web`'s `/api/transcribe` (the speech-to-text service on
+/// this machine; MOONSHOT §3.4): the text, or what `ling web` said went wrong.
+pub async fn transcribe(port: u16, cookie: &str, media: &str, bytes: &[u8]) -> Result<String, String> {
+    let mut request = format!(
+        "POST /api/transcribe HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: {media}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        bytes.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(bytes);
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;
+    stream.write_all(&request).await.map_err(|err| err.to_string())?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.map_err(|err| err.to_string())?;
+    let split = response.windows(4).position(|w| w == b"\r\n\r\n").ok_or("ling web sent no HTTP response")?;
+    let body: Value = serde_json::from_slice(&response[split + 4..]).unwrap_or(Value::Null);
+    match body.get("text").and_then(Value::as_str) {
+        Some(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Some(_) => Err("nothing was heard in it".to_string()),
+        None => Err(body.get("error").and_then(Value::as_str).unwrap_or("ling web did not transcribe it").to_string()),
+    }
+}
+
 /// Asks one question in a new Ask thread; returns the answer, streaming it to stdout.
 pub async fn ask(state: &Path, port: u16, question: &str, limit: Duration) -> Result<String, String> {
     let cookie = sign_in(state, port).await?;
