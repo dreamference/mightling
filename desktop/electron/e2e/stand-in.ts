@@ -77,7 +77,8 @@ export function writeStandIn(home: string, askRoot: string): string {
   fs.writeFileSync(ling, `#!/usr/bin/env node
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
-if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
+// Airgapped on while the test has left a file saying so (links.e2e.ts).
+if (process.argv[2] === "airgapped") { console.log("Airgapped: " + (fs.existsSync(${JSON.stringify(path.join(home, "airgapped-on"))}) ? "on" : "off") + " (default)"); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
 if (process.argv[2] === "node") {
   // ling node list --json and ling node use <name> (Settings › Node): two nodes, the chosen one remembered in a file.
@@ -241,7 +242,9 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }
-          const answerItem = { type: "agentMessage", id: "m" + id, text: "Done: the retry counter is in fetcher/client.py." };
+          const answerItem = { type: "agentMessage", id: "m" + id, text: asked.includes("with a source")
+            ? "NVFP4 is described on [NVIDIA's developer blog](https://developer.nvidia.com/blog/nvfp4/) [1].\\n\\n[1] https://developer.nvidia.com/blog/nvfp4/"
+            : "Done: the retry counter is in fetcher/client.py." };
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: answerItem } });
           // As ling sends it: the completed turn lists the answer alone, not what the turn streamed.
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
