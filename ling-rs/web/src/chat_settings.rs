@@ -8,6 +8,8 @@
 //! answer_seconds = 180         # an answer's time, then the agent is told to answer now; 0: no limit
 //! tool_calls = 25              # an answer's tool calls, the same; 0: no limit
 //! command_seconds = 60         # one command's time in a chat session, the same; 0: no limit
+//! night_repos = ["~/code/app"]  # where /night add may queue, besides every repository already queued in
+//! night_report_to = ["signal", "matrix"]  # which messengers get the morning report; [] for none
 //! telegram_mini_app_url = "https://…"  # ling web over HTTPS on your own network, as Telegram's app (telegram_app.rs)
 //! ```
 //!
@@ -40,6 +42,12 @@ pub struct ChatSettings {
     pub tool_calls: Option<u32>,
     /// None: no limit on one command's time.
     pub command_timeout: Option<Duration>,
+    /// Repositories `/night add` may queue in, besides those already queued in (night_phone.rs).
+    pub night_repos: Vec<String>,
+    /// Which messengers get Night Shift's morning report: Signal and Matrix unless the user says;
+    /// Telegram only when named, because the report's repository and task names would then be on
+    /// Telegram's servers (MOONSHOT §3.5).
+    pub night_report_to: Vec<String>,
 }
 
 impl Default for ChatSettings {
@@ -49,6 +57,8 @@ impl Default for ChatSettings {
             answer_budget: Some(DEFAULT_ANSWER_BUDGET),
             tool_calls: Some(DEFAULT_TOOL_CALLS),
             command_timeout: Some(DEFAULT_COMMAND_TIMEOUT),
+            night_repos: Vec::new(),
+            night_report_to: vec!["signal".to_string(), "matrix".to_string()],
         }
     }
 }
@@ -80,6 +90,15 @@ impl ChatSettings {
         if let Some(calls) = chat.get("tool_calls").and_then(toml::Value::as_integer).filter(|n| (0..=10_000).contains(n)) {
             settings.tool_calls = (calls > 0).then_some(calls as u32);
         }
+        let strings = |key: &str| -> Option<Vec<String>> {
+            chat.get(key)?.as_array().map(|items| items.iter().filter_map(toml::Value::as_str).map(str::to_string).collect())
+        };
+        if let Some(repos) = strings("night_repos") {
+            settings.night_repos = repos;
+        }
+        if let Some(to) = strings("night_report_to") {
+            settings.night_report_to = to.into_iter().map(|m| m.to_ascii_lowercase()).collect();
+        }
         settings
     }
 
@@ -100,6 +119,7 @@ impl ChatSettings {
             "answerSeconds": self.answer_budget.map_or(0, |budget| budget.as_secs()),
             "toolCalls": self.tool_calls.unwrap_or(0),
             "commandSeconds": self.command_timeout.map_or(0, |timeout| timeout.as_secs()),
+            "nightReportTo": self.night_report_to,
         })
     }
 
@@ -118,6 +138,9 @@ impl ChatSettings {
         }
         if let Some(calls) = value.get("toolCalls").and_then(Value::as_u64) {
             settings.tool_calls = (calls > 0).then(|| calls.min(10_000) as u32);
+        }
+        if let Some(to) = value.get("nightReportTo").and_then(Value::as_array) {
+            settings.night_report_to = to.iter().filter_map(Value::as_str).map(str::to_string).collect();
         }
         settings
     }
@@ -142,12 +165,23 @@ mod tests {
         assert_eq!(bounds.tool_calls, Some(10));
         assert_eq!(bounds.command_timeout, None);
         assert_eq!(ChatSettings::from_toml("[chat]\ntool_calls = 0\n").tool_calls, None);
+        let night = ChatSettings::from_toml("[chat]\nnight_repos = [\"~/code/app\"]\nnight_report_to = [\"Telegram\", \"signal\"]\n");
+        assert_eq!(night.night_repos, ["~/code/app"]);
+        assert_eq!(night.night_report_to, ["telegram", "signal"]);
+        assert_eq!(ChatSettings::default().night_report_to, ["signal", "matrix"], "Telegram only when named");
     }
 
     #[test]
     fn the_settings_survive_the_trip_through_ling_web() {
-        let off = ChatSettings { new_thread_after: None, answer_budget: None, tool_calls: None, command_timeout: None };
-        let short = ChatSettings { new_thread_after: Some(Duration::from_secs(60)), answer_budget: Some(Duration::from_secs(30)), tool_calls: Some(3), command_timeout: Some(Duration::from_secs(5)) };
+        let off = ChatSettings { new_thread_after: None, answer_budget: None, tool_calls: None, command_timeout: None, night_report_to: vec![], ..ChatSettings::default() };
+        let short = ChatSettings {
+            new_thread_after: Some(Duration::from_secs(60)),
+            answer_budget: Some(Duration::from_secs(30)),
+            tool_calls: Some(3),
+            command_timeout: Some(Duration::from_secs(5)),
+            night_report_to: vec!["telegram".to_string()],
+            ..ChatSettings::default()
+        };
         for settings in [ChatSettings::default(), off, short] {
             assert_eq!(ChatSettings::from_json(&settings.to_json()), settings);
         }

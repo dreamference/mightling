@@ -214,6 +214,37 @@ pub async fn get(port: u16, cookie: &str, path_and_query: &str) -> Result<(u16, 
     Ok((status, response[split + 4..].to_vec()))
 }
 
+/// A JSON request to `ling web` as a signed-in client (`GET` without a body, `POST` with one):
+/// the answer's JSON, or its `error`.
+pub async fn web_json(port: u16, cookie: &str, path_and_query: &str, body: Option<&Value>) -> Result<Value, String> {
+    let (status, raw) = match body {
+        None => get(port, cookie, path_and_query).await?,
+        Some(body) => {
+            let body = body.to_string();
+            let request = format!(
+                "POST {path_and_query} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;
+            stream.write_all(request.as_bytes()).await.map_err(|err| err.to_string())?;
+            let mut response = Vec::new();
+            stream.read_to_end(&mut response).await.map_err(|err| err.to_string())?;
+            let split = response.windows(4).position(|w| w == b"\r\n\r\n").ok_or("ling web sent no HTTP response")?;
+            let head = String::from_utf8_lossy(&response[..split]).into_owned();
+            let status = head.split_whitespace().nth(1).and_then(|code| code.parse().ok()).ok_or("ling web sent no status")?;
+            (status, response[split + 4..].to_vec())
+        }
+    };
+    let value: Value = serde_json::from_slice(&raw).map_err(|_| format!("ling web answered HTTP {status} without JSON"))?;
+    if status == 200 {
+        Ok(value)
+    } else {
+        Err(value.get("error").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("ling web refused (HTTP {status})")))
+    }
+}
+
 /// A file an Ask thread's agent made (`/api/ask/files`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MadeFile {

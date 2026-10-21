@@ -45,6 +45,15 @@ is not a preview.
 - **Files back.** When Mightling makes a file for you (a table, a report) and names it in the
   answer, the bridge offers to send it: press "Send it" on Telegram, or reply YES on Signal and
   Matrix. Nothing is sent unless you say so, and nothing at all while the air gap is on.
+- **Night Shift from the phone.** `/night add <task>` queues a task for tonight, with the
+  conversation's last question and answer as context; the bridge asks which repository (and
+  waits for your yes) before anything is queued. `/night status` shows the queue, and the morning
+  report arrives in Signal and Matrix (Telegram too if you add it). Configure under `[chat]`:
+
+  ```toml
+  night_repos = ["~/code/myapp"]          # besides every repository you queued in before
+  night_report_to = ["signal", "matrix"]  # [] for none; add "telegram" to get it there
+  ```
 - **Quick follow-ups join the answer.** A message sent while Mightling is answering is added to
   the question it is working on, not answered separately afterwards. `/stop` still stops the answer.
 - **Answers are bounded.** An answer that takes over three minutes, uses over 25 tool calls or
