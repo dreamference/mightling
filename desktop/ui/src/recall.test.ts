@@ -16,7 +16,7 @@ describe("earlier questions", () => {
 
   it("writes the title, the dates, the folder, then each question and answer, nothing else", () => {
     const turns = [{ id: "a", status: "completed", error: null, items: [
-      { type: "userMessage", id: "u", content: [{ type: "text", text: "What is NVFP4?", text_elements: [] }, { type: "localImage", path: "/x/chart.png" }] },
+      { type: "userMessage", id: "u", content: [{ type: "text", text: "What is NVFP4?", text_elements: [] }, { type: "localImage", path: "/x/chart.png" }, { type: "text", text: "<project_context>\nThis conversation belongs to the project\n</project_context>", text_elements: [] }] },
       { type: "reasoning", id: "r", summary: ["secret thinking"], content: [] },
       { type: "commandExecution", id: "c", command: "ling-search nvfp4" },
       { type: "agentMessage", id: "m", text: "A 4-bit float format [1].\n\n[1] https://developer.nvidia.com/blog/nvfp4/" },
@@ -27,6 +27,7 @@ describe("earlier questions", () => {
       "## Question", "", "What is NVFP4?\n[image: chart.png]", "", "## Answer", "", "A 4-bit float format [1].\n\n[1] https://developer.nvidia.com/blog/nvfp4/", "",
     ].join("\n"));
     expect(text).not.toContain("secret thinking");
+    expect(text).not.toContain("project_context");
     expect(text).not.toContain("ling-search");
   });
 });

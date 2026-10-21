@@ -30,7 +30,7 @@ import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addTask, dropTask, readReport, readReports, readTasks, runNow } from "./night";
 import { Nodes } from "./nodes";
-import { docsAdd, docsReindex, docsRemove, docsStatus, locate } from "./docs";
+import { docsAdd, docsReindex, docsRemove, docsStatus, locate, syncKnowledge } from "./docs";
 import { Tasks } from "./tasks";
 import { RequestRouter } from "./windows";
 import * as worktree from "./worktree";
@@ -736,10 +736,19 @@ export async function main(options: MainOptions): Promise<void> {
         if (!home) throw new Error("Mightling's home folder is not known");
         const projectId = String(message.projectId);
         if (message.type === "project/knowledge-list") return knowledge.listKnowledge(home, projectId);
-        if (message.type === "project/knowledge-remove") return knowledge.removeKnowledge(home, projectId, String(message.name));
+        // The knowledge as a collection the agent searches (DESKTOP_PARITY_CLAUDE §4.7), kept in step in the background.
+        const searchable = (files: knowledge.KnowledgeFile[]) => {
+          const ling = findLing(resourcesPath());
+          if (ling) {
+            syncKnowledge(ling, knowledge.knowledgeFolder(home, projectId), knowledge.knowledgeCollection(projectId), files.length)
+              .catch((error: unknown) => console.error(`ling-app: the knowledge of ${projectId} is read as files only: ${error instanceof Error ? error.message : String(error)}`));
+          }
+          return files;
+        };
+        if (message.type === "project/knowledge-remove") return searchable(await knowledge.removeKnowledge(home, projectId, String(message.name)));
         const chosen = await dialog.showOpenDialog(own, { title: "Add knowledge files to the project", properties: ["openFile", "multiSelections"] });
         if (chosen.canceled || chosen.filePaths.length === 0) return knowledge.listKnowledge(home, projectId);
-        return knowledge.addKnowledge(home, projectId, chosen.filePaths);
+        return searchable(await knowledge.addKnowledge(home, projectId, chosen.filePaths));
       }
       case "dialog/save-text": {
         // Only a file name is suggested (no folder from the page); the user picks where it goes.

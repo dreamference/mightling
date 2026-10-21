@@ -702,6 +702,23 @@ Mightling's own settings stay where they are (`dreamference.toml`, `~/.config/dr
 | `mcp__server__tool` | Codex's MCP tool approval settings |
 | `additionalDirectories` | writable roots |
 
+**Built (2026-10-21)** in `ling-rs/src/compat_permissions.rs`.
+- **The guard:** Claude Code's rules from the settings files (a repository's only in a trusted folder) and from `--allowedTools`/`--disallowedTools` go to one `PreToolUse` hook, `ling compat guard`. The launcher registers and trusts it with the session's other hooks; there are no exec-policy files.
+  - Deny is checked first, then ask, then allow.
+  - A **deny** rule refuses the call and names the rule.
+  - An **ask** rule refuses it too and says so: a hook cannot make Codex ask, so the mode takes the safe direction.
+  - An **allow** rule needs nothing. Codex runs what its sandbox permits without asking and still asks for what would leave the sandbox.
+- **`Bash(…)` rules:** matched on every subcommand (Claude Code's separators, substitutions included, inside double quotes too), after its wrappers and any leading assignment. `*` works as on the permissions page, including the bare-command rule for a trailing ` *` and the older `:*`.
+- **`Read(…)`/`Edit(…)` rules:** the four gitignore anchors (`//`, `~/`, `/` from the settings file's anchor, relative), against `apply_patch`'s files and the file commands and redirections of a shell command. A `Read` deny also refuses an edit.
+- **Other rules:** `WebFetch(domain:…)` matches `ling-fetch` URLs, with Claude Code's label rules. Bare `WebSearch` matches `ling-search`. Tool names and globs match (`mcp__*`, `Agent(role)`). Writes to `.claude/` and `.git/` are refused as protected.
+- **`--permission-mode` in the TUI:**
+  - `default`, `manual` and `acceptEdits` change nothing (Codex's workspace-write already lets edits through).
+  - `dontAsk` is `-a never`.
+  - `bypassPermissions` is Full Access, refused at `/airgapped on`.
+  - `plan` starts as usual with a line saying to type `/plan`, since Codex has no setting for the starting mode.
+  - `auto` is refused.
+- **`permissions.defaultMode`** in a settings file is not read: a repository must not choose a looser mode.
+
 The mapping is not exact (§14 Q4): where Claude Code would *allow* without asking and Codex's model cannot express it (a `PreToolUse` hook may not return a plain `allow` at the pinned tag, only `allow` with a rewritten input), the mode asks, which is the safe direction. Claude Code's own rule that a hook's `allow` never overrides a deny or ask rule holds trivially.
 
 ### 9.4 Commands, skills and subagents
@@ -774,6 +791,7 @@ Ask threads are `ling` sessions; they take the profile only if the node's config
 
 Following the pattern of §20–§23 of [SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md):
 
+- **Built (2026-10-21), the `--compat` part:** `swe-bench run --compat claude|off` sets the variable in every container and records `compat` in the manifest (`auto` without the flag, which a manifest from before reads as). The report prints a `Compatibility` line and `--against` lists the field when two runs differ. No night is armed; the main session schedules one. `--claude-tools` waits for the discrete roster.
 - **`swe-bench run --compat claude`** sets `DREAMFERENCE_MIGHTLING_COMPAT=claude` for every session of the run (the runner's extra environment of each container); **`--claude-tools codex|discrete|discrete-search`** sets `DREAMFERENCE_MIGHTLING_CLAUDE_TOOLS`. With no flag neither variable is set and the launcher decides as for every user. The manifest records `compat` and `claude_tools` (`auto` when absent; a manifest from before the options reads as `auto`); `report` prints them and `report --against` lists them when they differ.
 - **The instances carry no `CLAUDE.md`**, so the profile alone changes only the command line and the output; the arm that matters is **`--compat claude --claude-tools discrete`** against the record arm (`default`). A second pair adds a generated `CLAUDE.md` per instance (the same text the record arm gets as its task preamble, moved into the memory file) to check that memory delivered through the `SessionStart` hook scores the same as through the prompt.
 - **The list**: the night-2 list without mismatched tasks (`docs/dev/swe-bench/night2-no-mismatch.txt`, 44 tasks), record arm first, as on every night; McNemar exact, the report's verdict. Columns: resolved, tokens (the roster's schema tokens counted), tool calls by name, edits by tool, compactions, wall time.

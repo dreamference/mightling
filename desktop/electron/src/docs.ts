@@ -56,6 +56,25 @@ export function docsAdd(ling: string, folder: unknown): Promise<string> {
   return lingDocs(ling, ["add", folder]);
 }
 
+/**
+ * A project's knowledge folder as a collection of its own (DESKTOP_PARITY_CLAUDE §4.7), so the agent's
+ * `docs_search` finds passages in it: made with its first file, indexed again when files come or go,
+ * removed with its last. A `ling-docs` older than the knowledge folder's exception refuses it; the
+ * files are still read as files then, so a refusal is only logged.
+ */
+export async function syncKnowledge(ling: string, folder: string, name: string, files: number): Promise<void> {
+  if (!COLLECTION.test(name)) throw new Error("not a collection");
+  if (files === 0) {
+    await lingDocs(ling, ["remove", name]).catch(() => "");
+    return;
+  }
+  await lingDocs(ling, ["add", folder, "--name", name]).catch((error: Error) => {
+    if (!/already/i.test(error.message)) throw error;
+    return "";
+  });
+  await lingDocs(ling, ["reindex", name]);
+}
+
 export function docsRemove(ling: string, name: unknown): Promise<string> {
   if (typeof name !== "string" || !COLLECTION.test(name)) return Promise.reject(new Error("not a collection"));
   return lingDocs(ling, ["remove", name]);
