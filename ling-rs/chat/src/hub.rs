@@ -36,7 +36,7 @@ pub enum Inbound {
     /// A message, or a command (`/new`, …).
     Text { chat: String, text: String },
     /// A message with attachments (its caption as `text`), and what the adapter could not take,
-    /// named for the user ("a voice message").
+    /// named for the user ("a sticker").
     Media { chat: String, text: String, attachments: Vec<Media>, dropped: Vec<String> },
     /// The messenger's own stop control (Telegram's button on a streaming answer).
     Stop { chat: String },
@@ -60,6 +60,8 @@ pub enum Outbound {
     ApprovalClosed { chat: String, id: String, outcome: String },
     /// A topic's thread got its name (from the first message): the topic is renamed after it.
     ThreadNamed { chat: String, name: String },
+    /// A file the agent made, sent because the user said so (MOONSHOT §3.7).
+    File { chat: String, name: String, bytes: Vec<u8> },
     /// The turn is over: drop the draft, stop "typing".
     TurnEnded { chat: String },
 }
@@ -73,6 +75,7 @@ impl Outbound {
             | Outbound::Approval { chat, .. }
             | Outbound::ApprovalClosed { chat, .. }
             | Outbound::ThreadNamed { chat, .. }
+            | Outbound::File { chat, .. }
             | Outbound::TurnEnded { chat } => chat,
         }
     }
@@ -158,6 +161,8 @@ struct Turn {
     watch: Watch,
     /// Why the bridge interrupted it, when it did.
     limit_reason: Option<String>,
+    /// When it started (milliseconds since the epoch): files changed since are the agent's.
+    started_ms: u64,
 }
 
 impl Turn {
@@ -223,6 +228,27 @@ impl Turn {
     }
 }
 
+/// Files offered back after one answer, at most.
+const MAX_OFFERS: usize = 3;
+
+/// The largest file each messenger takes from the bridge: Telegram's 50 MB for a bot, and the
+/// homeserver's usual 20 MB for Matrix.
+pub fn file_limit(adapter: &str) -> u64 {
+    match adapter {
+        "telegram" => 50 * 1024 * 1024,
+        _ => 20 * 1024 * 1024,
+    }
+}
+
+/// "12 KB", "3.4 MB".
+pub fn size(bytes: u64) -> String {
+    if bytes < 1024 * 1024 {
+        format!("{} KB", bytes.div_ceil(1024).max(1))
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 /// A final answer shorter than this is taken as a pointer to an earlier, longer message.
 const SUBSTANTIVE: usize = 200;
 /// An earlier message at least this long is taken as the answer such a last word points at.
@@ -251,6 +277,15 @@ struct Pending {
     deadline: Instant,
     /// When it was asked, in order.
     seq: u64,
+    /// The bridge's own question, answered here rather than by the agent: a file to send back.
+    local: Option<Local>,
+}
+
+/// What the bridge itself asks the user to confirm.
+#[derive(Clone, Debug)]
+enum Local {
+    /// A file the agent made, to send into the chat (MOONSHOT §3.7).
+    SendFile { thread: String, name: String },
 }
 
 pub struct Hub {
@@ -261,6 +296,8 @@ pub struct Hub {
     turns: HashMap<String, Turn>,
     /// Messages that arrived while a turn ran and could not steer it, as turn inputs.
     queued: HashMap<String, Vec<Value>>,
+    /// The names the user's own attachments were saved under, per thread: never offered back.
+    uploaded: HashMap<String, HashSet<String>>,
     /// Pending approvals by their nonce.
     approvals: HashMap<String, Pending>,
     /// The order approvals were asked in, for a typed "yes" (the newest open one).
@@ -342,6 +379,7 @@ impl Hub {
             queued: HashMap::new(),
             approvals: HashMap::new(),
             next_approval: 0,
+            uploaded: HashMap::new(),
             closed: std::collections::VecDeque::new(),
             subscribed: HashSet::new(),
             airgap,
@@ -608,6 +646,29 @@ impl Hub {
     /// A message with attachments: each goes into the thread's folder through `ling web`, then the
     /// turn is built from what came back (attachments.rs). Nothing usable: the bridge says so.
     async fn media(&mut self, chat: &str, text: &str, files: Vec<Media>) {
+        // Recordings first: each is transcribed on this machine and its text joins the question,
+        // with a line saying what was heard (MOONSHOT §3.4).
+        let (recordings, files): (Vec<Media>, Vec<Media>) = files.into_iter().partition(Media::is_audio);
+        let mut text = text.trim().to_string();
+        for recording in recordings {
+            match self.agent.transcribe(&recording.mime, recording.bytes).await {
+                Ok(heard) => {
+                    self.notice(chat, attachments::heard_notice(&heard));
+                    if !text.is_empty() {
+                        text.push_str("\n\n");
+                    }
+                    text.push_str(&heard);
+                }
+                Err(reason) => self.notice(chat, attachments::not_heard_notice(&reason)),
+            }
+        }
+        if files.is_empty() {
+            if !text.is_empty() {
+                self.message(chat, &text).await;
+            }
+            return;
+        }
+        let text = text.as_str();
         let first = if text.trim().is_empty() { "(image)" } else { text.trim() };
         self.fresh_after_silence(chat);
         let thread = match self.ensure_thread(chat, first).await {
@@ -621,8 +682,12 @@ impl Hub {
         for file in files {
             let image = file.is_image();
             let saved = self.agent.upload(&thread, &file.name, image, file.bytes).await;
-            if let Err(err) = &saved {
-                eprintln!("ling chat: could not save {} in the thread's folder: {err}", file.name);
+            match &saved {
+                Ok(saved) => {
+                    let name = std::path::Path::new(&saved.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.uploaded.entry(thread.clone()).or_default().insert(name);
+                }
+                Err(err) => eprintln!("ling chat: could not save {} in the thread's folder: {err}", file.name),
             }
             uploads.push(Uploaded { name: file.name, image, saved });
         }
@@ -666,6 +731,7 @@ impl Hub {
                 last_draft: Instant::now(),
                 watch: Watch::new(now_ms()),
                 limit_reason: None,
+                started_ms: now_ms(),
             },
         );
         self.send(Outbound::Draft { chat: chat.to_string(), text: String::new() });
@@ -735,7 +801,7 @@ impl Hub {
             "turn/completed" => self.finish(&thread, &params["turn"]).await,
             "serverRequest/resolved" => {
                 let request = params.get("requestId").cloned().unwrap_or(Value::Null);
-                let resolved: Vec<String> = self.approvals.iter().filter(|(_, p)| p.request == request).map(|(id, _)| id.clone()).collect();
+                let resolved: Vec<String> = self.approvals.iter().filter(|(_, p)| p.local.is_none() && p.request == request).map(|(id, _)| id.clone()).collect();
                 for id in resolved {
                     if let Some(pending) = self.approvals.remove(&id) {
                         self.close(pending.chat, id, "Answered elsewhere.");
@@ -787,7 +853,7 @@ impl Hub {
         match status {
             // Stopped (the stop button, /stop): what it wrote so far is kept, marked (MOONSHOT D9).
             "interrupted" if wrote => self.send(Outbound::Message { chat: chat.clone(), markdown: format!("{answer}\n\n_(stopped)_") }),
-            _ if wrote => self.send(Outbound::Message { chat: chat.clone(), markdown: answer }),
+            _ if wrote => self.send(Outbound::Message { chat: chat.clone(), markdown: answer.clone() }),
             _ => {}
         }
         match status {
@@ -802,7 +868,70 @@ impl Hub {
             }
             _ => {}
         }
+        if status == "completed" && wrote {
+            self.offer_files(&chat, thread, turn.started_ms, &answer).await;
+        }
         self.after_turn(&chat, thread).await;
+    }
+
+    /// Files the agent made during the turn and named in its answer are offered, each sent only
+    /// when the user says so (MOONSHOT §3.7). Never at `/airgapped on`; never the user's own
+    /// uploads; one too large for the messenger is named and kept.
+    async fn offer_files(&mut self, chat: &str, thread: &str, since_ms: u64, answer: &str) {
+        if self.airgapped {
+            return;
+        }
+        let Ok(files) = self.agent.made_files(thread, since_ms.saturating_sub(1_000)).await else { return };
+        let uploaded = self.uploaded.get(thread).cloned().unwrap_or_default();
+        let limit = file_limit(adapter_of(chat));
+        let mut offered = 0;
+        for file in files {
+            let base = file.name.rsplit('/').next().unwrap_or(&file.name).to_string();
+            if uploaded.contains(&file.name) || !answer.contains(&base) || offered >= MAX_OFFERS {
+                continue;
+            }
+            offered += 1;
+            if file.bytes > limit {
+                self.notice(chat, format!("Mightling made {} ({}), larger than the {} this messenger takes, so it stays in the thread's folder.", file.name, size(file.bytes), size(limit)));
+                continue;
+            }
+            self.next_approval += 1;
+            let id = ling_web_server::auth::random_hex(8);
+            let text = format!("Mightling made {} ({}). Send it here?", file.name, size(file.bytes));
+            self.approvals.insert(
+                id.clone(),
+                Pending {
+                    local: Some(Local::SendFile { thread: thread.to_string(), name: file.name.clone() }),
+                    chat: chat.to_string(),
+                    thread: thread.to_string(),
+                    request: Value::Null,
+                    method: "local/sendFile".to_string(),
+                    params: Value::Null,
+                    replies: vec![Reply::Approve, Reply::Decline],
+                    free_text: false,
+                    deadline: Instant::now() + self.config.approval_timeout,
+                    seq: self.next_approval,
+                },
+            );
+            self.send(Outbound::Approval { chat: chat.to_string(), id, text, options: vec!["Send it".to_string(), "No".to_string()] });
+        }
+    }
+
+    /// Fetches a file from the thread's folder and hands it to the chat's adapter, off the hub's
+    /// loop (a large file must not hold the conversation up).
+    fn send_file(&self, chat: &str, thread: &str, name: &str) {
+        let Some(adapter) = self.adapters.get(adapter_of(chat)).cloned() else { return };
+        let (agent, chat, thread, name) = (self.agent.clone(), chat.to_string(), thread.to_string(), name.to_string());
+        tokio::spawn(async move {
+            match agent.made_file(&thread, &name).await {
+                Ok(bytes) => {
+                    let _ = adapter.send(Outbound::File { chat, name, bytes });
+                }
+                Err(err) => {
+                    let _ = adapter.send(Outbound::Notice { chat, text: format!("I couldn't send {name}: {err}") });
+                }
+            }
+        });
     }
 
     /// Each running turn against its bounds: told to answer now, then interrupted (limits.rs).
@@ -850,7 +979,7 @@ impl Hub {
     async fn after_turn(&mut self, chat: &str, thread: &str) {
         let chat = chat.to_string();
         // Approvals of a finished turn can no longer be answered.
-        let stale: Vec<String> = self.approvals.iter().filter(|(_, p)| p.thread == thread).map(|(id, _)| id.clone()).collect();
+        let stale: Vec<String> = self.approvals.iter().filter(|(_, p)| p.local.is_none() && p.thread == thread).map(|(id, _)| id.clone()).collect();
         for id in stale {
             if let Some(pending) = self.approvals.remove(&id) {
                 self.close(pending.chat, id, "The turn ended.");
@@ -965,6 +1094,7 @@ impl Hub {
         self.approvals.insert(
             approval.clone(),
             Pending {
+                local: None,
                 chat: chat.clone(),
                 thread,
                 request: id,
@@ -1000,6 +1130,17 @@ impl Hub {
 
     fn resolve(&mut self, approval: &str, reply: Reply) {
         let Some(pending) = self.approvals.remove(approval) else { return };
+        if let Some(local) = pending.local.clone() {
+            let outcome = match (&local, &reply) {
+                (Local::SendFile { thread, name }, Reply::Approve) => {
+                    self.send_file(&pending.chat, thread, name);
+                    "Sending it."
+                }
+                (Local::SendFile { .. }, _) => "Not sent; it stays in the thread's folder.",
+            };
+            self.close(pending.chat, approval.to_string(), outcome);
+            return;
+        }
         let payload = Self::payload(&pending, &reply);
         self.agent.respond(pending.request.clone(), payload);
         let outcome = match &reply {
@@ -1078,6 +1219,10 @@ impl Hub {
         let expired: Vec<String> = self.approvals.iter().filter(|(_, p)| p.deadline <= now).map(|(id, _)| id.clone()).collect();
         for approval in expired {
             if let Some(pending) = self.approvals.remove(&approval) {
+                if pending.local.is_some() {
+                    self.close(pending.chat, approval, "No answer in time; the file stays in the thread's folder.");
+                    continue;
+                }
                 self.agent.respond(pending.request.clone(), Self::payload(&pending, &Reply::Decline));
                 self.close(pending.chat, approval, "Declined: no answer in time.");
             }

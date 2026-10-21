@@ -114,10 +114,25 @@ index 369a674..74897a5 100644
 -            Span::from("OpenAI Codex").bold(),
 +            Span::from("Mightling").bold(),
              Span::from(" ").dim(),
+@@ -753,3 +753,3 @@
+                 (None, Some(plan)) => plan.clone(),
+-                (None, None) => "ChatGPT".to_string(),
++                (None, None) => "signed in".to_string(),
+             },
+@@ -756,3 +756,3 @@
+             StatusAccountDisplay::ApiKey => {
+-                "API key configured (run codex login to use ChatGPT)".to_string()
++                "API key configured".to_string()
+             }
 diff --git a/codex-rs/tui/src/bottom_pane/command_popup.rs b/codex-rs/tui/src/bottom_pane/command_popup.rs
 --- a/codex-rs/tui/src/bottom_pane/command_popup.rs
 +++ b/codex-rs/tui/src/bottom_pane/command_popup.rs
-@@ -209,3 +209,3 @@
+@@ -81,3 +81,2 @@
+-                SlashCommandItem::Builtin(cmd) => (!cmd.command().starts_with("debug")
+-                    && cmd != SlashCommand::Apps)
++                SlashCommandItem::Builtin(cmd) => (!cmd.command().starts_with("debug"))
+                     .then_some(CommandItem::Builtin(cmd)),
+@@ -209,3 +208,3 @@
                  let name = format!("/{}", item.command());
 -                let description = item.description().to_string();
 +                let description = item.description().replace("Codex", "Mightling");

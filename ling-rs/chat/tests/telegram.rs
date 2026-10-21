@@ -51,6 +51,12 @@ async fn handle(State(stand): State<Stand>, Path((bot, method)): Path<(String, S
     (status, Json(value))
 }
 
+/// `sendDocument`: a multipart upload; the body is kept for the test to read.
+async fn document(State(stand): State<Stand>, body: axum::body::Bytes) -> (StatusCode, Json<Value>) {
+    stand.calls.lock().unwrap().push(("sendDocument".to_string(), json!({ "raw": String::from_utf8_lossy(&body) })));
+    (StatusCode::OK, Json(json!({ "ok": true, "result": { "message_id": 77 } })))
+}
+
 /// The Bot API's file download: the bytes of `photos/<name>`, named in them.
 async fn file(Path((bot, path)): Path<(String, String)>) -> (StatusCode, Vec<u8>) {
     assert_eq!(bot, format!("bot{TOKEN}"));
@@ -66,6 +72,7 @@ async fn stand_in(answer: Answer) -> (Stand, TelegramApi) {
     let app = Router::new()
         .route("/{bot}/{method}", post(handle))
         .route("/file/{bot}/{*path}", axum::routing::get(file))
+        .route("/{bot}/sendDocument", post(document))
         .with_state(stand.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let root = format!("http://{}", listener.local_addr().unwrap());
@@ -114,7 +121,7 @@ async fn a_paired_users_message_reaches_the_hub_and_strangers_get_one_reply_a_da
 /// A photo (its largest size) and its caption reach the hub as media; what the bridge does not
 /// take is named, never silently lost, and never sent on as an empty message.
 #[tokio::test]
-async fn a_photo_reaches_the_hub_with_its_caption_and_a_voice_message_is_named_as_dropped() {
+async fn a_photo_and_a_voice_message_reach_the_hub_and_a_sticker_is_named_as_dropped() {
     let answer: Answer = Arc::new(|method, body, _| match method {
         "getFile" => ok(json!({ "file_id": body["file_id"], "file_path": format!("photos/{}.jpg", body["file_id"].as_str().unwrap()) })),
         _ => ok(json!({ "message_id": 1 })),
@@ -133,9 +140,16 @@ async fn a_photo_reaches_the_hub_with_its_caption_and_a_voice_message_is_named_a
     assert_eq!(attachments[0].bytes, b"BYTES:photos/big.jpg");
     assert!(dropped.is_empty());
     assert_eq!(stand.bodies("getFile"), vec![json!({ "file_id": "big" })]);
-    let voice = json!({ "update_id": 8, "message": { "message_id": 9, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" }, "voice": { "file_id": "v", "duration": 3 } } });
+    // A voice message is downloaded to be transcribed on the node (MOONSHOT §3.4).
+    let voice = json!({ "update_id": 8, "message": { "message_id": 9, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" }, "voice": { "file_id": "v", "duration": 3, "mime_type": "audio/ogg" } } });
     poller.handle(&voice).await;
-    assert_eq!(inbound.try_recv().unwrap(), Inbound::Media { chat: "telegram:111".into(), text: String::new(), attachments: vec![], dropped: vec!["a voice message".into()] });
+    let Inbound::Media { attachments, dropped, .. } = inbound.try_recv().unwrap() else { panic!("not media") };
+    assert_eq!((attachments[0].name.as_str(), attachments[0].mime.as_str(), attachments[0].bytes.as_slice()), ("voice.ogg", "audio/ogg", b"BYTES:photos/v.jpg".as_slice()));
+    assert!(dropped.is_empty());
+    // A sticker is named as dropped.
+    let sticker = json!({ "update_id": 10, "message": { "message_id": 11, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" }, "sticker": { "file_id": "s" } } });
+    poller.handle(&sticker).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Media { chat: "telegram:111".into(), text: String::new(), attachments: vec![], dropped: vec!["a sticker".into()] });
 }
 
 #[tokio::test]
@@ -457,3 +471,68 @@ async fn rich_drafts_and_answers_are_blocks_and_a_refusal_falls_back_to_html() {
     assert!(stand.bodies("sendRichMessageDraft").is_empty());
     assert_eq!(stand.bodies("sendMessageDraft").len(), 1);
 }
+
+const MINI_APP: &str = "https://node.example.ts.net/";
+
+/// The Mini App (MOONSHOT §15): with an address set, `/app` is offered and every paired user's
+/// menu button opens it; without one, the buttons go back to Telegram's default.
+#[tokio::test]
+async fn the_mini_app_is_the_paired_users_menu_button_and_follows_the_setting() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let (_out_tx, out_rx) = mpsc::unbounded_channel();
+    let options = ling_chat::telegram::Options { mini_app_url: Some(MINI_APP.to_string()), ..Default::default() };
+    ling_chat::telegram::start(api.clone(), scratch("miniapp-on"), hub.clone(), out_rx, options).await.unwrap();
+    let commands = &stand.bodies("setMyCommands")[0]["commands"];
+    assert!(commands.as_array().unwrap().iter().any(|c| c["command"] == "app"));
+    let buttons = stand.bodies("setChatMenuButton");
+    assert_eq!(buttons, vec![json!({ "chat_id": 111, "menu_button": { "type": "web_app", "text": "Mightling", "web_app": { "url": MINI_APP } } })]);
+
+    let (stand, api) = stand_in(default_answer()).await;
+    let (_out_tx, out_rx) = mpsc::unbounded_channel();
+    ling_chat::telegram::start(api, scratch("miniapp-off"), hub, out_rx, ling_chat::telegram::Options::default()).await.unwrap();
+    assert!(!stand.bodies("setMyCommands")[0]["commands"].as_array().unwrap().iter().any(|c| c["command"] == "app"));
+    assert_eq!(stand.bodies("setChatMenuButton"), vec![json!({ "chat_id": 111, "menu_button": { "type": "default" } })]);
+}
+
+#[tokio::test]
+async fn app_answers_with_a_web_app_button_or_how_to_set_one_up_and_is_no_question() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, scratch("app-cmd"), hub);
+    poller.handle(&private_message(111, "/app")).await;
+    let reply = stand.bodies("sendMessage").pop().unwrap();
+    assert!(reply.get("reply_markup").is_none());
+    assert!(reply["text"].as_str().unwrap().contains("telegram_mini_app_url"));
+    poller.mini_app_url = Some(MINI_APP.to_string());
+    poller.handle(&private_message(111, "/app")).await;
+    let reply = stand.bodies("sendMessage").pop().unwrap();
+    assert_eq!(reply["reply_markup"]["inline_keyboard"][0][0]["web_app"]["url"], MINI_APP);
+    assert!(inbound.try_recv().is_err());
+    // A stranger gets the one unpaired reply, never the button.
+    poller.handle(&private_message(999, "/app")).await;
+    assert_eq!(stand.bodies("sendMessage").pop().unwrap()["text"], ling_chat::telegram::UNPAIRED_REPLY);
+}
+
+#[tokio::test]
+async fn a_newly_paired_user_gets_the_mini_app_button() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let dir = scratch("app-pair");
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let mut poller = Poller::new(api, dir.clone(), hub);
+    poller.mini_app_url = Some(MINI_APP.to_string());
+    let code = store::issue_pairing_code(&dir).unwrap();
+    poller.handle(&private_message(333, &format!("/pair {code}"))).await;
+    assert_eq!(stand.bodies("setChatMenuButton")[0]["chat_id"], 333);
+}
+
+#[tokio::test]
+async fn a_file_is_sent_as_a_document_in_its_topic() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let renderer = Renderer::new(api);
+    renderer.render(Outbound::File { chat: "telegram:111/5".into(), name: "report \"final\".md".into(), bytes: b"# Purifiers".to_vec() }).await;
+    let raw = stand.bodies("sendDocument")[0]["raw"].as_str().unwrap().to_string();
+    assert!(raw.contains("name=\"chat_id\"\r\n\r\n111\r\n") && raw.contains("name=\"message_thread_id\"\r\n\r\n5\r\n"), "{raw}");
+    assert!(raw.contains("filename=\"report _final_.md\"") && raw.contains("# Purifiers"), "{raw}");
+}
+

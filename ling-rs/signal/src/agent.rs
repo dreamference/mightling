@@ -274,6 +274,65 @@ pub async fn upload(port: u16, cookie: &str, thread: &str, name: &str, image: bo
     Ok(saved_from(&body))
 }
 
+/// A voice note as text, through `ling web`'s `/api/transcribe` (the speech-to-text service on
+/// the node): the text, or what went wrong (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.5).
+pub async fn transcribe(port: u16, cookie: &str, media: &str, bytes: &[u8]) -> Result<String, String> {
+    let media: String = media.split(';').next().unwrap_or_default().chars().filter(|c| c.is_ascii_alphanumeric() || "/-.+".contains(*c)).collect();
+    let mut request = format!(
+        "POST /api/transcribe HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: {media}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        bytes.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(bytes);
+    let (_, _, body) = http(port, &request).await?;
+    heard_from(&body)
+}
+
+/// Reads `/api/transcribe`'s answer: `{text}` or `{error}`.
+pub fn heard_from(body: &[u8]) -> Result<String, String> {
+    let value: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    match value.get("text").and_then(Value::as_str) {
+        Some(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Some(_) => Err("nothing was heard in it".to_string()),
+        None => Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web did not transcribe it").to_string()),
+    }
+}
+
+/// The files `thread`'s agent changed since `since_ms` (`/api/ask/files`): (name, bytes).
+pub async fn made_files(port: u16, cookie: &str, thread: &str, since_ms: u64) -> Result<Vec<(String, u64)>, String> {
+    let request = format!("GET /api/ask/files?thread={}&since={since_ms} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n", form_escape(thread));
+    let (status, _, body) = http(port, request.as_bytes()).await?;
+    if status != 200 {
+        return Err(format!("ling web did not list the thread's files (HTTP {status})"));
+    }
+    let value: Value = serde_json::from_slice(&body).map_err(|err| err.to_string())?;
+    Ok(made_from(&value))
+}
+
+/// Reads `/api/ask/files`' answer.
+pub fn made_from(value: &Value) -> Vec<(String, u64)> {
+    value
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|files| files.iter().filter_map(|f| Some((f.get("name")?.as_str()?.to_string(), f.get("bytes")?.as_u64()?))).collect())
+        .unwrap_or_default()
+}
+
+/// One file of `thread`'s folder (`/api/ask/file`), which `ling web` refuses at `/airgapped on`.
+pub async fn made_file(port: u16, cookie: &str, thread: &str, name: &str) -> Result<Vec<u8>, String> {
+    let request = format!(
+        "GET /api/ask/file?thread={}&name={} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n",
+        form_escape(thread),
+        form_escape(name)
+    );
+    let (status, _, body) = http(port, request.as_bytes()).await?;
+    if status == 200 {
+        return Ok(body);
+    }
+    let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    Err(value.get("error").and_then(Value::as_str).unwrap_or("ling web refused it").to_string())
+}
+
 /// The chat settings of the user's configuration (`[chat]`), as `ling web` reads them for the
 /// bridge, which cannot (`/api/chat/settings`; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -554,6 +613,14 @@ mod tests {
         assert_eq!((defaults.answer_ms, defaults.tool_calls, defaults.command_ms), (Some(180_000), Some(25), Some(60_000)));
         let set = ChatSettings::from_json(&json!({"answerSeconds": 60, "toolCalls": 0, "commandSeconds": 30}));
         assert_eq!((set.answer_ms, set.tool_calls, set.command_ms), (Some(60_000), None, Some(30_000)));
+    }
+
+    #[test]
+    fn transcriptions_are_read_with_their_failures() {
+        assert_eq!(heard_from(br#"{"text":" hello there "}"#), Ok("hello there".to_string()));
+        assert_eq!(heard_from(br#"{"text":"  "}"#), Err("nothing was heard in it".to_string()));
+        assert_eq!(heard_from(br#"{"error":"Speech-to-text is not running on this machine: start it with `ling-admin voice start`."}"#).unwrap_err(), "Speech-to-text is not running on this machine: start it with `ling-admin voice start`.");
+        assert!(heard_from(b"<html>").is_err());
     }
 
     #[test]

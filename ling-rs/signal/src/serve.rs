@@ -440,6 +440,25 @@ impl Daemon {
             }
             Action::StartThread => self.request("thread/start", json!({ "prompt": "chat" }), Pending::OpenThread).await,
             Action::StartAskThread => self.request("thread/start", json!({ "prompt": "ask" }), Pending::OpenThread).await,
+            Action::FindFiles { thread, since_ms, answer } => {
+                if let Ok(files) = agent::made_files(self.config.port, &self.cookie, &thread, since_ms.saturating_sub(1_000)).await
+                    && !files.is_empty()
+                {
+                    let actions = self.bridge.on_agent(AgentEvent::Made { thread, files, answer }, now_ms());
+                    Box::pin(self.carry_out(actions)).await;
+                }
+            }
+            Action::SendFile { thread, name } => match agent::made_file(self.config.port, &self.cookie, &thread, &name).await {
+                Ok(bytes) => {
+                    let base = name.rsplit('/').next().unwrap_or(&name).to_string();
+                    let path = self.state_dir.join("outbox").join(&base);
+                    if state::write_private(&path, &bytes).is_ok() {
+                        self.send_with(&Styled::plain(&base), &[path.to_string_lossy().into_owned()]).await;
+                    }
+                    let _ = std::fs::remove_file(path);
+                }
+                Err(err) => self.send_text(&Styled::plain(&format!("I couldn't send {name}: {err}"))).await,
+            },
             Action::AddToTurn { thread, turn, text } => {
                 let input = agent::turn_input(&text, &[]);
                 let pending = Pending::Steer { thread: thread.clone(), text };
@@ -496,7 +515,7 @@ impl Daemon {
         for attachment in attachments {
             let local = self.attachments_dir().join(&attachment.id);
             let name = attachment.filename.clone().unwrap_or_else(|| attachment.id.clone());
-            let mut uploaded = Uploaded { name: name.clone(), image: attachment.is_image(), path: None, text: None, vision: false };
+            let mut uploaded = Uploaded { name: name.clone(), image: attachment.is_image(), path: None, text: None, vision: false, heard: None };
             // signal-cli has downloaded it into its folder (it is started without
             // --ignore-attachments, §19.1); `getAttachment` reads that same folder, base64.
             let fetched = match std::fs::read(&local) {
@@ -516,6 +535,12 @@ impl Daemon {
                     continue;
                 }
             };
+            // A voice note is transcribed on this machine through `ling web`, not uploaded (§19.5).
+            if attachment.content_type.starts_with("audio/") {
+                uploaded.heard = Some(agent::transcribe(self.config.port, &self.cookie, &attachment.content_type, &bytes).await);
+                uploads.push(uploaded);
+                continue;
+            }
             match agent::upload(self.config.port, &self.cookie, thread, &name, attachment.is_image(), &bytes).await {
                 Ok(saved) => {
                     uploaded.vision = saved.vision || self.config.vision;

@@ -9,7 +9,7 @@
 // (ling-rs/web/src/policy.rs) and the desktop app's main process (desktop/electron/src/policy.ts).
 // So both show Ask by default and Work one click away (`#work`).
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react";
 
 import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseName, fileKindLabel, insideFolder, isAskThread, turnInput, viewTabs, type Attached } from "./ask";
 import * as bridge from "./bridge";
@@ -38,6 +38,7 @@ import type { Turn } from "./protocol/v2/Turn";
 import type { ThreadGoal } from "./protocol/v2/ThreadGoal";
 import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { UserInput } from "./protocol/v2/UserInput";
+import type { Project } from "./protocol/v2/Project";
 import {
   contextUse, initialState, isWorking, permissionChoices, projects, reduce, SERVER_EXITED, subagents, workingCount,
   type PendingRequest, type ThreadView, type TurnView,
@@ -67,9 +68,12 @@ import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
-import { moveToSection, nextAttention, pinnedFirst, recentThreads, stepThread, threadLink, toggled, type Section } from "./threads";
+import { nearBottom } from "./follow";
+import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, stepThread, threadLink, toggled, type Section } from "./threads";
 import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
+import { ProjectDialog } from "./ProjectDialog";
+import { contextItem, contextStamp, isContextText, isRemoved, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
 import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
@@ -174,6 +178,21 @@ export function App() {
   const [settingsPage, setSettingsPage] = useState<SettingsPage>("general");
   const [menuOpen, setMenuOpen] = useState<false | "all" | "projects">(false);
   const [rowMenu, setRowMenu] = useState<string | null>(null);
+  // Projects (projects.ts): the server's, the dialog that makes or edits one, the project a new thread
+  // or question starts in, and the open project menu.
+  const [serverProjects, setServerProjects] = useState<Project[]>([]);
+  const [projectDialog, setProjectDialog] = useState<{ project: Project | null; folder: string | null } | null>(null);
+  const [newProject, setNewProject] = useState<string | null>(null);
+  const [projectMenu, setProjectMenu] = useState<string | null>(null);
+  const draggedHeader = useRef<string | null>(null);
+  const loadProjects = useCallback(async () => {
+    try {
+      const answer = (await client.request("project/list", { limit: 200 })) as { data?: Project[] };
+      setServerProjects(answer.data ?? []);
+    } catch {
+      setServerProjects([]);
+    }
+  }, [client]);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findAt, setFindAt] = useState(0);
@@ -330,6 +349,7 @@ export function App() {
         loadPrefs(),
       ]);
       dispatch({ type: "threads", list: list.data });
+      void loadProjects();
       setProfiles(permissions.data);
       setAirgap(level);
       setPrefs(stored);
@@ -359,6 +379,9 @@ export function App() {
     }
   }, [client, notice]);
 
+  const loadProjectsRef = useRef(loadProjects);
+  loadProjectsRef.current = loadProjects;
+
   // The bridge's events, then the server; once, for the life of the window.
   const connected = useRef(false);
   useEffect(() => {
@@ -369,6 +392,7 @@ export function App() {
       // A thread this window starts (or forks) is loaded in the server from the start.
       if (notification.method === "thread/started") loader.markLoaded(notification.params.thread.id);
       if (notification.method === "thread/queue/changed") refreshQueue(notification.params.threadId);
+      if (notification.method === "project/changed") void loadProjectsRef.current();
       // A turn that ends while its thread is not in front leaves the thread unread.
       if (notification.method === "turn/completed") {
         const threadId = notification.params.threadId;
@@ -514,6 +538,29 @@ export function App() {
     })().catch((error: unknown) => notice(`The incognito question could not be deleted: ${error instanceof Error ? error.message : String(error)}`));
   }, [incognitoShown?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The conversation follows its latest message (follow.ts): a thread opens at the end, new output
+  // keeps the view there only while the reader is there, and an info panel opens at the top.
+  const turnsRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
+  const onTurnsScroll = () => {
+    if (turnsRef.current) followRef.current = nearBottom(turnsRef.current);
+  };
+  useLayoutEffect(() => {
+    const element = turnsRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    followRef.current = true;
+  }, [selected?.thread.id]);
+  useLayoutEffect(() => {
+    const element = turnsRef.current;
+    if (element && followRef.current && !info) element.scrollTop = element.scrollHeight;
+  });
+  useLayoutEffect(() => {
+    if (!info || !turnsRef.current) return;
+    turnsRef.current.scrollTop = 0;
+    followRef.current = false;
+  }, [info]);
+
   // The level can differ per thread (`/airgapped` in the TUI writes a session file).
   useEffect(() => {
     if (state.server === "ready") bridge.airgapped(state.selected).then(setAirgap).catch(notice);
@@ -648,8 +695,21 @@ export function App() {
 
   const switchView = showView;
 
+  /** The project a new thread or question starts in, while it is still shown. */
+  const startingProject = newProject ? shownProjects(serverProjects).find((project) => project.id === newProject) ?? null : null;
+  /** What `thread/start` adds for a thread of that project: its id and, in Work, the folders after the primary. */
+  const projectFields = (work: boolean): Record<string, unknown> => {
+    if (!startingProject) return {};
+    const others = secondaryFolders(startingProject);
+    return { projectId: startingProject.id, ...(work && others.length ? { runtimeWorkspaceRoots: others } : {}) };
+  };
+
   const startThread = async (): Promise<Thread | null> => {
-    const cwd = newCwd.trim();
+    const cwd = (startingProject ? primaryFolder(startingProject) : null) ?? newCwd.trim();
+    if (startingProject && !primaryFolder(startingProject)) {
+      notice(`The project ${startingProject.name} has no folder: add one in Edit project, or ask in Ask.`);
+      return null;
+    }
     if (!cwd) {
       notice(NAME_THE_FOLDER);
       return null;
@@ -657,7 +717,7 @@ export function App() {
     dispatch({ type: "dropNotice", message: NAME_THE_FOLDER });
     try {
       if (newChoice.mode === "worktree" && bridge.git.available()) return await startInWorktree(cwd);
-      const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile });
+      const started = await client.request("thread/start", { cwd, model: servedModel, permissions: profile, ...projectFields(true) } as ParamsOf<"thread/start">);
       dispatch({ type: "opened", thread: started.thread });
       setDrawer(false);
       return started.thread;
@@ -681,7 +741,7 @@ export function App() {
   /** A new thread in a new managed worktree (§2.6): created, bound to the thread, its setup run, the oldest cleaned up. */
   const startInWorktree = async (cwd: string): Promise<Thread> => {
     const created = await bridge.worktrees.create(cwd, newChoice.base, newChoice.withChanges && !newChoice.base, wtSettings.root);
-    const started = await client.request("thread/start", { cwd: created.cwd, model: servedModel, permissions: profile });
+    const started = await client.request("thread/start", { cwd: created.cwd, model: servedModel, permissions: profile, ...projectFields(true) } as ParamsOf<"thread/start">);
     await bridge.worktrees.bind(created.root, started.thread.id).catch(notice);
     setLink(started.thread.id, { checkout: created.root, cwd: created.cwd, source: created.sourceRoot, sourceCwd: cwd, location: "worktree", snapshot: null });
     dispatch({ type: "opened", thread: started.thread });
@@ -717,10 +777,10 @@ export function App() {
    * A new Ask thread: the UI names the prompt, `ling web` sets its text, folder and sandbox. An
    * incognito one (DESKTOP_PARITY_CLAUDE §4.3) is ephemeral, so the server keeps no session file and
    * no memory of it, and its folder is marked so that leaving the question deletes it; if the mark
-   * cannot be made, the question is dropped rather than kept.
+   * cannot be made, the question is dropped rather than kept. An incognito question joins no project.
    */
   const startAsk = async (incognito = false): Promise<Thread> => {
-    const params = { model: servedModel, prompt: ASK_PROMPT, ...(incognito ? { ephemeral: true } : {}) } as unknown as ParamsOf<"thread/start">;
+    const params = { model: servedModel, prompt: ASK_PROMPT, ...(incognito ? { ephemeral: true } : projectFields(false)) } as unknown as ParamsOf<"thread/start">;
     const started = await client.request("thread/start", params);
     if (incognito) {
       try {
@@ -876,16 +936,37 @@ export function App() {
     return next;
   });
 
+  /**
+   * A project thread's turn carries the project's name, instructions and knowledge files (projects.ts)
+   * on its first message and again after the project changed; `stamp` is recorded once the turn is sent.
+   */
+  const withProjectContext = async (thread: Thread, input: UserInput[], starting: boolean): Promise<{ input: UserInput[]; stamp: string | null }> => {
+    const projectId = thread.projectId ?? (starting ? startingProject?.id ?? null : null);
+    const project = projectId ? serverProjects.find((entry) => entry.id === projectId) ?? null : null;
+    if (!project) return { input, stamp: null };
+    const files: KnowledgeFile[] = bridge.knowledge.available() ? await bridge.knowledge.list(project.id).catch(() => []) : [];
+    const context = projectContext(project, files);
+    const stamp = contextStamp(context);
+    if (!context || prefsRef.current.projectContextSent[thread.id] === stamp) return { input, stamp: null };
+    return { input: [...input, contextItem(context)], stamp };
+  };
+  const contextSent = (threadId: string, stamp: string | null) => {
+    if (stamp) updatePrefs({ projectContextSent: { ...prefsRef.current.projectContextSent, [threadId]: stamp } });
+  };
+
   const sendWork = async (message: string, mode: "default" | "steer" | "queue") => {
     // The draft this message came from: a new thread's is cleared, not the thread's it starts.
     const from = draftKeyRef.current;
+    const starting = !selected;
     const target = selected?.thread ?? (await startThread());
     if (!target) return;
     const images = pending.filter((item) => item.kind === "image" && item.path).map((item) => item.path as string);
     // Long pastes go into the message itself: Work writes nothing into a project for them.
     const pastes = pending.flatMap((item) => (item.text !== undefined ? [item.text] : []));
-    const input = composeInput(pastes.length ? withPastes(message, pastes) : message, rootSkills, images);
-    if (input.length === 0) return;
+    const typed = composeInput(pastes.length ? withPastes(message, pastes) : message, rootSkills, images);
+    if (typed.length === 0) return;
+    const shownActive = selected?.thread.id === target.id ? selected.activeTurnId : null;
+    const { input, stamp } = shownActive ? { input: typed, stamp: null } : await withProjectContext(target, typed, starting);
     setDraftFor(from, "");
     const files = pending;
     setPending([]);
@@ -902,6 +983,7 @@ export function App() {
         cwd: turnCwd(prefsRef.current.worktreeThreads[target.id]),
         collaborationMode: planFor(target.id),
       });
+      contextSent(target.id, stamp);
       promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
     } catch (error) {
@@ -918,14 +1000,16 @@ export function App() {
     setDraftFor(from, "");
     setPending([]);
     try {
+      const starting = !selected;
       const thread = selected?.thread ?? (await startAsk(incognitoNext && bridge.incognito.available()));
       // Attachments go into the thread's own folder, which exists once the thread does.
       const attached: Attached[] = await Promise.all(
         files.map(async (item) => ({ kind: item.kind, name: item.name, path: (await bridge.upload(thread.id, item.file, item.kind, item.name)).path })),
       );
-      const input = turnInput(message, attached);
       const active = selected?.thread.id === thread.id ? selected.activeTurnId : null;
+      const { input, stamp } = active ? { input: turnInput(message, attached), stamp: null } : await withProjectContext(thread, turnInput(message, attached), starting);
       await sendMessage(client, { threadId: thread.id, activeTurnId: active, input, followUp: mode === "default" ? prefs.followUp : mode, effort, model: modelChoice, collaborationMode: planFor(thread.id) });
+      contextSent(thread.id, stamp);
       promptHistory.push(message);
       files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview));
     } catch (error) {
@@ -967,8 +1051,11 @@ export function App() {
   const rename = async (threadId: string, name: string) => {
     setRenaming(null);
     const trimmed = name.trim();
-    if (!trimmed) return;
-    const before = state.threads[threadId]?.thread.name ?? null;
+    const current = state.threads[threadId]?.thread;
+    // Left as it opened (a blur, Enter on the shown title): nothing to rename, and a title taken
+    // from the first question does not harden into a name.
+    if (!trimmed || (current && trimmed === renameStart(current))) return;
+    const before = current?.name ?? null;
     try {
       await setName(threadId, trimmed);
       undoStack.push({ label: "Rename", undo: () => setName(threadId, before ?? ""), redo: () => setName(threadId, trimmed) });
@@ -977,32 +1064,94 @@ export function App() {
     }
   };
 
+  /** Archives one thread on the server, its managed worktree removed (a snapshot kept for Restore), without an undo entry. */
+  const archiveOne = async (threadId: string) => {
+    await client.request("thread/archive", { threadId });
+    // Archiving deletes a managed worktree (a snapshot is kept for Restore), never a permanent one.
+    const link = links[threadId];
+    if (link && bridge.git.available() && !prefs.permanentWorktrees.includes(link.checkout)) {
+      bridge.worktrees.remove(link.sourceCwd, link.checkout, wtSettings.root, threadId)
+        .then((kept) => setLink(threadId, { ...link, snapshot: kept })).catch(notice);
+    }
+    dispatch({ type: "archived", threadId });
+    setFound((list) => list?.filter((result) => result.thread.id !== threadId) ?? null);
+  };
+  /** One undo entry that brings several archived threads back (a project's Archive chats archives them all at once). */
+  const archiveUndo = (label: string, threadIds: string[]) => undoStack.push({
+    label,
+    undo: async () => {
+      for (const threadId of threadIds) {
+        const answer = (await client.request("thread/unarchive", { threadId })) as { thread?: Thread };
+        if (answer.thread) dispatch({ type: "threads", list: [answer.thread] });
+      }
+    },
+    redo: async () => {
+      for (const threadId of threadIds) {
+        await client.request("thread/archive", { threadId });
+        dispatch({ type: "archived", threadId });
+      }
+    },
+  });
+
   const archive = async (threadId: string) => {
     try {
-      await client.request("thread/archive", { threadId });
-      // Archiving deletes a managed worktree (a snapshot is kept for Restore), never a permanent one.
-      const link = links[threadId];
-      if (link && bridge.git.available() && !prefs.permanentWorktrees.includes(link.checkout)) {
-        bridge.worktrees.remove(link.sourceCwd, link.checkout, wtSettings.root, threadId)
-          .then((kept) => setLink(threadId, { ...link, snapshot: kept })).catch(notice);
+      await archiveOne(threadId);
+      archiveUndo("Archive", [threadId]);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** A project's menu: Archive chats archives every thread of it (one undo brings them back). */
+  const archiveProjectChats = async (project: Project) => {
+    const ids = Object.values(state.threads).filter((view) => view.thread.projectId === project.id && !view.thread.ephemeral).map((view) => view.thread.id);
+    if (ids.length === 0) return notice(`${project.name} has no threads to archive.`);
+    if (!window.confirm(`Archive the ${ids.length} thread${ids.length === 1 ? "" : "s"} of ${project.name}? Ctrl+Z brings them back.`)) return;
+    const done: string[] = [];
+    try {
+      for (const id of ids) {
+        await archiveOne(id);
+        done.push(id);
       }
-      dispatch({ type: "archived", threadId });
-      setFound((list) => list?.filter((result) => result.thread.id !== threadId) ?? null);
+    } catch (error) {
+      notice(error);
+    }
+    if (done.length) archiveUndo(`Archive ${project.name}'s threads`, done);
+  };
+
+  /** A project's metadata changed (Remove from the sidebar, Restore), the change undoable. */
+  const setProjectMetadata = async (project: Project, changes: Record<string, string | null>, label: string) => {
+    try {
+      const metadata = withMetadata(project.metadata, changes);
+      await client.request("project/update", { projectId: project.id, metadata });
+      await loadProjects();
       undoStack.push({
-        label: "Archive",
+        label,
         undo: async () => {
-          const answer = (await client.request("thread/unarchive", { threadId })) as { thread?: Thread };
-          if (answer.thread) dispatch({ type: "threads", list: [answer.thread] });
+          await client.request("project/update", { projectId: project.id, metadata: withMetadata(project.metadata, {}) });
+          await loadProjects();
         },
         redo: async () => {
-          await client.request("thread/archive", { threadId });
-          dispatch({ type: "archived", threadId });
+          await client.request("project/update", { projectId: project.id, metadata });
+          await loadProjects();
         },
       });
     } catch (error) {
       notice(error);
     }
   };
+
+  /** A thread moved into a project, or out of its project (`thread/metadata/update`'s `projectId`). */
+  const moveToProject = async (threadId: string, projectId: string | null) => {
+    try {
+      const answer = (await client.request("thread/metadata/update", { threadId, projectId } as ParamsOf<"thread/metadata/update">)) as { thread?: Thread };
+      if (answer.thread) dispatch({ type: "threads", list: [answer.thread] });
+      else dispatch({ type: "notification", notification: { method: "thread/project/updated", params: { threadId, projectId } } as ServerNotification });
+    } catch (error) {
+      notice(error);
+    }
+  };
+
 
   /** The agent's settings, read and written through the server (Settings › Memories). */
   const readConfig = useCallback(async () => ((await client.request("config/read", {})) as { config: Record<string, unknown> }).config, [client]);
@@ -1329,7 +1478,7 @@ export function App() {
     archiveChat: () => { if (selected) void archive(selected.thread.id); },
     markUnread: () => { if (selected) markUnread(selected.thread.id); },
     pinChat: () => { if (selected) pin(selected.thread.id); },
-    renameChat: () => { if (selected) setRenaming({ id: selected.thread.id, name: selected.thread.name ?? "" }); },
+    renameChat: () => { if (selected) setRenaming({ id: selected.thread.id, name: renameStart(selected.thread) }); },
     sideChat: () => void sideChat(),
     findInChat: () => { setFindOpen(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".find-bar input")?.select()); },
     findNext: () => setFindAt((at) => (findCount ? (at + 1) % findCount : 0)),
@@ -1645,7 +1794,7 @@ export function App() {
           return editPrevious();
         case "rename":
           if (threadId && args) return rename(threadId, args);
-          if (threadId) setRenaming({ id: threadId, name: selected?.thread.name ?? "" });
+          if (threadId) setRenaming({ id: threadId, name: renameStart(state.threads[threadId]?.thread ?? { name: null, preview: "" }) });
           return;
         case "archive":
           if (threadId) return archive(threadId);
@@ -1936,7 +2085,33 @@ export function App() {
   const usage = contextUse(selected?.usage ?? null);
   const otherRequests = state.requests.length - threadRequests.length;
   const allThreads = Object.values(state.threads).map((entry) => entry.thread);
-  const asks = found ? found.map((result) => result.thread) : askThreads(allThreads, askRoot);
+  // Projects (projects.ts): the shown ones, and every thread that belongs to a project the server knows
+  // (shown or removed), which leaves the folder groups and the plain question list.
+  const listedProjects = ordered(shownProjects(serverProjects), (project) => `project:${project.id}`, prefs.projectOrder);
+  const folderGroups = ordered(projects(state, askRoot, (thread) => projectFolder(thread, links)), (group) => `folder:${group.cwd}`, prefs.projectOrder);
+  /** Dragging a project or folder header onto another puts it just before that one, kept in the window's preferences. */
+  const dragHeader = (key: string) => ({
+    draggable: true,
+    onDragStart: (event: DragEvent) => {
+      draggedHeader.current = key;
+      event.dataTransfer.effectAllowed = "move";
+    },
+    onDragOver: (event: DragEvent) => {
+      if (draggedHeader.current && draggedHeader.current !== key) event.preventDefault();
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      const moved = draggedHeader.current;
+      draggedHeader.current = null;
+      if (!moved || moved === key) return;
+      const shownKeys = [...listedProjects.map((project) => `project:${project.id}`), ...folderGroups.map((group) => `folder:${group.cwd}`)];
+      updatePrefs({ projectOrder: movedBefore(shownKeys, prefsRef.current.projectOrder, moved, key) });
+    },
+  });
+  const knownProjects = new Set(serverProjects.map((project) => project.id));
+  const inProject = (thread: Thread) => Boolean(thread.projectId && knownProjects.has(thread.projectId));
+  const asks = found ? found.map((result) => result.thread) : askThreads(allThreads, askRoot).filter((thread) => !inProject(thread));
+  const askOfProject = (projectId: string) => askThreads(allThreads, askRoot).filter((thread) => thread.projectId === projectId);
   const snippets = new Map((found ?? []).map((result) => [result.thread.id, result.snippet]));
   const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
   const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.text !== undefined ? pasteLabel(item.text) : item.name, preview: item.preview, title: item.text?.slice(0, 600) }));
@@ -1947,6 +2122,33 @@ export function App() {
   const pinnedHere = prefs.pinnedThreads.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread) && !thread!.ephemeral && isAskThread(thread!, askRoot) === (view === "ask"));
   const sectioned = new Set(prefs.sections.flatMap((section) => section.threads));
   const workLabel = (thread: Thread) => thread.name || thread.preview || "(new thread)";
+
+  /** A project in the sidebar: its name (a click makes it where the next thread or question starts), its menu, its threads. */
+  const projectSection = (project: Project, threads: Thread[], where: "ask" | "work") => (
+    <section key={`project-${project.id}`} className={`project server-project${newProject === project.id ? " starting" : ""}`}>
+      <h2 title={[project.name, ...project.roots.map((root) => root.path)].join("\n")} {...dragHeader(`project:${project.id}`)} onClick={() => {
+        setNewProject(project.id);
+        const primary = primaryFolder(project);
+        if (where === "work" && primary) setNewCwd(primary);
+        dispatch({ type: "select", threadId: null });
+      }}>
+        <Icon name="folderTree" size={14} />{project.name}
+        <span className="menu-anchor">
+          <button className="icon project-action" title="Project" aria-label={`Project ${project.name}`} aria-haspopup="menu"
+            onClick={(event) => { event.stopPropagation(); setProjectMenu(projectMenu === project.id ? null : project.id); }}><Icon name="more" size={12} /></button>
+          {projectMenu === project.id ? (
+            <span className="menu" role="menu" aria-label={`Project ${project.name}`} onClick={(event) => { event.stopPropagation(); setProjectMenu(null); }}>
+              <button role="menuitem" onClick={() => { setNewProject(project.id); const primary = primaryFolder(project); if (where === "work" && primary) setNewCwd(primary); dispatch({ type: "select", threadId: null }); }}>{where === "ask" ? "New question in this project" : "New thread in this project"}</button>
+              <button role="menuitem" onClick={() => setProjectDialog({ project, folder: null })}>Edit project…</button>
+              <button role="menuitem" onClick={() => void archiveProjectChats(project)}>Archive chats</button>
+              <button role="menuitem" onClick={() => { if (newProject === project.id) setNewProject(null); void setProjectMetadata(project, { [REMOVED_KEY]: "1" }, `Remove ${project.name}`); }}>Remove from the sidebar</button>
+            </span>
+          ) : null}
+        </span>
+      </h2>
+      {threads.map((thread) => threadRow(thread, where === "ask" ? askTitle(thread) : workLabel(thread)))}
+    </section>
+  );
 
   const threadRow = (thread: Thread, label: string) => (
     renaming?.id === thread.id ? (
@@ -1974,7 +2176,7 @@ export function App() {
             <button className="icon" title="More" aria-label="More" aria-haspopup="menu" onClick={() => setRowMenu(rowMenu === thread.id ? null : thread.id)}><Icon name="more" size={14} /></button>
             {rowMenu === thread.id ? (
               <span className="menu" role="menu" aria-label="Thread" onClick={() => setRowMenu(null)}>
-                <button role="menuitem" onClick={() => setRenaming({ id: thread.id, name: thread.name || label })}>Rename</button>
+                <button role="menuitem" onClick={() => setRenaming({ id: thread.id, name: renameStart(thread) })}>Rename</button>
                 <button role="menuitem" onClick={() => markUnread(thread.id)}>Mark unread</button>
                 {HOST === "electron" ? <button role="menuitem" onClick={() => void bridge.popOut(thread.id).catch(notice)}>Open in a window of its own</button> : null}
                 <button role="menuitem" onClick={() => copyLink(thread.id)}>Copy link</button>
@@ -1985,6 +2187,10 @@ export function App() {
                     {prefs.sections.some((section) => section.threads.includes(thread.id)) ? <button role="menuitem" onClick={() => toSection(thread.id, null)}>Out of its section</button> : null}
                   </>
                 ) : null}
+                {listedProjects.filter((project) => project.id !== thread.projectId).map((project) => (
+                  <button key={project.id} role="menuitem" onClick={() => void moveToProject(thread.id, project.id)}>Move to project {project.name}</button>
+                ))}
+                {thread.projectId && knownProjects.has(thread.projectId) ? <button role="menuitem" onClick={() => void moveToProject(thread.id, null)}>Out of its project</button> : null}
               </span>
             ) : null}
           </span>
@@ -2032,13 +2238,16 @@ export function App() {
             <h2 className="section-label">Questions</h2>
             {asks.length === 0 ? <p className="empty small">{found ? "Nothing matches." : "No questions yet."}</p> : null}
             {asks.filter((thread) => found || !prefs.pinnedThreads.includes(thread.id)).map((thread) => threadRow(thread, askTitle(thread)))}
+            {found ? null : listedProjects.filter((project) => project.roots.length === 0 || askOfProject(project.id).length > 0).map((project) => projectSection(project, askOfProject(project.id).filter((thread) => !prefs.pinnedThreads.includes(thread.id)), "ask"))}
+            {found ? null : <button className="nav-row new-project-button" onClick={() => setProjectDialog({ project: null, folder: null })}><Icon name="folderTree" />New project</button>}
           </>
         ) : (
           <>
             <button className="nav-row new-thread-button" onClick={newThread}><Icon name="squarePen" />New thread</button>
+            <button className="nav-row new-project-button" onClick={() => setProjectDialog({ project: null, folder: newCwd.trim() || null })}><Icon name="folderTree" />New project</button>
             <label className="new-thread" title="The project folder a new thread starts in">
               <Icon name="folder" size={14} />
-              <input ref={folderField} value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
+              <input ref={folderField} value={startingProject && view === "work" ? `${startingProject.name} (project)` : newCwd} onChange={(event) => { setNewProject(null); setNewCwd(event.target.value); }} placeholder="/path/to/project" aria-label="Project folder" />
             </label>
             <label className="search">
               <Icon name="search" size={14} />
@@ -2058,7 +2267,13 @@ export function App() {
                   </section>
                 ) : null}
                 <section className="project recents">
-                  <h2 onClick={() => updatePrefs({ recentsOpen: !prefs.recentsOpen })} title="The most recent threads of every project">
+                  <h2 onClick={() => updatePrefs({ recentsOpen: !prefs.recentsOpen })} title="The most recent threads of every project"
+                    role="button" tabIndex={0} aria-expanded={prefs.recentsOpen}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      updatePrefs({ recentsOpen: !prefs.recentsOpen });
+                    }}>
                     <Icon name={prefs.recentsOpen ? "chevronDown" : "chevronRight"} size={12} />Recent
                   </h2>
                   {prefs.recentsOpen ? recentThreads(workThreads, 5).map((thread) => threadRow(thread, workLabel(thread))) : null}
@@ -2083,15 +2298,18 @@ export function App() {
                 ))}
               </>
             )}
-            {found ? null : pinnedFirst(projects(state, askRoot, (thread) => projectFolder(thread, links)), prefs.pinnedProjects, (project) => project.cwd)
+            {found ? null : listedProjects.map((project) => projectSection(project, workThreads.filter((thread) => thread.projectId === project.id && !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)), "work"))}
+            {found ? null : pinnedFirst(folderGroups.map((group) => ({ ...group, threads: group.threads.filter((thread) => !inProject(thread)) })), prefs.pinnedProjects, (project) => project.cwd)
               .filter((project) => project.threads.some((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)) || prefs.pinnedProjects.includes(project.cwd)).map((project) => (
               <section key={project.cwd} className="project">
-                <h2 title={project.cwd} onClick={() => setNewCwd(project.cwd)}>
+                <h2 title={project.cwd} {...dragHeader(`folder:${project.cwd}`)} onClick={() => { setNewProject(null); setNewCwd(project.cwd); }}>
                   <Icon name="folder" size={14} />{project.cwd.split(/[\\/]/).filter(Boolean).pop() ?? project.cwd}
                   <button className={`icon project-action${prefs.pinnedProjects.includes(project.cwd) ? " on" : ""}`} title={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"} aria-label={prefs.pinnedProjects.includes(project.cwd) ? "Unpin the project" : "Pin the project"}
                     onClick={(event) => { event.stopPropagation(); pinProject(project.cwd); }}><Icon name="pin" size={12} /></button>
                   {bridge.git.available() ? <button className="icon project-action" title="New permanent worktree: a project of its own, never cleaned up" aria-label="New permanent worktree"
                     onClick={(event) => { event.stopPropagation(); void permanentWorktree(project.cwd); }}><Icon name="gitFork" size={12} /></button> : null}
+                  <button className="icon project-action" title="Make a project of this folder: more folders, instructions, knowledge files" aria-label="Make a project of this folder"
+                    onClick={(event) => { event.stopPropagation(); setProjectDialog({ project: null, folder: project.cwd }); }}><Icon name="plus" size={12} /></button>
                 </h2>
                 {project.threads.filter((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)).map((thread) => threadRow(thread, workLabel(thread)))}
               </section>
@@ -2192,7 +2410,7 @@ export function App() {
           </div>
         ) : null}
         <OpenFileContext.Provider value={view === "work" ? { open: openFile, cwd: selected?.thread.cwd ?? null, ask: false } : askFolder ? { open: openFile, cwd: askFolder, ask: true } : null}>
-        <div className="turns">
+        <div className="turns" ref={turnsRef} onScroll={onTurnsScroll}>
           {incognitoShown || (view === "ask" && !selected && incognitoNext) ? (
             <div className="incognito-banner" role="note">
               <Icon name="eyeOff" size={16} />
@@ -2214,9 +2432,10 @@ export function App() {
             <div className="empty ask-empty">
               <MightlingMark size={56} />
               <h1>Ask Mightling</h1>
+              {startingProject ? <p className="starting-project">In the project <strong>{startingProject.name}</strong>: its instructions and knowledge files go with the question. <button className="link-button" onClick={() => setNewProject(null)}>Ask outside it</button></p> : null}
               <p>A question with no project: Mightling answers in a folder of its own, searching the web when it needs to{airgap?.level === "on" ? ", except that airgapped is on, so web search is off" : ""}. Attach images or files with the paperclip, or paste a screenshot.</p>
             </div>
-          ) : <p className="empty">{newCwd.trim() ? `A new thread in ${newCwd.trim()}: write the first message below.` : "Open a thread, or name a project folder for a new one."}</p>}
+          ) : <p className="empty">{startingProject ? `A new thread in the project ${startingProject.name}${primaryFolder(startingProject) ? ` (${primaryFolder(startingProject)})` : ""}: write the first message below.` : newCwd.trim() ? `A new thread in ${newCwd.trim()}: write the first message below.` : "Open a thread, or name a project folder for a new one."}</p>}
           {threadRequests.map((request) => (
             <Approval key={JSON.stringify(request.id)} request={request} airgappedOn={airgap?.level === "on"} onAnswer={(result) => answer(request, result)} />
           ))}
@@ -2367,6 +2586,7 @@ export function App() {
       ) : null}
       {settingsOpen ? <SettingsDialog page={settingsPage} setPage={setSettingsPage} prefs={prefs} onChange={updatePrefs} onClose={() => setSettingsOpen(false)} worktrees={wtSettings} onWorktree={(key, value) => void writeWorktreeSetting(key, value)}
         listArchived={listArchived} unarchive={unarchiveThread} notice={notice}
+        removedProjects={serverProjects.filter(isRemoved)} restoreProject={(project) => void setProjectMetadata(project, { [REMOVED_KEY]: null }, `Restore ${project.name}`)}
         readConfig={readConfig} writeConfig={async (keyPath, value) => {
           await writeConfig(keyPath, value);
           if (keyPath === "features.agent_message_board" || keyPath === "features.multi_agent_v2") readConfig().then((config) => setBoard({ on: boardOn(config), sqliteHome: sqliteHome(config) })).catch(() => {});
@@ -2375,6 +2595,20 @@ export function App() {
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
           seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice} />
+      ) : null}
+      {projectDialog ? (
+        <ProjectDialog client={client} project={projectDialog.project} folder={projectDialog.folder} notice={notice} onClose={() => setProjectDialog(null)}
+          onSaved={(saved) => {
+            setProjectDialog(null);
+            void loadProjects();
+            if (!projectDialog.project) {
+              // A new project is where the next thread (or question) starts.
+              setNewProject(saved.id);
+              const primary = primaryFolder(saved);
+              if (primary) setNewCwd(primary);
+              dispatch({ type: "select", threadId: null });
+            }
+          }} />
       ) : null}
       {extensions ? <ExtensionsView client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
       {fileSearch !== null && composeRoot ? (
@@ -2590,7 +2824,8 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
 function describeInput(input: UserInput): string {
   switch (input.type) {
     case "text":
-      return input.text;
+      // A project's context (projects.ts) is for the agent; the transcript shows what the user wrote.
+      return isContextText(input.text) ? "" : input.text;
     case "localImage":
       return `[image: ${input.path.split(/[\\/]/).pop()}]`;
     case "skill":

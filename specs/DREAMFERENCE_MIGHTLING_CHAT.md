@@ -439,3 +439,11 @@ The hub already steered a message into a running turn and merged the ones that c
 
 Topics as threads (a conversation per `telegram:<chat>/<topic>`), rich messages built from blocks (off by default), approvals with colour, a used state and nonce ids, and the partial answer kept on stop and on a time-out in every bridge: specs/DREAMFERENCE_MIGHTLING_TELEGRAM_MOONSHOT.md §14. Approval ids are nonces for Matrix too.
 
+### 16.6 Voice messages (branch `chat/voice`)
+
+Telegram's `voice` and `audio` and Matrix's `m.audio` are downloaded like images and transcribed through the link (`AgentCommand::Transcribe`, `/api/transcribe` with the link's cookie) instead of being dropped; the hub says "Heard: …", adds the text to the question, and on a failure says so and asks nothing for a recording alone (SIGNAL §19.5 has the same rule). Video, video messages, stickers and the rest are still named as dropped.
+
+### 16.7 Files back (branch `chat/files-back`)
+
+As SIGNAL §19.6: after a completed answer the hub lists the files the agent changed during the turn (`AgentCommand::MadeFiles`), offers each one the answer names (not the user's uploads, at most three) as the bridge's own approval ("Send it" / "No": Telegram buttons, Matrix ✅/❌ or yes/no), and on "Send it" fetches it (`MadeFile`) and sends it: Telegram `sendDocument` (50 MB), Matrix an upload to the homeserver and an `m.file` (20 MB). Too large: named and kept. Nothing is offered at `/airgapped on`, and `ling web`'s `/api/ask/file` refuses at a user-level `on`.
+

@@ -80,6 +80,7 @@ fn config(dir: &Path, port: u16, lan_names: Vec<String>) -> Config {
         state_dir,
         port,
         lan_names,
+        public_names: Vec::new(),
     }
 }
 
@@ -123,10 +124,13 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/apps"),
     ("GET", "/api/airgapped"),
     ("GET", "/api/chat/settings"),
+    ("GET", "/api/ask/files?thread=t"),
+    ("GET", "/api/ask/file?thread=t&name=a"),
     ("GET", "/images/0123456789abcdef.jpg"),
     ("GET", "/docs/documents/1"),
     ("GET", "/api/docs"),
     ("POST", "/api/docs/add"),
+    ("POST", "/api/telegram/check"),
     ("GET", "/devices"),
     ("POST", "/devices/pair"),
     ("POST", "/devices/revoke"),
@@ -463,6 +467,34 @@ async fn a_bridge_upload_reads_an_images_text_and_says_whether_the_model_takes_i
     let (_, _, body) = call(&server, upload("/api/upload?thread=thr-1&name=shot.jpg&kind=image")).await;
     let plain: Value = serde_json::from_str(&body).unwrap();
     assert!(plain.get("text").is_none() && plain.get("vision").is_none(), "{plain}");
+}
+
+/// Files back to a phone: the thread's changed files are listed and one is given, only from its
+/// folder, and never at a user-level `/airgapped on`.
+#[tokio::test]
+async fn a_threads_files_are_listed_and_given_and_never_at_air_gap_on() {
+    let scratch = scratch("files");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let root = server.ask_root();
+    let folder = ling_web_server::ask::new_folder(&root).unwrap();
+    ling_web_server::ask::link_thread(&root, "thr-1", &folder).unwrap();
+    std::fs::write(folder.join("report.md"), "# Purifiers").unwrap();
+    // SAFETY: the other tests here accept either level.
+    unsafe { std::env::set_var(ling_airgapped::ENV_VAR, "off") };
+    let get = |uri: &str| request("GET", uri).header(header::COOKIE, &cookie).body(Body::empty()).unwrap();
+    let (status, _, body) = call(&server, get("/api/ask/files?thread=thr-1&since=0")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["files"][0]["name"], "report.md");
+    let (status, _, body) = call(&server, get("/api/ask/file?thread=thr-1&name=report.md")).await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "# Purifiers"));
+    assert_eq!(call(&server, get("/api/ask/file?thread=thr-1&name=../../etc/passwd")).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(call(&server, get("/api/ask/file?thread=thr-other&name=report.md")).await.0, StatusCode::NOT_FOUND);
+    // SAFETY: as above.
+    unsafe { std::env::set_var(ling_airgapped::ENV_VAR, "on") };
+    let (status, _, body) = call(&server, get("/api/ask/file?thread=thr-1&name=report.md")).await;
+    unsafe { std::env::remove_var(ling_airgapped::ENV_VAR) };
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }
 
 /// The stand-in app-server: one WebSocket connection on the Unix socket, its frames handed to the test.
@@ -866,4 +898,61 @@ async fn a_recording_is_passed_to_speech_to_text_and_the_text_comes_back() {
     let (status, _, body) = call(&server, post("audio/webm", b"again")).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert!(body.contains("ling-admin voice start"));
+}
+
+/// Telegram's launch parameters for `user`, signed with `token` the way Telegram signs them.
+fn telegram_launch(token: &str, user: i64, auth_date: u64) -> String {
+    use ling_web_server::telegram_app::hmac_sha256;
+    let user_json = format!("{{\"id\":{user}}}");
+    let check = format!("auth_date={auth_date}\nuser={user_json}");
+    let secret = hmac_sha256(b"WebAppData", token.as_bytes());
+    let hash: String = hmac_sha256(&secret, check.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    format!("auth_date={auth_date}&user=%7B%22id%22%3A{user}%7D&hash={hash}")
+}
+
+/// The Mini App (TELEGRAM_MOONSHOT §15): its HTTPS front's name is served as given, and the launch
+/// check answers whether the page was opened from this node's bot by a paired user, behind the
+/// credential like every route.
+#[tokio::test]
+async fn a_mini_app_launch_is_checked_against_ling_chats_bot_behind_the_credential() {
+    let scratch = scratch("tgapp");
+    let mut config = config(&scratch.dir, 3100, Vec::new());
+    config.public_names = vec!["node.example.ts.net".to_string()];
+    let chat = config.codex_home.join("chat");
+    std::fs::create_dir_all(&chat).unwrap();
+    std::fs::write(chat.join("telegram.json"), r#"{"token":"7:tok","consented":1,"users":[42]}"#).unwrap();
+    let server = Server::new(config).unwrap();
+    let cookie = sign_in(&server).await;
+    let check = |init_data: String, host: &'static str, origin: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/telegram/check")
+            .header(header::HOST, host)
+            .header(header::ORIGIN, origin)
+            .header(header::COOKIE, &cookie)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "initData": init_data }).to_string()))
+            .unwrap()
+    };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let front = ("node.example.ts.net", "https://node.example.ts.net");
+    let (status, _, body) = call(&server, check(telegram_launch("7:tok", 42, now), front.0, front.1)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], true);
+    for (init_data, why) in [
+        (telegram_launch("7:tok", 43, now), "not paired"),
+        (telegram_launch("8:other", 42, now), "this Mightling's bot"),
+        (telegram_launch("7:tok", 42, now - 3 * 24 * 3600), "too old"),
+        (String::new(), "this Mightling's bot"),
+    ] {
+        let (_, _, body) = call(&server, check(init_data, front.0, front.1)).await;
+        let answer = serde_json::from_str::<Value>(&body).unwrap();
+        assert_eq!(answer["ok"], false);
+        assert!(answer["reason"].as_str().unwrap().contains(why), "{answer}");
+    }
+    // Another name is still refused, and the front's name gets no more than loopback.
+    let (status, _, _) = call(&server, check(telegram_launch("7:tok", 42, now), "evil.example", "https://evil.example")).await;
+    assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
+    let bare = Request::builder().uri("/healthz").header(header::HOST, front.0);
+    assert_eq!(call(&server, bare.body(Body::empty()).unwrap()).await.0, StatusCode::UNAUTHORIZED);
 }

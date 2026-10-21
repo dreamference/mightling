@@ -885,3 +885,11 @@ On 2026-10-20 a second message sent while the first was answered became a separa
 
 It waits as the next question instead when it cannot join: an attachment after the question has gone, an approval waiting for YES or NO, a stop under way, or the final turn after a time-out (§19.3). Everything that waited is then asked as **one** question, texts joined by blank lines. `/stop` stops the answer and empties the queue, as before; the queue still holds at most five.
 
+### 19.5 Voice notes (branch `chat/voice`; owner's approval of 2026-10-21, MOONSHOT §3.4)
+
+A voice note (an `audio/*` attachment) is not uploaded: the bridge sends it to `ling web`'s `/api/transcribe`, which passes it to the speech-to-text service on the node (speaches, `ling-admin voice start`; nothing leaves the machine). What was heard is said back first ("Heard: …"), so a mis-hearing is seen before the answer is trusted, and joins the question's text. A failure is said ("I couldn't transcribe the voice message (…); type the question instead.", with `ling web`'s reason, which names `ling-admin voice start` when the service is not running); a voice note alone then asks nothing.
+
+### 19.6 Files back (branch `chat/files-back`; owner's approval of 2026-10-21, MOONSHOT §3.7)
+
+After an answer, the bridge asks `ling web` for the files the agent changed in the thread's folder during the turn (`/api/ask/files`, the folder's own regular files, never through a link, never hidden ones). One the answer names, and that is not the owner's own upload, is offered: "Mightling made report.md (2 KB). Reply YES to get it here, or NO." (at most three per answer; the phone prompt asks the agent to name what it made). Only YES sends it (`/api/ask/file`, then a Signal attachment from the bridge's outbox, deleted after); NO or ten minutes keeps it in the folder. Larger than 95 MB: named and kept. Never at `/airgapped on`: the bridge offers nothing, and `ling web` gives out no file at a user-level `on`. The offer is the bridge's own question: answering it never answers the agent.
+

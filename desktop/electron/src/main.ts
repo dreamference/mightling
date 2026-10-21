@@ -9,6 +9,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import * as knowledge from "./knowledge";
 import * as userFs from "./userfs";
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 
@@ -725,6 +726,18 @@ export async function main(options: MainOptions): Promise<void> {
       case "dialog/open-image": {
         const chosen = await dialog.showOpenDialog(own, { title: "A picture for the pet", properties: ["openFile"], filters: [{ name: "Pictures", extensions: ["png", "gif", "webp", "svg", "jpg", "jpeg"] }] });
         return chosen.canceled ? null : chosen.filePaths[0] ?? null;
+      }
+      case "project/knowledge-list":
+      case "project/knowledge-add":
+      case "project/knowledge-remove": {
+        const home = codexHome();
+        if (!home) throw new Error("Mightling's home folder is not known");
+        const projectId = String(message.projectId);
+        if (message.type === "project/knowledge-list") return knowledge.listKnowledge(home, projectId);
+        if (message.type === "project/knowledge-remove") return knowledge.removeKnowledge(home, projectId, String(message.name));
+        const chosen = await dialog.showOpenDialog(own, { title: "Add knowledge files to the project", properties: ["openFile", "multiSelections"] });
+        if (chosen.canceled || chosen.filePaths.length === 0) return knowledge.listKnowledge(home, projectId);
+        return knowledge.addKnowledge(home, projectId, chosen.filePaths);
       }
       case "dialog/open-folder": {
         const chosen = await dialog.showOpenDialog(own, { title: "Open a project folder", properties: ["openDirectory"] });

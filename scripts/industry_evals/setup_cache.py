@@ -31,8 +31,8 @@ IFEVAL_RAW: Final[str] = (
     "https://raw.githubusercontent.com/google-research/google-research/"
     f"{IFEVAL_COMMIT}/instruction_following_eval/"
 )
+# The folder has no __init__.py: the scorer runs as a namespace package from the folder above it.
 IFEVAL_FILES: Final[tuple[str, ...]] = (
-    "__init__.py",
     "evaluation_main.py",
     "evaluation_lib.py",
     "instructions.py",
@@ -65,6 +65,14 @@ POLYGLOT_TARBALL: Final[str] = (
 )
 POLYGLOT_IMAGE: Final[str] = "mightling-polyglot:latest"
 HERE: Final[Path] = Path(__file__).resolve().parent
+# NLTK's data both scorers load: IFEval's sentence splitter, and IFBench's stop words and tagger
+# (found missing by an offline run on 2026-10-21, which would otherwise score those checks as fails).
+NLTK_PACKAGES: Final[tuple[str, ...]] = (
+    "punkt",
+    "punkt_tab",
+    "stopwords",
+    "averaged_perceptron_tagger_eng",
+)
 MANIFEST: Final[dict] = {
     "ifeval": {
         "source": IFEVAL_RAW,
@@ -77,7 +85,7 @@ MANIFEST: Final[dict] = {
         "licence": "Apache-2.0 (code, allenai/IFBench); test set card names no licence",
     },
     "nltk_punkt": {
-        "source": "nltk.download('punkt', 'punkt_tab')",
+        "source": "nltk.download: punkt, punkt_tab, stopwords, averaged_perceptron_tagger_eng",
         "licence": "Apache-2.0 (NLTK data)",
     },
     "polyglot": {
@@ -87,6 +95,81 @@ MANIFEST: Final[dict] = {
         "repository has no licence file and attributes the exercises to Exercism",
     },
 }
+
+
+# The disk every build keeps free (the owner's rule of 2026-10-21, after a night failed on a full
+# disk): checked before each build and between Terminal-Bench's tasks.
+RESERVE_GB: Final[int] = 150
+
+
+class BuildGuard:
+    """Refuses a build while a SWE-bench night runs or when the disk would go under the reserve.
+
+    `run` is the subprocess seam the tests replace.
+    """
+
+    def __init__(self, reserve_gb: int = RESERVE_GB, run=subprocess.run, usage=None) -> None:
+        self.reserve_gb = reserve_gb
+        self.run = run
+        self.usage = usage or (lambda path: __import__("shutil").disk_usage(path))
+
+    def docker_root(self) -> str:
+        done = self.run(
+            ["docker", "info", "--format", "{{.DockerRootDir}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return done.stdout.strip() or "/var/lib/docker"
+
+    def free_gb(self, path: str) -> float:
+        return self.usage(path).free / 1e9
+
+    def nights(self) -> list[str]:
+        done = self.run(
+            [
+                "systemctl",
+                "--user",
+                "list-units",
+                "--state=active",
+                "ling-swe-*",
+                "--no-legend",
+                "--plain",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return [line.split()[0] for line in done.stdout.splitlines() if line.strip()]
+
+    def refusal(self, cache: Path, need_gb: float = 0.0) -> str | None:
+        """Why a build must not start now, or None."""
+        nights = self.nights()
+        if nights:
+            return f"a SWE-bench night is running ({', '.join(nights)})"
+        for path in {self.docker_root(), str(cache)}:
+            try:
+                free = self.free_gb(path)
+            except OSError:
+                continue
+            if free - need_gb < self.reserve_gb:
+                return f"{free:.0f} GB free on {path}; a build keeps {self.reserve_gb} GB free"
+        return None
+
+    def image_bytes(self, tag: str) -> int:
+        done = self.run(
+            ["docker", "image", "inspect", "--format", "{{.Size}}", tag],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        try:
+            return int(done.stdout.strip())
+        except ValueError:
+            return 0
+
+    def prune_build_cache(self) -> None:
+        self.run(["docker", "builder", "prune", "-f"], capture_output=True, text=True, check=False)
 
 
 def fetch(url: str, path: Path) -> Path:
@@ -140,7 +223,9 @@ def setup_ifeval(cache: Path, run=subprocess.run, download=fetch) -> dict:
         [
             str(venv_python(cache)),
             "-c",
-            f"import nltk; nltk.download('punkt', {str(nltk_data)!r}); nltk.download('punkt_tab', {str(nltk_data)!r})",
+            "import nltk, sys; [nltk.download(p, sys.argv[1], raise_on_error=True) for p in "
+            f"{list(NLTK_PACKAGES)!r}]",
+            str(nltk_data),
         ],
         check=True,
     )
@@ -159,8 +244,18 @@ def _manifest(cache: Path, key: str) -> None:
     path.write_text(json.dumps(current, indent=2) + "\n")
 
 
-def setup_polyglot(cache: Path, build: bool = True, run=subprocess.run, download=fetch) -> Path:
-    """Fetches the exercises into the cache and builds the image from a staged context."""
+def setup_polyglot(
+    cache: Path,
+    build: bool = True,
+    run=subprocess.run,
+    download=fetch,
+    guard: BuildGuard | None = None,
+) -> Path:
+    """Fetches the exercises into the cache and builds the image from a staged context.
+
+    The build waits for no night and keeps the disk reserve (`BuildGuard`); the image's size goes
+    into the manifest, and the build cache is pruned after it.
+    """
     tarball = download(POLYGLOT_TARBALL, cache / "polyglot.tar.gz")
     with tarfile.open(tarball) as archive:
         archive.extractall(cache, filter="data")
@@ -181,7 +276,16 @@ def setup_polyglot(cache: Path, build: bool = True, run=subprocess.run, download
             (context / name).write_bytes((HERE / "polyglot" / name).read_bytes())
             (context / name).chmod(0o755)
         subprocess.run(["cp", "-a", str(target), str(context / "polyglot-benchmark")], check=True)
+        guard = guard or BuildGuard()
+        refusal = guard.refusal(cache, need_gb=20)
+        if refusal:
+            raise SystemExit(f"❌ Not building the Polyglot image: {refusal}.")
         run(["docker", "build", "-t", POLYGLOT_IMAGE, str(context)], check=True)
+        guard.prune_build_cache()
+        subprocess.run(["rm", "-rf", str(context)], check=True)
+        manifest = json.loads((cache / "manifest.json").read_text())
+        manifest["polyglot"]["image_bytes"] = guard.image_bytes(POLYGLOT_IMAGE)
+        (cache / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return target
 
 

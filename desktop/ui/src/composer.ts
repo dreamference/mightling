@@ -8,6 +8,7 @@ import type { Model } from "./protocol/v2/Model";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { UserInput } from "./protocol/v2/UserInput";
 import type { ThreadView } from "./store";
+import { isContextText } from "./projects";
 
 export type TriggerKind = "@" | "$" | "/";
 
@@ -210,7 +211,7 @@ export function userTexts(view: ThreadView | null): string[] {
   for (const turn of view.turns) {
     for (const item of turn.items) {
       if (item.type !== "userMessage") continue;
-      const text = item.content.map((input) => (input.type === "text" ? input.text : "")).join("").trim();
+      const text = item.content.map((input) => (input.type === "text" && !isContextText(input.text) ? input.text : "")).join("").trim();
       if (text) texts.push(text);
     }
   }
@@ -224,7 +225,7 @@ export function lastUserTurn(view: ThreadView | null): { turnId: string; text: s
     const turn = view.turns[index];
     const message = turn.items.find((item) => item.type === "userMessage");
     if (message && message.type === "userMessage") {
-      return { turnId: turn.id, text: message.content.map((input) => (input.type === "text" ? input.text : "")).join("") };
+      return { turnId: turn.id, text: message.content.map((input) => (input.type === "text" && !isContextText(input.text) ? input.text : "")).join("") };
     }
   }
   return null;

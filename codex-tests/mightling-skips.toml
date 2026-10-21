@@ -34,6 +34,21 @@ filter = """
 | (binary_id(codex-tui) & test(=chatwidget::tests::review_mode::interrupted_turn_error_message_snapshot))
 """
 
+# tui-remote-catalog-hints: 1 test
+[[test]]
+reason = """Patch 0030 rewords the remote plugin catalogs' next-step hints, which named a ChatGPT sign-in Mightling never offers ("Sign in with ChatGPT auth; ...", "Sign in to ChatGPT, ..."); this inline test in app/background_requests.rs asserts upstream's wording, and a test-only patch may not touch that product file (1.7.1)."""
+filter = """
+  (binary_id(codex-tui) & test(=app::background_requests::tests::plugin_remote_section_error_message_adds_concrete_next_steps))
+"""
+
+# tui-apps-manage-label: 2 tests
+[[test]]
+reason = """Patch 0030 labels the installed app page's first action "Manage in browser" (the service's account page, APPS §3) where upstream says "Manage on ChatGPT"; these two inline tests in app_link_view.rs assert upstream's label, and a test-only patch may not touch that product file. The action itself is unchanged (1.7.1)."""
+filter = """
+  (binary_id(codex-tui) & test(=bottom_pane::app_link_view::tests::installed_app_has_toggle_action))
+  | (binary_id(codex-tui) & test(=bottom_pane::app_link_view::tests::toggle_action_sends_set_app_enabled_and_updates_label))
+"""
+
 # tui-cavemode-completion: 1 test
 [[test]]
 reason = """Patch 0017 adds /cavemode after /model, ahead of /compact in the command list, so `/c` then Tab completes `/cavemode` where upstream completed `/compact`. The completion itself is unchanged; the first match is a Mightling command. Moving /cavemode after /compact in 0017 would restore upstream's result and un-skip this (found 2026-10-02, the only TUI failure of 5,517)."""

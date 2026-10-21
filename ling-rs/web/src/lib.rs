@@ -9,11 +9,13 @@
 //! microphone, the speech-to-text service on loopback (sidecars.rs); the only processes it starts
 //! are `ling app-server`, `ling prompt show --composed`, for a phone bridge's image, the offline
 //! text reader (ocr.rs), to open a cited document, `ling docs locate` (documents.rs), and, for the answers' length,
-//! `ling cavemode` (cave.rs).
+//! `ling cavemode` (cave.rs). As a Telegram Mini App it is the same page, reached over the
+//! user's own HTTPS front, never through Telegram (telegram_app.rs).
 
 pub mod app_server;
 pub mod ask;
 pub mod ask_client;
+pub mod ask_files;
 pub mod assets;
 pub mod auth;
 pub mod cave;
@@ -28,6 +30,7 @@ pub mod qr;
 pub mod relay;
 pub mod server;
 pub mod sidecars;
+pub mod telegram_app;
 
 pub use cli::Environment;
 pub use cli::run_cli;
