@@ -28,7 +28,7 @@ import { boardFile, readBoards } from "./board";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
-import { addTask, dropTask, readReport, readReports, readTasks, runNow } from "./night";
+import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
 import { Nodes } from "./nodes";
 import { docsAdd, docsReindex, docsRemove, docsStatus, locate } from "./docs";
 import { Tasks } from "./tasks";
@@ -418,6 +418,21 @@ export async function main(options: MainOptions): Promise<void> {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
         return dropTask(ling, message.repo, message.id);
+      }
+      case "night/every-add":
+      case "night/every-list":
+      case "night/every-drop": {
+        // MIGHTLING_ADMIN names another ling-admin (the e2e's stand-in), as MIGHTLING_GH does for gh.
+        const admin = process.env.MIGHTLING_ADMIN || whichOnPath("ling-admin");
+        if (!admin) throw new Error("ling-admin is not on PATH: repeating tasks live where Night Shift runs, on the node");
+        if (message.type === "night/every-list") return listRepeating(admin);
+        if (message.type === "night/every-drop") return dropRepeating(admin, message.id);
+        return addRepeating(admin, message.repo, message.task, message.test, message.cadence, message.weekday);
+      }
+      case "night/details": {
+        const home = codexHome();
+        if (!home) throw new Error("there is no CODEX_HOME");
+        return taskDetails(path.join(home, "night"), message.id);
       }
       case "night/run": {
         const admin = whichOnPath("ling-admin");

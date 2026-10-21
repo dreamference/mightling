@@ -37,7 +37,7 @@ async function open(extraEnv: Record<string, string> = {}): Promise<Session> {
   const ling = writeStandIn(home, askRoot);
   const app = await launch({
     args: [main],
-    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv },
+    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_ADMIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv },
   });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -919,3 +919,58 @@ test("8 terminal: a tab in the thread's folder under its permissions, typing, an
     await close();
   }
 });
+
+test("decision 7: a finished run opens on its result, changes and transcript, a task repeats every week, one from a thread carries its context", async () => {
+  const { page, home, close } = await open();
+  const night = path.join(home, ".mightling", "night");
+  const { fetcher } = projectFolders(home);
+  for (const folder of ["tasks", "logs", "reports"]) fs.mkdirSync(path.join(night, folder), { recursive: true });
+  fs.writeFileSync(path.join(night, "tasks", "20261020-2200.json"), JSON.stringify({ id: "20261020-2200", repo: fetcher, base: "abc", task: "Log every retry at debug level", status: "done",
+    branch: "night/20261020-2200", test: null, on: null, history: [{ at: "2026-10-21T03:00:00+01:00", status: "done" }], result: { branch: "night/20261020-2200", best_of: { chosen: 2 } } }));
+  fs.writeFileSync(path.join(night, "logs", "20261020-2200-a2.last.txt"), "Every retry is now logged at **debug** level.\n");
+  fs.writeFileSync(path.join(night, "logs", "20261020-2200-a2.diff"), "--- a/fetcher/client.py\n+++ b/fetcher/client.py\n@@ -3 +3 @@\n-    step(2)\n+    log.debug(\"retry\")\n");
+  fs.writeFileSync(path.join(night, "logs", "20261020-2200-a2.jsonl"), [
+    JSON.stringify({ type: "thread.started", thread_id: "w2" }),
+    JSON.stringify({ type: "item.completed", item: { id: "1", type: "command_execution", command: "pytest -q", exit_code: 0 } }),
+    JSON.stringify({ type: "item.completed", item: { id: "2", type: "agent_message", text: "Done: debug logging added." } }),
+  ].join("\n"));
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("button", { name: /Scheduled/ }).click();
+    const view = page.getByRole("dialog", { name: "Scheduled" });
+    await view.getByRole("button", { name: "Log every retry at debug level" }).click();
+    const details = view.locator(".night-details");
+    await expect(details).toContainText("Every retry is now logged at debug level.");
+    await details.getByRole("button", { name: "Changes" }).click();
+    await expect(details.locator(".night-diff")).toContainText('log.debug("retry")');
+    await details.getByRole("button", { name: "Transcript" }).click();
+    await expect(details).toContainText("$ pytest -q  (exit 0)");
+    await expect(details).toContainText("Mightling: Done: debug logging added.");
+
+    // Every week on Friday, through ling-admin night every.
+    await view.getByRole("textbox", { name: "Task" }).fill("Bump the dependencies");
+    await view.getByRole("combobox", { name: "Repeat" }).selectOption("weekly");
+    await view.getByRole("combobox", { name: "Day" }).selectOption("fri");
+    await view.getByRole("button", { name: "Repeat", exact: true }).click();
+    await expect.poll(() => runs(home).find((args) => args[1] === "every" && args[2] === "add")).toEqual(["night", "every", "add", "--weekly", "fri", "--", "Bump the dependencies"]);
+    await expect(view.locator("tr", { hasText: "Bump the dependencies" })).toContainText("every Friday");
+    await view.locator("tr", { hasText: "Bump the dependencies" }).getByRole("button", { name: "Stop" }).click();
+    await expect(view.locator("tr", { hasText: "Bump the dependencies" })).toHaveCount(0);
+
+    // The finished run opened as a thread.
+    await details.getByRole("button", { name: "Open as a thread" }).click();
+    await expect(view).toHaveCount(0);
+    await expect(page.locator(".bar .title")).toHaveText("Log every retry at debug level");
+
+    // From the thread now shown: tonight's task carries what was said in it.
+    await page.getByRole("button", { name: /Scheduled/ }).click();
+    await expect(view.getByRole("checkbox", { name: /With what was said in/ })).toBeChecked();
+    await view.getByRole("textbox", { name: "Task" }).fill("Make it configurable");
+    await view.getByRole("button", { name: "Queue" }).click();
+    await expect.poll(() => runs(home).filter((args) => args[0] === "night" && args[1] === "add").map((args) => args[args.length - 1]).pop() ?? "")
+      .toMatch(/^Make it configurable\n\nContext: this was asked in the conversation "Log every retry at debug level"/);
+  } finally {
+    await close();
+  }
+});
+
