@@ -36,6 +36,8 @@ pub enum AgentCommand {
     Respond { id: Value, result: Value },
     /// An attachment into a thread's Ask folder (`/api/upload`, with the link's cookie).
     Upload { thread: String, name: String, image: bool, bytes: Vec<u8>, reply: oneshot::Sender<Result<Saved, String>> },
+    /// A voice message to text (`/api/transcribe`).
+    Transcribe { media: String, bytes: Vec<u8>, reply: oneshot::Sender<Result<String, String>> },
     /// `/cavemode <text>` for a thread (None before the first question), through `ling web`'s
     /// `/api/cavemode`: what `ling cavemode` printed.
     Cavemode { thread: Option<String>, text: String, reply: oneshot::Sender<Result<String, String>> },
@@ -73,6 +75,15 @@ impl AgentHandle {
         let (reply, answer) = oneshot::channel();
         self.tx
             .send(AgentCommand::Cavemode { thread, text, reply })
+            .map_err(|_| "the bridge to ling web has stopped".to_string())?;
+        answer.await.map_err(|_| "the connection to ling web was lost".to_string())?
+    }
+
+    /// A voice message to text, by the speech-to-text service on this machine.
+    pub async fn transcribe(&self, media: &str, bytes: Vec<u8>) -> Result<String, String> {
+        let (reply, answer) = oneshot::channel();
+        self.tx
+            .send(AgentCommand::Transcribe { media: media.to_string(), bytes, reply })
             .map_err(|_| "the bridge to ling web has stopped".to_string())?;
         answer.await.map_err(|_| "the connection to ling web was lost".to_string())?
     }
@@ -295,6 +306,7 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                             Some(AgentCommand::Request { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                             Some(AgentCommand::Respond { .. }) => {}
                             Some(AgentCommand::Upload { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
+                            Some(AgentCommand::Transcribe { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                             Some(AgentCommand::Cavemode { reply, .. }) => { let _ = reply.send(Err(format!("ling web is not reachable: {err}"))); }
                         },
                     }
@@ -323,6 +335,12 @@ pub async fn run_link(target: WebTarget, mut commands: mpsc::UnboundedReceiver<A
                         let (port, cookie) = (session.port, session.cookie.clone());
                         tokio::spawn(async move {
                             let _ = reply.send(ling_web_server::ask_client::cavemode(port, &cookie, thread.as_deref(), &text).await);
+                        });
+                    }
+                    Some(AgentCommand::Transcribe { media, bytes, reply }) => {
+                        let (port, cookie) = (session.port, session.cookie.clone());
+                        tokio::spawn(async move {
+                            let _ = reply.send(ling_web_server::ask_client::transcribe(port, &cookie, &media, &bytes).await);
                         });
                     }
                     Some(AgentCommand::Upload { thread, name, image, bytes, reply }) => {

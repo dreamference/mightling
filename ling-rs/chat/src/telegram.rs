@@ -163,9 +163,19 @@ pub fn attachments_of(message: &Value) -> (Vec<Attached>, Vec<String>) {
             mime: document.get("mime_type").and_then(Value::as_str).unwrap_or("application/octet-stream").to_string(),
         });
     }
+    // A voice message or an audio file is transcribed on this machine (MOONSHOT §3.4).
+    for (field, name) in [("voice", "voice.ogg"), ("audio", "audio")] {
+        if let Some(recording) = message.get(field)
+            && let Some(id) = recording.get("file_id").and_then(Value::as_str)
+        {
+            files.push(Attached {
+                file_id: id.to_string(),
+                name: recording.get("file_name").and_then(Value::as_str).unwrap_or(name).to_string(),
+                mime: recording.get("mime_type").and_then(Value::as_str).unwrap_or("audio/ogg").to_string(),
+            });
+        }
+    }
     let dropped = [
-        ("voice", "a voice message"),
-        ("audio", "an audio file"),
         ("video", "a video"),
         ("video_note", "a video message"),
         ("animation", "an animation"),
