@@ -920,6 +920,10 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .queued-edit { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
 .queued .icon:disabled { opacity: 0.35; }
 
+/* Inline diff editing (item 16): a hunk's lines edited in place in the review pane. */
+.hunk-editor { padding: 8px; background: var(--code-bg); }
+.hunk-editor textarea { width: 100%; box-sizing: border-box; font-family: var(--font-code); font-size: 13px; line-height: 1.4; color: var(--text); background: var(--canvas); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 8px; resize: vertical; tab-size: 4; }
+.hunk-editor .buttons { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 /* Projects (projects.ts, ProjectDialog.tsx): the dialog's folders and files, and the project a new thread starts in. */
 .dialog.project-dialog { width: min(560px, calc(100vw - 32px)); }
 .project-dialog h3 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
