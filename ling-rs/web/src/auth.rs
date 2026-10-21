@@ -266,6 +266,13 @@ impl Addresses {
         Addresses { hosts }
     }
 
+    /// Also the names an HTTPS front on the user's overlay forwards here, as browsers send them
+    /// (no port appended: the front listens on its own).
+    pub fn with_public(mut self, names: &[String]) -> Addresses {
+        self.hosts.extend(names.iter().map(|name| name.trim().to_ascii_lowercase()).filter(|name| !name.is_empty()));
+        self
+    }
+
     /// Whether a `Host` header names this server.
     pub fn host_ok(&self, host: Option<&str>) -> bool {
         host.is_some_and(|host| self.hosts.contains(&host.trim().to_ascii_lowercase()))

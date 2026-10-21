@@ -261,6 +261,12 @@ async fn serve_command(args: &[String], environment: &Environment) -> i32 {
         state_dir: state.clone(),
         port,
         lan_names: if lan { lan_names() } else { Vec::new() },
+        public_names: ling_airgapped::user_config_file()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| crate::telegram_app::mini_app_url(&text))
+            .and_then(|url| crate::telegram_app::authority(&url))
+            .into_iter()
+            .collect(),
         socket: app_server::default_socket(&state),
         launch: Launch { ling: environment.ling.clone(), env: environment.child_env.clone(), log: state.join("app-server.log") },
         images_dir: environment.home.join(crate::sidecars::IMAGE_STORE),
