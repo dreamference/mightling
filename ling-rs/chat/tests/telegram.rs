@@ -51,6 +51,12 @@ async fn handle(State(stand): State<Stand>, Path((bot, method)): Path<(String, S
     (status, Json(value))
 }
 
+/// `sendDocument`: a multipart upload; the body is kept for the test to read.
+async fn document(State(stand): State<Stand>, body: axum::body::Bytes) -> (StatusCode, Json<Value>) {
+    stand.calls.lock().unwrap().push(("sendDocument".to_string(), json!({ "raw": String::from_utf8_lossy(&body) })));
+    (StatusCode::OK, Json(json!({ "ok": true, "result": { "message_id": 77 } })))
+}
+
 /// The Bot API's file download: the bytes of `photos/<name>`, named in them.
 async fn file(Path((bot, path)): Path<(String, String)>) -> (StatusCode, Vec<u8>) {
     assert_eq!(bot, format!("bot{TOKEN}"));
@@ -66,6 +72,7 @@ async fn stand_in(answer: Answer) -> (Stand, TelegramApi) {
     let app = Router::new()
         .route("/{bot}/{method}", post(handle))
         .route("/file/{bot}/{*path}", axum::routing::get(file))
+        .route("/{bot}/sendDocument", post(document))
         .with_state(stand.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let root = format!("http://{}", listener.local_addr().unwrap());
@@ -518,3 +525,14 @@ async fn a_newly_paired_user_gets_the_mini_app_button() {
     poller.handle(&private_message(333, &format!("/pair {code}"))).await;
     assert_eq!(stand.bodies("setChatMenuButton")[0]["chat_id"], 333);
 }
+
+#[tokio::test]
+async fn a_file_is_sent_as_a_document_in_its_topic() {
+    let (stand, api) = stand_in(default_answer()).await;
+    let renderer = Renderer::new(api);
+    renderer.render(Outbound::File { chat: "telegram:111/5".into(), name: "report \"final\".md".into(), bytes: b"# Purifiers".to_vec() }).await;
+    let raw = stand.bodies("sendDocument")[0]["raw"].as_str().unwrap().to_string();
+    assert!(raw.contains("name=\"chat_id\"\r\n\r\n111\r\n") && raw.contains("name=\"message_thread_id\"\r\n\r\n5\r\n"), "{raw}");
+    assert!(raw.contains("filename=\"report _final_.md\"") && raw.contains("# Purifiers"), "{raw}");
+}
+

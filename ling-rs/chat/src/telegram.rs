@@ -73,6 +73,36 @@ impl TelegramApi {
         TelegramApi { base: format!("{root}/bot{token}"), files: format!("{root}/file/bot{token}"), http: reqwest::Client::new() }
     }
 
+    /// Sends a file into a chat (`sendDocument`, multipart; MOONSHOT §3.7).
+    pub async fn send_document(&self, chat_id: i64, topic: Option<i64>, name: &str, bytes: &[u8]) -> Result<Value, ApiError> {
+        let failed = |description: String| ApiError { description, retry_after: None, missing_method: false };
+        let boundary = format!("mightling{:016x}", rand_boundary());
+        let safe: String = name.chars().map(|c| if c == '"' || c.is_control() { '_' } else { c }).collect();
+        let mut body = Vec::with_capacity(bytes.len() + 512);
+        let mut field = |key: &str, value: &str| body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n").as_bytes());
+        field("chat_id", &chat_id.to_string());
+        if let Some(topic) = topic {
+            field("message_thread_id", &topic.to_string());
+        }
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{safe}\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes());
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let response = self
+            .http
+            .post(format!("{}/sendDocument", self.base))
+            .header("Content-Type", format!("multipart/form-data; boundary={boundary}"))
+            .body(body)
+            .timeout(Duration::from_secs(300))
+            .send()
+            .await
+            .map_err(|err| failed(err.without_url().to_string()))?;
+        let value: Value = response.json().await.map_err(|err| failed(err.without_url().to_string()))?;
+        if value.get("ok") == Some(&Value::Bool(true)) {
+            return Ok(value.get("result").cloned().unwrap_or(Value::Null));
+        }
+        Err(failed(value.get("description").and_then(Value::as_str).unwrap_or("Telegram refused the file").to_string()))
+    }
+
     /// Downloads a file the user sent: `getFile` for its path, then the file itself.
     pub async fn download(&self, file_id: &str) -> Result<Vec<u8>, ApiError> {
         let failed = |description: String| ApiError { description, retry_after: None, missing_method: false };
@@ -189,6 +219,11 @@ pub fn attachments_of(message: &Value) -> (Vec<Attached>, Vec<String>) {
     .map(|(_, named)| named.to_string())
     .collect();
     (files, dropped)
+}
+
+/// A multipart boundary that is not guessable from the file.
+fn rand_boundary() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0) ^ (std::process::id() as u64).rotate_left(32)
 }
 
 fn chat_key(chat_id: i64) -> String {
@@ -644,6 +679,12 @@ impl Renderer {
                     None => {
                         let _ = self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": outcome }), topic)).await;
                     }
+                }
+            }
+            Outbound::File { name, bytes, .. } => {
+                if let Err(err) = self.api.send_document(chat_id, topic, &name, &bytes).await {
+                    let line = format!("Telegram refused {name}: {err}");
+                    let _ = self.api.call("sendMessage", in_topic(json!({ "chat_id": chat_id, "text": line }), topic)).await;
                 }
             }
             Outbound::ThreadNamed { name, .. } => {

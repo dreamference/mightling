@@ -102,6 +102,8 @@ const watches = {};
 const config = { features: { memories: false }, memories: {}, desktop: null };
 // hooks.state as config/batchWrite leaves it: a hook is trusted once its trusted_hash is its current hash.
 const hookState = {};
+// Projects (item 13), as the server keeps them: roots in order, metadata replaced whole on update.
+const projects = [];
 const hookOf = (key, base) => {
   const state = hookState[key] || {};
   const trustStatus = base.isManaged ? "managed" : state.trusted_hash === base.currentHash ? "trusted" : state.trusted_hash ? "modified" : "untrusted";
@@ -127,6 +129,28 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   const answer = (result) => say({ id: m.id, result });
   switch (m.method) {
     case "initialize": return answer({ userAgent: "stand-in" });
+    case "project/list": return answer({ data: projects, nextCursor: null });
+    case "project/create": {
+      const made = { id: "proj-" + (projects.length + 1), name: p.name, roots: p.roots || [], metadata: p.metadata || {}, position: projects.length, createdAt: 0, updatedAt: 0, recencyAt: null };
+      projects.push(made);
+      say({ method: "project/changed", params: { projectId: made.id, changeType: "created" } });
+      return answer({ project: made });
+    }
+    case "project/update": {
+      const found = projects.find((entry) => entry.id === p.projectId);
+      if (!found) return say({ id: m.id, error: { code: -32602, message: "project not found: " + p.projectId } });
+      if (p.name) found.name = p.name;
+      if (p.roots) found.roots = p.roots;
+      if (p.metadata) found.metadata = p.metadata;
+      say({ method: "project/changed", params: { projectId: found.id, changeType: "updated" } });
+      return answer({ project: found });
+    }
+    case "thread/metadata/update": {
+      const found = threads.find((t) => t.id === p.threadId);
+      if (!found) return say({ id: m.id, error: { code: -32600, message: "no such thread" } });
+      if ("projectId" in p) found.projectId = p.projectId;
+      return answer({ thread: { ...found, turns: [] } });
+    }
     case "thread/list":
       if (p.archived) return answer({ data: [{ ...threads[0], id: "old1", name: "Try a smaller hero image", turns: [] }], nextCursor: null });
       return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null });
@@ -204,7 +228,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "thread/start": {
       const id = (p.ephemeral ? "e" : "n") + next++;
       const started = { id, cwd: p.cwd, name: null, preview: "", turns: [], status: { type: "idle" }, ephemeral: !!p.ephemeral, parentThreadId: null,
-        createdAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), recencyAt: null, model: "qwen3.8-27b", modelProvider: "local" };
+        createdAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), recencyAt: null, model: "qwen3.8-27b", modelProvider: "local",
+        projectId: p.projectId || null, runtimeWorkspaceRoots: p.runtimeWorkspaceRoots || [] };
       if (!p.ephemeral) threads.push(started);
       return answer({ thread: started, model: "qwen3.8-27b", modelProvider: "local", cwd: p.cwd });
     }
