@@ -1,13 +1,13 @@
 #!/bin/bash
-# The engine A/B's model servers on the engine's development machine (second-puffin), one at a time (the
+# The engine A/B's model servers on the engine's development machine (`<machine>` below, the ssh name), one at a time (the
 # one-model-server rule there): the night script runs this over ssh before each round and at the end.
 #
-#   ssh second-puffin bash -s -- serve sglang < scripts/engine_ab_remote.sh   production's SGLang (scratch container)
-#   ssh second-puffin bash -s -- serve engine < scripts/engine_ab_remote.sh   ling-serve
-#   ssh second-puffin bash -s -- restore < scripts/engine_ab_remote.sh        both arms stopped, m0-prod8000 back
-#   ssh second-puffin bash -s -- status < scripts/engine_ab_remote.sh
-#   ssh second-puffin AB_DIR=~/ab-n15 bash -s -- adopt ~/ab-n12 < scripts/engine_ab_remote.sh   (see below)
-#   ssh second-puffin bash -s -- restore keep < scripts/engine_ab_remote.sh   arms stopped, the GPU lock kept
+#   ssh <machine> bash -s -- serve sglang < scripts/engine_ab_remote.sh   production's SGLang (scratch container)
+#   ssh <machine> bash -s -- serve engine < scripts/engine_ab_remote.sh   ling-serve
+#   ssh <machine> bash -s -- restore < scripts/engine_ab_remote.sh        both arms stopped, m0-prod8000 back
+#   ssh <machine> bash -s -- status < scripts/engine_ab_remote.sh
+#   ssh <machine> AB_DIR=~/ab-n15 bash -s -- adopt ~/ab-n12 < scripts/engine_ab_remote.sh   (see below)
+#   ssh <machine> bash -s -- restore keep < scripts/engine_ab_remote.sh   arms stopped, the GPU lock kept
 #
 # `serve` stops m0-prod8000 and the other arm, starts the arm and waits until /v1/models answers, then prints
 # `ready <owned_by>`; it exits non-zero when the arm does not come up. Both arms load the same files: the target
@@ -17,7 +17,7 @@
 # ling-serve the engine's A/B recipe (engine MILESTONES §14). Files under AB_DIR (default ~/ab-n12): ling-serve (the
 # engine binary, pinned by sha256 in its .sha256), serve.py, and the logs.
 #
-# The GPU lock: the engine's agents share second-puffin's GPU under `flock ~/.ling-gpu.lock`. The night holds that
+# The GPU lock: the engine's agents share that machine's GPU under `flock ~/.ling-gpu.lock`. The night holds that
 # same lock for the whole time an arm runs, not only while it starts: the first `serve` waits for it (GPU_LOCK_WAIT,
 # 14 h by default, since day-time engine work ends by 20:00 UTC) and hands it to a detached lease process
 # (`ab-n12-gpu-lease`, its pid in AB_DIR/gpu-lease.pid), which later `serve`s reuse and `restore` ends once

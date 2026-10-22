@@ -73,6 +73,11 @@ DEFAULT_EVAL_WORKERS: Final[int] = 4
 DEFAULT_EVAL_MEMORY: Final[str] = "4G"
 DEFAULT_EVAL_TIMEOUT: Final[str] = "30m"
 DEFAULT_DISK_RESERVE: Final[str] = "100G"
+# With `--eval --remove-images`, the most instances of one repository whose images are on disk at
+# once: a repository is run, graded and its images removed in chunks of at most this many (0: the
+# whole repository at once, as before 2026-10-20, when a 150-task night's 86 django tasks would have
+# needed about 200 GB of images at once).
+DEFAULT_IMAGE_CHUNK: Final[int] = 25
 
 
 class SweBenchSettings:
@@ -97,6 +102,7 @@ class SweBenchSettings:
         self.eval_memory: str = str(table.get("eval_memory", DEFAULT_EVAL_MEMORY))
         self.eval_timeout_s: int = duration(table.get("eval_timeout", DEFAULT_EVAL_TIMEOUT))
         self.disk_reserve: str = str(table.get("disk_reserve", DEFAULT_DISK_RESERVE))
+        self.image_chunk: int = max(0, int(table.get("image_chunk", DEFAULT_IMAGE_CHUNK)))
         # Paired nodes serving the same model add lanes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3).
         self.nodes: Any = table.get("nodes", "paired")
 

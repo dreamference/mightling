@@ -1,4 +1,4 @@
-# 50 fresh SWE-bench Verified tasks for night 12, ling-engine against SGLang serving the same agent (the production bar's A/B), both on second-puffin with the ScaleSearch drafter, 60-minute limit, drawn 2026-10-18
+# 50 fresh SWE-bench Verified tasks for night 12, ling-engine against SGLang serving the same agent (the production bar's A/B), both on the engine's development machine with the ScaleSearch drafter, 60-minute limit, drawn 2026-10-18
 # from the 93 tasks validated on this machine outside sample-100.txt and verified-mismatch-exclude.txt (68), fresh-50e.txt (50), fresh-50f.txt (50), fresh-30g.txt (30), seed 20261018.
 # Stratified to sample-100.txt's mix (easy/medium/hard 59/16/25 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
 # wanted 30/8/12, drawn 30/8/12.
