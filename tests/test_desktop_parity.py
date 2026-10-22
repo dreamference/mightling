@@ -33,15 +33,17 @@ POLICY_TO_ADD = {
     "threadSection/create": 3, "threadSection/list": 3, "threadSection/update": 3, "threadSection/delete": 3,
     "thread/section/move": 3, "thread/searchOccurrences": 3,
     "skills/extraRoots/set": 11, "plugin/skill/read": 11,
-    "plugin/read": 11, "plugin/search": 11,
-    "plugin/installed": 11, "app/read": 11, "app/installed": 11,
+    "plugin/search": 11, "app/read": 11, "app/installed": 11,
 }
 
 
-# Methods a §2 row names that Mightling deliberately does not allow, with the reason.
-NOT_ADDED = {
-    "thread/shellCommand": "runs unsandboxed with full access, so a command from the window would pass /airgapped on",
-}
+# Methods a §2 row names that Mightling deliberately does not allow, with the reason. Empty since
+# 2026-10-22: `thread/shellCommand` (the composer's `!` command) is allowed at `/airgapped off` and
+# refused at `on` (policy.json's `airgappedRefusedRequests`), as the owner decided.
+NOT_ADDED: dict[str, str] = {}
+
+# Methods the policy allows only while `/airgapped` is off (among others it may list).
+OFF_ONLY = {"thread/shellCommand"}
 
 
 def methods_in(path: Path | str) -> set[str]:
@@ -136,3 +138,5 @@ def test_every_phase_2_method_is_allowed_or_listed():
     assert missing == sorted(POLICY_TO_ADD), "update POLICY_TO_ADD: a method was added to the policy or a row changed"
     assert not set(POLICY_TO_ADD) & allowed
     assert not set(NOT_ADDED) & allowed, "a method Mightling refuses is in the policy"
+    refused_at_on = set(json.loads(POLICY.read_text(encoding="utf-8"))["airgappedRefusedRequests"])
+    assert OFF_ONLY <= refused_at_on <= allowed

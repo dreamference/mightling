@@ -72,9 +72,10 @@ fn enforced_line(fixed_at_launch: bool) -> String {
 
 /// The `-c` settings a launch at `level` needs on this platform, or why it must not start. On
 /// macOS a configured `on` becomes `sandbox_workspace_write.network_access=false`, which Codex turns
-/// into Seatbelt's network denial for every sandboxed command; the read-only sandbox has no network
-/// in the first place, and Full Access is refused by [`full_access_conflict`]. A `-c` of the same
-/// key from the user would decide instead, so it is refused rather than silently lost or obeyed.
+/// into Seatbelt's network denial for every workspace-write command; the read-only sandbox is given
+/// the network only below `on` (patch 0031 asks [`ling_airgapped::read_only_network`] per command),
+/// and Full Access is refused by [`full_access_conflict`]. A `-c` of the same key from the user
+/// would decide instead, so it is refused rather than silently lost or obeyed.
 pub fn launch_overrides(user_args: &[String], level: Level) -> Result<Vec<String>, String> {
     launch_overrides_for(user_args, level, LEVEL_FIXED_AT_LAUNCH)
 }
@@ -287,6 +288,13 @@ pub fn command<T: std::fmt::Display>(thread_id: Option<T>, args: &str) -> Vec<St
     {
         return lines;
     }
+    // On Linux the sandbox's empty network namespace is what enforces `on`: with bubblewrap refused
+    // its namespaces there is nothing to enforce it (userns.rs).
+    if wanted == Some(Level::On)
+        && let Some(lines) = crate::userns::on_refusal_now()
+    {
+        return lines;
+    }
     match words.as_slice() {
         [] => {
             let resolved = resolve(thread_id);
@@ -338,6 +346,7 @@ fn status_lines(resolved: &Resolved, in_session: bool, guard: &[String]) -> Vec<
     if resolved.level == Level::On {
         lines.push(enforced_line(LEVEL_FIXED_AT_LAUNCH));
         lines.push("NOT ENFORCED for: Full Access, a command you approve to run outside the sandbox, MCP servers, and ling's own connection to the model server.".to_string());
+        lines.push(crate::plugins::STATUS_LINE.to_string());
     }
     lines.extend(guard.iter().cloned());
     lines.extend(resolved.invalid.iter().map(|note| format!("Note: {note}.")));
@@ -507,6 +516,11 @@ pub fn full_access_conflict(user_args: &[String], level: Level) -> Option<String
     ))
 }
 
+/// Whether this launch runs in Full Access, by the flag, `-c` or the configuration files.
+pub(crate) fn full_access_selected(user_args: &[String]) -> bool {
+    full_access_source(user_args, &config_layers()).is_some()
+}
+
 /// What selects Full Access for this launch, if anything does, following Codex's precedence: a
 /// sandbox flag, then `-c`, then the configuration files (the selected profile's keys before the
 /// top level's, a later file before an earlier one). `layers` are (name, table), lowest first.
@@ -591,6 +605,67 @@ fn config_override(text: &str) -> Option<(String, bool)> {
     let mut table = toml::Table::new();
     table.insert(key.to_string(), toml::Value::String(parsed));
     table_mode(&table).map(|(_, full_access)| (text.to_string(), full_access))
+}
+
+/// What the model is told about the read-only sandbox while it has the network: Codex's own sentence
+/// (`prompts/templates/permissions/sandbox_mode/read_only.md`) with the network named as it is.
+/// Without it the session would read "Network access is restricted." from the permission profile,
+/// which patch 0031 widens only when a command starts.
+pub const READ_ONLY_SANDBOX_TEXT: &str = "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sandbox only permits reading files. Network access is enabled: commands can reach the internet and the local network, unless a later message says this session is air-gapped.";
+
+/// Turns the user's "no network" for the workspace-write sandbox into
+/// [`ling_airgapped::READ_ONLY_NETWORK_ENV_VAR`]` = off` for this process and what it starts, so the
+/// read-only sandbox, which has no setting of its own, keeps no network either (patch 0031). A value
+/// already in the environment is the user's and is left alone.
+///
+/// Called from `home::use_mightling_home`, first thing in Codex's `main()`, once `CODEX_HOME` is
+/// settled and before any other thread exists: the only point at which setting a variable is sound.
+pub fn export_read_only_network_choice() {
+    if std::env::var_os(ling_airgapped::READ_ONLY_NETWORK_ENV_VAR).is_some() {
+        return;
+    }
+    let user_args: Vec<String> = std::env::args().skip(1).collect();
+    if network_refused(&user_args, &config_layers()) {
+        // SAFETY: see above; no other thread can be reading the environment yet.
+        unsafe { std::env::set_var(ling_airgapped::READ_ONLY_NETWORK_ENV_VAR, "off") };
+    }
+}
+
+/// Whether the read-only sandbox has the network for a session starting now: the configured level
+/// is `off` and the user has not said no network ([`export_read_only_network_choice`]).
+pub fn read_only_network_now() -> bool {
+    resolve(None).level == Level::Off
+        && ling_airgapped::read_only_network_allowed(std::env::var(ling_airgapped::READ_ONLY_NETWORK_ENV_VAR).ok().as_deref())
+}
+
+/// Whether the user set `sandbox_workspace_write.network_access = false`: the last `-c` of the key
+/// decides, then the configuration files (a later layer before an earlier one). `layers` are as
+/// [`config_layers`] returns them.
+fn network_refused(user_args: &[String], layers: &[(String, toml::Table)]) -> bool {
+    let mut cli = None;
+    let mut args = user_args.iter().map(String::as_str);
+    while let Some(arg) = args.next() {
+        let setting = match arg {
+            "-c" | "--config" => args.next(),
+            _ => arg.strip_prefix("--config="),
+        };
+        if let Some(access) = setting.and_then(network_override) {
+            cli = Some(access);
+        }
+    }
+    let access = cli.or_else(|| {
+        layers.iter().rev().find_map(|(_, table)| table.get("sandbox_workspace_write")?.get("network_access")?.as_bool())
+    });
+    access == Some(false)
+}
+
+/// The value of a `-c sandbox_workspace_write.network_access=<bool>`, if `text` is one.
+fn network_override(text: &str) -> Option<bool> {
+    let (key, value) = text.split_once('=')?;
+    if key.trim() != NETWORK_KEY {
+        return None;
+    }
+    toml::from_str::<toml::Table>(&format!("v = {value}")).ok()?.get("v")?.as_bool()
 }
 
 /// The configuration files Codex layers, lowest first: the system file, the user's, and the
@@ -920,6 +995,7 @@ mod tests {
         assert_eq!(lines[0], format!("Airgapped: on ({ENV_VAR})"));
         assert!(lines.iter().any(|line| line.starts_with("  on ") && line.ends_with("← in force")));
         assert!(lines.iter().any(|line| line.starts_with("NOT ENFORCED for: Full Access")));
+        assert!(lines.iter().any(|line| line.starts_with("Plugins: off in a session started at on")));
         let resolved = Resolved { level: Level::Off, source: ling_airgapped::Source::Default, invalid: vec!["ignored \"x\" from this session".into()] };
         let lines = status_lines(&resolved, false, &["Held: x".to_string()]);
         assert!(lines.iter().any(|line| line == "Held: x"));
@@ -1024,6 +1100,37 @@ mod tests {
 
     fn layers(files: &[(&str, &str)]) -> Vec<(String, toml::Table)> {
         files.iter().map(|(name, text)| (name.to_string(), text.parse().unwrap_or_default())).collect()
+    }
+
+    #[test]
+    fn the_users_no_network_is_read_from_the_command_line_then_the_files() {
+        let args = |words: &[&str]| words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+        let refused = layers(&[("user.toml", "[sandbox_workspace_write]\nnetwork_access = false\n")]);
+        let allowed = layers(&[("user.toml", "[sandbox_workspace_write]\nnetwork_access = true\n")]);
+        // Nothing said, or the launcher's own `true`: the read-only sandbox gets the network.
+        assert!(!network_refused(&[], &layers(&[])));
+        assert!(!network_refused(&[], &allowed));
+        assert!(network_refused(&[], &refused));
+        // A project's file is a later layer than the user's.
+        let project = layers(&[("user.toml", "[sandbox_workspace_write]\nnetwork_access = true\n"), ("project.toml", "sandbox_workspace_write.network_access = false\n")]);
+        assert!(network_refused(&[], &project));
+        // The command line beats the files, and its last word counts.
+        assert!(network_refused(&args(&["-c", "sandbox_workspace_write.network_access=false"]), &allowed));
+        assert!(network_refused(&args(&["--config=sandbox_workspace_write.network_access = false"]), &layers(&[])));
+        assert!(!network_refused(&args(&["-c", "sandbox_workspace_write.network_access=true"]), &refused));
+        assert!(!network_refused(
+            &args(&["-c", "sandbox_workspace_write.network_access=false", "-c", "sandbox_workspace_write.network_access=true"]),
+            &layers(&[])
+        ));
+        // Another key, or a value that is not a boolean, says nothing.
+        assert!(!network_refused(&args(&["-c", "sandbox_mode=read-only", "-c", "sandbox_workspace_write.network_access=nope"]), &layers(&[])));
+    }
+
+    #[test]
+    fn the_read_only_text_keeps_codex_s_sentence_and_names_the_network() {
+        assert!(READ_ONLY_SANDBOX_TEXT.starts_with("Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`"));
+        assert!(READ_ONLY_SANDBOX_TEXT.contains("Network access is enabled"));
+        assert!(!READ_ONLY_SANDBOX_TEXT.contains("{{"));
     }
 
     #[test]

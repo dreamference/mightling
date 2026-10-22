@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 from conftest import REAL_GATE_PROBE
 
+from dreamference.hardware import get_model_launch_overrides
 from dreamference.vllm_server import model_gate, model_gate_service
 from dreamference.vllm_server.model_gate import ModelGate
 from dreamference.vllm_server.model_gate_guard import ModelGateGuard as GateGuard
@@ -684,6 +685,12 @@ def _quiet_start(monkeypatch, mgr, gate_starts):
         "dreamference.vllm_server.chat_template_patcher.ChatTemplatePatcher.prepare",
         classmethod(lambda cls, *a: Path("/nonexistent/chat_template.jinja")),
     )
+    events = []
+    # The image's file comes out of docker, which a test may not run; the patch has its own tests.
+    monkeypatch.setattr(
+        "dreamference.vllm_server.sglang_runtime_patcher.SGLangRuntimePatcher.prepare",
+        classmethod(lambda cls, image, patches: events.append(("patch", image, len(patches)))),
+    )
     monkeypatch.setattr(
         "dreamference.hardware.hardware_manager.HardwareManager.detect_gb10_hardware",
         classmethod(
@@ -705,7 +712,6 @@ def _quiet_start(monkeypatch, mgr, gate_starts):
         "build_launch_command",
         lambda **kwargs: built.append(kwargs) or ["docker", "run", "image"],
     )
-    events = []
     monkeypatch.setattr(
         ModelGate,
         "start",
@@ -738,6 +744,30 @@ def test_a_gate_that_cannot_start_leaves_the_engine_on_the_public_port(monkeypat
     mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
     assert [kwargs["gate"] for kwargs in built] == [True, False]
     assert ("remove gate", 8000) in events
+
+
+def test_server_start_prepares_the_recipes_runtime_patch_before_the_engine(monkeypatch):
+    mgr = VLLMServerManager()
+    _, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
+    mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
+    image = get_model_launch_overrides("qwen3.8-27b-nvfp4-dflash2")["docker_image"]
+    assert ("patch", image, 1) in events
+    assert events.index(("patch", image, 1)) < events.index(("docker", "run"))
+
+
+def test_a_runtime_patch_that_cannot_be_prepared_stops_the_start(monkeypatch):
+    # Serving the image unpatched would bring back the split history (models-and-engines.md).
+    mgr = VLLMServerManager()
+    built, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
+    monkeypatch.setattr(
+        "dreamference.vllm_server.sglang_runtime_patcher.SGLangRuntimePatcher.prepare",
+        classmethod(lambda cls, image, patches: "1 anchor(s) of the patch to x.py no longer match"),
+    )
+    with pytest.raises(SystemExit) as stopped:
+        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False)
+    assert built == [] and ("docker", "run") not in events
+    assert "❌ The recipe's SGLang runtime patch could not be prepared" in str(stopped.value.code)
+    assert "no longer match" in str(stopped.value.code)
 
 
 def test_no_gate_removes_one_an_earlier_start_left(monkeypatch):

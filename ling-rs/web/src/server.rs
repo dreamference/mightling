@@ -96,6 +96,8 @@ pub struct Server {
     pairing_failures: AtomicU32,
     busy: Mutex<HashMap<u64, BusyTracker>>,
     next_tab: AtomicU64,
+    /// The sync hub's store, opened on the first request after `ling sync enable` (sync_hub.rs).
+    sync: Mutex<Option<Arc<crate::sync_store::Store>>>,
 }
 
 impl Server {
@@ -113,12 +115,40 @@ impl Server {
             pairing_failures: AtomicU32::new(0),
             busy: Mutex::new(HashMap::new()),
             next_tab: AtomicU64::new(1),
+            sync: Mutex::new(None),
             config,
         }))
     }
 
     pub fn ask_root(&self) -> PathBuf {
         ask::root(&self.config.codex_home)
+    }
+
+    /// The sync hub's store while the hub is on (specs/DREAMFERENCE_MIGHTLING_SYNC.md): asked on
+    /// every request, so `ling sync enable` and `disable` need no restart, and nothing is opened
+    /// or written while it is off.
+    pub fn sync_store(&self) -> Option<Arc<crate::sync_store::Store>> {
+        let mut cached = self.sync.lock().unwrap_or_else(|p| p.into_inner());
+        if !crate::sync_store::enabled(&self.config.codex_home) {
+            *cached = None;
+            return None;
+        }
+        if cached.is_none() {
+            *cached = crate::sync_store::Store::open(&self.config.codex_home).ok().map(Arc::new);
+        }
+        cached.clone()
+    }
+
+    /// A wrong pairing code; ten withdraw every pending one (shared by `/pair` and `/api/sync/pair`).
+    pub fn pairing_failed(&self) {
+        if self.pairing_failures.fetch_add(1, Ordering::Relaxed) + 1 >= auth::PAIRING_ATTEMPTS {
+            auth::withdraw_pairing_codes(&self.config.state_dir);
+            self.pairing_failures.store(0, Ordering::Relaxed);
+        }
+    }
+
+    pub fn pairing_succeeded(&self) {
+        self.pairing_failures.store(0, Ordering::Relaxed);
     }
 
     pub fn new_tab_id(&self) -> u64 {
@@ -137,6 +167,13 @@ impl Server {
         }
         if let Some(token) = auth::cookie(cookies, auth::DEVICE_COOKIE)
             && auth::device_for_token(&self.config.state_dir, token).is_some()
+        {
+            return true;
+        }
+        // A sync agent's secret opens the hub's routes and nothing else (sync_hub.rs).
+        if path.starts_with("/api/sync/")
+            && let Some(secret) = header_str(headers, header::AUTHORIZATION).and_then(|value| value.strip_prefix("Bearer "))
+            && auth::sync_device_for_token(&self.config.state_dir, secret.trim()).is_some()
         {
             return true;
         }
@@ -236,6 +273,10 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/airgapped", get(airgapped))
         .route("/api/chat/settings", get(chat_settings))
         .route("/api/ask/files", get(ask_files))
+        .route("/api/night/repos", get(night_repos))
+        .route("/api/night/add", post(night_add))
+        .route("/api/night/status", get(night_status))
+        .route("/api/night/reports", get(night_reports))
         .route("/api/ask/file", get(ask_file))
         .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/api/telegram/check", post(telegram_check))
@@ -245,6 +286,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/devices", get(devices_page))
         .route("/devices/pair", post(devices_pair))
         .route("/devices/revoke", post(devices_revoke))
+        .route("/devices/scope", post(devices_scope))
+        .merge(crate::sync_hub::routes())
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(server.clone(), guard))
         .with_state(server)
@@ -263,7 +306,8 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
         return secured(text(StatusCode::FORBIDDEN, "Requests from other sites are refused.\n"));
     }
     let path = request.uri().path();
-    let public = matches!(path, "/login" | "/pair" | "/pair.css");
+    // `/api/sync/pair` answers 404 while the hub is off, and pairs an agent only with a code.
+    let public = matches!(path, "/login" | "/pair" | "/pair.css" | "/api/sync/pair");
     if !public && !server.authenticated(path, headers) {
         let response = if path == "/" || path == "/index.html" {
             html(StatusCode::UNAUTHORIZED, assets::LOCKED_HTML)
@@ -561,6 +605,57 @@ async fn ask_file(State(server): State<Arc<Server>>, Query(query): Query<HashMap
     }
 }
 
+fn night_dir(server: &Server) -> PathBuf {
+    server.config.codex_home.join("night")
+}
+
+fn night_candidates(server: &Server) -> Vec<PathBuf> {
+    let settings = crate::chat_settings::ChatSettings::load();
+    let home = ling_airgapped::user_config_file().and_then(|file| Some(file.parent()?.parent()?.parent()?.to_path_buf()));
+    crate::night_phone::repos(&night_dir(server), &settings.night_repos, home.as_deref())
+}
+
+/// Where a phone's `/night add` may queue (night_phone.rs).
+async fn night_repos(State(server): State<Arc<Server>>) -> Response {
+    let repos: Vec<serde_json::Value> = night_candidates(&server)
+        .iter()
+        .map(|repo| json!({ "path": repo.to_string_lossy(), "name": crate::night_phone::name_of(repo) }))
+        .collect();
+    json_response(StatusCode::OK, json!({ "repos": repos }))
+}
+
+/// Queues a phone's task (`{repo, task}`), in one of the repositories `/api/night/repos` names,
+/// with `ling night add` there; the bridge asked the owner first.
+async fn night_add(State(server): State<Arc<Server>>, body: axum::body::Bytes) -> Response {
+    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send {repo, task}" }));
+    };
+    let (Some(repo), Some(task)) = (request.get("repo").and_then(|v| v.as_str()), request.get("task").and_then(|v| v.as_str())) else {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "send {repo, task}" }));
+    };
+    if task.trim().is_empty() {
+        return json_response(StatusCode::BAD_REQUEST, json!({ "error": "the task is empty" }));
+    }
+    let repo = PathBuf::from(repo);
+    if !night_candidates(&server).contains(&repo) {
+        return json_response(StatusCode::FORBIDDEN, json!({ "error": "not a repository Night Shift may queue in from the phone" }));
+    }
+    let (queued, lines) = crate::night_phone::add(&server.config.launch, &repo, task).await;
+    json_response(StatusCode::OK, json!({ "queued": queued, "lines": lines }))
+}
+
+/// The queue, for `/night status` on a phone.
+async fn night_status(State(server): State<Arc<Server>>) -> Response {
+    json_response(StatusCode::OK, json!({ "tasks": crate::night_phone::status(&night_dir(&server), std::time::SystemTime::now()) }))
+}
+
+/// The morning reports after `?after=<name>`, and the newest name, for the bridges' push.
+async fn night_reports(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let after = query.get("after").map(String::as_str).unwrap_or_default();
+    let (reports, latest) = crate::night_phone::reports_after(&night_dir(&server), after);
+    json_response(StatusCode::OK, json!({ "reports": reports, "latest": latest }))
+}
+
 /// The air-gap level without a session: `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of
 /// the file `DREAMFERENCE_CONFIG_PATH` names and the user-level file.
 pub fn user_airgap_level() -> ling_airgapped::Resolved {
@@ -576,6 +671,18 @@ pub fn user_airgap_level() -> ling_airgapped::Resolved {
     }
     let configs: Vec<(PathBuf, String)> = files.into_iter().filter_map(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text))).collect();
     ling_airgapped::resolve_from(None, environment.as_deref(), &configs)
+}
+
+/// Whether `/airgapped` is `on` for a thread (the configured level for none), as the launcher
+/// resolves it (`ling_airgapped::resolve`, what `ling airgapped --thread` prints): read in this
+/// process's folder and, when the thread's own folder `cwd` is known, in that one too, the stricter
+/// winning, so a repository whose `dreamference.toml` asks for `on` is not missed.
+pub fn thread_airgapped_on(thread: Option<&str>, cwd: Option<&std::path::Path>) -> bool {
+    let ids = [thread.unwrap_or_default()];
+    ling_airgapped::resolve(&ids).level == ling_airgapped::Level::On
+        || cwd.is_some_and(|cwd| {
+            ling_airgapped::resolve_in(&ids, std::env::var(ling_airgapped::ENV_VAR).ok(), cwd).level == ling_airgapped::Level::On
+        })
 }
 
 /// `ling web open`'s link: trades the one-time code for a session cookie.
@@ -662,6 +769,27 @@ async fn devices_revoke(State(server): State<Arc<Server>>, headers: HeaderMap, F
     html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), &server.config.lan_names, None, notice.as_deref(), now_secs()))
 }
 
+/// Narrows a device to watching other devices' threads, or gives it control again (SYNC §5.1).
+async fn devices_scope(State(server): State<Arc<Server>>, headers: HeaderMap, Form(form): Form<HashMap<String, String>>) -> Response {
+    if !server.owner_session(&headers) {
+        return html(StatusCode::FORBIDDEN, &devices::device_page());
+    }
+    let state = &server.config.state_dir;
+    let id = form.get("device").map(String::as_str).unwrap_or_default();
+    let notice = match form.get("scope").map(String::as_str).and_then(auth::Scope::parse) {
+        None => Some("A scope is control or watch.".to_string()),
+        Some(scope) => match auth::set_scope(state, id, scope) {
+            Ok(changed) if changed.is_empty() => Some("No paired device has that id.".to_string()),
+            Ok(_) => None,
+            Err(err) => Some(format!("Could not change it: {err}")),
+        },
+    };
+    if notice.is_none() {
+        return (StatusCode::SEE_OTHER, [(header::LOCATION, "/devices")]).into_response();
+    }
+    html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), &server.config.lan_names, None, notice.as_deref(), now_secs()))
+}
+
 /// The pairing form: a code from `ling web pair` and a name for this device.
 async fn pair(State(server): State<Arc<Server>>, Form(form): Form<HashMap<String, String>>) -> Response {
     let code = form.get("code").map(|code| code.trim().to_string()).unwrap_or_default();
@@ -678,10 +806,7 @@ async fn pair(State(server): State<Arc<Server>>, Form(form): Form<HashMap<String
         };
     }
     // Ten wrong codes withdraw every pending one: guessing eight digits takes far more.
-    if server.pairing_failures.fetch_add(1, Ordering::Relaxed) + 1 >= auth::PAIRING_ATTEMPTS {
-        auth::withdraw_pairing_codes(state);
-        server.pairing_failures.store(0, Ordering::Relaxed);
-    }
+    server.pairing_failed();
     tokio::time::sleep(Duration::from_millis(500)).await;
     html(StatusCode::UNAUTHORIZED, &assets::pair_html(Some("That code is wrong or has expired. Run `ling web pair` for a new one.")))
 }

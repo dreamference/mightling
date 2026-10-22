@@ -1,16 +1,16 @@
 // External agent import (DESKTOP_PARITY Phase 3 item 8): what starts ticked, what is refused, how results read.
 import { describe, expect, it } from "vitest";
 
-import { refusal, resultLines, scopeOf, startsTicked } from "./imports";
+import { caveat, resultLines, scopeOf, startsTicked } from "./imports";
 
 describe("importing another agent's configuration", () => {
-  it("ticks what is cheap and local; leaves past sessions to the user; refuses plugins", () => {
+  it("ticks what is cheap and local; leaves past sessions and plugins to the user", () => {
     expect(startsTicked({ itemType: "AGENTS_MD" })).toBe(true);
     expect(startsTicked({ itemType: "SKILLS" })).toBe(true);
     expect(startsTicked({ itemType: "SESSIONS" })).toBe(false);
     expect(startsTicked({ itemType: "PLUGINS" })).toBe(false);
-    expect(refusal({ itemType: "PLUGINS" })).toContain("marketplaces");
-    expect(refusal({ itemType: "MCP_SERVER_CONFIG" })).toBeNull();
+    expect(caveat({ itemType: "PLUGINS" })).toContain("airgapped is on");
+    expect(caveat({ itemType: "MCP_SERVER_CONFIG" })).toBeNull();
   });
 
   it("says where an item applies and what an import did", () => {

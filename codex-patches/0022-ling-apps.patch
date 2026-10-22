@@ -1,5 +1,4 @@
 diff --git a/codex-rs/app-server/src/request_processors/apps_processor.rs b/codex-rs/app-server/src/request_processors/apps_processor.rs
-index be74a8f..bdbcd7b 100644
 --- a/codex-rs/app-server/src/request_processors/apps_processor.rs
 +++ b/codex-rs/app-server/src/request_processors/apps_processor.rs
 @@ -72,2 +72,7 @@ impl AppsRequestProcessor {
@@ -11,7 +10,6 @@ index be74a8f..bdbcd7b 100644
 +        }
          let auth = self.auth_manager.auth().await;
 diff --git a/codex-rs/tui/src/chatwidget/connectors.rs b/codex-rs/tui/src/chatwidget/connectors.rs
-index eaa2c26..0167bac 100644
 --- a/codex-rs/tui/src/chatwidget/connectors.rs
 +++ b/codex-rs/tui/src/chatwidget/connectors.rs
 @@ -150,3 +150,3 @@ impl ChatWidget {

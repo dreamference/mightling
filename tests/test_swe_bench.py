@@ -45,6 +45,8 @@ from dreamference.swe_bench import (
     SweBenchRunStore,
     SweBenchRuntime,
     SweBenchSettings,
+    SweBenchShardMerge,
+    SweBenchShards,
     swe_bench_settings,
 )
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS
@@ -68,11 +70,14 @@ from dreamference.swe_bench.swe_bench_runner import (
     APPLY_PATCH_ENV,
     BUILT_IN_PROMPTS,
     DROP_OLD_OUTPUTS_ENV,
+    COMPAT_ENV,
     EXEC_TOOL_ENV,
+    FINISH_CHECK_ENV,
     LOOP_GUARD_ENV,
     OUTPUT_BUDGET_ENV,
     RUN_NAME,
     SAMPLING_ENV,
+    TEST_GUARD_ENV,
 )
 
 REPOSITORY = "greynewell/swe-bench-arm64"
@@ -135,6 +140,8 @@ class FakeDocker:
         self.removed = {}
         self.modes = {}
         self.default_mode = "change"
+        # True: the guard arms' hooks never run, so no state file is written.
+        self.guards_silent = False
         self.processes = []
         # The review turn, per instance: `leave` (the default), `edit`, `hang`.
         self.review_modes = {}
@@ -254,6 +261,31 @@ class FakeDocker:
                 handle.write(
                     json.dumps({"type": "compacted", "payload": {"message": "summary"}}) + "\n"
                 )
+
+    @classmethod
+    def write_guard_state(cls, box, session):
+        """Writes what the launcher's guard hooks leave in `codex-home/guards/` (guard.rs).
+
+        With the finish check, an untested change held and then tested; with the test guard, a
+        note and a test-edits hold the agent did not comply with. A second, older session holds
+        nothing.
+        """
+        folder = box["scratch"] / "codex-home" / "guards"
+        folder.mkdir(parents=True, exist_ok=True)
+        holds, notes = [], []
+        if box["env"].get(FINISH_CHECK_ENV) == "1":
+            holds.append({"kind": "untested", "call": 3, "stop": 1, "complied": True, "files": ["widget.py"]})
+        if box["env"].get(TEST_GUARD_ENV) == "1":
+            notes.append({"call": 2, "files": [{"path": "tests/test_widget.py", "lines": ["- assert w() == 1"]}]})
+            holds.append({"kind": "test-edits", "call": 3, "stop": 1, "complied": False, "remaining": 1})
+            holds.append({"kind": "not-a-kind", "complied": True})
+        (folder / f"{session}.json").write_text(json.dumps({
+            "version": 1, "session": session, "updated": 200, "calls": 5, "edits": 2, "test_runs": 1,
+            "notes": notes, "holds": holds,
+            "last_stop": {"stop": 2, "edited": True, "code_changed": 1, "tested_now": True, "weakened_files": 0}}))
+        (folder / "older.json").write_text(json.dumps({"updated": 100, "calls": 1, "edits": 0, "holds": [],
+                                                       "last_stop": {"edited": False}}))
+        (folder / "torn.json").write_text("{not json")
 
     # -- SweBenchDocker.popen ----------------------------------------------------------------
     def popen(self, args, stdout):
@@ -430,6 +462,9 @@ class FakeDocker:
                 )
                 + "\nnot json\n"
             )
+        if (box["env"].get(TEST_GUARD_ENV) == "1" or box["env"].get(FINISH_CHECK_ENV) == "1") \
+                and not self.guards_silent:
+            self.write_guard_state(box, session)
         form = box["env"].get(APPLY_PATCH_ENV)
         if form in ("function", "freeform") and mode == "change":
             rollout = (
@@ -3251,11 +3286,8 @@ def test_eval_and_report_take_the_drop_test_hunks_switch(monkeypatch):
         ["report", "r", "--drop-test-hunks", "--against", "r"],
     ):
         assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", *words])) == 0
-    assert seen == [
-        ("eval", ("r", DROP_TEST_HUNKS, True)),
-        ("eval", ("r", None, False)),
-        ("report", ("r", "r", DROP_TEST_HUNKS)),
-    ]
+    assert seen == [("eval", ("r", DROP_TEST_HUNKS, True, None)), ("eval", ("r", None, False, None)),
+                    ("report", ("r", "r", DROP_TEST_HUNKS))]
 
 
 def test_eval_with_remove_images_grades_one_repository_at_a_time_and_removes_what_it_pulled(
@@ -4815,6 +4847,41 @@ def test_the_turn_end_compaction_arm_pins_codexs_key_on_every_exec_command_line(
     assert seen["turn_end_compaction"] is None
 
 
+def test_the_compatibility_mode_arm_sets_the_launchers_switch_and_is_recorded(bench, monkeypatch):
+    monkeypatch.delenv(COMPAT_ENV, raising=False)
+    assert run(bench, name="cc", instances=["acme__widget-1"], compat="claude") == 0
+    env, _ = container_env(bench)
+    assert env[COMPAT_ENV] == "claude"
+    store = SweBenchRunStore("cc")
+    assert store.manifest()["compat"] == "claude"
+    assert "Compatibility       claude: every session in the compatibility mode" in SweBenchReport.render(store)
+    # Without the flag the variable is not set, and the manifest says the launcher decided.
+    bench["docker"].calls.clear()
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert COMPAT_ENV not in env
+    plain = SweBenchRunStore("plain")
+    assert plain.manifest()["compat"] == "auto"
+    assert "Compatibility       auto: the launcher's own setting" in SweBenchReport.render(plain)
+    # Two arms on the same tasks: `--against` names the difference.
+    assert "differs: compat: claude | auto" in SweBenchReport.against(store, plain)
+
+
+def test_swe_bench_run_passes_compat_to_the_runner(monkeypatch):
+    import argparse
+
+    from dreamference.swe_bench.swe_bench_command import SweBenchCommand
+
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--compat", "claude", "--name", "x"])) == 0
+    assert seen["compat"] == "claude"
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["compat"] is None
+
+
 def test_the_exec_tool_arm_sets_the_launchers_switch_and_counts_the_calls(bench, monkeypatch):
     monkeypatch.delenv(EXEC_TOOL_ENV, raising=False)
     assert run(bench, name="fn", instances=["acme__widget-1"], exec_tool="function") == 0
@@ -5169,3 +5236,364 @@ def test_the_drop_arm_is_told_apart_by_against_and_parsed(bench, monkeypatch):
     assert seen["drop_old_outputs"] is True
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["drop_old_outputs"] is False
+
+
+# -- another machine's model server (the engine A/B, MILESTONES §14's production bar) -------------
+
+def test_another_machines_model_server_is_reached_through_a_relay_and_this_gate_stays_open(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    monkeypatch.setenv("DREAMFERENCE_VLLM_HOST", "http://node-b.local:8300")
+    opened = []
+
+    def relays(cls, gateway, lanes):
+        for lane in lanes:
+            lane["model_url"] = f"http://{gateway}:40002"
+            opened.append((gateway, lane["host"]))
+        return []
+    monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(relays))
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert opened == [("172.30.0.1", "http://node-b.local:8300")]
+    created = [call for call in bench["docker"].calls if call[0] == "run"]
+    hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
+             for call in created}
+    assert hosts == {"http://172.30.0.1:40002"}                         # the relay, never the other machine's name
+    assert ModelGate.run_record() is None, "this machine's gate is not held for a server it does not serve"
+
+
+def test_only_loopback_and_this_machines_names_are_local(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket, "gethostname", lambda: "gx10-1a2b")
+    monkeypatch.setattr(socket, "getfqdn", lambda: "gx10-1a2b")
+    for host in ("http://localhost:8000", "http://127.0.0.1:8000", "http://gx10-1a2b:8000", "http://gx10-1a2b.local:8000"):
+        assert not SweBenchRunner.remote_server(host), host
+    assert SweBenchRunner.remote_server("http://node-b.local:8300")
+
+
+# -- image chunks, shards and their merge (150-task nights, 2026-10-20) ---------------------------
+
+def graded_batches(harness, since=0):
+    return [sorted(call[i + 1] for i, word in enumerate(call) if word == "-i")
+            for call in harness.calls[since:] if "-p" in call and "to-grade.jsonl" in call[call.index("-p") + 1]]
+
+
+def test_the_image_chunk_defaults_to_25_and_is_read_from_the_config():
+    assert SweBenchSettings({}).image_chunk == 25
+    assert SweBenchSettings({"image_chunk": 10}).image_chunk == 10
+    assert SweBenchSettings({"image_chunk": -3}).image_chunk == 0
+
+
+def test_a_large_repository_is_cut_into_equal_chunks_in_run_order():
+    ids = [f"acme__widget-{n}" for n in range(86)] + ["beta__gadget-1", "beta__gadget-2"]
+    rows = {i: row(i) for i in ids}
+    chunks = SweBenchRunner.image_chunks(ids, rows, 25)
+    assert [len(chunk) for chunk in chunks] == [22, 22, 21, 21, 2]
+    assert [i for chunk in chunks for i in chunk] == ids
+    assert [len(chunk) for chunk in SweBenchRunner.image_chunks(ids, rows, 0)] == [86, 2]
+    assert [len(chunk) for chunk in SweBenchRunner.image_chunks(ids, rows, 100)] == [86, 2]
+
+
+def test_remove_images_runs_grades_and_removes_one_chunk_at_a_time(bench):
+    assert run(bench, evaluate=True, keep_images=False, image_chunk=1) == 0
+    docker, harness = bench["docker"], bench["harness"]
+    assert graded_batches(harness) == [["acme__widget-1"], ["acme__widget-2"], ["beta__gadget-7"]]
+    order = [call[0] for call in docker.calls if call[0] in ("rmi", "run")]
+    # Never two images of one repository on disk: each goes once its chunk is graded.
+    assert order == ["run", "rmi", "run", "rmi", "run", "rmi"]
+    assert docker.present == set()
+    assert SweBenchReport.summary(SweBenchRunStore("r1"))["resolved"] == 3
+
+
+def test_the_configured_chunk_applies_when_no_flag_is_given(bench):
+    assert run(bench, evaluate=True, keep_images=False, settings=SweBenchSettings({"task_timeout": "5s", "image_chunk": 1})) == 0
+    assert graded_batches(bench["harness"]) == [["acme__widget-1"], ["acme__widget-2"], ["beta__gadget-7"]]
+
+
+def test_a_negative_image_chunk_or_a_malformed_shard_is_refused(bench, capsys):
+    assert run(bench, image_chunk=-1) == 1
+    assert run(bench, shard="3/2") == 1
+    assert "--image-chunk -1" in capsys.readouterr().out
+    assert SweBenchRunStore("r1").manifest() is None
+
+
+def test_eval_with_remove_images_grades_in_chunks(bench, monkeypatch):
+    from dreamference.night_shift.night_shift_host import NightShiftHost
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 1 << 50))
+    bench["docker"].modes = dict.fromkeys(IDS, "with_tests")
+    run(bench, instances=["acme__widget-1", "acme__widget-2"], evaluate=True)
+    docker, harness = bench["docker"], bench["harness"]
+    docker.present.clear()
+    since = len(harness.calls)
+    assert SweBenchCommand.evaluate("r1", DROP_TEST_HUNKS, remove_images=True, image_chunk=1) == 0
+    assert sorted(graded_batches(harness, since)) == [["acme__widget-1"], ["acme__widget-2"]]
+    assert docker.present == set()
+
+
+def test_two_shards_cover_the_list_once_and_record_what_they_are(bench):
+    assert run(bench, name="s1", shard="1/2") == 0
+    assert run(bench, name="s2", shard="2/2") == 0
+    first, second = SweBenchRunStore("s1").manifest(), SweBenchRunStore("s2").manifest()
+    covered = first["instances"] + list(first["excluded"]) + second["instances"] + list(second["excluded"])
+    assert sorted(covered) == sorted(IDS)
+    assert first["shard"]["index"] == 1 and second["shard"]["index"] == 2
+    assert first["shard"]["of"] == second["shard"]["of"] == 2 and first["shard"]["list_instances"] == len(IDS)
+    assert first["shard"]["list_sha256"] == second["shard"]["list_sha256"] == SweBenchShards.digest(IDS)
+    # Each shard takes one task of each repository.
+    for manifest in (first, second):
+        both = manifest["instances"] + list(manifest["excluded"])
+        assert sorted(i.split("__")[0] for i in both) == ["acme", "beta"]
+
+
+def test_a_resumed_shard_keeps_its_shard_and_a_merged_run_is_never_run(bench, capsys):
+    assert run(bench, name="s1", shard="1/2") == 0
+    assert run(bench, name="s1", shard="2/2") == 1
+    assert "it was started with shard 1/2" in capsys.readouterr().out
+    assert run(bench, name="s1") == 0  # resuming without naming the shard keeps it
+    assert run(bench, name="s2", shard="2/2") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 0
+    assert run(bench, name="m") == 1
+    assert "only reports" in capsys.readouterr().out
+
+
+def test_merged_shards_report_as_one_run(bench):
+    bench["docker"].modes = dict.fromkeys(IDS, "with_tests")
+    assert run(bench, name="s1", shard="1/2", evaluate=True) == 0
+    assert run(bench, name="s2", shard="2/2", evaluate=True) == 0
+    for name in ("s1", "s2"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"], variant=DROP_TEST_HUNKS)
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 0
+    merged, s1, s2 = (SweBenchRunStore(name) for name in ("m", "s1", "s2"))
+    manifest = merged.manifest()
+    assert manifest["merged_from"] == ["s1", "s2"] and "shard" not in manifest
+    assert manifest["instances"] == sorted(s1.manifest()["instances"] + s2.manifest()["instances"])
+    assert sorted(manifest["excluded"]) == ["beta__gadget-9"]
+    assert [shard["shard"]["index"] for shard in manifest["shards"]] == [1, 2]
+    assert sorted(p["instance_id"] for p in merged.predictions()) == manifest["instances"]
+    assert sorted(merged.finished()) == manifest["instances"]
+    plain = merged.grading(1)["results"]
+    assert sorted(plain) == manifest["instances"]
+    assert plain == {**s1.grading(1)["results"], **s2.grading(1)["results"]}
+    dropped = merged.grading(1, DROP_TEST_HUNKS)["results"]
+    assert sorted(dropped) == manifest["instances"]
+    assert all(r.get("reused") in (None, "plain grading 1") for r in dropped.values())
+    # Each instance's scratch is the shard's, linked, so the rollouts are read where they are.
+    some = manifest["instances"][0]
+    owner = s1 if some in s1.manifest()["instances"] else s2
+    assert (merged.directory / "scratch" / some).resolve() == (owner.directory / "scratch" / some).resolve()
+    summary = SweBenchReport.summary(merged)
+    assert summary["resolved"] == SweBenchReport.summary(s1)["resolved"] + SweBenchReport.summary(s2)["resolved"]
+    assert SweBenchReport.render(merged).count("run m") == 1
+    # A merged run compares like any run: against a run of the same instances (here itself), and a
+    # shard, which covers fewer, is refused as any run of other instances is.
+    assert SweBenchReport.against(merged, merged).startswith("m against m:")
+    assert SweBenchReport.against(merged, s1).startswith("Not compared: m and s1 cover different instances")
+
+
+def test_shards_that_measured_different_things_or_overlap_are_not_merged(bench, capsys):
+    assert run(bench, name="s1", shard="1/2") == 0
+    assert run(bench, name="s2", shard="2/2", task_rules=["tests-v2"]) == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 1
+    assert "task_rules differ" in capsys.readouterr().out
+    assert run(bench, name="all") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "all"]) == 1
+    assert "some runs are shards" in capsys.readouterr().out
+    assert run(bench, name="again", shard="1/2") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "again"]) == 1
+    assert "two runs are the same shard" in capsys.readouterr().out
+    # Runs of hand-made lists (not --shard) merge when they share no instance.
+    assert run(bench, name="x", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="y", instances=["acme__widget-1", "beta__gadget-7"]) == 0
+    assert SweBenchShardMerge.merge("m", ["x", "y"]) == 1
+    assert "1 instance(s) are in more than one run, e.g. acme__widget-1" in capsys.readouterr().out
+    assert SweBenchShardMerge.merge("m", ["s1"]) == 1
+    assert SweBenchShardMerge.merge("m", ["s1", "missing"]) == 1
+    assert SweBenchRunStore("m").manifest() is None
+
+
+def test_a_merge_of_some_shards_says_which_are_missing(bench, capsys):
+    assert run(bench, name="s1", shard="1/3") == 0
+    assert run(bench, name="s2", shard="2/3") == 0
+    assert SweBenchShardMerge.merge("m", ["s1", "s2"]) == 0
+    assert "Shard(s) 3 of 3 are not in the merge" in capsys.readouterr().out
+
+
+def test_the_shard_command_writes_the_lists_run_would_cover(bench, tmp_path, capsys):
+    source = tmp_path / "list.txt"
+    source.write_text("# four\n" + "".join(f"{i}\n" for i in IDS))
+    assert SweBenchCommand.shard(source, 2) == 0
+    written = [tmp_path / "list-1of2.txt", tmp_path / "list-2of2.txt"]
+    repos = {i: row(i)["repo"] for i in IDS}
+    for index, path in enumerate(written, start=1):
+        ids = [line for line in path.read_text().splitlines() if not line.startswith("#")]
+        assert ids == SweBenchShards.pick(IDS, repos, index, 2)
+    # --balance-by spreads another list's tasks; a list sharing none with it is refused.
+    other = tmp_path / "other.txt"
+    other.write_text("acme__widget-1\nacme__widget-2\n")
+    assert SweBenchCommand.shard(source, 2, balance_by=[other]) == 0
+    halves = [[line for line in path.read_text().splitlines() if not line.startswith("#")] for path in written]
+    assert sorted(len({"acme__widget-1", "acme__widget-2"} & set(half)) for half in halves) == [1, 1]
+    assert "NOT the tasks of" in written[0].read_text()
+    other.write_text("sympy__sympy-1\n")
+    assert SweBenchCommand.shard(source, 2, balance_by=[other]) == 1
+    source.write_text("not__a-task\n")
+    assert SweBenchCommand.shard(source, 2) == 1
+    assert SweBenchCommand.shard(source, 0) == 1
+
+
+def test_run_eval_shard_and_merge_take_their_options(monkeypatch):
+    import argparse
+    seen = []
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **k: seen.append(("run", k["shard"], k["image_chunk"])) or 0))
+    monkeypatch.setattr(SweBenchCommand, "evaluate", classmethod(lambda cls, *a: seen.append(("eval", a)) or 0))
+    monkeypatch.setattr(SweBenchCommand, "shard", classmethod(lambda cls, *a: seen.append(("shard", a)) or 0))
+    monkeypatch.setattr(SweBenchShardMerge, "merge", classmethod(lambda cls, *a: seen.append(("merge", a)) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    for words in (["run", "--shard", "2/3", "--image-chunk", "10", "--eval", "--remove-images"],
+                  ["eval", "r", "--remove-images", "--image-chunk", "5"], ["shard", "l.txt", "--shards", "3", "--balance-by", "f.txt"],
+                  ["merge", "m", "a", "b", "c"]):
+        assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", *words])) == 0
+    assert seen == [("run", "2/3", 10), ("eval", ("r", None, True, 5)), ("shard", (Path("l.txt"), 3, None, "verified", [Path("f.txt")])),
+                    ("merge", ("m", ["a", "b", "c"]))]
+
+
+# -- the guard arms (`--test-guard`, `--finish-check`, spec §29) ------------------------------------
+
+def test_the_guard_arms_set_the_launchers_switches_and_the_report_counts_their_holds(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    assert run(bench, name="guarded", instances=["acme__widget-1"], test_guard=True, finish_check=True) == 0
+    env, _ = container_env(bench)
+    assert env[TEST_GUARD_ENV] == "1" and env[FINISH_CHECK_ENV] == "1"
+    store = SweBenchRunStore("guarded")
+    manifest = store.manifest()
+    assert manifest["test_guard"] is True and manifest["finish_check"] is True
+    record = store.state("acme__widget-1")["guards"]
+    assert record["sessions"] == 2 and record["calls"] == 6 and record["edits"] == 2 and record["notes"] == 1
+    assert record["holds"] == {"untested": {"fired": 1, "complied": 1}, "test-edits": {"fired": 1, "complied": 0}}
+    assert record["last_stop"]["tested_now"] is True
+    assert ("Guards              test guard on, finish check on: ran in 1 of 1 finished instance(s); notes in 1; "
+            "holds: untested 1 (complied 1), test-edits 1 (complied 0); tested at the last stop in 1 of 1 "
+            "that changed code") in SweBenchReport.render(store)
+    # Without the flags neither variable is set, and every instance still gets an empty record.
+    bench["docker"].calls.clear()
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    env, _ = container_env(bench)
+    assert TEST_GUARD_ENV not in env and FINISH_CHECK_ENV not in env
+    plain = SweBenchRunStore("plain")
+    assert plain.manifest()["test_guard"] is False and plain.manifest()["finish_check"] is False
+    assert plain.state("acme__widget-1")["guards"]["sessions"] == 0
+    assert "Guards              test guard off, finish check off\n" in SweBenchReport.render(plain)
+
+
+def test_one_guard_alone_sets_only_its_switch(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    assert run(bench, name="finish", instances=["acme__widget-1"], finish_check=True) == 0
+    env, _ = container_env(bench)
+    assert env[FINISH_CHECK_ENV] == "1" and TEST_GUARD_ENV not in env
+    record = SweBenchRunStore("finish").state("acme__widget-1")["guards"]
+    assert record["holds"] == {"untested": {"fired": 1, "complied": 1}} and record["notes"] == 0
+
+
+def test_a_guard_arm_whose_hooks_never_ran_says_so(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    run(bench, name="plain", instances=["acme__widget-1"])
+    bench["docker"].guards_silent = True
+    assert run(bench, name="silent", instances=["acme__widget-1"], finish_check=True) == 0
+    for name in ("plain", "silent"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    report = SweBenchReport.render(SweBenchRunStore("silent"))
+    assert ("Guards              test guard off, finish check on: the hooks never ran "
+            "(no instance has a guard state)") in report
+    against = SweBenchReport.against(SweBenchRunStore("silent"), SweBenchRunStore("plain"))
+    assert "In silent the guards never ran: this comparison says nothing about them." in against
+    assert "differs: finish_check: True | False" in against
+
+
+def test_the_guard_arms_are_told_apart_by_against_and_parsed(bench, monkeypatch):
+    for variable in (TEST_GUARD_ENV, FINISH_CHECK_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    run(bench, name="plain", instances=["acme__widget-1"])
+    assert run(bench, name="guarded", instances=["acme__widget-1"], test_guard=True) == 0
+    for name in ("plain", "guarded"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    against = SweBenchReport.against(SweBenchRunStore("guarded"), SweBenchRunStore("plain"))
+    assert "differs: test_guard: True | False" in against
+    assert "finish_check" not in against
+    assert re.search(r"guards\s+test-guard\s+none", against)
+    # A run made before the options existed ran without them.
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["test_guard"], manifest["finish_check"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "test_guard" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    against = SweBenchReport.against(SweBenchRunStore("guarded"), SweBenchRunStore("plain"))
+    assert "differs: test_guard: True | False" in against
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--test-guard", "--finish-check",
+                                                       "--name", "x"])) == 0
+    assert seen["test_guard"] is True and seen["finish_check"] is True
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["test_guard"] is False and seen["finish_check"] is False
+
+
+WEAKENING_PATCH = """diff --git a/tests/test_widget.py b/tests/test_widget.py
+index 1111111..2222222 100644
+--- a/tests/test_widget.py
++++ b/tests/test_widget.py
+@@ -1,6 +1,6 @@
+ import pytest
+-def test_widget():
+-    assert widget() == 1
++@pytest.mark.skip
++def test_widget():
++    assert widget() in (1, 2)
+     assert widget() is not None
+-        assert moved()
++    assert moved()
+diff --git a/tests/test_new.py b/tests/test_new.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_new.py
+@@ -0,0 +1,2 @@
++@pytest.mark.skip
++def test_new(): assert False
+diff --git a/acme/core.py b/acme/core.py
+--- a/acme/core.py
++++ b/acme/core.py
+@@ -1,2 +1,2 @@
+-    assert value, "checked"
++    pass
+"""
+
+
+def test_a_weakened_test_is_found_from_the_patch_alone():
+    # A rewritten assertion and an added skip in an existing test file; a moved, re-indented
+    # assertion, a new test file and an assertion in source code weaken nothing.
+    assert SweBenchPatchFilter.weakened_tests(WEAKENING_PATCH) == {
+        "tests/test_widget.py": ["- assert widget() == 1", "+ @pytest.mark.skip"]}
+    deleted = ("diff --git a/tests/test_old.py b/tests/test_old.py\ndeleted file mode 100644\n"
+               "--- a/tests/test_old.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-def test_old():\n-    assert old()\n"
+               "-# assert in a comment\n")
+    assert SweBenchPatchFilter.weakened_tests(deleted) == {
+        "tests/test_old.py": ["- def test_old():", "- assert old()"]}
+    assert SweBenchPatchFilter.weakened_tests("") == {}
+
+
+def test_the_report_counts_patches_that_weaken_an_existing_test_in_every_run(bench):
+    assert run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("plain")
+    assert "Weakened tests      0 of 2 patch(es) weaken an existing test" in SweBenchReport.render(store)
+    lines = store.predictions_path.read_text().splitlines()
+    first = json.loads(lines[0])
+    first["model_patch"] = WEAKENING_PATCH
+    store.predictions_path.write_text("\n".join([json.dumps(first), *lines[1:]]) + "\n")
+    assert (f"Weakened tests      1 of 2 patch(es) weaken an existing test (an assertion removed or "
+            f"rewritten, a test deleted or skipped): {first['instance_id']}") in SweBenchReport.render(store)
+    SweBenchEvaluator.grade(store, bench["settings"])
+    assert re.search(r"weakened tests\s+1\s+1", SweBenchReport.against(store, store))

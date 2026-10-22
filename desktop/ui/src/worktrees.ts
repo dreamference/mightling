@@ -58,6 +58,15 @@ export interface WorktreeSettings {
 
 export const DEFAULT_KEEP = 15;
 
+/**
+ * Where a new thread works unless the composer's toggle says otherwise: the user's own choice, the
+ * key `/worktree on|off` and `ling worktree on|off` write in `[desktop]` (ling-rs/src/worktree.rs),
+ * so the terminal and the app agree. Local, in place, as in the vendor's app, unless it says worktree.
+ */
+export function defaultCheckout(desktop: Record<string, unknown> | null | undefined): "local" | "worktree" {
+  return desktop?.["mightling-worktree-mode"] === "worktree" ? "worktree" : "local";
+}
+
 export function worktreeSettings(desktop: Record<string, unknown> | null | undefined): WorktreeSettings {
   const root = typeof desktop?.["git-worktree-root"] === "string" && (desktop["git-worktree-root"] as string).trim() ? (desktop["git-worktree-root"] as string).trim() : null;
   const autoCleanup = typeof desktop?.["worktree-auto-cleanup-enabled"] === "boolean" ? (desktop["worktree-auto-cleanup-enabled"] as boolean) : true;

@@ -3,6 +3,9 @@
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3). `desktop/ui/src/bridge.ts` holds the page's
 // copy of these shapes.
 
+import type { TerminalSession } from "./terminal-mirror";
+import type { PaneAction, PaneKind, WindowsState } from "./windows";
+
 /** The channel names, as the Codex app names them: `<app>_desktop:message-from-view` and `-for-view`. */
 export const CHANNEL_FROM_VIEW = "mightling_desktop:message-from-view";
 export const CHANNEL_FOR_VIEW = "mightling_desktop:message-for-view";
@@ -37,6 +40,13 @@ export type FromView =
   | { type: "cave/set"; level: string; thread: string | null }
   /** An attachment for an Ask thread, written into its folder (ask.ts); the bytes base64. */
   | { type: "ask/upload"; thread: string; name: string; kind: "image" | "file"; data: string }
+  /** An incognito question (DESKTOP_PARITY_CLAUDE §4.3): its folder marked when it starts, deleted with its files when it is left. */
+  | { type: "ask/incognito"; thread: string }
+  | { type: "ask/forget"; thread: string }
+  /** Earlier questions for the agent (recall.ts): what is kept, keeping one, dropping the rest. */
+  | { type: "recall/index" }
+  | { type: "recall/write"; thread: string; updatedAt: number; markdown: string }
+  | { type: "recall/prune"; keep: string[] }
   /** The microphone's recording, for text (voice.ts); the bytes base64. */
   | { type: "voice/transcribe"; mime: string; data: string }
   | { type: "context-menu"; x: number; y: number; editable: boolean; selection: string }
@@ -47,7 +57,7 @@ export type FromView =
   | { type: "git/diff"; root: string; scope: "unstaged" | "staged" | "commit" | "branch"; commit?: string | null }
   | { type: "git/log"; root: string }
   | { type: "git/stage" | "git/unstage" | "git/discard"; root: string; paths: string[] }
-  | { type: "git/apply"; root: string; patch: string; cached?: boolean; reverse?: boolean; index?: boolean }
+  | { type: "git/apply"; root: string; patch: string; cached?: boolean; reverse?: boolean; index?: boolean; zeroContext?: boolean }
   | { type: "git/commit"; root: string; message: string; all: boolean }
   | { type: "git/push"; root: string; force: boolean; thread: string | null }
   | { type: "git/pull-request"; root: string; thread: string | null }
@@ -91,6 +101,8 @@ export type FromView =
   | { type: "prefs/write"; values: Record<string, unknown> }
   /** Quick Entry's shortcut: on or off, registered or why not (quick.ts), for Settings › General. */
   | { type: "quick/status" }
+  /** A link in an answer, opened in the system's browser after the page asked (links.ts); refused at /airgapped on. */
+  | { type: "open/url"; url: string; thread: string | null }
   | { type: "window/minimize" }
   | { type: "window/maximize" }
   | { type: "window/close" }
@@ -100,6 +112,26 @@ export type FromView =
   /** A thread in a window of its own, and a window kept above the others (DESKTOP_PARITY §2.1). */
   | { type: "window/popout"; thread: string }
   | { type: "window/always-on-top"; on: boolean }
+  /** Several windows (windows.ts, DESKTOP_ELECTRON §13): New Window, on a view or the sender's. */
+  | { type: "window/new"; view?: "ask" | "work" }
+  /** Who owns which thread's composer, for this window. */
+  | { type: "window/state" }
+  /** The page shows a thread (or none) on a view: the composer's owner and the session follow. */
+  | { type: "window/showing"; view: "ask" | "work"; thread: string | null }
+  /** "Use the composer here": the thread this window shows takes its composer from the other window. */
+  | { type: "window/take"; thread: string }
+  /** Bring the window whose composer a thread is forward. */
+  | { type: "window/show-thread"; thread: string }
+  /** A thread's terminal or diff into a window of its own, and back. */
+  | { type: "window/detach"; pane: PaneKind; thread: string }
+  | { type: "window/dock"; pane: PaneKind; thread: string }
+  /** A detached pane's request for the window it came from (windows.ts `paneAction`). */
+  | { type: "pane/relay"; action: unknown }
+  /** The terminal tabs every window sees (terminal-mirror.ts): the list, a tab started or ended, one closed, a tab's recent output. */
+  | { type: "terminal/list" }
+  | { type: "terminal/publish"; session: unknown }
+  | { type: "terminal/forget"; processId: string }
+  | { type: "terminal/backlog"; processId: string }
   /** The user's home folder: where a thread with no project works (Ctrl+Alt+O). */
   | { type: "app/home" }
   /** Settings › Profile and Personalization (insights.ts): statistics from the session files; `$CODEX_HOME/AGENTS.md`. */
@@ -117,9 +149,21 @@ export type FromView =
   | { type: "night/add"; repo: string; task: string; test: string | null }
   | { type: "night/drop"; repo: string; id: string }
   | { type: "night/run" }
+  /** Repeating tasks (night.ts): through ling-admin, which runs where Night Shift does. */
+  | { type: "night/every-add"; repo: string; task: string; test: string | null; cadence: "daily" | "weekly"; weekday: string | null }
+  | { type: "night/every-list" }
+  | { type: "night/every-drop"; id: string }
+  /** A finished task's last message, diff and transcript (night.ts `taskDetails`). */
+  | { type: "night/details"; id: string }
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" }
+  /** A thread's export (desktop/ui/src/exportthread.ts): a save dialog, then the text written there. */
+  | { type: "dialog/save-text"; name: string; text: string }
+  /** A project's knowledge files (knowledge.ts), by the project's server id; add opens a file dialog. */
+  | { type: "project/knowledge-list"; projectId: string }
+  | { type: "project/knowledge-add"; projectId: string }
+  | { type: "project/knowledge-remove"; projectId: string; name: string }
   /** Settings › Pets: a picture of the user's own for the pet. */
   | { type: "dialog/open-image" }
   /** The pull-request tab (prs.ts): `gh` in the repository, when Settings › Git turns it on; refused at airgapped on. */
@@ -134,6 +178,8 @@ export type FromView =
   | { type: "preview/open"; id: string; url: string; thread: string | null }
   | { type: "preview/navigate"; id: string; url: string; thread: string | null }
   | { type: "preview/go"; id: string; step: "back" | "forward" }
+  /** The agent's console tool (windowtools.ts): the recent console of the thread's previews. */
+  | { type: "preview/console"; thread: string | null }
   | { type: "preview/reload"; id: string; fresh?: boolean }
   | { type: "preview/place"; id: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }
   | { type: "preview/pick"; id: string }
@@ -161,7 +207,17 @@ export type ForView =
   | { channel: "theme"; payload: "light" | "dark" }
   | { channel: "pet://state"; payload: { working: number; waiting: number; finished: number; size: "small" | "medium" | "large"; image: string | null } }
   /** Show Ask or Work: the menu, a second instance or a link asked for one. */
-  | { channel: "view"; payload: "ask" | "work" };
+  | { channel: "view"; payload: "ask" | "work" }
+  /** Who owns which thread's composer (windows.ts), sent to each window whenever it changes. */
+  | { channel: "windows"; payload: WindowsState }
+  /** Every terminal tab (terminal-mirror.ts), whenever the list changes. */
+  | { channel: "terminals"; payload: TerminalSession[] }
+  /** A pane detached from this window closed: it shows here again. */
+  | { channel: "pane://docked"; payload: { pane: PaneKind; thread: string } }
+  /** A pane detached from this window asks for something (windows.ts `paneAction`). */
+  | { channel: "pane://action"; payload: PaneAction }
+  /** The Window menu's pane items, for the page in front: detach (or dock back) the terminal or the diff. */
+  | { channel: "command"; payload: "detachTerminal" | "detachReview" };
 
 export interface Started {
   served_model: string | null;

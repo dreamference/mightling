@@ -266,10 +266,10 @@ fn a_sandbox_without_network_is_named_as_the_sandbox_not_as_the_level() {
     let sandbox = ("CODEX_SANDBOX_NETWORK_DISABLED", "1");
     let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), sandbox]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stdout(&output).contains("the sandbox it runs in does not allow it"));
+    assert!(stdout(&output).contains("switched the sandbox's network off"));
     assert!(!stdout(&output).contains("airgapped") && !stdout(&output).contains("💡"));
     let output = fetch(&[&format!("{}/page", server.base)], &[sandbox]);
-    assert!(stdout(&output).contains("the sandbox it runs in does not allow it"));
+    assert!(stdout(&output).contains("switched the sandbox's network off"));
     assert!(server.requests().is_empty());
 }
 

@@ -98,7 +98,12 @@ export class MessagePrompts implements PromptSource {
   /** The folder a vetted `thread/start` created, if it created one. */
   created: string | null = null;
 
-  constructor(private readonly root: string, private readonly prompt: { name: string; text: string } | null) {}
+  constructor(
+    private readonly root: string,
+    private readonly prompt: { name: string; text: string } | null,
+    /** The configured air-gap level was `on` when the message arrived (`ling airgapped`). */
+    private readonly airgapped = false,
+  ) {}
 
   composed(name: string): string {
     if (this.prompt && this.prompt.name === name) return this.prompt.text;
@@ -116,6 +121,11 @@ export class MessagePrompts implements PromptSource {
 
   scratchFolderOf(threadId: string): string | null {
     return folderOf(this.root, threadId);
+  }
+
+  /** The level the host resolved before vetting: the named thread's for a `!` command, else the configured one. */
+  airgappedOn(_threadId: string | null = null): boolean {
+    return this.airgapped;
   }
 }
 
@@ -196,4 +206,63 @@ export function writeUpload(root: string, upload: Upload): { path: string; bytes
   const file = unusedPath(folder, cleanFileName(typeof upload.name === "string" ? upload.name : ""));
   fs.writeFileSync(file, bytes, { flag: "wx", mode: 0o600 });
   return { path: file, bytes: bytes.length };
+}
+
+/** The mark in an incognito question's folder (DESKTOP_PARITY_CLAUDE §4.3): the folder goes when the question is left. */
+export const INCOGNITO_MARK = ".mightling-incognito";
+
+/** Marks an Ask thread's folder incognito; answers the folder. Only an Ask thread's folder can be marked. */
+export function markIncognito(root: string, threadId: string): string {
+  const folder = folderOf(root, threadId);
+  if (!folder) throw new Error("only an Ask question can be incognito");
+  fs.writeFileSync(path.join(folder, INCOGNITO_MARK), "This question is incognito: Mightling deletes this folder when you leave it.\n", { mode: 0o600 });
+  return folder;
+}
+
+/** Removes a link under the root that names a folder (`ask/<thread-id>` → `q-…`), when it does. */
+function unlinkTo(root: string, names: Set<string>): void {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isSymbolicLink()) continue;
+    const link = path.join(root, entry.name);
+    try {
+      if (names.has(path.basename(fs.readlinkSync(link)))) fs.unlinkSync(link);
+    } catch {
+      // Gone already.
+    }
+  }
+}
+
+/**
+ * Deletes an incognito question: its folder, with every file in it, and the link that names it.
+ * Refuses a folder that is not marked incognito, so no other question can be deleted this way.
+ * Answers false when there was nothing left to delete.
+ */
+export function forgetIncognito(root: string, threadId: string): boolean {
+  if (!validThreadId(threadId)) throw new Error(`not a thread id: ${threadId}`);
+  const folder = folderOf(root, threadId);
+  if (!folder) return false;
+  if (!fs.existsSync(path.join(folder, INCOGNITO_MARK))) throw new Error("this question is not incognito; it is kept");
+  fs.rmSync(folder, { recursive: true, force: true });
+  unlinkTo(root, new Set([path.basename(folder)]));
+  return true;
+}
+
+/** Deletes every incognito folder left under the root (an app that quit or crashed while one was open); answers how many. */
+export function sweepIncognito(root: string): number {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  const gone = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^q-[0-9a-f]+$/.test(entry.name)) continue;
+    const folder = path.join(root, entry.name);
+    if (!fs.existsSync(path.join(folder, INCOGNITO_MARK))) continue;
+    fs.rmSync(folder, { recursive: true, force: true });
+    gone.add(entry.name);
+  }
+  if (gone.size) unlinkTo(root, gone);
+  return gone.size;
 }

@@ -10,6 +10,7 @@ from dreamference.audit.egress_trace import EgressTrace
 from dreamference.audit.egress_verdict import EgressVerdict
 from dreamference.audit.preview_page import PreviewPage
 from dreamference.audit.strace_parser import StraceParser
+from dreamference.audit.sync_egress_audit import SyncEgressAudit
 from dreamference.audit.tui_session import TuiSession
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "EgressVerdict",
     "PreviewPage",
     "StraceParser",
+    "SyncEgressAudit",
     "TuiSession",
 ]

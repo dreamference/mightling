@@ -125,6 +125,10 @@ def test_the_patches_stay_small():
     # user-reachable "ChatGPT" and "OpenAI" string the patches had left (the app page, the plugin
     # install rows, the plugin catalog's "OpenAI Curated", the remote catalogs' sign-in hints, the
     # model menu's base-URL warning) and the /hooks screen's "Right before Codex ends its turn".
+    # Not raised on 2026-10-22 for 0031-read-only-network (1,004 bytes: a dependency line and one
+    # line in SandboxManager::transform giving the read-only sandbox the network below
+    # /airgapped on): the series' 59 `index` lines, which `git apply` does not need, were dropped
+    # to make room (1,770 bytes); 56,757 after.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 58_000
 
 

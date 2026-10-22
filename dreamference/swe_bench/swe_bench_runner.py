@@ -9,6 +9,7 @@ Shift's, imported, not copied: a benchmark run and a night run exclude each othe
 import hashlib
 import re
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -37,6 +38,7 @@ from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
 from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
+from dreamference.swe_bench.swe_bench_shards import SweBenchShards
 from dreamference.vllm_server.model_gate import ModelGate
 
 POLL_S: Final[float] = 5.0
@@ -55,6 +57,10 @@ AUTO_APPLY_PATCH: Final[str] = "auto"
 # (ling-rs/src/exec_tool.rs, `ENV`), and the manifest value for a run that left the launcher's choice alone.
 EXEC_TOOL_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_EXEC_TOOL"
 AUTO_EXEC_TOOL: Final[str] = "auto"
+# The compatibility-mode arm (MIGHTLING_LING_CLAUDE §11): the launcher's switch
+# (ling-rs/src/compat.rs), and the manifest value for a run that left it alone.
+COMPAT_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_COMPAT"
+AUTO_COMPAT: Final[str] = "auto"
 # The drop-first compaction arm (compaction spec §13): the launcher's switch (ling-rs/src/compaction.rs,
 # `DROP_ENV`), set to this value only when the run asks.
 DROP_OLD_OUTPUTS_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS"
@@ -68,6 +74,10 @@ DEFAULT_SAMPLING: Final[str] = "default"
 SAMPLING_ARMS: Final[tuple[str, ...]] = (DEFAULT_SAMPLING, "nonthinking")
 # The smallest cap the gate applies (`model_gate_guard.MIN_BUDGET`).
 MIN_OUTPUT_BUDGET: Final[int] = 64
+# The guard arms (spec §29): the launcher's switches for the test guard and the finish check
+# (ling-rs/src/guard.rs), set to "1" only when the run asks.
+TEST_GUARD_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_TEST_GUARD"
+FINISH_CHECK_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_FINISH_CHECK"
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
 # The turn-end compaction arm (spec §16, night 10): Codex's own key, pinned on every `ling exec`
@@ -305,6 +315,9 @@ class SweBenchRunner:
         loop_guard: bool = False,
         output_budget: int | None = None,
         sampling: str | None = None,
+        compat: str | None = None,
+        test_guard: bool = False,
+        finish_check: bool = False,
     ) -> dict[str, Any]:
         """Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -375,10 +388,13 @@ class SweBenchRunner:
             "turn_end_compaction": turn_end_compaction or AUTO_TURN_END,
             "apply_patch": apply_patch or AUTO_APPLY_PATCH,
             "exec_tool": exec_tool or AUTO_EXEC_TOOL,
+            "compat": compat or AUTO_COMPAT,
             "drop_old_outputs": bool(drop_old_outputs),
             "loop_guard": bool(loop_guard),
             "output_budget": int(output_budget or 0),
             "sampling": sampling or DEFAULT_SAMPLING,
+            "test_guard": bool(test_guard),
+            "finish_check": bool(finish_check),
             **({"hooks_gate_sha256": SweBenchHooks.gate_digest()} if hooks else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
@@ -387,6 +403,23 @@ class SweBenchRunner:
             "parallelism": parallel,
             "repository_commit": cls._output(["git", "-C", REPO_ROOT, "rev-parse", "HEAD"]),
         }
+
+    @classmethod
+    def guard_env(cls, manifest: dict[str, Any]) -> dict[str, str]:
+        """Gives the launcher's guard switches for a run's sessions (spec §29).
+
+        Each is set only when the run asks, so a run without the arm measures what a user gets;
+        a manifest from before the arms has neither key and ran without them.
+
+        Args:
+            manifest: The run's manifest.
+
+        Returns:
+            dict[str, str]: `DREAMFERENCE_MIGHTLING_TEST_GUARD` and
+            `DREAMFERENCE_MIGHTLING_FINISH_CHECK`, each `1` when its arm is on.
+        """
+        switches = {TEST_GUARD_ENV: "test_guard", FINISH_CHECK_ENV: "finish_check"}
+        return {env: "1" for env, key in switches.items() if manifest.get(key)}
 
     @classmethod
     def prompt_file(cls, name: str) -> Path | None:
@@ -463,10 +496,15 @@ class SweBenchRunner:
         restart_after_compactions: int = 0,
         apply_patch: str | None = None,
         exec_tool: str | None = None,
+        compat: str | None = None,
         drop_old_outputs: bool = False,
         loop_guard: bool = False,
         output_budget: int | None = None,
         sampling: str | None = None,
+        shard: str | None = None,
+        image_chunk: int | None = None,
+        test_guard: bool = False,
+        finish_check: bool = False,
     ) -> int:
         """Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -480,8 +518,9 @@ class SweBenchRunner:
             until: `HH:MM` after which no new instance starts; running ones finish.
             idle_minutes: Minutes the model must have been idle first; defaults to the setting.
             ignore_sessions: Do not wait for open `ling` sessions (for testing beside one).
-            keep_images: With `evaluate`, False works one repository at a time and removes its
-                images once it is graded, to make room for the next repository's.
+            keep_images: With `evaluate`, False works one repository at a time, in chunks of at
+                most `image_chunk` instances, and removes a chunk's images once it is graded, to
+                make room for the next chunk's.
             require_smoke: Refuse to run unless a smoke has passed on this machine.
             code_index: `off`, `universal` to index each instance's repository on the host
                 and give the agent `ling-code`, or `exact` for the same with the SCIP stores
@@ -519,6 +558,10 @@ class SweBenchRunner:
                 through `DREAMFERENCE_MIGHTLING_EXEC_TOOL`: `function` (translated) or `freeform`
                 (Codex's custom tool, which SGLang drops); None leaves the launcher's choice,
                 `function` on SGLang and vLLM (spec §23). A new run only, like `code_index`.
+            compat: The compatibility mode for every session, through
+                `DREAMFERENCE_MIGHTLING_COMPAT`: `claude` or `off`; None leaves the launcher's
+                own setting, which a container's fresh home leaves off (MIGHTLING_LING_CLAUDE §11).
+                A new run only, like `code_index`.
             drop_old_outputs: Drop-first compaction in every session, through
                 `DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS`: when a session is about to compact, its
                 older tool outputs are dropped first and the summary runs only if that is not
@@ -530,6 +573,15 @@ class SweBenchRunner:
                 as `max_output_tokens` by the model gate; None or 0 is no cap. A new run only.
             sampling: `nonthinking` has the gate fill in the model card's non-thinking sampling
                 (`DREAMFERENCE_MIGHTLING_SAMPLING`); None or `default` leaves the server's. A new run only.
+            test_guard: The launcher's test guard in every session, through
+                `DREAMFERENCE_MIGHTLING_TEST_GUARD`: a change that weakens an existing test is
+                pointed out, and the first stop while it stands is held once (spec §29). Off by
+                default. A new run only, like `code_index`.
+            finish_check: The launcher's finish check in every session, through
+                `DREAMFERENCE_MIGHTLING_FINISH_CHECK`: the first stop after a source change that no
+                test has run on is held once, as are a stop mid-work and a failure called
+                pre-existing with no run on the unchanged code (spec §29). Off by default. A new
+                run only, like `code_index`.
             hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
                 holds the first edit once until the files and functions the issue names have
                 been read, and the first stop once until its example has been run; spec §20).
@@ -540,6 +592,13 @@ class SweBenchRunner:
                 (`turn_end_percent`), `off` pins it at 0, a number pins that percentage; None
                 leaves the key alone, and `exec` never compacts at a turn's end. The launcher's
                 switch is set to `1` or `0` beside it. A new run only, like `code_index`.
+            shard: `I/K`: a new run covers only the I-th of K balanced shards of the selected
+                instances (`SweBenchShards`), so K machines can share one list; recorded in the
+                manifest, where `swe-bench merge` reads it. A resumed run keeps its shard, and
+                naming another is refused.
+            image_chunk: With `evaluate` and `keep_images` False, the most instances of one
+                repository whose images are on disk at once; None takes `[swe_bench]
+                image_chunk` (25), 0 the whole repository.
 
         Returns:
             int: 0 when the run did what it could (whatever its instances did), 1 when it could
@@ -579,6 +638,15 @@ class SweBenchRunner:
         if unknown_hooks:
             print(f"❌ --hooks takes: {', '.join(HOOK_SETS)} (not {', '.join(unknown_hooks)}).")
             return 1
+        wanted_shard = SweBenchShards.parse(shard) if shard is not None else None
+        if shard is not None and wanted_shard is None:
+            print(f"❌ --shard {shard!r}: I/K, the I-th of K shards (1 <= I <= K).")  # noqa: T201 — CLI output
+            return 1
+        if image_chunk is not None and image_chunk < 0:
+            print(  # noqa: T201 — CLI output
+                f"❌ --image-chunk {image_chunk}: a number of instances, 0 for a whole repository."
+            )
+            return 1
         if (
             name is not None
             and not RUN_NAME.fullmatch(name)
@@ -607,6 +675,10 @@ class SweBenchRunner:
         vllm_host = DreamferenceConfig().vllm_host
 
         store = SweBenchRunStore(name or cls.default_name())
+        refusal = cls.resume_problem(store.manifest(), wanted_shard)
+        if refusal:
+            print(f"❌ Run {store.name}: {refusal}")  # noqa: T201 — CLI output
+            return 1
         end = cls.until_time(until)
         with NightShiftQueue.runner_lock(NightShiftQueue.night_dir(), holder=LOCK_HOLDER) as held:
             if not held:
@@ -620,10 +692,12 @@ class SweBenchRunner:
                     f"❌ Could not create the internal Docker network {swe_bench_settings.NETWORK_NAME}."
                 )
                 return 1
-            # The model gate refuses every request but this run's while the block lasts (§18).
-            with cls.gate_hold(
-                store, vllm_host, SweBenchDocker.subnet(swe_bench_settings.NETWORK_NAME), label
-            ) as hold:
+            # The model gate refuses every request but this run's while the block lasts (§18). A server on
+            # another machine (`vllm_host` naming it) has no gate of this machine's in front of it, so this
+            # machine's gate is left open and the run waits for other requests there as it would without one.
+            remote = cls.remote_server(vllm_host)
+            subnet = None if remote else SweBenchDocker.subnet(swe_bench_settings.NETWORK_NAME)
+            with cls.gate_hold(store, vllm_host, subnet, label) as hold:
                 idle = settings.idle_minutes if idle_minutes is None else idle_minutes
                 if hold.priority():
                     # Nobody else can reach the model now: an open session cannot start a turn, so
@@ -682,6 +756,8 @@ class SweBenchRunner:
                     except (ValueError, OSError) as error:
                         print(f"❌ {error}")
                         return 1
+                    whole = list(selected)
+                    selected = cls.shard_of(dataset, whole, wanted_shard)
                     print(
                         f"🔎 Checking that {len(selected)} instance(s) grade correctly here "
                         "(reference patch resolves, no-op patch does not)..."
@@ -711,11 +787,15 @@ class SweBenchRunner:
                         restart_after_compactions=restart_after_compactions,
                         apply_patch=apply_patch,
                         exec_tool=exec_tool,
+                        compat=compat,
                         drop_old_outputs=drop_old_outputs,
                         loop_guard=loop_guard,
                         output_budget=output_budget,
                         sampling=sampling,
+                        test_guard=test_guard,
+                        finish_check=finish_check,
                     )
+                    manifest.update(cls.shard_record(whole, wanted_shard))
                     store.write_manifest(manifest)
                 elif (
                     manifest.get("runtime_hash") != runtime_hash
@@ -731,8 +811,7 @@ class SweBenchRunner:
                 model_url = f"http://{gateway}:{urlparse(vllm_host).port or 8000}"
                 run_prompt = str(manifest.get("prompt") or DEFAULT_RUN_PROMPT)
                 lanes, lane_notes = cls.lanes(vllm_host, served, settings, parallel)
-                lanes[0]["model_url"] = model_url
-                relays = cls.open_relays(gateway, lanes[1:])
+                relays = cls.lane_relays(gateway, lanes, model_url, vllm_host if remote else None)
                 for note in lane_notes:
                     print(f"   {note}")
                 cave = manifest.get("cave_mode") or swe_bench_settings.SWE_BENCH_CAVE_MODE
@@ -764,6 +843,10 @@ class SweBenchRunner:
                 run_exec_tool = str(manifest.get("exec_tool") or AUTO_EXEC_TOOL)
                 if run_exec_tool != AUTO_EXEC_TOOL:
                     extra_env[EXEC_TOOL_ENV] = run_exec_tool
+                # The compatibility-mode arm: the launcher's switch, only when the run asks.
+                run_compat = str(manifest.get("compat") or AUTO_COMPAT)
+                if run_compat != AUTO_COMPAT:
+                    extra_env[COMPAT_ENV] = run_compat
                 # The drop-first compaction arm (compaction spec §13): the launcher's switch, only
                 # when the run asks. A run made before the option existed has no key and ran without.
                 if manifest.get("drop_old_outputs"):
@@ -771,6 +854,7 @@ class SweBenchRunner:
                 # The loop guard's arms: the launcher's variables, only when the run asks. A run made
                 # before the options existed has no keys and ran with none.
                 extra_env.update(cls.loop_guard_env(manifest))
+                extra_env.update(cls.guard_env(manifest))
                 # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
                 # the text a later session of the same instance would start from.
                 custom_prompt = cls.prompt_file(run_prompt)
@@ -853,14 +937,21 @@ class SweBenchRunner:
                 if threading.current_thread() is threading.main_thread():
                     signal.signal(signal.SIGTERM, cls._raise_interrupt)
                 try:
-                    # One repository at a time only when its images are to be removed after grading;
-                    # otherwise everything is one group, so small repositories do not run alone.
+                    # One repository at a time, in chunks of at most `image_chunk` instances, only when
+                    # the images are to be removed after grading; otherwise everything is one group, so
+                    # small repositories do not run alone. The chunks are cut from the whole run, so a
+                    # resumed run has the same ones, and a chunk with nothing left to run is skipped.
                     cycling = evaluate and not keep_images
-                    groups = cls.by_repository(pending, rows) if cycling else {None: pending}
-                    for repo, group in groups.items():
+                    chunk = settings.image_chunk if image_chunk is None else image_chunk
+                    waiting = set(pending)
+                    groups = cls.run_groups(
+                        manifest["instances"], waiting, rows, chunk if cycling else None
+                    )
+                    for group in groups:
+                        todo = pending if group is None else [i for i in group if i in waiting]
                         stopped = cls.schedule(
                             store,
-                            group,
+                            todo,
                             rows,
                             manifest,
                             settings,
@@ -877,11 +968,7 @@ class SweBenchRunner:
                             hold=hold,
                         )
                         if evaluate:
-                            graded_now = [
-                                i
-                                for i in manifest["instances"]
-                                if repo is None or rows[i]["repo"] == repo
-                            ]
+                            graded_now = list(manifest["instances"]) if group is None else group
                             SweBenchEvaluator.grade(store, settings, only=graded_now)
                             if cycling and not stopped:
                                 SweBenchImages.remove(
@@ -1067,6 +1154,26 @@ class SweBenchRunner:
                 return True
             tail = chunk[-len(needle) :]
         return False
+
+    @classmethod
+    def remote_server(cls, vllm_host: str) -> bool:
+        """Whether the configured model server is another machine's.
+
+        An engine A/B serves the agent from the engine's development machine: its host is neither
+        loopback nor one of this machine's names.
+
+        Args:
+            vllm_host: The configured model server's base URL.
+
+        Returns:
+            bool: True when the containers must reach it through a relay on the gateway.
+        """
+        host = (urlparse(vllm_host).hostname or "").lower().rstrip(".")
+        if host in ("", "localhost", "::1", "0.0.0.0") or host.startswith("127."):
+            return False
+        names = {socket.gethostname().lower(), socket.getfqdn().lower()}
+        names |= {name + ".local" for name in list(names)}
+        return host not in names
 
     @classmethod
     def open_relays(cls, gateway: str, lanes: list[dict[str, Any]]) -> list[SweBenchRelay]:
@@ -1281,6 +1388,175 @@ class SweBenchRunner:
         for instance_id in instance_ids:
             groups.setdefault(rows[instance_id]["repo"], []).append(instance_id)
         return groups
+
+    @classmethod
+    def shard_of(cls, dataset: str, whole: list[str], wanted: tuple[int, int] | None) -> list[str]:
+        """The instances a new run covers: all of them, or its shard of them (`--shard`).
+
+        Args:
+            dataset: The dataset the instances are from, for their repositories.
+            whole: The selected instances.
+            wanted: The (I, K) shard asked for, or None.
+
+        Returns:
+            list[str]: The instances to run.
+        """
+        if wanted is None:
+            return whole
+        repos = {
+            row["instance_id"]: str(row.get("repo", "")) for row in SweBenchHarness.rows(dataset)
+        }
+        selected = SweBenchShards.pick(whole, repos, *wanted)
+        print(  # noqa: T201 — CLI output
+            f"🧩 Shard {wanted[0]} of {wanted[1]}: {len(selected)} of the {len(whole)} selected "
+            f"instance(s), {SweBenchShards.mix(selected, repos)}."
+        )
+        return selected
+
+    @classmethod
+    def shard_record(cls, whole: list[str], wanted: tuple[int, int] | None) -> dict[str, Any]:
+        """The manifest's record of a new run's shard, where `swe-bench merge` reads it.
+
+        Args:
+            whole: The selected instances, before the shard was cut.
+            wanted: The (I, K) shard, or None.
+
+        Returns:
+            dict[str, Any]: `{"shard": {...}}`, or nothing for a run made without `--shard`.
+        """
+        if wanted is None:
+            return {}
+        return {
+            "shard": {
+                "index": wanted[0],
+                "of": wanted[1],
+                "list_instances": len(whole),
+                "list_sha256": SweBenchShards.digest(whole),
+            }
+        }
+
+    @classmethod
+    def lane_relays(
+        cls,
+        gateway: str,
+        lanes: list[dict[str, Any]],
+        model_url: str,
+        remote_host: str | None,
+    ) -> list[SweBenchRelay]:
+        """Points each lane's containers at their model server, through a relay where they need one.
+
+        The containers reach the run network's gateway only. This machine's server is there on its
+        own port; a replica lane, or every lane when the server is another machine's (the engine
+        A/B), gets a relay on the gateway.
+
+        Args:
+            gateway: The run network's gateway address.
+            lanes: The run's lanes, this machine's first.
+            model_url: This machine's server as the containers reach it.
+            remote_host: The other machine's server when the run is served from there, else None.
+
+        Returns:
+            list[SweBenchRelay]: The relays opened.
+        """
+        if remote_host is not None:
+            print(  # noqa: T201 — CLI output
+                f"   The model server is another machine's ({remote_host}): reached through a relay "
+                "on the run's network gateway.",
+                flush=True,
+            )
+            return cls.open_relays(gateway, lanes)
+        lanes[0]["model_url"] = model_url
+        return cls.open_relays(gateway, lanes[1:])
+
+    @classmethod
+    def run_groups(
+        cls,
+        instances: list[str],
+        waiting: set[str],
+        rows: dict[str, dict[str, Any]],
+        chunk: int | None,
+    ) -> list[list[str] | None]:
+        """The groups a run schedules in turn: one, or its image chunks with something left to run.
+
+        Args:
+            instances: The run's instances, in run order.
+            waiting: Those not run yet.
+            rows: Their dataset rows.
+            chunk: The image chunk when images are removed after grading (0: a whole repository),
+                or None for one group of everything.
+
+        Returns:
+            list[list[str] | None]: The chunks, or `[None]` for everything at once.
+        """
+        if chunk is None:
+            return [None]
+        groups: list[list[str] | None] = [
+            list(group)
+            for group in cls.image_chunks(instances, rows, chunk)
+            if waiting.intersection(group)
+        ]
+        print(  # noqa: T201 — CLI output
+            f"🧩 Images one repository at a time, at most {chunk or 'all'} of one repository "
+            f"on disk at once: {len(groups)} chunk(s) to run.",
+            flush=True,
+        )
+        return groups
+
+    @classmethod
+    def image_chunks(
+        cls, instance_ids: list[str], rows: dict[str, dict[str, Any]], size: int
+    ) -> list[list[str]]:
+        """Cuts instances into the chunks whose images are on disk together (`--remove-images`).
+
+        One repository at a time (`by_repository`), a repository of more than `size` instances
+        into as few chunks of at most `size` as hold it, as equal as can be and in the instances'
+        order (86 at 25: 22, 22, 21, 21).
+
+        Args:
+            instance_ids: The instances, in run order.
+            rows: Their dataset rows.
+            size: The most instances in a chunk; 0 for a whole repository.
+
+        Returns:
+            list[list[str]]: The chunks, repository by repository.
+        """
+        chunks: list[list[str]] = []
+        for group in cls.by_repository(instance_ids, rows).values():
+            parts = -(-len(group) // size) if size > 0 else 1
+            low, extra = divmod(len(group), parts)
+            start = 0
+            for part in range(parts):
+                end = start + low + (1 if part < extra else 0)
+                chunks.append(group[start:end])
+                start = end
+        return chunks
+
+    @classmethod
+    def resume_problem(cls, manifest: dict[str, Any] | None, shard: tuple | None) -> str | None:
+        """Why a run of this name cannot be run (again) as asked.
+
+        Args:
+            manifest: The existing run's manifest; None for a new run.
+            shard: The (I, K) asked for, or None.
+
+        Returns:
+            str | None: The reason, or None.
+        """
+        if manifest is None:
+            return None
+        if manifest.get("merged_from"):
+            return (
+                f"it is the merge of {', '.join(manifest['merged_from'])} (`swe-bench merge`), which only "
+                "reports: resume the shard that is not finished and merge again."
+            )
+        recorded = manifest.get("shard") or {}
+        recorded_pair = (recorded.get("index"), recorded.get("of")) if recorded else None
+        if shard is not None and tuple(shard) != recorded_pair:
+            had = f"shard {recorded_pair[0]}/{recorded_pair[1]}" if recorded_pair else "no shard"
+            return (
+                f"it was started with {had}; a resumed run keeps its instances. Use a new --name."
+            )
+        return None
 
     @classmethod
     def default_name(cls) -> str:

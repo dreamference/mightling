@@ -46,6 +46,8 @@ pub mod compat;
 pub mod compat_agents;
 pub mod compat_commands;
 pub mod compat_hooks;
+pub mod compat_mcp;
+pub mod compat_permissions;
 pub mod compat_memory;
 pub mod compat_keys;
 pub mod compat_print;
@@ -53,6 +55,7 @@ pub mod compat_tui;
 pub mod compaction;
 pub mod docs_index;
 pub mod exec_tool;
+pub mod guard;
 pub mod help;
 pub mod home;
 pub mod images;
@@ -63,6 +66,7 @@ pub mod night;
 pub mod node;
 pub mod node_command;
 pub mod notice;
+pub mod plugins;
 pub mod prompt;
 pub mod proxy;
 pub mod refine;
@@ -73,12 +77,16 @@ pub mod rename;
 pub mod signal;
 pub mod skills;
 pub mod summary_cap;
+#[cfg(unix)]
+pub mod sync;
 
 pub mod update;
 pub mod usage;
+pub mod userns;
 pub mod vision;
 #[cfg(unix)]
 pub mod web;
+pub mod worktree;
 
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
@@ -112,13 +120,13 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync",
 ];
 
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard",
+    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -175,8 +183,9 @@ when you already know the URL, or to read one source in full.
 
 Do not say you cannot browse the web. You can, through these commands, unless a later message says web access is off for this session.
 
-Do not use `curl` or `wget` for this. They are frequently blocked by the sandbox and return nothing,
-which looks like the site being down rather than the command being unavailable.
+To read the web, prefer these to `curl` or `wget`: they return readable text rather than raw HTML.
+Your commands do have the network unless this session is air-gapped (a message says so when it is),
+so `curl`, `git fetch`, `pip install` and `npm install` work when the task needs them.
 
 There is no web search *tool* — do not look for one. Search is a shell command, shown above.
 
@@ -364,6 +373,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(ledger::run_cli(&user_args[index + 1..]));
     }
+    // `guard` is the test guard's and the finish check's hook, after each tool call and at each
+    // stop (guard.rs); it reads `git` and a state file and answers.
+    if let Some(index) = subcommand
+        && user_args[index] == "guard"
+    {
+        std::process::exit(guard::run_cli(&user_args[index + 1..]));
+    }
     // `notice` is the hook that shows the start-up lines inside the TUI (notice.rs).
     if let Some(index) = subcommand
         && user_args[index] == "notice"
@@ -421,6 +437,19 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
             std::process::exit(2);
         }
     }
+    // `sync` is one set of threads on every device, through the node's `ling web` (sync.rs;
+    // specs/DREAMFERENCE_MIGHTLING_SYNC.md).
+    if let Some(index) = subcommand
+        && user_args[index] == "sync"
+    {
+        #[cfg(unix)]
+        std::process::exit(sync::run_cli(&user_args[index + 1..]).await);
+        #[cfg(not(unix))]
+        {
+            eprintln!("`ling sync` is not available on Windows yet: the hub is part of `ling web`.");
+            std::process::exit(2);
+        }
+    }
     // `signal` is Mightling over Signal: the setup, status and removal of the bridge the system
     // account runs (signal.rs; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md).
     if let Some(index) = subcommand
@@ -452,6 +481,25 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(refine::run_cli(&user_args[index + 1..]));
     }
+    // `worktree` shows or sets where new sessions edit, and lists, applies or discards worktree
+    // sessions (worktree.rs), as `/worktree on|off|status|apply|discard` does inside one.
+    if let Some(index) = subcommand
+        && user_args[index] == "worktree"
+    {
+        std::process::exit(worktree::run_cli(&user_args[index + 1..]));
+    }
+    // `ling plugin add` and `marketplace add|upgrade` fetch with git outside the sandbox: refused
+    // at a configured `on` (plugins.rs).
+    // Codex's own subcommand, not the launcher's: it runs on in Codex unless refused here.
+    if let Some(index) = subcommand
+        && user_args[index].as_str() == "plugin"
+        && std::env::var_os(UPSTREAM_TESTS_ENV).is_none()
+    {
+        let configured = airgapped::resolve(None);
+        if let Some(reason) = plugins::install_refusal(&user_args[index + 1..], configured.level, &configured.source.label()) {
+            bail!("{reason}");
+        }
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
@@ -469,8 +517,21 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     for line in airgapped::windows_sandbox_lines(&user_args) {
         notice::say(&line);
     }
+    // On Linux, bubblewrap refused its namespaces (Ubuntu 24.04 with no profile for it) refuses a
+    // configured `on` and is said at every start, with the fix (userns.rs).
+    if let Some(reason) = userns::airgapped_conflict_now(configured.level) {
+        bail!("{reason}");
+    }
+    for line in userns::startup_lines_now(airgapped::full_access_selected(&user_args)) {
+        notice::say(&line);
+    }
     // On macOS the sandbox's network is set once, now: a configured `on` takes it away here.
     let args = match airgapped::with_launch_policy(args, &user_args, configured.level) {
+        Ok(args) => args,
+        Err(reason) => bail!("{reason}"),
+    };
+    // At a configured `on` no plugin loads: its MCP servers would run outside the sandbox (plugins.rs).
+    let args = match plugins::with_level(args, &user_args, configured.level) {
         Ok(args) => args,
         Err(reason) => bail!("{reason}"),
     };
@@ -519,6 +580,18 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         .context("could not resolve CODEX_HOME")?
         .as_path()
         .to_path_buf();
+    // Where the session's edits land (worktree.rs; specs/DREAMFERENCE_MIGHTLING_WORKTREE.md): in
+    // place by default, as in Codex; in worktree mode a new interactive session moves into a fresh
+    // worktree on a branch of its own before anything below reads the working folder.
+    let session_dir = code_index::session_dir(&user_args);
+    let prepared = worktree::prepare(args, user_args, &codex_home, interactive, &session_dir);
+    if let Some(cwd) = &prepared.cwd {
+        std::env::set_current_dir(cwd).with_context(|| format!("could not move into {}", cwd.display()))?;
+    }
+    for line in &prepared.lines {
+        notice::say(line);
+    }
+    let (args, user_args) = (prepared.args, prepared.user_args);
     // Which system prompt a new session gets (prompt.rs; specs/DREAMFERENCE_MIGHTLING_PROMPT.md).
     let chosen = prompt::resolve(&codex_home);
     for line in prompt::startup_lines(&chosen, interactive) {
@@ -583,6 +656,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
     // The TUI starts at its own cave level when nothing is configured (cave.rs; spec §11.5).
     cave::set_tui(tui);
+    // The footer names the folder and the branch edits land in, unless the user chose a status line.
+    let args = worktree::with_status_line(args, &user_args, &codex_home, tui);
     // The compatibility mode's renderer and key map, for this session only (compat_tui.rs).
     let args = if compat_tui::applies(compat_mode.mode, tui) {
         compat_tui::prepare(args, &user_args, &codex_home, &code_index::session_dir(&user_args))
@@ -596,10 +671,38 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // agents of .claude/agents as Codex roles (compat_agents.rs), for this session only.
     let args = if compat_mode.mode == compat::Mode::Claude {
         let dir = code_index::session_dir(&user_args);
-        let (args, hook_plan) = compat_hooks::prepare(args, &codex_home, &dir);
+        // Claude Code's --permission-mode, --allowedTools and --disallowedTools in the TUI, and
+        // the rules print mode hands its child (compat_permissions.rs).
+        let (args, mut extra_rules) = if tui {
+            let (args, mode, rules) = compat_permissions::take_tui_flags(args);
+            let args = match mode.as_deref().map(|mode| compat_permissions::tui_mode(mode, configured.level == airgapped::Level::On)) {
+                Some(Err(reason)) => bail!("{reason}"),
+                Some(Ok((options, line))) => {
+                    if let Some(line) = line {
+                        notice::say(&line);
+                    }
+                    let mut args = args.into_iter();
+                    let mut out: Vec<OsString> = args.next().into_iter().collect();
+                    out.extend(options.into_iter().map(OsString::from));
+                    out.extend(args);
+                    out
+                }
+                None => args,
+            };
+            (args, rules)
+        } else {
+            (args, Vec::new())
+        };
+        extra_rules.extend(compat_permissions::rules_from_env());
+        let (args, hook_plan) = compat_hooks::prepare(args, &codex_home, &dir, &extra_rules);
         let (args, agents, agent_notes) = compat_agents::prepare(args, &codex_home, &dir);
+        // The approved MCP servers of .mcp.json and ~/.claude.json (compat_mcp.rs).
+        let (args, mcp_plan) = compat_mcp::prepare(args, &codex_home, &dir, configured.level == airgapped::Level::On);
         if tui {
-            notice::say(&compat::read_summary(&dir, &codex_home, &hook_plan, agents, agent_notes.len()));
+            notice::say(&compat::read_summary(&dir, &codex_home, &hook_plan, agents, agent_notes.len() + mcp_plan.notes.len(), mcp_plan.offered.len()));
+            for note in mcp_plan.notes.iter().filter(|note| note.contains("waits for your approval")) {
+                notice::say(&format!("⚠️  {note}."));
+            }
         }
         args
     } else {
@@ -607,6 +710,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     };
     // Refine mode's hook for the interactive session; before the notice, which shows its line.
     refine::register_hook(&codex_home, tui);
+    // The test guard and the finish check, when switched on, for every session, `exec` included
+    // (guard.rs); before the notice, which shows their lines.
+    guard::register(&codex_home, tui);
     notice::publish(&codex_home, tui);
     // The index as tools, when the block just written names them (code_index.rs).
     let args = if code_index::named_in(&code_block) == Some(code_index::TOOLS_NAME) {
@@ -1135,6 +1241,19 @@ pub fn model_catalog_with_adapters(model: &ServedModel, adapters: &[adapter::Ada
     json!({ "models": models })
 }
 
+/// `catalog` with Codex's sentence about the read-only sandbox replaced in every entry when that
+/// sandbox has the network (`open`): Codex words it from the session's permission profile, which
+/// says "restricted" for read-only, while patch 0031 gives each command the network below `on`.
+/// Below `on` only: at `on`, and when the user said no network, Codex's own sentence is right.
+pub fn with_read_only_network(mut catalog: serde_json::Value, open: bool) -> serde_json::Value {
+    if open && let Some(models) = catalog["models"].as_array_mut() {
+        for entry in models {
+            entry["model_messages"] = json!({"permissions": {"read_only": airgapped::READ_ONLY_SANDBOX_TEXT}});
+        }
+    }
+    catalog
+}
+
 /// Writes the catalogs and brings `config.toml` up to what a local session needs.
 ///
 /// The catalogs are rewritten on every launch, because the served model can change between runs.
@@ -1155,16 +1274,20 @@ pub fn configure_codex_home(
     std::fs::create_dir_all(codex_home)?;
     let catalog_path = codex_home.join("model_catalog.json");
     let default_text = prompt::compose(&prompt::Prompt::default_prompt(), parts);
+    // Whether the read-only sandbox has the network in a session starting now (patch 0031).
+    let open = airgapped::read_only_network_now();
     write_atomically(
         &catalog_path,
-        serde_json::to_string_pretty(&model_catalog_with_adapters(model, adapters, &default_text))?.as_bytes(),
+        serde_json::to_string_pretty(&with_read_only_network(model_catalog_with_adapters(model, adapters, &default_text), open))?
+            .as_bytes(),
     )?;
     let chosen_catalog = if chosen.is_default() {
         None
     } else {
         let path = prompt::catalog_file(codex_home, chosen);
         let text = prompt::compose(chosen, parts);
-        write_atomically(&path, serde_json::to_string_pretty(&model_catalog_with_adapters(model, adapters, &text))?.as_bytes())?;
+        let catalog = with_read_only_network(model_catalog_with_adapters(model, adapters, &text), open);
+        write_atomically(&path, serde_json::to_string_pretty(&catalog)?.as_bytes())?;
         Some(path)
     };
 
@@ -1238,9 +1361,14 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     // offered a choice that cannot work and resolved that model at every thread start ("Unknown
     // model gpt-5.6-luna", 1.7 tests). Only when absent, so a user can turn it back on.
     set_if_absent(features, "guardian_approval", false);
+    // Plugins are allowed; the vendor's remote catalogue and plugin sharing are not (plugins.rs).
+    plugins::close_vendor_features(features);
 
-    // Without network access the workspace-write sandbox also blocks DNS, and the web commands in
-    // the prompt fail with "Temporary failure in name resolution".
+    // Sandboxed commands have the network whenever /airgapped is off (owner decision, 2026-10-22):
+    // without it the workspace-write sandbox also blocks DNS, and `pip install`, `git fetch` and the
+    // web commands fail with "Temporary failure in name resolution". Only when absent, so
+    // `network_access = false` stays the user's; it then holds for the read-only sandbox too, which
+    // has no key of its own and is given the network by patch 0031 (airgapped.rs).
     let sandbox = table(doc.as_table_mut(), "sandbox_workspace_write");
     set_if_absent(sandbox, "network_access", true);
     // The built-in `skill-installer` downloads a skill from github.com/openai/skills into

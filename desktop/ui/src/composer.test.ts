@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PromptHistory, reviewTarget, activeTrigger, collaborationMode, applyCompletion, composeInput, effortChoices, effortFor, enterSends, keyAnswer,
-  lastUserTurn, matchCommands, matchSkills, mentionPath, parseSlash, rememberModel, userTexts,
+  lastUserTurn, matchCommands, matchSkills, mentionPath, parseShell, parseSlash, rememberModel, userTexts,
 } from "./composer";
 import { DEFAULT_PREFS, cleanAppearance, sanitize } from "./prefs";
 import { ScriptedServer } from "./scripted-server";
@@ -61,6 +61,15 @@ describe("the composer's menus", () => {
     expect(parseSlash("/cavemode default full")).toMatchObject({ command: { name: "cavemode" }, args: "default full" });
     expect(parseSlash("/nonesuch")).toBeNull();
     expect(parseSlash("an ordinary /message")).toBeNull();
+  });
+
+  it("reads a ! shell command, as the Codex app does, and nothing else", () => {
+    expect(parseShell("!ls -la | head")).toBe("ls -la | head");
+    expect(parseShell("  ! git status  ")).toBe("git status");
+    expect(parseShell("!")).toBeNull();
+    expect(parseShell("! ")).toBeNull();
+    expect(parseShell("why does !x fail")).toBeNull();
+    expect(parseShell("/airgapped on")).toBeNull();
   });
 });
 

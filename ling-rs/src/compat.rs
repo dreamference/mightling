@@ -343,19 +343,20 @@ fn doctor_lines(resolved: &Resolved) -> Vec<String> {
     lines.push(String::new());
     lines.extend(hooks_and_agents_lines(&dir, codex_home.as_deref()));
     lines.push(String::new());
-    lines.push("Not built yet: permission rules from the settings files, .claude/rules and \
+    lines.push("Not built yet: .claude/rules and \
                 the discrete tool roster (specs/DREAMFERENCE_MIGHTLING_LING_CLAUDE.md §12)."
         .to_string());
     lines
 }
 
 /// The one start-up line of a TUI session in the mode: what it read from Claude Code's files.
-pub fn read_summary(dir: &Path, codex_home: &Path, hooks: &crate::compat_hooks::Plan, agents: usize, agent_notes: usize) -> String {
+pub fn read_summary(dir: &Path, codex_home: &Path, hooks: &crate::compat_hooks::Plan, agents: usize, agent_notes: usize, mcp: usize) -> String {
     let memory = crate::compat_memory::read(&crate::compat_memory::Places::for_dir(dir, Some(codex_home)));
-    let hook_count: usize = hooks.groups.iter().skip(1).map(|group| group.handlers.len()).sum();
+    let hook_count: usize =
+        hooks.groups.iter().flat_map(|group| &group.handlers).filter(|handler| handler.command.contains(" compat hook-shim ")).count();
     let notes = memory.notes.len() + hooks.notes.len() + agent_notes;
     let mut line = format!(
-        "Claude Code files: CLAUDE.md {}, hooks {hook_count}, agents {agents}",
+        "Claude Code files: CLAUDE.md {}, hooks {hook_count}, agents {agents}, MCP servers {mcp}",
         memory.files.len()
     );
     if notes > 0 {
@@ -397,6 +398,24 @@ fn hooks_and_agents_lines(dir: &Path, codex_home: Option<&Path>) -> Vec<String> 
         let shadowed = crate::compat_commands::CODEX_COMMANDS.contains(&command.name.as_str());
         lines.push(format!("  /{}{} ({})", command.name, if shadowed { " (Codex's own /command of that name wins)" } else { "" }, command.source.display()));
     }
+    let (rules, rule_notes) = crate::compat_permissions::rules_for(&root, home.as_deref(), trusted, &[]);
+    lines.push(format!(
+        "Permission rules: {} from the settings files, enforced by the guard hook (deny refuses; ask refuses too, since the mode cannot ask){}",
+        rules.len(),
+        if rules.is_empty() { "." } else { ":" }
+    ));
+    for rule in &rules {
+        lines.push(format!("  {:?} {}", rule.kind, rule.text));
+    }
+    lines.extend(rule_notes.iter().map(|note| format!("  ⚠️  {note}")));
+    let (servers, mcp_notes) = crate::compat_mcp::discover(&root, home.as_deref(), trusted);
+    let approved = codex_home.map(crate::compat_mcp::approved).unwrap_or_default();
+    lines.push(format!("MCP servers: {} from .mcp.json and ~/.claude.json{}", servers.len(), if servers.is_empty() { "." } else { ":" }));
+    for server in servers.values() {
+        let state = if approved.contains(&crate::compat_mcp::definition_hash(server)) { "approved" } else { "waits for `ling compat mcp approve`" };
+        lines.push(format!("  {} ({} scope): {state}", server.name, server.scope.name()));
+    }
+    lines.extend(mcp_notes.iter().map(|note| format!("  ⚠️  {note}")));
     if !trusted && root.join(".claude").join("commands").is_dir() {
         lines.push("  ⚠️  this repository's .claude/commands wait until the folder is trusted".to_string());
     }
@@ -468,7 +487,7 @@ pub fn report_lines() -> Vec<String> {
     }
 }
 
-const USAGE: &str = "usage: ling compat [status | use claude|off | doctor]";
+const USAGE: &str = "usage: ling compat [status | use claude|off | doctor | mcp [list|approve <name>|--all|revoke <name>]]";
 
 /// `ling compat …` from a shell. Returns the exit code. It never waits for a model server.
 pub fn run_cli(args: &[String]) -> i32 {
@@ -477,6 +496,9 @@ pub fn run_cli(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("memory") => return crate::compat_memory::run_hook(),
         Some("hook-shim") => return crate::compat_hooks::run_shim(&args[1..]),
+        Some("mcp-run") => return crate::compat_mcp::run_server(&args[1..]),
+        Some("guard") => return crate::compat_permissions::run_guard(&args[1..]),
+        Some("mcp") => return crate::compat_mcp::run_cli(&args[1..]),
         _ => {}
     }
     let resolved = match resolve() {

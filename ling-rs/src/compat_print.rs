@@ -87,14 +87,13 @@ pub struct Request {
     pub passthrough: Vec<String>,
     pub debug: bool,
     pub bare: bool,
+    /// `--allowedTools` and `--disallowedTools`, as permission rules (compat_permissions.rs).
+    pub allowed: Vec<String>,
+    pub disallowed: Vec<String>,
 }
 
 /// Claude Code's documented print-mode flags this build does not honour yet, each with why.
 const NOT_YET: &[(&str, &str)] = &[
-    ("--allowedTools", "permission rules come with the mode's permissions (spec §9.3)"),
-    ("--allowed-tools", "permission rules come with the mode's permissions (spec §9.3)"),
-    ("--disallowedTools", "permission rules come with the mode's permissions (spec §9.3)"),
-    ("--disallowed-tools", "permission rules come with the mode's permissions (spec §9.3)"),
     ("--tools", "the tool roster is a later phase (spec §7.2)"),
     ("--input-format", "only text input is read in this build (stream-json input is a later phase)"),
     ("--include-partial-messages", "partial messages are not streamed by the local server's client"),
@@ -145,6 +144,10 @@ fn takes_value(arg: &str) -> bool {
             | "--add-dir"
             | "--model"
             | "--permission-mode"
+            | "--allowedTools"
+            | "--allowed-tools"
+            | "--disallowedTools"
+            | "--disallowed-tools"
             | "-r"
             | "--resume"
             | "-C"
@@ -173,6 +176,8 @@ pub fn parse(user_args: &[String]) -> Result<Request, String> {
         passthrough: Vec::new(),
         debug: false,
         bare: false,
+        allowed: Vec::new(),
+        disallowed: Vec::new(),
     };
     let mut positional: Vec<String> = Vec::new();
     let mut index = 0;
@@ -248,6 +253,10 @@ pub fn parse(user_args: &[String]) -> Result<Request, String> {
                 let given = value(name)?;
                 request.passthrough.push(name.to_string());
                 request.passthrough.push(given);
+            }
+            "--allowedTools" | "--allowed-tools" => request.allowed.extend(crate::compat_permissions::split_tool_list(&value(name)?)),
+            "--disallowedTools" | "--disallowed-tools" => {
+                request.disallowed.extend(crate::compat_permissions::split_tool_list(&value(name)?));
             }
             "--debug" => request.debug = true,
             "--bare" => request.bare = true,
@@ -750,6 +759,9 @@ async fn run_inner(user_args: &[String]) -> anyhow::Result<i32> {
     if request.bare {
         command.env(BARE_ENV, "1");
     }
+    if !request.allowed.is_empty() || !request.disallowed.is_empty() {
+        command.env(crate::compat_permissions::RULES_ENV, crate::compat_permissions::rules_to_env(&request.allowed, &request.disallowed));
+    }
     let started = Instant::now();
     let mut child = command.spawn()?;
     let cwd = std::env::current_dir().map(|dir| dir.display().to_string()).unwrap_or_default();
@@ -856,6 +868,9 @@ mod tests {
         assert_eq!(r.permission_mode, PermissionMode::AcceptEdits);
         assert_eq!(r.passthrough, ["-C", "sub"]);
         assert_eq!(r.prompt.as_deref(), Some("explain this"));
+        let r = parse(&strings(&["-p", "--allowedTools", "Bash(npm *),Read", "--disallowedTools=Bash(git push *)", "x"])).unwrap();
+        assert_eq!(r.allowed, ["Bash(npm *)", "Read"]);
+        assert_eq!(r.disallowed, ["Bash(git push *)"]);
         let r = parse(&strings(&["-p", "-c", "go on"])).unwrap();
         assert_eq!(r.resume, Resume::Last);
         let r = parse(&strings(&["-p", "--resume=0199a213-81c0-7800-8aa1-bbab2a035a53", "go on"])).unwrap();
@@ -863,7 +878,6 @@ mod tests {
         let r = parse(&strings(&["-p", "--output-format=json", "x"])).unwrap();
         assert_eq!(r.format, Format::Json);
         for refused in [
-            vec!["-p", "--allowedTools", "Bash", "x"],
             vec!["-p", "--max-budget-usd", "1", "x"],
             vec!["-p", "--output-format", "xml", "x"],
             vec!["-p", "--permission-mode", "auto", "x"],

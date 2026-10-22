@@ -125,6 +125,10 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/airgapped"),
     ("GET", "/api/chat/settings"),
     ("GET", "/api/ask/files?thread=t"),
+    ("GET", "/api/night/repos"),
+    ("POST", "/api/night/add"),
+    ("GET", "/api/night/status"),
+    ("GET", "/api/night/reports"),
     ("GET", "/api/ask/file?thread=t&name=a"),
     ("GET", "/images/0123456789abcdef.jpg"),
     ("GET", "/docs/documents/1"),
@@ -134,6 +138,12 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/devices"),
     ("POST", "/devices/pair"),
     ("POST", "/devices/revoke"),
+    ("POST", "/devices/scope"),
+    ("GET", "/api/sync/status"),
+    ("GET", "/api/sync/threads"),
+    ("GET", "/api/sync/manifest"),
+    ("PUT", "/api/sync/rollouts/01a0f1ae-2da4-7942-99ae-c3151dc137cc?offset=0"),
+    ("POST", "/api/sync/threads/01a0f1ae-2da4-7942-99ae-c3151dc137cc/delete"),
     ("GET", "/anything-else"),
 ];
 
@@ -495,6 +505,52 @@ async fn a_threads_files_are_listed_and_given_and_never_at_air_gap_on() {
     let (status, _, body) = call(&server, get("/api/ask/file?thread=thr-1&name=report.md")).await;
     unsafe { std::env::remove_var(ling_airgapped::ENV_VAR) };
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}
+
+/// Night Shift from a phone: the repositories a task may go to (a checkout already queued in),
+/// queueing through `ling night add` there and nowhere else, the queue, and the reports after a name.
+#[tokio::test]
+async fn night_shift_is_queued_and_read_for_a_phone_bridge() {
+    let scratch = scratch("night");
+    let mut config = config(&scratch.dir, 3100, Vec::new());
+    let repo = scratch.dir.join("app");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    let ling = scratch.dir.join("ling-night");
+    std::fs::write(&ling, "#!/bin/sh\n[ \"$1 $2\" = \"night add\" ] || exit 9\necho \"Queued 20261021-1300-abc on branch night/20261021-1300-abc, from 0123456789.\"\necho \"cwd $(pwd) task $3\"\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&ling, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    config.launch.ling = ling;
+    let night = config.codex_home.join("night");
+    std::fs::create_dir_all(night.join("tasks")).unwrap();
+    std::fs::create_dir_all(night.join("reports")).unwrap();
+    std::fs::write(night.join("tasks/old.json"), json!({ "id": "old", "repo": repo.canonicalize().unwrap(), "status": "queued", "task": "Earlier task" }).to_string()).unwrap();
+    std::fs::write(night.join("reports/2026-10-21.md"), "# Night Shift, 2026-10-21\n\n## app\n\n- old: done").unwrap();
+    let server = Server::new(config).unwrap();
+    let cookie = sign_in(&server).await;
+    let get = |uri: &str| request("GET", uri).header(header::COOKIE, &cookie).body(Body::empty()).unwrap();
+    let post = |body: Value| request("POST", "/api/night/add").header(header::ORIGIN, ORIGIN).header(header::COOKIE, &cookie).body(Body::from(body.to_string())).unwrap();
+    let (_, _, body) = call(&server, get("/api/night/repos")).await;
+    let repos: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(repos["repos"][0]["name"], "app", "{body}");
+    let path = repos["repos"][0]["path"].as_str().unwrap().to_string();
+    let (status, _, body) = call(&server, post(json!({ "repo": path, "task": "Fix the parser" }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let added: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(added["queued"], true, "{body}");
+    assert!(added["lines"][1].as_str().unwrap().ends_with("task Fix the parser"), "{body}");
+    // Anywhere else is refused.
+    assert_eq!(call(&server, post(json!({ "repo": "/etc", "task": "x" }))).await.0, StatusCode::FORBIDDEN);
+    let (_, _, body) = call(&server, get("/api/night/status")).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["tasks"][0]["task"], "Earlier task");
+    let (_, _, body) = call(&server, get("/api/night/reports?after=2026-10-20.md")).await;
+    let reports: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(reports["latest"], "2026-10-21.md");
+    assert!(reports["reports"][0]["text"].as_str().unwrap().contains("old: done"));
+    let (_, _, body) = call(&server, get("/api/night/reports?after=2026-10-21.md")).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["reports"], json!([]));
 }
 
 /// The stand-in app-server: one WebSocket connection on the Unix socket, its frames handed to the test.
@@ -892,12 +948,28 @@ async fn a_recording_is_passed_to_speech_to_text_and_the_text_comes_back() {
     let sent = service.await.unwrap();
     assert!(sent.starts_with("POST /v1/audio/transcriptions HTTP/1.1\r\n"), "{sent}");
     assert!(sent.contains("Systran/faster-whisper-small") && sent.contains("filename=\"speech.webm\"") && sent.contains("OPUSDATA"));
-    // Not audio, empty, or no service: refused, each saying why.
+    // Not audio, or empty: refused, each saying why.
     assert_eq!(call(&server, post("text/plain", b"hi")).await.0, StatusCode::UNSUPPORTED_MEDIA_TYPE);
     assert_eq!(call(&server, post("audio/webm", b"")).await.0, StatusCode::BAD_REQUEST);
-    let (status, _, body) = call(&server, post("audio/webm", b"again")).await;
+    // No service: an address held bound but not listening, so it refuses and no other test can
+    // take it. The stand-in's own port, once dropped, was sometimes bound by a test running beside
+    // this one, which then answered (about 1 run in 4 of the whole file).
+    let closed = tokio::net::TcpSocket::new_v4().unwrap();
+    closed.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let mut settings = config(&scratch.dir, 3100, Vec::new());
+    settings.speech_addr = closed.local_addr().unwrap().to_string();
+    let no_service = Server::new(settings).unwrap();
+    let cookie = sign_in(&no_service).await;
+    let again = request("POST", "/api/transcribe")
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::CONTENT_TYPE, "audio/webm")
+        .body(Body::from(&b"again"[..]))
+        .unwrap();
+    let (status, _, body) = call(&no_service, again).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert!(body.contains("ling-admin voice start"));
+    drop(closed);
 }
 
 /// Telegram's launch parameters for `user`, signed with `token` the way Telegram signs them.

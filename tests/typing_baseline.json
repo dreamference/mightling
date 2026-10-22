@@ -71,9 +71,6 @@
   "dreamference/node/node_pairing.py": {
    "arg-type": 1
   },
-  "dreamference/node/node_provisioner.py": {
-   "arg-type": 2
-  },
   "dreamference/node/node_remote.py": {
    "assignment": 1
   },
@@ -145,5 +142,5 @@
   }
  },
  "mypy": "2.4.0",
- "total": 136
+ "total": 134
 }

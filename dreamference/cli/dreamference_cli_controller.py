@@ -756,6 +756,47 @@ class DreamferenceCLIController:
         return 0
 
     @classmethod
+    def handle_night_every(cls, args: argparse.Namespace) -> int:
+        """`ling-admin night every add|list|drop`: Night Shift's repeating tasks (night_shift_recurring.py).
+
+        Args:
+            args: The parsed command line.
+
+        Returns:
+            The exit code: 0 when it did what was asked.
+        """
+        import json
+        from pathlib import Path
+
+        from dreamference.night_shift import NightShiftQueue, NightShiftRecurring
+
+        night_dir = NightShiftQueue.night_dir()
+        match args.night_every_command:
+            case "add":
+                cadence = "weekly" if args.weekly else "daily"
+                try:
+                    template = NightShiftRecurring.add(
+                        night_dir, Path.cwd(), " ".join(args.task), cadence, args.weekly, args.test)
+                except ValueError as error:
+                    print(f"❌ {error}")
+                    return 1
+                when = f"every {template['weekday']}" if args.weekly else "every night"
+                print(f"✅ Repeating task {template['id']}, {when}, in {Path.cwd()}: queued each night when due.")
+                return 0
+            case "list":
+                for template in NightShiftRecurring.templates(night_dir):
+                    print(json.dumps(template))
+                return 0
+            case "drop":
+                if NightShiftRecurring.drop(night_dir, args.id):
+                    print(f"✅ Repeating task {args.id} dropped; what it already queued stays.")
+                    return 0
+                print(f"❌ No repeating task {args.id}.")
+                return 1
+        print("usage: ling-admin night every {add,list,drop}")
+        return 2
+
+    @classmethod
     def handle_gate_pause(cls, vllm_host: str, duration: Optional[str]) -> int:
         """
         `ling-admin night pause [--for DURATION]` and `night resume`: while paused, the model gate
@@ -1221,6 +1262,21 @@ class DreamferenceCLIController:
         night_run_parser.add_argument("--minutes", type=float, default=None, help="Run for this many minutes instead")
         night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing; their requests still pause the run)")
+        night_every_parser = night_subparsers.add_parser(
+            "every", help="Repeating tasks, queued by each night's run when due")
+        night_every_subparsers = night_every_parser.add_subparsers(dest="night_every_command")
+        night_every_add_parser = night_every_subparsers.add_parser(
+            "add", help="Repeat a task in this repository every night or every week")
+        night_every_add_cadence = night_every_add_parser.add_mutually_exclusive_group(required=True)
+        night_every_add_cadence.add_argument("--daily", action="store_true", help="Every night")
+        night_every_add_cadence.add_argument(
+            "--weekly", choices=["mon", "tue", "wed", "thu", "fri", "sat", "sun"], help="Every week, that day's night")
+        night_every_add_parser.add_argument("--test", default=None, help="The test command each run uses")
+        night_every_add_parser.add_argument("task", nargs="+", help="What to do, in words")
+        night_every_subparsers.add_parser("list", help="The repeating tasks, as JSON lines")
+        night_every_drop_parser = night_every_subparsers.add_parser(
+            "drop", help="Stop repeating a task (what it already queued stays)")
+        night_every_drop_parser.add_argument("id", help="The repeating task's id (r...)")
         night_pause_parser = night_subparsers.add_parser("pause", help="Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate)")
         night_pause_parser.add_argument("--for", dest="duration", default="1h", help="How long: 90m, 2h, 45s, or minutes (default 1h)")
         night_subparsers.add_parser("resume", help="End a pause: the model gate refuses everyone but the benchmark run again")
@@ -1246,8 +1302,14 @@ class DreamferenceCLIController:
             "in a repository with Claude Code's files",
         )
         audit_egress_mode.add_argument("--docs", action="store_true", help="Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing")
+        audit_egress_mode.add_argument(
+            "--sync",
+            action="store_true",
+            help="Trace one sync agent cycle instead (`ling sync agent --once`) against a throwaway hub: "
+            "it must reach the node's ling web port and nothing else",
+        )
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
-        audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web or docs)")
+        audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web, docs or sync)")
         audit_egress_parser.add_argument("--ling-docs-bin", default=None, help=argparse.SUPPRESS)
 
         # Command: ling-admin node (offer this machine to the local network as a Mightling node)
@@ -2600,6 +2662,9 @@ class DreamferenceCLIController:
                               "search over a fixture folder, with no ling session to prompt.")
                         sys.exit(2)
                     sys.exit(DocsEgressAudit.run(ling_docs=args.ling_docs_bin, write_json=args.json))
+                if args.sync:
+                    from dreamference.audit import SyncEgressAudit
+                    sys.exit(SyncEgressAudit.from_cli(prompt=args.prompt, write_json=args.json))
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
                 sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui, app=args.app, web=args.web,
                                          compat=args.compat is not None))
@@ -2713,7 +2778,9 @@ class DreamferenceCLIController:
                                               ignore_sessions=args.ignore_open_sessions))
             if args.night_command in ("pause", "resume"):
                 sys.exit(cls.handle_gate_pause(config.vllm_host, args.duration if args.night_command == "pause" else None))
-            print("usage: ling-admin night {enable,disable,status,run,pause,resume}")
+            if args.night_command in ("every",):
+                sys.exit(cls.handle_night_every(args))
+            print("usage: ling-admin night {enable,disable,status,run,every,pause,resume}")
             sys.exit(2)
 
         elif args.command == "code":

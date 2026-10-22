@@ -56,6 +56,14 @@ pub fn use_mightling_home() {
     // can be deleted.
     #[cfg(windows)]
     crate::update::sweep_replaced_binaries();
+    set_codex_home();
+    // Once `CODEX_HOME` is settled, since its `config.toml` is read: a "no network" the user chose
+    // for the workspace-write sandbox holds for the read-only one too (airgapped.rs).
+    crate::airgapped::export_read_only_network_choice();
+}
+
+/// The part of [`use_mightling_home`] that settles `CODEX_HOME`.
+fn set_codex_home() {
     let Some(home) = ling_node_locator::home_dir() else {
         return;
     };

@@ -1317,6 +1317,10 @@ def test_an_sglang_model_leaves_the_vllm_compile_cache_alone(monkeypatch):
         "dreamference.vllm_server.chat_template_patcher.ChatTemplatePatcher.prepare",
         classmethod(lambda cls, *a: Path("/nonexistent/chat_template.jinja")),
     )
+    monkeypatch.setattr(
+        "dreamference.vllm_server.sglang_runtime_patcher.SGLangRuntimePatcher.prepare",
+        classmethod(lambda cls, image, patches: None),
+    )
     try:
         mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=True)
     except Exception:

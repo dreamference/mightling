@@ -4,6 +4,8 @@
 // browser against another transport. Nothing else in the UI touches Electron.
 
 import type { Transport } from "./rpc";
+import type { TerminalSession } from "./terminal";
+import type { PaneKind, WindowsState } from "./windows";
 
 export interface Started {
   served_model: string | null;
@@ -118,7 +120,7 @@ export const git = {
   stage: (root: string, paths: string[]) => send<void>({ type: "git/stage", root, paths }),
   unstage: (root: string, paths: string[]) => send<void>({ type: "git/unstage", root, paths }),
   discard: (root: string, paths: string[]) => send<void>({ type: "git/discard", root, paths }),
-  apply: (root: string, patch: string, options: { cached?: boolean; reverse?: boolean; index?: boolean }) => send<void>({ type: "git/apply", root, patch, ...options }),
+  apply: (root: string, patch: string, options: { cached?: boolean; reverse?: boolean; index?: boolean; zeroContext?: boolean }) => send<void>({ type: "git/apply", root, patch, ...options }),
   commit: (root: string, message: string, all: boolean) => send<string>({ type: "git/commit", root, message, all }),
   push: (root: string, force: boolean, thread: string | null) => send<string>({ type: "git/push", root, force, thread }),
   pullRequest: (root: string, thread: string | null) => send<string>({ type: "git/pull-request", root, thread }),
@@ -189,6 +191,16 @@ export function openDocument(doc: string, page: number | null): Promise<null> {
   window.open(`/docs/${doc}${page === null ? "" : `#page=${page}`}`, "_blank", "noopener");
   return Promise.resolve(null);
 }
+/**
+ * Opens a web address from an answer, once the user said so (LinkDialog.tsx): in the app in the
+ * system's browser through the main process, which refuses at `/airgapped on`; in a browser on
+ * `ling web` in a new tab, with no opener and no referrer.
+ */
+export function openWebLink(url: string, thread: string | null): Promise<unknown> {
+  if (host() === "electron") return send<string>({ type: "open/url", url, thread });
+  window.open(url, "_blank", "noopener,noreferrer");
+  return Promise.resolve(null);
+}
 export const openEditorAt = (dir: string, editor: string | null) => send<null>({ type: "open/editor", dir, editor });
 
 export interface TaskEvent {
@@ -248,6 +260,40 @@ export async function popOut(thread: string): Promise<void> {
 }
 /** Keeps this window above the others; resolves with whether it now is. */
 export const alwaysOnTop = (on: boolean) => send<boolean>({ type: "window/always-on-top", on });
+
+/** What a detached pane asks of the window it came from (desktop/electron/src/windows.ts `paneAction`). */
+export type PaneAction =
+  | { kind: "newTerminal"; thread: string }
+  | { kind: "compose"; thread: string; text: string }
+  | { kind: "openFile"; thread: string; path: string; line: number | null };
+
+/**
+ * Several windows (the app only; DESKTOP_ELECTRON §13): a new one, what this one shows (the main
+ * process gives a thread's composer to one window), taking the composer over, a pane detached into
+ * a window of its own and docked back, and a detached pane's requests for the window it came from.
+ */
+export const windows = {
+  available: () => host() === "electron",
+  open: (view: "ask" | "work") => send<void>({ type: "window/new", view }),
+  state: () => send<WindowsState>({ type: "window/state" }),
+  showing: (view: "ask" | "work", thread: string | null) => send<WindowsState>({ type: "window/showing", view, thread }),
+  take: (thread: string) => send<WindowsState>({ type: "window/take", thread }),
+  showThread: (thread: string) => send<void>({ type: "window/show-thread", thread }),
+  detach: (pane: PaneKind, thread: string) => send<void>({ type: "window/detach", pane, thread }),
+  dock: (pane: PaneKind, thread: string) => send<void>({ type: "window/dock", pane, thread }),
+  /** A detached pane's request; the main process names the pane's thread. */
+  relay: (action: { kind: "newTerminal" } | { kind: "compose"; text: string } | { kind: "openFile"; path: string; line: number | null }) => send<void>({ type: "pane/relay", action }),
+};
+
+/** The terminal tabs every window sees (desktop/electron/src/terminal-mirror.ts): the app only. */
+export const terminals = {
+  available: () => host() === "electron",
+  list: () => send<TerminalSession[]>({ type: "terminal/list" }),
+  publish: (session: TerminalSession) => send<void>({ type: "terminal/publish", session }),
+  forget: (processId: string) => send<void>({ type: "terminal/forget", processId }),
+  /** A tab's recent output, base64, kept by the main process from the start. */
+  backlog: (processId: string) => send<string>({ type: "terminal/backlog", processId }),
+};
 /** The user's home folder, where a thread with no project works. */
 export const homeFolder = () => send<string>({ type: "app/home" });
 export interface Insights {
@@ -307,15 +353,48 @@ export const nodes = {
 };
 
 /** The Scheduled view over Night Shift (desktop/electron/src/night.ts). */
+/** A repeating Night Shift task (desktop/electron/src/night.ts). */
+export interface RepeatingTask {
+  id: string;
+  repo: string;
+  task: string;
+  test: string | null;
+  cadence: "daily" | "weekly";
+  weekday: string | null;
+  lastQueued: string | null;
+  lastError: string | null;
+}
 export const night = {
   list: () => send<{ tasks: NightTask[]; reports: { name: string; modified: number }[] }>({ type: "night/list" }),
   report: (name: string) => send<string>({ type: "night/report", name }),
   add: (repo: string, task: string, test: string | null) => send<string>({ type: "night/add", repo, task, test }),
   drop: (repo: string, id: string) => send<string>({ type: "night/drop", repo, id }),
   runNow: () => send<null>({ type: "night/run" }),
+  /** Repeating tasks: every night, or every week on one day (ling-admin night every). */
+  every: (repo: string, task: string, test: string | null, cadence: "daily" | "weekly", weekday: string | null) =>
+    send<string>({ type: "night/every-add", repo, task, test, cadence, weekday }),
+  repeating: () => send<RepeatingTask[]>({ type: "night/every-list" }),
+  dropRepeating: (id: string) => send<string>({ type: "night/every-drop", id }),
+  /** A finished task's last message, diff and transcript, and the session it ran as. */
+  details: (id: string) => send<{ result: string | null; diff: string | null; transcript: string | null; session: string | null }>({ type: "night/details", id }),
 };
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
+/** Saves a thread's export where the user chooses (desktop app); the path, or null when cancelled. */
+export const saveText = (name: string, text: string) => send<string | null>({ type: "dialog/save-text", name, text });
+
+/** A project's knowledge files (desktop app only: `ling web` has no main process to keep them). */
+export interface KnowledgeFile {
+  name: string;
+  path: string;
+  size: number;
+}
+export const knowledge = {
+  available: () => host() === "electron",
+  list: (projectId: string) => send<KnowledgeFile[]>({ type: "project/knowledge-list", projectId }),
+  add: (projectId: string) => send<KnowledgeFile[]>({ type: "project/knowledge-add", projectId }),
+  remove: (projectId: string, name: string) => send<KnowledgeFile[]>({ type: "project/knowledge-remove", projectId, name }),
+};
 
 /** One collection of the local file index, as `ling docs status --json` describes it. */
 export interface DocsCollection {
@@ -396,6 +475,27 @@ export async function base64(file: Blob): Promise<string> {
 }
 
 /**
+ * An incognito question (DESKTOP_PARITY_CLAUDE §4.3), the desktop app's only: its folder marked when
+ * it starts, and deleted, with every file in it, when the question is left.
+ */
+export const incognito = {
+  available: () => host() === "electron",
+  mark: (thread: string) => send<null>({ type: "ask/incognito", thread }),
+  forget: (thread: string) => send<boolean>({ type: "ask/forget", thread }),
+};
+
+/**
+ * Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4), the desktop app's only: the copies the
+ * main process keeps while Settings › Memories has it on.
+ */
+export const recall = {
+  available: () => host() === "electron",
+  index: () => send<Record<string, number>>({ type: "recall/index" }),
+  write: (thread: string, updatedAt: number, markdown: string) => send<null>({ type: "recall/write", thread, updatedAt, markdown }),
+  prune: (keep: string[]) => send<number>({ type: "recall/prune", keep }),
+};
+
+/**
  * Writes an attachment into an Ask thread's scratch folder, and resolves with where it landed: in
  * a browser through `ling web`'s `/api/upload` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1), in the
  * app through its main process, which applies the same checks (desktop/electron/src/ask.ts).
@@ -446,6 +546,16 @@ export interface BridgeEvents {
   task?: (event: TaskEvent) => void;
   /** A `ling://` link or a second `ling app` asked for something (DESKTOP_PARITY §2.20). */
   link?: (target: LinkTarget) => void;
+  /** Who holds which thread's composer, whenever it changes (several windows). */
+  windows?: (state: WindowsState) => void;
+  /** Every terminal tab of the app, whenever the list changes. */
+  terminals?: (list: TerminalSession[]) => void;
+  /** A pane detached from this window closed: show it here again. */
+  docked?: (pane: PaneKind, thread: string) => void;
+  /** A pane detached from this window asks for something. */
+  paneAction?: (action: PaneAction) => void;
+  /** The Window menu's pane items, for this window. */
+  command?: (command: "detachTerminal" | "detachReview") => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -468,6 +578,20 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
         return events.link?.(data.payload as LinkTarget);
       case "task://event":
         return events.task?.(data.payload as TaskEvent);
+      case "windows":
+        return events.windows?.(data.payload as WindowsState);
+      case "terminals":
+        return events.terminals?.(Array.isArray(data.payload) ? (data.payload as TerminalSession[]) : []);
+      case "pane://docked": {
+        const docked = data.payload as { pane?: unknown; thread?: unknown } | null;
+        if ((docked?.pane === "terminal" || docked?.pane === "review") && typeof docked.thread === "string") events.docked?.(docked.pane, docked.thread);
+        return;
+      }
+      case "pane://action":
+        return events.paneAction?.(data.payload as PaneAction);
+      case "command":
+        if (data.payload === "detachTerminal" || data.payload === "detachReview") events.command?.(data.payload);
+        return;
     }
   };
   window.addEventListener("message", onMessage);
@@ -500,6 +624,8 @@ export interface PickedElement {
 
 /** The preview tab (DESKTOP_PARITY §2.9): the desktop app's only; a browser on `ling web` has none. */
 export const preview = {
+  /** The recent console of a thread's previews (or of every preview), for the agent's console tool. */
+  console: (thread: string | null) => send<{ url: string; lines: string[] }[]>({ type: "preview/console", thread }),
   available: () => host() === "electron",
   open: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/open", id, url, thread }),
   navigate: (id: string, url: string, thread: string | null) => send<null>({ type: "preview/navigate", id, url, thread }),

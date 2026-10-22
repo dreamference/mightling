@@ -79,11 +79,12 @@ SESSION_NAMES: Final[Dict[str, str]] = {
 }
 
 # The desktop app's session (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §6): `ling-app` is
-# started as `ling app` starts it, with `MIGHTLING_APP_AUDIT=<seconds>`: its one window opens
-# hidden on Ask, the app-server it owns is started (and traced with it), and it quits by itself
-# after that many seconds. Its allowlist is the `exec` session's: since 2026-10-09 the app opens
-# no window on `ling web` (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6), so a connection to that
-# server's port 3100, like one to the retired Onyx web UI's 3000, is a finding.
+# started as `ling app` starts it, with `MIGHTLING_APP_AUDIT=<seconds>`: one window opens hidden
+# on Ask (no other: the session restores none), the app-server it owns is started (and traced
+# with it), and it quits by itself after that many seconds. Its allowlist is the `exec`
+# session's: since 2026-10-09 the app opens no window on `ling web`
+# (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6), so a connection to that server's port 3100, like
+# one to the retired Onyx web UI's 3000, is a finding.
 APP_SESSION_S: Final[int] = 40
 
 # Mightling over Signal (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §10): the one component that talks to
@@ -231,8 +232,10 @@ class EgressAudit:
         env = dict(os.environ)
         env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
         # The base: the audited session is the same whatever adapter the user starts sessions with.
-        from dreamference.runner.codex_installer import ADAPTER_ENV
+        from dreamference.runner.codex_installer import ADAPTER_ENV, WORKTREE_ENV
         env[ADAPTER_ENV] = ""
+        # In place: the audited TUI session never moves into a worktree of the throwaway repository.
+        env[WORKTREE_ENV] = "off"
         # `-yy` labels each descriptor with its socket kind and inode, which is what tells a UDP
         # route lookup from a connection (StraceParser).
         strace = ["strace", "-f", "-qq", "-yy", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]

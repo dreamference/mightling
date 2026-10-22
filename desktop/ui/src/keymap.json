@@ -13,6 +13,16 @@
    "status": "built"
   },
   {
+   "id": "newWindow",
+   "group": "General",
+   "label": "New window",
+   "keys": [
+    "Ctrl+Shift+N"
+   ],
+   "context": "global",
+   "status": "built"
+  },
+  {
    "id": "settings",
    "group": "General",
    "label": "Settings",

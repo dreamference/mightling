@@ -73,8 +73,8 @@ diff --git a/codex-rs/tui/src/chatwidget/plugin_catalog.rs b/codex-rs/tui/src/ch
                  (
 -                    "No OpenAI Curated plugins available",
 -                    "No OpenAI Curated plugins available",
-+                    "No Curated plugins available",
-+                    "No Curated plugins available",
++                    "Vendor catalogue closed in Mightling",
++                    "Mightling does not fetch the vendor's curated plugins",
                  )
 @@ -809,3 +809,3 @@
              curated_items.push(remote_section_loading_item(

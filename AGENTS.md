@@ -11,7 +11,7 @@ ling-search "your query here"              # search; -n N for more results (defa
 ling-fetch "https://example.com"           # fetch a page as readable text
 ```
 
-Do not use `curl` or `wget` for this: the sandbox usually blocks them, which looks like the site being down rather than the command being unavailable. There is no web search *tool*; search is a shell command. The full instructions are appended to the system prompt by the `ling` launcher (`WEB_ACCESS_INSTRUCTIONS` in `ling-rs/src/lib.rs`), so they apply in every workspace; this section is a pointer, not a copy.
+Prefer them to `curl` or `wget` for reading the web; sandboxed commands have the network unless `/airgapped on`. There is no web search *tool*; search is a shell command. The full instructions are appended to the system prompt by the `ling` launcher (`WEB_ACCESS_INSTRUCTIONS` in `ling-rs/src/lib.rs`), so they apply in every workspace; this section is a pointer, not a copy.
 
 ## Project
 
@@ -58,7 +58,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 - **`ling` is never upstream `codex`.** `CodexInstaller` resolves the built path only; a fallback to a `codex` on PATH would silently bring back the unbranded agent.
 - **Host safety.** On unified memory a model load can freeze the whole host. Keep both layers, `check_host_safety()` before a load and the PSI watchdog during it, when touching `start_server()`; anything that runs beside a resident model server (indexing, sidecars) must bound its memory. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md).
 - **Two install modes.** A checkout has `codex/`, `codex-patches/` and the crates beside the package; a release install has only the wheel and prebuilt binaries. Anything new that reaches for a path under `REPO_ROOT` needs the `has_source()` guard. Details: [docs/dev/install-modes.md](docs/dev/install-modes.md).
-- **No sandboxed command reaches a host control socket** (Docker, containerd, Podman, the D-Bus buses, the systemd user manager): patch 0019 denies them (`ling_airgapped::host_sockets`). Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
+- **Host control sockets** (Docker, D-Bus, systemd…) are masked from sandboxed commands only at `/airgapped on` (patch 0019, `host_sockets_at`); at `off` the sandbox is Codex's. Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
 - **Sandbox results need the AppArmor profile.** `kernel.apparmor_restrict_unprivileged_userns` is 1, so `bwrap` (and Chromium's sandbox) need a profile to create a user namespace. Shells under PyCharm run in a permissive profile and pass anyway; units, the Night Shift timer and SSH jobs do not. Check `cat /proc/self/attr/current` before trusting a sandbox result; `ling-admin host setup` installs the profile. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md#bubblewrap-needs-an-apparmor-profile-and-this-machine-now-has-one).
 - **Unattended callers of `ling`** (Night Shift, the egress audit, SWE-bench, the Codex test runner) name the model server in `DREAMFERENCE_VLLM_HOST`: a node browse is a multicast DNS query, which the egress audit counts as a failure.
 - **Launch flags belong in the model registry**, not in the launch builder ([docs/dev/models-and-engines.md](docs/dev/models-and-engines.md)). Ask the *server* which model is running (`model_key_for_served_id`), never the config.
@@ -67,7 +67,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 - **Byte-identical copies** are compared by tests: the air-gap resolver (`ling-rs/airgapped/` and `ling-web-rs/src/airgapped.rs`) and the node locator (`ling-rs/node-locator/` and `ling-web-rs/src/node_locator.rs`). Change both or neither.
 - **Never write the user's choices into the repository** where a clone or the agent could write them: submodule indexing choices live in `$CODEX_HOME/ling-code.toml`, a node's advertisement in `~/.config/dreamference/node-advertise.json`, and for `/airgapped` the strictest of the repository's and the user's config wins.
 - The specification is `specs/`, one document per area, indexed by `specs/README.md` (which also lists the code defects found when the specs were reconciled with the code on 2026-09-28). There is no single `DREAMFERENCE_SPEC.md` any more; read the one document you need.
-- `.gemini/`, `.antigravity/`, `.dreamference/` are gitignored leftovers from other tooling, not part of the project (`.dreamference/` at a workspace root is also where the context engine writes its index).
+- `.gemini/`, `.antigravity/`, `.dreamference/` are gitignored leftovers of other tools (`.dreamference/` at a workspace root also holds the context engine's index).
 
 ## Where things live
 
@@ -109,7 +109,7 @@ Outside the package:
 
 `ling-admin` (`dreamference.cli:main`) has about thirty subcommand groups (`init`, `run`, `server`, `codex`, `node`, `night`, `desktop`, `audit`, …); every command rejects unknown arguments. The full list: [docs/dev/cli.md](docs/dev/cli.md).
 
-`ling`, the terminal agent, is **not** Python: it is the Rust binary `CodexBrandedBuilder` builds, linked at `~/.local/bin/ling`, so every Codex flag and subcommand works natively (`ling -a on-request "…"`, `ling exec …`, `ling resume --last`). The old `chat` subcommand that started the agent was removed once the agent stopped being a Python wrapper; `ling-admin run "…"` remains for one-shot tasks with any configured agent. `ling-search` and `ling-fetch` are Rust binaries from `ling-web-rs/`, installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is only the MCP server's copy of the same behaviour.
+`ling`, the terminal agent, is **not** Python: it is the Rust binary `CodexBrandedBuilder` builds, linked at `~/.local/bin/ling`, so every Codex flag and subcommand works natively. The old `chat` subcommand that started the agent was removed once the agent stopped being a Python wrapper; `ling-admin run "…"` remains for one-shot tasks with any configured agent. `ling-search` and `ling-fetch` are Rust binaries from `ling-web-rs/`, installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is only the MCP server's copy of the same behaviour.
 
 ## Architecture in brief
 
@@ -127,7 +127,9 @@ Outside the package:
 
 **The egress audit**, `ling-admin audit egress`, runs a real `ling exec` under strace and passes only if every connection is an allowlisted loopback port and no DNS query left. Re-run it after any Codex bump; `codex build` runs it. Details: [docs/dev/egress-audit.md](docs/dev/egress-audit.md).
 
-**`/airgapped`** has two levels, `off` and `on`; `on` gives every sandboxed command an empty network namespace, enforced in Codex's sandbox helper (patch `0019`), and is never allowed together with Full Access. Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
+**`/airgapped`** has two levels, `off` and `on`; `on` gives every sandboxed command an empty network namespace (patch `0019`), never goes with Full Access, and loads no plugin (allowed at `off`, but never the vendor's). Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
+
+**Where edits land:** in place, as in Codex; `/worktree on` starts new TUI sessions in a worktree, `/worktree apply` brings changes back. Details: [docs/dev/launcher.md](docs/dev/launcher.md#where-edits-land-worktree).
 
 **Skills from other agents** are linked under `~/.mightling/skills/from-<agent>/` at every start and budgeted, with no Codex patch. Details: [docs/dev/skills.md](docs/dev/skills.md).
 
@@ -139,13 +141,13 @@ Outside the package:
 
 **The web UI is `ling web`** (`ling-rs/web`, port 3100) and the desktop app the same page; the Onyx web chat is retired (spec `specs/DREAMFERENCE_MIGHTLING_ASK.md` §19). Image search and voice are sidecars behind both (`ling-admin images`, `ling-admin voice`); `server start` on a node starts them. Details: [docs/dev/cli.md](docs/dev/cli.md#sidecars-behind-ling-web-and-the-app).
 
-**The desktop app** is stock Electron with `ling` inside and one window: it shows Ask and Work (the menu, the tray and `ling app` switch its view, never open another) and talks to its own `ling app-server`, the app's only one, over one IPC channel, vetted by the main process against `ling-rs/web/policy.json`, the file `ling web` enforces (both run its conformance cases); egress is closed in the main process and audited with `--app`. Details: [docs/dev/desktop.md](docs/dev/desktop.md).
+**The desktop app** is stock Electron with `ling` inside: several windows (New Window; a thread, the terminal or the diff popped out), each Ask or Work, all on its own `ling app-server`, the app's only one (single-instance lock); one IPC channel routed per window, one composer per thread, every message vetted by the main process against `ling-rs/web/policy.json`, the file `ling web` enforces (both run its conformance cases); egress is closed in the main process and audited with `--app`.
 
 **The code index**, `ling-code` (`ling-code-rs/`), answers `def`/`refs`/`callers`/… from codebase-memory's graph and scip stores; queries only read, indexing runs outside the sandbox under one host-wide memory budget, and a submodule is indexed only if it is yours or you ask. Details: [docs/dev/code-index.md](docs/dev/code-index.md).
 
 **The local file index**, `ling-docs` (`ling-docs-rs/`), indexes the user's collections (`~/Documents`, `~/Downloads` by default) for `docs_search`/`docs_read`, opens no socket, and indexes in bwrap under the same memory budget. Details: [docs/dev/local-file-index.md](docs/dev/local-file-index.md).
 
-**Phone messengers** ship with Mightling and are **off until a command turns one on**: `ling signal setup` (Signal, linked to the owner's account, Note to Self only), `ling chat start` after `ling chat telegram setup` or `ling-admin matrix start` (Matrix over Tailscale, Telegram). One surface: `ling signal …` and `ling chat …` are launcher subcommands; the small `ling-signal` binary is only the daemon a system account runs. signal-cli and its Java runtime are fetched by setup, pinned by URL and SHA-256. `stop` disables, and the egress audit names every bridge that is on. Details: [docs/dev/messengers.md](docs/dev/messengers.md).
+**Phone messengers** ship with Mightling and are **off until a command turns one on**: `ling signal setup` (Signal, linked to the owner's account, Note to Self only), `ling chat start` after `ling chat telegram setup` or `ling-admin matrix start` (Matrix over Tailscale, Telegram). One surface: `ling signal …` and `ling chat …` are launcher subcommands; the small `ling-signal` binary is only the daemon a system account runs. `stop` disables, and the egress audit names every bridge that is on. Details: [docs/dev/messengers.md](docs/dev/messengers.md).
 
 **The context engine** (`context_engine/`, `ling-admin index` and `mcp`) writes `.dreamference/context_index.json` and `context.db`; its indexing is bounded because it runs beside a resident model server. Details: [docs/dev/context-engine.md](docs/dev/context-engine.md).
 
@@ -192,6 +194,7 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay, its DNS and its migration
 - [docs/dev/adapters.md](docs/dev/adapters.md): LoRA adapters: `ling-admin adapter`, the signature, serving them
 - [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
+- [docs/dev/sync.md](docs/dev/sync.md): `ling sync`
 - [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
 - [docs/dev/cli.md](docs/dev/cli.md): every `ling-admin` subcommand, the sidecars behind `ling web` and the app
-- [docs/dev/sessions.md](docs/dev/sessions.md): the parallel work streams of 2026-10-10 and their status board (retired)
+- [docs/dev/sessions.md](docs/dev/sessions.md): the work streams of 2026-10-10 (retired)
