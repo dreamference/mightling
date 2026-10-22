@@ -98,6 +98,8 @@ ASK_EVALS_LING=${ASK_EVALS_LING:-$HOME/.local/share/dreamference/mightling/bin/l
 # use time, never stored as an address).
 REMOTE=${REMOTE:-node-b}
 REMOTE_HOST=${REMOTE_HOST:-node-b.local}
+# The helper's folder there (its ling-serve, serve.py, lease and logs), when not its default ~/ab-n12.
+REMOTE_AB_DIR=${REMOTE_AB_DIR:-}
 
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
@@ -140,16 +142,16 @@ remote_serve() {
     case "$server" in sglang) port=30000 ;; engine) port=8300 ;; *) return 2 ;; esac
     # The helper first waits for REMOTE's GPU lock (up to 14 h, while day-time engine work holds it), then up to
     # about 45 min for the arm: the ssh session outlasts both.
-    out=$(timeout "${REMOTE_SERVE_TIMEOUT:-15h}" ssh -o BatchMode=yes "$REMOTE" bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
+    out=$(timeout "${REMOTE_SERVE_TIMEOUT:-15h}" ssh -o BatchMode=yes "$REMOTE" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
     local rc=$?
     echo "$out" | tail -3 | sed 's/^/   /'
     [ "$rc" -eq 0 ] && echo "$out" | grep -q '^ready ' || return 1
     export DREAMFERENCE_VLLM_HOST="http://$REMOTE_HOST:$port"
     log "$server on $REMOTE serving at $DREAMFERENCE_VLLM_HOST ($(echo "$out" | sed -n 's/^ready //p'))"
 }
-# Production back on REMOTE, both arms stopped.
+# Production back on REMOTE, both arms stopped; `remote_restore keep`: the arms stopped and the GPU lock kept.
 remote_restore() {
-    timeout 30m ssh -o BatchMode=yes "$REMOTE" bash -s -- restore < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
+    timeout 30m ssh -o BatchMode=yes "$REMOTE" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- restore ${1:-} < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
     unset DREAMFERENCE_VLLM_HOST
 }
 free_gb() { df --output=avail -BG "${DISK_PATH:-$HOME/.cache}" | tail -1 | tr -dc '0-9'; }
@@ -335,11 +337,14 @@ start() {
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
     fi
-    # Every arm runs one real task first; nothing below happens unless each one ran. Production on REMOTE comes
-    # back after the smoke whatever it found; the night serves each arm again.
+    # Every arm runs one real task first; nothing below happens unless each one ran. On REMOTE, a smoke that failed
+    # brings production back; one that passed stops the arms and keeps the GPU lock for the night, which serves each
+    # arm again (a lock let go here goes to whoever waits on it: night 12's start let it go for 6 s).
     smoke
     rc=$?
-    uses_remote && remote_restore
+    if uses_remote; then
+        if [ "$rc" -eq 0 ]; then remote_restore keep; else remote_restore; fi
+    fi
     [ "$rc" -eq 0 ] || exit 1
     if [ "$BEST_OF" -gt 1 ]; then judge_smoke || exit 1; fi
     # A finished or failed night keeps its folder; this one starts clean.
@@ -360,7 +365,9 @@ start() {
         --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
-        /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
+        --setenv=REMOTE="$REMOTE" --setenv=REMOTE_HOST="$REMOTE_HOST" --setenv=REMOTE_AB_DIR="$REMOTE_AB_DIR" \
+        /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1" \
+        || { echo "❌ Could not start $UNIT."; uses_remote && remote_restore; exit 1; }
     echo "✅ Started $UNIT; log: $D/run.log"
 }
 
@@ -479,7 +486,9 @@ run() {
             disk_pause "$PREFIX-$name" || fail "round $PREFIX-$name (instances not run)" 1
         done
     done
-    uses_remote && remote_restore
+    # Production back now; the EXIT trap's second restore would find no lease and wait 30 min for a lock that is
+    # by then someone else's.
+    if uses_remote; then remote_restore; trap - EXIT; fi
     for name in $rname $cname; do
         log "regrade $PREFIX-$name with the test files dropped"
         admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images
