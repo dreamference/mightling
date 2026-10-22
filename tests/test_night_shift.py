@@ -614,7 +614,8 @@ def test_the_subcommand_after_options_and_their_values_is_found(args):
 
 @pytest.mark.parametrize("args", [
     ["chat", "start"], ["signal", "status"], ["docs", "status"], ["audit", "egress"],
-    ["ledger", "show"], ["notice"], ["refine", "hook"], ["plugin", "list"], ["remote-control"],
+    ["ledger", "show"], ["notice"], ["refine", "hook"], ["guard", "tests.finish"], ["plugin", "list"],
+    ["remote-control"],
     ["exec-server"], ["queue", "t1", "next"], ["archive", "t1"], ["unarchive", "t1"], ["delete", "t1"],
     ["execpolicy", "check"], ["migrate-rollouts"], ["responses-api-proxy"], ["stdio-to-uds", "/s"],
     ["tcp-tunnel"], ["mcp-server"], ["app-server", "--listen", "unix:///s"],

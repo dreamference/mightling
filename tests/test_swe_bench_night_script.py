@@ -476,6 +476,53 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_drop_switch(tmp_
     assert not (tmp_path / "night7").exists()
 
 
+def test_the_guard_arms_reach_only_their_round_and_stack(tmp_path):
+    status, recorded, folder = night(tmp_path, "default test-guard+finish-check")
+    assert status == 0 and (folder / "done").exists()
+    record, candidate = runs(recorded)
+    assert "--test-guard" not in record and "--finish-check" not in record
+    assert "--name n4-test-guard-finish-check " in candidate
+    assert candidate.count("--test-guard") == 1 and candidate.count("--finish-check") == 1
+    assert "--task-rules" not in candidate
+    assert (folder / "test-guard-finish-check-against-default.txt").exists()
+
+
+@pytest.mark.parametrize("arm", ["test-guards", "test_guard", "finish", "finish-checks", "testguard"])
+def test_a_misspelt_guard_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"default {arm}")
+    assert status == 2 and runs(recorded) == []
+    assert (folder / "failed").exists() and not (folder / "done").exists()
+
+
+@pytest.mark.parametrize(("arm", "variable"), [("test-guard", "TEST_GUARD"), ("finish-check", "FINISH_CHECK")])
+@pytest.mark.parametrize("reads_it", [False, True])
+def test_start_refuses_an_installed_ling_without_the_guards(tmp_path, arm, variable, reads_it):
+    # As for the drop arm: stand-ins for systemctl, git and the venv's Python.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ling = tmp_path / "ling"
+    marker = f"DREAMFERENCE_MIGHTLING_{variable}".encode()
+    ling.write_bytes(b"\x7fELF ... " + marker + b" ..." if reads_it else b"\x7fELF ... 1.7.0 ...")
+    for name, body in (("systemctl", "exit 1"), ("git", "exit 0")):
+        tool = bin_dir / name
+        tool.write_text(f"#!/bin/bash\n{body}\n")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    fake = tmp_path / "python"
+    install = tmp_path / "install"
+    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{install}";; esac\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
+           "D": str(tmp_path / "night7"), "NIGHT": "7", "UNIT": "ling-swe-night7-test",
+           "LIVE_UNIT": "ling-swe-night6-test", "ARMS": f"default {arm}", "LIST": str(tmp_path / "list.txt")}
+    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 1
+    refused = f"{ling} does not read DREAMFERENCE_MIGHTLING_{variable}" in result.stdout
+    assert refused is not reads_it
+    if reads_it:
+        assert "ling-code is missing" in result.stdout
+    assert not (tmp_path / "night7").exists()
+
+
 def best_of_night(tmp_path, arms="default", best_of="3"):
     """The night's `run` step with BEST_OF set; returns (exit status, recorded calls, D)."""
     calls = tmp_path / "calls.txt"

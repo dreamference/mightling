@@ -154,7 +154,8 @@ pin_build() {
 # arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM freeform
 # or off: `--apply-patch FORM`, spec §22; the pinned Codex has no function form, so ling refuses it), `exec-tool-FORM` (FORM function or freeform:
 # `--exec-tool FORM`, spec §23), `drop-outputs` (drop-first compaction: `--drop-old-outputs`,
-# compaction spec §13), or several of these joined with `+`
+# compaction spec §13), `test-guard` and `finish-check` (the launcher's guards: `--test-guard`,
+# `--finish-check`, spec §29), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -175,6 +176,10 @@ arm_flags() {
             drop-*|drop_*) echo "❌ Arm $1: write the drop-first compaction arm as drop-outputs." >&2; return 2 ;;
             on-sglang|on-engine) ;;  # the model server, not an option of the run (arm_server)
             on-*) echo "❌ Arm $1: write the model server as on-sglang or on-engine." >&2; return 2 ;;
+            test-guard) flags="$flags --test-guard" ;;
+            finish-check) flags="$flags --finish-check" ;;
+            test-guard*|test_guard*|testguard*) echo "❌ Arm $1: write the test guard's arm as test-guard." >&2; return 2 ;;
+            finish*) echo "❌ Arm $1: write the finish check's arm as finish-check." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
@@ -373,6 +378,19 @@ start() {
             echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS: rebuild it (\`ling-admin codex build\`) from a commit that has drop-first compaction."; exit 1
         fi ;;
     esac
+    # The guard arms only set the launcher's switches (spec §29); a `ling` built before guard.rs
+    # ignores them, and the night would measure the record arm twice.
+    for guard in test-guard:TEST_GUARD finish-check:FINISH_CHECK; do
+        case "$ARMS" in *"${guard%%:*}"*)
+            if ! grep -q -- "\"--${guard%%:*}\"" "$WT/dreamference/swe_bench/swe_bench_command.py"; then
+                echo "❌ $WT does not have --${guard%%:*}: pin REF to a commit that has it."; exit 1
+            fi
+            ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
+            if ! grep -q -a "DREAMFERENCE_MIGHTLING_${guard#*:}" "$ling"; then
+                echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_${guard#*:}: rebuild it (\`ling-admin codex build\`) from a commit that has the guards."; exit 1
+            fi ;;
+        esac
+    done
     # The universal code index needs codebase-memory-mcp beside ling-code in Mightling's install
     # directory (ling-code never looks on PATH). Without it every index fails and the run refuses
     # to start, which is how the night of 2026-10-09 was lost after the old install folder, which

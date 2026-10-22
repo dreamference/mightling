@@ -1,6 +1,6 @@
 # Mightling on SWE-bench: why 32 of 100 tasks failed (`im100-default`)
 
-**Status:** analysis, 2026-10-08. §6 proposes four changes, each to be measured as an A/B on 50 tasks that are not among these 100. The harness defects of §5, Proposals 1, 2 and 4, and the scripts for the first A/B night are built (§8); nothing is measured yet. §9 (2026-10-09) reads every failure more closely, finds the moment each run went wrong and ranks the candidate fixes for night 3 onwards. Where §9 and §6.5 disagree on order, §9 is current.
+**Status:** analysis, 2026-10-08. §6 proposes four changes, each to be measured as an A/B on 50 tasks that are not among these 100. The harness defects of §5, Proposals 1, 2 and 4, and the scripts for the first A/B night are built (§8); nothing is measured yet. §9 (2026-10-09) reads every failure more closely, finds the moment each run went wrong and ranks the candidate fixes for night 3 onwards. Where §9 and §6.5 disagree on order, §9 is current. §10 (2026-10-20) builds the proposals that change what a user gets as the launcher's guards, switchable night arms, says which proposals were not rebuilt and why, and proposes their A/B on `fresh-150k`'s thirds.
 **Data:** the round `im100-default` in `~/.local/share/dreamference/swe-bench/runs/im100-default/`, read only: `manifest.json`, `predictions.jsonl`, `instances/<id>.json`, `logs/<id>.jsonl` (the agent's event stream), `scratch/<id>/codex-home/sessions/` (the session rollouts), `eval/1/grading.json` and the harness's per-task `report.json` and `test_output.txt`. Each task's difficulty comes from [MIGHTLING_SWE_BENCH_COMPARISON](./DREAMFERENCE_MIGHTLING_SWE_BENCH_COMPARISON.md)'s per-task table (175 published submissions, 78 of them at 60% or more overall).
 **Builds on:** [MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md) (the harness), [MIGHTLING_PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md) §1.4 and §5.2 (the first failure classes, from 11 failures on 24 tasks) and [MIGHTLING_REFINE](./DREAMFERENCE_MIGHTLING_REFINE.md) (the study-then-fix arm, whose 100-task round `im100-refine` started on the evening of 2026-10-08).
 
@@ -335,3 +335,43 @@ Regrading with the test files dropped (`--drop-test-hunks`) changed no count on 
 **The enforced form of rank 1 is available for a later night (2026-10-09).** `--hooks issue-v1` holds the first edit and the first stop once each (§9.3, below the table). Its test is the record arm with `--task-rules issue-v1` against the same with `--hooks issue-v1` added, decided by the behaviour measures the report prints (holds fired and complied, named targets read before the first edit, the example run after the last edit) before the resolve count.
 
 **The list stays fresh only while nobody designs a rule from its transcripts.** Once night 1's or a later night's failures on `fresh-50.txt` are analysed, later measurements need a second list. `scripts/swe_bench_fresh.py draw --exclude docs/dev/swe-bench/fresh-50.txt` (built 2026-10-10; repeatable) draws it from the validated tasks outside `sample-100.txt` and every list named, and the header names each excluded list. There are 120 validated tasks, 100 of them in the sample. Night 1's validation adds about 60, and about 211 arm64 tasks would still be unvalidated.
+
+## 10. The proposals as product arms (2026-10-20)
+
+The owner's decision of 2026-10-20: build this analysis's proposals as switchable night arms, A/B them in later nights on `fresh-150k`'s thirds, and make only winners defaults. The rule from earlier arms holds: an arm changes what a user gets (the agent's prompts, tools, guards) and never uses benchmark-only knowledge (hidden tests, the gold patch, the `FAIL_TO_PASS` list).
+
+### 10.1 Built: two guards in the launcher
+
+Most of §6 and §9 were already arms, but in the harness (the task prompt's rules, the runner's resumes, a gate mounted into the container, a regrade), so none of them could become a default for `ling`, `ling exec` or Night Shift. The two built now live in the launcher (`ling-rs/src/guard.rs`, [MIGHTLING_SWE_BENCH §29](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)), are enforced through Codex's hooks with no Codex patch, are off by default, and are switched on per session (`DREAMFERENCE_MIGHTLING_TEST_GUARD`, `DREAMFERENCE_MIGHTLING_FINISH_CHECK`), in the config file (`mightling_test_guard`, `mightling_finish_check`, which Night Shift's sessions read too) or for a run (`swe-bench run --test-guard`, `--finish-check`; night arms `test-guard`, `finish-check`):
+
+| Arm | What changes for a user | Proposal it builds | Failures it is for |
+|---|---|---|---|
+| `test-guard` | When a change rewrites or removes an assertion of an existing test, deletes a test or skips one, the agent is told at once (once per file), and its first stop while the change stands is held once to decide from the task whether that behaviour was asked to change | §6.1 and §9.3 rank 2 (`tests-v2`), enforced instead of asked | 16100, 11445, 16950, 26194 (assertions rewritten to pass); 13837 and 16877 indirectly |
+| `finish-check` | The first stop after a source change that no test has run on is held once, with the module's existing tests named; so are a stop that calls failures pre-existing with no run on the unchanged code, and one that ends announcing a next step | §6.1's third line and §9.3 rank 3's test half (run the changed modules' tests before stopping, compare by name), §9.1's "pre-existing" pattern, and §6.4's completion nudge as a product rule | 12774, 14623, 16100 (broke a passing test); 14623, 13212, 23413 (pre-existing unchecked); 11885, 15563 (stopped mid-work) |
+
+Both are read in every run, arm or not: the report's `Weakened tests` line counts the patches that weaken an existing test by the guard's rule, from the patch alone, and §24's `broke a passing test` line counts the hidden regressions.
+
+### 10.2 Not rebuilt, and why
+
+- **`--drop-test-hunks` and the harness fixes of §5** (the per-file reset, the test-patch refusal count): grading only. They change what is graded, not what the agent does, so there is nothing a user could get from them; they are built and run in every night already. The collisions of 13837 and 16877 were a grading artefact the per-file reset removed.
+- **"Put any test or script of your own in /tmp"** (§6.1's second line): its harm was the collision above, and for a user a regression test in the repository is wanted, not avoided.
+- **The task-rule texts `tests`, `tests-v2` and `issue-v1`** (§6.1, §6.3, §9.3 ranks 1 and 2): already arms, in the benchmark's task prompt; `tests-v2` against `default` was 64 against 63 of 94 over nights 1 and 2, and the agent survey found the asked-for form of such rules no better than none. Their enforced forms are the guards above and `--hooks issue-v1`.
+- **`--hooks issue-v1`** (§9.3 rank 1, enforced): built in the harness, never run on a night. It reads only the issue, which a user's task is too, so it could be ported to the launcher; port it if its night wins, not before.
+- **`--review-turn`** (§9.3 rank 3): built in the harness, never run on a night. The finish check is its test half as a product rule; the "re-read the issue and the diff" half stays a harness arm until measured.
+- **The completion nudge** (§6.4) stays in the harness for every arm; its product form is the finish check's mid-work hold, measured with that arm.
+- **`--prompt offline`** (rank 5): already a built-in prompt a user can choose (`ling prompt use offline`).
+- **A larger `task_context`** (rank 6): configuration, not behaviour, and it halves a night's throughput.
+- **Restart after compactions**: measured on night 4 (28 against 31 of 44) and dropped.
+- **Not buildable without benchmark knowledge, so skipped:** running the instance's `FAIL_TO_PASS`/`PASS_TO_PASS` tests, or tests named in `hints_text`, before stopping; choosing between patches by the hidden tests; a per-repository test-runner hint (§6.6 already ruled it a benchmark-only crutch). The finish check names tests from the repository's own file names only.
+
+### 10.3 The A/B plan (a proposal for the owner)
+
+The thirds are planned as nights 14 to 16; which arms they carry, G1 to G3 below or others, is the owner's choice. They are `fresh-150k-1of3.txt`, `-2of3.txt` and `-3of3.txt` (50 tasks each, balanced by tier, by membership of `fresh-61j.txt` and by repository; committed on branch `bench/chunked-images`, not yet on main, so a guard night needs that branch merged or the lists copied). `<record>` is the night's record arm (`default` unless an earlier night has changed the configuration of record). Every guard night runs a `ling` built from a commit with `guard.rs` (a source build and the egress audit after it, as nights 5 and 6), and its `start` refuses one without.
+
+| Night | List | `ARMS` | Decided by |
+|---|---|---|---|
+| G1 | third 1 | `<record> <record>+finish-check` | `broke a passing test` down; untested holds fired and complied; tested-at-last-stop share; mid-work and pre-existing holds; median wall time not more than about 10% up; then resolved |
+| G2 | third 2 | `<record> <record>+test-guard` | `Weakened tests` down against the record arm; test-edits holds and compliance; `did not fix` not up (the guard must not talk the agent out of an assertion change the issue asked for); then resolved |
+| G3 | third 3 | if both passed their behaviour measures: `<record>+finish-check <record>+finish-check+test-guard`; if one passed: `<record> <record>+<that arm>`; if neither: no guard night | as above; the arm that passed now has 100 paired tasks over two thirds |
+
+The finish check goes first: it targets the larger class (broken passing tests are 2 to 9% of graded instances in §24's table, against the test guard's few rewritten assertions), and the owner named both. One 50-task pair cannot confirm a resolve-count effect of the size expected (§6.5 item 4: about 7 net tasks for p < 0.05), so each arm is judged by its behaviour measure on its first third, and only an arm that passes is run on a second third, pooled over the 100 tasks for the resolve count. An arm becomes the default only on the owner's decision after that. The guards stack with every other arm, and the night's other arm settings stay the record arm's.
