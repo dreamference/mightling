@@ -321,6 +321,12 @@ async fn a_watch_device_may_read_but_not_delete_and_archiving_reaches_the_owner(
     let watcher = phone(&hub, auth::Scope::Watch);
     assert_eq!(get(&hub, &format!("/api/sync/threads/{THREAD}"), Some(&watcher)).await.0, 200);
     assert_eq!(post(&hub, &format!("/api/sync/threads/{THREAD}/delete"), &watcher).await, 403);
+    // An agent narrowed to watching may publish its own threads, but not delete another's.
+    let (desktop, _) = device(&scratch.dir, &hub, "desktop");
+    let desktop_id = DeviceFile::load(&desktop).unwrap().device;
+    auth::set_scope(&hub.server.config.state_dir, &desktop_id, auth::Scope::Watch).unwrap();
+    assert!(client(&hub, &desktop).delete(THREAD).await.unwrap_err().contains("403"));
+    assert!(hub.server.sync_store().unwrap().record(THREAD).is_some());
     let controller = phone(&hub, auth::Scope::Control);
     let archive = reqwest::Client::new()
         .post(format!("{}/api/sync/threads/{THREAD}/meta", hub.base))
@@ -463,4 +469,34 @@ async fn an_agent_pairs_with_a_code_and_its_secret_opens_only_the_sync_routes() 
     // `ling sync forget` ends it.
     hub_client.forget().await.unwrap();
     assert!(hub_client.status().await.is_err());
+}
+
+#[tokio::test]
+async fn an_archive_codex_did_not_carry_out_is_not_published_back_over_the_hubs() {
+    let scratch = scratch("stuck");
+    let hub = hub(&scratch.dir, true).await;
+    let (laptop, _) = device(&scratch.dir, &hub, "laptop");
+    // A `ling` whose `archive` succeeds and moves nothing (a loaded thread, say).
+    let ling = scratch.dir.join("still-ling");
+    std::fs::write(&ling, "#!/bin/sh\nexit 0\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&ling, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write(&rollout_path(&laptop, THREAD), &format!("{}{}", meta_line(THREAD, "vscode", "/w"), said("UserMessage", "one")));
+    let mut agent = agent(&laptop, &ling, Settings::default());
+    let hub_client = client(&hub, &laptop);
+    agent.cycle(&hub_client).await;
+    let controller = phone(&hub, auth::Scope::Control);
+    let archive = reqwest::Client::new()
+        .post(format!("{}/api/sync/threads/{THREAD}/meta", hub.base))
+        .header("Cookie", &controller)
+        .header("Origin", &hub.base)
+        .json(&serde_json::json!({ "archived": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(archive.status().as_u16(), 200);
+    for _ in 0..3 {
+        agent.cycle(&hub_client).await;
+    }
+    assert!(hub.server.sync_store().unwrap().threads()[0].current.archived, "the phone's choice stands");
 }

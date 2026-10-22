@@ -451,8 +451,15 @@ impl Agent {
                     }
                 }
             }
+            // What the files say now, not what was asked: a command that left the rollout where it
+            // was must not make the next cycle publish the old state over the new one as a change.
+            let lies_archived = scan::scan(&self.codex_home)
+                .into_iter()
+                .filter(|local| local.thread == thread)
+                .max_by(|a, b| a.file.cmp(&b.file))
+                .map_or(archived, |newest| newest.archived);
             if let Some(entry) = self.state.threads.get_mut(&thread) {
-                entry.archived = Some(archived);
+                entry.archived = Some(lies_archived);
                 entry.applied_archive = reading.to_string();
             }
         }
