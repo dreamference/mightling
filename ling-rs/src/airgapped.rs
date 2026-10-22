@@ -288,6 +288,13 @@ pub fn command<T: std::fmt::Display>(thread_id: Option<T>, args: &str) -> Vec<St
     {
         return lines;
     }
+    // On Linux the sandbox's empty network namespace is what enforces `on`: with bubblewrap refused
+    // its namespaces there is nothing to enforce it (userns.rs).
+    if wanted == Some(Level::On)
+        && let Some(lines) = crate::userns::on_refusal_now()
+    {
+        return lines;
+    }
     match words.as_slice() {
         [] => {
             let resolved = resolve(thread_id);
@@ -506,6 +513,11 @@ pub fn full_access_conflict(user_args: &[String], level: Level) -> Option<String
     Some(format!(
         "airgapped is on, and {source} selects Full Access. {INCOMPATIBLE}. Choose one: another sandbox (-s workspace-write), or ling airgapped default off ({ENV_VAR}=off for one run)."
     ))
+}
+
+/// Whether this launch runs in Full Access, by the flag, `-c` or the configuration files.
+pub(crate) fn full_access_selected(user_args: &[String]) -> bool {
+    full_access_source(user_args, &config_layers()).is_some()
 }
 
 /// What selects Full Access for this launch, if anything does, following Codex's precedence: a

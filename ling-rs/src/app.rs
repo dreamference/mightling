@@ -51,6 +51,113 @@ const TAIL_LINES: usize = 12;
 /// What Chromium prints when it cannot start its sandbox.
 const SANDBOX_FAILURES: [&str; 3] = ["No usable sandbox", "zygote_host", "setuid sandbox"];
 
+/// Setuid sandbox helpers that Chromium-based programs install as root, by their default paths.
+/// Chromium uses one in place of its user-namespace sandbox when `CHROME_DEVEL_SANDBOX` names it
+/// and the app's binary belongs to the user (an unpacked build); the protocol between them has not
+/// changed in years. This is Chromium's own documented route for builds without a profile
+/// (docs/security/apparmor-userns-restrictions.md, "Option 3"), measured on 2026-10-22: an
+/// unprofiled copy of the app started with Google Chrome's helper, its zygote in new PID and
+/// network namespaces and its renderer under seccomp (specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md).
+const SETUID_HELPERS: [(&str, &str); 9] = [
+    ("Google Chrome", "/opt/google/chrome/chrome-sandbox"),
+    ("Microsoft Edge", "/opt/microsoft/msedge/msedge-sandbox"),
+    ("Brave", "/opt/brave.com/brave/chrome-sandbox"),
+    ("Vivaldi", "/opt/vivaldi/vivaldi-sandbox"),
+    ("Chromium", "/usr/lib/chromium/chrome-sandbox"),
+    ("Visual Studio Code", "/usr/share/code/chrome-sandbox"),
+    ("Slack", "/usr/lib/slack/chrome-sandbox"),
+    ("Discord", "/usr/share/discord/chrome-sandbox"),
+    ("Signal", "/opt/Signal/chrome-sandbox"),
+];
+
+/// The variable that hands Chromium a setuid sandbox helper.
+const HELPER_VARIABLE: &str = "CHROME_DEVEL_SANDBOX";
+
+/// The script `forge.config.js` copies beside an unpacked build's binary.
+const PROFILE_SCRIPT: &str = "install-sandbox-profile.sh";
+
+/// How the app's Chromium sandbox can start on this machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChromiumSandbox {
+    /// User namespaces are not restricted here, or a profile lets the binary create one.
+    Ready,
+    /// No profile, but a root-owned setuid helper is installed and the binary is the user's.
+    Helper { owner: String, path: PathBuf },
+    /// Neither: the app aborts at start with "No usable sandbox!".
+    Missing,
+}
+
+/// Decides from the facts: the sysctl, a covering profile, who owns the binary, a helper found.
+pub fn chromium_sandbox(restricted: bool, covered: bool, user_owned: bool, helper: Option<(&str, &Path)>) -> ChromiumSandbox {
+    if !restricted || covered {
+        return ChromiumSandbox::Ready;
+    }
+    match helper {
+        // Chromium reads the variable only for a binary the user owns (setuid_sandbox_host.cc).
+        Some((owner, path)) if user_owned => ChromiumSandbox::Helper {
+            owner: owner.to_string(),
+            path: path.to_path_buf(),
+        },
+        _ => ChromiumSandbox::Missing,
+    }
+}
+
+/// What `ling app` says before starting the app, for each case, and what fixes it for good.
+pub fn sandbox_lines(sandbox: &ChromiumSandbox, binary: &Path) -> Vec<String> {
+    let fix = match binary.parent().map(|dir| dir.join(PROFILE_SCRIPT)).filter(|script| script.is_file()) {
+        Some(script) => format!("an administrator runs {} once (--print shows what it does)", script.display()),
+        None => "from a checkout, ling-admin desktop install (sudo, once)".to_string(),
+    };
+    match sandbox {
+        ChromiumSandbox::Ready => Vec::new(),
+        ChromiumSandbox::Helper { owner, path } => vec![
+            format!("💡 No AppArmor profile lets {} create Chromium's sandbox; using {owner}'s setuid sandbox helper instead ({path}).", binary.display(), path = path.display()),
+            format!("   For the app's own sandbox, {fix}."),
+        ],
+        ChromiumSandbox::Missing => vec![
+            format!("⚠️ No AppArmor profile lets {} create Chromium's sandbox (kernel.apparmor_restrict_unprivileged_userns=1), and no setuid sandbox helper from a Chromium browser is installed: the app will stop at start.", binary.display()),
+            format!("   The fix: {fix}."),
+        ],
+    }
+}
+
+/// The facts for `executable` on this machine, read without root.
+#[cfg(target_os = "linux")]
+pub fn chromium_sandbox_now(executable: &Path) -> (PathBuf, ChromiumSandbox) {
+    use std::os::unix::fs::MetadataExt;
+    let binary = std::fs::canonicalize(executable).unwrap_or_else(|_| executable.to_path_buf());
+    let restricted = std::fs::read_to_string(crate::userns::USERNS_SYSCTL).is_ok_and(|value| value.trim() == "1");
+    if !restricted {
+        return (binary, ChromiumSandbox::Ready);
+    }
+    let covered = covering_profile(Path::new(crate::userns::APPARMOR_DIR), &binary).is_some();
+    // SAFETY: getuid cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let user_owned = binary.metadata().is_ok_and(|meta| meta.uid() == uid);
+    let helper = SETUID_HELPERS.iter().find(|(_, path)| {
+        Path::new(path)
+            .metadata()
+            .is_ok_and(|meta| meta.is_file() && meta.uid() == 0 && meta.mode() & 0o4000 != 0)
+    });
+    let sandbox = chromium_sandbox(restricted, covered, user_owned, helper.map(|(owner, path)| (*owner, Path::new(*path))));
+    (binary, sandbox)
+}
+
+/// A profile file in `dir` that lets `binary` create a user namespace: one naming its quoted path
+/// (the `.deb`'s, `ling-admin desktop install`'s, the unpacked build's script's) or attaching to it
+/// unquoted, with `userns,` in it. The test `DesktopInstaller.covering_profile()` makes.
+pub fn covering_profile(dir: &Path, binary: &Path) -> Option<PathBuf> {
+    let quoted = format!("\"{}\"", binary.display());
+    let attaching = crate::userns::profiles_attaching(dir, binary);
+    let mut names: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.filter_map(Result::ok).map(|entry| entry.path()).collect();
+    names.sort();
+    names.into_iter().find(|path| {
+        std::fs::read_to_string(path).is_ok_and(|text| {
+            text.contains("userns,") && (text.contains(&quoted) || attaching.contains(path))
+        })
+    })
+}
+
 /// Which view `ling app` opens the window on: Ask, or Work with the arguments `ling-app` takes
 /// for it (`--work`, `--cwd <folder>`, `--thread <id>`).
 #[derive(Debug, PartialEq)]
@@ -131,8 +238,22 @@ pub async fn open(args: &[String]) -> i32 {
         Window::Work(forwarded) => forwarded.clone(),
         Window::Ask => Vec::new(),
     };
+    // Chromium's sandbox, checked before it aborts the app where nothing can catch it.
+    #[cfg(target_os = "linux")]
+    let helper = {
+        let (binary, sandbox) = chromium_sandbox_now(&executable);
+        for line in sandbox_lines(&sandbox, &binary) {
+            eprintln!("{line}");
+        }
+        match sandbox {
+            ChromiumSandbox::Helper { path, .. } => Some(path),
+            _ => None,
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let helper: Option<PathBuf> = None;
     let log = log_path();
-    let mut child = match launch(&executable, &forwarded, log.as_deref()) {
+    let mut child = match launch_with(&executable, &forwarded, log.as_deref(), helper.as_deref()) {
         Ok(child) => child,
         Err(error) => {
             eprintln!("❌ Could not start {}: {error}", executable.display());
@@ -163,8 +284,16 @@ fn log_path() -> Option<PathBuf> {
 /// A file, not a pipe: the app outlives `ling app`, and a pipe whose reader is gone would fail its
 /// writes.
 pub fn launch(executable: &Path, args: &[String], log: Option<&Path>) -> std::io::Result<Child> {
+    launch_with(executable, args, log, None)
+}
+
+/// [`launch`], with a setuid sandbox helper for Chromium when one is to be used.
+pub fn launch_with(executable: &Path, args: &[String], log: Option<&Path>, helper: Option<&Path>) -> std::io::Result<Child> {
     let mut command = Command::new(executable);
     command.args(args).stdin(Stdio::null());
+    if let Some(helper) = helper {
+        command.env(HELPER_VARIABLE, helper);
+    }
     match log.and_then(|path| std::fs::File::create(path).ok()) {
         Some(file) => {
             let stderr = file.try_clone()?;
@@ -214,7 +343,8 @@ pub fn failure_lines(code: Option<i32>, log_text: &str, log: Option<&Path>) -> V
     }
     if SANDBOX_FAILURES.iter().any(|marker| log_text.contains(marker)) {
         lines.push("💡 Chromium could not start its sandbox: the app needs an AppArmor profile that allows it a user namespace.".to_string());
-        lines.push("   From a checkout: ling-admin desktop install. An unpacked build: run install-sandbox-profile.sh beside the binary.".to_string());
+        lines.push("   From a checkout: ling-admin desktop install. An unpacked build: an administrator runs install-sandbox-profile.sh beside the binary.".to_string());
+        lines.push("   Without an administrator: ling app uses the setuid sandbox helper of a Chromium browser that ships one (Google Chrome, Edge, Brave), for an unpacked build in your home.".to_string());
     }
     if let Some(log) = log {
         lines.push(format!("   The app's output: {}", log.display()));
@@ -308,6 +438,57 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("AppArmor profile")));
         assert!(lines.iter().any(|line| line.contains("ling-admin desktop install")));
         assert_eq!(lines.last().map(String::as_str), Some("   The app's output: /h/.mightling/log/ling-app.log"));
+    }
+
+    #[test]
+    fn the_chromium_sandbox_is_ready_from_a_profile_and_otherwise_borrows_a_helper() {
+        let chrome = Path::new("/opt/google/chrome/chrome-sandbox");
+        assert_eq!(chromium_sandbox(false, false, true, None), ChromiumSandbox::Ready);
+        assert_eq!(chromium_sandbox(true, true, true, Some(("Google Chrome", chrome))), ChromiumSandbox::Ready);
+        assert_eq!(
+            chromium_sandbox(true, false, true, Some(("Google Chrome", chrome))),
+            ChromiumSandbox::Helper { owner: "Google Chrome".into(), path: chrome.into() }
+        );
+        // Chromium ignores the variable for a binary root owns (an installed package's).
+        assert_eq!(chromium_sandbox(true, false, false, Some(("Google Chrome", chrome))), ChromiumSandbox::Missing);
+        assert_eq!(chromium_sandbox(true, false, true, None), ChromiumSandbox::Missing);
+    }
+
+    #[test]
+    fn each_case_says_what_it_does_and_never_turns_the_sandbox_off() {
+        let binary = Path::new("/home/u/.local/opt/Mightling/Mightling");
+        assert!(sandbox_lines(&ChromiumSandbox::Ready, binary).is_empty());
+        let helper = ChromiumSandbox::Helper { owner: "Google Chrome".into(), path: "/opt/google/chrome/chrome-sandbox".into() };
+        let lines = sandbox_lines(&helper, binary);
+        assert!(lines[0].contains("Google Chrome's setuid sandbox helper") && lines[0].contains("/opt/google/chrome/chrome-sandbox"));
+        let missing = sandbox_lines(&ChromiumSandbox::Missing, binary);
+        assert!(missing[0].contains("will stop at start") && missing[1].contains("ling-admin desktop install"));
+        assert!(!lines.iter().chain(&missing).any(|line| line.contains("--no-sandbox")));
+    }
+
+    #[test]
+    fn a_profile_covers_the_binary_it_names() {
+        let dir = std::env::temp_dir().join(format!("ling-app-profiles-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mightling-unpacked"), "profile mightling-unpacked \"/home/u/m/Mightling\" flags=(unconfined) {\n  userns,\n}\n").unwrap();
+        std::fs::write(dir.join("obsidian"), "profile obsidian /opt/Obsidian/obsidian flags=(unconfined) {\n  userns,\n}\n").unwrap();
+        std::fs::write(dir.join("named-only"), "# \"/home/u/x/Mightling\" without the rule\n").unwrap();
+        assert_eq!(covering_profile(&dir, Path::new("/home/u/m/Mightling")), Some(dir.join("mightling-unpacked")));
+        assert_eq!(covering_profile(&dir, Path::new("/opt/Obsidian/obsidian")), Some(dir.join("obsidian")));
+        assert_eq!(covering_profile(&dir, Path::new("/home/u/x/Mightling")), None);
+        assert_eq!(covering_profile(&dir, Path::new("/home/u/m/Mightling2")), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_helper_reaches_the_app() {
+        let (script, log) = stand_in("helper", "echo \"helper=$CHROME_DEVEL_SANDBOX\"");
+        let (program, args) = sh(&script, &[]);
+        let mut child = launch_with(&program, &args, Some(&log), Some(Path::new("/opt/x/chrome-sandbox"))).unwrap();
+        assert!(watch(&mut child, Duration::from_secs(5)).await.is_some());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "helper=/opt/x/chrome-sandbox\n");
     }
 
     #[test]
