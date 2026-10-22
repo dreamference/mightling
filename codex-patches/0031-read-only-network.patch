@@ -1,0 +1,14 @@
+diff --git a/codex-rs/sandboxing/Cargo.toml b/codex-rs/sandboxing/Cargo.toml
+--- a/codex-rs/sandboxing/Cargo.toml
++++ b/codex-rs/sandboxing/Cargo.toml
+@@ -18,2 +18,3 @@
+ codex-network-proxy = { workspace = true }
++ling-airgapped = { path = "../ling/airgapped" }
+ codex-protocol = { workspace = true }
+diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manager.rs
+--- a/codex-rs/sandboxing/src/manager.rs
++++ b/codex-rs/sandboxing/src/manager.rs
+@@ -374,2 +374,3 @@
+             effective_permission_profile(permissions, additional_permissions.as_ref());
++        let base_effective_permission_profile = if base_effective_permission_profile == PermissionProfile::read_only() && ling_airgapped::read_only_network(|k| command.env.get(k).cloned()) { PermissionProfile::from_runtime_permissions(&FileSystemSandboxPolicy::read_only(), NetworkSandboxPolicy::Enabled) } else { base_effective_permission_profile };
+         let pending_sandboxed_request = PendingSandboxedExecRequest::new(

@@ -4,6 +4,13 @@ Developer notes behind the `/airgapped` line in `AGENTS.md`. Spec: `specs/DREAMF
 
 `/airgapped` has two levels, and `on` is enforced. `off` is the default; `on` gives every sandboxed command an empty network namespace.
 
+**At `off` every sandboxed command has the network** (owner decision, 2026-10-22), whatever the permission mode: `pip install`, `npm install`, `curl` and `git fetch` work in Read Only too. Two settings carry it:
+
+- the workspace-write sandbox: the launcher writes `[sandbox_workspace_write] network_access = true` when absent (`updated_config` in `ling-rs/src/lib.rs`);
+- the read-only sandbox, which has no setting in Codex (`PermissionProfile::read_only()` is hard-wired to no network, and `-s read-only`, the TUI's Read Only, `/permissions` and an app-server `sandbox: "read-only"` all build that profile): patch `0031` widens it in `SandboxManager::transform` (`codex-rs/sandboxing`), the one place every platform's sandbox (bwrap's helper, Seatbelt, the Windows sandbox) takes its profile from and the place core reads back to set `CODEX_SANDBOX_NETWORK_DISABLED`. A command whose permissions are exactly the read-only ones gets `NetworkSandboxPolicy::Enabled` when `ling_airgapped::read_only_network` says so: not at `on` (resolved from the command's own environment, as the Windows hook does), and not when `DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off`. The launcher sets that variable when the user chose `sandbox_workspace_write.network_access = false` (a `-c` or any configuration layer), so the user's "no network" holds for both sandboxes. Not covered: a user-written `[permissions]` profile that extends `:read-only` and says nothing else compiles to the same profile and is widened too.
+
+What the model is told follows: Codex words the read-only sandbox from the session's profile ("Network access is restricted."), so the launcher puts `model_messages.permissions.read_only` (`airgapped::READ_ONLY_SANDBOX_TEXT`, "Network access is enabled") into the catalog when the configured level is `off` and the user has not said no network; a change of level in the session is told by the World State texts as before. The Linux helper's hook from `0019` still forces `Restricted` at `on` and still denies the host's control sockets, so neither depends on `0031`.
+
 A third level, `duckduckgo` (search through that engine alone), was removed on 2026-10-03 because DuckDuckGo answered SearXNG with a CAPTCHA, so the level searched nothing; a stored `duckduckgo` is now an invalid value, named in `/airgapped`'s status and passed over to the next tier.
 
 ## Resolution

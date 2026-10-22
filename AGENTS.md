@@ -11,7 +11,7 @@ ling-search "your query here"              # search; -n N for more results (defa
 ling-fetch "https://example.com"           # fetch a page as readable text
 ```
 
-Do not use `curl` or `wget` for this: the sandbox usually blocks them, which looks like the site being down rather than the command being unavailable. There is no web search *tool*; search is a shell command. The full instructions are appended to the system prompt by the `ling` launcher (`WEB_ACCESS_INSTRUCTIONS` in `ling-rs/src/lib.rs`), so they apply in every workspace; this section is a pointer, not a copy.
+Prefer them to `curl` or `wget` for reading the web; sandboxed commands have the network unless `/airgapped on`. There is no web search *tool*; search is a shell command. The full instructions are appended to the system prompt by the `ling` launcher (`WEB_ACCESS_INSTRUCTIONS` in `ling-rs/src/lib.rs`), so they apply in every workspace; this section is a pointer, not a copy.
 
 ## Project
 

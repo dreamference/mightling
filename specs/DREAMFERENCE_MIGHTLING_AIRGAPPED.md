@@ -121,7 +121,7 @@ The exact texts go in an appendix when they are written, and are checked against
 
 Every command the agent runs goes through Codex's sandbox. Under `workspace-write`, the launcher today sets `[sandbox_workspace_write] network_access = true`, so the web commands work. At `on` the sandbox policy for a command is the restricted one whatever the configuration says, so `bwrap` gives the command a network namespace of its own with nothing in it. `curl`, `git fetch`, `pip install`, `ling-search` and a hand-written socket all fail the same way, because none of them has an interface to send on.
 
-**How it composes with the user's own sandbox choice.** `on` forces the restricted policy; at the other two levels the sandbox's own answer stands. `ling exec` without `-s` runs read-only, which has no network at any level, so the web commands fail there at `off` as they do today; the level does not grant what the sandbox withholds.
+**How it composes with the user's own sandbox choice.** `on` forces the restricted policy. *Superseded 2026-10-22 (§14.11):* below `on` every sandbox has the network, the read-only one included (`ling exec` without `-s`, the TUI's Read Only); the user's own `network_access = false` still holds. The design of 2026-10-01 read: at the other levels the sandbox's own answer stands, so `ling exec` without `-s` (read-only) had no network at any level.
 
 **One hook decides it, per command.** The session's network policy is computed in one place in Codex's core (`TurnContext::network_sandbox_policy()`, from the permission profile). The patch adds one line there: when `ling_launcher::airgapped::sealed(session)` is true, the answer is `Restricted`. `session` is the same root-session key the level file uses (§6.1), so the hook and `/airgapped` can never read different files. That covers the TUI, `ling exec`, a resumed session, a subagent and a switch in the middle of a turn, because it is asked again for every command. Phase 0 confirms that this is the only path a command's network policy takes, and that the core crate can depend on the launcher crate without a cycle (§9). If the dependency would be a cycle, the resolution moves into a leaf crate, `ling-airgapped`, with no dependency beyond the standard library, which both the core and the launcher use; the hook stays one line. The other route, in which the launcher passes `-c sandbox_workspace_write.network_access=false` at start and `/airgapped on` sends what `/permissions` sends, is rejected: it misses a session resumed under a different configured level, and it turns the slash command's one-line arm into policy construction inside a patch.
 
@@ -175,9 +175,9 @@ Resolved before every command and every model request. First match wins:
 
 `ling-search` and `ling-fetch` run inside the command sandbox, as children of the agent's shell. They resolve the level by the same four tiers, finding the session file through `CODEX_SESSION_ID` and `$CODEX_HOME` (default `~/.mightling`), both of which the sandbox can read and not write. The resolution is a small module in `ling-web-rs/` with the same unit tests as the launcher's, since the two crates share no code.
 
-**A second signal: the sandbox's own.** Codex sets `CODEX_SANDBOX_NETWORK_DISABLED=1` for a command it runs without a network. That happens at `on`, and also at any level under a read-only sandbox (`ling exec` without `-s`). When either web command sees the variable it sends nothing and prints no restart hint, and the message depends on the level it resolved:
+**A second signal: the sandbox's own.** Codex sets `CODEX_SANDBOX_NETWORK_DISABLED=1` for a command it runs without a network. That happens at `on` under the read-only sandbox, and below `on` only where the user switched the sandbox's network off (§14.11; until 2026-10-22, at any level under a read-only sandbox). When either web command sees the variable it sends nothing and prints no restart hint, and the message depends on the level it resolved:
 - **`on`:** the message of §4.
-- **Another level, or none found:** `This command has no network: the sandbox it runs in does not allow it. Web access needs the workspace-write sandbox (ling exec -s workspace-write).` Saying `/airgapped on` here would name a setting nobody chose.
+- **Another level, or none found:** `This command has no network: the user switched the sandbox's network off (sandbox_workspace_write.network_access = false, or DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off). Only the user can change that.` Saying `/airgapped on` here would name a setting nobody chose. (Until 2026-10-22 it named the read-only sandbox and sent the user to `ling exec -s workspace-write`.)
 
 **Finding `$CODEX_HOME`.** The launcher sets `CODEX_HOME` in `ling`'s own environment (`use_mightling_home()`), and Codex's default policy passes the environment on to commands, so the variable is normally there. A user's `shell_environment_policy` can strip it; the web commands then fall back to `~/.mightling`.
 
@@ -451,3 +451,31 @@ A search asks only the engines of its category. Each sees the query text and Sea
 
 Ownership is as published by each company on 2026-10-20 and is not re-checked automatically; an engine whose owner changes hands to a Russian or Chinese company belongs in `REMOVED_ENGINES`.
 
+### 14.11 Below `on`, every sandbox has the network (2026-10-22)
+
+Owner decision: sandboxed commands (`pip install`, `npm install`, `curl`, `git fetch`) have the network whenever `/airgapped` is off; `on` is unchanged. Until then only the workspace-write sandbox had it (the launcher's `network_access = true`); Codex's read-only sandbox had none, and it is what these surfaces run:
+
+| Surface | What decided it before |
+|---|---|
+| `ling exec` without `-s` | no `sandbox_mode` and no trust decision: `ConfigToml::derive_permission_profile` picks read-only |
+| the TUI's Read Only, an untrusted-and-undecided folder, `/permissions` | the built-in `:read-only` profile, `PermissionProfile::read_only()` |
+| the desktop app's Work, `ling web` | the picker's `:read-only` row, or an app-server `sandbox: "read-only"` (`thread_processor.rs`); `ling web`'s Ask threads are pinned to workspace-write (`policy.json`'s `scratchSandbox`) and had the network |
+| the phone bridges' `chat` threads | `thread/start` names no sandbox, so the config's default: read-only unless the folder is trusted |
+| Night Shift | `ling exec -s workspace-write` and `ling sandbox -c …network_access=true`: had it |
+| macOS (Seatbelt), Windows | the same profiles; the launcher's config reaches workspace-write on both, nothing reached read-only |
+
+No configuration reaches read-only: the profile is hard-wired, `-s read-only` and an app-server `read-only` bypass `[permissions]` profiles, and a `default_permissions` profile would also replace the trusted-folder default. So patch `0031` (1,004 bytes) adds one line to `SandboxManager::transform` (`codex-rs/sandboxing`), which every platform's sandbox takes its profile from and whose result core reads back to set `CODEX_SANDBOX_NETWORK_DISABLED`: a profile exactly `PermissionProfile::read_only()` becomes read-only with `NetworkSandboxPolicy::Enabled` when `ling_airgapped::read_only_network` agrees, that is not at `on` (resolved from the command's environment) and not with `DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off`. The launcher sets that variable when the user chose `sandbox_workspace_write.network_access = false` (`-c` or a configuration layer), so an explicit "no network" holds for both sandboxes; a workspace-write `false` is untouched, since only the exact read-only profile is widened. The catalog's `model_messages.permissions.read_only` tells the model "Network access is enabled" at a configured `off`. `0019`'s helper hook still forces `Restricted` at `on` and denies the host's control sockets. Not covered: `ling sandbox` (the debug command builds its bwrap arguments without `transform`), and a user's `[permissions]` profile that only extends `:read-only` is widened like the built-in one. The patch series stays under its cap: the 59 `index` lines were dropped (1,770 bytes).
+
+Measured on the development GB10 against the default model, `curl https://pypi.org/simple/` run verbatim by the model, in a scratch folder:
+
+| Run | Installed build (f93b53bc) | With `0031` |
+|---|---|---|
+| `ling exec` (default, read-only) | `000`, exit 6 (no DNS) | `200`, `CODEX_SANDBOX_NETWORK_DISABLED` unset |
+| `ling exec -s read-only` | "Could not resolve host" (owner's run) | `200` |
+| `ling exec -s workspace-write` | `200` | `200` |
+| `DREAMFERENCE_MIGHTLING_AIRGAPPED=on ling exec` | exit 6 (`-s workspace-write`) | exit 6 (default read-only), variable set |
+| `ling exec -c sandbox_workspace_write.network_access=false` | — | exit 6, variable set |
+| `ling-search` in `ling exec` (default) | refused: "the sandbox it runs in does not allow it" | results (PyPI's page first) |
+| `curl --unix-socket /var/run/docker.sock` (read-only) | — | exit 7 (masked by `0019`) |
+
+The egress audit (`ling exec`, no network call) passed on the new build.

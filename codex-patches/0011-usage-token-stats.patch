@@ -1,5 +1,4 @@
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
-index 9d61157..4033938 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
 @@ -24,2 +24,3 @@ workspace = true
@@ -7,7 +6,6 @@ index 9d61157..4033938 100644
 +ling-launcher = { path = "../ling" }
  codex-build-info = { workspace = true }
 diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
-index 383376a..c60916f 100644
 --- a/codex-rs/tui/src/bottom_pane/slash_commands.rs
 +++ b/codex-rs/tui/src/bottom_pane/slash_commands.rs
 @@ -77,3 +77,2 @@ pub(crate) fn builtins_for_input(flags: BuiltinCommandFlags) -> Vec<(&'static st
@@ -15,7 +13,6 @@ index 383376a..c60916f 100644
 -        .filter(|(_, cmd)| flags.token_activity_command_enabled || *cmd != SlashCommand::Usage)
          .filter(|(_, cmd)| flags.goal_command_enabled || *cmd != SlashCommand::Goal)
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
-index 4fe2ed0..878517b 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -533,5 +533,6 @@ impl ChatWidget {
@@ -45,7 +42,6 @@ index 4fe2ed0..878517b 100644
 +            SlashCommand::Usage => self.dispatch_command(SlashCommand::Usage),
              SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
-index 25a7842..7b0b05e 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -120,3 +120,3 @@ impl SlashCommand {
