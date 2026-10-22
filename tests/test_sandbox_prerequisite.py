@@ -18,9 +18,13 @@ from dreamference.vllm_server import sandbox_prerequisite
 
 
 @pytest.fixture
-def machine(monkeypatch):
+def machine(monkeypatch, tmp_path):
     """A GB10 under Ubuntu's AppArmor restriction; the test sets what the probe answers."""
     state = {"works": False, "answers": [], "root": [], "systemctl": [], "tty": True}
+    profiles = tmp_path / "apparmor.d"
+    profiles.mkdir()
+    monkeypatch.setattr(sandbox_prerequisite, "APPARMOR_DIR", str(profiles))
+    state["profiles"] = profiles
     monkeypatch.setattr(SandboxPrerequisite, "gate", classmethod(REAL_SANDBOX_GATE.__func__))
     monkeypatch.setattr(HostSafetySetup, "sandbox_works", classmethod(lambda cls: state["works"]))
     monkeypatch.setattr(SandboxPrerequisite, "_userns_restricted", classmethod(lambda cls: True))
@@ -151,3 +155,24 @@ def test_the_profile_compiles(tmp_path):
     result = subprocess.run(["apparmor_parser", "-Q", "-K", "-I", "/etc/apparmor.d", str(profile)],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_a_profile_ubuntu_ships_for_bwrap_is_loaded_not_doubled(machine):
+    # Ubuntu 25.04 and later: `bwrap-userns-restrict` attaches to /usr/bin/bwrap. A second
+    # profile for the same binary would make AppArmor attach neither (openai/codex#38715).
+    ubuntu = machine["profiles"] / "bwrap-userns-restrict"
+    ubuntu.write_text("abi <abi/5.0>,\nprofile bwrap /usr/bin/bwrap flags=(attach_disconnected) {\n  allow userns,\n}\n"
+                      "profile unpriv_bwrap flags=(attach_disconnected) {\n}\n")
+    assert SandboxPrerequisite.fix_commands() == [["apparmor_parser", "-r", str(ubuntu)]]
+    # Upgraded from 24.04 with ours in place: ours goes, Ubuntu's stays.
+    ours = machine["profiles"] / "puffin-bwrap"
+    ours.write_text(SandboxPrerequisite.profile_text("/usr/bin/bwrap"))
+    assert SandboxPrerequisite.fix_commands() == [
+        ["apparmor_parser", "-R", str(ours)], ["rm", "-f", str(ours)], ["apparmor_parser", "-r", str(ubuntu)],
+    ]
+
+
+def test_profiles_are_found_by_their_attachment_not_a_mention(machine):
+    (machine["profiles"] / "notes").write_text("# /usr/bin/bwrap is mentioned here only\n")
+    (machine["profiles"] / "chrome").write_text("profile chrome /opt/google/chrome/chrome flags=(unconfined) {\n}\n")
+    assert SandboxPrerequisite.profiles_attaching("/usr/bin/bwrap") == []
