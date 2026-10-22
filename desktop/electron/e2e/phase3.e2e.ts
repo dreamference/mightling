@@ -489,7 +489,7 @@ test("7 suggested prompts: off by default; on, a finished turn brings the predic
   }
 });
 
-test("8 import: another agent's configuration found, plugins refused, the ticked items imported through the server", async () => {
+test("8 import: another agent's configuration found, plugins offered unticked, the ticked items imported through the server", async () => {
   const { page, home, shoot, close } = await open();
   try {
     await page.getByRole("button", { name: "Work", exact: true }).click();
@@ -501,7 +501,10 @@ test("8 import: another agent's configuration found, plugins refused, the ticked
     await expect(found.getByRole("checkbox", { name: /Instructions \(AGENTS.md\)/ })).toBeChecked();
     await expect(found.getByRole("checkbox", { name: /Skills/ })).toBeChecked();
     await expect(found.getByRole("checkbox", { name: /Past sessions/ })).not.toBeChecked();
-    await expect(found.getByRole("checkbox", { name: /Plugins/ })).toBeDisabled();
+    // Plugins import at /airgapped off (AIRGAPPED §14.12), unticked: they come over the network.
+    await expect(found.getByRole("checkbox", { name: /Plugins/ })).toBeEnabled();
+    await expect(found.getByRole("checkbox", { name: /Plugins/ })).not.toBeChecked();
+    await expect(found).toContainText("left out while airgapped is on");
     await expect(dialog.locator(".import-history")).toContainText("1 imported");
     await shoot("8-import.png");
     await dialog.getByRole("button", { name: "Import the ticked items" }).click();
