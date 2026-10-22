@@ -37,7 +37,10 @@ a URL, a mailbox read.
     refused.
   - `/feedback`, which uploaded session logs, is removed.
   - `/voice` and `/approve`, which depend on cloud models, are hidden.
-  - `/import`, whose plugin step can fetch a plugin marketplace from GitHub, is refused.
+  - `/import` is hidden: its plugin step fetches marketplaces inside `ling`'s own process, where
+    `/airgapped on` cannot stop it. The desktop app's Import follows the level.
+  - Plugins are allowed from marketplaces you add (a git repository or a folder); the vendor's own
+    plugin catalogue and plugin sharing are closed.
   - The only update check is Mightling's own, `ling update`.
   - Usage analytics are disabled in the code (patch `0013`), and `ling` never reads `~/.codex`,
     where another tool may keep a cloud sign-in.
@@ -71,8 +74,11 @@ Read Only too) or `DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off` for Read Only a
 namespace: no search, no page fetch, no mail, no `curl`, `git fetch` or package install. Only the
 model server is reached. Full Access, which runs commands outside the sandbox, cannot be combined
 with it: Mightling refuses to start with both, greys Full Access out in `/permissions` and in the
-desktop app, and refuses `/airgapped on` in a Full Access session. `/airgapped` lists what the level
-does not cover, such as commands you approve to run outside the sandbox. See
+desktop app, and refuses `/airgapped on` in a Full Access session. A session that starts at `on`
+loads no plugin, and installing one or adding a marketplace is refused, since `git` fetches them
+outside the sandbox. `/airgapped` lists what the level does not cover, such as commands you approve
+to run outside the sandbox, MCP servers you configured, and the plugins of a session switched to
+`on` after it started. See
 [Terminal agent](ling.md#what-mightling-adds).
 
 ## Email is untrusted input

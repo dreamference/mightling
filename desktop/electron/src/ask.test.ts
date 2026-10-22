@@ -35,6 +35,10 @@ if (args[0] === "prompt") {
   process.stdout.write("COMPOSED " + args[2] + " IN " + process.cwd());
   process.exit(0);
 }
+if (args[0] === "airgapped") {
+  process.stdout.write("Airgapped: " + (process.env.STUB_AIRGAPPED || "off") + " (stub)\\n");
+  process.exit(0);
+}
 const log = ${JSON.stringify(path.join(dir, "received.jsonl"))};
 let buffer = "";
 let threads = 0;
@@ -166,6 +170,41 @@ describe("an Ask thread in the app", () => {
       expect(all[2].params).toEqual({ model: "m", cwd: "/work/repo" });
       // Nothing outside the allow-list reaches the server.
       await expect(server.send({ id: 5, method: "feedback/upload", params: {} })).rejects.toThrow();
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("plugins and the air gap in the app (AIRGAPPED §14.12)", () => {
+  const saved = { CODEX_HOME: process.env.CODEX_HOME, MIGHTLING_BIN: process.env.MIGHTLING_BIN, STUB_AIRGAPPED: process.env.STUB_AIRGAPPED };
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("asks ling for the level: at on a thread starts without plugins and nothing is installed; at off both pass", async () => {
+    const dir = scratch("plugins");
+    process.env.CODEX_HOME = path.join(dir, "home");
+    process.env.MIGHTLING_BIN = scriptedLing(dir);
+    const server = new AppServer(null, { deliver: () => {}, busyChanged: () => {} });
+    server.start();
+    const received = () => fs.readFileSync(path.join(dir, "received.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    try {
+      process.env.STUB_AIRGAPPED = "on";
+      await server.send({ id: 1, method: "thread/start", params: { model: "m", cwd: "/work/repo", config: { "features.plugins": true } } });
+      await expect(server.send({ id: 2, method: "plugin/install", params: { marketplacePath: "/m/marketplace.json", pluginName: "lint" } })).rejects.toThrow(/airgapped is on/);
+      await expect(server.send({ id: 3, method: "marketplace/add", params: { source: "acme/plugins" } })).rejects.toThrow(/airgapped is on/);
+      process.env.STUB_AIRGAPPED = "off";
+      await server.send({ id: 4, method: "marketplace/add", params: { source: "acme/plugins" } });
+      await server.send({ id: 5, method: "thread/start", params: { model: "m", cwd: "/work/repo" } });
+      await until(() => fs.existsSync(path.join(dir, "received.jsonl")) && received().length >= 3);
+      const [onStart, added, offStart] = received();
+      expect(onStart.params).toEqual({ model: "m", cwd: "/work/repo", config: { "features.plugins": false } });
+      expect(added).toMatchObject({ id: 4, method: "marketplace/add" });
+      expect(offStart.params).toEqual({ model: "m", cwd: "/work/repo" });
     } finally {
       server.stop();
     }

@@ -33,8 +33,7 @@ POLICY_TO_ADD = {
     "threadSection/create": 3, "threadSection/list": 3, "threadSection/update": 3, "threadSection/delete": 3,
     "thread/section/move": 3, "thread/searchOccurrences": 3,
     "skills/extraRoots/set": 11, "plugin/skill/read": 11,
-    "plugin/read": 11, "plugin/search": 11,
-    "plugin/installed": 11, "app/read": 11, "app/installed": 11,
+    "plugin/search": 11, "app/read": 11, "app/installed": 11,
 }
 
 

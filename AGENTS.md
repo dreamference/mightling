@@ -127,7 +127,7 @@ Outside the package:
 
 **The egress audit**, `ling-admin audit egress`, runs a real `ling exec` under strace and passes only if every connection is an allowlisted loopback port and no DNS query left. Re-run it after any Codex bump; `codex build` runs it. Details: [docs/dev/egress-audit.md](docs/dev/egress-audit.md).
 
-**`/airgapped`** has two levels, `off` and `on`; `on` gives every sandboxed command an empty network namespace, enforced in Codex's sandbox helper (patch `0019`), and is never allowed together with Full Access. Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
+**`/airgapped`** has two levels, `off` and `on`; `on` gives every sandboxed command an empty network namespace (patch `0019`), never goes with Full Access, and loads no plugin (allowed at `off`, but never the vendor's). Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
 
 **Where edits land:** in place, as in Codex; `/worktree on` starts new TUI sessions in a worktree, `/worktree apply` brings changes back. Details: [docs/dev/launcher.md](docs/dev/launcher.md#where-edits-land-worktree).
 

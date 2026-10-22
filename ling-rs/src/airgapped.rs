@@ -346,6 +346,7 @@ fn status_lines(resolved: &Resolved, in_session: bool, guard: &[String]) -> Vec<
     if resolved.level == Level::On {
         lines.push(enforced_line(LEVEL_FIXED_AT_LAUNCH));
         lines.push("NOT ENFORCED for: Full Access, a command you approve to run outside the sandbox, MCP servers, and ling's own connection to the model server.".to_string());
+        lines.push(crate::plugins::STATUS_LINE.to_string());
     }
     lines.extend(guard.iter().cloned());
     lines.extend(resolved.invalid.iter().map(|note| format!("Note: {note}.")));
@@ -994,6 +995,7 @@ mod tests {
         assert_eq!(lines[0], format!("Airgapped: on ({ENV_VAR})"));
         assert!(lines.iter().any(|line| line.starts_with("  on ") && line.ends_with("← in force")));
         assert!(lines.iter().any(|line| line.starts_with("NOT ENFORCED for: Full Access")));
+        assert!(lines.iter().any(|line| line.starts_with("Plugins: off in a session started at on")));
         let resolved = Resolved { level: Level::Off, source: ling_airgapped::Source::Default, invalid: vec!["ignored \"x\" from this session".into()] };
         let lines = status_lines(&resolved, false, &["Held: x".to_string()]);
         assert!(lines.iter().any(|line| line == "Held: x"));

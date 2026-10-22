@@ -1,5 +1,5 @@
 {
-  "comment": "Conformance cases for policy.json (specs/DREAMFERENCE_MIGHTLING_ASK.md §2.3, §13). Every implementation of the policy runs every case with the same stubs: a named prompt's composed text is the string \"PROMPT:<name>\"; the scratch folders it creates are \"SCRATCH/1\", \"SCRATCH/2\", ... in order of creation, counted across the whole file; and a thread whose id starts with \"ask-\" is an existing Ask thread whose folder is \"ASK/<id>\" (no other thread has one). `pending` lists the ids (as JSON text) of server requests waiting for an answer before the case. `out` is the exact message forwarded to the app-server, compared as JSON values; `pendingAfter` the ids still waiting after it.",
+  "comment": "Conformance cases for policy.json (specs/DREAMFERENCE_MIGHTLING_ASK.md §2.3, §13). Every implementation of the policy runs every case with the same stubs, at the air-gap level the case names in `airgapped` (\"off\" when absent): a named prompt's composed text is the string \"PROMPT:<name>\"; the scratch folders it creates are \"SCRATCH/1\", \"SCRATCH/2\", ... in order of creation, counted across the whole file; and a thread whose id starts with \"ask-\" is an existing Ask thread whose folder is \"ASK/<id>\" (no other thread has one). `pending` lists the ids (as JSON text) of server requests waiting for an answer before the case. `out` is the exact message forwarded to the app-server, compared as JSON values; `pendingAfter` the ids still waiting after it.",
   "cases": [
     {
       "name": "an allowed request passes unchanged, its jsonrpc field removed",
@@ -301,13 +301,21 @@
       "out": {"id": 64, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "AGENTS_MD", "description": "AGENTS.md", "cwd": "/w", "details": null}]}}
     },
     {
-      "name": "externalAgentConfig/import loses its plugin items, whose sources can be cloned or fetched from the network; config and skills still import",
+      "name": "externalAgentConfig/import keeps its plugin items while airgapped is off: plugins are allowed",
       "message": {"id": 66, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "CONFIG", "description": "settings", "cwd": "/w", "details": null}, {"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}, {"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}], "source": "desktop"}},
       "accept": true,
-      "out": {"id": 66, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "CONFIG", "description": "settings", "cwd": "/w", "details": null}, {"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}], "source": "desktop"}}
+      "out": {"id": 66, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "CONFIG", "description": "settings", "cwd": "/w", "details": null}, {"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}, {"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}], "source": "desktop"}}
     },
     {
-      "name": "externalAgentConfig/import of plugins alone is refused: nothing would be left to import",
+      "name": "externalAgentConfig/import at airgapped on loses its plugin items, whose sources are cloned or fetched from the network; config and skills still import",
+      "airgapped": "on",
+      "message": {"id": 94, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "CONFIG", "description": "settings", "cwd": "/w", "details": null}, {"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}, {"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}], "source": "desktop"}},
+      "accept": true,
+      "out": {"id": 94, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "CONFIG", "description": "settings", "cwd": "/w", "details": null}, {"itemType": "SKILLS", "description": "skills", "cwd": "/w", "details": null}], "source": "desktop"}}
+    },
+    {
+      "name": "externalAgentConfig/import of plugins alone at airgapped on is refused: nothing would be left to import",
+      "airgapped": "on",
       "message": {"id": 67, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}]}},
       "accept": false
     },
@@ -358,6 +366,95 @@
       "name": "window tools named on thread/resume are refused: tools are set when a thread starts",
       "message": {"id": 93, "method": "thread/resume", "params": {"threadId": "t1", "windowTools": ["mightling_terminal_output"]}},
       "accept": false
+    },
+    {
+      "name": "externalAgentConfig/import of plugins alone passes while airgapped is off",
+      "message": {"id": 95, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}]}},
+      "accept": true,
+      "out": {"id": 95, "method": "externalAgentConfig/import", "params": {"migrationItems": [{"itemType": "PLUGINS", "description": "Plugins", "cwd": null, "details": {"plugins": [{"marketplaceName": "claude-plugins-official", "pluginNames": ["x"]}], "skills": [], "sessions": [], "mcpServers": [], "hooks": [], "subagents": [], "commands": []}}]}}
+    },
+    {
+      "name": "plugin/install at airgapped on is refused: installing runs git outside the sandbox",
+      "airgapped": "on",
+      "message": {"id": 96, "method": "plugin/install", "params": {"marketplacePath": "/w/.mightling/marketplace.json", "pluginName": "lint"}},
+      "accept": false
+    },
+    {
+      "name": "marketplace/add passes while airgapped is off: a marketplace in a git repository",
+      "message": {"id": 97, "method": "marketplace/add", "params": {"source": "https://github.com/acme/plugins.git"}},
+      "accept": true,
+      "out": {"id": 97, "method": "marketplace/add", "params": {"source": "https://github.com/acme/plugins.git"}}
+    },
+    {
+      "name": "marketplace/add at airgapped on is refused",
+      "airgapped": "on",
+      "message": {"id": 98, "method": "marketplace/add", "params": {"source": "acme/plugins"}},
+      "accept": false
+    },
+    {
+      "name": "marketplace/upgrade passes while airgapped is off",
+      "message": {"id": 99, "method": "marketplace/upgrade", "params": {"marketplaceName": "acme"}},
+      "accept": true,
+      "out": {"id": 99, "method": "marketplace/upgrade", "params": {"marketplaceName": "acme"}}
+    },
+    {
+      "name": "marketplace/upgrade at airgapped on is refused: it asks the repository for news",
+      "airgapped": "on",
+      "message": {"id": 100, "method": "marketplace/upgrade", "params": {}},
+      "accept": false
+    },
+    {
+      "name": "marketplace/remove passes at airgapped on: it only deletes a folder",
+      "airgapped": "on",
+      "message": {"id": 101, "method": "marketplace/remove", "params": {"marketplaceName": "acme"}},
+      "accept": true,
+      "out": {"id": 101, "method": "marketplace/remove", "params": {"marketplaceName": "acme"}}
+    },
+    {
+      "name": "plugin/uninstall passes at airgapped on",
+      "airgapped": "on",
+      "message": {"id": 102, "method": "plugin/uninstall", "params": {"pluginId": "lint@acme"}},
+      "accept": true,
+      "out": {"id": 102, "method": "plugin/uninstall", "params": {"pluginId": "lint@acme"}}
+    },
+    {
+      "name": "plugin/read passes at airgapped on: it reads a marketplace already on disk",
+      "airgapped": "on",
+      "message": {"id": 103, "method": "plugin/read", "params": {"marketplacePath": "/w/.mightling/marketplace.json", "pluginName": "lint"}},
+      "accept": true,
+      "out": {"id": 103, "method": "plugin/read", "params": {"marketplacePath": "/w/.mightling/marketplace.json", "pluginName": "lint"}}
+    },
+    {
+      "name": "plugin/share/save is refused: sharing goes through the vendor's accounts",
+      "message": {"id": 104, "method": "plugin/share/save", "params": {"pluginPath": "/w/p"}},
+      "accept": false
+    },
+    {
+      "name": "thread/start at airgapped on starts without plugins, whatever config the UI sent",
+      "airgapped": "on",
+      "message": {"id": 105, "method": "thread/start", "params": {"cwd": "/work/repo", "config": {"features.plugins": true}}},
+      "accept": true,
+      "out": {"id": 105, "method": "thread/start", "params": {"cwd": "/work/repo", "config": {"features.plugins": false}}}
+    },
+    {
+      "name": "thread/resume of an Ask thread at airgapped on stays in its folder and has no plugins",
+      "airgapped": "on",
+      "message": {"id": 106, "method": "thread/resume", "params": {"threadId": "ask-7"}},
+      "accept": true,
+      "out": {"id": 106, "method": "thread/resume", "params": {"threadId": "ask-7", "cwd": "ASK/ask-7", "sandbox": "workspace-write", "config": {"features.plugins": false}}}
+    },
+    {
+      "name": "thread/fork at airgapped on has no plugins",
+      "airgapped": "on",
+      "message": {"id": 107, "method": "thread/fork", "params": {"threadId": "t1"}},
+      "accept": true,
+      "out": {"id": 107, "method": "thread/fork", "params": {"threadId": "t1", "config": {"features.plugins": false}}}
+    },
+    {
+      "name": "thread/start while airgapped is off keeps the plugins: no config is added",
+      "message": {"id": 108, "method": "thread/start", "params": {"cwd": "/work/repo"}},
+      "accept": true,
+      "out": {"id": 108, "method": "thread/start", "params": {"cwd": "/work/repo"}}
     }
   ]
 }

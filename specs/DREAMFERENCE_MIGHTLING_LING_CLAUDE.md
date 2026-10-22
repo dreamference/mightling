@@ -607,6 +607,8 @@ Because the mode is the same binary:
 
 ### 8.3 `/import` and plugins
 
+> **2026-10-22:** plugins are allowed at `/airgapped off` (AIRGAPPED §14.12). The desktop app's import keeps plugin items at `off` and drops them at `on`; `/import` in the TUI stays hidden (patch `0012`), because it runs in `ling`'s own process and cannot follow a level switched mid-session.
+
 `/import` is in `ling` today and unaudited. Its plugin step reads Claude Code's known-marketplaces file and can add a marketplace whose source is a GitHub repository (`OFFICIAL_MARKETPLACE_SOURCE = "anthropics/claude-plugins-official"` in `source_cla.rs`). Phase 0 traces `/import` on a home with a Claude Code setup and either (i) confirms it fetches nothing, or (ii) adds a one-line hook that skips non-local marketplace sources (Codex already has `is_local_marketplace_source`), counted against the cap with the owner's approval. The compatibility layer itself never fetches a plugin (§1.2).
 
 ### 8.4 Hooks are code from the repository

@@ -8,9 +8,10 @@
 // a thread opener loses the fields that would replace Mightling's prompt, provider or policy, and a
 // named prompt becomes `baseInstructions` here, never from the page's own text. An Ask thread
 // (§3.1) also gets a fresh scratch folder as its `cwd` and a sandbox rooted there, whatever folder
-// the page asked for. An import of another agent's setup loses its plugin items: their sources can
-// be cloned from GitHub or fetched from npm, a path the egress audit does not trace
-// (MIGHTLING_LING_CLAUDE §16.4). No Electron here, so this tests on its own.
+// the page asked for. Plugins are allowed while `/airgapped` is off; at a configured `on` what
+// fetches one is refused (`airgappedRefusedRequests`), an import loses its plugin items and every
+// thread opener gets `airgappedThreadConfig`, so it starts without plugins
+// (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §14.12). No Electron here, so this tests on its own.
 
 // Compiled in, as the Rust crate compiles it in: a running app cannot be pointed at a weaker file.
 import policyFile from "../../../ling-rs/web/policy.json";
@@ -25,6 +26,8 @@ export interface PromptSource {
   newScratchFolder(): string;
   /** The scratch folder of an existing Ask thread, or null for any other thread. */
   scratchFolderOf(threadId: string): string | null;
+  /** Whether the configured air-gap level is `on` (`ling airgapped`, no thread): installing is not one thread's act. */
+  airgappedOn(): boolean;
 }
 
 /** The rules of `policy.json`. */
@@ -41,6 +44,12 @@ export interface Policy {
   scratchSandbox: string;
   importRequest: string;
   refusedImportItems: ReadonlySet<string>;
+  /** Requests refused at `on`: they fetch a plugin or a marketplace outside the sandbox. */
+  airgappedRefusedRequests: ReadonlySet<string>;
+  /** Import items dropped at `on`, beside `refusedImportItems`. */
+  airgappedRefusedImportItems: ReadonlySet<string>;
+  /** The `config` overrides a thread opener gets at `on`: no plugins. */
+  airgappedThreadConfig: Readonly<JsonObject>;
   /** The `thread/start` field naming the window's own tools (the terminal's output, the preview's console); the policy writes their definitions as `dynamicTools`. */
   windowToolsField: string;
   windowTools: ReadonlyMap<string, unknown>;
@@ -79,6 +88,9 @@ export function parsePolicy(value: unknown): Policy {
     scratchSandbox: string(value, "scratchSandbox"),
     importRequest: string(value, "importRequest"),
     refusedImportItems: new Set(strings(value, "refusedImportItems")),
+    airgappedRefusedRequests: new Set(strings(value, "airgappedRefusedRequests")),
+    airgappedRefusedImportItems: new Set(strings(value, "airgappedRefusedImportItems")),
+    airgappedThreadConfig: isObject(value.airgappedThreadConfig) ? value.airgappedThreadConfig : (() => { throw new Error("policy.json: `airgappedThreadConfig` must be an object"); })(),
     windowToolsField: string(value, "windowToolsField"),
     windowTools: new Map(Object.entries(isObject(value.windowTools) ? value.windowTools : (() => { throw new Error("policy.json: `windowTools` must be an object"); })()) as [string, unknown][]),
   };
@@ -87,6 +99,9 @@ export function parsePolicy(value: unknown): Policy {
   }
   if (![...policy.scratchPrompts].every((name) => policy.namedPrompts.has(name))) {
     throw new Error("policy.json: every scratch prompt must also be a named prompt");
+  }
+  if (![...policy.airgappedRefusedRequests].every((method) => policy.allowedRequests.has(method))) {
+    throw new Error("policy.json: every request refused at airgapped on must be allowed at off");
   }
   if (![...policy.promptOpeners].every((method) => policy.threadOpeners.has(method))) {
     throw new Error("policy.json: every prompt opener must also be a thread opener");
@@ -106,6 +121,16 @@ export function namedPrompt(message: unknown, policy: Policy = POLICY): string |
   if (!isObject(message) || typeof message.method !== "string" || !policy.promptOpeners.has(message.method)) return null;
   const name = isObject(message.params) ? message.params[policy.promptField] : undefined;
   return typeof name === "string" && name !== "default" && policy.namedPrompts.has(name) ? name : null;
+}
+
+/**
+ * Whether vetting a message depends on the air-gap level: a request refused at `on`, an import, or
+ * a thread opener. The host asks `ling airgapped` beforehand, only for these.
+ */
+export function levelMatters(message: unknown, policy: Policy = POLICY): boolean {
+  if (!isObject(message) || typeof message.method !== "string" || !("id" in message)) return false;
+  const method = message.method;
+  return policy.airgappedRefusedRequests.has(method) || policy.threadOpeners.has(method) || method === policy.importRequest;
 }
 
 /** Puts a thread in its scratch folder: whatever the page said about where it works and what it may write is replaced. */
@@ -132,6 +157,8 @@ function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSo
     });
     if (tools.length) params.dynamicTools = tools;
   }
+  // At `on` the thread starts without plugins, whatever the page asked (`config` is dropped).
+  if (prompts.airgappedOn() && Object.keys(policy.airgappedThreadConfig).length) params.config = { ...policy.airgappedThreadConfig };
   if (!(policy.promptField in params)) return params;
   const name = params[policy.promptField];
   delete params[policy.promptField];
@@ -147,20 +174,23 @@ function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSo
 }
 
 /**
- * Removes the items an import may not carry (`refusedImportItems`: plugins, whose sources can be
- * fetched from the network); the others are imported as asked. An item that does not name its
- * type, or an import left with nothing to do, is refused rather than guessed at.
+ * Removes the items an import may not carry (`refusedImportItems`, and at `on`
+ * `airgappedRefusedImportItems`: plugins, whose sources are fetched from the network); the others
+ * are imported as asked. An item that does not name its type, or an import left with nothing to
+ * do, is refused rather than guessed at.
  */
-function vetImportParams(policy: Policy, original: JsonObject): JsonObject {
+function vetImportParams(policy: Policy, original: JsonObject, airgappedOn: boolean): JsonObject {
   const items = original.migrationItems;
   if (!Array.isArray(items)) throw new Error("an import must list its migrationItems");
   const kept = items.filter((item) => {
     const kind = isObject(item) ? item.itemType : undefined;
     if (typeof kind !== "string") throw new Error("every migration item must name its itemType");
-    return !policy.refusedImportItems.has(kind);
+    return !policy.refusedImportItems.has(kind) && !(airgappedOn && policy.airgappedRefusedImportItems.has(kind));
   });
   if (kept.length === 0) {
-    throw new Error("nothing left to import: plugins are not imported here, since their sources can be fetched from the network");
+    throw new Error(
+      airgappedOn ? "nothing left to import: plugins are not imported while airgapped is on, since their sources are fetched from the network" : "nothing left to import",
+    );
   }
   return { ...original, migrationItems: kept };
 }
@@ -179,6 +209,9 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
   const key = "id" in object ? JSON.stringify(object.id) : undefined;
   if (method !== undefined && key !== undefined) {
     if (!policy.allowedRequests.has(method)) throw new Error(`the Mightling UI does not send ${method}`);
+    if (policy.airgappedRefusedRequests.has(method) && prompts.airgappedOn()) {
+      throw new Error(`airgapped is on: ${method} fetches a plugin or a marketplace with git outside the sandbox. Run ling airgapped default off to install one.`);
+    }
     const namesPrompt = isObject(object.params) && policy.promptField in object.params;
     if (namesPrompt && !policy.promptOpeners.has(method)) {
       throw new Error(`a prompt can only be chosen when a thread is started, not by ${method}`);
@@ -191,7 +224,7 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
       object.params = vetThreadParams(policy, object.params, prompts);
     }
     if (method === policy.importRequest) {
-      object.params = vetImportParams(policy, isObject(object.params) ? object.params : {});
+      object.params = vetImportParams(policy, isObject(object.params) ? object.params : {}, prompts.airgappedOn());
     }
     return object;
   }
