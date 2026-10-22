@@ -42,6 +42,21 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 # and the runner's own check (which stops starting instances below it) use the same number.
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
+# The disk guard (owner, 2026-10-21: night 12 failed on 10-20 when other work's build trees took the disk under it):
+# a round that stops for disk (`swe-bench run` stops below the reserve; its report says instances not run) pauses
+# instead of failing the night: the night waits until RESERVE_GB + DISK_RESUME_GB is free, checking every
+# DISK_POLL_S, then runs the same round again, which resumes it (its finished instances kept). After
+# DISK_PAUSE_MAX_S of waiting in all, or a round that stops with the disk fine, the night fails as before.
+DISK_RESUME_GB=${DISK_RESUME_GB:-20}
+DISK_POLL_S=${DISK_POLL_S:-300}
+DISK_PAUSE_MAX_S=${DISK_PAUSE_MAX_S:-28800}
+# A repository's instances are run, graded and their images removed in chunks of at most IMAGE_CHUNK
+# (`--image-chunk`; 0: the whole repository at once), so the disk holds one chunk's images, not the
+# largest repository's (fresh-150k's 86 django tasks would need about 260 GB at once; 25 need 75).
+IMAGE_CHUNK=${IMAGE_CHUNK:-25}
+# SHARD=I/K: this machine runs only the I-th of K balanced shards of LIST (`swe-bench run --shard`),
+# the other machines the others; `ling-admin swe-bench merge` puts each arm's K rounds together.
+SHARD=${SHARD:-}
 REFINE=${REFINE:-0}
 # The per-task time limit (`[swe_bench] task_timeout`, e.g. 60m); the runner's default (45m) when unset.
 TASK_TIMEOUT=${TASK_TIMEOUT:-}
@@ -83,13 +98,64 @@ ASK_EVALS_LIMIT=${ASK_EVALS_LIMIT:-90m}
 ASK_EVALS_PORT=${ASK_EVALS_PORT:-18000}
 # The installed binary by its real path, not PATH's link, so a rebuild changes nothing mid-slot.
 ASK_EVALS_LING=${ASK_EVALS_LING:-$HOME/.local/share/dreamference/mightling/bin/ling}
+# The engine A/B (the production bar's night, engine MILESTONES §14): an arm part `on-sglang` or `on-engine` runs
+# the arm against that model server on the engine's development machine instead of this machine's, served there
+# by scripts/engine_ab_remote.sh over ssh, one at a time; production there (m0-prod8000) comes back at the end,
+# on a failure and on a stop. REMOTE is its ssh name, REMOTE_HOST the name the run reaches it by (resolved at
+# use time, never stored as an address).
+REMOTE=${REMOTE:-}
+REMOTE_HOST=${REMOTE_HOST:-${REMOTE:+$REMOTE.local}}
+# The helper's folder there (its ling-serve, serve.py, lease and logs), when not its default ~/ab-n12.
+REMOTE_AB_DIR=${REMOTE_AB_DIR:-}
+# A series of nights pinned to one commit and one `ling` build (the owner's decision of 2026-10-20 for nights
+# 14-16, the three thirds of fresh-150k, whose runs `swe-bench merge` joins only when they measured the same
+# thing): REF is a full 40-character commit. The first `start` at that REF builds `ling` from the worktree
+# (`codex build`, with its egress audit) and records the build's sha256 in $PINS/ling-<REF>.sha256; every later
+# `start` at the same REF neither fetches (when the commit is here) nor rebuilds, and refuses an installed `ling`
+# that is not the recorded build. The unit checks the build again before each round (LING_PIN_SHA256).
+PINS=${PINS:-$(dirname "$D")/pins}
+LING_PIN_SHA256=${LING_PIN_SHA256:-}
 
 log() { echo "$(date -Is) $*"; }
+pinned() { [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; }
+installed_ling() { "$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())"; }
+
+# A pinned series' build (see REF above): the recorded build of REF, or, the first time, a build from the
+# worktree, recorded. Sets LING_PIN_SHA256. Never builds while a SWE-bench unit runs, since the build
+# replaces the `ling` a night would be running.
+pin_build() {
+    local record="$PINS/ling-$REF.sha256" ling have want busy
+    [ "$(git -C "$WT" rev-parse HEAD 2>/dev/null)" = "$REF" ] || { echo "❌ $WT is not at the pinned $REF."; return 1; }
+    ling=$(cd "$WT" && PYTHONPATH="$WT" installed_ling) || return 1
+    if [ -s "$record" ]; then
+        want=$(awk 'NR==1{print $1}' "$record")
+        have=$(sha256sum "$ling" 2>/dev/null | cut -d' ' -f1)
+        if [ "$have" != "$want" ]; then
+            echo "❌ $ling is not the build pinned for $REF (sha256 ${have:-none}; pinned ${want:0:12} in $record):"
+            echo "   it was rebuilt or replaced since, and this night's runs would not merge with the series'."
+            echo "   Restore that build, or remove $record to start a new series on purpose."
+            return 1
+        fi
+        echo "📌 Pinned to ${REF:0:12} and its recorded build of ling (${want:0:12}): no fetch past it, no rebuild."
+    else
+        busy=$(systemctl --user list-units --state=active --plain --no-legend 'ling-swe-*' 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+        [ -z "${busy// /}" ] || { echo "❌ Not building the pinned ling while $busy runs: it would replace that night's ling."; return 1; }
+        echo "📌 Pinned to ${REF:0:12} with no build recorded: building ling from $WT (codex build, with its egress audit)..."
+        git -C "$WT" submodule update --init codex > /dev/null 2>&1 || { echo "❌ Could not check out the codex submodule in $WT."; return 1; }
+        ( cd "$WT" && PYTHONPATH="$WT" admin codex build ) || { echo "❌ codex build at $REF failed; nothing recorded."; return 1; }
+        have=$(sha256sum "$ling" 2>/dev/null | cut -d' ' -f1)
+        [ -n "$have" ] || { echo "❌ No ling at $ling after the build."; return 1; }
+        mkdir -p "$PINS" && echo "$have  $ling  $REF  $(date -Is)" > "$record" || return 1
+        echo "📌 Built and recorded: $record (${have:0:12})."
+    fi
+    LING_PIN_SHA256=$have
+}
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
 # arm, `--restart-after-compactions N`, SWE_BENCH spec §21), `apply-patch-FORM` (FORM freeform
 # or off: `--apply-patch FORM`, spec §22; the pinned Codex has no function form, so ling refuses it), `exec-tool-FORM` (FORM function or freeform:
 # `--exec-tool FORM`, spec §23), `drop-outputs` (drop-first compaction: `--drop-old-outputs`,
-# compaction spec §13), or several of these joined with `+`
+# compaction spec §13), `test-guard` and `finish-check` (the launcher's guards: `--test-guard`,
+# `--finish-check`, spec §29), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -108,12 +174,57 @@ arm_flags() {
             exec-tool*|exec_tool*) echo "❌ Arm $1: write the Code Mode arm as exec-tool-function or exec-tool-freeform." >&2; return 2 ;;
             drop-outputs) flags="$flags --drop-old-outputs" ;;
             drop-*|drop_*) echo "❌ Arm $1: write the drop-first compaction arm as drop-outputs." >&2; return 2 ;;
+            on-sglang|on-engine) ;;  # the model server, not an option of the run (arm_server)
+            on-*) echo "❌ Arm $1: write the model server as on-sglang or on-engine." >&2; return 2 ;;
+            test-guard) flags="$flags --test-guard" ;;
+            finish-check) flags="$flags --finish-check" ;;
+            test-guard*|test_guard*|testguard*) echo "❌ Arm $1: write the test guard's arm as test-guard." >&2; return 2 ;;
+            finish*) echo "❌ Arm $1: write the finish check's arm as finish-check." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
     echo "${flags# }"
 }
 arm_name() { echo "$1" | tr ,+ --; }
+# The arm's model server on REMOTE (`sglang` or `engine`), or nothing: this machine's server.
+arm_server() { echo "$1" | tr + '\n' | sed -n 's/^on-//p' | head -1; }
+uses_remote() { case "$ARMS" in *on-sglang*|*on-engine*) return 0 ;; esac; return 1; }
+# Serves the arm's model server on REMOTE (stopping production and the other arm there) and points the run at it.
+remote_serve() {
+    local server=$1 port out
+    case "$server" in sglang) port=30000 ;; engine) port=8300 ;; *) return 2 ;; esac
+    [ -n "$REMOTE" ] || { echo "❌ REMOTE is not set: name the engine's machine (its ssh name) for an on-$server arm."; return 1; }
+    # The helper first waits for REMOTE's GPU lock (up to 14 h, while day-time engine work holds it), then up to
+    # about 45 min for the arm: the ssh session outlasts both.
+    out=$(timeout "${REMOTE_SERVE_TIMEOUT:-15h}" ssh -o BatchMode=yes "$REMOTE" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
+    local rc=$?
+    echo "$out" | tail -3 | sed 's/^/   /'
+    [ "$rc" -eq 0 ] && echo "$out" | grep -q '^ready ' || return 1
+    export DREAMFERENCE_VLLM_HOST="http://$REMOTE_HOST:$port"
+    log "$server on $REMOTE serving at $DREAMFERENCE_VLLM_HOST ($(echo "$out" | sed -n 's/^ready //p'))"
+}
+# Production back on REMOTE, both arms stopped; `remote_restore keep`: the arms stopped and the GPU lock kept.
+remote_restore() {
+    timeout 30m ssh -o BatchMode=yes "$REMOTE" ${REMOTE_AB_DIR:+AB_DIR=$REMOTE_AB_DIR} bash -s -- restore ${1:-} < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
+    unset DREAMFERENCE_VLLM_HOST
+}
+free_gb() { df --output=avail -BG "${DISK_PATH:-$HOME/.cache}" | tail -1 | tr -dc '0-9'; }
+# Waits for the disk after a round stopped short; returns non-zero when the disk was not short or never came back.
+disk_pause() {
+    local round=$1 free
+    free=$(free_gb)
+    [ "$free" -lt $(( RESERVE_GB + DISK_RESUME_GB )) ] || return 1
+    log "⏸️  $round paused: ${free}G free, the reserve is ${RESERVE_GB}G (other work took the disk); resuming at $(( RESERVE_GB + DISK_RESUME_GB ))G"
+    while [ "$(free_gb)" -lt $(( RESERVE_GB + DISK_RESUME_GB )) ]; do
+        [ "$DISK_PAUSED" -lt "$DISK_PAUSE_MAX_S" ] || { log "❌ the disk stayed short for $(( DISK_PAUSED / 60 )) min"; return 1; }
+        sleep "$DISK_POLL_S"
+        DISK_PAUSED=$(( DISK_PAUSED + DISK_POLL_S ))
+    done
+    log "▶️  $round resumed: $(free_gb)G free"
+}
+# The options every round and regrade takes: the image chunk, and the round's shard of the list.
+chunk_flags() { echo "--image-chunk $IMAGE_CHUNK"; }
+shard_flags() { [ -n "$SHARD" ] && echo "--shard $SHARD"; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
 
 # The smoke check: one real task per arm (SMOKE_INSTANCE), with the night's settings and the arm's
@@ -136,6 +247,11 @@ smoke() {
         extra=$(arm_flags "$arm") || return 2
         [ "$REFINE" = 1 ] && extra="$extra --refine"
         run="$PREFIX-smoke-$name-$stamp"
+        server=$(arm_server "$arm")
+        if [ -n "$server" ] && ! remote_serve "$server"; then
+            echo "❌ Night $NIGHT not started: arm $arm's model server ($server on $REMOTE) did not come up."
+            return 1
+        fi
         echo "🔥 Smoke check of arm $arm: $SMOKE_INSTANCE as run $run (limit $SMOKE_TIMEOUT)..."
         ( cd "$WT" && export PYTHONPATH="$WT" DREAMFERENCE_CONFIG_PATH="$SMOKE_DIR/dreamference.toml" &&
           timeout -s INT -k 2m 25m "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" \
@@ -183,13 +299,20 @@ start() {
     fi
     # The worktree is what the unit runs (this script included), so it is moved to origin/main
     # every start: a stale worktree would run last night's script with none of today's fixes.
-    git -C "$REPO" fetch origin || exit 1
+    # A pinned commit already here needs no fetch; anything else is fetched, as before.
+    if ! { pinned && git -C "$REPO" cat-file -e "$REF^{commit}" 2>/dev/null; }; then
+        git -C "$REPO" fetch origin || exit 1
+    fi
     if [ ! -d "$WT" ]; then
         git -C "$REPO" worktree add --detach "$WT" "$REF" || exit 1
     elif [ -z "$(git -C "$WT" status --porcelain)" ]; then
         git -C "$WT" checkout --quiet --detach "$REF" || exit 1
     else
         echo "❌ $WT has local changes; commit or discard them so the night runs $REF."; exit 1
+    fi
+    # Before the checks below that read the installed ling: a pinned series builds it once, here.
+    if pinned; then
+        pin_build || exit 1
     fi
     if ! grep -q -- '"tests-v2"' "$WT/dreamference/swe_bench/swe_bench_instance_run.py"; then
         echo "❌ $WT does not have the tests-v2 task rule: update it to origin/main."; exit 1
@@ -255,6 +378,19 @@ start() {
             echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS: rebuild it (\`ling-admin codex build\`) from a commit that has drop-first compaction."; exit 1
         fi ;;
     esac
+    # The guard arms only set the launcher's switches (spec §29); a `ling` built before guard.rs
+    # ignores them, and the night would measure the record arm twice.
+    for guard in test-guard:TEST_GUARD finish-check:FINISH_CHECK; do
+        case "$ARMS" in *"${guard%%:*}"*)
+            if ! grep -q -- "\"--${guard%%:*}\"" "$WT/dreamference/swe_bench/swe_bench_command.py"; then
+                echo "❌ $WT does not have --${guard%%:*}: pin REF to a commit that has it."; exit 1
+            fi
+            ling=$("$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())") || exit 1
+            if ! grep -q -a "DREAMFERENCE_MIGHTLING_${guard#*:}" "$ling"; then
+                echo "❌ $ling does not read DREAMFERENCE_MIGHTLING_${guard#*:}: rebuild it (\`ling-admin codex build\`) from a commit that has the guards."; exit 1
+            fi ;;
+        esac
+    done
     # The universal code index needs codebase-memory-mcp beside ling-code in Mightling's install
     # directory (ling-code never looks on PATH). Without it every index fails and the run refuses
     # to start, which is how the night of 2026-10-09 was lost after the old install folder, which
@@ -268,18 +404,32 @@ start() {
     if [ ! -s "$LIST" ]; then
         echo "❌ No task list at $LIST: run scripts/swe_bench_fresh.py validate, then draw."; exit 1
     fi
+    case "$IMAGE_CHUNK" in ''|*[!0-9]*) echo "❌ IMAGE_CHUNK=$IMAGE_CHUNK: a number of instances, 0 for a whole repository."; exit 2 ;; esac
+    if [ -n "$SHARD" ] && { ! [[ "$SHARD" =~ ^[1-9][0-9]*/[1-9][0-9]*$ ]] || [ "${SHARD%/*}" -gt "${SHARD#*/}" ]; }; then
+        echo "❌ SHARD=$SHARD: I/K, the I-th of K shards of the list."; exit 2
+    fi
     count=$(grep -cv '^\s*\(#\|$\)' "$LIST")
-    # The largest repository's images are on disk at once while that repository is graded.
+    # One chunk of the largest repository's images is on disk at once while it is run and graded
+    # (the whole list's count: a shard holds no more).
     largest=$(grep -v '^\s*\(#\|$\)' "$LIST" | sed 's/-[0-9]*$//' | sort | uniq -c | sort -rn | awk 'NR==1{print $1}')
-    need=$(( largest * IMAGE_GB + RESERVE_GB ))
+    at_once=$largest
+    [ "$IMAGE_CHUNK" -gt 0 ] && [ "$largest" -gt "$IMAGE_CHUNK" ] && at_once=$IMAGE_CHUNK
+    need=$(( at_once * IMAGE_GB + RESERVE_GB ))
     free=$(df --output=avail -BG "$HOME/.cache" | tail -1 | tr -dc '0-9')
-    echo "Tasks: $count; largest repository: $largest; disk needed about ${need}G, free ${free}G."
+    echo "Tasks: $count${SHARD:+ (this machine: shard $SHARD)}; largest repository: $largest, at most $at_once of its images at once; disk needed about ${need}G, free ${free}G."
     if [ "$free" -lt "$need" ]; then
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
     fi
-    # Every arm runs one real task first; nothing below happens unless each one ran.
-    smoke || exit 1
+    # Every arm runs one real task first; nothing below happens unless each one ran. On REMOTE, a smoke that failed
+    # brings production back; one that passed stops the arms and keeps the GPU lock for the night, which serves each
+    # arm again (a lock let go here goes to whoever waits on it: night 12's start let it go for 6 s).
+    smoke
+    rc=$?
+    if uses_remote; then
+        if [ "$rc" -eq 0 ]; then remote_restore keep; else remote_restore; fi
+    fi
+    [ "$rc" -eq 0 ] || exit 1
     if [ "$BEST_OF" -gt 1 ]; then judge_smoke || exit 1; fi
     # A finished or failed night keeps its folder; this one starts clean.
     if [ -e "$D/done" ] || [ -e "$D/failed" ]; then
@@ -298,8 +448,11 @@ start() {
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
+        --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" --setenv=LING_PIN_SHA256="$LING_PIN_SHA256" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
-        /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
+        --setenv=REMOTE="$REMOTE" --setenv=REMOTE_HOST="$REMOTE_HOST" --setenv=REMOTE_AB_DIR="$REMOTE_AB_DIR" \
+        /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1" \
+        || { echo "❌ Could not start $UNIT."; uses_remote && remote_restore; exit 1; }
     echo "✅ Started $UNIT; log: $D/run.log"
 }
 
@@ -314,6 +467,15 @@ fail() {
     exit "$rc"
 }
 
+# A pinned series: the installed ling is still the recorded build (another build between two rounds would
+# leave the night's rounds measuring two binaries).
+check_pin() {
+    [ -n "$LING_PIN_SHA256" ] || return 0
+    local have
+    have=$(sha256sum "$(installed_ling)" 2>/dev/null | cut -d' ' -f1)
+    [ "$have" = "$LING_PIN_SHA256" ] || fail "pinned ling check (installed ${have:-none}, pinned ${LING_PIN_SHA256:0:12})" 1
+}
+
 # BEST_OF > 1: the one arm N times, then chooser v1 over the N runs and the report against run 1.
 best_of_run() {
     local arm name extra k round names=""
@@ -326,9 +488,11 @@ best_of_run() {
     [ "$REFINE" = 1 ] && extra="$extra --refine"
     for k in $(seq 1 "$BEST_OF"); do
         round="$PREFIX-$name-$k"
+        check_pin
         log "round $round (attempt $k of $BEST_OF)"
         admin swe-bench run --subset "$LIST" --name "$round" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
+            --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) \
+            --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
         rc=$?
         log "$round finished ($rc)"
         df -h / | tail -1
@@ -373,7 +537,8 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
-    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
+    DISK_PAUSED=0
+    log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}, image chunk $IMAGE_CHUNK${SHARD:+, shard $SHARD}${LING_PIN_SHA256:+, pinned ling ${LING_PIN_SHA256:0:12}}"
     [ "$ASK_EVALS" = 1 ] && ask_evals_slot
     if [ "$BEST_OF" -gt 1 ]; then
         best_of_run
@@ -387,27 +552,43 @@ run() {
     for arm in $record $candidate; do
         arm_flags "$arm" > /dev/null || fail "arm $arm" 2
     done
+    # The engine A/B: production on REMOTE comes back however the night ends (a stopped unit gets TERM, and the
+    # EXIT trap runs on the way out); once both rounds have run it comes back at once, before the regrades.
+    if uses_remote; then
+        trap 'remote_restore' EXIT
+        trap 'exit 143' TERM INT
+    fi
     for arm in $record $candidate; do
         name=$(arm_name "$arm")
         extra=$(arm_flags "$arm")
         [ "$REFINE" = 1 ] && extra="$extra --refine"
-        log "round $PREFIX-$name"
-        # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
-        admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
-        rc=$?
-        log "$PREFIX-$name finished ($rc)"
-        df -h / | tail -1
-        [ "$rc" -eq 0 ] || fail "round $PREFIX-$name" "$rc"
-        # A round that ran nothing is a failure whatever its status: the report says what was left.
-        if admin swe-bench report "$PREFIX-$name" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet'; then
-            admin swe-bench report "$PREFIX-$name" | grep '^INCOMPLETE'
-            fail "round $PREFIX-$name (instances not run)" 1
+        server=$(arm_server "$arm")
+        if [ -n "$server" ]; then
+            remote_serve "$server" || fail "serving $server on $REMOTE for $PREFIX-$name" 1
         fi
+        check_pin
+        log "round $PREFIX-$name"
+        while :; do
+            # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
+            admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
+                --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) --label "night $NIGHT, $name arm"
+            rc=$?
+            log "$PREFIX-$name finished ($rc)"
+            df -h / | tail -1
+            [ "$rc" -eq 0 ] || fail "round $PREFIX-$name" "$rc"
+            # A round that ran nothing is a failure whatever its status, unless it stopped for disk: the report says
+            # what was left.
+            admin swe-bench report "$PREFIX-$name" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet' || break
+            admin swe-bench report "$PREFIX-$name" | grep '^INCOMPLETE'
+            disk_pause "$PREFIX-$name" || fail "round $PREFIX-$name (instances not run)" 1
+        done
     done
+    # Production back now; the EXIT trap's second restore would find no lease and wait 30 min for a lock that is
+    # by then someone else's.
+    if uses_remote; then remote_restore; trap - EXIT; fi
     for name in $rname $cname; do
         log "regrade $PREFIX-$name with the test files dropped"
-        admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images
+        admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images $(chunk_flags)
         rc=$?
         log "regrade of $PREFIX-$name finished ($rc)"
         [ "$rc" -eq 0 ] || fail "regrade $PREFIX-$name" "$rc"

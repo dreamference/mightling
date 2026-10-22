@@ -10,6 +10,7 @@ from dreamference.night_shift.night_shift_compaction_audit import NightShiftComp
 from dreamference.night_shift.night_shift_host import NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
+from dreamference.night_shift.night_shift_recurring import NightShiftRecurring
 from dreamference.night_shift.night_shift_remote import NightShiftRemote
 from dreamference.night_shift.night_shift_report import NightShiftReport
 from dreamference.night_shift.night_shift_runner import NightShiftRunner
@@ -25,6 +26,7 @@ __all__ = [
     "NightShiftHost",
     "NightShiftIndex",
     "NightShiftQueue",
+    "NightShiftRecurring",
     "NightShiftRemote",
     "NightShiftReport",
     "NightShiftRunner",

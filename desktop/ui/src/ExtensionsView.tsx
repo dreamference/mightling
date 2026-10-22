@@ -1,8 +1,9 @@
 // Skills, plugins, MCP servers, apps and hooks (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY.md
 // §2.11): what a thread can use, read from the server (`skills/list`, `plugin/list`,
 // `mcpServerStatus/list`, `app/list`, `hooks/list`), changed through the server: a skill turned
-// off or on (`skills/config/write`), a plugin of a local or repository marketplace installed or
-// removed (`plugin/install`, `plugin/uninstall`; the vendor's catalogue stays closed, patch 0015),
+// off or on (`skills/config/write`), a marketplace added from git or a folder (`marketplace/add`),
+// a plugin installed or removed (`plugin/install`, `plugin/uninstall`; the vendor's catalogue stays
+// closed, patch 0015, and at airgapped on the app's policy refuses installs: AIRGAPPED §14.12),
 // an MCP server added, turned off or on and the servers read again (`config/value/write`,
 // `config/mcpServer/reload`), an app turned off or on, a hook trusted or turned off (`config/batchWrite`
 // on `hooks.state`, as the TUI does: Codex skips a hook that is not managed until its definition is
@@ -91,6 +92,7 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
   const [hooks, setHooks] = useState<HooksListEntry[] | null>(null);
   const [adding, setAdding] = useState<{ name: string; kind: "command" | "url"; target: string; args: string } | null>(null);
   const [changed, setChanged] = useState(false);
+  const [source, setSource] = useState("");
 
   const load = useCallback(() => {
     client.request("skills/list", cwd ? { cwds: [cwd] } : {})
@@ -104,13 +106,15 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
   useEffect(load, [load]);
 
   /** A change through the server, then everything read again. */
-  const act = async (method: "skills/config/write" | "plugin/install" | "plugin/uninstall" | "config/mcpServer/reload", params: Record<string, unknown>) => {
+  const act = async (method: "skills/config/write" | "plugin/install" | "plugin/uninstall" | "marketplace/add" | "config/mcpServer/reload", params: Record<string, unknown>) => {
     try {
       await client.request(method, params as never);
       setChanged(true);
       load();
+      return true;
     } catch (error) {
       notice(error);
+      return false;
     }
   };
 
@@ -176,7 +180,11 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
         ) : null}
         {props.tab === "plugins" ? (
           <>
-            <p className="dialog-note">Plugins from this machine's and this project's marketplaces. The vendor's own catalogue is closed in Mightling.</p>
+            <p className="dialog-note">Plugins from marketplaces in git repositories and folders on this machine. A plugin's MCP servers and hooks run as you, outside the sandbox: add only what you trust. The vendor's own catalogue is closed in Mightling, and while airgapped is on, plugins are off and nothing is installed.</p>
+            <form className="plugin-market-add" onSubmit={(event) => { event.preventDefault(); const chosen = source.trim(); if (chosen) void act("marketplace/add", { source: chosen }).then((added) => added && setSource("")); }}>
+              <input aria-label="Marketplace source" placeholder="owner/repo, a git URL or a folder" value={source} onChange={(event) => setSource(event.target.value)} />
+              <button type="submit" disabled={!source.trim()}>Add marketplace</button>
+            </form>
             {marketplaces === null ? <p className="empty small">…</p> : marketplaces.every((market) => market.plugins.length === 0) ? <p className="empty small">No marketplace offers a plugin here.</p> : marketplaces.map((market) => (
               <section key={market.name} className="plugin-market">
                 <h3>{market.name}</h3>
@@ -189,7 +197,7 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
                         <td className="shortcut-actions">
                           {plugin.installed
                             ? <button className="link-button" onClick={() => void act("plugin/uninstall", { pluginId: plugin.id })}>Remove</button>
-                            : <button className="link-button" disabled={!market.path} title={market.path ? "" : "Only local and repository marketplaces install here"} onClick={() => void act("plugin/install", { marketplacePath: market.path, pluginName: plugin.name })}>Install</button>}
+                            : <button className="link-button" disabled={!market.path} title={market.path ? "" : "Only marketplaces on this machine install here"} onClick={() => void act("plugin/install", { marketplacePath: market.path, pluginName: plugin.name })}>Install</button>}
                         </td>
                       </tr>
                     ))}

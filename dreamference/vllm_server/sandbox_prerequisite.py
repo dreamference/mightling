@@ -14,8 +14,12 @@ the password), or turn off what depends on it. The fix is the narrowest one: an 
 for `/usr/bin/bwrap` alone, the same shape as the profiles Ubuntu itself ships for programs that
 build sandboxes (`/etc/apparmor.d/chrome`, `linux-sandbox`): `flags=(unconfined)` plus `userns,`.
 Setting the sysctl to 0 would also work, for every program on the machine, and is not offered.
-Ubuntu's stricter `bwrap-userns-restrict` (apparmor-profiles) confines what runs inside the
-sandbox as well; it was not tried with Codex's sandbox, which sets up a loopback interface in it.
+Ubuntu's stricter `bwrap-userns-restrict` confines what runs inside the sandbox as well. Ubuntu
+25.04 and later ship it in the `apparmor` package, and there Codex's sandbox works with no step
+(measured on 26.04, 2026-10-22). Two profiles attaching to the same `bwrap` make AppArmor attach
+neither (openai/codex#38715), so where another one is there (a machine upgraded from 24.04 with
+ours in place, say) the fix loads that one and removes ours, never writes a second
+(specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md).
 
 The user's answer to "turn it off" is kept in `~/.config/dreamference/sandbox.json`, so the
 question is not asked again; `ling-admin host setup` applies the fix later and the file is then
@@ -32,7 +36,8 @@ from pathlib import Path
 from typing import Final, List, Optional, Tuple
 
 PROFILE_NAME: Final[str] = "puffin-bwrap"
-PROFILE_PATH: Final[str] = f"/etc/apparmor.d/{PROFILE_NAME}"
+APPARMOR_DIR: Final[str] = "/etc/apparmor.d"
+PROFILE_PATH: Final[str] = f"{APPARMOR_DIR}/{PROFILE_NAME}"
 USERNS_SYSCTL: Final[str] = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
 
 # Commands that are never asked about: `mcp` and `node serve-job` speak a protocol on stdio,
@@ -158,11 +163,41 @@ class SandboxPrerequisite:
         if cls._userns_restricted() is not True:
             return None
         bwrap = os.path.realpath(shutil.which("bwrap") or "/usr/bin/bwrap")
+        others = [path for path in cls.profiles_attaching(bwrap) if Path(path).name != PROFILE_NAME]
+        if others:
+            # A second profile for the same binary would make AppArmor attach neither: load the one
+            # there (Ubuntu's own, on 25.04 and later) and take ours away if it is there too.
+            ours = Path(APPARMOR_DIR) / PROFILE_NAME
+            removal = [["apparmor_parser", "-R", str(ours)], ["rm", "-f", str(ours)]] if ours.exists() else []
+            return [*removal, ["apparmor_parser", "-r", others[0]]]
         staged = cls.staged_profile(bwrap)
         return [
             ["install", "-m", "644", "-o", "root", "-g", "root", str(staged), PROFILE_PATH],
             ["apparmor_parser", "-r", PROFILE_PATH],
         ]
+
+    @classmethod
+    def profiles_attaching(cls, binary: str) -> list[str]:
+        """The profile files whose `profile` line attaches to a binary, read without root.
+
+        Args:
+            binary: The absolute path of the executable.
+
+        Returns:
+            list[str]: The files, sorted by name.
+        """
+        found = []
+        for path in sorted(Path(APPARMOR_DIR).glob("*")):
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                match line.split():
+                    case ["profile", _, attachment, *_] if attachment.strip('"') == binary:
+                        found.append(str(path))
+                        break
+        return found
 
     @classmethod
     def profile_text(cls, bwrap: str) -> str:

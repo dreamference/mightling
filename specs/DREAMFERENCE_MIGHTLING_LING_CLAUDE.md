@@ -607,6 +607,8 @@ Because the mode is the same binary:
 
 ### 8.3 `/import` and plugins
 
+> **2026-10-22:** plugins are allowed at `/airgapped off` (AIRGAPPED §14.12). The desktop app's import keeps plugin items at `off` and drops them at `on`; `/import` in the TUI stays hidden (patch `0012`), because it runs in `ling`'s own process and cannot follow a level switched mid-session.
+
 `/import` is in `ling` today and unaudited. Its plugin step reads Claude Code's known-marketplaces file and can add a marketplace whose source is a GitHub repository (`OFFICIAL_MARKETPLACE_SOURCE = "anthropics/claude-plugins-official"` in `source_cla.rs`). Phase 0 traces `/import` on a home with a Claude Code setup and either (i) confirms it fetches nothing, or (ii) adds a one-line hook that skips non-local marketplace sources (Codex already has `is_local_marketplace_source`), counted against the cap with the owner's approval. The compatibility layer itself never fetches a plugin (§1.2).
 
 ### 8.4 Hooks are code from the repository
@@ -662,6 +664,15 @@ Read, in the documented precedence (managed, then `--settings`, then `.claude/se
 | `hooks` | §9.5 | 1 |
 | MCP servers in `.mcp.json` (project, approved before first use) and `~/.claude.json` (user and local scopes; only its `mcpServers` entries are read) | `-c mcp_servers.<name>…` for the session, `${VAR}` and `${VAR:-default}` expanded; a project server is offered only after the trust prompt; remote (`http`, `sse`, WebSocket) servers are refused at `/airgapped on` | 1 |
 | `attribution` | the commit guidance in the prompt block | 3 |
+
+**MCP servers: built (2026-10-21)** in `ling-rs/src/compat_mcp.rs`, by the owner's decision that each needs the user's approval first.
+- **Scopes:** Claude Code's three, in its precedence (local `~/.claude.json` `projects.<path>.mcpServers`, project `.mcp.json`, user `~/.claude.json` `mcpServers`). A project's `.mcp.json` is read only in a trusted folder.
+- **Approval:** `ling compat mcp approve <name>|--all` records a hash of the server's name, scope, file and definition in `$CODEX_HOME/compat/claude/mcp-approved.json`, which the sandbox cannot write. A changed definition waits again. A TUI start names each server that waits; `ling compat mcp` lists them and `revoke` removes an approval.
+- **stdio servers:** Codex runs `ling compat mcp-run …`, which checks the approval once more at spawn and expands `${VAR}`/`${VAR:-default}` itself. Codex forwards only the named variables through `env_vars`, so no value is on a command line. The wrapper then becomes the server, in the project's root. At a configured `/airgapped on` it runs the server under `bwrap --unshare-net`, or refuses without `bwrap`.
+- **HTTP servers:** Codex connects them with `env_http_headers`, `bearer_token_env_var` or literal headers. A header mixing text and variables is refused. HTTP servers are not offered at `/airgapped on`.
+- **Refused:** SSE and WebSocket servers, names Codex rejects, and Mightling's own server names.
+- **Egress audit:** the `--compat claude` audit's repository has an approved stdio server (it must start and reach nothing) and an unapproved HTTP one (it must never be connected).
+- **Mid-session `/airgapped on`:** stdio servers already running keep what they had at start. Start the session at `on` to have them offline.
 | `env` | set in the session's environment (not the sandbox's network settings; `HTTP_PROXY` and similar are refused at `/airgapped on`) | 1 |
 | `model` | accepted if served, else a notice | 1 |
 | `apiKeyHelper`, Anthropic credentials, `forceLoginMethod` and similar | ignored with a notice ("no vendor sign-in in Mightling") | 1 |
@@ -692,6 +703,23 @@ Mightling's own settings stay where they are (`dreamference.toml`, `~/.config/dr
 | `WebFetch(domain:…)` | passed to `ling-fetch` as an allow-list (a flag to add in `ling-web-rs/`) |
 | `mcp__server__tool` | Codex's MCP tool approval settings |
 | `additionalDirectories` | writable roots |
+
+**Built (2026-10-21)** in `ling-rs/src/compat_permissions.rs`.
+- **The guard:** Claude Code's rules from the settings files (a repository's only in a trusted folder) and from `--allowedTools`/`--disallowedTools` go to one `PreToolUse` hook, `ling compat guard`. The launcher registers and trusts it with the session's other hooks; there are no exec-policy files.
+  - Deny is checked first, then ask, then allow.
+  - A **deny** rule refuses the call and names the rule.
+  - An **ask** rule refuses it too and says so: a hook cannot make Codex ask, so the mode takes the safe direction.
+  - An **allow** rule needs nothing. Codex runs what its sandbox permits without asking and still asks for what would leave the sandbox.
+- **`Bash(…)` rules:** matched on every subcommand (Claude Code's separators, substitutions included, inside double quotes too), after its wrappers and any leading assignment. `*` works as on the permissions page, including the bare-command rule for a trailing ` *` and the older `:*`.
+- **`Read(…)`/`Edit(…)` rules:** the four gitignore anchors (`//`, `~/`, `/` from the settings file's anchor, relative), against `apply_patch`'s files and the file commands and redirections of a shell command. A `Read` deny also refuses an edit.
+- **Other rules:** `WebFetch(domain:…)` matches `ling-fetch` URLs, with Claude Code's label rules. Bare `WebSearch` matches `ling-search`. Tool names and globs match (`mcp__*`, `Agent(role)`). Writes to `.claude/` and `.git/` are refused as protected.
+- **`--permission-mode` in the TUI:**
+  - `default`, `manual` and `acceptEdits` change nothing (Codex's workspace-write already lets edits through).
+  - `dontAsk` is `-a never`.
+  - `bypassPermissions` is Full Access, refused at `/airgapped on`.
+  - `plan` starts as usual with a line saying to type `/plan`, since Codex has no setting for the starting mode.
+  - `auto` is refused.
+- **`permissions.defaultMode`** in a settings file is not read: a repository must not choose a looser mode.
 
 The mapping is not exact (§14 Q4): where Claude Code would *allow* without asking and Codex's model cannot express it (a `PreToolUse` hook may not return a plain `allow` at the pinned tag, only `allow` with a rewritten input), the mode asks, which is the safe direction. Claude Code's own rule that a hook's `allow` never overrides a deny or ask rule holds trivially.
 
@@ -765,6 +793,7 @@ Ask threads are `ling` sessions; they take the profile only if the node's config
 
 Following the pattern of §20–§23 of [SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md):
 
+- **Built (2026-10-21), the `--compat` part:** `swe-bench run --compat claude|off` sets the variable in every container and records `compat` in the manifest (`auto` without the flag, which a manifest from before reads as). The report prints a `Compatibility` line and `--against` lists the field when two runs differ. No night is armed; the main session schedules one. `--claude-tools` waits for the discrete roster.
 - **`swe-bench run --compat claude`** sets `DREAMFERENCE_MIGHTLING_COMPAT=claude` for every session of the run (the runner's extra environment of each container); **`--claude-tools codex|discrete|discrete-search`** sets `DREAMFERENCE_MIGHTLING_CLAUDE_TOOLS`. With no flag neither variable is set and the launcher decides as for every user. The manifest records `compat` and `claude_tools` (`auto` when absent; a manifest from before the options reads as `auto`); `report` prints them and `report --against` lists them when they differ.
 - **The instances carry no `CLAUDE.md`**, so the profile alone changes only the command line and the output; the arm that matters is **`--compat claude --claude-tools discrete`** against the record arm (`default`). A second pair adds a generated `CLAUDE.md` per instance (the same text the record arm gets as its task preamble, moved into the memory file) to check that memory delivered through the `SessionStart` hook scores the same as through the prompt.
 - **The list**: the night-2 list without mismatched tasks (`docs/dev/swe-bench/night2-no-mismatch.txt`, 44 tasks), record arm first, as on every night; McNemar exact, the report's verdict. Columns: resolved, tokens (the roster's schema tokens counted), tool calls by name, edits by tool, compactions, wall time.

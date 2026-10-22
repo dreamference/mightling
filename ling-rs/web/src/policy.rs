@@ -7,10 +7,18 @@
 //! send, or an answer to a server request that is not waiting is refused; a thread opener loses the
 //! fields that would replace Mightling's prompt, provider or policy, and a named prompt becomes
 //! `baseInstructions` here, never from the UI's own text. An Ask thread (§3.1) also gets a fresh
-//! scratch folder as its `cwd` and a sandbox rooted there, whatever folder the UI asked for. An
-//! import of another agent's setup loses its plugin items: their sources can be cloned from GitHub
-//! or fetched from npm, a path the egress audit does not trace (MIGHTLING_LING_CLAUDE §16.4).
+//! scratch folder as its `cwd` and a sandbox rooted there, whatever folder the UI asked for.
+//!
+//! Plugins are allowed while `/airgapped` is off (2026-10-22). At a configured `on` the policy
+//! refuses what fetches one (`airgappedRefusedRequests`: installing, adding or upgrading a
+//! marketplace, all `git` in the app server's own process, outside the sandbox), an import loses
+//! its plugin items (`airgappedRefusedImportItems`), and every thread opener gets
+//! `airgappedThreadConfig`, which starts the thread without plugins: their MCP servers would run
+//! outside the sandbox (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §14.12). The composer's `!`
+//! command (`thread/shellCommand`, run in the user's own shell with no sandbox) is refused the same
+//! way, judged by the level of the thread it names (§14.13).
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
@@ -32,6 +40,11 @@ pub trait PromptSource: Send + Sync {
     /// The scratch folder of an existing Ask thread, or None for any other thread: a resumed or
     /// forked Ask thread stays in its folder, whatever the UI asks for.
     fn scratch_folder_of(&self, thread_id: &str) -> Option<String>;
+    /// Whether the air-gap level is `on`, as the launcher resolves it: for the thread `thread_id`
+    /// names, or the configured level (`ling airgapped`, no thread) for None. Installing is not one
+    /// thread's act, and a thread being opened has no level of its own yet, so both ask with None;
+    /// a `!` command asks for its thread. An implementation that cannot tell answers true.
+    fn airgapped_on(&self, thread_id: Option<&str>) -> bool;
 }
 
 /// The rules of `policy.json`.
@@ -49,6 +62,20 @@ pub struct Policy {
     pub scratch_sandbox: String,
     pub import_request: String,
     pub refused_import_items: BTreeSet<String>,
+    /// Requests refused at `on`: they fetch a plugin or a marketplace outside the sandbox, or run a
+    /// `!` command with no sandbox. Judged by the level of the thread they name, else the configured one.
+    pub airgapped_refused_requests: BTreeSet<String>,
+    /// Why a request is refused at `on`, for those with a reason of their own.
+    pub airgapped_refusal_reasons: BTreeMap<String, String>,
+    /// Import items dropped at `on`, beside `refused_import_items`.
+    pub airgapped_refused_import_items: BTreeSet<String>,
+    /// The `config` overrides a thread opener gets at `on`: no plugins.
+    pub airgapped_thread_config: Map<String, Value>,
+    /// The field of `thread/start` in which the UI names the window's own tools it answers
+    /// (`windowTools`: the terminal's output, the preview's console; DESKTOP_PARITY §4.5, the
+    /// owner's decision 5). The policy, not the UI, writes their definitions as `dynamicTools`.
+    pub window_tools_field: String,
+    pub window_tools: BTreeMap<String, Value>,
 }
 
 fn strings(value: &Value, key: &str) -> Result<Vec<String>, String> {
@@ -86,9 +113,47 @@ impl Policy {
             scratch_sandbox: string(&value, "scratchSandbox")?,
             import_request: string(&value, "importRequest")?,
             refused_import_items: strings(&value, "refusedImportItems")?.into_iter().collect(),
+            airgapped_refused_requests: strings(&value, "airgappedRefusedRequests")?.into_iter().collect(),
+            airgapped_refused_import_items: strings(&value, "airgappedRefusedImportItems")?.into_iter().collect(),
+            airgapped_refusal_reasons: value
+                .get("airgappedRefusalReasons")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "policy.json: `airgappedRefusalReasons` must be an object".to_string())?
+                .iter()
+                .map(|(method, reason)| {
+                    reason
+                        .as_str()
+                        .map(|reason| (method.clone(), reason.to_string()))
+                        .ok_or_else(|| format!("policy.json: the reason `{method}` is refused at on must be a string"))
+                })
+                .collect::<Result<_, _>>()?,
+            airgapped_thread_config: value
+                .get("airgappedThreadConfig")
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or_else(|| "policy.json: `airgappedThreadConfig` must be an object".to_string())?,
+            window_tools_field: string(&value, "windowToolsField")?,
+            window_tools: value
+                .get("windowTools")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "policy.json: `windowTools` must be an object".to_string())?
+                .iter()
+                .map(|(name, spec)| (name.clone(), spec.clone()))
+                .collect(),
         };
+        for (name, spec) in &policy.window_tools {
+            if spec.get("name").and_then(Value::as_str) != Some(name.as_str()) {
+                return Err(format!("policy.json: the window tool `{name}` must carry its own name"));
+            }
+        }
         if !policy.scratch_prompts.is_subset(&policy.named_prompts) {
             return Err("policy.json: every scratch prompt must also be a named prompt".to_string());
+        }
+        if !policy.airgapped_refused_requests.is_subset(&policy.allowed_requests) {
+            return Err("policy.json: every request refused at airgapped on must be allowed at off".to_string());
+        }
+        if let Some(method) = policy.airgapped_refusal_reasons.keys().find(|method| !policy.airgapped_refused_requests.contains(*method)) {
+            return Err(format!("policy.json: `{method}` has a reason to be refused at on but is not refused there"));
         }
         if !policy.prompt_openers.is_subset(&policy.thread_openers) {
             return Err("policy.json: every prompt opener must also be a thread opener".to_string());
@@ -123,11 +188,23 @@ impl Policy {
                 if !self.allowed_requests.contains(&method) {
                     return Err(format!("the Mightling UI does not send {method}"));
                 }
+                if self.airgapped_refused_requests.contains(&method) && prompts.airgapped_on(airgap_thread(&object)) {
+                    return Err(self.airgapped_refusal_reasons.get(&method).cloned().unwrap_or_else(|| {
+                        format!("airgapped is on: {method} fetches a plugin or a marketplace with git outside the sandbox. Run ling airgapped default off to install one.")
+                    }));
+                }
                 let opener = self.thread_openers.contains(&method);
                 let names_prompt =
                     object.get("params").and_then(Value::as_object).is_some_and(|params| params.contains_key(&self.prompt_field));
                 if names_prompt && !self.prompt_openers.contains(&method) {
                     return Err(format!("a prompt can only be chosen when a thread is started, not by {method}"));
+                }
+                let names_tools = object
+                    .get("params")
+                    .and_then(Value::as_object)
+                    .is_some_and(|params| params.contains_key(&self.window_tools_field));
+                if names_tools && !self.prompt_openers.contains(&method) {
+                    return Err(format!("window tools can only be named when a thread is started, not by {method}"));
                 }
                 if opener {
                     if let Some(Value::Object(params)) = object.get("params") {
@@ -137,7 +214,7 @@ impl Policy {
                 }
                 if method == self.import_request {
                     let params = object.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
-                    object.insert("params".to_string(), Value::Object(self.vet_import_params(params)?));
+                    object.insert("params".to_string(), Value::Object(self.vet_import_params(params, prompts.airgapped_on(None))?));
                 }
                 Ok(Value::Object(object))
             }
@@ -169,6 +246,28 @@ impl Policy {
         if let Some(folder) = existing {
             self.confine(&mut params, folder);
         }
+        if let Some(names) = params.remove(&self.window_tools_field) {
+            let Value::Array(names) = names else {
+                return Err(format!("`{}` must list tool names", self.window_tools_field));
+            };
+            let mut tools = Vec::new();
+            for name in names {
+                let Some(name) = name.as_str() else {
+                    return Err(format!("`{}` must list tool names", self.window_tools_field));
+                };
+                let Some(spec) = self.window_tools.get(name) else {
+                    return Err(format!("no window tool named \"{name}\""));
+                };
+                tools.push(spec.clone());
+            }
+            if !tools.is_empty() {
+                params.insert("dynamicTools".to_string(), Value::Array(tools));
+            }
+        }
+        // At `on` the thread starts without plugins, whatever the UI asked (`config` is dropped).
+        if prompts.airgapped_on(None) && !self.airgapped_thread_config.is_empty() {
+            params.insert("config".to_string(), Value::Object(self.airgapped_thread_config.clone()));
+        }
         let Some(name) = params.remove(&self.prompt_field) else { return Ok(params) };
         let Value::String(name) = name else {
             return Err(format!("`{}` must name a prompt", self.prompt_field));
@@ -190,10 +289,11 @@ impl Policy {
         Ok(params)
     }
 
-    /// Removes the items an import may not carry (`refusedImportItems`: plugins, whose sources can
-    /// be fetched from the network); the others are imported as asked. An item that does not name
-    /// its type, or an import left with nothing to do, is refused rather than guessed at.
-    fn vet_import_params(&self, mut params: Map<String, Value>) -> Result<Map<String, Value>, String> {
+    /// Removes the items an import may not carry (`refusedImportItems`, and at `on`
+    /// `airgappedRefusedImportItems`: plugins, whose sources are fetched from the network); the
+    /// others are imported as asked. An item that does not name its type, or an import left with
+    /// nothing to do, is refused rather than guessed at.
+    fn vet_import_params(&self, mut params: Map<String, Value>, airgapped_on: bool) -> Result<Map<String, Value>, String> {
         let Some(Value::Array(items)) = params.get("migrationItems") else {
             return Err("an import must list its migrationItems".to_string());
         };
@@ -202,12 +302,18 @@ impl Policy {
             let Some(kind) = item.get("itemType").and_then(Value::as_str) else {
                 return Err("every migration item must name its itemType".to_string());
             };
-            if !self.refused_import_items.contains(kind) {
+            let refused = self.refused_import_items.contains(kind)
+                || (airgapped_on && self.airgapped_refused_import_items.contains(kind));
+            if !refused {
                 kept.push(item.clone());
             }
         }
         if kept.is_empty() {
-            return Err("nothing left to import: plugins are not imported here, since their sources can be fetched from the network".to_string());
+            return Err(if airgapped_on {
+                "nothing left to import: plugins are not imported while airgapped is on, since their sources are fetched from the network".to_string()
+            } else {
+                "nothing left to import".to_string()
+            });
         }
         params.insert("migrationItems".to_string(), Value::Array(kept));
         Ok(params)
@@ -222,6 +328,21 @@ impl Policy {
         params.insert("cwd".to_string(), Value::String(folder));
         params.insert("sandbox".to_string(), Value::String(self.scratch_sandbox.clone()));
     }
+}
+
+/// The thread whose air-gap level decides a request in `airgappedRefusedRequests`: its `threadId`.
+fn airgap_thread(object: &Map<String, Value>) -> Option<&str> {
+    object.get("params").and_then(|params| params.get("threadId")).and_then(Value::as_str)
+}
+
+/// The thread a message from the app-server describes and the folder it works in, if it carries
+/// one (`thread/started`, and the answers to `thread/start|resume|fork|read`): the enforcer keeps
+/// it, so a thread's level is read with its own repository's configuration file.
+pub fn thread_place(value: &Value) -> Option<(String, String)> {
+    let thread = value.pointer("/params/thread").or_else(|| value.pointer("/result/thread"))?;
+    let id = thread.get("id").and_then(Value::as_str)?;
+    let cwd = thread.get("cwd").and_then(Value::as_str)?;
+    Some((id.to_string(), cwd.to_string()))
 }
 
 /// One thing the app-server sent.
@@ -292,6 +413,7 @@ mod tests {
     /// The stubs every implementation's conformance runner uses (vectors/outgoing.json).
     struct Stub {
         made: Mutex<u32>,
+        airgapped: std::sync::atomic::AtomicBool,
     }
 
     impl PromptSource for Stub {
@@ -306,6 +428,9 @@ mod tests {
         fn scratch_folder_of(&self, thread_id: &str) -> Option<String> {
             thread_id.starts_with("ask-").then(|| format!("ASK/{thread_id}"))
         }
+        fn airgapped_on(&self, _thread_id: Option<&str>) -> bool {
+            self.airgapped.load(std::sync::atomic::Ordering::Relaxed)
+        }
     }
 
     #[test]
@@ -313,7 +438,12 @@ mod tests {
         let policy = Policy::embedded();
         assert!(policy.allowed_requests.contains("thread/start"));
         assert!(policy.named_prompts.contains("ask"));
-        assert!(policy.refused_import_items.contains("PLUGINS"), "an import never fetches plugins");
+        assert!(!policy.refused_import_items.contains("PLUGINS"), "plugins import while airgapped is off");
+        assert!(policy.airgapped_refused_import_items.contains("PLUGINS"), "an import fetches no plugin at on");
+        for fetches in ["plugin/install", "marketplace/add", "marketplace/upgrade"] {
+            assert!(policy.allowed_requests.contains(fetches) && policy.airgapped_refused_requests.contains(fetches), "{fetches}");
+        }
+        assert_eq!(policy.airgapped_thread_config.get("features.plugins"), Some(&Value::Bool(false)));
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {
             assert!(!policy.allowed_requests.contains(refused), "{refused}");
         }
@@ -323,7 +453,7 @@ mod tests {
     fn every_conformance_vector_holds() {
         let vectors: Value = serde_json::from_str(include_str!("../vectors/outgoing.json")).unwrap();
         let policy = Policy::embedded();
-        let stub = Stub { made: Mutex::new(0) };
+        let stub = Stub { made: Mutex::new(0), airgapped: Default::default() };
         let cases = vectors["cases"].as_array().unwrap();
         assert!(cases.len() >= 25);
         for case in cases {
@@ -333,6 +463,9 @@ mod tests {
                 .and_then(Value::as_array)
                 .map(|ids| ids.iter().map(|id| id.as_str().unwrap().to_string()).collect())
                 .unwrap_or_default();
+            let level = case.get("airgapped").and_then(Value::as_str).unwrap_or("off");
+            assert!(matches!(level, "off" | "on"), "{name}: airgapped is off or on");
+            stub.airgapped.store(level == "on", std::sync::atomic::Ordering::Relaxed);
             let result = policy.vet_outgoing(&case["message"], &mut pending, &stub);
             if case["accept"].as_bool().unwrap() {
                 let out = result.unwrap_or_else(|err| panic!("{name}: refused: {err}"));
@@ -345,6 +478,50 @@ mod tests {
                 assert_eq!(pending, after, "{name}");
             }
         }
+    }
+
+    #[test]
+    fn the_bang_command_is_refused_at_on_with_its_own_reason() {
+        let policy = Policy::embedded();
+        assert!(policy.allowed_requests.contains("thread/shellCommand"));
+        assert!(policy.airgapped_refused_requests.contains("thread/shellCommand"));
+        assert!(policy.airgapped_refusal_reasons["thread/shellCommand"].starts_with("airgapped is on"));
+        let mut value: Value = serde_json::from_str(POLICY_JSON).unwrap();
+        value["airgappedRefusalReasons"] = serde_json::json!({"thread/list": "no"});
+        assert!(Policy::parse(&value.to_string()).is_err(), "a reason for a request not refused at on");
+    }
+
+    /// The level asked for is the named thread's: a `!` command names one, an install does not.
+    #[test]
+    fn a_refused_request_is_judged_by_the_thread_it_names() {
+        struct Sealed;
+        impl PromptSource for Sealed {
+            fn composed(&self, name: &str) -> Result<String, String> {
+                Ok(name.to_string())
+            }
+            fn new_scratch_folder(&self, _prompt: &str) -> Result<String, String> {
+                Err("none".to_string())
+            }
+            fn scratch_folder_of(&self, _thread_id: &str) -> Option<String> {
+                None
+            }
+            fn airgapped_on(&self, thread_id: Option<&str>) -> bool {
+                thread_id == Some("sealed")
+            }
+        }
+        let policy = Policy::embedded();
+        let shell = |thread: &str| serde_json::json!({"id": 1, "method": "thread/shellCommand", "params": {"threadId": thread, "command": "ls"}});
+        assert!(policy.vet_outgoing(&shell("open"), &mut HashSet::new(), &Sealed).is_ok());
+        assert!(policy.vet_outgoing(&shell("sealed"), &mut HashSet::new(), &Sealed).is_err());
+    }
+
+    #[test]
+    fn a_thread_and_its_folder_are_read_from_what_the_server_says() {
+        let started = serde_json::json!({"method": "thread/started", "params": {"thread": {"id": "t1", "cwd": "/work/repo"}}});
+        assert_eq!(thread_place(&started), Some(("t1".to_string(), "/work/repo".to_string())));
+        let resumed = serde_json::json!({"id": 3, "result": {"thread": {"id": "t2", "cwd": "/work/other"}}});
+        assert_eq!(thread_place(&resumed), Some(("t2".to_string(), "/work/other".to_string())));
+        assert_eq!(thread_place(&serde_json::json!({"id": 4, "result": {}})), None);
     }
 
     #[test]

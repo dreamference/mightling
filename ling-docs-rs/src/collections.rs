@@ -244,14 +244,46 @@ pub const SECRET_DIRS: &[&str] = &[
     ".docker",
 ];
 
+/// A desktop project's knowledge folder, `$CODEX_HOME/projects/<id>/knowledge` (DESKTOP_PARITY §4.5
+/// item 13, DESKTOP_PARITY_CLAUDE §4.7): the copies a user gave a project so that its threads read
+/// them. The one folder inside a secret folder that may be a collection, since everything in it was
+/// put there to be read; nothing else under `$CODEX_HOME` is.
+pub fn is_project_knowledge(root: &Path, codex_home: &Path) -> bool {
+    let projects = codex_home.canonicalize().unwrap_or_else(|_| codex_home.to_path_buf()).join("projects");
+    let Some(project) = root.parent() else { return false };
+    let id_ok = project.file_name().and_then(|n| n.to_str()).is_some_and(|id| {
+        !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    });
+    root.file_name().is_some_and(|n| n == "knowledge") && project.parent() == Some(projects.as_path()) && id_ok
+}
+
+/// The secret folders a walk of `root` skips: all of them, except the one holding a project's knowledge folder when `root` is one.
+pub fn secret_dirs(root: &Path, home: &Path) -> Vec<PathBuf> {
+    secret_dirs_in(root, home, &config::home())
+}
+
+/// [`secret_dirs`] with the agent's home named.
+pub fn secret_dirs_in(root: &Path, home: &Path, codex_home: &Path) -> Vec<PathBuf> {
+    let knowledge = is_project_knowledge(root, codex_home);
+    SECRET_DIRS.iter().map(|d| home.join(d)).filter(|s| !(knowledge && root.starts_with(s))).collect()
+}
+
 /// Refuses `/`, the home folder, any folder containing it, and anything inside a secret folder.
 pub fn validate_root(root: &Path, user_home: &Path) -> Result<()> {
+    validate_root_in(root, user_home, &config::home())
+}
+
+/// [`validate_root`] with the agent's home named, a project's knowledge folder in it allowed.
+pub fn validate_root_in(root: &Path, user_home: &Path, codex_home: &Path) -> Result<()> {
     if root == Path::new("/") {
         bail!("`/` cannot be a collection: name the folders that hold documents instead");
     }
     let home = user_home.canonicalize().unwrap_or_else(|_| user_home.to_path_buf());
     if root == home || home.starts_with(root) {
         bail!("{} holds your whole home folder, with its keys and settings: name the folders that hold documents instead (for example ~/Documents)", root.display());
+    }
+    if is_project_knowledge(root, codex_home) {
+        return Ok(());
     }
     for secret in SECRET_DIRS {
         let secret = home.join(secret);
@@ -288,6 +320,28 @@ mod tests {
         // The user may add it back explicitly.
         again.add(&home.join("Downloads"), Some("downloads"), &home).unwrap();
         assert!(again.removed_defaults.is_empty());
+    }
+
+    #[test]
+    fn a_desktop_projects_knowledge_folder_is_the_one_collection_allowed_inside_the_agents_home() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let codex = home.join(".mightling");
+        let knowledge = codex.join("projects/p-1a2b/knowledge");
+        for dir in [knowledge.as_path(), &codex.join("projects/p-1a2b/other"), &codex.join("sessions"), &codex.join("projects/bad id/knowledge")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        assert!(is_project_knowledge(&knowledge, &codex));
+        assert!(validate_root_in(&knowledge, &home, &codex).is_ok());
+        for refused in [codex.join("projects/p-1a2b/other"), codex.join("sessions"), codex.join("projects/bad id/knowledge"), codex.join("projects")] {
+            assert!(!is_project_knowledge(&refused, &codex), "{}", refused.display());
+            assert!(validate_root_in(&refused, &home, &codex).is_err(), "{}", refused.display());
+        }
+        // A walk of the knowledge folder skips every secret folder but the one it is in.
+        let skipped = secret_dirs_in(&knowledge, &home, &codex);
+        assert!(!skipped.contains(&home.join(".mightling")));
+        assert!(skipped.contains(&home.join(".ssh")));
+        assert!(secret_dirs_in(&home.join("Documents"), &home, &codex).contains(&home.join(".mightling")));
     }
 
     #[test]

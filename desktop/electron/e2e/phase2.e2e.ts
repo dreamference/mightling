@@ -37,7 +37,7 @@ async function open(extraEnv: Record<string, string> = {}): Promise<Session> {
   const ling = writeStandIn(home, askRoot);
   const app = await launch({
     args: [main],
-    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv },
+    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_ADMIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv },
   });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -197,6 +197,44 @@ test("6 review pane across threads: nothing of the last repository, and no Rever
     await page.locator(".thread", { hasText: "flaky retry" }).click();
     await expect(pane.locator(".file-name")).toHaveText(["fetcher/client.py", "fetcher/backoff.py"], { timeout: 15_000 });
     await expect(pane.getByText("Only for the flaky retry thread.")).toBeVisible();
+  } finally {
+    await close();
+  }
+});
+
+test("item 16: a hunk edited in place in the Unstaged scope, and an edit git refuses when the file changed meanwhile", async () => {
+  const { page, home, close } = await open();
+  const root = scratchRepo(home);
+  const client = path.join(root, "fetcher", "client.py");
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.keyboard.press("Control+Shift+G");
+    const pane = page.getByRole("complementary", { name: "Review" });
+    const first = pane.locator(".review-file").first();
+    await expect(first.locator(".file-name")).toHaveText("fetcher/client.py");
+    // Edit the first hunk: its lines as the file has them now, changed, saved into the working tree.
+    await first.getByRole("button", { name: "Edit", exact: true }).first().click();
+    const editor = first.getByRole("textbox", { name: /^Edit fetcher\/client\.py at line/ });
+    await expect(editor).toHaveValue(/step\(2\)  # retried/);
+    await editor.fill((await editor.inputValue()).replace("# retried", "# retried, at most three times"));
+    await first.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => fs.readFileSync(client, "utf8")).toContain("    step(2)  # retried, at most three times\n");
+    expect(fs.readFileSync(client, "utf8")).toContain("    step(36)  # logged at debug level\n");
+    await expect(first).toContainText("at most three times");
+    // The file changes on disk while the editor is open: the patch no longer fits, git refuses it, and the file keeps the other change.
+    await first.getByRole("button", { name: "Edit", exact: true }).first().click();
+    await editor.fill((await editor.inputValue()).replace("at most three times", "never"));
+    fs.writeFileSync(client, fs.readFileSync(client, "utf8").replace("    step(3)\n", "    step(3)  # changed elsewhere\n"));
+    await first.getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".notice").last()).toContainText(/patch|apply|does not/i, { timeout: 10_000 });
+    expect(fs.readFileSync(client, "utf8")).toContain("# retried, at most three times");
+    expect(fs.readFileSync(client, "utf8")).toContain("# changed elsewhere");
+    // Not offered outside Unstaged.
+    await pane.getByRole("navigation", { name: "Scope" }).getByRole("button", { name: "Staged", exact: true }).click();
+    await expect(pane.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
   } finally {
     await close();
   }
@@ -663,7 +701,8 @@ test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task 
     await view.getByRole("button", { name: "Queue" }).click();
     await expect(view.locator(".notice")).toContainText("Queued 20261017-0930");
     await view.getByRole("button", { name: "Drop" }).click();
-    await expect.poll(() => runs(home).filter((args) => args[0] === "night").map((args) => args.join(" "))).toEqual([
+    // (`night every list` is Scheduled reading the repeating tasks, decision 7.)
+    await expect.poll(() => runs(home).filter((args) => args[0] === "night" && args[1] !== "every").map((args) => args.join(" "))).toEqual([
       "night add Update the changelog for 1.7", "night drop 20261016-2215",
     ]);
     await page.keyboard.press("Escape");
@@ -919,3 +958,58 @@ test("8 terminal: a tab in the thread's folder under its permissions, typing, an
     await close();
   }
 });
+
+test("decision 7: a finished run opens on its result, changes and transcript, a task repeats every week, one from a thread carries its context", async () => {
+  const { page, home, close } = await open();
+  const night = path.join(home, ".mightling", "night");
+  const { fetcher } = projectFolders(home);
+  for (const folder of ["tasks", "logs", "reports"]) fs.mkdirSync(path.join(night, folder), { recursive: true });
+  fs.writeFileSync(path.join(night, "tasks", "20261020-2200.json"), JSON.stringify({ id: "20261020-2200", repo: fetcher, base: "abc", task: "Log every retry at debug level", status: "done",
+    branch: "night/20261020-2200", test: null, on: null, history: [{ at: "2026-10-21T03:00:00+01:00", status: "done" }], result: { branch: "night/20261020-2200", best_of: { chosen: 2 } } }));
+  fs.writeFileSync(path.join(night, "logs", "20261020-2200-a2.last.txt"), "Every retry is now logged at **debug** level.\n");
+  fs.writeFileSync(path.join(night, "logs", "20261020-2200-a2.diff"), "--- a/fetcher/client.py\n+++ b/fetcher/client.py\n@@ -3 +3 @@\n-    step(2)\n+    log.debug(\"retry\")\n");
+  fs.writeFileSync(path.join(night, "logs", "20261020-2200-a2.jsonl"), [
+    JSON.stringify({ type: "thread.started", thread_id: "w2" }),
+    JSON.stringify({ type: "item.completed", item: { id: "1", type: "command_execution", command: "pytest -q", exit_code: 0 } }),
+    JSON.stringify({ type: "item.completed", item: { id: "2", type: "agent_message", text: "Done: debug logging added." } }),
+  ].join("\n"));
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("button", { name: /Scheduled/ }).click();
+    const view = page.getByRole("dialog", { name: "Scheduled" });
+    await view.getByRole("button", { name: "Log every retry at debug level" }).click();
+    const details = view.locator(".night-details");
+    await expect(details).toContainText("Every retry is now logged at debug level.");
+    await details.getByRole("button", { name: "Changes" }).click();
+    await expect(details.locator(".night-diff")).toContainText('log.debug("retry")');
+    await details.getByRole("button", { name: "Transcript" }).click();
+    await expect(details).toContainText("$ pytest -q  (exit 0)");
+    await expect(details).toContainText("Mightling: Done: debug logging added.");
+
+    // Every week on Friday, through ling-admin night every.
+    await view.getByRole("textbox", { name: "Task" }).fill("Bump the dependencies");
+    await view.getByRole("combobox", { name: "Repeat" }).selectOption("weekly");
+    await view.getByRole("combobox", { name: "Day" }).selectOption("fri");
+    await view.getByRole("button", { name: "Repeat", exact: true }).click();
+    await expect.poll(() => runs(home).find((args) => args[1] === "every" && args[2] === "add")).toEqual(["night", "every", "add", "--weekly", "fri", "--", "Bump the dependencies"]);
+    await expect(view.locator("tr", { hasText: "Bump the dependencies" })).toContainText("every Friday");
+    await view.locator("tr", { hasText: "Bump the dependencies" }).getByRole("button", { name: "Stop" }).click();
+    await expect(view.locator("tr", { hasText: "Bump the dependencies" })).toHaveCount(0);
+
+    // The finished run opened as a thread.
+    await details.getByRole("button", { name: "Open as a thread" }).click();
+    await expect(view).toHaveCount(0);
+    await expect(page.locator(".bar .title")).toHaveText("Log every retry at debug level");
+
+    // From the thread now shown: tonight's task carries what was said in it.
+    await page.getByRole("button", { name: /Scheduled/ }).click();
+    await expect(view.getByRole("checkbox", { name: /With what was said in/ })).toBeChecked();
+    await view.getByRole("textbox", { name: "Task" }).fill("Make it configurable");
+    await view.getByRole("button", { name: "Queue" }).click();
+    await expect.poll(() => runs(home).filter((args) => args[0] === "night" && args[1] === "add").map((args) => args[args.length - 1]).pop() ?? "")
+      .toMatch(/^Make it configurable\n\nContext: this was asked in the conversation "Log every retry at debug level"/);
+  } finally {
+    await close();
+  }
+});
+

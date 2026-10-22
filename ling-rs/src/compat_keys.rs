@@ -4,7 +4,8 @@
 //!
 //! - [`enter`]: `Enter` in the composer. A draft ending in `\` gets a newline instead of being
 //!   sent, and a slash command Claude Code names but Codex does not is run under Codex's name or
-//!   answered here (the slash-command fallback).
+//!   answered here (the slash-command fallback). In every mode, `/worktree` with a sub-command is
+//!   answered by worktree.rs: the one hook that answers outside the mode.
 //! - [`double_press_exit`]: whether `Ctrl+C` and `Ctrl+D` on an empty prompt ask for a second
 //!   press, as in Claude Code, instead of quitting at once.
 //! - [`transcript`]: `[` and `v` in the transcript overlay put the whole conversation in the
@@ -71,7 +72,13 @@ const NOT_IN_THE_MODE: &[&str] = &[
 ];
 
 /// `Enter` with this draft in the composer: what to do instead of Codex's own handling, or None.
+/// The compatibility mode's answers, and `/worktree`'s sub-commands in any mode.
 pub fn enter(text: &str) -> Option<Enter> {
+    // `/worktree on|off|status|apply|discard` in every mode (worktree.rs); `/worktree` alone stays
+    // Codex's picker.
+    if let Some(lines) = crate::worktree::enter(text) {
+        return Some(Enter::Say(lines));
+    }
     if !on() {
         return None;
     }

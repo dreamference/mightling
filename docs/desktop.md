@@ -165,6 +165,31 @@ instead. The shortcut works while the app runs; tick **Keep Mightling in the tra
 closes** so that closing the window leaves it running (Quit still ends it). Both are off until you
 turn them on. `ling://ask?prompt=…` opens a new question with that text in the composer.
 
+**Links in answers.** A web address in an answer (a cited source, a page the agent mentions) is a
+link. Clicking it first shows its site and its full address; **Open in your browser** opens it in
+your usual browser, **Copy the address** copies it. With `/airgapped on` nothing opens: the dialog
+offers the copy only. In `ling web` the link opens in a new tab after the same question.
+
+**Incognito questions.** **Incognito** in the header of a new question starts one that is not
+saved: it is not listed, not kept as a session, not fed to the memories and not found by later
+searches. A dashed frame and a note stay on it as a reminder. When you leave it (another question,
+a new one, Work, or closing the app), the question, its answers and its folder with every file in
+it are deleted for good. The desktop app only.
+
+**Earlier questions.** In **Settings › Memories**, **Let the agent search your earlier Ask
+questions** (off until you turn it on) keeps a copy of each Ask question and its answers under
+`~/.mightling/ask-history/` and gives the agent a skill to search and read them, on this machine and
+read only, when you refer to something asked before. Incognito questions are never kept, archived
+ones are removed, and turning it off deletes the copies.
+
+**The composer.** A long paste (2,000 characters or 40 lines) becomes an attachment chip: in Ask a
+file in the question's folder, in Work a block after your words (Settings › General turns this
+off). With **Settings › Suggested prompts** on, the message you are likely to send next shows in
+grey in the empty composer; Tab takes it. Every finished turn offers **Fork from here** (a new
+thread with the conversation up to there) and **Edit in a new thread** (the conversation before
+that message, the message in the composer to change), leaving the thread as it is. A queued
+message can be edited and moved up or down.
+
 The app itself decides what an Ask thread is: the window only names the `ask` prompt, and the app
 composes its text, makes the folder and keeps the thread inside it, with the same rules `ling web`
 applies. So a question asked in the app and one asked in a browser live in the same place.
@@ -176,9 +201,30 @@ ling app --thread <id>        # Work, on an existing thread
 ling app                      # the app window on Ask
 ```
 
-There is one window. The menu's **Ask** and **Work** entries (Alt+1 and Alt+2), the tray icon's
-and `ling app` bring it forward on the view asked for; none opens a second window. In 1.5 the
-menu's Ask opened a separate window on [`ling web`](web.md#ling-web-ask-and-work-in-a-browser),
+### Several windows
+
+**File › New Window** (Ctrl+Shift+N) opens another window, and each window shows its own question,
+thread or project. All of them talk to the app's one agent server: no window starts a second one,
+and everything a window sends is checked by the same rules. The menu's **Ask** and **Work** entries
+(Alt+1 and Alt+2), the tray icon's and `ling app` bring the window you used last forward on the view
+asked for, or open one if none is open; a second `ling app` or a `ling://` link never starts a
+second copy of the app. The windows you had open when you quit come back where they were, on the
+view they showed. Closing the last window quits the app, as before (unless Settings › General keeps
+it in the tray).
+
+A thread open in two windows has **one composer**: the window that showed it first, or the one it
+was popped out into, sends its messages, answers its approvals and stops its turns. The other
+window follows the thread read-only and says so above where the composer would be, with **Go to
+that window** and **Use the composer here**, which moves the composer to it.
+
+The **terminal** and the **diff** can each have a window of their own: the button in the terminal
+panel's or the review pane's header, or **Window › Terminal in Its Own Window** and **Diff in Its
+Own Window**. The detached pane stays live (its terminals are the same shells, its diff follows the
+thread's turns); close its window, or press its **Dock** button, and it goes back where it was. A
+new terminal opened from a detached pane runs with the thread's permissions, as one opened in the
+thread's window does.
+
+In 1.5 the menu's Ask opened a separate window on [`ling web`](web.md#ling-web-ask-and-work-in-a-browser),
 which ran a second agent server on the same `~/.mightling`; the app no longer starts or uses
 `ling web`. `ling web` itself is unchanged, for browsers and phones.
 
@@ -201,13 +247,21 @@ accent, background and text colours of the theme in front; each theme keeps its 
 - **Approvals in the conversation**, Stop (or Esc), steering while a turn runs, and undo of the last
   turn.
 - **Context use** with a Compress button, the served model and the `/airgapped` level.
-- **A permission picker** that greys out Full Access at `/airgapped on`; the server itself refuses
-  that combination for every client.
+- **A permission picker** with Read only, Workspace and Full Access, as in Codex. Full Access is
+  greyed out only at `/airgapped on`; the server itself refuses that combination for every client.
+- **`!` commands:** `!git status` in the composer runs the command in your own shell, in the
+  thread's folder and with no sandbox, as in the Codex app, and shows its output in the thread. It
+  is refused at `/airgapped on`, since nothing would keep it off the network.
 - **One app:** opening `ling app` again brings the running window forward; `mightling://thread/<id>`
   links open Work on that thread.
+- **Local or Worktree** under the composer of a new thread in a git project. **Local**, the
+  default as in Codex's app, edits your checkout in place, so your editor sees every change.
+  **Worktree** gives the thread its own checkout from the branch you pick; the thread's header says
+  where its work is, and **Hand off** brings it to your local checkout. `/worktree on` in `ling`
+  (or `ling worktree on`) makes Worktree the default here too.
 - **Ask one click away**, in the same window's sidebar.
 
-Not there yet: review, git worktrees, settings pages and choosing a model (it is shown, not chosen).
+Not there yet: review, settings pages and choosing a model (it is shown, not chosen).
 Night Shift holds back while a Work turn is running, and the machine stays awake until it ends.
 
 ## Notes

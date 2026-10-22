@@ -13,6 +13,7 @@ import { chordOf, conflicts, keyLabel, KEYMAP, shortcutLabel, type KeyAction } f
 import { boardOn } from "./board";
 import { cleanAppearance, type Appearance, type AppearanceColours, type Prefs } from "./prefs";
 import { useShownTheme, type ThemeChoice } from "./theme";
+import type { Project } from "./protocol/v2/Project";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
@@ -28,6 +29,9 @@ export interface SettingsProps {
   onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => void;
   /** Archived threads (`thread/list` with `archived`), and bringing one back (`thread/unarchive`). */
   listArchived: () => Promise<Thread[]>;
+  /** Projects removed from the sidebar (projects.ts), and bringing one back. */
+  removedProjects?: Project[];
+  restoreProject?: (project: Project) => void;
   unarchive: (threadId: string) => Promise<void>;
   notice: (error: unknown) => void;
   /** The agent's settings as `config/read` answers them, and a write of one key (`config/value/write`). */
@@ -113,6 +117,7 @@ function General({ prefs, onChange }: SettingsProps) {
         <legend>While the agent works</legend>
         <label><input type="checkbox" checked={prefs.preventSleep} onChange={(event) => onChange({ preventSleep: event.target.checked })} /> Keep the machine from sleeping while a turn runs</label>
         <label><input type="checkbox" checked={prefs.openArtifacts} onChange={(event) => onChange({ openArtifacts: event.target.checked })} /> Open a document, PDF or image the agent creates in a tab beside the thread</label>
+        <label><input type="checkbox" checked={prefs.pasteAsFile} onChange={(event) => onChange({ pasteAsFile: event.target.checked })} /> Make a long paste (2,000 characters or 40 lines) an attachment: a file in Ask, a block after your words in Work</label>
       </fieldset>
       <AnswerLength />
       {bridge.git.available() ? <QuickEntry prefs={prefs} onChange={onChange} /> : null}
@@ -600,13 +605,29 @@ function NodePage({ notice }: { notice: (error: unknown) => void }) {
   );
 }
 
-function Archived({ listArchived, unarchive, notice }: SettingsProps) {
+function Archived({ listArchived, unarchive, notice, removedProjects, restoreProject }: SettingsProps) {
   const [threads, setThreads] = useState<Thread[] | null>(null);
   useEffect(() => {
     listArchived().then(setThreads).catch((error) => { setThreads([]); notice(error); });
   }, [listArchived, notice]);
   return (
     <>
+      {removedProjects && removedProjects.length > 0 ? (
+        <>
+          <h3>Removed projects</h3>
+          <table className="shortcut-table archived">
+            <tbody>
+              {removedProjects.map((project) => (
+                <tr key={project.id}>
+                  <td>{project.name}</td>
+                  <td className="planned-note">{project.roots.map((root) => root.path.split(/[\\/]/).filter(Boolean).pop()).join(", ") || "no folder"}</td>
+                  <td className="shortcut-actions"><button className="link-button" onClick={() => restoreProject?.(project)}>Restore</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
       <h3>Archived threads</h3>
       {threads === null ? <p className="empty small">…</p> : threads.length === 0 ? <p className="empty small">No archived threads.</p> : (
         <table className="shortcut-table archived">
@@ -676,6 +697,8 @@ function Project({ prefs, onChange }: SettingsProps) {
           <input defaultValue={prefs.terminalShell ?? ""} placeholder="/bin/bash" aria-label="Terminal shell" onBlur={(event) => onChange({ terminalShell: event.target.value.trim() || null })} />
         </label>
         <p className="dialog-note">Terminal tabs open in the bottom panel ({shortcutLabel("terminal")}), in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
+        <label><input type="checkbox" checked={prefs.agentReadsWindow} onChange={(event) => onChange({ agentReadsWindow: event.target.checked })} /> Let the agent read the thread's terminal tabs and the preview's console when it needs to (new threads)</label>
+        <p className="dialog-note">It reads them on this machine, the latest lines only, with anything that looks like a password or token masked; nothing is sent anywhere else.</p>
       </fieldset>
       <fieldset>
         <legend>Where files open</legend>
@@ -702,7 +725,7 @@ export function memorySwitches(config: Record<string, unknown>): { enabled: bool
   };
 }
 
-function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories }: SettingsProps) {
+function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories, prefs, onChange }: SettingsProps) {
   const [switches, setSwitches] = useState<ReturnType<typeof memorySwitches> | null>(null);
   const [status, setStatus] = useState<{ v2ConsolidatedThreads: number; v2Ready: boolean } | null>(null);
   useEffect(() => {
@@ -725,6 +748,13 @@ function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories
         <label><input type="checkbox" checked={switches.generate} disabled={!switches.enabled} onChange={(event) => void write("memories.generate_memories", event.target.checked)} /> Threads add to the memories</label>
         <label><input type="checkbox" checked={switches.external} disabled={!switches.enabled} onChange={(event) => void write("memories.disable_on_external_context", !event.target.checked)} /> Including threads that used the web or an MCP server</label>
       </fieldset>
+      {bridge.recall.available() ? (
+        <fieldset className="recall">
+          <legend>Earlier questions</legend>
+          <label><input type="checkbox" checked={prefs.recallQuestions} onChange={(event) => onChange({ recallQuestions: event.target.checked })} /> Let the agent search your earlier Ask questions</label>
+          <p className="dialog-note">Off by default. When on, Mightling keeps a copy of each Ask question and its answers as a Markdown file under ~/.mightling/ask-history/ and gives the agent a skill, earlier-questions, to search and read them on this machine, read only. Incognito questions are never kept, archived ones are removed, and turning this off deletes the copies.</p>
+        </fieldset>
+      ) : null}
       <p className="dialog-note">{status ? `${status.v2ConsolidatedThreads} thread${status.v2ConsolidatedThreads === 1 ? "" : "s"} remembered${status.v2Ready ? "" : "; the memories are still being made"}.` : ""} /memories in a thread turns them off or on for that thread.</p>
       <div className="buttons dialog-buttons">
         <button className="danger-button" onClick={() => window.confirm("Delete everything the agent remembers? This cannot be undone.") && resetMemories().then(() => memoryStatus().then(setStatus)).catch(notice)}>Delete the memories</button>
@@ -819,10 +849,10 @@ function Suggestions({ prefs, onChange }: SettingsProps) {
   return (
     <>
       <h3>Suggested prompts</h3>
-      <p className="dialog-note">When a turn ends, the served model suggests three follow-ups for the thread; a click puts one in the composer, it is never sent by itself. Each suggestion is one short extra turn on this machine's model, in a read-only thread that is not kept, and only when nothing else is running.</p>
+      <p className="dialog-note">When a turn ends, the served model predicts the message you are most likely to send next. It shows in grey in the empty composer; Tab or → puts it there to edit or send, and typing anything else ignores it. It is never sent by itself. Each prediction is one short extra turn on this machine's model, in a read-only thread that is not kept, and only when nothing else is running.</p>
       <fieldset>
-        <legend>Follow-ups</legend>
-        <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Suggest follow-ups when a turn ends</label>
+        <legend>Next message</legend>
+        <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Predict my next message when a turn ends</label>
       </fieldset>
     </>
   );

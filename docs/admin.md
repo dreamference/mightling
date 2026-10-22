@@ -272,6 +272,33 @@ Work through the queue now, until the window ends.
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing; their requests still pause the run) |
 
+#### `ling-admin night every`
+
+Repeating tasks, queued by each night's run when due.
+
+#### `ling-admin night every add`
+
+Repeat a task in this repository every night or every week.
+
+| Option | Description |
+|---|---|
+| `--daily` | Every night. |
+| `--weekly` | Every week, that day's night. One of: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`. |
+| `--test` | The test command each run uses. |
+| `task` | What to do, in words. |
+
+#### `ling-admin night every list`
+
+The repeating tasks, as JSON lines.
+
+#### `ling-admin night every drop`
+
+Stop repeating a task (what it already queued stays).
+
+| Option | Description |
+|---|---|
+| `id` | The repeating task's id (r...) |
+
 #### `ling-admin night pause`
 
 Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate).
@@ -321,7 +348,6 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--limit` | Only the first N selected instances, sorted by id. |
 | `--name` | The run's name (letters, digits, ., _ and -); an existing run of that name is resumed. |
 | `--eval` | Grade the predictions when the agent phase ends. |
-| `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
 | `--code-index` | universal: index each instance's repository on the host and give the agent ling-code (default off); exact: the same with the SCIP stores alone and no graph. One of: `off`, `universal`, `exact`. |
 | `--prompt` | The system prompt the agent starts with: default, offline (default without the web and email blocks), high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one) |
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
@@ -338,11 +364,17 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--turn-end-compaction` | Compaction at the end of a turn in every session, through Codex's model_post_turn_compact_threshold_percent on the exec command line: on (the launcher's rule for the run's limit), off (pinned at 0) or a percentage of the usable window (1-99); absent, the key is not set and exec never compacts at a turn's end (spec §16, night 10) |
 | `--apply-patch` | How the agent is offered Codex's apply_patch tool: freeform (a custom tool, which only ling-engine serves) or off; the launcher's own choice when absent (spec §22). The pinned Codex has no function form, and ling refuses one. One of: `off`, `freeform`. |
 | `--exec-tool` | How the agent is offered Code Mode's exec tool: function (translated, which SGLang serves) or freeform (Codex's custom tool, which only ling-engine serves and SGLang drops); the launcher's own choice when absent: function on SGLang and vLLM (spec §23) One of: `function`, `freeform`. |
+| `--compat` | The compatibility mode for every session (claude: ling working the way Claude Code does); the launcher's own setting when absent, which is off in a container. One of: `claude`, `off`. |
 | `--drop-old-outputs` | When a session is about to compact, first drop the output of its older tool calls (the calls stay, the last 10 outputs and short ones are kept) and summarise only if that is not enough; sets the launcher's switch in every session (compaction spec §13) |
 | `--loop-guard` | Switch on ling's loop detector in every session: a response that repeats itself is cut where the loop began and the model is told once to stop and answer (DREAMFERENCE_MIGHTLING_LOOP_GUARD; docs/dev/loop-guard.md). Off by default. |
 | `--output-budget` | Cap every response at TOKENS (max_output_tokens, set by the model gate from ling's request metadata); a capped response is followed by one nudge to answer. Needs a gate started by this version (`ling-admin server start`). Default: no cap. |
 | `--sampling` | nonthinking: the model card's non-thinking sampling (temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5), filled in by the model gate; default: the server's own (the checkpoint's thinking-mode values). Needs a gate started by this version. One of: `default`, `nonthinking`. |
+| `--test-guard` | The launcher's test guard in every session: a change that weakens an existing test is pointed out, and the first stop while it stands is held once (spec §29) |
+| `--finish-check` | The launcher's finish check in every session: the first stop after a change no test has run on, mid-work, or calling failures pre-existing unchecked is held once (spec §29) |
 | `--review-turn` | After the agent stops with a changed tree, resume its session once more to re-read the issue, read its diff, run the tests of the modules it changed and fix what does not hold, within the task's time limit; the patch is collected after that turn (default off) |
+| `--remove-images` | With --eval: work one repository at a time, in chunks of at most --image-chunk instances, and remove a chunk's images once it is graded. |
+| `--image-chunk` | With --eval --remove-images: the most instances of one repository whose images are on disk at once (default [swe_bench] image_chunk, 25; 0: the whole repository) |
+| `--shard` | A new run covers only the I-th of K shards of the selected instances, balanced by difficulty and repository and the same on every machine, so K machines share one list; `swe-bench merge` puts the K runs back together. |
 
 #### `ling-admin swe-bench eval`
 
@@ -352,7 +384,8 @@ The grading phase: the upstream harness applies each patch and runs the tests.
 |---|---|
 | `run` | The run (default: the latest) |
 | `--drop-test-hunks` | Grade the same predictions again with every test file left out of each patch, as a separate grading (eval-drop-test-hunks/); no agent runs. |
-| `--remove-images` | Grade one repository at a time and remove the images this grading pulled once their repository is graded. |
+| `--remove-images` | Grade one repository at a time, in chunks of at most --image-chunk instances, and remove the images this grading pulled once their chunk is graded. |
+| `--image-chunk` | With --remove-images: the most instances of one repository graded at once (default [swe_bench] image_chunk, 25; 0: the whole repository) |
 
 #### `ling-admin swe-bench report`
 
@@ -367,6 +400,27 @@ Print the resolved rate and what it was measured with.
 #### `ling-admin swe-bench status`
 
 Runs, their progress, images and disk.
+
+#### `ling-admin swe-bench shard`
+
+Split a task list into K balanced shards, written as lists of their own.
+
+| Option | Description |
+|---|---|
+| `list` | The task list, one instance id per line. |
+| `--shards` | How many shards. |
+| `--out-dir` | Where to write <list>-<I>of<K>.txt (default: beside the list) |
+| `--dataset` | The dataset the ids are from (default verified) |
+| `--balance-by` | Also spread the tasks of this other list evenly over the shards (repeatable), e.g. the fresh ones; the shards are then not those run --shard makes, and say so. |
+
+#### `ling-admin swe-bench merge`
+
+Put the runs of one list's shards together as one run, which report reads like any other.
+
+| Option | Description |
+|---|---|
+| `name` | The merged run's name. |
+| `runs` | The shards' runs (copy a run made on another machine into this machine's runs directory first) |
 
 #### `ling-admin swe-bench clean`
 
@@ -392,8 +446,9 @@ Trace one real ling session and list every network destination and process, with
 | `--web` | Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`. |
 | `--compat` | Trace the compatibility mode's print mode, `ling --compat claude -p`, in a repository with Claude Code's files. One of: `claude`. |
 | `--docs` | Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing. |
+| `--sync` | Trace one sync agent cycle instead (`ling sync agent --once`) against a throwaway hub: it must reach the node's ling web port and nothing else. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
-| `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web or docs) |
+| `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web, docs or sync) |
 
 ### `ling-admin node`
 

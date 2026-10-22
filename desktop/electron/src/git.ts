@@ -334,13 +334,15 @@ export function patchPaths(patch: string): string[] {
  * Applies a patch the page built from one hunk: to the index (stage), reversed to the index
  * (unstage), reversed to the work tree (revert), or reversed to both (revert a staged hunk).
  */
-export async function apply(root: string, patch: unknown, options: { cached?: boolean; reverse?: boolean; index?: boolean }): Promise<void> {
+export async function apply(root: string, patch: unknown, options: { cached?: boolean; reverse?: boolean; index?: boolean; zeroContext?: boolean }): Promise<void> {
   if (typeof patch !== "string" || !patch.includes("@@") || patch.length > MAX_OUTPUT) throw new GitError("not a patch");
   for (const file of patchPaths(patch)) insidePath(root, file);
   const args = ["apply", "--whitespace=nowarn", "--recount"];
   if (options.cached) args.push("--cached");
   else if (options.index) args.push("--index");
   if (options.reverse) args.push("--reverse");
+  // An edit in the review pane whose change starts or ends at its hunk's edge (desktop/ui/src/diff.ts `zeroContext`).
+  if (options.zeroContext) args.push("--unidiff-zero");
   await git(root, [...args, "-"], patch);
 }
 

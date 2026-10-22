@@ -75,12 +75,47 @@ DIFFUSION_ENABLED: Final[bool] = False
 # An adapter's model id is its base's plus this and its name (`RadixArk/Qwen3.8-27B-NVFP4+rust`).
 ADAPTER_SEPARATOR: Final[str] = "+"
 
+# The pinned SGLang image (v0.5.19 until 1.6.1, v0.5.21 since 2026-10-14) and its /v1/responses
+# source, by the sha256 of the image's own copy. A runtime patch names all three, so a new image
+# serves nothing patched until each patch has been checked against its file again.
+QWEN38_SGLANG_IMAGE: Final[str] = (
+    "lmsysorg/sglang@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469"
+)
+SGLANG_SERVING_RESPONSES: Final[str] = (
+    "/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py"
+)
+SGLANG_SERVING_RESPONSES_SHA256: Final[str] = (
+    "ed490a69c960cafa7fc97129e585d176993fb63dbda66468ac9b86770813a00d"
+)
+
+# SGLang v0.5.21's /v1/responses tags the text a model writes before a tool call
+# `phase: "commentary"`, and Codex sends that item back in every later request. Rebuilding the chat
+# history, the endpoint merges consecutive assistant items only when their phases are equal; a
+# function_call carries no phase, so the text and its call never merge and render as two assistant
+# turns, the first one ending after the announcement. The model copies the pattern and ends its
+# turn after "Let me look at X." (57 early stops on nights 12 and 15; v0.5.19 tagged no phase and
+# nights 4-10 had none). The merge ignores the phase, as ling-engine's does. Mounted on every
+# launch of the pinned image; a file or anchor that does not match stops the start.
+SGLANG_PHASE_MERGE_PATCH: Final[dict[str, Any]] = {
+    "path": SGLANG_SERVING_RESPONSES,
+    "sha256": SGLANG_SERVING_RESPONSES_SHA256,
+    "image": QWEN38_SGLANG_IMAGE,
+    "substitutions": [
+        [
+            '                and merged[-1].get("role") == "assistant"\n'
+            '                and merged[-1].get("phase") == msg.get("phase")\n'
+            "            ):\n",
+            '                and merged[-1].get("role") == "assistant"\n'
+            "            ):\n",
+        ],
+    ],
+}
+
 QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     "engine": "sglang",
-    "docker_image": (
-        "lmsysorg/sglang@sha256:"
-        "b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469"
-    ),
+    "docker_image": QWEN38_SGLANG_IMAGE,
+    # Patches of the image's own Python, mounted over it on every launch (SGLangRuntimePatcher).
+    "runtime_patches": [SGLANG_PHASE_MERGE_PATCH],
     "revision": "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854",
     "max_model_len": 262144,
     # SGLang's --mem-fraction-static: weights plus KV pool. What lies outside it (CUDA
@@ -187,12 +222,14 @@ QWEN38_LORA_RECIPE: Final[dict[str, Any]] = {
     # SGLang v0.5.21's /v1/responses, the only endpoint ling speaks, builds its request without the
     # adapter: it accepted `<base>:<adapter>` and ran the base (the probe). Both places that build
     # one pass `lora_path` as /v1/chat/completions does. Applied to a copy of the image's file and
-    # mounted over it (SGLangRuntimePatcher); the sha256 is the image's own file, so a new image
-    # serves no adapters until the patch is checked against it.
+    # mounted over it together with the recipe's own patch of the same file (SGLangRuntimePatcher);
+    # the sha256 is the image's own file, so a new image serves no adapters until the patch is
+    # checked against it.
     "runtime_patches": [
         {
-            "path": "/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py",
-            "sha256": "ed490a69c960cafa7fc97129e585d176993fb63dbda66468ac9b86770813a00d",
+            "path": SGLANG_SERVING_RESPONSES,
+            "sha256": SGLANG_SERVING_RESPONSES_SHA256,
+            "image": QWEN38_SGLANG_IMAGE,
             "substitutions": [
                 [
                     "                        require_reasoning=require_reasoning,\n"

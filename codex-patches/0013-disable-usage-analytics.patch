@@ -1,5 +1,4 @@
 diff --git a/codex-rs/analytics/src/client.rs b/codex-rs/analytics/src/client.rs
-index a00c76d..d920989 100644
 --- a/codex-rs/analytics/src/client.rs
 +++ b/codex-rs/analytics/src/client.rs
 @@ -247,3 +247,4 @@ impl AnalyticsEventsClient {

@@ -4,6 +4,7 @@
 // the launcher's own resolver, rather than kept as a fourth copy of the resolver crate.
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 import { command } from "./platform";
 
 import type { Airgapped } from "./api";
@@ -22,6 +23,32 @@ export function airgapped(ling: string, thread: string | null): Promise<Airgappe
       resolve(parseStatus(String(stdout)) ?? { level: "off", source: "unknown (ling airgapped did not answer)" });
     });
   });
+}
+
+/** One `ling airgapped [--thread <id>]` run in `cwd` (null: this process's folder); null when it did not answer. */
+export type StatusRun = (ling: string, args: string[], cwd: string | null) => Promise<Airgapped | null>;
+
+const runStatus: StatusRun = (ling, args, cwd) =>
+  new Promise((resolve) => {
+    const run = command(ling, args);
+    execFile(run.file, run.args, { timeout: 10_000, shell: run.shell, windowsHide: true, ...(cwd ? { cwd } : {}) }, (_error, stdout) => {
+      resolve(parseStatus(String(stdout)));
+    });
+  });
+
+/**
+ * Whether a thread is at `on`, for a refusal that binds (policy.json's `airgappedRefusedRequests`: a `!`
+ * command runs in the user's shell with no sandbox). The launcher's own resolution, `ling airgapped
+ * --thread <id>`, run in this process's folder and, when the thread's folder `cwd` is known, in that
+ * one too, so its repository's `dreamference.toml` counts; the stricter wins. Unlike `airgapped`,
+ * an answer that does not come counts as `on`: this gate fails closed.
+ */
+export async function airgappedOn(ling: string, thread: string | null, cwd: string | null, run: StatusRun = runStatus): Promise<boolean> {
+  const args = ["airgapped", ...(thread && /^[A-Za-z0-9-]+$/.test(thread) ? ["--thread", thread] : [])];
+  const places: (string | null)[] = [null];
+  if (cwd && fs.existsSync(cwd)) places.push(cwd);
+  const answers = await Promise.all(places.map((place) => run(ling, args, place)));
+  return answers.some((answer) => answer === null || answer.level === "on");
 }
 
 /** Sets the level new threads start at (`ling airgapped default <level>`); resolves with what it printed. */

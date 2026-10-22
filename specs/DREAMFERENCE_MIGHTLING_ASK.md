@@ -92,6 +92,7 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 - `allowedRequests`, `allowedNotifications` (today's `ALLOWED_REQUESTS`/`ALLOWED_NOTIFICATIONS`);
 - `threadOpeners` and `droppedThreadFields` (`baseInstructions`, `developerInstructions`, `modelProvider`, `config`, `personality`);
 - the pending-request rule (answers only to server requests not yet answered);
+- **`airgappedRefusedRequests`** (2026-10-22): requests allowed only while `/airgapped` is off, judged by the level of the thread they name, else the configured one (the plugin installs, MIGHTLING_AIRGAPPED §14.12; the composer's `!` command, `thread/shellCommand`, §14.13), with a reason of their own in `airgappedRefusalReasons`. The host supplies the level from the launcher's resolver;
 - **`namedPrompts`:** the prompt names the UI may ask for (`default`, `ask`, `high-swe`), which the policy layer, not the UI, turns into `baseInstructions` (§3.2).
 
 `desktop/bridge/vectors/*.json` are conformance cases (message in → accepted or refused, fields out). The Rust crate's tests and the Electron main process's tests both run every vector.
@@ -504,6 +505,8 @@ No live service was touched: no model server, no installed `ling`, a scratch `HO
 - **Phase 0's measurements**, question 1 above all.
 
 ### 18.6 One window, one app-server in the app (branch `desktop/one-app-server`, 2026-10-09)
+
+> **Superseded in part (2026-10-22):** one app-server stands; one window does not. The app has several windows on that app-server, routed per window and vetted as before, with one composer per thread ([DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) §13, the owner's decision).
 
 **The decision (the user's, 2026-10-09).** The menu's Ask no longer opens a window of its own on `ling web`: it brings the app window forward on Ask. While the app runs, the app itself starts exactly one app-server on `~/.mightling`, the app window's own over stdio (§18.1). This settles §2.1 for the desktop app the first way §17 named, the policy in the main process; `ling web` keeps its own app-server on its socket, for browsers and phones, unchanged.
 

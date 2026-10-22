@@ -18,6 +18,10 @@ from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
 # here explicitly (specs/DREAMFERENCE_MIGHTLING_ADAPTERS.md §10.4).
 ADAPTER_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_ADAPTER"
 
+# Where a new interactive `ling` session edits (ling-rs/src/worktree.rs): `off` keeps an unattended
+# TUI session (the egress audit's `--tui`) in its own folder whatever the user's shell says.
+WORKTREE_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_WORKTREE"
+
 
 class CodexInstaller:
     """

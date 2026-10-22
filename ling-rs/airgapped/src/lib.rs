@@ -44,6 +44,11 @@ pub const SEAL_DIR: &str = "ling-airgapped";
 /// Set by Codex for a command it runs without a network.
 pub const SANDBOX_NETWORK_DISABLED_ENV_VAR: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
 
+/// `off` keeps the read-only sandbox's commands off the network at `off` too ([`read_only_network`]).
+/// The launcher sets it in `ling`'s own environment when the user chose
+/// `sandbox_workspace_write.network_access = false`, in `config.toml` or with `-c`.
+pub const READ_ONLY_NETWORK_ENV_VAR: &str = "DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK";
+
 /// A level, ordered by strictness: `Off < On`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -381,12 +386,19 @@ pub fn resolve(ids: &[&str]) -> Resolved {
 /// [`resolve`] with the environment tier's value given, for a command whose environment is not
 /// this process's.
 pub fn resolve_with(ids: &[&str], environment: Option<String>) -> Resolved {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    resolve_in(ids, environment, &cwd)
+}
+
+/// [`resolve_with`] for a session that works in `cwd`, not in this process's folder: the
+/// repository's configuration file is `cwd`'s. The app's policy layer judges a thread this way,
+/// from the folder the thread works in, as the sandbox helper judges its commands.
+pub fn resolve_in(ids: &[&str], environment: Option<String>, cwd: &Path) -> Resolved {
     let session = ids
         .iter()
         .filter_map(|id| session_file(id))
         .find_map(|path| std::fs::read_to_string(path).ok());
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let configs: Vec<(PathBuf, String)> = config_files(&cwd)
+    let configs: Vec<(PathBuf, String)> = config_files(cwd)
         .into_iter()
         .filter_map(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text)))
         .collect();
@@ -419,6 +431,22 @@ pub fn sealed_for_env(get: impl Fn(&str) -> Option<String>) -> bool {
     let session = get("CODEX_SESSION_ID").unwrap_or_default();
     let environment = get(ENV_VAR).or_else(|| std::env::var(ENV_VAR).ok());
     resolve_with(&[thread.as_str(), session.as_str()], environment).level == Level::On
+}
+
+/// Whether a command Codex would run in its read-only sandbox gets the network. Sandboxed commands
+/// have the network whenever `/airgapped` is off (owner decision, 2026-10-22), and Codex's read-only
+/// sandbox has no network setting of its own, so it is widened here: asked by Codex's sandbox
+/// manager for every command whose permissions are exactly the read-only ones (patch 0031), with
+/// the command's environment as `get`, as [`sealed_for_env`] takes it. Not at `on`, and not when the
+/// user said no network ([`READ_ONLY_NETWORK_ENV_VAR`] in this process's environment).
+pub fn read_only_network(get: impl Fn(&str) -> Option<String>) -> bool {
+    read_only_network_allowed(std::env::var(READ_ONLY_NETWORK_ENV_VAR).ok().as_deref()) && !sealed_for_env(get)
+}
+
+/// Whether [`READ_ONLY_NETWORK_ENV_VAR`]'s value leaves the read-only sandbox its network: anything
+/// but `off`, `false`, `0` or `no`.
+pub fn read_only_network_allowed(setting: Option<&str>) -> bool {
+    !setting.is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "off" | "false" | "0" | "no"))
 }
 
 /// What Codex is told when it may not take a permission profile: the allowed set of its error.
@@ -459,10 +487,11 @@ pub fn refusal(
         .map(|root| ("writable_roots", root.display().to_string(), SEAL_ROOT_ALLOWED.to_string()))
 }
 
-/// The host's control sockets that a sandboxed command must not reach, under `/`: talking to
-/// one is acting on the host outside the sandbox. A command ran `docker restart` on the host
+/// The host's control sockets that a sandboxed command at `on` must not reach, under `/`: talking
+/// to one is acting on the host outside the sandbox. A command ran `docker restart` on the host
 /// from `ling exec`'s workspace-write sandbox (2026-10-20): the user is in the `docker` group,
-/// and a read-only bind mount does not stop a `connect()`. Docker and containerd (root and
+/// and a read-only bind mount does not stop a `connect()`. At `off` they stay reachable, as in
+/// Codex (owner's decision, 2026-10-22; [`host_sockets_at`]). Docker and containerd (root and
 /// rootless), Podman, the D-Bus system and session buses (systemd's API, which starts units),
 /// the systemd user manager's own sockets, snapd, and Mightling's runtime folder (`ling web`'s
 /// app-server socket, which starts threads with any permissions). Whatever exists and this user
@@ -488,6 +517,15 @@ pub fn host_sockets() -> Vec<PathBuf> {
     host_sockets_in(Path::new("/"), runtime_dir().as_deref())
 }
 
+/// The control sockets Codex's sandbox helper denies to one command (patch 0019): every one of
+/// [`host_sockets`] when the command's level is `on`, none at `off`. At `off` the workspace-write
+/// sandbox is Codex's own and lets a command use Docker, which is root on the host; at `on` the
+/// sockets are masked, so nothing reaches the network or the host through a daemon.
+#[cfg(not(windows))]
+pub fn host_sockets_at(on: bool) -> Vec<PathBuf> {
+    if on { host_sockets() } else { Vec::new() }
+}
+
 /// [`host_sockets`] under another root and runtime folder, for tests.
 pub fn host_sockets_in(root: &Path, runtime: Option<&Path>) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = HOST_SOCKETS
@@ -509,6 +547,27 @@ mod tests {
 
     fn config(path: &str, text: &str) -> (PathBuf, String) {
         (PathBuf::from(path), text.to_string())
+    }
+
+    #[test]
+    fn a_session_is_judged_by_the_repository_it_works_in() {
+        if std::env::var_os("DREAMFERENCE_CONFIG_PATH").is_some() {
+            return; // That file replaces the repository's.
+        }
+        let repo = std::env::temp_dir().join(format!("ling-airgapped-repo-{}", std::process::id()));
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("dreamference.toml"), "mightling_airgapped = \"on\"\n").unwrap();
+        let resolved = resolve_in(&[], None, &repo);
+        let _ = std::fs::remove_dir_all(&repo);
+        assert_eq!(resolved.level, Level::On);
+        assert_eq!(resolved.source, Source::ConfigFile(repo.join("dreamference.toml")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_host_control_sockets_are_masked_only_at_on() {
+        assert_eq!(host_sockets_at(true), host_sockets());
+        assert!(host_sockets_at(false).is_empty());
     }
 
     #[cfg(unix)]
@@ -684,6 +743,21 @@ mod tests {
             ENV_VAR => Some("off".to_string()),
             _ => None,
         }));
+    }
+
+    #[test]
+    fn the_read_only_sandbox_has_the_network_unless_on_or_switched_off() {
+        let map = |var: &'static str, value: &'static str| move |key: &str| (key == var).then(|| value.to_string());
+        for value in [None, Some(""), Some("on"), Some("true"), Some("1")] {
+            assert!(read_only_network_allowed(value), "{value:?}");
+        }
+        for value in ["off", "OFF", " false ", "0", "no"] {
+            assert!(!read_only_network_allowed(Some(value)), "{value}");
+        }
+        if read_only_network_allowed(std::env::var(READ_ONLY_NETWORK_ENV_VAR).ok().as_deref()) {
+            assert!(read_only_network(map(ENV_VAR, "off")));
+        }
+        assert!(!read_only_network(map(ENV_VAR, "on")));
     }
 
     #[test]

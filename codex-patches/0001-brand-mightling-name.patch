@@ -1,5 +1,4 @@
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index 4d7984d..003136b 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -121,4 +121,5 @@
@@ -21,7 +20,6 @@ index 4d7984d..003136b 100644
 +    let name = "ling";
      generate(cmd.shell, &mut app, name, &mut std::io::stdout());
 diff --git a/codex-rs/cli/src/mcp_cmd.rs b/codex-rs/cli/src/mcp_cmd.rs
-index 8fda684..1ae8765 100644
 --- a/codex-rs/cli/src/mcp_cmd.rs
 +++ b/codex-rs/cli/src/mcp_cmd.rs
 @@ -97,3 +97,3 @@ pub struct GetArgs {
@@ -30,7 +28,6 @@ index 8fda684..1ae8765 100644
 +#[command(override_usage = "ling mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
  pub struct AddArgs {
 diff --git a/codex-rs/exec/src/cli.rs b/codex-rs/exec/src/cli.rs
-index 0ef0be6..a6bd293 100644
 --- a/codex-rs/exec/src/cli.rs
 +++ b/codex-rs/exec/src/cli.rs
 @@ -12,3 +12,3 @@ use std::path::PathBuf;
@@ -39,7 +36,6 @@ index 0ef0be6..a6bd293 100644
 +    override_usage = "ling exec [OPTIONS] [PROMPT]\n       ling exec [OPTIONS] <COMMAND> [ARGS]"
  )]
 diff --git a/codex-rs/exec/src/event_processor_with_human_output.rs b/codex-rs/exec/src/event_processor_with_human_output.rs
-index 222bc48..17fa132 100644
 --- a/codex-rs/exec/src/event_processor_with_human_output.rs
 +++ b/codex-rs/exec/src/event_processor_with_human_output.rs
 @@ -102,3 +102,3 @@
@@ -58,7 +54,6 @@ index 222bc48..17fa132 100644
 +                "ling".style(self.italic).style(self.magenta),
                  message
 diff --git a/codex-rs/tui/src/chatwidget.rs b/codex-rs/tui/src/chatwidget.rs
-index 5ca4182..c1a7ea0 100644
 --- a/codex-rs/tui/src/chatwidget.rs
 +++ b/codex-rs/tui/src/chatwidget.rs
 @@ -2044,3 +2044,3 @@ impl Drop for ChatWidget {
@@ -67,7 +62,6 @@ index 5ca4182..c1a7ea0 100644
 +const PLACEHOLDER: &str = "Ask Mightling to do anything";
  const SIDE_PLACEHOLDER: &str = "Ask a follow-up question";
 diff --git a/codex-rs/tui/src/history_cell/session.rs b/codex-rs/tui/src/history_cell/session.rs
-index e749c02..e4d305e 100644
 --- a/codex-rs/tui/src/history_cell/session.rs
 +++ b/codex-rs/tui/src/history_cell/session.rs
 @@ -406,3 +406,3 @@ impl HistoryCell for SessionHeaderHistoryCell {
@@ -86,7 +80,6 @@ index e749c02..e4d305e 100644
 +            Line::from(format!("Mightling (v{})", self.version)),
              Line::from(format!(
 diff --git a/codex-rs/tui/src/onboarding/trust_directory.rs b/codex-rs/tui/src/onboarding/trust_directory.rs
-index baab586..e7fae14 100644
 --- a/codex-rs/tui/src/onboarding/trust_directory.rs
 +++ b/codex-rs/tui/src/onboarding/trust_directory.rs
 @@ -68,3 +68,3 @@ impl WidgetRef for &TrustDirectoryWidget {
@@ -95,7 +88,6 @@ index baab586..e7fae14 100644
 +                "Trust this folder? Mightling can read, edit, and run files here, subject to \
                   your permission settings. Folder settings can run code automatically, \
 diff --git a/codex-rs/tui/src/onboarding/welcome.rs b/codex-rs/tui/src/onboarding/welcome.rs
-index 9c9e7b8..85c8fa9 100644
 --- a/codex-rs/tui/src/onboarding/welcome.rs
 +++ b/codex-rs/tui/src/onboarding/welcome.rs
 @@ -128,4 +128,4 @@ impl WidgetRef for &WelcomeWidget {
@@ -106,7 +98,6 @@ index 9c9e7b8..85c8fa9 100644
 +            ", your local coding agent".into(),
          ]));
 diff --git a/codex-rs/tui/src/status/card.rs b/codex-rs/tui/src/status/card.rs
-index 369a674..74897a5 100644
 --- a/codex-rs/tui/src/status/card.rs
 +++ b/codex-rs/tui/src/status/card.rs
 @@ -738,3 +738,3 @@ impl StatusHistoryCell {
@@ -146,7 +137,6 @@ diff --git a/codex-rs/tui/src/chatwidget/permissions_menu.rs b/codex-rs/tui/src/
 +            "Use with caution: Mightling can edit files outside this workspace and access the internet without approval"
          }
 diff --git a/codex-rs/tui/src/startup_draft.rs b/codex-rs/tui/src/startup_draft.rs
-index dd6cda8..72c430d 100644
 --- a/codex-rs/tui/src/startup_draft.rs
 +++ b/codex-rs/tui/src/startup_draft.rs
 @@ -531,3 +531,3 @@ fn startup_draft_bottom_pane(

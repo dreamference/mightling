@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FILE_CAP, IMAGE_CAP, cleanFileName, composePrompt, folderOf, isFolder, linkThread, newFolder, writeUpload } from "./ask";
+import { FILE_CAP, IMAGE_CAP, INCOGNITO_MARK, cleanFileName, composePrompt, folderOf, forgetIncognito, isFolder, linkThread, markIncognito, newFolder, sweepIncognito, writeUpload } from "./ask";
 import type { ForView } from "./api";
 import { samePath } from "./platform";
 import { AppServer } from "./server";
@@ -33,6 +33,10 @@ function scriptedLing(dir: string): string {
 const args = process.argv.slice(2);
 if (args[0] === "prompt") {
   process.stdout.write("COMPOSED " + args[2] + " IN " + process.cwd());
+  process.exit(0);
+}
+if (args[0] === "airgapped") {
+  process.stdout.write("Airgapped: " + (process.env.STUB_AIRGAPPED || "off") + " (stub)\\n");
   process.exit(0);
 }
 const log = ${JSON.stringify(path.join(dir, "received.jsonl"))};
@@ -169,5 +173,82 @@ describe("an Ask thread in the app", () => {
     } finally {
       server.stop();
     }
+  });
+});
+
+describe("plugins and the air gap in the app (AIRGAPPED §14.12)", () => {
+  const saved = { CODEX_HOME: process.env.CODEX_HOME, MIGHTLING_BIN: process.env.MIGHTLING_BIN, STUB_AIRGAPPED: process.env.STUB_AIRGAPPED };
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("asks ling for the level: at on a thread starts without plugins and nothing is installed; at off both pass", async () => {
+    const dir = scratch("plugins");
+    process.env.CODEX_HOME = path.join(dir, "home");
+    process.env.MIGHTLING_BIN = scriptedLing(dir);
+    const server = new AppServer(null, { deliver: () => {}, busyChanged: () => {} });
+    server.start();
+    const received = () => fs.readFileSync(path.join(dir, "received.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    try {
+      process.env.STUB_AIRGAPPED = "on";
+      await server.send({ id: 1, method: "thread/start", params: { model: "m", cwd: "/work/repo", config: { "features.plugins": true } } });
+      await expect(server.send({ id: 2, method: "plugin/install", params: { marketplacePath: "/m/marketplace.json", pluginName: "lint" } })).rejects.toThrow(/airgapped is on/);
+      await expect(server.send({ id: 3, method: "marketplace/add", params: { source: "acme/plugins" } })).rejects.toThrow(/airgapped is on/);
+      process.env.STUB_AIRGAPPED = "off";
+      await server.send({ id: 4, method: "marketplace/add", params: { source: "acme/plugins" } });
+      await server.send({ id: 5, method: "thread/start", params: { model: "m", cwd: "/work/repo" } });
+      await until(() => fs.existsSync(path.join(dir, "received.jsonl")) && received().length >= 3);
+      const [onStart, added, offStart] = received();
+      expect(onStart.params).toEqual({ model: "m", cwd: "/work/repo", config: { "features.plugins": false } });
+      expect(added).toMatchObject({ id: 4, method: "marketplace/add" });
+      expect(offStart.params).toEqual({ model: "m", cwd: "/work/repo" });
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("incognito questions (DESKTOP_PARITY_CLAUDE §4.3)", () => {
+  const question = (root: string, id: string) => {
+    const folder = newFolder(root);
+    linkThread(root, id, folder);
+    fs.writeFileSync(path.join(folder, "notes.md"), "a file the agent wrote\n");
+    return folder;
+  };
+
+  it("deletes a marked question's folder, files and link, and nothing else", () => {
+    const root = path.join(scratch("incognito"), "ask");
+    const secret = question(root, "t-secret");
+    const kept = question(root, "t-kept");
+    expect(markIncognito(root, "t-secret")).toBe(secret);
+    expect(fs.existsSync(path.join(secret, INCOGNITO_MARK))).toBe(true);
+    // A question that is not marked is never deleted this way.
+    expect(() => forgetIncognito(root, "t-kept")).toThrow(/not incognito/);
+    expect(forgetIncognito(root, "t-secret")).toBe(true);
+    expect(fs.existsSync(secret)).toBe(false);
+    expect(fs.existsSync(path.join(root, "t-secret"))).toBe(false);
+    expect(() => fs.lstatSync(path.join(root, "t-secret"))).toThrow();
+    expect(fs.readFileSync(path.join(kept, "notes.md"), "utf8")).toContain("agent");
+    expect(folderOf(root, "t-kept")).toBe(kept);
+    // Nothing left: nothing to do; a thread id that could leave the root is refused.
+    expect(forgetIncognito(root, "t-secret")).toBe(false);
+    expect(() => forgetIncognito(root, "../x")).toThrow(/not a thread id/);
+    expect(() => markIncognito(root, "t-unknown")).toThrow(/only an Ask question/);
+  });
+
+  it("sweeps what a closed or crashed app left, keeping every other question", () => {
+    const root = path.join(scratch("sweep"), "ask");
+    const left = question(root, "t-left");
+    const kept = question(root, "t-kept");
+    markIncognito(root, "t-left");
+    expect(sweepIncognito(root)).toBe(1);
+    expect(fs.existsSync(left)).toBe(false);
+    expect(() => fs.lstatSync(path.join(root, "t-left"))).toThrow();
+    expect(folderOf(root, "t-kept")).toBe(kept);
+    expect(sweepIncognito(root)).toBe(0);
+    expect(sweepIncognito(path.join(root, "missing"))).toBe(0);
   });
 });

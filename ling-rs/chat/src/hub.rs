@@ -108,6 +108,7 @@ pub const HELP: &str = "Mightling, from your phone. Each conversation is an Ask 
 /use <n> — continue thread n from /threads\n\
 /status — what Mightling is doing\n\
 /cavemode [off|lite|full|ultra] — how terse this thread's answers are; /cavemode default <level> for new threads\n\
+/night add <task> — queue a task for Night Shift tonight, with this thread's last exchange; /night status — the queue\n\
 /help — this list";
 
 /// Settings (MIGHTLING_CHAT §10).
@@ -126,6 +127,8 @@ pub struct HubConfig {
     pub settings: ChatSettings,
     /// The user's configuration, read again for the settings with the air gap; None in tests.
     pub settings_file: Option<PathBuf>,
+    /// How often Night Shift's reports are looked for.
+    pub report_interval: Duration,
     /// After "answer now", how long before the interrupt; the final turn's time (limits.rs).
     pub grace: Duration,
     pub final_budget: Duration,
@@ -142,6 +145,7 @@ impl HubConfig {
             airgap_interval: Duration::from_secs(60),
             settings: ChatSettings::default(),
             settings_file: None,
+            report_interval: Duration::from_secs(300),
             grace: Duration::from_millis(limits::GRACE_MS),
             final_budget: Duration::from_millis(limits::FINAL_BUDGET_MS),
         }
@@ -228,6 +232,39 @@ impl Turn {
     }
 }
 
+/// When no repository can take a phone's Night Shift task.
+pub const NO_NIGHT_REPOS: &str = "Night Shift has no repository to queue in from the phone yet. Queue one task from a checkout on the node (`ling`, then /night add), or list it as night_repos = [\"~/path/to/repo\"] under [chat] in ~/.config/dreamference/config.toml.";
+
+/// A phone's Night Shift task with the thread's last exchange after it, so the night knows what
+/// "this" was.
+pub fn with_context(task: &str, exchange: Option<&(String, String)>) -> String {
+    let Some((question, answer)) = exchange else { return task.trim().to_string() };
+    let mut text = format!("{}\n\nContext, from the phone conversation this was asked in:", task.trim());
+    if !question.trim().is_empty() {
+        text.push_str(&format!("\n\nQuestion: {}", cut(question.trim(), 1_500)));
+    }
+    if !answer.trim().is_empty() {
+        text.push_str(&format!("\n\nAnswer: {}", cut(answer.trim(), 3_000)));
+    }
+    text
+}
+
+/// `/api/night/status` as lines for a phone.
+pub fn night_status_text(value: &Value) -> String {
+    let tasks = value.get("tasks").and_then(Value::as_array).cloned().unwrap_or_default();
+    if tasks.is_empty() {
+        return "Night Shift's queue is empty. /night add <task> queues one.".to_string();
+    }
+    let lines: Vec<String> = tasks
+        .iter()
+        .map(|t| {
+            let field = |key: &str| t.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+            format!("• {} — {} [{}] {}", field("id"), field("status"), field("repo"), field("task"))
+        })
+        .collect();
+    format!("Night Shift:\n{}", lines.join("\n"))
+}
+
 /// Files offered back after one answer, at most.
 const MAX_OFFERS: usize = 3;
 
@@ -286,6 +323,8 @@ struct Pending {
 enum Local {
     /// A file the agent made, to send into the chat (MOONSHOT §3.7).
     SendFile { thread: String, name: String },
+    /// A Night Shift task to queue in the repository the user picks (MOONSHOT §3.5).
+    NightAdd { task: String },
 }
 
 pub struct Hub {
@@ -416,6 +455,8 @@ impl Hub {
     pub async fn run(mut self, mut inbound: mpsc::UnboundedReceiver<Inbound>, mut events: mpsc::UnboundedReceiver<Value>) {
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut reports = tokio::time::interval_at(tokio::time::Instant::now() + self.config.report_interval, self.config.report_interval);
+        reports.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 message = inbound.recv() => match message {
@@ -427,6 +468,7 @@ impl Hub {
                     None => break,
                 },
                 _ = tick.tick() => self.on_tick(),
+                _ = reports.tick() => self.push_reports().await,
             }
         }
     }
@@ -556,6 +598,10 @@ impl Hub {
                         if self.airgapped { "on" } else { "off" }
                     ),
                 );
+            }
+            "/night" => {
+                let rest = text.trim()["/night".len()..].trim().to_string();
+                self.night(chat, &rest).await;
             }
             "/cavemode" => {
                 let rest = words.collect::<Vec<_>>().join(" ");
@@ -917,6 +963,154 @@ impl Hub {
         }
     }
 
+    /// `/night add <task>`, `/night status` (MOONSHOT §3.5, CHAT §16.8).
+    async fn night(&mut self, chat: &str, rest: &str) {
+        let (verb, task) = rest.split_once(char::is_whitespace).map(|(v, t)| (v, t.trim())).unwrap_or((rest, ""));
+        match verb {
+            "add" if !task.is_empty() => self.night_add(chat, task).await,
+            "status" | "list" => {
+                let answer = match self.agent.web("/api/night/status", None).await {
+                    Ok(value) => night_status_text(&value),
+                    Err(err) => format!("Night Shift's queue could not be read: {err}"),
+                };
+                self.notice(chat, answer);
+            }
+            _ => self.notice(chat, "/night add <task> queues a task for Night Shift tonight; /night status shows the queue."),
+        }
+    }
+
+    /// Asks which repository and confirms before anything is queued: the bridge's own question,
+    /// answered by a press or a reply. The task carries the thread's last exchange.
+    async fn night_add(&mut self, chat: &str, task: &str) {
+        let repos = match self.agent.web("/api/night/repos", None).await {
+            Ok(value) => value.get("repos").and_then(Value::as_array).cloned().unwrap_or_default(),
+            Err(err) => {
+                self.notice(chat, format!("Night Shift's repositories could not be read: {err}"));
+                return;
+            }
+        };
+        let repos: Vec<(String, String)> = repos
+            .iter()
+            .filter_map(|r| Some((r.get("path")?.as_str()?.to_string(), r.get("name")?.as_str()?.to_string())))
+            .take(8)
+            .collect();
+        if repos.is_empty() {
+            self.notice(chat, NO_NIGHT_REPOS);
+            return;
+        }
+        let task = with_context(task, last_exchange(self.agent.clone(), self.current(chat)).await.as_ref());
+        let preview = cut(&task, 400);
+        let (text, options, replies) = if repos.len() == 1 {
+            let (path, name) = &repos[0];
+            (
+                format!("Queue this for Night Shift tonight, in {name}?\n\n{preview}"),
+                vec!["Queue it".to_string(), "Cancel".to_string()],
+                vec![Reply::Answer(path.clone()), Reply::Decline],
+            )
+        } else {
+            let mut options: Vec<String> = repos.iter().map(|(_, name)| name.clone()).collect();
+            options.push("Cancel".to_string());
+            let mut replies: Vec<Reply> = repos.iter().map(|(path, _)| Reply::Answer(path.clone())).collect();
+            replies.push(Reply::Decline);
+            (format!("Queue this for Night Shift tonight? Choose the repository.\n\n{preview}"), options, replies)
+        };
+        self.next_approval += 1;
+        let id = ling_web_server::auth::random_hex(8);
+        let thread = self.current(chat).unwrap_or_default();
+        self.approvals.insert(
+            id.clone(),
+            Pending {
+                local: Some(Local::NightAdd { task }),
+                chat: chat.to_string(),
+                thread,
+                request: Value::Null,
+                method: "local/nightAdd".to_string(),
+                params: Value::Null,
+                replies,
+                free_text: false,
+                deadline: Instant::now() + self.config.approval_timeout,
+                seq: self.next_approval,
+            },
+        );
+        self.send(Outbound::Approval { chat: chat.to_string(), id, text, options });
+    }
+
+}
+
+/// A thread's last question and answer, for a Night Shift task's context.
+async fn last_exchange(agent: AgentHandle, thread: Option<String>) -> Option<(String, String)> {
+    {
+        let thread = thread?;
+        let listed = agent.request("thread/turns/list", json!({ "threadId": thread, "limit": 1, "sortDirection": "desc" })).await.ok()?;
+        let items = listed.pointer("/data/0/items")?.as_array()?.clone();
+        let question = items
+            .iter()
+            .find(|i| i.get("type").and_then(Value::as_str) == Some("userMessage"))
+            .and_then(|i| i.get("content")?.as_array().cloned())
+            .map(|parts| parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n"))
+            .unwrap_or_default();
+        let answer = items.iter().rev().filter(|i| i.get("type").and_then(Value::as_str) == Some("agentMessage")).find_map(|i| i.get("text").and_then(Value::as_str).map(str::to_string)).unwrap_or_default();
+        (!question.trim().is_empty() || !answer.trim().is_empty()).then_some((question, answer))
+    }
+}
+
+impl Hub {
+    /// Queues a confirmed task through `ling web` and says what Night Shift said.
+    fn night_queue(&self, chat: &str, repo: &str, task: &str) {
+        let Some(adapter) = self.adapters.get(adapter_of(chat)).cloned() else { return };
+        let (agent, chat, body) = (self.agent.clone(), chat.to_string(), json!({ "repo": repo, "task": task }));
+        tokio::spawn(async move {
+            let text = match agent.web("/api/night/add", Some(body)).await {
+                Ok(value) => {
+                    let lines: Vec<String> = value.get("lines").and_then(Value::as_array).map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+                    if value.get("queued") == Some(&Value::Bool(true)) { lines.join("\n") } else { format!("Night Shift did not queue it: {}", lines.join(" ")) }
+                }
+                Err(err) => format!("Night Shift did not queue it: {err}"),
+            };
+            let _ = adapter.send(Outbound::Notice { chat, text });
+        });
+    }
+
+    /// The morning reports since the last one pushed, to every chat of each messenger the user
+    /// named (`[chat] night_report_to`; Signal and Matrix by default, MOONSHOT §3.5). The first
+    /// look only notes the newest report, so a bridge started fresh repeats no old one.
+    pub async fn push_reports(&mut self) {
+        let seen_file = self.config.dir.join("night-report-seen");
+        let seen = std::fs::read_to_string(&seen_file).ok().map(|s| s.trim().to_string());
+        let after = seen.clone().unwrap_or_default();
+        let Ok(value) = self.agent.web(&format!("/api/night/reports?after={after}"), None).await else { return };
+        let latest = value.get("latest").and_then(Value::as_str).map(str::to_string);
+        if seen.is_none() {
+            if let Some(latest) = latest {
+                let _ = crate::store::write_private(&seen_file, &latest);
+            }
+            return;
+        }
+        let reports = value.get("reports").and_then(Value::as_array).cloned().unwrap_or_default();
+        let targets: Vec<String> = {
+            let mut keys: Vec<String> = self
+                .threads
+                .chats
+                .keys()
+                .map(|key| base_of(key).to_string())
+                .filter(|key| self.config.settings.night_report_to.iter().any(|m| m == adapter_of(key)))
+                .collect();
+            keys.sort();
+            keys.dedup();
+            keys
+        };
+        for report in &reports {
+            let (Some(name), Some(text)) = (report.get("name").and_then(Value::as_str), report.get("text").and_then(Value::as_str)) else { continue };
+            for chat in &targets {
+                if adapter_of(chat) == "telegram" && self.airgapped {
+                    continue;
+                }
+                self.send(Outbound::Message { chat: chat.clone(), markdown: format!("**Night Shift's report** ({})\n\n{text}", name.trim_end_matches(".md")) });
+            }
+            let _ = crate::store::write_private(&seen_file, name);
+        }
+    }
+
     /// Fetches a file from the thread's folder and hands it to the chat's adapter, off the hub's
     /// loop (a large file must not hold the conversation up).
     fn send_file(&self, chat: &str, thread: &str, name: &str) {
@@ -1137,6 +1331,11 @@ impl Hub {
                     "Sending it."
                 }
                 (Local::SendFile { .. }, _) => "Not sent; it stays in the thread's folder.",
+                (Local::NightAdd { task }, Reply::Answer(repo)) => {
+                    self.night_queue(&pending.chat, repo, task);
+                    "Queueing it."
+                }
+                (Local::NightAdd { .. }, _) => "Not queued.",
             };
             self.close(pending.chat, approval.to_string(), outcome);
             return;
@@ -1219,8 +1418,12 @@ impl Hub {
         let expired: Vec<String> = self.approvals.iter().filter(|(_, p)| p.deadline <= now).map(|(id, _)| id.clone()).collect();
         for approval in expired {
             if let Some(pending) = self.approvals.remove(&approval) {
-                if pending.local.is_some() {
-                    self.close(pending.chat, approval, "No answer in time; the file stays in the thread's folder.");
+                if let Some(local) = &pending.local {
+                    let outcome = match local {
+                        Local::SendFile { .. } => "No answer in time; the file stays in the thread's folder.",
+                        Local::NightAdd { .. } => "No answer in time; not queued.",
+                    };
+                    self.close(pending.chat, approval, outcome);
                     continue;
                 }
                 self.agent.respond(pending.request.clone(), Self::payload(&pending, &Reply::Decline));

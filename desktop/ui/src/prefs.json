@@ -40,6 +40,18 @@
       "default": {},
       "type": "object"
     },
+    "projectContextSent": {
+      "default": {},
+      "type": "object"
+    },
+    "projectOrder": {
+      "default": [],
+      "type": "strings"
+    },
+    "agentReadsWindow": {
+      "default": true,
+      "type": "boolean"
+    },
     "permanentWorktrees": {
       "default": [],
       "type": "strings"
@@ -96,6 +108,10 @@
       "default": true,
       "type": "boolean"
     },
+    "pasteAsFile": {
+      "default": true,
+      "type": "boolean"
+    },
     "previewSites": {
       "default": {},
       "type": "object"
@@ -105,6 +121,10 @@
       "type": "boolean"
     },
     "petShown": {
+      "default": false,
+      "type": "boolean"
+    },
+    "recallQuestions": {
       "default": false,
       "type": "boolean"
     },

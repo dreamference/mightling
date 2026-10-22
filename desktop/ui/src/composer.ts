@@ -8,6 +8,7 @@ import type { Model } from "./protocol/v2/Model";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
 import type { UserInput } from "./protocol/v2/UserInput";
 import type { ThreadView } from "./store";
+import { isContextText } from "./projects";
 
 export type TriggerKind = "@" | "$" | "/";
 
@@ -122,6 +123,16 @@ export function parseSlash(text: string): { command: SlashCommand; args: string 
   return command ? { command, args: (match[2] ?? "").trim() } : null;
 }
 
+/**
+ * A message that is a `!` shell command, as the Codex app reads one: `!` first, then the command,
+ * run in the user's own shell in the thread's folder (`thread/shellCommand`); null for anything
+ * else, a bare `!` included. Allowed only while `/airgapped` is off: the policy refuses it at `on`.
+ */
+export function parseShell(text: string): string | null {
+  const match = text.trim().match(/^!\s*([\s\S]+)$/);
+  return match ? match[1].trim() : null;
+}
+
 /** Skills whose name or description matches, enabled ones first. */
 export function matchSkills(skills: SkillMetadata[], query: string): SkillMetadata[] {
   const q = query.toLowerCase();
@@ -210,7 +221,7 @@ export function userTexts(view: ThreadView | null): string[] {
   for (const turn of view.turns) {
     for (const item of turn.items) {
       if (item.type !== "userMessage") continue;
-      const text = item.content.map((input) => (input.type === "text" ? input.text : "")).join("").trim();
+      const text = item.content.map((input) => (input.type === "text" && !isContextText(input.text) ? input.text : "")).join("").trim();
       if (text) texts.push(text);
     }
   }
@@ -224,7 +235,7 @@ export function lastUserTurn(view: ThreadView | null): { turnId: string; text: s
     const turn = view.turns[index];
     const message = turn.items.find((item) => item.type === "userMessage");
     if (message && message.type === "userMessage") {
-      return { turnId: turn.id, text: message.content.map((input) => (input.type === "text" ? input.text : "")).join("") };
+      return { turnId: turn.id, text: message.content.map((input) => (input.type === "text" && !isContextText(input.text) ? input.text : "")).join("") };
     }
   }
   return null;
@@ -291,4 +302,31 @@ export function reviewTarget(args: string): { type: "uncommittedChanges" } | { t
   const commit = words.match(/^commit\s+([0-9a-fA-F]{4,64})$/);
   if (commit) return { type: "commit", sha: commit[1], title: null };
   return { type: "custom", instructions: words };
+}
+
+/** A paste this long becomes an attachment (DESKTOP_PARITY_CLAUDE §4.6): characters, or lines. */
+export const LONG_PASTE = { chars: 2_000, lines: 40 };
+
+/** Whether pasted text is long enough to go in as an attachment rather than into the text. */
+export function isLongPaste(text: string): boolean {
+  return text.length >= LONG_PASTE.chars || text.split("\n").length >= LONG_PASTE.lines;
+}
+
+/** A pasted text's chip: its lines, or its characters when it is one long line. */
+export function pasteLabel(text: string): string {
+  const lines = text.replace(/\n+$/, "").split("\n").length;
+  return lines > 1 ? `Pasted text · ${lines} lines` : `Pasted text · ${text.length.toLocaleString("en")} characters`;
+}
+
+/**
+ * A Work message with its pasted texts (Work writes no attachment into a project): each after the
+ * words, as a fenced block long enough not to be closed by a fence inside it.
+ */
+export function withPastes(message: string, pastes: string[]): string {
+  const blocks = pastes.map((text, index) => {
+    const longest = Math.max(2, ...Array.from(text.matchAll(/`{3,}/g), (found) => found[0].length));
+    const fence = "`".repeat(longest + 1);
+    return `Pasted text ${index + 1}:\n${fence}\n${text.replace(/\n+$/, "")}\n${fence}`;
+  });
+  return [message.trim(), ...blocks].filter(Boolean).join("\n\n");
 }

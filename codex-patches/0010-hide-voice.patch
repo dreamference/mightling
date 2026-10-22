@@ -1,5 +1,4 @@
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
-index 25a7842..93c12fc 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -307,3 +307,6 @@ impl SlashCommand {

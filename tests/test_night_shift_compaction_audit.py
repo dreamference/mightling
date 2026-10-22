@@ -156,3 +156,13 @@ def test_the_report_keeps_its_review_section_when_there_are_tasks():
             "result": {"branch": "night/t"}}
     text = NightShiftReport.render(datetime(2026, 10, 3, 1, 0), [task], [], compactions=["1 compaction(s)."])
     assert text.index("## Review") < text.index("## Compactions")
+
+
+def test_the_report_says_how_to_bring_a_branch_into_the_checkout():
+    task = {"id": "t", "repo": "/r", "base": "a" * 40, "status": "done", "task": "x",
+            "result": {"branch": "night/t"}}
+    text = NightShiftReport.render(datetime(2026, 10, 3, 1, 0), [task], [])
+    assert "- Branch: `night/t`, not merged; `ling night apply t` brings it into your checkout" in text
+    assert "Nothing was merged into your checkout. `ling night apply <id>`" in text
+    no_branch = dict(task, status="no-change", result={})
+    assert "No branch to review." in NightShiftReport.render(datetime(2026, 10, 3, 1, 0), [no_branch], [])

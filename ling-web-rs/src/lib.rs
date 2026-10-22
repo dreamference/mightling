@@ -32,8 +32,9 @@ use airgapped::Level;
 pub const AIRGAPPED_ON_MESSAGE: &str = "Web access is off in this session (/airgapped on). Only the user can change that, with /airgapped.";
 
 /// Printed, with nothing sent, when the sandbox this command runs in has no network and the level
-/// is not `on`: naming `/airgapped on` here would name a setting nobody chose.
-pub const NO_NETWORK_SANDBOX_MESSAGE: &str = "This command has no network: the sandbox it runs in does not allow it. Web access needs the workspace-write sandbox (ling exec -s workspace-write).";
+/// is not `on`: naming `/airgapped on` here would name a setting nobody chose. Below `on` every
+/// sandbox has the network unless the user switched it off, so that is what is named.
+pub const NO_NETWORK_SANDBOX_MESSAGE: &str = "This command has no network: the user switched the sandbox's network off (sandbox_workspace_write.network_access = false, or DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off). Only the user can change that.";
 
 /// The session's air-gap level, as the launcher and the sandbox resolve it
 /// (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §6.2).

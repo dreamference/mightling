@@ -1,10 +1,10 @@
-"""The desktop app's window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, on Electron per
+"""The desktop app's windows (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, on Electron per
 specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md).
 
-Ask and Work share the one app window and its one app-server (the separate Ask window on
-`ling web` was folded into it on 2026-10-09, specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6), the
-bridge only sends methods the pinned Codex has, and the committed protocol types are the ones the
-pinned Codex would generate.
+Ask and Work are views of each app window, and every window shares the app's one app-server (the
+separate Ask window on `ling web` was folded in on 2026-10-09, specs/DREAMFERENCE_MIGHTLING_ASK.md
+§18.6; several windows since 2026-10-22, DESKTOP_ELECTRON §13), the bridge only sends methods the
+pinned Codex has, and the committed protocol types are the ones the pinned Codex would generate.
 """
 
 import json
@@ -32,9 +32,10 @@ def app_config() -> dict:
     return json.loads((Path(ELECTRON_DIR) / "app.json").read_text(encoding="utf-8"))
 
 
-def test_ask_is_a_view_of_the_one_app_window_not_a_window_on_ling_web():
-    # The menu's Ask, the tray's and `ling app` alone show Ask in the app window; nothing in the
-    # app starts, signs in to or loads `ling web`, so its app-server is the only one on the home.
+def test_ask_is_a_view_of_the_app_windows_not_a_window_on_ling_web():
+    # The menu's Ask, the tray's and `ling app` alone show Ask in the most recent app window (or a
+    # new one when none is open); nothing in the app starts, signs in to or loads `ling web`, so its
+    # app-server is the only one on the home, whatever the number of windows.
     config = app_config()
     assert "chat" not in config and config["work"]["title"] == "Mightling"
     for retired in ("chat.ts", "web.ts", "sign-in.ts", "forwarder.ts", "discover.ts"):
@@ -46,12 +47,15 @@ def test_ask_is_a_view_of_the_one_app_window_not_a_window_on_ling_web():
         assert '"web", "serve"' not in text and "--print-url" not in text and "127.0.0.1:3100" not in text, source.name
     main = (SRC / "main.ts").read_text(encoding="utf-8")
     assert "openWork(" in main and main.count("new BrowserWindow") == 0
-    assert 'const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };' in main
+    assert 'openAsk: () => showView("ask"),' in main and 'openWork: () => showView("work"),' in main
+    assert "newWindow: (from: BrowserWindow | null) => newWindow(from)," in main
     assert "installMenu(actions);" in main
-    # No argument opens Ask; `--work`, a folder, a thread or a link open Work.
-    assert 'showView(options.work ? "work" : "ask");' in main
-    # A window already open is switched, never doubled.
-    assert 'deliver({ channel: "view", payload: view });' in main
+    # No argument opens Ask; `--work`, a folder, a thread or a link open Work, in the most recent window.
+    assert 'showView(options.work ? "work" : "ask", options.work ?? undefined);' in main
+    assert 'view: last ? (options.work ? "work" : "ask") : saved.view' in main
+    # A window already open is switched, never doubled; one window, hidden, in the audit's session.
+    assert 'send(existing, { channel: "view", payload: view });' in main
+    assert "const restored = options.audit === null ? session.restored() : [];" in main
     assert '"work/open-chat"' not in (SRC / "api.ts").read_text(encoding="utf-8")
 
 
@@ -61,11 +65,15 @@ def test_the_app_window_alone_has_ipc_and_only_for_itself():
     work = (SRC / "work.ts").read_text(encoding="utf-8")
     assert re.search(r"sandbox: true,\s*contextIsolation: true,\s*nodeIntegration: false", work)
     main = (SRC / "main.ts").read_text(encoding="utf-8")
-    # Since pop-outs (DESKTOP_PARITY §2.1) the app's windows are the main one and its pop-outs, all
-    # on the one app-server; anything else is refused.
+    # The app's windows are its full windows, pop-outs and detached panes (DESKTOP_ELECTRON §13), all
+    # on the one app-server and all made by `openWork` with the same webPreferences; anything else is
+    # refused, and every message is routed per window before the policy vets it.
     assert 'const own = windowFor(event.sender.id);' in main
     assert 'if (!own) throw new Error("only the app\'s windows talk to the agent");' in main
     assert "windows().find((entry) => entry.webContents.id === senderId)" in main
+    assert "const routed = hub.outgoing(String(own.webContents.id), message.message);" in main
+    assert "webviewTag: false" in work
+    assert 'contents.on("will-attach-webview", (event) => event.preventDefault());' in work
     preload = (SRC / "preload.ts").read_text(encoding="utf-8")
     assert "contextBridge.exposeInMainWorld" in preload and "require(" not in preload.replace('require("electron")', "")
 

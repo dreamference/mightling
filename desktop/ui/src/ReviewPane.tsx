@@ -9,7 +9,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import * as bridge from "./bridge";
-import { commentsMessage, fingerprint, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
+import { commentsMessage, editable, editPatch, zeroContext, fingerprint, hunkNewText, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
 import { Icon } from "./icons";
 import { keyLabel } from "./keymap";
 
@@ -43,6 +43,8 @@ export interface ReviewPaneProps {
   notice: (error: unknown) => void;
   /** Opens a changed file in a file tab of its own (Phase 3 item 1), at a line or the top. */
   onOpenFile: ((path: string, line: number | null) => void) | null;
+  /** Into a window of its own, or (`docks`, in that window) back into the thread's (several windows); null where there are no windows. */
+  detach?: { docks: boolean; run: () => void } | null;
 }
 
 interface Draft {
@@ -69,6 +71,8 @@ export function ReviewPane(props: ReviewPaneProps) {
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
+  /** A hunk being edited in place (item 16): its file, its index and the text so far. */
+  const [editing, setEditing] = useState<{ path: string; index: number; text: string } | null>(null);
   const [includeUnstaged, setIncludeUnstaged] = useState(false);
   const [forcePush, setForcePush] = useState(props.forcePushDefault);
   const [editors, setEditors] = useState<bridge.Editor[]>([]);
@@ -101,6 +105,7 @@ export function ReviewPane(props: ReviewPaneProps) {
     setViewed(back?.viewed ?? new Set());
     setCollapsed(back?.collapsed ?? new Set());
     setMessage(back?.message ?? "");
+    setEditing(null);
   }, [owner]);
 
   // The repositories of the thread's folder.
@@ -213,6 +218,9 @@ export function ReviewPane(props: ReviewPaneProps) {
     if (scope === "unstaged") {
       return (
         <>
+          {editable(file, index) && !(editing?.path === file.path && editing.index === index) ? (
+            <button className="link-button" onClick={() => setEditing({ path: file.path, index, text: hunkNewText(file.hunks[index]) })}>Edit</button>
+          ) : null}
           <button className="link-button" onClick={() => void step("stage", () => bridge.git.apply(root, patch, { cached: true }))}>Stage hunk</button>
           <button className="link-button danger" onClick={() => confirmRevert("this hunk") && void step("revert", () => bridge.git.apply(root, patch, { reverse: true }))}>Revert hunk</button>
         </>
@@ -333,6 +341,27 @@ export function ReviewPane(props: ReviewPaneProps) {
         {isCollapsed ? null : file.binary ? <p className="empty small">A binary file.</p> : file.hunks.map((hunk, index) => (
           <div key={index} className="review-hunk">
             <div className="hunk-header"><code>{hunk.header}</code><span className="spacer" />{hunkActions(file, index)}</div>
+            {editing && editing.path === file.path && editing.index === index && scope === "unstaged" && root ? (
+              <div className="hunk-editor">
+                <textarea value={editing.text} aria-label={`Edit ${file.path} at line ${hunk.newStart}`} spellCheck={false}
+                  rows={Math.min(30, editing.text.split("\n").length + 1)}
+                  onChange={(event) => setEditing({ ...editing, text: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setEditing(null);
+                  }} />
+                <div className="buttons">
+                  <button className="primary" disabled={busy !== null} onClick={() => {
+                    const patch = editPatch(file, index, editing.text);
+                    setEditing(null);
+                    // Applied to the working tree only, as Revert hunk is; git refuses it, and the file
+                    // stays as it was, when the file changed since this diff was read.
+                    if (patch) void step("edit", () => bridge.git.apply(root, patch, { zeroContext: zeroContext(patch) }));
+                  }}>Save</button>
+                  <button onClick={() => setEditing(null)}>Cancel</button>
+                  <span className="planned-note">Lines {hunk.newStart} to {hunk.newStart + hunkNewText(hunk).split("\n").length - 1} of the file as it is now.</span>
+                </div>
+              </div>
+            ) : (
             <table className={`diff-table ${props.layout}`}>
               <tbody>
                 {props.layout === "split"
@@ -350,6 +379,7 @@ export function ReviewPane(props: ReviewPaneProps) {
                   ))}
               </tbody>
             </table>
+            )}
           </div>
         ))}
       </section>
@@ -387,6 +417,11 @@ export function ReviewPane(props: ReviewPaneProps) {
         <span className="spacer" />
         <button className="icon" title={props.layout === "split" ? "Show the diff in one column" : "Show the old and the new side by side"} aria-label="Switch the view" onClick={() => props.setLayout(props.layout === "split" ? "unified" : "split")}>{props.layout === "split" ? "One column" : "Side by side"}</button>
         <button className="icon" title="Read the repository again" aria-label="Refresh" onClick={() => void load()}><Icon name="undo" size={14} /></button>
+        {props.detach ? (
+          <button className="icon" aria-label={props.detach.docks ? "Dock the diff" : "Diff in its own window"} title={props.detach.docks ? "Back into the thread's window" : "Open the diff in a window of its own"} onClick={props.detach.run}>
+            <Icon name={props.detach.docks ? "dock" : "externalLink"} size={14} />
+          </button>
+        ) : null}
       </header>
       <nav className="review-scopes" aria-label="Scope">
         {SCOPES.filter((entry) => windowGit || entry.id === "turn").map((entry) => (

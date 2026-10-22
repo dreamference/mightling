@@ -69,3 +69,48 @@ describe("a terminal tab", () => {
     expect(server.sent[0].params).not.toHaveProperty("permissionProfile");
   });
 });
+
+describe("a terminal tab drawn in another window (DESKTOP_ELECTRON §13)", () => {
+  const delta = (processId: string, text: string) => ({ method: "command/exec/outputDelta", params: { processId, stream: "stdout", deltaBase64: encode(text), capReached: false } }) as never;
+
+  it("starts from what the app kept, drops what it already holds, then follows the output", async () => {
+    const server = new ScriptedServer({});
+    let answer: (bytes: Uint8Array) => void = () => {};
+    const asked: string[] = [];
+    const hub = new TerminalHub(server.client, (processId) => {
+      asked.push(processId);
+      return new Promise((resolve) => (answer = resolve));
+    });
+    // Output before the view, and while the main process answers: both are in its answer.
+    hub.deliver(delta("term-9", "one "));
+    const seen: string[] = [];
+    const detach = hub.attach("term-9", (bytes) => seen.push(new TextDecoder().decode(bytes)));
+    hub.deliver(delta("term-9", "two "));
+    expect(seen).toEqual([]);
+    answer(new TextEncoder().encode("zero one two "));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    hub.deliver(delta("term-9", "three"));
+    expect(seen.join("")).toBe("zero one two three");
+    expect(asked).toEqual(["term-9"]);
+    expect(hub.tail("term-9")).toBe("zero one two three");
+    detach();
+    // Drawn again (a pane docked back): from the start again, never twice.
+    const again: string[] = [];
+    hub.attach("term-9", (bytes) => again.push(new TextDecoder().decode(bytes)));
+    answer(new TextEncoder().encode("zero one two three"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(again.join("")).toBe("zero one two three");
+    const tail = hub.tailFrom("term-9");
+    answer(new TextEncoder().encode("zero\r\none two three"));
+    expect(await tail).toBe("zero\none two three");
+  });
+
+  it("keeps a bounded amount for a tab no view of this window draws", () => {
+    const server = new ScriptedServer({});
+    const hub = new TerminalHub(server.client);
+    for (let index = 0; index < 40; index++) hub.deliver(delta("term-1", "x".repeat(64 * 1024)));
+    const seen: Uint8Array[] = [];
+    hub.attach("term-1", (bytes) => seen.push(bytes));
+    expect(seen.reduce((sum, bytes) => sum + bytes.length, 0)).toBeLessThanOrEqual(1024 * 1024);
+  });
+});

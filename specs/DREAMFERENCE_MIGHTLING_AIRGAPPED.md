@@ -121,7 +121,7 @@ The exact texts go in an appendix when they are written, and are checked against
 
 Every command the agent runs goes through Codex's sandbox. Under `workspace-write`, the launcher today sets `[sandbox_workspace_write] network_access = true`, so the web commands work. At `on` the sandbox policy for a command is the restricted one whatever the configuration says, so `bwrap` gives the command a network namespace of its own with nothing in it. `curl`, `git fetch`, `pip install`, `ling-search` and a hand-written socket all fail the same way, because none of them has an interface to send on.
 
-**How it composes with the user's own sandbox choice.** `on` forces the restricted policy; at the other two levels the sandbox's own answer stands. `ling exec` without `-s` runs read-only, which has no network at any level, so the web commands fail there at `off` as they do today; the level does not grant what the sandbox withholds.
+**How it composes with the user's own sandbox choice.** `on` forces the restricted policy. *Superseded 2026-10-22 (§14.11):* below `on` every sandbox has the network, the read-only one included (`ling exec` without `-s`, the TUI's Read Only); the user's own `network_access = false` still holds. The design of 2026-10-01 read: at the other levels the sandbox's own answer stands, so `ling exec` without `-s` (read-only) had no network at any level.
 
 **One hook decides it, per command.** The session's network policy is computed in one place in Codex's core (`TurnContext::network_sandbox_policy()`, from the permission profile). The patch adds one line there: when `ling_launcher::airgapped::sealed(session)` is true, the answer is `Restricted`. `session` is the same root-session key the level file uses (§6.1), so the hook and `/airgapped` can never read different files. That covers the TUI, `ling exec`, a resumed session, a subagent and a switch in the middle of a turn, because it is asked again for every command. Phase 0 confirms that this is the only path a command's network policy takes, and that the core crate can depend on the launcher crate without a cycle (§9). If the dependency would be a cycle, the resolution moves into a leaf crate, `ling-airgapped`, with no dependency beyond the standard library, which both the core and the launcher use; the hook stays one line. The other route, in which the launcher passes `-c sandbox_workspace_write.network_access=false` at start and `/airgapped on` sends what `/permissions` sends, is rejected: it misses a session resumed under a different configured level, and it turns the slash command's one-line arm into policy construction inside a patch.
 
@@ -140,6 +140,7 @@ Every command the agent runs goes through Codex's sandbox. Under `workspace-writ
 - **`$CODEX_HOME` inside a writable root.** The sandbox lets commands write the working directory, `/tmp` and `$TMPDIR`. `ling` started in the home directory therefore makes `~/.mightling` and `~/.config/dreamference` writable, and a command could rewrite the session's level file or the user-level configuration file (measured, §14.5). The level is therefore **held outside those folders**: a session seen at `on` gets a seal, a file under the user's runtime directory (`$XDG_RUNTIME_DIR/ling-airgapped/<thread-id>`), which the sandbox mounts read-only. While the seal exists the level is `on` whatever the files say. It is written by the `ling` process (when the World State section sees `on`, before the turn's first command, and by `/airgapped on`), removed by `/airgapped off` or `/airgapped duckduckgo` typed by the user, and pruned at the next launch once the process that wrote it has exited. Where there is no runtime directory, the first design applies as a fallback: an exposed session file may tighten the configured level and not loosen it, and `/airgapped` reports the hole as `NOT ENFORCED`.
 - **A command the user approves to run outside the sandbox** has the network. The `on` fragment tells the model not to ask (§3), and the approval prompt is the user's own decision, but nothing stops it.
 - **MCP servers** the user configured run outside the command sandbox, with the network.
+- **Plugins** (allowed at `off` since 2026-10-22): `git` fetches a marketplace or a plugin in `ling`'s own process, and a plugin's MCP servers and hooks run outside the sandbox. A session that starts at `on` loads none and refuses installs (§14.12); a session switched to `on` later keeps those it loaded until restarted, and `/airgapped` says so.
 - **`ling` itself.** Its known channels to the upstream vendor and GitHub are closed at their call sites (patches `0013`, `0015`, `0016`), and a traced session reaches only the model server and the Gmail service. A channel a future Codex release adds would not be stopped by the command sandbox.
 
 ### 5.4 The airlock closes those
@@ -175,9 +176,9 @@ Resolved before every command and every model request. First match wins:
 
 `ling-search` and `ling-fetch` run inside the command sandbox, as children of the agent's shell. They resolve the level by the same four tiers, finding the session file through `CODEX_SESSION_ID` and `$CODEX_HOME` (default `~/.mightling`), both of which the sandbox can read and not write. The resolution is a small module in `ling-web-rs/` with the same unit tests as the launcher's, since the two crates share no code.
 
-**A second signal: the sandbox's own.** Codex sets `CODEX_SANDBOX_NETWORK_DISABLED=1` for a command it runs without a network. That happens at `on`, and also at any level under a read-only sandbox (`ling exec` without `-s`). When either web command sees the variable it sends nothing and prints no restart hint, and the message depends on the level it resolved:
+**A second signal: the sandbox's own.** Codex sets `CODEX_SANDBOX_NETWORK_DISABLED=1` for a command it runs without a network. That happens at `on` under the read-only sandbox, and below `on` only where the user switched the sandbox's network off (§14.11; until 2026-10-22, at any level under a read-only sandbox). When either web command sees the variable it sends nothing and prints no restart hint, and the message depends on the level it resolved:
 - **`on`:** the message of §4.
-- **Another level, or none found:** `This command has no network: the sandbox it runs in does not allow it. Web access needs the workspace-write sandbox (ling exec -s workspace-write).` Saying `/airgapped on` here would name a setting nobody chose.
+- **Another level, or none found:** `This command has no network: the user switched the sandbox's network off (sandbox_workspace_write.network_access = false, or DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off). Only the user can change that.` Saying `/airgapped on` here would name a setting nobody chose. (Until 2026-10-22 it named the read-only sandbox and sent the user to `ling exec -s workspace-write`.)
 
 **Finding `$CODEX_HOME`.** The launcher sets `CODEX_HOME` in `ling`'s own environment (`use_mightling_home()`), and Codex's default policy passes the environment on to commands, so the variable is normally there. A user's `shell_environment_policy` can strip it; the web commands then fall back to `~/.mightling`.
 
@@ -428,6 +429,7 @@ Each later surface follows the same resolver (`ling-airgapped`, the strictest of
 | `ling chat` | the Telegram adapter stops relaying and answers with one line saying why; Matrix keeps working (the whole path stays on the machine) | [MIGHTLING_CHAT §3](./DREAMFERENCE_MIGHTLING_CHAT.md) |
 | `ling signal` | the bridge runs only at `off`, because Signal needs the internet | [MIGHTLING_SIGNAL](./DREAMFERENCE_MIGHTLING_SIGNAL.md) |
 | `/node` | runs, after a line saying it talks to the local network only (§14.8) | [MIGHTLING_NODE §18.9](./DREAMFERENCE_MIGHTLING_NODE.md) |
+| Codex plugins (`/plugins`, `ling plugin`, the app's Plugins tab and Import) | a session started at `on` loads none; installs and marketplace changes that fetch are refused (§14.12, 2026-10-22) | this spec |
 
 ### 14.10 Who sees a search (2026-10-20)
 
@@ -451,3 +453,74 @@ A search asks only the engines of its category. Each sees the query text and Sea
 
 Ownership is as published by each company on 2026-10-20 and is not re-checked automatically; an engine whose owner changes hands to a Russian or Chinese company belongs in `REMOVED_ENGINES`.
 
+### 14.11 Below `on`, every sandbox has the network (2026-10-22)
+
+Owner decision: sandboxed commands (`pip install`, `npm install`, `curl`, `git fetch`) have the network whenever `/airgapped` is off; `on` is unchanged. Until then only the workspace-write sandbox had it (the launcher's `network_access = true`); Codex's read-only sandbox had none, and it is what these surfaces run:
+
+| Surface | What decided it before |
+|---|---|
+| `ling exec` without `-s` | no `sandbox_mode` and no trust decision: `ConfigToml::derive_permission_profile` picks read-only |
+| the TUI's Read Only, an untrusted-and-undecided folder, `/permissions` | the built-in `:read-only` profile, `PermissionProfile::read_only()` |
+| the desktop app's Work, `ling web` | the picker's `:read-only` row, or an app-server `sandbox: "read-only"` (`thread_processor.rs`); `ling web`'s Ask threads are pinned to workspace-write (`policy.json`'s `scratchSandbox`) and had the network |
+| the phone bridges' `chat` threads | `thread/start` names no sandbox, so the config's default: read-only unless the folder is trusted |
+| Night Shift | `ling exec -s workspace-write` and `ling sandbox -c …network_access=true`: had it |
+| macOS (Seatbelt), Windows | the same profiles; the launcher's config reaches workspace-write on both, nothing reached read-only |
+
+No configuration reaches read-only: the profile is hard-wired, `-s read-only` and an app-server `read-only` bypass `[permissions]` profiles, and a `default_permissions` profile would also replace the trusted-folder default. So patch `0031` (1,004 bytes) adds one line to `SandboxManager::transform` (`codex-rs/sandboxing`), which every platform's sandbox takes its profile from and whose result core reads back to set `CODEX_SANDBOX_NETWORK_DISABLED`: a profile exactly `PermissionProfile::read_only()` becomes read-only with `NetworkSandboxPolicy::Enabled` when `ling_airgapped::read_only_network` agrees, that is not at `on` (resolved from the command's environment) and not with `DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off`. The launcher sets that variable when the user chose `sandbox_workspace_write.network_access = false` (`-c` or a configuration layer), so an explicit "no network" holds for both sandboxes; a workspace-write `false` is untouched, since only the exact read-only profile is widened. The catalog's `model_messages.permissions.read_only` tells the model "Network access is enabled" at a configured `off`. `0019`'s helper hook still forces `Restricted` at `on` and, at `on` (§14.13), denies the host's control sockets. Not covered: `ling sandbox` (the debug command builds its bwrap arguments without `transform`), and a user's `[permissions]` profile that only extends `:read-only` is widened like the built-in one. The patch series stays under its cap: the 59 `index` lines were dropped (1,770 bytes).
+
+Measured on the development GB10 against the default model, `curl https://pypi.org/simple/` run verbatim by the model, in a scratch folder:
+
+| Run | Installed build (f93b53bc) | With `0031` |
+|---|---|---|
+| `ling exec` (default, read-only) | `000`, exit 6 (no DNS) | `200`, `CODEX_SANDBOX_NETWORK_DISABLED` unset |
+| `ling exec -s read-only` | "Could not resolve host" (owner's run) | `200` |
+| `ling exec -s workspace-write` | `200` | `200` |
+| `DREAMFERENCE_MIGHTLING_AIRGAPPED=on ling exec` | exit 6 (`-s workspace-write`) | exit 6 (default read-only), variable set |
+| `ling exec -c sandbox_workspace_write.network_access=false` | — | exit 6, variable set |
+| `ling-search` in `ling exec` (default) | refused: "the sandbox it runs in does not allow it" | results (PyPI's page first) |
+| `curl --unix-socket /var/run/docker.sock` (read-only) | — | exit 7 (masked by `0019`; measured at `off` before §14.13, which masks the sockets only at `on`) |
+
+The egress audit (`ling exec`, no network call) passed on the new build.
+
+### 14.12 Plugins: allowed at `off`, refused at `on` (2026-10-22)
+
+**The decision.** The owner reversed the blanket refusal of Codex plugins: marketplaces, plugin installs, and a plugin's skills, MCP servers, hooks and apps are allowed whenever the level is `off`, on every surface (the TUI, `exec`, the desktop app's Work, `ling web`). At `on` they are refused. The upstream vendor's channels stay closed at every level.
+
+**What was blocked before, and why** (the inventory of that day):
+
+| Where | What | Why |
+|---|---|---|
+| `ling-rs/web/policy.json` | `refusedImportItems: ["PLUGINS"]`: an import lost its plugin items | network: the importer can `git clone` a marketplace or plugin and `npm pack` one, untraced by the audit |
+| `ling-rs/web/policy.json` | `marketplace/add|remove|upgrade`, `plugin/read`, `plugin/installed` not in `allowedRequests` (`plugin/list|install|uninstall` were) | not yet added (DESKTOP_PARITY row 30), not a refusal |
+| Launcher config | nothing: `features.plugins` was on (Codex's default), `/plugins` and `ling plugin` worked at every level, `on` included | — |
+| Launcher config | `chatgpt_base_url` at a closed port | vendor channel: the remote catalogue, sharing and featured list go to the vendor's backend |
+| Patch 0015 | the curated catalogue's startup `git ls-remote`/clone of the vendor's repository and the featured-plugins request | vendor channel |
+| Patch 0012 | `/import` hidden | network: its plugin step clones marketplaces |
+| Patch 0030 | "OpenAI Curated" renamed "Curated" | branding |
+| Patch 0013 | plugin install analytics, with all analytics | privacy |
+| `ling web` | the same policy as the app | as above |
+
+So the paper draft's "Mightling Desktop explicitly enforces `refusedImportItems: ["PLUGINS"]` … no external code executes inside the agent core" described only the import path: plugins were installable from configured marketplaces at every level, `on` included.
+
+**As built** (no new patch; `ling-rs/src/plugins.rs`, the policy, the app):
+- `config.toml`: `features.remote_plugin = false` and `features.plugin_sharing = false`, forced on every start (vendor-only features; they reached the closed port anyway, and now the remote sections are not offered).
+- A session started at a configured `on` gets `-c features.plugins=false`: no plugin loads, `/plugins` is hidden; a user's `-c features.plugins=true` or `--enable plugins` is refused at launch.
+- `ling plugin` at a configured `on` runs only `list`, `remove`, `marketplace list|remove` and help; the rest is refused before Codex parses it, with `Plugins not changed: airgapped is on (<source>). …`.
+- `policy.json`: `plugin/read`, `plugin/installed` and `marketplace/add|remove|upgrade` allowed; `refusedImportItems` empty; at `on` (the configured level, asked of `ling airgapped` by the app and resolved by `ling-airgapped` in `ling web`) `airgappedRefusedRequests` (`plugin/install`, `marketplace/add`, `marketplace/upgrade`) are refused, `airgappedRefusedImportItems` (`PLUGINS`) dropped, and every thread opener gets `airgappedThreadConfig` (`features.plugins = false`), so a thread opened at `on` has no plugins even in an app server started at `off`. Fifteen conformance cases, at both levels, run in both enforcers.
+- The app: Skills and tools › Plugins adds a marketplace (`owner/repo`, a git URL or a folder) and says the vendor's catalogue is closed; Import offers plugins unticked.
+- The TUI's Curated tab (the vendor's marketplace, never synced: 0015) reads `Vendor catalogue closed in Mightling` (0030, 33 bytes; the series at 57,556 of 58,000).
+
+**Decided, and why.** Installed plugins are refused at `on`, not only fenced: a session started at `on` loads none, so their MCP servers and hooks never start. A session switched to `on` mid-way is the exception: Codex loaded its plugins already, and its app server gates neither `plugin/install` nor `marketplace/add` on the feature, so refusing those mid-session needs a hook in the plugin manager, which the 58,000-byte cap has no room for. The commands a plugin's skills run are sandboxed and get the empty namespace like any other; its MCP servers keep the network they started with, as servers the user configured do. `/airgapped` at `on` prints `Plugins: off in a session started at on; a session switched to on keeps the plugins it loaded (their MCP servers keep the network) until it is restarted.` `/import` stays hidden for the same reason.
+
+**Run live on 2026-10-22** with a build of this branch (scratch `HOME` and `CODEX_HOME`, `DREAMFERENCE_VLLM_HOST=http://localhost:8000`, the served Qwen3.8-27B): `ling plugin marketplace add andrehuang/research-companion` cloned a third-party marketplace from GitHub, and `ling plugin add research-companion@andrehuang-research-companion` installed its plugin (skills only). A `ling exec -s workspace-write` turn listed `research-companion:research-companion` among its skills, read its `SKILL.md` and answered in the skill's format (a verdict and one question to resolve next). With `DREAMFERENCE_MIGHTLING_AIRGAPPED=on`: `ling plugin add …` and `ling plugin marketplace upgrade` ended with exit 1 and the `Plugins not changed: airgapped is on (DREAMFERENCE_MIGHTLING_AIRGAPPED).` message, `ling plugin list` still listed the marketplace, the same `exec` question listed the built-in skills only and said research-companion was not among them, and `ling -c features.plugins=true exec …` was refused at launch.
+
+**The egress audits** run with no plugin installed and no marketplace added, so they still prove the vendor's channels closed; a user's plugin's traffic is the user's choice (docs/dev/egress-audit.md).
+
+### 14.13 Strict confinement only at `on` (owner's decision, 2026-10-22)
+
+The owner decided that the confinement Mightling adds to Codex is needed only at `on`; at `off` Mightling behaves like Codex.
+
+- **The host's control sockets** (Docker, containerd, Podman, the D-Bus buses, the systemd user manager, snapd, `$XDG_RUNTIME_DIR/mightling`; added in 1.7.1 after a sandboxed `docker restart`) are masked **only at `on`**. Patch `0019` resolves the command's level once, in the sandbox helper (`let on = ling_airgapped::sealed_for_command()`), and both the network and the sockets follow it: `ling_airgapped::host_sockets_at(on)` is every socket that exists at `on` and none at `off`. At `on` nothing changed. **At `off` the workspace-write sandbox is Codex's own and does not protect the host from anything that can use Docker: a command can reach the Docker socket if the user can, and Docker access is root on the host.** Codex upstream does not mask these sockets either. Full Access has no sandbox at either level (Codex never starts the helper for it), so it reaches them too. Tests: `tests/test_sandbox_host_sockets.py` (the patched helper resolves once and masks through `host_sockets_at(on)`), the crate's `the_host_control_sockets_are_masked_only_at_on`.
+- **The agent's sandbox stays the user's choice**, as in Codex: Read only, Workspace (workspace-write) or Full Access, in the TUI's `/permissions`, the desktop app's picker and `ling web`'s. Full Access is refused only at `on` (§14.7); no surface refuses it at `off`. Ask threads keep their scratch folder and workspace-write sandbox at every level (MIGHTLING_ASK §3), which is what an Ask thread is, not an air-gap rule; the phone bridges start only Ask threads, and the Signal bridge declines requests for wider permissions from a phone at every level.
+- **The `!` command in the app and `ling web`** (`thread/shellCommand`) is allowed at `off` and refused at `on`. It is user-initiated: the user types `!command` in the composer and Codex runs it in the user's own shell, unsandboxed, in the thread's folder, with its output shown in the thread; the agent cannot issue it. `ling-rs/web/policy.json` lists it in `airgappedRefusedRequests` beside the plugin installs (§14.12), with its reason in `airgappedRefusalReasons`; unlike an install, it is judged by the level of the thread it names, not only the configured one: `ling web` and the desktop app's main process ask the launcher's resolver for the level of the thread the request names (`ling_airgapped::resolve`, `ling airgapped --thread <id>` in Electron, which fails closed), in their own folder and in the thread's (`ling_airgapped::resolve_in`), the stricter winning, so the thread's repository's `dreamference.toml` counts. The conformance cases cover both levels (`"airgapped": "on"`). The TUI's `!` is Codex's, unpatched, and runs at either level, like `/node` (§5.2).
+- **The egress audits** (`ling-admin audit egress`, exec, tui, `--app`, `--web`) are unchanged by this: they trace the agent's own traffic, which `!` commands and the host's sockets do not add to.

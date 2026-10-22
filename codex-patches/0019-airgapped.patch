@@ -1,5 +1,4 @@
 diff --git a/codex-rs/app-server/src/extensions.rs b/codex-rs/app-server/src/extensions.rs
-index c1c205d..7f99585 100644
 --- a/codex-rs/app-server/src/extensions.rs
 +++ b/codex-rs/app-server/src/extensions.rs
 @@ -96,2 +96,3 @@ pub(crate) fn thread_extensions(
@@ -7,7 +6,6 @@ index c1c205d..7f99585 100644
 +    ling_launcher::airgapped::install(&mut builder);
      codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index 1ef016e..ac8d572 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -2052,2 +2052,3 @@ async fn run_debug_prompt_input_command(
@@ -15,7 +13,6 @@ index 1ef016e..ac8d572 100644
 +    ling_launcher::airgapped::install(&mut extensions);
      codex_skills_extension::install(&mut extensions, |config: &Config| {
 diff --git a/codex-rs/linux-sandbox/Cargo.toml b/codex-rs/linux-sandbox/Cargo.toml
-index 17b3fa1..8993fa1 100644
 --- a/codex-rs/linux-sandbox/Cargo.toml
 +++ b/codex-rs/linux-sandbox/Cargo.toml
 @@ -21,2 +21,3 @@ clap = { workspace = true, features = ["derive"] }
@@ -23,24 +20,23 @@ index 17b3fa1..8993fa1 100644
 +ling-airgapped = { path = "../ling/airgapped" }
  codex-network-proxy = { workspace = true }
 diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandbox/src/linux_run_main.rs
-index 8ef5165..6917a7e 100644
 --- a/codex-rs/linux-sandbox/src/linux_run_main.rs
 +++ b/codex-rs/linux-sandbox/src/linux_run_main.rs
-@@ -394,6 +394,10 @@
+@@ -394,6 +394,11 @@
  ) -> Result<EffectivePermissions, ResolvePermissionProfileError> {
 -    let permission_profile =
 +    let mut permission_profile =
          permission_profile.ok_or(ResolvePermissionProfileError::MissingConfiguration)?;
 -    let (file_system_sandbox_policy, network_sandbox_policy) =
-+    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut permission_profile && ling_airgapped::sealed_for_command() {
++    let on = ling_airgapped::sealed_for_command();
++    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut permission_profile && on {
 +        *network = NetworkSandboxPolicy::Restricted;
 +    }
 +    let (mut file_system_sandbox_policy, network_sandbox_policy) =
          permission_profile.to_runtime_permissions();
-+    file_system_sandbox_policy.entries.extend(ling_airgapped::host_sockets().into_iter().filter_map(|p| codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(p).ok()).map(|p| FileSystemSandboxEntry::new(p.into(), FileSystemAccessMode::Deny)));
++    file_system_sandbox_policy.entries.extend(ling_airgapped::host_sockets_at(on).into_iter().filter_map(|p| codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(p).ok()).map(|p| FileSystemSandboxEntry::new(p.into(), FileSystemAccessMode::Deny)));
      Ok(EffectivePermissions {
 diff --git a/codex-rs/tui/src/chatwidget/permission_popups.rs b/codex-rs/tui/src/chatwidget/permission_popups.rs
-index fc98703..8ff3f28 100644
 --- a/codex-rs/tui/src/chatwidget/permission_popups.rs
 +++ b/codex-rs/tui/src/chatwidget/permission_popups.rs
 @@ -93,3 +93,4 @@ impl ChatWidget {
@@ -50,7 +46,6 @@ index fc98703..8ff3f28 100644
 +                .or_else(|| ling_launcher::airgapped::full_access_refusal(self.thread_id, preset.id));
              let default_actions = self.permission_mode_actions(
 diff --git a/codex-rs/tui/src/chatwidget/permissions_menu.rs b/codex-rs/tui/src/chatwidget/permissions_menu.rs
-index 4fec70a..eb9fa2a 100644
 --- a/codex-rs/tui/src/chatwidget/permissions_menu.rs
 +++ b/codex-rs/tui/src/chatwidget/permissions_menu.rs
 @@ -56,2 +56,3 @@ impl ChatWidget {
@@ -58,7 +53,6 @@ index 4fec70a..eb9fa2a 100644
 +        if let Some(reason) = ling_launcher::airgapped::full_access_refusal(self.thread_id, preset.id) { return Some(reason); }
          self.config
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
-index 59f8446..7c9565f 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -540,2 +540,3 @@ impl ChatWidget {
@@ -74,7 +68,6 @@ index 59f8446..7c9565f 100644
 +            | SlashCommand::Airgapped
              | SlashCommand::DebugConfig
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
-index 119e1d3..fe3fc69 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -18,2 +18,3 @@ pub enum SlashCommand {

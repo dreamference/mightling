@@ -77,8 +77,29 @@ export function writeStandIn(home: string, askRoot: string): string {
   fs.writeFileSync(ling, `#!/usr/bin/env node
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(path.join(home, "runs.jsonl"))}, JSON.stringify(process.argv.slice(2)) + "\\n");
-if (process.argv[2] === "airgapped") { console.log("Airgapped: off (default)"); process.exit(0); }
+// Airgapped on while the test has left a file saying so (links.e2e.ts).
+if (process.argv[2] === "airgapped") { console.log("Airgapped: " + (fs.existsSync(${JSON.stringify(path.join(home, "airgapped-on"))}) ? "on" : "off") + " (default)"); process.exit(0); }
 if (process.argv[2] === "prompt") { process.stdout.write("THE ASK PROMPT"); process.exit(0); }
+if (process.argv[2] === "docs") {
+  // ling docs add|remove|reindex|status --json, over a file of collections (a project's knowledge, DESKTOP_PARITY_CLAUDE §4.7).
+  const file = ${JSON.stringify(path.join(home, "docs-collections.json"))};
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : [];
+  const counts = { documents: 1, indexed: 1, pending: 0, failed: 0, duplicates: 0, skipped: 0, chunks: 1, embedded: 1, needs_ocr_pages: 0, needs_ocr_documents: 0 };
+  const verb = process.argv[3];
+  if (verb === "add") {
+    const name = process.argv[process.argv.indexOf("--name") + 1];
+    if (all.some((c) => c.name === name)) { console.error("ling-docs: a collection named " + name + " already exists"); process.exit(1); }
+    all.push({ name, root: process.argv[4], enabled: true, default: false, counts, last_status: "ok", last_run: 0, disk_bytes: 0 });
+  } else if (verb === "remove") {
+    all.splice(all.findIndex((c) => c.name === process.argv[4]), 1);
+  } else if (verb === "status") {
+    console.log(JSON.stringify({ collections: all, runtime_missing: null }));
+    process.exit(0);
+  }
+  fs.writeFileSync(file, JSON.stringify(all));
+  console.log("ok");
+  process.exit(0);
+}
 if (process.argv[2] === "node") {
   // ling node list --json and ling node use <name> (Settings › Node): two nodes, the chosen one remembered in a file.
   const chosen = ${JSON.stringify(path.join(home, "node-choice"))};
@@ -86,6 +107,22 @@ if (process.argv[2] === "node") {
   if (process.argv[3] === "use") { fs.writeFileSync(chosen, process.argv[4]); console.log("Using node " + process.argv[4] + " at http://192.168.50.106:8000/v1."); process.exit(0); }
   const node = (name, id, model) => ({ name, id, choice: name, inUse: used === name, model, contextTokens: model ? 262144 : null, state: model ? "ready" : "stopped", version: "1.7.1", coding: true });
   console.log(JSON.stringify({ thisMachine: "client", nodes: [node("spark-1", "11111111-aaaa", "RadixArk/Qwen3.8-27B-NVFP4"), node("spark-2", "22222222-bbbb", null)], rememberedAway: null, hint: null }));
+  process.exit(0);
+}
+// ling-admin night every add|list|drop (MIGHTLING_ADMIN is this script too): templates kept in a file.
+if (process.argv[2] === "night" && process.argv[3] === "every") {
+  const kept = ${JSON.stringify(path.join(home, "repeating.json"))};
+  const list = fs.existsSync(kept) ? JSON.parse(fs.readFileSync(kept, "utf8")) : [];
+  if (process.argv[4] === "list") { for (const entry of list) console.log(JSON.stringify(entry)); process.exit(0); }
+  if (process.argv[4] === "drop") { fs.writeFileSync(kept, JSON.stringify(list.filter((entry) => entry.id !== process.argv[5]))); console.log("Repeating task " + process.argv[5] + " dropped."); process.exit(0); }
+  const args = process.argv.slice(5);
+  const weekly = args[0] === "--weekly" ? args[1] : null;
+  const test = args.includes("--test") ? args[args.indexOf("--test") + 1] : null;
+  const task = args.slice(args.indexOf("--") + 1).join(" ");
+  const id = "r" + String(list.length + 1).padStart(12, "0");
+  list.push({ id, repo: process.cwd(), task, test, cadence: weekly ? "weekly" : "daily", weekday: weekly, created: "2026-10-21T12:00:00+01:00", last_queued: null, last_error: null });
+  fs.writeFileSync(kept, JSON.stringify(list));
+  console.log("Repeating task " + id + ", " + (weekly ? "every " + weekly : "every night") + ".");
   process.exit(0);
 }
 if (process.argv[2] === "night") { console.log(process.argv[3] === "add" ? "Queued 20261017-0930 on branch night/20261017-0930, from 1a2b3c4d5e." : "Dropped " + process.argv[4] + "."); process.exit(0); }
@@ -102,12 +139,16 @@ const watches = {};
 const config = { features: { memories: false }, memories: {}, desktop: null };
 // hooks.state as config/batchWrite leaves it: a hook is trusted once its trusted_hash is its current hash.
 const hookState = {};
+// Projects (item 13), as the server keeps them: roots in order, metadata replaced whole on update.
+const projects = [];
 const hookOf = (key, base) => {
   const state = hookState[key] || {};
   const trustStatus = base.isManaged ? "managed" : state.trusted_hash === base.currentHash ? "trusted" : state.trusted_hash ? "modified" : "untrusted";
   return { ...base, key, enabled: state.enabled !== false, trustStatus };
 };
 let asked = false;
+// Ephemeral threads: never listed, still known by id (an incognito question's folder).
+const unlisted = {};
 let next = 1;
 const model = { id: "qwen3.8-27b", model: "qwen3.8-27b", displayName: "qwen3.8-27b", description: "The model this machine serves",
   hidden: false, isDefault: true, supportedReasoningEfforts: ["low", "medium", "high"].map((e) => ({ reasoningEffort: e, description: "" })),
@@ -127,6 +168,28 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
   const answer = (result) => say({ id: m.id, result });
   switch (m.method) {
     case "initialize": return answer({ userAgent: "stand-in" });
+    case "project/list": return answer({ data: projects, nextCursor: null });
+    case "project/create": {
+      const made = { id: "proj-" + (projects.length + 1), name: p.name, roots: p.roots || [], metadata: p.metadata || {}, position: projects.length, createdAt: 0, updatedAt: 0, recencyAt: null };
+      projects.push(made);
+      say({ method: "project/changed", params: { projectId: made.id, changeType: "created" } });
+      return answer({ project: made });
+    }
+    case "project/update": {
+      const found = projects.find((entry) => entry.id === p.projectId);
+      if (!found) return say({ id: m.id, error: { code: -32602, message: "project not found: " + p.projectId } });
+      if (p.name) found.name = p.name;
+      if (p.roots) found.roots = p.roots;
+      if (p.metadata) found.metadata = p.metadata;
+      say({ method: "project/changed", params: { projectId: found.id, changeType: "updated" } });
+      return answer({ project: found });
+    }
+    case "thread/metadata/update": {
+      const found = threads.find((t) => t.id === p.threadId);
+      if (!found) return say({ id: m.id, error: { code: -32600, message: "no such thread" } });
+      if ("projectId" in p) found.projectId = p.projectId;
+      return answer({ thread: { ...found, turns: [] } });
+    }
     case "thread/list":
       if (p.archived) return answer({ data: [{ ...threads[0], id: "old1", name: "Try a smaller hero image", turns: [] }], nextCursor: null });
       return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null });
@@ -191,26 +254,59 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       answer({ queuedSubmission: item });
       return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
     }
+    case "thread/queue/update": {
+      const item = (queues[p.threadId] || []).find((q) => q.id === p.queuedSubmissionId);
+      if (item) item.input = p.input;
+      answer({ queuedSubmission: item || null });
+      return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
+    }
+    case "thread/queue/reorder": {
+      const byId = Object.fromEntries((queues[p.threadId] || []).map((q) => [q.id, q]));
+      queues[p.threadId] = p.queuedSubmissionIds.map((id) => byId[id]).filter(Boolean);
+      answer({});
+      return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
+    }
     case "thread/queue/delete":
       queues[p.threadId] = (queues[p.threadId] || []).filter((q) => q.id !== p.queuedSubmissionId);
       answer({});
       return say({ method: "thread/queue/changed", params: { threadId: p.threadId } });
     case "thread/fork": {
       const source = threads.find((t) => t.id === p.threadId);
-      const copy = { ...source, id: source.id + "-fork", name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
+      // Through a turn (lastTurnId) or before one (beforeTurnId): the turns cut there.
+      const turns = source.turns || [];
+      const at = turns.findIndex((t) => t.id === (p.lastTurnId || p.beforeTurnId));
+      const cut = at < 0 ? turns : p.lastTurnId ? turns.slice(0, at + 1) : turns.slice(0, at);
+      const copy = { ...source, turns: cut, id: source.id + "-fork" + (p.lastTurnId || p.beforeTurnId ? "-" + next++ : ""), name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
       threads.push(copy);
       return answer({ thread: copy, model: "qwen3.8-27b", modelProvider: "local", cwd: copy.cwd });
     }
     case "thread/start": {
-      const id = (p.ephemeral ? "e" : "n") + next++;
+      // An ephemeral thread in an Ask folder is an incognito question ("i"), answered as a question is;
+      // any other ephemeral one is a helper's ("e": a commit message, suggestions).
+      const id = (p.ephemeral ? (String(p.cwd || "").startsWith(${JSON.stringify(askRoot)}) ? "i" : "e") : "n") + next++;
       const started = { id, cwd: p.cwd, name: null, preview: "", turns: [], status: { type: "idle" }, ephemeral: !!p.ephemeral, parentThreadId: null,
-        createdAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), recencyAt: null, model: "qwen3.8-27b", modelProvider: "local" };
+        createdAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), recencyAt: null, model: "qwen3.8-27b", modelProvider: "local",
+        projectId: p.projectId || null, runtimeWorkspaceRoots: p.runtimeWorkspaceRoots || [] };
       if (!p.ephemeral) threads.push(started);
+      else unlisted[id] = started;
       return answer({ thread: started, model: "qwen3.8-27b", modelProvider: "local", cwd: p.cwd });
+    }
+    case "thread/shellCommand": {
+      // A ! command, as Codex runs one: its own turn, a commandExecution item from the user's shell.
+      const id = "turn-" + next++;
+      const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
+      const item = { type: "commandExecution", id: "sh" + id, command: p.command, cwd: (own && own.cwd) || fetcher, processId: null, source: "userShell",
+        status: "inProgress", commandActions: [], exitCode: null, durationMs: null, aggregatedOutput: null };
+      answer({});
+      say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
+      say({ method: "item/started", params: { threadId: p.threadId, turnId: id, item } });
+      say({ method: "item/commandExecution/outputDelta", params: { threadId: p.threadId, turnId: id, itemId: item.id, delta: "On branch main\\n" } });
+      say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { ...item, status: "completed", exitCode: 0, durationMs: 12, aggregatedOutput: "On branch main\\nnothing to commit, working tree clean\\n" } } });
+      return say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [], status: "completed", error: null } } });
     }
     case "turn/start": {
       const id = "turn-" + next++;
-      if (String(p.threadId).startsWith("n")) {
+      if (/^[ni]/.test(String(p.threadId))) {
         // A thread the test started: the turn runs briefly and answers.
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
         say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
@@ -232,17 +328,27 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           }
           if (asked.includes("with a report")) {
             // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
-            const own = threads.find((t) => t.id === p.threadId);
+            const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
             const report = require("node:path").join((own && own.cwd) || "/tmp", "report.md");
             require("node:fs").writeFileSync(report, "# Memory on the GB10\\n\\nOne pool of LPDDR5X, shared by the CPU and the GPU.\\n");
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
               changes: [{ path: report, kind: { type: "add" }, diff: "+# Memory on the GB10\\n" }] } } });
           }
+          // The window's own tools (the owner's decision 5): the agent reads the terminal and the preview's console.
+          if (asked.includes("with the terminal")) {
+            say({ id: "tool-1", method: "item/tool/call", params: { threadId: p.threadId, turnId: id, callId: "call-1", namespace: null, tool: "mightling_terminal_output", arguments: { lines: 5 } } });
+            say({ id: "tool-2", method: "item/tool/call", params: { threadId: p.threadId, turnId: id, callId: "call-2", namespace: null, tool: "mightling_preview_console", arguments: {} } });
+          }
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }
-          const answerItem = { type: "agentMessage", id: "m" + id, text: "Done: the retry counter is in fetcher/client.py." };
+          const answerItem = { type: "agentMessage", id: "m" + id, text: asked.includes("with a source")
+            ? "NVFP4 is described on [NVIDIA's developer blog](https://developer.nvidia.com/blog/nvfp4/) [1].\\n\\n[1] https://developer.nvidia.com/blog/nvfp4/"
+            : "Done: the retry counter is in fetcher/client.py." };
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: answerItem } });
+          // Kept, as ling keeps it, so a thread opened again (or forked) has its turns.
+          const kept = threads.find((t) => t.id === p.threadId);
+          if (kept) kept.turns = [...(kept.turns || []), { id, status: "completed", error: null, items: [{ type: "userMessage", id: "u" + id, content: p.input || [] }, answerItem] }];
           // As ling sends it: the completed turn lists the answer alone, not what the turn streamed.
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
         }, 300);
@@ -359,7 +465,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       return answer({ connectors: [], data: [{ importId: "imp-0", providerId: "mightling_desktop", completedAtMs: Date.now() - 86400000, successes: [{}], failures: [] }] });
     case "thread/turns/list": {
       const found = threads.find((t) => t.id === p.threadId);
-      return answer({ data: found ? [...(found.turns || [])].reverse() : [], nextCursor: null, backwardsCursor: null });
+      const turns = found ? [...(found.turns || [])] : [];
+      return answer({ data: p.sortDirection === "asc" ? turns : turns.reverse(), nextCursor: null, backwardsCursor: null });
     }
     case "fs/readDirectory":
       try {

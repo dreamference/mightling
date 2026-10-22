@@ -17,6 +17,7 @@ const NO_PROMPTS: PromptSource = {
     throw new Error("no folder is made here");
   },
   scratchFolderOf: () => null,
+  airgappedOn: () => false,
 };
 const vetOutgoing = (message: unknown, pending: Set<string>) => vet(message, pending, NO_PROMPTS);
 

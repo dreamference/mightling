@@ -20,17 +20,18 @@ export const TYPE_LABELS: Record<ExternalAgentConfigMigrationItemType, string> =
 };
 
 /**
- * Items the window does not import: plugins come from their marketplaces, which an import would
- * clone over the network (and the vendor's catalogue is closed, patch 0015); install them from
- * Skills and tools › Plugins instead.
+ * What to know before importing an item: plugins are fetched from their marketplaces over the
+ * network (git, npm), and while airgapped is on the app leaves them out of an import
+ * (ling-rs/web/policy.json, `airgappedRefusedImportItems`; the vendor's catalogue stays closed,
+ * patch 0015).
  */
-export function refusal(item: Pick<ExternalAgentConfigMigrationItem, "itemType">): string | null {
-  return item.itemType === "PLUGINS" ? "Plugins come from their marketplaces over the network: install them from the Plugins tab." : null;
+export function caveat(item: Pick<ExternalAgentConfigMigrationItem, "itemType">): string | null {
+  return item.itemType === "PLUGINS" ? "Fetched from their marketplaces over the network; left out while airgapped is on." : null;
 }
 
-/** Ticked to begin with: everything importable but past sessions, which can be many. */
+/** Ticked to begin with: everything cheap and local, so not past sessions (they can be many) or plugins (fetched). */
 export function startsTicked(item: Pick<ExternalAgentConfigMigrationItem, "itemType">): boolean {
-  return !refusal(item) && item.itemType !== "SESSIONS";
+  return item.itemType !== "SESSIONS" && item.itemType !== "PLUGINS";
 }
 
 /** Where an item applies: every project (the home folder's), or one project. */

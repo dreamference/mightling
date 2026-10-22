@@ -1,0 +1,55 @@
+# 50 fresh SWE-bench Verified tasks for night 9, default against the Code Mode night-6 fixes, 60-minute limit
+# (scripts/swe_bench_night1.sh; docs/dev/code-mode-night6.md), drawn 2026-10-14
+# from the 79 tasks validated on this machine outside sample-100.txt and verified-mismatch-exclude.txt (68), fresh-50.txt (50), fresh-50c.txt (50), fresh-50d.txt (50), seed 20261014.
+# Stratified to sample-100.txt's mix (easy/medium/hard 59/16/25 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
+# wanted 30/8/12, drawn 32/8/10 (2 filled from other tiers, which were short).
+astropy__astropy-13977
+astropy__astropy-14365
+astropy__astropy-14598
+django__django-10880
+django__django-11149
+django__django-11163
+django__django-11179
+django__django-11239
+django__django-11400
+django__django-11603
+django__django-11999
+django__django-12050
+django__django-13023
+django__django-13089
+django__django-13279
+django__django-13346
+django__django-13449
+django__django-13569
+django__django-13741
+django__django-13794
+django__django-14017
+django__django-14140
+django__django-14404
+django__django-14493
+django__django-14559
+django__django-14608
+django__django-15128
+django__django-15499
+django__django-15503
+django__django-15814
+django__django-15916
+django__django-16116
+django__django-16256
+django__django-16485
+django__django-16631
+django__django-17087
+mwaskom__seaborn-3187
+pallets__flask-5014
+pytest-dev__pytest-7432
+scikit-learn__scikit-learn-26323
+sphinx-doc__sphinx-9258
+sympy__sympy-12489
+sympy__sympy-13372
+sympy__sympy-15017
+sympy__sympy-15976
+sympy__sympy-16766
+sympy__sympy-19495
+sympy__sympy-19783
+sympy__sympy-22714
+sympy__sympy-24539

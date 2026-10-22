@@ -330,6 +330,7 @@ html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, h
 .item > summary:hover, .item details > summary:hover, .turn-diff > summary:hover { color: var(--text); }
 .item > summary code, .item details > summary code { font-size: 12.5px; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .item.reasoning pre { color: var(--muted); font-family: var(--font-ui); font-size: 13px; padding-left: 12px; border-left: 2px solid var(--line); }
+.item.command .shell-mark { flex: none; font-family: var(--font-code); font-weight: 600; color: var(--muted); }
 .item.command pre { background: var(--code-bg); border: 1px solid var(--line); padding: 10px 12px; border-radius: var(--radius-sm); max-height: 320px; overflow: auto; }
 .diffstat { flex: none; font-family: var(--font-code); font-size: 12px; }
 .diffstat .plus { color: var(--add-text); }
@@ -742,15 +743,14 @@ html.pet-page body { margin: 0; }
 @keyframes pet-blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
 
 /* Suggested prompts (Phase 3 item 7): chips above the composer. */
-.suggestions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: var(--column); margin: 0 auto; padding: 0 20px 6px; width: 100%; box-sizing: border-box; }
-.suggestion { border: 1px solid var(--line); background: var(--raised); border-radius: var(--radius-pill); padding: 4px 12px; font-size: 13px; color: var(--text); text-align: left; }
-.suggestion:hover { border-color: var(--accent); background: var(--accent-soft); }
 
 /* Skills and tools › Import (Phase 3 item 8). */
 .import-items { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .import-items label { display: flex; gap: 8px; align-items: center; }
 .import-description { margin-left: 26px; font-size: 12.5px; color: var(--muted); }
 .import-panel .buttons { display: flex; gap: 8px; margin-bottom: 8px; }
+.plugin-market-add { display: flex; gap: 8px; margin-bottom: 8px; }
+.plugin-market-add input { flex: 1; min-width: 0; }
 .import-history { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
 
 /* The pull-request tab (Phase 3 item 9). */
@@ -899,3 +899,83 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .quick-hint { margin: 0; color: var(--faint); font-size: 12px; }
 .quick-entry .dialog-note.warning { color: var(--danger); }
 .quick-row textarea, .quick-row textarea:focus, .quick-row textarea:focus-visible { border: none; box-shadow: none; outline: none; padding: 0; border-radius: 0; }
+
+/* A link in an answer (LinkDialog.tsx, DESKTOP_PARITY_CLAUDE §2.4): clickable, and the dialog that shows it in full first. */
+.markdown .web-link { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.markdown .web-link:focus-visible { outline: 2px solid var(--focus-ring); border-radius: 2px; }
+.link-dialog { width: min(560px, calc(100vw - 32px)); }
+.link-dialog h3 { margin: 0 0 10px; }
+.link-site { margin: 0 0 4px; font-weight: 600; font-size: 15px; }
+.link-url { margin: 0 0 12px; }
+.link-url code { display: block; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-sm); overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12.5px; }
+.link-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* An incognito question (DESKTOP_PARITY_CLAUDE §4.3): a dashed frame round the thread and a note that leaving deletes it. */
+.thread-pane.incognito { outline: 2px dashed var(--muted); outline-offset: -6px; }
+.incognito-banner { display: flex; gap: 10px; align-items: flex-start; margin: 12px auto 4px; max-width: 760px; padding: 10px 14px; border: 1px dashed var(--muted); border-radius: var(--radius-md); background: var(--panel); color: var(--text); font-size: 13px; line-height: 1.45; }
+.incognito-banner svg { flex: none; margin-top: 2px; }
+.chip.incognito-toggle { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--muted); }
+.chip.incognito-toggle.active { border-style: dashed; border-color: var(--text); color: var(--text); background: var(--selected); }
+
+/* Fork from here, edit in a new thread, and queue edits (DESKTOP_PARITY §4.5 item 22). */
+.turn-actions.earlier { opacity: 0; transition: opacity var(--motion-fast); }
+.turn:hover .turn-actions.earlier, .turn-actions.earlier:focus-within { opacity: 1; }
+.queued-edit { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.queued .icon:disabled { opacity: 0.35; }
+
+/* Inline diff editing (item 16): a hunk's lines edited in place in the review pane. */
+.hunk-editor { padding: 8px; background: var(--code-bg); }
+.hunk-editor textarea { width: 100%; box-sizing: border-box; font-family: var(--font-code); font-size: 13px; line-height: 1.4; color: var(--text); background: var(--canvas); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 8px; resize: vertical; tab-size: 4; }
+.hunk-editor .buttons { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+/* Projects (projects.ts, ProjectDialog.tsx): the dialog's folders and files, and the project a new thread starts in. */
+.dialog.project-dialog { width: min(560px, calc(100vw - 32px)); }
+.project-dialog h3 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
+.project-folders, .project-files { list-style: none; margin: 0 0 8px; padding: 0; }
+.project-folders li, .project-files li { display: flex; align-items: center; gap: 8px; padding: 4px 0; min-width: 0; }
+.project-folders code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.project-add-folder { display: flex; gap: 8px; margin-bottom: 4px; }
+.project-add-folder input { flex: 1; min-width: 0; }
+.project-instructions { width: 100%; box-sizing: border-box; font: inherit; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--canvas); color: var(--text); padding: 8px; resize: vertical; }
+.project.server-project.starting > h2 { color: var(--accent-text); }
+.starting-project { color: var(--muted); }
+.project.server-project h2 .menu-anchor { margin-left: auto; display: inline-flex; }
+.project.server-project h2 .menu-anchor .project-action { margin-left: 0; }
+
+/* Activity's Needs you tab (item 17): why each thread is listed. */
+.attention-state { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--muted); white-space: nowrap; }
+.attention-state.waiting { background: var(--accent-soft); color: var(--accent-text); }
+.activity-filters .spacer { flex: 1; }
+/* Export the thread (exportthread.ts): its options and the exact text it saves. */
+.dialog.export-dialog { width: min(760px, calc(100vw - 32px)); }
+.export-options { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+.export-preview { max-height: 45vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--code-bg); border-radius: var(--radius-sm); padding: 10px 12px; font-family: var(--font-code); font-size: 12.5px; }
+/* A project's page in Ask (ProjectPage.tsx, DESKTOP_PARITY_CLAUDE §4.7). */
+.project-page { max-width: 720px; margin: 24px auto; padding: 0 20px; display: grid; gap: 12px; }
+.project-page header { display: flex; align-items: center; gap: 10px; }
+.project-page header h1 { font-size: 20px; margin: 0; flex: 1; }
+.project-page h2 { font-size: 13px; font-weight: 600; margin: 8px 0 6px; color: var(--muted); }
+.project-instructions-text { white-space: pre-wrap; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); max-height: 220px; overflow: auto; }
+.project-page .project-files li span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-questions { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.project-add-files { display: inline-flex; align-items: center; gap: 6px; justify-self: start; }
+/* Scheduled (item 18, the owner's decision 7): a finished run opened on its result, changes and transcript. */
+.night-details pre { max-height: 40vh; overflow: auto; }
+.night-transcript { white-space: pre-wrap; font-family: var(--font-code); font-size: 12.5px; background: var(--code-bg); border-radius: var(--radius-sm); padding: 8px 10px; }
+/* Other devices (SYNC Phase 1): a thread from another device, read only. */
+.synced-transcript td { padding-bottom: 12px; }
+.synced-item { margin: 8px 0; }
+.synced-item.user p { white-space: pre-wrap; margin: 2px 0 0; }
+.synced-item.command code { font-family: var(--font-code); font-size: 12.5px; white-space: pre-wrap; }
+.synced-item.command pre { white-space: pre-wrap; font-family: var(--font-code); font-size: 12px; background: var(--code-bg); border-radius: var(--radius-sm); padding: 6px 8px; max-height: 14em; overflow: auto; margin: 4px 0 0; }
+.night-context { display: block; margin: 4px 0 8px; color: var(--muted); }
+
+/* Several windows (DESKTOP_ELECTRON §13): a thread mirrored read-only while another window holds its
+   composer, a pane away in a window of its own, and that pane's window. */
+.composer-mirror { display: flex; align-items: center; gap: 10px; max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 6px auto 16px; padding: 10px 14px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); background: var(--raised); color: var(--muted); }
+.composer-mirror .spacer, .pane-away .spacer { flex: 1; }
+.approval-host.mirrored { opacity: 0.6; }
+.pane-away { display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); }
+.work.pane-window { grid-template-columns: 1fr; }
+.work.pane-window .sidebar { display: none; }
+.pane-window .bottom-panel { flex: 1; height: auto; border-top: none; }
+.pane-window .review-pane { flex: 1; min-height: 0; border-left: none; }

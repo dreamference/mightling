@@ -40,7 +40,7 @@ async function open(prepare?: (home: string) => void, extraEnv: (home: string) =
   const ling = writeStandIn(home, askRoot);
   const app = await launch({
     args: [main],
-    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv(home) },
+    env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_ADMIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", ...(out ? {} : { MIGHTLING_HIDDEN: "1" }), ...extraEnv(home) },
   });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
@@ -391,6 +391,8 @@ test("5 activity: what the agent did across threads, by kind and project, a row 
     await page.getByRole("button", { name: "Work", exact: true }).click();
     await page.keyboard.press("Control+Alt+u");
     const activity = page.getByRole("dialog", { name: "Activity" });
+    // The timeline is Activity's second tab since item 17.
+    await activity.getByRole("button", { name: "What the agent did" }).click();
     const rows = activity.getByRole("listitem");
     await expect(rows.filter({ hasText: "Ran pytest tests/test_fetch.py -q -k retry (exit 1)" })).toHaveCount(1);
     await expect(rows.filter({ hasText: "Edited client.py" })).toHaveCount(1);
@@ -451,7 +453,7 @@ test("6 pets: Mightling's ling above the windows, working with a turn, a quick q
   }
 });
 
-test("7 suggested prompts: off by default; on, a finished turn brings three follow-ups, a click fills the composer", async () => {
+test("7 suggested prompts: off by default; on, a finished turn brings the predicted next message, Tab takes it (DESKTOP_PARITY_CLAUDE §4.6)", async () => {
   const { page, home, shoot, close } = await open();
   try {
     await page.getByRole("button", { name: "Work", exact: true }).click();
@@ -460,23 +462,24 @@ test("7 suggested prompts: off by default; on, a finished turn brings three foll
     await page.keyboard.press("Enter");
     await expect(page.locator(".item.agent").last()).toContainText("Done: the retry counter");
     await page.waitForTimeout(800);
-    await expect(page.getByRole("group", { name: "Suggested follow-ups" })).toHaveCount(0);
+    await expect(page.locator(".composer textarea")).not.toHaveAttribute("placeholder", /Tab to use/);
     expect(received(home).filter((message) => message.method === "thread/start" && (message.params as { ephemeral?: boolean })?.ephemeral)).toHaveLength(0);
 
     await page.keyboard.press("Control+,");
     const settings = page.getByRole("dialog", { name: "Settings" });
     await settings.getByRole("button", { name: "Suggested prompts" }).click();
-    await settings.getByRole("checkbox", { name: "Suggest follow-ups when a turn ends" }).check();
+    await settings.getByRole("checkbox", { name: "Predict my next message when a turn ends" }).check();
     await page.keyboard.press("Escape");
     await page.locator(".composer textarea").fill("Now log every retry.");
     await page.keyboard.press("Enter");
-    const group = page.getByRole("group", { name: "Suggested follow-ups" });
-    await expect(group.getByRole("button", { name: "Log the URL on every retry" })).toBeVisible({ timeout: 10_000 });
-    await expect(group.locator(".suggestion")).toHaveCount(3);
+    // One prediction, the model's first line, in grey in the empty composer; Tab takes it, it is not sent.
+    const composer = page.locator(".composer textarea");
+    await expect(composer).toHaveAttribute("placeholder", "Add a test for the retry limit   (Tab to use)", { timeout: 10_000 });
     await shoot("7-suggested-prompts.png");
-    await group.getByRole("button", { name: "Add a test for the retry limit" }).click();
-    await expect(page.locator(".composer textarea")).toHaveValue("Add a test for the retry limit");
-    await expect(group).toHaveCount(0);
+    await composer.focus();
+    await page.keyboard.press("Tab");
+    await expect(composer).toHaveValue("Add a test for the retry limit");
+    await expect(page.locator(".item.user", { hasText: "Add a test for the retry limit" })).toHaveCount(0);
     const unkept = received(home).filter((message) => message.method === "thread/start" && (message.params as { ephemeral?: boolean; sandbox?: string })?.ephemeral);
     expect(unkept).toHaveLength(1);
     expect((unkept[0].params as { sandbox?: string }).sandbox).toBe("read-only");
@@ -486,7 +489,7 @@ test("7 suggested prompts: off by default; on, a finished turn brings three foll
   }
 });
 
-test("8 import: another agent's configuration found, plugins refused, the ticked items imported through the server", async () => {
+test("8 import: another agent's configuration found, plugins offered unticked, the ticked items imported through the server", async () => {
   const { page, home, shoot, close } = await open();
   try {
     await page.getByRole("button", { name: "Work", exact: true }).click();
@@ -498,7 +501,10 @@ test("8 import: another agent's configuration found, plugins refused, the ticked
     await expect(found.getByRole("checkbox", { name: /Instructions \(AGENTS.md\)/ })).toBeChecked();
     await expect(found.getByRole("checkbox", { name: /Skills/ })).toBeChecked();
     await expect(found.getByRole("checkbox", { name: /Past sessions/ })).not.toBeChecked();
-    await expect(found.getByRole("checkbox", { name: /Plugins/ })).toBeDisabled();
+    // Plugins import at /airgapped off (AIRGAPPED §14.12), unticked: they come over the network.
+    await expect(found.getByRole("checkbox", { name: /Plugins/ })).toBeEnabled();
+    await expect(found.getByRole("checkbox", { name: /Plugins/ })).not.toBeChecked();
+    await expect(found).toContainText("left out while airgapped is on");
     await expect(dialog.locator(".import-history")).toContainText("1 imported");
     await shoot("8-import.png");
     await dialog.getByRole("button", { name: "Import the ticked items" }).click();
@@ -671,6 +677,239 @@ test("item 14: an MCP server's question shows in its thread, a form answered and
     await expect(link.locator(".elicitation-url")).toHaveText("http://127.0.0.1:9/login");
     await link.getByRole("button", { name: "Decline" }).click();
     await expect.poll(() => received(home).find((m) => m.id === "elicit-2")?.result).toEqual({ action: "decline", content: null, _meta: null });
+  } finally {
+    await close();
+  }
+});
+
+test("item 13: a project with two folders, instructions and a knowledge file; a thread in it, a thread moved in, its chats archived and back, removed and restored", async () => {
+  const { page, home, close } = await open();
+  const { fetcher, website } = projectFolders(home);
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("button", { name: "New project" }).click();
+    const dialog = page.getByRole("dialog", { name: "New project" });
+    await dialog.getByRole("textbox", { name: "Project name" }).fill("Launch");
+    for (const folder of [fetcher, website]) {
+      await dialog.getByRole("textbox", { name: "Folder to add" }).fill(folder);
+      await dialog.getByRole("textbox", { name: "Folder to add" }).press("Enter");
+    }
+    await dialog.getByRole("textbox", { name: "Project instructions" }).fill("Write for nurses, not doctors.");
+    await dialog.getByRole("button", { name: "Create project" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "project/create")?.params).toMatchObject({
+      name: "Launch", roots: [{ path: fetcher }, { path: website }], metadata: { "mightling.instructions": "Write for nurses, not doctors." },
+    });
+    await expect(page.locator(".server-project h2", { hasText: "Launch" })).toBeVisible();
+    await expect(page.locator(".empty", { hasText: "A new thread in the project Launch" })).toBeVisible();
+    // A knowledge file, as Add files… would have copied it.
+    const knowledge = path.join(home, ".mightling", "projects", "proj-1", "knowledge");
+    fs.mkdirSync(knowledge, { recursive: true });
+    fs.writeFileSync(path.join(knowledge, "style.md"), "# House style\n");
+
+    // A thread in the project: the primary folder, the other as a workspace root, the project's context with its first message.
+    await page.locator(".composer textarea").fill("Draft the release notes.");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => received(home).find((m) => m.method === "thread/start" && m.params?.projectId)?.params).toMatchObject({ cwd: fetcher, projectId: "proj-1", runtimeWorkspaceRoots: [website] });
+    const first = () => received(home).find((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("Draft the release notes."));
+    await expect.poll(() => JSON.stringify(first()?.params?.input ?? "")).toContain("Write for nurses, not doctors.");
+    expect(JSON.stringify(first()?.params?.input)).toContain(path.join(knowledge, "style.md"));
+    const started = String(first()?.params?.threadId);
+    await expect(page.locator(".item.user").last()).toHaveText("Draft the release notes.");
+    // The next message is not told again: nothing about the project changed.
+    await page.locator(".item.agent").last().waitFor();
+    await page.locator(".composer textarea").fill("Shorter, please.");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => received(home).some((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("Shorter, please."))).toBe(true);
+    expect(JSON.stringify(received(home).find((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("Shorter, please."))?.params?.input)).not.toContain("project_context");
+
+    // Edit project: the website folder made primary.
+    const header = page.locator(".server-project h2", { hasText: "Launch" });
+    await header.hover();
+    await header.getByRole("button", { name: "Project Launch" }).click();
+    await page.getByRole("menuitem", { name: "Edit project…" }).click();
+    const edit = page.getByRole("dialog", { name: "Edit project" });
+    await expect(edit).toContainText("style.md");
+    await edit.locator("li", { hasText: website }).getByRole("button", { name: "Make primary" }).click();
+    await edit.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "project/update").pop()?.params).toMatchObject({ projectId: "proj-1", roots: [{ path: website }, { path: fetcher }] });
+
+    // An older thread moved in from its row's menu.
+    const row = page.locator(".thread-row", { hasText: "flaky retry" }).first();
+    await row.hover();
+    await row.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Move to project Launch" }).click();
+    await expect.poll(() => received(home).find((m) => m.method === "thread/metadata/update")?.params).toEqual({ threadId: "w1", projectId: "proj-1" });
+    await expect(page.locator(".server-project", { hasText: "Launch" })).toContainText("flaky retry");
+
+    // Archive chats: both threads, and one Ctrl+Z brings both back.
+    await header.hover();
+    await header.getByRole("button", { name: "Project Launch" }).click();
+    page.once("dialog", (asked) => void asked.accept());
+    await page.getByRole("menuitem", { name: "Archive chats" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "thread/archive").map((m) => m.params?.threadId).sort()).toEqual([started, "w1"].sort());
+    await page.locator(".turns, .empty").first().click({ position: { x: 5, y: 5 } }).catch(() => {});
+    await page.keyboard.press("Control+Z");
+    await expect.poll(() => received(home).filter((m) => m.method === "thread/unarchive").map((m) => m.params?.threadId).sort()).toEqual([started, "w1"].sort());
+
+    // Removed from the sidebar, then restored from Settings › Archived threads.
+    await header.hover();
+    await header.getByRole("button", { name: "Project Launch" }).click();
+    await page.getByRole("menuitem", { name: "Remove from the sidebar" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "project/update").pop()?.params?.metadata).toEqual({ "mightling.instructions": "Write for nurses, not doctors.", "mightling.removed": "1" });
+    await expect(page.locator(".server-project", { hasText: "Launch" })).toHaveCount(0);
+    await page.keyboard.press("Control+,");
+    await page.getByRole("button", { name: "Archived threads" }).click();
+    await page.locator("tr", { hasText: "Launch" }).getByRole("button", { name: "Restore" }).click();
+    await expect.poll(() => received(home).filter((m) => m.method === "project/update").pop()?.params?.metadata).toEqual({ "mightling.instructions": "Write for nurses, not doctors." });
+  } finally {
+    await close();
+  }
+});
+
+test("item 13 in Ask: a project with no folder, a question asked in it with its instructions, kept in its scratch folder", async () => {
+  const { page, home, close } = await open();
+  try {
+    await page.getByRole("button", { name: "New project" }).click();
+    const dialog = page.getByRole("dialog", { name: "New project" });
+    await dialog.getByRole("textbox", { name: "Project name" }).fill("Reading group");
+    await dialog.getByRole("textbox", { name: "Project instructions" }).fill("Answer in plain words for a book club.");
+    await dialog.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".server-project h2", { hasText: "Reading group" })).toBeVisible();
+    await expect(page.locator(".starting-project")).toContainText("Reading group");
+    await page.locator(".composer textarea").fill("Who narrates the second half?");
+    await page.keyboard.press("Enter");
+    // The policy layer still puts the question in a scratch folder of its own; the project id goes with it.
+    await expect.poll(() => received(home).find((m) => m.method === "thread/start" && m.params?.projectId)?.params).toMatchObject({ projectId: "proj-1" });
+    const start = received(home).find((m) => m.method === "thread/start" && m.params?.projectId)?.params ?? {};
+    expect(String(start.cwd)).toContain(path.join(".mightling", "ask"));
+    await expect.poll(() => JSON.stringify(received(home).find((m) => m.method === "turn/start" && JSON.stringify(m.params?.input).includes("second half"))?.params?.input ?? "")).toContain("Answer in plain words for a book club.");
+    await expect(page.locator(".server-project", { hasText: "Reading group" })).toContainText("Who narrates the second half?");
+  } finally {
+    await close();
+  }
+});
+
+test("item 13's order: folders and projects keep their place as threads get busy, and a drag moves one before another, kept", async () => {
+  const { page, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    const folders = page.locator(".sidebar section.project:not(.recents):not(.pinned):not(.server-project) > h2");
+    // By when each folder was first used: the website's thread is the older one.
+    await expect(folders).toHaveText([/website/, /fetcher/]);
+    // A message in a fetcher thread does not move fetcher up.
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    await page.getByRole("button", { name: "Decline" }).click();
+    await page.locator(".composer textarea").fill("And the timeout?");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+    await expect(folders).toHaveText([/website/, /fetcher/]);
+    // Dragged: fetcher before website, and still so after the page loads again.
+    await folders.filter({ hasText: "fetcher" }).dragTo(folders.filter({ hasText: "website" }));
+    await expect(folders).toHaveText([/fetcher/, /website/]);
+    await page.reload();
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await expect(folders).toHaveText([/fetcher/, /website/]);
+  } finally {
+    await close();
+  }
+});
+
+test("item 17: Activity opens on what needs you, a waiting thread first, filters, Mark all as read", async () => {
+  const { page, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    // Opening the flaky retry thread makes its server ask for an approval; then another thread is shown.
+    await page.locator(".thread", { hasText: "flaky retry" }).click();
+    await page.locator(".approval").waitFor();
+    const other = page.locator(".thread-row", { hasText: "Compress the hero" }).first();
+    await other.locator(".thread").click();
+    // A thread marked unread by hand.
+    const logRow = page.locator(".thread-row", { hasText: "Log every retry" }).first();
+    await logRow.hover();
+    await logRow.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Mark unread" }).click();
+    await expect(page.locator(".activity-button .count")).toHaveText("2");
+    await page.keyboard.press("Control+Alt+u");
+    const activity = page.getByRole("dialog", { name: "Activity" });
+    const rows = activity.getByRole("list", { name: "What needs you" }).getByRole("listitem");
+    await expect(rows.first()).toContainText("Fix the flaky retry test");
+    await expect(rows.first()).toContainText("Waiting for you");
+    await expect(rows.filter({ hasText: "Log every retry" })).toContainText("Unread");
+    // Ask alone: none of these is a question.
+    await activity.getByRole("button", { name: "Ask", exact: true }).click();
+    await expect(rows).toHaveCount(0);
+    await activity.getByRole("button", { name: "Ask", exact: true }).click();
+    await activity.getByRole("button", { name: "Mark all as read" }).click();
+    await expect(rows.filter({ hasText: "Log every retry" })).toHaveCount(0);
+    await expect(rows.filter({ hasText: "Fix the flaky retry test" })).toHaveCount(1);
+    await rows.filter({ hasText: "Fix the flaky retry test" }).click();
+    await expect(activity).toHaveCount(0);
+    await expect(page.locator(".bar .title")).toHaveText("Fix the flaky retry test");
+  } finally {
+    await close();
+  }
+});
+
+test("decision 5: a new thread may read its terminal tab and the preview's console when the agent asks, a secret masked", async () => {
+  const { page, home, close } = await open();
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.getByRole("textbox", { name: "Project folder" }).fill(projectFolders(home).fetcher);
+    await page.locator(".composer textarea").fill("Start the dev server.");
+    await page.keyboard.press("Enter");
+    // The policy wrote the two tools' own definitions; the page only named them.
+    await expect.poll(() => (received(home).find((m) => m.method === "thread/start" && Array.isArray(m.params?.dynamicTools))?.params?.dynamicTools as { name: string }[] | undefined)?.map((tool) => tool.name))
+      .toEqual(["mightling_terminal_output", "mightling_preview_console"]);
+    expect(received(home).find((m) => m.method === "thread/start" && m.params?.dynamicTools)?.params).not.toHaveProperty("windowTools");
+    await page.locator(".item.agent").last().waitFor();
+    await page.keyboard.press("Control+`");
+    const panel = page.getByRole("region", { name: "Bottom panel" });
+    await expect(panel.locator(".xterm-rows")).toContainText("stand-in shell in");
+    await page.keyboard.type("echo ready on port 5173 token=abc123secret");
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".xterm-rows")).toContainText("ready on port 5173");
+    await page.locator(".composer textarea").fill("Check it with the terminal.");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => JSON.stringify(received(home).find((m) => m.id === "tool-1")?.result ?? "")).toContain("ready on port 5173");
+    const answer = JSON.stringify(received(home).find((m) => m.id === "tool-1")?.result);
+    expect(answer).toContain("token=[masked]");
+    expect(answer).not.toContain("abc123secret");
+    expect(received(home).find((m) => m.id === "tool-1")?.result).toMatchObject({ success: true });
+    await expect.poll(() => JSON.stringify(received(home).find((m) => m.id === "tool-2")?.result ?? "")).toContain("No preview tab is open");
+  } finally {
+    await close();
+  }
+});
+
+
+test("decision 6: a thread exported to Markdown, redacted, read before saving, written where the user chose", async () => {
+  const { app, page, home, close } = await open();
+  const file = path.join(home, "export.md");
+  try {
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    const row = page.locator(".thread-row", { hasText: "flaky retry" }).first();
+    await row.hover();
+    await row.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Export…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Export the thread" });
+    const preview = dialog.getByLabel("What will be saved");
+    await expect(preview).toContainText("# Fix the flaky retry test");
+    await expect(preview).toContainText("The retry test fails one run in ten.");
+    await expect(preview).not.toContainText("pytest tests/test_fetch.py");
+    await dialog.getByRole("checkbox", { name: "Include the commands and their output" }).check();
+    await expect(preview).toContainText("pytest tests/test_fetch.py -q -k retry");
+    expect(await preview.textContent()).not.toContain(home);
+    // The save dialog, answered as a user would.
+    await app.evaluate(({ dialog: electronDialog }, target) => {
+      electronDialog.showSaveDialog = (async () => ({ canceled: false, filePath: target })) as typeof electronDialog.showSaveDialog;
+    }, file);
+    await dialog.getByRole("button", { name: "Save…" }).click();
+    await expect(dialog.getByRole("status")).toContainText(file);
+    const saved = fs.readFileSync(file, "utf8");
+    expect(saved).toContain("# Fix the flaky retry test");
+    expect(saved).toContain("pytest tests/test_fetch.py -q -k retry");
+    expect(saved).not.toContain(home);
   } finally {
     await close();
   }

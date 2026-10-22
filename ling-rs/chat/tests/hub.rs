@@ -75,6 +75,28 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                 AgentCommand::Respond { id, result } => agent_log.responses.lock().unwrap().push((id, result)),
                 // `ling web`'s upload: a name with "text" in it has text on it; one with "vision"
                 // goes to a model that takes images; "lost" never arrives.
+                // `ling web`'s Night Shift routes: one repository, a queue of one, one report after "".
+                AgentCommand::Web { path, body, reply } => {
+                    agent_log.requests.lock().unwrap().push(("web".to_string(), json!({ "path": path, "body": body })));
+                    let answer = if path == "/api/night/repos" {
+                        json!({ "repos": [{ "path": "/w/app", "name": "app" }] })
+                    } else if path == "/api/night/add" {
+                        json!({ "queued": true, "lines": ["Queued 20261021-1300-abc on branch night/20261021-1300-abc, from 0123456789.", "Runs tonight 01:00-07:00."] })
+                    } else if path == "/api/night/status" {
+                        json!({ "tasks": [{ "id": "20261021-1300-abc", "status": "queued", "repo": "app", "task": "Fix the parser" }] })
+                    } else if path.starts_with("/api/night/reports") {
+                        if path.ends_with("after=") {
+                            json!({ "reports": [], "latest": "2026-10-20.md" })
+                        } else if path.ends_with("after=2026-10-21.md") {
+                            json!({ "reports": [], "latest": "2026-10-21.md" })
+                        } else {
+                            json!({ "reports": [{ "name": "2026-10-21.md", "text": "## app\n- 20261021-1300-abc: done" }], "latest": "2026-10-21.md" })
+                        }
+                    } else {
+                        json!({})
+                    };
+                    let _ = reply.send(Ok(answer));
+                }
                 // The agent's files: a thread "th-files" made report.md (and a huge one); bytes on request.
                 AgentCommand::MadeFiles { thread, since_ms: _, reply } => {
                     agent_log.requests.lock().unwrap().push(("madeFiles".to_string(), json!({ "thread": thread })));
@@ -802,5 +824,83 @@ async fn no_file_is_offered_at_air_gap_on() {
     while let Ok(out) = rig.matrix.try_recv() {
         assert!(!matches!(out, Outbound::Approval { .. }), "{out:?}");
     }
+}
+
+/// Night Shift from the phone (MOONSHOT §3.5): `/night add` confirms the repository first, the
+/// task carries the thread's last exchange, and nothing is queued before the press.
+#[tokio::test]
+async fn night_add_confirms_first_and_carries_the_threads_context() {
+    let base = default_script();
+    let script: Script = Arc::new(move |method, params| {
+        if method == "thread/turns/list" {
+            return Ok(json!({ "data": [{ "id": "tu1", "status": "completed", "items": [
+                { "type": "userMessage", "id": "u", "content": [{ "type": "text", "text": "why does the parser drop tabs?" }] },
+                { "type": "agentMessage", "id": "a", "text": "Because split_whitespace eats them." }
+            ] }] }));
+        }
+        base(method, params)
+    });
+    let mut rig = rig("night", script, false, |_| {});
+    rig.inbound.send(text(CHAT, "why does the parser drop tabs?")).unwrap();
+    settle().await;
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    settle().await;
+    while rig.telegram.try_recv().is_ok() {}
+    rig.inbound.send(text(CHAT, "/night add fix it so tabs survive")).unwrap();
+    let (id, asked, options) = loop {
+        if let Outbound::Approval { id, text, options, .. } = next_settled(&mut rig.telegram).await {
+            break (id, text, options);
+        }
+    };
+    assert!(asked.starts_with("Queue this for Night Shift tonight, in app?") && asked.contains("fix it so tabs survive") && asked.contains("split_whitespace"), "{asked}");
+    assert_eq!(options, vec!["Queue it".to_string(), "Cancel".to_string()]);
+    let adds = |rig: &Rig| rig.log.params("web").into_iter().filter(|w| w["path"] == "/api/night/add").collect::<Vec<_>>();
+    assert!(adds(&rig).is_empty(), "nothing queued before the press");
+    rig.inbound.send(Inbound::Answer { chat: CHAT.into(), approval: id, choice: 0 }).unwrap();
+    let line = loop {
+        if let Outbound::Notice { text, .. } = next_settled(&mut rig.telegram).await
+            && text.starts_with("Queued ")
+        {
+            break text;
+        }
+    };
+    assert!(line.contains("night/20261021-1300-abc"), "{line}");
+    let added = adds(&rig);
+    assert_eq!(added[0]["body"]["repo"], "/w/app");
+    let task = added[0]["body"]["task"].as_str().unwrap();
+    assert!(task.starts_with("fix it so tabs survive\n\nContext, from the phone conversation") && task.contains("Question: why does the parser drop tabs?") && task.contains("Answer: Because split_whitespace"), "{task}");
+    // /night status reads the queue.
+    rig.inbound.send(text(CHAT, "/night status")).unwrap();
+    let status = loop {
+        if let Outbound::Notice { text, .. } = next_settled(&mut rig.telegram).await
+            && text.starts_with("Night Shift:")
+        {
+            break text;
+        }
+    };
+    assert!(status.contains("• 20261021-1300-abc — queued [app] Fix the parser"), "{status}");
+}
+
+/// The morning report is pushed to Signal and Matrix chats by default, never twice, and the first
+/// look after a fresh start sends nothing old.
+#[tokio::test]
+async fn the_morning_report_is_pushed_once_to_the_messengers_named() {
+    let mut rig = rig("reports", default_script(), false, |config| config.report_interval = Duration::from_millis(150));
+    rig.inbound.send(text("matrix:!r:x", "hello")).unwrap();
+    rig.inbound.send(text(CHAT, "hello")).unwrap();
+    settle().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mut pushed = Vec::new();
+    while let Ok(out) = rig.matrix.try_recv() {
+        if let Outbound::Message { markdown, .. } = out {
+            pushed.push(markdown);
+        }
+    }
+    assert_eq!(pushed.len(), 1, "once: {pushed:?}");
+    assert!(pushed[0].starts_with("**Night Shift's report** (2026-10-21)") && pushed[0].contains("done"));
+    while let Ok(out) = rig.telegram.try_recv() {
+        assert!(!matches!(&out, Outbound::Message { markdown, .. } if markdown.contains("Night Shift's report")), "Telegram only when named");
+    }
+    assert_eq!(std::fs::read_to_string(rig.dir.join("night-report-seen")).unwrap(), "2026-10-21.md");
 }
 

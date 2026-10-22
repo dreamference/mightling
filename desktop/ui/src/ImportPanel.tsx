@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { TYPE_LABELS, itemKey, refusal, resultLines, scopeOf, startsTicked } from "./imports";
+import { TYPE_LABELS, caveat, itemKey, resultLines, scopeOf, startsTicked } from "./imports";
 import type { ExternalAgentConfigImportHistory } from "./protocol/v2/ExternalAgentConfigImportHistory";
 import type { ExternalAgentConfigImportTypeResult } from "./protocol/v2/ExternalAgentConfigImportTypeResult";
 import type { ExternalAgentConfigMigrationItem } from "./protocol/v2/ExternalAgentConfigMigrationItem";
@@ -49,7 +49,7 @@ export function ImportPanel(props: { client: RpcClient; listen: Listen; cwd: str
   }), [listen, running, onImported, detect]);
 
   const start = async () => {
-    const chosen = (items ?? []).filter((item) => ticked.has(itemKey(item)) && !refusal(item));
+    const chosen = (items ?? []).filter((item) => ticked.has(itemKey(item)));
     if (!chosen.length) return;
     setResults(null);
     try {
@@ -62,16 +62,16 @@ export function ImportPanel(props: { client: RpcClient; listen: Listen; cwd: str
 
   return (
     <div className="import-panel">
-      <p className="dialog-note">Another coding agent's instructions, skills, MCP servers, hooks, commands and past sessions found on this machine, imported into Mightling's own files. Nothing is sent anywhere; plugins are left to the Plugins tab.</p>
+      <p className="dialog-note">Another coding agent's instructions, skills, MCP servers, hooks, commands and past sessions found on this machine, imported into Mightling's own files. Nothing is sent anywhere, except plugins, which come from their marketplaces.</p>
       {items === null ? <p className="empty small">Looking…</p> : items.length === 0 ? <p className="empty small">Nothing to import was found{cwd ? " in your home folder or this project" : " in your home folder"}.</p> : (
         <ul className="import-items" aria-label="Found">
           {items.map((item) => {
             const key = itemKey(item);
-            const refused = refusal(item);
+            const note = caveat(item);
             return (
               <li key={key}>
-                <label title={refused ?? undefined}>
-                  <input type="checkbox" disabled={Boolean(refused) || running !== null} checked={ticked.has(key)} onChange={(event) => setTicked((set) => {
+                <label title={note ?? undefined}>
+                  <input type="checkbox" disabled={running !== null} checked={ticked.has(key)} onChange={(event) => setTicked((set) => {
                     const next = new Set(set);
                     if (event.target.checked) next.add(key);
                     else next.delete(key);
@@ -79,7 +79,7 @@ export function ImportPanel(props: { client: RpcClient; listen: Listen; cwd: str
                   })} />
                   <strong>{TYPE_LABELS[item.itemType] ?? item.itemType}</strong> <span className="planned-note">{scopeOf(item)}</span>
                 </label>
-                <div className="import-description">{refused ?? item.description}</div>
+                <div className="import-description">{note ? `${item.description} ${note}` : item.description}</div>
               </li>
             );
           })}
