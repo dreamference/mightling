@@ -42,6 +42,14 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 # and the runner's own check (which stops starting instances below it) use the same number.
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
+# The disk guard (owner, 2026-10-21: night 12 failed on 10-20 when other work's build trees took the disk under it):
+# a round that stops for disk (`swe-bench run` stops below the reserve; its report says instances not run) pauses
+# instead of failing the night: the night waits until RESERVE_GB + DISK_RESUME_GB is free, checking every
+# DISK_POLL_S, then runs the same round again, which resumes it (its finished instances kept). After
+# DISK_PAUSE_MAX_S of waiting in all, or a round that stops with the disk fine, the night fails as before.
+DISK_RESUME_GB=${DISK_RESUME_GB:-20}
+DISK_POLL_S=${DISK_POLL_S:-300}
+DISK_PAUSE_MAX_S=${DISK_PAUSE_MAX_S:-28800}
 REFINE=${REFINE:-0}
 # The per-task time limit (`[swe_bench] task_timeout`, e.g. 60m); the runner's default (45m) when unset.
 TASK_TIMEOUT=${TASK_TIMEOUT:-}
@@ -83,6 +91,13 @@ ASK_EVALS_LIMIT=${ASK_EVALS_LIMIT:-90m}
 ASK_EVALS_PORT=${ASK_EVALS_PORT:-18000}
 # The installed binary by its real path, not PATH's link, so a rebuild changes nothing mid-slot.
 ASK_EVALS_LING=${ASK_EVALS_LING:-$HOME/.local/share/dreamference/mightling/bin/ling}
+# The engine A/B (the production bar's night, engine MILESTONES §14): an arm part `on-sglang` or `on-engine` runs
+# the arm against that model server on the engine's development machine instead of this machine's, served there
+# by scripts/engine_ab_remote.sh over ssh, one at a time; production there (m0-prod8000) comes back at the end,
+# on a failure and on a stop. REMOTE is its ssh name, REMOTE_HOST the name the run reaches it by (resolved at
+# use time, never stored as an address).
+REMOTE=${REMOTE:-second-puffin}
+REMOTE_HOST=${REMOTE_HOST:-second-puffin.local}
 
 log() { echo "$(date -Is) $*"; }
 # An arm is `default`, a task-rules list (`tests-v2`, `tests-v2,issue-v1`), `restart-N` (the restart
@@ -108,12 +123,49 @@ arm_flags() {
             exec-tool*|exec_tool*) echo "❌ Arm $1: write the Code Mode arm as exec-tool-function or exec-tool-freeform." >&2; return 2 ;;
             drop-outputs) flags="$flags --drop-old-outputs" ;;
             drop-*|drop_*) echo "❌ Arm $1: write the drop-first compaction arm as drop-outputs." >&2; return 2 ;;
+            on-sglang|on-engine) ;;  # the model server, not an option of the run (arm_server)
+            on-*) echo "❌ Arm $1: write the model server as on-sglang or on-engine." >&2; return 2 ;;
             *) flags="$flags --task-rules $part" ;;
         esac
     done
     echo "${flags# }"
 }
 arm_name() { echo "$1" | tr ,+ --; }
+# The arm's model server on REMOTE (`sglang` or `engine`), or nothing: this machine's server.
+arm_server() { echo "$1" | tr + '\n' | sed -n 's/^on-//p' | head -1; }
+uses_remote() { case "$ARMS" in *on-sglang*|*on-engine*) return 0 ;; esac; return 1; }
+# Serves the arm's model server on REMOTE (stopping production and the other arm there) and points the run at it.
+remote_serve() {
+    local server=$1 port out
+    case "$server" in sglang) port=30000 ;; engine) port=8300 ;; *) return 2 ;; esac
+    # The helper first waits for REMOTE's GPU lock (up to 14 h, while day-time engine work holds it), then up to
+    # about 45 min for the arm: the ssh session outlasts both.
+    out=$(timeout "${REMOTE_SERVE_TIMEOUT:-15h}" ssh -o BatchMode=yes "$REMOTE" bash -s -- serve "$server" < "$WT/scripts/engine_ab_remote.sh" 2>&1)
+    local rc=$?
+    echo "$out" | tail -3 | sed 's/^/   /'
+    [ "$rc" -eq 0 ] && echo "$out" | grep -q '^ready ' || return 1
+    export DREAMFERENCE_VLLM_HOST="http://$REMOTE_HOST:$port"
+    log "$server on $REMOTE serving at $DREAMFERENCE_VLLM_HOST ($(echo "$out" | sed -n 's/^ready //p'))"
+}
+# Production back on REMOTE, both arms stopped.
+remote_restore() {
+    timeout 30m ssh -o BatchMode=yes "$REMOTE" bash -s -- restore < "$WT/scripts/engine_ab_remote.sh" 2>&1 | tail -2 | sed 's/^/   /'
+    unset DREAMFERENCE_VLLM_HOST
+}
+free_gb() { df --output=avail -BG "${DISK_PATH:-$HOME/.cache}" | tail -1 | tr -dc '0-9'; }
+# Waits for the disk after a round stopped short; returns non-zero when the disk was not short or never came back.
+disk_pause() {
+    local round=$1 free
+    free=$(free_gb)
+    [ "$free" -lt $(( RESERVE_GB + DISK_RESUME_GB )) ] || return 1
+    log "⏸️  $round paused: ${free}G free, the reserve is ${RESERVE_GB}G (other work took the disk); resuming at $(( RESERVE_GB + DISK_RESUME_GB ))G"
+    while [ "$(free_gb)" -lt $(( RESERVE_GB + DISK_RESUME_GB )) ]; do
+        [ "$DISK_PAUSED" -lt "$DISK_PAUSE_MAX_S" ] || { log "❌ the disk stayed short for $(( DISK_PAUSED / 60 )) min"; return 1; }
+        sleep "$DISK_POLL_S"
+        DISK_PAUSED=$(( DISK_PAUSED + DISK_POLL_S ))
+    done
+    log "▶️  $round resumed: $(free_gb)G free"
+}
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
 
 # The smoke check: one real task per arm (SMOKE_INSTANCE), with the night's settings and the arm's
@@ -136,6 +188,11 @@ smoke() {
         extra=$(arm_flags "$arm") || return 2
         [ "$REFINE" = 1 ] && extra="$extra --refine"
         run="$PREFIX-smoke-$name-$stamp"
+        server=$(arm_server "$arm")
+        if [ -n "$server" ] && ! remote_serve "$server"; then
+            echo "❌ Night $NIGHT not started: arm $arm's model server ($server on $REMOTE) did not come up."
+            return 1
+        fi
         echo "🔥 Smoke check of arm $arm: $SMOKE_INSTANCE as run $run (limit $SMOKE_TIMEOUT)..."
         ( cd "$WT" && export PYTHONPATH="$WT" DREAMFERENCE_CONFIG_PATH="$SMOKE_DIR/dreamference.toml" &&
           timeout -s INT -k 2m 25m "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" \
@@ -278,8 +335,12 @@ start() {
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
     fi
-    # Every arm runs one real task first; nothing below happens unless each one ran.
-    smoke || exit 1
+    # Every arm runs one real task first; nothing below happens unless each one ran. Production on REMOTE comes
+    # back after the smoke whatever it found; the night serves each arm again.
+    smoke
+    rc=$?
+    uses_remote && remote_restore
+    [ "$rc" -eq 0 ] || exit 1
     if [ "$BEST_OF" -gt 1 ]; then judge_smoke || exit 1; fi
     # A finished or failed night keeps its folder; this one starts clean.
     if [ -e "$D/done" ] || [ -e "$D/failed" ]; then
@@ -373,6 +434,7 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     rm -f "$D/failed"
+    DISK_PAUSED=0
     log "night $NIGHT from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), arms [$ARMS], best of $BEST_OF, refine $REFINE, task limit ${TASK_TIMEOUT:-default}"
     [ "$ASK_EVALS" = 1 ] && ask_evals_slot
     if [ "$BEST_OF" -gt 1 ]; then
@@ -387,24 +449,37 @@ run() {
     for arm in $record $candidate; do
         arm_flags "$arm" > /dev/null || fail "arm $arm" 2
     done
+    # The engine A/B: production on REMOTE comes back however the night ends (a stopped unit gets TERM, and the
+    # EXIT trap runs on the way out); once both rounds have run it comes back at once, before the regrades.
+    if uses_remote; then
+        trap 'remote_restore' EXIT
+        trap 'exit 143' TERM INT
+    fi
     for arm in $record $candidate; do
         name=$(arm_name "$arm")
         extra=$(arm_flags "$arm")
         [ "$REFINE" = 1 ] && extra="$extra --refine"
-        log "round $PREFIX-$name"
-        # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
-        admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
-        rc=$?
-        log "$PREFIX-$name finished ($rc)"
-        df -h / | tail -1
-        [ "$rc" -eq 0 ] || fail "round $PREFIX-$name" "$rc"
-        # A round that ran nothing is a failure whatever its status: the report says what was left.
-        if admin swe-bench report "$PREFIX-$name" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet'; then
-            admin swe-bench report "$PREFIX-$name" | grep '^INCOMPLETE'
-            fail "round $PREFIX-$name (instances not run)" 1
+        server=$(arm_server "$arm")
+        if [ -n "$server" ]; then
+            remote_serve "$server" || fail "serving $server on $REMOTE for $PREFIX-$name" 1
         fi
+        log "round $PREFIX-$name"
+        while :; do
+            # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
+            admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
+                --prompt default $extra --eval --remove-images --label "night $NIGHT, $name arm"
+            rc=$?
+            log "$PREFIX-$name finished ($rc)"
+            df -h / | tail -1
+            [ "$rc" -eq 0 ] || fail "round $PREFIX-$name" "$rc"
+            # A round that ran nothing is a failure whatever its status, unless it stopped for disk: the report says
+            # what was left.
+            admin swe-bench report "$PREFIX-$name" | grep -q '^INCOMPLETE .*[1-9][0-9]* not run yet' || break
+            admin swe-bench report "$PREFIX-$name" | grep '^INCOMPLETE'
+            disk_pause "$PREFIX-$name" || fail "round $PREFIX-$name (instances not run)" 1
+        done
     done
+    uses_remote && remote_restore
     for name in $rname $cname; do
         log "regrade $PREFIX-$name with the test files dropped"
         admin swe-bench eval "$PREFIX-$name" --drop-test-hunks --remove-images

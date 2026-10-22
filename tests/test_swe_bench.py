@@ -5205,3 +5205,34 @@ def test_the_drop_arm_is_told_apart_by_against_and_parsed(bench, monkeypatch):
     assert seen["drop_old_outputs"] is True
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["drop_old_outputs"] is False
+
+
+# -- another machine's model server (the engine A/B, MILESTONES §14's production bar) -------------
+
+def test_another_machines_model_server_is_reached_through_a_relay_and_this_gate_stays_open(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    monkeypatch.setenv("DREAMFERENCE_VLLM_HOST", "http://second-puffin.local:8300")
+    opened = []
+
+    def relays(cls, gateway, lanes):
+        for lane in lanes:
+            lane["model_url"] = f"http://{gateway}:40002"
+            opened.append((gateway, lane["host"]))
+        return []
+    monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(relays))
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert opened == [("172.30.0.1", "http://second-puffin.local:8300")]
+    created = [call for call in bench["docker"].calls if call[0] == "run"]
+    hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
+             for call in created}
+    assert hosts == {"http://172.30.0.1:40002"}                         # the relay, never the other machine's name
+    assert ModelGate.run_record() is None, "this machine's gate is not held for a server it does not serve"
+
+
+def test_only_loopback_and_this_machines_names_are_local(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket, "gethostname", lambda: "gx10-9428")
+    monkeypatch.setattr(socket, "getfqdn", lambda: "gx10-9428")
+    for host in ("http://localhost:8000", "http://127.0.0.1:8000", "http://gx10-9428:8000", "http://gx10-9428.local:8000"):
+        assert not SweBenchRunner.remote_server(host), host
+    assert SweBenchRunner.remote_server("http://second-puffin.local:8300")
