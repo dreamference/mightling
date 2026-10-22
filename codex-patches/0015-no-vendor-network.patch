@@ -1,5 +1,4 @@
 diff --git a/codex-rs/core-plugins/src/manager.rs b/codex-rs/core-plugins/src/manager.rs
-index 3312b40..8c20601 100644
 --- a/codex-rs/core-plugins/src/manager.rs
 +++ b/codex-rs/core-plugins/src/manager.rs
 @@ -732,3 +732,5 @@ impl PluginsManager {
@@ -10,7 +9,6 @@ index 3312b40..8c20601 100644
 +            && config.plugins_enabled
              && !self.remote_global_catalog_active(config)
 diff --git a/codex-rs/core-plugins/src/remote_legacy.rs b/codex-rs/core-plugins/src/remote_legacy.rs
-index 65f1c04..4426d9f 100644
 --- a/codex-rs/core-plugins/src/remote_legacy.rs
 +++ b/codex-rs/core-plugins/src/remote_legacy.rs
 @@ -127,2 +127,6 @@ pub async fn fetch_remote_featured_plugin_ids(
@@ -21,7 +19,6 @@ index 65f1c04..4426d9f 100644
 +    }
      let base_url = config.chatgpt_base_url.trim_end_matches('/');
 diff --git a/codex-rs/otel/src/config.rs b/codex-rs/otel/src/config.rs
-index 69ad3b6..42b1fa4 100644
 --- a/codex-rs/otel/src/config.rs
 +++ b/codex-rs/otel/src/config.rs
 @@ -19,3 +19,4 @@ pub(crate) fn resolve_exporter(exporter: &OtelExporter) -> OtelExporter {
@@ -31,7 +28,6 @@ index 69ad3b6..42b1fa4 100644
 +            if true {
                  return OtelExporter::None;
 diff --git a/codex-rs/tui/src/tooltips.rs b/codex-rs/tui/src/tooltips.rs
-index a8cceac..8fa61fc 100644
 --- a/codex-rs/tui/src/tooltips.rs
 +++ b/codex-rs/tui/src/tooltips.rs
 @@ -76,3 +76,5 @@

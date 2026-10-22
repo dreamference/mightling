@@ -1,5 +1,4 @@
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
-index fce548a..59f8446 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -539,2 +539,3 @@ impl ChatWidget {
@@ -15,7 +14,6 @@ index fce548a..59f8446 100644
 +            | SlashCommand::Night
              | SlashCommand::DebugConfig
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
-index 2652f76..119e1d3 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -44,2 +44,3 @@ pub enum SlashCommand {

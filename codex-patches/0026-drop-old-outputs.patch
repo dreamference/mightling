@@ -1,5 +1,4 @@
 diff --git a/codex-rs/core/src/context_manager/history.rs b/codex-rs/core/src/context_manager/history.rs
-index 6d86025..0c0663d 100644
 --- a/codex-rs/core/src/context_manager/history.rs
 +++ b/codex-rs/core/src/context_manager/history.rs
 @@ -849,2 +849,7 @@ impl ContextManager {
@@ -11,7 +10,6 @@ index 6d86025..0c0663d 100644
 +
      /// When true, the server already accounted for past reasoning tokens and
 diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
-index 4e86837..f66c810 100644
 --- a/codex-rs/core/src/session/turn.rs
 +++ b/codex-rs/core/src/session/turn.rs
 @@ -1461,2 +1461,6 @@ async fn run_auto_compact(

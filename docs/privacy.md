@@ -56,9 +56,13 @@ a URL, a mailbox read.
 
 ## The agent's sandbox
 
-`ling` runs shell commands inside its Linux sandbox, which limits what they can write. Network
-access from that sandbox is **on** by default, because the agent's web search and page fetching are
-shell commands.
+`ling` runs shell commands inside its sandbox (bubblewrap on Linux, Seatbelt on macOS, the Windows
+sandbox), which limits what they can write. Network access from that sandbox is **on** whenever
+`/airgapped` is off, in every permission mode, Read Only included: the agent's web search and page
+fetching are shell commands, and so are `pip install`, `npm install` and `git fetch`. To keep the
+sandbox off the network without air-gapping the session, set
+`sandbox_workspace_write.network_access = false` in `~/.mightling/config.toml` (it then holds for
+Read Only too) or `DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off` for Read Only alone.
 
 ## Air-gapped sessions
 
