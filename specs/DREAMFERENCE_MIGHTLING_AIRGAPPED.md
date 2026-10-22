@@ -140,6 +140,7 @@ Every command the agent runs goes through Codex's sandbox. Under `workspace-writ
 - **`$CODEX_HOME` inside a writable root.** The sandbox lets commands write the working directory, `/tmp` and `$TMPDIR`. `ling` started in the home directory therefore makes `~/.mightling` and `~/.config/dreamference` writable, and a command could rewrite the session's level file or the user-level configuration file (measured, §14.5). The level is therefore **held outside those folders**: a session seen at `on` gets a seal, a file under the user's runtime directory (`$XDG_RUNTIME_DIR/ling-airgapped/<thread-id>`), which the sandbox mounts read-only. While the seal exists the level is `on` whatever the files say. It is written by the `ling` process (when the World State section sees `on`, before the turn's first command, and by `/airgapped on`), removed by `/airgapped off` or `/airgapped duckduckgo` typed by the user, and pruned at the next launch once the process that wrote it has exited. Where there is no runtime directory, the first design applies as a fallback: an exposed session file may tighten the configured level and not loosen it, and `/airgapped` reports the hole as `NOT ENFORCED`.
 - **A command the user approves to run outside the sandbox** has the network. The `on` fragment tells the model not to ask (§3), and the approval prompt is the user's own decision, but nothing stops it.
 - **MCP servers** the user configured run outside the command sandbox, with the network.
+- **Plugins** (allowed at `off` since 2026-10-22): `git` fetches a marketplace or a plugin in `ling`'s own process, and a plugin's MCP servers and hooks run outside the sandbox. A session that starts at `on` loads none and refuses installs (§14.12); a session switched to `on` later keeps those it loaded until restarted, and `/airgapped` says so.
 - **`ling` itself.** Its known channels to the upstream vendor and GitHub are closed at their call sites (patches `0013`, `0015`, `0016`), and a traced session reaches only the model server and the Gmail service. A channel a future Codex release adds would not be stopped by the command sandbox.
 
 ### 5.4 The airlock closes those
@@ -428,6 +429,7 @@ Each later surface follows the same resolver (`ling-airgapped`, the strictest of
 | `ling chat` | the Telegram adapter stops relaying and answers with one line saying why; Matrix keeps working (the whole path stays on the machine) | [MIGHTLING_CHAT §3](./DREAMFERENCE_MIGHTLING_CHAT.md) |
 | `ling signal` | the bridge runs only at `off`, because Signal needs the internet | [MIGHTLING_SIGNAL](./DREAMFERENCE_MIGHTLING_SIGNAL.md) |
 | `/node` | runs, after a line saying it talks to the local network only (§14.8) | [MIGHTLING_NODE §18.9](./DREAMFERENCE_MIGHTLING_NODE.md) |
+| Codex plugins (`/plugins`, `ling plugin`, the app's Plugins tab and Import) | a session started at `on` loads none; installs and marketplace changes that fetch are refused (§14.12, 2026-10-22) | this spec |
 
 ### 14.10 Who sees a search (2026-10-20)
 
@@ -479,3 +481,37 @@ Measured on the development GB10 against the default model, `curl https://pypi.o
 | `curl --unix-socket /var/run/docker.sock` (read-only) | — | exit 7 (masked by `0019`) |
 
 The egress audit (`ling exec`, no network call) passed on the new build.
+
+### 14.12 Plugins: allowed at `off`, refused at `on` (2026-10-22)
+
+**The decision.** The owner reversed the blanket refusal of Codex plugins: marketplaces, plugin installs, and a plugin's skills, MCP servers, hooks and apps are allowed whenever the level is `off`, on every surface (the TUI, `exec`, the desktop app's Work, `ling web`). At `on` they are refused. The upstream vendor's channels stay closed at every level.
+
+**What was blocked before, and why** (the inventory of that day):
+
+| Where | What | Why |
+|---|---|---|
+| `ling-rs/web/policy.json` | `refusedImportItems: ["PLUGINS"]`: an import lost its plugin items | network: the importer can `git clone` a marketplace or plugin and `npm pack` one, untraced by the audit |
+| `ling-rs/web/policy.json` | `marketplace/add|remove|upgrade`, `plugin/read`, `plugin/installed` not in `allowedRequests` (`plugin/list|install|uninstall` were) | not yet added (DESKTOP_PARITY row 30), not a refusal |
+| Launcher config | nothing: `features.plugins` was on (Codex's default), `/plugins` and `ling plugin` worked at every level, `on` included | — |
+| Launcher config | `chatgpt_base_url` at a closed port | vendor channel: the remote catalogue, sharing and featured list go to the vendor's backend |
+| Patch 0015 | the curated catalogue's startup `git ls-remote`/clone of the vendor's repository and the featured-plugins request | vendor channel |
+| Patch 0012 | `/import` hidden | network: its plugin step clones marketplaces |
+| Patch 0030 | "OpenAI Curated" renamed "Curated" | branding |
+| Patch 0013 | plugin install analytics, with all analytics | privacy |
+| `ling web` | the same policy as the app | as above |
+
+So the paper draft's "Mightling Desktop explicitly enforces `refusedImportItems: ["PLUGINS"]` … no external code executes inside the agent core" described only the import path: plugins were installable from configured marketplaces at every level, `on` included.
+
+**As built** (no new patch; `ling-rs/src/plugins.rs`, the policy, the app):
+- `config.toml`: `features.remote_plugin = false` and `features.plugin_sharing = false`, forced on every start (vendor-only features; they reached the closed port anyway, and now the remote sections are not offered).
+- A session started at a configured `on` gets `-c features.plugins=false`: no plugin loads, `/plugins` is hidden; a user's `-c features.plugins=true` or `--enable plugins` is refused at launch.
+- `ling plugin` at a configured `on` runs only `list`, `remove`, `marketplace list|remove` and help; the rest is refused before Codex parses it, with `Plugins not changed: airgapped is on (<source>). …`.
+- `policy.json`: `plugin/read`, `plugin/installed` and `marketplace/add|remove|upgrade` allowed; `refusedImportItems` empty; at `on` (the configured level, asked of `ling airgapped` by the app and resolved by `ling-airgapped` in `ling web`) `airgappedRefusedRequests` (`plugin/install`, `marketplace/add`, `marketplace/upgrade`) are refused, `airgappedRefusedImportItems` (`PLUGINS`) dropped, and every thread opener gets `airgappedThreadConfig` (`features.plugins = false`), so a thread opened at `on` has no plugins even in an app server started at `off`. Fifteen conformance cases, at both levels, run in both enforcers.
+- The app: Skills and tools › Plugins adds a marketplace (`owner/repo`, a git URL or a folder) and says the vendor's catalogue is closed; Import offers plugins unticked.
+- The TUI's Curated tab (the vendor's marketplace, never synced: 0015) reads `Vendor catalogue closed in Mightling` (0030, 33 bytes; the series at 57,556 of 58,000).
+
+**Decided, and why.** Installed plugins are refused at `on`, not only fenced: a session started at `on` loads none, so their MCP servers and hooks never start. A session switched to `on` mid-way is the exception: Codex loaded its plugins already, and its app server gates neither `plugin/install` nor `marketplace/add` on the feature, so refusing those mid-session needs a hook in the plugin manager, which the 58,000-byte cap has no room for. The commands a plugin's skills run are sandboxed and get the empty namespace like any other; its MCP servers keep the network they started with, as servers the user configured do. `/airgapped` at `on` prints `Plugins: off in a session started at on; a session switched to on keeps the plugins it loaded (their MCP servers keep the network) until it is restarted.` `/import` stays hidden for the same reason.
+
+**Run live on 2026-10-22** with a build of this branch (scratch `HOME` and `CODEX_HOME`, `DREAMFERENCE_VLLM_HOST=http://localhost:8000`, the served Qwen3.8-27B): `ling plugin marketplace add andrehuang/research-companion` cloned a third-party marketplace from GitHub, and `ling plugin add research-companion@andrehuang-research-companion` installed its plugin (skills only). A `ling exec -s workspace-write` turn listed `research-companion:research-companion` among its skills, read its `SKILL.md` and answered in the skill's format (a verdict and one question to resolve next). With `DREAMFERENCE_MIGHTLING_AIRGAPPED=on`: `ling plugin add …` and `ling plugin marketplace upgrade` ended with exit 1 and the `Plugins not changed: airgapped is on (DREAMFERENCE_MIGHTLING_AIRGAPPED).` message, `ling plugin list` still listed the marketplace, the same `exec` question listed the built-in skills only and said research-companion was not among them, and `ling -c features.plugins=true exec …` was refused at launch.
+
+**The egress audits** run with no plugin installed and no marketplace added, so they still prove the vendor's channels closed; a user's plugin's traffic is the user's choice (docs/dev/egress-audit.md).

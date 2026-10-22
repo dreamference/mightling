@@ -7,9 +7,14 @@
 //! send, or an answer to a server request that is not waiting is refused; a thread opener loses the
 //! fields that would replace Mightling's prompt, provider or policy, and a named prompt becomes
 //! `baseInstructions` here, never from the UI's own text. An Ask thread (§3.1) also gets a fresh
-//! scratch folder as its `cwd` and a sandbox rooted there, whatever folder the UI asked for. An
-//! import of another agent's setup loses its plugin items: their sources can be cloned from GitHub
-//! or fetched from npm, a path the egress audit does not trace (MIGHTLING_LING_CLAUDE §16.4).
+//! scratch folder as its `cwd` and a sandbox rooted there, whatever folder the UI asked for.
+//!
+//! Plugins are allowed while `/airgapped` is off (2026-10-22). At a configured `on` the policy
+//! refuses what fetches one (`airgappedRefusedRequests`: installing, adding or upgrading a
+//! marketplace, all `git` in the app server's own process, outside the sandbox), an import loses
+//! its plugin items (`airgappedRefusedImportItems`), and every thread opener gets
+//! `airgappedThreadConfig`, which starts the thread without plugins: their MCP servers would run
+//! outside the sandbox (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §14.12).
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -33,6 +38,9 @@ pub trait PromptSource: Send + Sync {
     /// The scratch folder of an existing Ask thread, or None for any other thread: a resumed or
     /// forked Ask thread stays in its folder, whatever the UI asks for.
     fn scratch_folder_of(&self, thread_id: &str) -> Option<String>;
+    /// Whether the configured air-gap level is `on` (`ling airgapped`, no thread): installing is
+    /// not one thread's act, and a thread being opened has no level of its own yet.
+    fn airgapped_on(&self) -> bool;
 }
 
 /// The rules of `policy.json`.
@@ -50,6 +58,12 @@ pub struct Policy {
     pub scratch_sandbox: String,
     pub import_request: String,
     pub refused_import_items: BTreeSet<String>,
+    /// Requests refused at `on`: they fetch a plugin or a marketplace outside the sandbox.
+    pub airgapped_refused_requests: BTreeSet<String>,
+    /// Import items dropped at `on`, beside `refused_import_items`.
+    pub airgapped_refused_import_items: BTreeSet<String>,
+    /// The `config` overrides a thread opener gets at `on`: no plugins.
+    pub airgapped_thread_config: Map<String, Value>,
     /// The field of `thread/start` in which the UI names the window's own tools it answers
     /// (`windowTools`: the terminal's output, the preview's console; DESKTOP_PARITY §4.5, the
     /// owner's decision 5). The policy, not the UI, writes their definitions as `dynamicTools`.
@@ -92,6 +106,13 @@ impl Policy {
             scratch_sandbox: string(&value, "scratchSandbox")?,
             import_request: string(&value, "importRequest")?,
             refused_import_items: strings(&value, "refusedImportItems")?.into_iter().collect(),
+            airgapped_refused_requests: strings(&value, "airgappedRefusedRequests")?.into_iter().collect(),
+            airgapped_refused_import_items: strings(&value, "airgappedRefusedImportItems")?.into_iter().collect(),
+            airgapped_thread_config: value
+                .get("airgappedThreadConfig")
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or_else(|| "policy.json: `airgappedThreadConfig` must be an object".to_string())?,
             window_tools_field: string(&value, "windowToolsField")?,
             window_tools: value
                 .get("windowTools")
@@ -108,6 +129,9 @@ impl Policy {
         }
         if !policy.scratch_prompts.is_subset(&policy.named_prompts) {
             return Err("policy.json: every scratch prompt must also be a named prompt".to_string());
+        }
+        if !policy.airgapped_refused_requests.is_subset(&policy.allowed_requests) {
+            return Err("policy.json: every request refused at airgapped on must be allowed at off".to_string());
         }
         if !policy.prompt_openers.is_subset(&policy.thread_openers) {
             return Err("policy.json: every prompt opener must also be a thread opener".to_string());
@@ -142,6 +166,11 @@ impl Policy {
                 if !self.allowed_requests.contains(&method) {
                     return Err(format!("the Mightling UI does not send {method}"));
                 }
+                if self.airgapped_refused_requests.contains(&method) && prompts.airgapped_on() {
+                    return Err(format!(
+                        "airgapped is on: {method} fetches a plugin or a marketplace with git outside the sandbox. Run ling airgapped default off to install one."
+                    ));
+                }
                 let opener = self.thread_openers.contains(&method);
                 let names_prompt =
                     object.get("params").and_then(Value::as_object).is_some_and(|params| params.contains_key(&self.prompt_field));
@@ -163,7 +192,7 @@ impl Policy {
                 }
                 if method == self.import_request {
                     let params = object.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
-                    object.insert("params".to_string(), Value::Object(self.vet_import_params(params)?));
+                    object.insert("params".to_string(), Value::Object(self.vet_import_params(params, prompts.airgapped_on())?));
                 }
                 Ok(Value::Object(object))
             }
@@ -213,6 +242,10 @@ impl Policy {
                 params.insert("dynamicTools".to_string(), Value::Array(tools));
             }
         }
+        // At `on` the thread starts without plugins, whatever the UI asked (`config` is dropped).
+        if prompts.airgapped_on() && !self.airgapped_thread_config.is_empty() {
+            params.insert("config".to_string(), Value::Object(self.airgapped_thread_config.clone()));
+        }
         let Some(name) = params.remove(&self.prompt_field) else { return Ok(params) };
         let Value::String(name) = name else {
             return Err(format!("`{}` must name a prompt", self.prompt_field));
@@ -234,10 +267,11 @@ impl Policy {
         Ok(params)
     }
 
-    /// Removes the items an import may not carry (`refusedImportItems`: plugins, whose sources can
-    /// be fetched from the network); the others are imported as asked. An item that does not name
-    /// its type, or an import left with nothing to do, is refused rather than guessed at.
-    fn vet_import_params(&self, mut params: Map<String, Value>) -> Result<Map<String, Value>, String> {
+    /// Removes the items an import may not carry (`refusedImportItems`, and at `on`
+    /// `airgappedRefusedImportItems`: plugins, whose sources are fetched from the network); the
+    /// others are imported as asked. An item that does not name its type, or an import left with
+    /// nothing to do, is refused rather than guessed at.
+    fn vet_import_params(&self, mut params: Map<String, Value>, airgapped_on: bool) -> Result<Map<String, Value>, String> {
         let Some(Value::Array(items)) = params.get("migrationItems") else {
             return Err("an import must list its migrationItems".to_string());
         };
@@ -246,12 +280,18 @@ impl Policy {
             let Some(kind) = item.get("itemType").and_then(Value::as_str) else {
                 return Err("every migration item must name its itemType".to_string());
             };
-            if !self.refused_import_items.contains(kind) {
+            let refused = self.refused_import_items.contains(kind)
+                || (airgapped_on && self.airgapped_refused_import_items.contains(kind));
+            if !refused {
                 kept.push(item.clone());
             }
         }
         if kept.is_empty() {
-            return Err("nothing left to import: plugins are not imported here, since their sources can be fetched from the network".to_string());
+            return Err(if airgapped_on {
+                "nothing left to import: plugins are not imported while airgapped is on, since their sources are fetched from the network".to_string()
+            } else {
+                "nothing left to import".to_string()
+            });
         }
         params.insert("migrationItems".to_string(), Value::Array(kept));
         Ok(params)
@@ -336,6 +376,7 @@ mod tests {
     /// The stubs every implementation's conformance runner uses (vectors/outgoing.json).
     struct Stub {
         made: Mutex<u32>,
+        airgapped: std::sync::atomic::AtomicBool,
     }
 
     impl PromptSource for Stub {
@@ -350,6 +391,9 @@ mod tests {
         fn scratch_folder_of(&self, thread_id: &str) -> Option<String> {
             thread_id.starts_with("ask-").then(|| format!("ASK/{thread_id}"))
         }
+        fn airgapped_on(&self) -> bool {
+            self.airgapped.load(std::sync::atomic::Ordering::Relaxed)
+        }
     }
 
     #[test]
@@ -357,7 +401,12 @@ mod tests {
         let policy = Policy::embedded();
         assert!(policy.allowed_requests.contains("thread/start"));
         assert!(policy.named_prompts.contains("ask"));
-        assert!(policy.refused_import_items.contains("PLUGINS"), "an import never fetches plugins");
+        assert!(!policy.refused_import_items.contains("PLUGINS"), "plugins import while airgapped is off");
+        assert!(policy.airgapped_refused_import_items.contains("PLUGINS"), "an import fetches no plugin at on");
+        for fetches in ["plugin/install", "marketplace/add", "marketplace/upgrade"] {
+            assert!(policy.allowed_requests.contains(fetches) && policy.airgapped_refused_requests.contains(fetches), "{fetches}");
+        }
+        assert_eq!(policy.airgapped_thread_config.get("features.plugins"), Some(&Value::Bool(false)));
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {
             assert!(!policy.allowed_requests.contains(refused), "{refused}");
         }
@@ -367,7 +416,7 @@ mod tests {
     fn every_conformance_vector_holds() {
         let vectors: Value = serde_json::from_str(include_str!("../vectors/outgoing.json")).unwrap();
         let policy = Policy::embedded();
-        let stub = Stub { made: Mutex::new(0) };
+        let stub = Stub { made: Mutex::new(0), airgapped: Default::default() };
         let cases = vectors["cases"].as_array().unwrap();
         assert!(cases.len() >= 25);
         for case in cases {
@@ -377,6 +426,9 @@ mod tests {
                 .and_then(Value::as_array)
                 .map(|ids| ids.iter().map(|id| id.as_str().unwrap().to_string()).collect())
                 .unwrap_or_default();
+            let level = case.get("airgapped").and_then(Value::as_str).unwrap_or("off");
+            assert!(matches!(level, "off" | "on"), "{name}: airgapped is off or on");
+            stub.airgapped.store(level == "on", std::sync::atomic::Ordering::Relaxed);
             let result = policy.vet_outgoing(&case["message"], &mut pending, &stub);
             if case["accept"].as_bool().unwrap() {
                 let out = result.unwrap_or_else(|err| panic!("{name}: refused: {err}"));

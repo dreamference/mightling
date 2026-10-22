@@ -20,12 +20,13 @@ type Step = {
   owner?: string; is?: string | null; fallback?: string | null;
 };
 
-function stubs(): PromptSource {
+function stubs(airgappedOn: () => boolean = () => false): PromptSource {
   let made = 0;
   return {
     composed: (name) => `PROMPT:${name}`,
     newScratchFolder: () => `SCRATCH/${++made}`,
     scratchFolderOf: (thread) => (thread.startsWith("ask-") ? `ASK/${thread}` : null),
+    airgappedOn,
   };
 }
 
@@ -84,14 +85,16 @@ describe("the window routing cases", () => {
 describe("ling web's conformance cases from any window", () => {
   it("hold for a second window, a pop-out and a pane as for the first, ids tagged", () => {
     const vectors = JSON.parse(fs.readFileSync(path.join(WEB, "vectors", "outgoing.json"), "utf8")) as {
-      cases: { name: string; message: unknown; accept: boolean; out?: Record<string, unknown>; pending?: string[]; pendingAfter?: string[] }[];
+      cases: { name: string; message: unknown; accept: boolean; out?: Record<string, unknown>; pending?: string[]; pendingAfter?: string[]; airgapped?: "off" | "on" }[];
     };
     for (const kind of ["full", "popout", "pane"] as const) {
       const hub = new WindowHub();
       hub.open("1", "full");
       hub.open("2", kind);
-      const prompts = stubs();
+      let on = false;
+      const prompts = stubs(() => on);
       for (const testCase of vectors.cases) {
+        on = testCase.airgapped === "on";
         const pending = new Set(testCase.pending ?? []);
         const message = testCase.message as Record<string, unknown>;
         // A pane sends no composer method at all (refused before the policy is asked); the rest is the policy's call.

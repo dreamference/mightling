@@ -14,7 +14,7 @@ diff --git a/codex-rs/tui/src/chatwidget/tests/popups_and_settings.rs b/codex-rs
 @@ -1285,3 +1285,3 @@
      let remote_curated_empty_popup =
 -        select_tab_containing(&mut remote_chat, "No OpenAI Curated plugins available");
-+        select_tab_containing(&mut remote_chat, "No Curated plugins available");
++        select_tab_containing(&mut remote_chat, "Vendor catalogue closed in Mightling");
  
 @@ -1297,4 +1297,4 @@
          @r"
@@ -28,7 +28,7 @@ diff --git a/codex-rs/tui/src/chatwidget/tests/popups_and_settings.rs b/codex-rs
 -    OpenAI Curated marketplace.
 -    No OpenAI Curated plugins available  No OpenAI Curated plugins available
 +    Curated marketplace.
-+    No Curated plugins available  No Curated plugins available
++    Vendor catalogue closed in Mightling  Mightling does not fetch the vendor's curated plugins
      "
 @@ -1949,4 +1949,4 @@
      assert!(

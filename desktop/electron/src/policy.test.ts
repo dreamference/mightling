@@ -18,6 +18,7 @@ interface Case {
   out?: unknown;
   pending?: string[];
   pendingAfter?: string[];
+  airgapped?: "off" | "on";
 }
 
 describe("the policy", () => {
@@ -27,7 +28,12 @@ describe("the policy", () => {
     expect([...POLICY.droppedThreadFields]).toEqual(file.droppedThreadFields);
     expect([...POLICY.namedPrompts].sort()).toEqual([...file.namedPrompts].sort());
     expect(POLICY.namedPrompts.has("ask")).toBe(true);
-    expect(POLICY.refusedImportItems.has("PLUGINS"), "an import never fetches plugins").toBe(true);
+    expect(POLICY.refusedImportItems.has("PLUGINS"), "plugins import while airgapped is off").toBe(false);
+    expect(POLICY.airgappedRefusedImportItems.has("PLUGINS"), "an import fetches no plugin at on").toBe(true);
+    for (const fetches of ["plugin/install", "marketplace/add", "marketplace/upgrade"]) {
+      expect(POLICY.allowedRequests.has(fetches) && POLICY.airgappedRefusedRequests.has(fetches), fetches).toBe(true);
+    }
+    expect(POLICY.airgappedThreadConfig["features.plugins"]).toBe(false);
     for (const refused of ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"]) {
       expect(POLICY.allowedRequests.has(refused), refused).toBe(false);
     }
@@ -37,12 +43,16 @@ describe("the policy", () => {
     const vectors = JSON.parse(fs.readFileSync(path.join(WEB, "vectors", "outgoing.json"), "utf8")) as { cases: Case[] };
     expect(vectors.cases.length).toBeGreaterThanOrEqual(25);
     let made = 0;
+    let on = false;
     const stub: PromptSource = {
       composed: (name) => `PROMPT:${name}`,
       newScratchFolder: () => `SCRATCH/${++made}`,
       scratchFolderOf: (thread) => (thread.startsWith("ask-") ? `ASK/${thread}` : null),
+      airgappedOn: () => on,
     };
     for (const testCase of vectors.cases) {
+      expect(["off", "on"], testCase.name).toContain(testCase.airgapped ?? "off");
+      on = testCase.airgapped === "on";
       const pending = new Set(testCase.pending ?? []);
       if (testCase.accept) {
         let out: unknown;
