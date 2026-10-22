@@ -74,6 +74,10 @@ DEFAULT_SAMPLING: Final[str] = "default"
 SAMPLING_ARMS: Final[tuple[str, ...]] = (DEFAULT_SAMPLING, "nonthinking")
 # The smallest cap the gate applies (`model_gate_guard.MIN_BUDGET`).
 MIN_OUTPUT_BUDGET: Final[int] = 64
+# The guard arms (spec §29): the launcher's switches for the test guard and the finish check
+# (ling-rs/src/guard.rs), set to "1" only when the run asks.
+TEST_GUARD_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_TEST_GUARD"
+FINISH_CHECK_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_FINISH_CHECK"
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
 # The turn-end compaction arm (spec §16, night 10): Codex's own key, pinned on every `ling exec`
@@ -312,6 +316,8 @@ class SweBenchRunner:
         output_budget: int | None = None,
         sampling: str | None = None,
         compat: str | None = None,
+        test_guard: bool = False,
+        finish_check: bool = False,
     ) -> dict[str, Any]:
         """Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -387,6 +393,8 @@ class SweBenchRunner:
             "loop_guard": bool(loop_guard),
             "output_budget": int(output_budget or 0),
             "sampling": sampling or DEFAULT_SAMPLING,
+            "test_guard": bool(test_guard),
+            "finish_check": bool(finish_check),
             **({"hooks_gate_sha256": SweBenchHooks.gate_digest()} if hooks else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
@@ -395,6 +403,23 @@ class SweBenchRunner:
             "parallelism": parallel,
             "repository_commit": cls._output(["git", "-C", REPO_ROOT, "rev-parse", "HEAD"]),
         }
+
+    @classmethod
+    def guard_env(cls, manifest: dict[str, Any]) -> dict[str, str]:
+        """Gives the launcher's guard switches for a run's sessions (spec §29).
+
+        Each is set only when the run asks, so a run without the arm measures what a user gets;
+        a manifest from before the arms has neither key and ran without them.
+
+        Args:
+            manifest: The run's manifest.
+
+        Returns:
+            dict[str, str]: `DREAMFERENCE_MIGHTLING_TEST_GUARD` and
+            `DREAMFERENCE_MIGHTLING_FINISH_CHECK`, each `1` when its arm is on.
+        """
+        switches = {TEST_GUARD_ENV: "test_guard", FINISH_CHECK_ENV: "finish_check"}
+        return {env: "1" for env, key in switches.items() if manifest.get(key)}
 
     @classmethod
     def prompt_file(cls, name: str) -> Path | None:
@@ -478,6 +503,8 @@ class SweBenchRunner:
         sampling: str | None = None,
         shard: str | None = None,
         image_chunk: int | None = None,
+        test_guard: bool = False,
+        finish_check: bool = False,
     ) -> int:
         """Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -546,6 +573,15 @@ class SweBenchRunner:
                 as `max_output_tokens` by the model gate; None or 0 is no cap. A new run only.
             sampling: `nonthinking` has the gate fill in the model card's non-thinking sampling
                 (`DREAMFERENCE_MIGHTLING_SAMPLING`); None or `default` leaves the server's. A new run only.
+            test_guard: The launcher's test guard in every session, through
+                `DREAMFERENCE_MIGHTLING_TEST_GUARD`: a change that weakens an existing test is
+                pointed out, and the first stop while it stands is held once (spec §29). Off by
+                default. A new run only, like `code_index`.
+            finish_check: The launcher's finish check in every session, through
+                `DREAMFERENCE_MIGHTLING_FINISH_CHECK`: the first stop after a source change that no
+                test has run on is held once, as are a stop mid-work and a failure called
+                pre-existing with no run on the unchanged code (spec §29). Off by default. A new
+                run only, like `code_index`.
             hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
                 holds the first edit once until the files and functions the issue names have
                 been read, and the first stop once until its example has been run; spec §20).
@@ -756,6 +792,8 @@ class SweBenchRunner:
                         loop_guard=loop_guard,
                         output_budget=output_budget,
                         sampling=sampling,
+                        test_guard=test_guard,
+                        finish_check=finish_check,
                     )
                     manifest.update(cls.shard_record(whole, wanted_shard))
                     store.write_manifest(manifest)
@@ -816,6 +854,7 @@ class SweBenchRunner:
                 # The loop guard's arms: the launcher's variables, only when the run asks. A run made
                 # before the options existed has no keys and ran with none.
                 extra_env.update(cls.loop_guard_env(manifest))
+                extra_env.update(cls.guard_env(manifest))
                 # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
                 # the text a later session of the same instance would start from.
                 custom_prompt = cls.prompt_file(run_prompt)

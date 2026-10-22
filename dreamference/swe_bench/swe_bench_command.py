@@ -84,6 +84,7 @@ class SweBenchCommand:
             "top_k 20, presence_penalty 1.5), filled in by the model gate; default: the server's "
             "own (the checkpoint's thinking-mode values). Needs a gate started by this version",
         )
+        cls.add_launcher_switches(run)
 
     @classmethod
     def add_chunk_arguments(
@@ -420,6 +421,30 @@ class SweBenchCommand:
         clean.add_argument("--images", action="store_true", help="Also remove the instance images")
 
     @classmethod
+    def add_launcher_switches(cls, run: argparse.ArgumentParser) -> None:
+        """Adds the guards, the arms that only switch on a hook of the launcher in every session.
+
+        `--drop-old-outputs`, also a launcher switch, is among `add_output_arms`, which calls this.
+
+        Args:
+            run: The `run` subcommand's parser.
+        """
+        run.add_argument(
+            "--test-guard",
+            action="store_true",
+            help="The launcher's test guard in every session: a change that weakens an "
+            "existing test is pointed out, and the first stop while it stands is "
+            "held once (spec §29)",
+        )
+        run.add_argument(
+            "--finish-check",
+            action="store_true",
+            help="The launcher's finish check in every session: the first stop after a "
+            "change no test has run on, mid-work, or calling failures pre-existing "
+            "unchecked is held once (spec §29)",
+        )
+
+    @classmethod
     def dispatch(cls, args: argparse.Namespace) -> int:
         """Runs the subcommand the arguments name.
 
@@ -472,6 +497,8 @@ class SweBenchCommand:
                 sampling=args.sampling,
                 shard=args.shard,
                 image_chunk=args.image_chunk,
+                test_guard=args.test_guard,
+                finish_check=args.finish_check,
             )
         if command == "eval":
             return cls.evaluate(

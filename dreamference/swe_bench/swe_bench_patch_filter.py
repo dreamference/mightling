@@ -20,6 +20,23 @@ TEST_FILE_NAMES: Final[re.Pattern] = re.compile(r"^(test_.*\.py|.*_test\.py|test
 
 DIFF_HEADER: Final[str] = "diff --git "
 
+# A line that checks something in a test file: an assertion, or a test function's own line, so a
+# deleted test counts. The launcher's test guard reads tests the same way (ling-rs/src/guard.rs,
+# `ASSERTION`).
+ASSERTION: Final[re.Pattern] = re.compile(
+    r"assert|\bexpect\s*\(|pytest\.raises|self\.fail\s*\(|\.should\b"
+    r"|^(async\s+)?def\s+test|^(pub\s+)?fn\s+test_",
+    re.IGNORECASE,
+)
+# A line that switches a test off (`SKIP` there).
+SKIP: Final[re.Pattern] = re.compile(
+    r"@pytest\.mark\.(skip|xfail)|@unittest\.(skip|expectedfailure)|^@skip\b|#\[ignore\]"
+    r"|\b(it|test|describe)\.skip\s*\(|\bxit\s*\(|pytest\.skip\s*\(|self\.skiptest\s*\(",
+    re.IGNORECASE,
+)
+# What a section's header says when the file did not exist before the patch.
+NEW_FILE: Final[str] = "--- /dev/null"
+
 
 class SweBenchPatchFilter:
     """Removes the test files from a unified diff."""
@@ -61,6 +78,60 @@ class SweBenchPatchFilter:
                 kept.append(section)
         text = "".join(kept)
         return (text if text.strip() else ""), dropped
+
+    @classmethod
+    def weakened_tests(cls, patch: str) -> dict[str, list[str]]:
+        """Finds the existing tests a patch weakens, by the rule of the launcher's test guard.
+
+        A file section counts when its file is a test file that existed before the patch: each
+        removed line that checks something (`ASSERTION`) and has no equal added line in the
+        section, indentation aside, and each added skip (`SKIP`) with no equal removed line. A
+        moved or re-indented assertion therefore weakens nothing, and a new test file never does.
+
+        Args:
+            patch: The collected patch.
+
+        Returns:
+            dict[str, list[str]]: Each weakened file's lines, as `- <line>` and `+ <line>`, in
+            the patch's order.
+        """
+        found: dict[str, list[str]] = {}
+        for section in cls.sections(patch):
+            paths = cls.paths(section)
+            if not paths or not cls.is_test_path(paths[-1]):
+                continue
+            header, _, body = section.partition("\n@@")
+            if NEW_FILE in header.splitlines():
+                continue
+            lines = cls.weakened_lines(body.splitlines())
+            if lines:
+                found[paths[-1]] = lines
+        return found
+
+    @classmethod
+    def weakened_lines(cls, body: list[str]) -> list[str]:
+        """Compares one section's removed and added lines.
+
+        Args:
+            body: The section's lines from its first hunk on.
+
+        Returns:
+            list[str]: The assertions it removes and the skips it adds, as `- `/`+ ` lines.
+        """
+        removed = [line[1:].strip() for line in body if line.startswith("-") and not line.startswith("---")]
+        added = [line[1:].strip() for line in body if line.startswith("+") and not line.startswith("+++")]
+        lost: list[str] = []
+        for kept, gone, rule, sign in ((added, removed, ASSERTION, "-"), (removed, added, SKIP, "+")):
+            left = list(kept)
+            for line in gone:
+                comment = line.startswith(("#", "//")) and not line.startswith("#[")
+                if not line or comment or not rule.search(line):
+                    continue
+                if line in left:
+                    left.remove(line)
+                else:
+                    lost.append(f"{sign} {line}")
+        return lost
 
     @classmethod
     def sections(cls, patch: str) -> List[str]:
