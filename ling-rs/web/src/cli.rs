@@ -9,7 +9,9 @@
 //!   `--print-url` prints the link alone, for the desktop app's Ask window.
 //! - `pair`: an eight-digit code for another device, for ten minutes, and in a terminal its QR
 //!   code (the Devices page, `/devices`, shows the same).
-//! - `devices`, `revoke <device>`: paired devices, and ending one.
+//! - `devices`, `revoke <device>`: paired devices (browsers and sync agents), and ending one;
+//!   `devices --scope <device> watch|control` narrows a device to watching other devices' threads,
+//!   or gives it control again (specs/DREAMFERENCE_MIGHTLING_SYNC.md §5.1).
 //! - `ask [--port N] <question>`: one Ask thread through the running server, for scripts and the
 //!   egress audit (ask_client.rs).
 //!
@@ -39,7 +41,7 @@ use crate::server::Server;
 
 pub const UNIT_NAME: &str = "mightling-web.service";
 
-const USAGE: &str = "Usage: ling web start [--lan] [--port N] | stop | status | open [--no-browser | --print-url] | pair | devices | revoke <device> | serve [--lan] [--port N] | ask [--port N] <question>";
+const USAGE: &str = "Usage: ling web start [--lan] [--port N] | stop | status | open [--no-browser | --print-url] | pair | devices [--scope <device> watch|control] | revoke <device> | serve [--lan] [--port N] | ask [--port N] <question>";
 
 /// What the launcher tells `ling web`.
 #[derive(Clone, Debug)]
@@ -206,6 +208,13 @@ pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
         Some("open") if words.contains(&"--print-url") => print_login_url(&state),
         Some("open") => open(&state, words.contains(&"--no-browser")),
         Some("pair") => pair(&state),
+        Some("devices") if words.get(1) == Some(&"--scope") => match (words.get(2), words.get(3).copied().and_then(auth::Scope::parse)) {
+            (Some(which), Some(scope)) => set_scope(&state, which, scope),
+            _ => {
+                eprintln!("Usage: ling web devices --scope <device id or name> watch|control");
+                2
+            }
+        },
         Some("devices") => devices(&state),
         Some("ask") => ask_command(&args[1..], &state).await,
         Some("revoke") => match words.get(1) {
@@ -434,6 +443,9 @@ fn pair(state: &Path) -> i32 {
         return 0;
     }
     println!("On the other device, open {} and type the code.", urls.join(" or "));
+    if crate::sync_store::enabled(state.parent().unwrap_or(state)) {
+        println!("For another computer's sync agent, run `ling sync enable` there and type the code.");
+    }
     if std::io::stdout().is_terminal()
         && let Some(drawn) = qr::terminal(&format!("{}?code={code}", urls[0]))
     {
@@ -491,9 +503,37 @@ fn devices(state: &Path) -> i32 {
         return 0;
     }
     for device in devices {
-        println!("{}  {}  paired {}, last used {}", device.id, device.name, ago(device.created), ago(device.last_used));
+        let kind = if device.kind == auth::DeviceKind::Sync { "sync agent, " } else { "" };
+        println!(
+            "{}  {}  {kind}{}, paired {}, last used {}",
+            device.id,
+            device.name,
+            device.scope.name(),
+            ago(device.created),
+            ago(device.last_used)
+        );
     }
     0
+}
+
+fn set_scope(state: &Path, which: &str, scope: auth::Scope) -> i32 {
+    match auth::set_scope(state, which, scope) {
+        Ok(changed) if changed.is_empty() => {
+            eprintln!("No paired device is called {which}; `ling web devices` lists them.");
+            1
+        }
+        Ok(changed) => {
+            for device in changed {
+                let what = if scope == auth::Scope::Watch { "may now watch other devices' threads, not change them" } else { "may now control other devices' threads" };
+                println!("{} ({}) {what}.", device.name, device.id);
+            }
+            0
+        }
+        Err(err) => {
+            eprintln!("Could not update the devices: {err}");
+            1
+        }
+    }
 }
 
 fn revoke(state: &Path, which: &str) -> i32 {

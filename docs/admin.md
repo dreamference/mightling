@@ -446,8 +446,9 @@ Trace one real ling session and list every network destination and process, with
 | `--web` | Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`. |
 | `--compat` | Trace the compatibility mode's print mode, `ling --compat claude -p`, in a repository with Claude Code's files. One of: `claude`. |
 | `--docs` | Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing. |
+| `--sync` | Trace one sync agent cycle instead (`ling sync agent --once`) against a throwaway hub: it must reach the node's ling web port and nothing else. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
-| `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web or docs) |
+| `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web, docs or sync) |
 
 ### `ling-admin node`
 

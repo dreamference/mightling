@@ -194,6 +194,7 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay, its DNS and its migration
 - [docs/dev/adapters.md](docs/dev/adapters.md): LoRA adapters: `ling-admin adapter`, the signature, serving them
 - [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
+- [docs/dev/sync.md](docs/dev/sync.md): `ling sync`
 - [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
 - [docs/dev/cli.md](docs/dev/cli.md): every `ling-admin` subcommand, the sidecars behind `ling web` and the app
 - [docs/dev/sessions.md](docs/dev/sessions.md): the work streams of 2026-10-10 (retired)

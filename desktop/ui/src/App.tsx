@@ -61,6 +61,7 @@ import { PreviewTab } from "./PreviewTab";
 import { PullRequestsTab } from "./PullRequestsTab";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { ScheduledView, unseen } from "./ScheduledView";
+import { SyncedView, useSynced } from "./SyncedView";
 import { ActivityView } from "./ActivityView";
 import { attentionList } from "./attention";
 import { CONSOLE_TOOL, MAX_LINES, TERMINAL_TOOL, consoleAnswer, linesAsked, terminalAnswer, toolLabel, windowToolNames } from "./windowtools";
@@ -221,6 +222,9 @@ export function App() {
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  // Threads from the user's other devices, on `ling web` with the node's sync hub on (SYNC Phase 1).
+  const synced = useSynced(HOST === "web" && !POPOUT);
+  const [syncedOpen, setSyncedOpen] = useState(false);
   /** The agent message board (Phase 3 item 10): whether config.toml has it on, and its view. */
   const [board, setBoard] = useState<{ on: boolean; sqliteHome: string | null }>({ on: false, sqliteHome: null });
   const [boardOpen, setBoardOpen] = useState(false);
@@ -2530,6 +2534,7 @@ export function App() {
           </button>
         ) : null}
         {!POPOUT && board.on && HOST === "electron" ? <button className="nav-row board-button" onClick={() => setBoardOpen(true)} title="What subagents posted for each other"><Icon name="messageSquare" size={14} />Message board</button> : null}
+        {!POPOUT && synced.status ? <button className="nav-row synced-button" onClick={() => setSyncedOpen(true)} title="Threads your other devices synced to this node"><Icon name="monitor" size={14} />Other devices{synced.count ? <span className="count" aria-label={`${synced.count} threads`}>{synced.count}</span> : null}</button> : null}
         {!POPOUT ? <button className="nav-row activity-button" onClick={() => setActivityOpen(true)} title={`What needs you, and what the agent did, across threads (${shortcutLabel("activityView")})`}><Icon name="activity" size={14} />Activity{attentionCount ? <span className="count" aria-label={`${attentionCount} need you`}>{attentionCount}</span> : null}</button> : null}
         {!POPOUT ? <button className="nav-row skills-button" onClick={() => setExtensions("skills")} title="Skills, MCP servers and apps"><Icon name="info" size={14} />Skills and tools</button> : null}
         <button className="nav-row settings-button" onClick={() => setSettingsOpen(true)} title={`Settings (${shortcutLabel("settings")})`}><Icon name="settings" size={14} />Settings</button>
@@ -2817,6 +2822,7 @@ export function App() {
           fromThread={selected && view === "work" ? { title: workLabel(selected.thread), context: threadContext(selected) } : null}
           onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }} />
       ) : null}
+      {syncedOpen && synced.status ? <SyncedView status={synced.status} onClose={() => setSyncedOpen(false)} onChanged={synced.refresh} notice={notice} /> : null}
       {exporting ? <ExportDialog client={client} thread={exporting.thread} title={exporting.title} home={exporting.home} notice={notice} onClose={() => setExporting(null)} /> : null}
       {projectDialog ? (
         <ProjectDialog client={client} project={projectDialog.project} folder={projectDialog.folder} notice={notice} onClose={() => setProjectDialog(null)}
