@@ -188,8 +188,21 @@
       "out": {"id": 44, "method": "command/exec/terminate", "params": {"processId": "term-1"}}
     },
     {
-      "name": "thread/shellCommand stays refused: it runs unsandboxed, past /airgapped on",
+      "name": "thread/shellCommand passes at /airgapped off: the user's own ! command, run in their shell as Codex runs it",
       "message": {"id": 45, "method": "thread/shellCommand", "params": {"threadId": "t", "command": "curl example.com"}},
+      "accept": true,
+      "out": {"id": 45, "method": "thread/shellCommand", "params": {"threadId": "t", "command": "curl example.com"}}
+    },
+    {
+      "name": "thread/shellCommand is refused at /airgapped on (the level of the thread it names): it runs with no sandbox, so nothing would keep it off the network",
+      "airgapped": "on",
+      "message": {"id": 145, "method": "thread/shellCommand", "params": {"threadId": "t", "command": "curl example.com"}},
+      "accept": false
+    },
+    {
+      "name": "thread/shellCommand is refused at on in an Ask thread too",
+      "airgapped": "on",
+      "message": {"id": 146, "method": "thread/shellCommand", "params": {"threadId": "ask-1", "command": "ls", "timeoutMs": 1000}},
       "accept": false
     },
     {

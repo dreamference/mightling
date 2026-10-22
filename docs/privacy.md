@@ -65,7 +65,12 @@ sandbox), which limits what they can write. Network access from that sandbox is 
 fetching are shell commands, and so are `pip install`, `npm install` and `git fetch`. To keep the
 sandbox off the network without air-gapping the session, set
 `sandbox_workspace_write.network_access = false` in `~/.mightling/config.toml` (it then holds for
-Read Only too) or `DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off` for Read Only alone.
+Read Only too) or `DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK=off` for Read Only alone. With
+`/airgapped` off the sandbox is otherwise the same as Codex's: it does not stop a command from
+talking to a service on this machine, so **a command can use Docker if your account can, and Docker
+access is root on the machine**, in every mode, Read Only included. If that matters for a project,
+use `/airgapped on`, which also masks those sockets. You choose the sandbox mode (Read only, Workspace, Full Access) in `/permissions`, the desktop app
+and the browser page; Full Access runs commands with no sandbox at all.
 
 ## Air-gapped sessions
 
@@ -78,7 +83,10 @@ desktop app, and refuses `/airgapped on` in a Full Access session. A session tha
 loads no plugin, and installing one or adding a marketplace is refused, since `git` fetches them
 outside the sandbox. `/airgapped` lists what the level does not cover, such as commands you approve
 to run outside the sandbox, MCP servers you configured, and the plugins of a session switched to
-`on` after it started. See
+`on` after it started. At `on` the sandbox also masks the machine's control sockets (Docker,
+containerd, Podman, the D-Bus buses, the systemd user manager). In the desktop app and the browser
+page, a `!` command typed in the composer runs in your own shell with no sandbox, so it is refused at
+`on`; in the terminal, `!` is yours at either level. See
 [Terminal agent](ling.md#what-mightling-adds).
 
 ## Email is untrusted input

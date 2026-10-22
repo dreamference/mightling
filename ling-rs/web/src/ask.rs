@@ -90,6 +90,9 @@ pub struct MessagePrompts<'a> {
     pub created: Mutex<Option<PathBuf>>,
     /// Whether the configured air-gap level is `on`, read when the message arrived.
     pub airgapped_on: bool,
+    /// The folder the thread the message names works in, when the server has said: a thread's
+    /// air-gap level is read with that repository's configuration file too.
+    pub thread_folder: Option<PathBuf>,
 }
 
 impl PromptSource for MessagePrompts<'_> {
@@ -110,8 +113,11 @@ impl PromptSource for MessagePrompts<'_> {
         folder_of(self.root, thread_id).map(|folder| folder.to_string_lossy().into_owned())
     }
 
-    fn airgapped_on(&self) -> bool {
-        self.airgapped_on
+    fn airgapped_on(&self, thread_id: Option<&str>) -> bool {
+        match thread_id {
+            None => self.airgapped_on,
+            Some(thread) => crate::server::thread_airgapped_on(Some(thread), self.thread_folder.as_deref()),
+        }
     }
 }
 

@@ -92,6 +92,7 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 - `allowedRequests`, `allowedNotifications` (today's `ALLOWED_REQUESTS`/`ALLOWED_NOTIFICATIONS`);
 - `threadOpeners` and `droppedThreadFields` (`baseInstructions`, `developerInstructions`, `modelProvider`, `config`, `personality`);
 - the pending-request rule (answers only to server requests not yet answered);
+- **`airgappedRefusedRequests`** (2026-10-22): requests allowed only while `/airgapped` is off, judged by the level of the thread they name, else the configured one (the plugin installs, MIGHTLING_AIRGAPPED §14.12; the composer's `!` command, `thread/shellCommand`, §14.13), with a reason of their own in `airgappedRefusalReasons`. The host supplies the level from the launcher's resolver;
 - **`namedPrompts`:** the prompt names the UI may ask for (`default`, `ask`, `high-swe`), which the policy layer, not the UI, turns into `baseInstructions` (§3.2).
 
 `desktop/bridge/vectors/*.json` are conformance cases (message in → accepted or refused, fields out). The Rust crate's tests and the Electron main process's tests both run every vector.

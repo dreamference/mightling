@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseN
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, isLongPaste, keyAnswer, mentionPath, parseSlash, pasteLabel, rememberModel, userTexts, withPastes, type SlashCommand } from "./composer";
+import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, isLongPaste, keyAnswer, mentionPath, parseShell, parseSlash, pasteLabel, rememberModel, userTexts, withPastes, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
@@ -1106,6 +1106,25 @@ export function App() {
     }
   };
 
+  /**
+   * A `!` command (DESKTOP_PARITY §2.3): run in the user's own shell in the thread's folder, as the
+   * Codex app runs it, its output shown in the thread. A thread is started first when none is open.
+   * The policy refuses it at `/airgapped on`; the refusal is the notice.
+   */
+  const runShell = async (command: string) => {
+    const from = draftKeyRef.current;
+    const target = selected?.thread ?? (await startThread());
+    if (!target) return;
+    setDraftFor(from, "");
+    try {
+      await client.request("thread/shellCommand", { threadId: target.id, command });
+      promptHistory.push(`!${command}`);
+    } catch (error) {
+      setDraftFor(from, `!${command}`);
+      notice(error);
+    }
+  };
+
   const send = async (text: string, mode: "default" | "steer" | "queue") => {
     const message = text.trim();
     if (sending) return;
@@ -1114,6 +1133,8 @@ export function App() {
       setDraft("");
       return runCommand(slash.command, slash.args);
     }
+    const shell = view === "work" ? parseShell(message) : null;
+    if (shell) return runShell(shell);
     if (view === "ask") {
       if (message || pending.length) await sendAsk(message, mode);
     } else if (message || pending.length) {
@@ -2956,7 +2977,7 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
   const { turn } = props;
   return (
     <section className={`turn turn-${turn.status}`}>
-      {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} />))}
+      {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} />))}
       {turn.error ? <div className="turn-error">{turn.error.message}</div> : null}
       {turn.status === "interrupted" ? <div className="turn-note">Stopped.</div> : null}
       {turn.diff ? (
@@ -3019,8 +3040,9 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
       return <div className="item plan markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }} />;
     case "commandExecution":
       return (
-        <details className={`item command status-${item.status}`} open={!folded && item.status === "inProgress"}>
-          <summary><Icon name="terminal" size={14} /><code>{item.command}</code>{item.exitCode !== null && item.exitCode !== 0 ? <span className="exit"> exit {item.exitCode}</span> : null}</summary>
+        // A `!` command is the user's own: its output stays open, as the Codex app shows it.
+        <details className={`item command status-${item.status}${item.source === "userShell" ? " user-shell" : ""}`} open={item.source === "userShell" || (!folded && item.status === "inProgress")}>
+          <summary><Icon name="terminal" size={14} />{item.source === "userShell" ? <span className="shell-mark" title="Your command, run in your shell">!</span> : null}<code>{item.command}</code>{item.exitCode !== null && item.exitCode !== 0 ? <span className="exit"> exit {item.exitCode}</span> : null}</summary>
           {item.aggregatedOutput ? <pre>{item.aggregatedOutput}</pre> : null}
         </details>
       );

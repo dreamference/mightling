@@ -123,7 +123,8 @@ export class MessagePrompts implements PromptSource {
     return folderOf(this.root, threadId);
   }
 
-  airgappedOn(): boolean {
+  /** The level the host resolved before vetting: the named thread's for a `!` command, else the configured one. */
+  airgappedOn(_threadId: string | null = null): boolean {
     return this.airgapped;
   }
 }

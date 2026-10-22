@@ -23,7 +23,7 @@ The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from
 
 ### The patches are one-line hooks and nothing else
 
-29 patches, ~56.8 KB in all (56,790 bytes); `test_the_patches_stay_small` caps them at 58 KB. The cap's history:
+29 patches, ~56.8 KB in all (56,813 bytes); `test_the_patches_stay_small` caps them at 58 KB. The cap's history:
 
 - raised from 20 KB on 2026-09-30 for the last on-screen Codex names;
 - to 25 KB on 2026-10-01 for `0017-cave-mode`;

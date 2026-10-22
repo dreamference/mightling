@@ -386,12 +386,19 @@ pub fn resolve(ids: &[&str]) -> Resolved {
 /// [`resolve`] with the environment tier's value given, for a command whose environment is not
 /// this process's.
 pub fn resolve_with(ids: &[&str], environment: Option<String>) -> Resolved {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    resolve_in(ids, environment, &cwd)
+}
+
+/// [`resolve_with`] for a session that works in `cwd`, not in this process's folder: the
+/// repository's configuration file is `cwd`'s. The app's policy layer judges a thread this way,
+/// from the folder the thread works in, as the sandbox helper judges its commands.
+pub fn resolve_in(ids: &[&str], environment: Option<String>, cwd: &Path) -> Resolved {
     let session = ids
         .iter()
         .filter_map(|id| session_file(id))
         .find_map(|path| std::fs::read_to_string(path).ok());
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let configs: Vec<(PathBuf, String)> = config_files(&cwd)
+    let configs: Vec<(PathBuf, String)> = config_files(cwd)
         .into_iter()
         .filter_map(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text)))
         .collect();
@@ -480,10 +487,11 @@ pub fn refusal(
         .map(|root| ("writable_roots", root.display().to_string(), SEAL_ROOT_ALLOWED.to_string()))
 }
 
-/// The host's control sockets that a sandboxed command must not reach, under `/`: talking to
-/// one is acting on the host outside the sandbox. A command ran `docker restart` on the host
+/// The host's control sockets that a sandboxed command at `on` must not reach, under `/`: talking
+/// to one is acting on the host outside the sandbox. A command ran `docker restart` on the host
 /// from `ling exec`'s workspace-write sandbox (2026-10-20): the user is in the `docker` group,
-/// and a read-only bind mount does not stop a `connect()`. Docker and containerd (root and
+/// and a read-only bind mount does not stop a `connect()`. At `off` they stay reachable, as in
+/// Codex (owner's decision, 2026-10-22; [`host_sockets_at`]). Docker and containerd (root and
 /// rootless), Podman, the D-Bus system and session buses (systemd's API, which starts units),
 /// the systemd user manager's own sockets, snapd, and Mightling's runtime folder (`ling web`'s
 /// app-server socket, which starts threads with any permissions). Whatever exists and this user
@@ -509,6 +517,15 @@ pub fn host_sockets() -> Vec<PathBuf> {
     host_sockets_in(Path::new("/"), runtime_dir().as_deref())
 }
 
+/// The control sockets Codex's sandbox helper denies to one command (patch 0019): every one of
+/// [`host_sockets`] when the command's level is `on`, none at `off`. At `off` the workspace-write
+/// sandbox is Codex's own and lets a command use Docker, which is root on the host; at `on` the
+/// sockets are masked, so nothing reaches the network or the host through a daemon.
+#[cfg(not(windows))]
+pub fn host_sockets_at(on: bool) -> Vec<PathBuf> {
+    if on { host_sockets() } else { Vec::new() }
+}
+
 /// [`host_sockets`] under another root and runtime folder, for tests.
 pub fn host_sockets_in(root: &Path, runtime: Option<&Path>) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = HOST_SOCKETS
@@ -530,6 +547,27 @@ mod tests {
 
     fn config(path: &str, text: &str) -> (PathBuf, String) {
         (PathBuf::from(path), text.to_string())
+    }
+
+    #[test]
+    fn a_session_is_judged_by_the_repository_it_works_in() {
+        if std::env::var_os("DREAMFERENCE_CONFIG_PATH").is_some() {
+            return; // That file replaces the repository's.
+        }
+        let repo = std::env::temp_dir().join(format!("ling-airgapped-repo-{}", std::process::id()));
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("dreamference.toml"), "mightling_airgapped = \"on\"\n").unwrap();
+        let resolved = resolve_in(&[], None, &repo);
+        let _ = std::fs::remove_dir_all(&repo);
+        assert_eq!(resolved.level, Level::On);
+        assert_eq!(resolved.source, Source::ConfigFile(repo.join("dreamference.toml")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_host_control_sockets_are_masked_only_at_on() {
+        assert_eq!(host_sockets_at(true), host_sockets());
+        assert!(host_sockets_at(false).is_empty());
     }
 
     #[cfg(unix)]

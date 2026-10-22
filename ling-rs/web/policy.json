@@ -1,5 +1,5 @@
 {
-  "comment": "What the Mightling UI may say to `ling app-server`, enforced by `ling web` (ling-rs/web/src/policy.rs) and by the desktop app's main process. Both run every case in ling-rs/web/vectors/, so the two cannot drift (specs/DREAMFERENCE_MIGHTLING_ASK.md \u00a72.3). It lives in this crate, not in desktop/bridge/, because the launcher's build copies ling-rs/ into the Codex export and nothing outside it.",
+  "comment": "What the Mightling UI may say to `ling app-server`, enforced by `ling web` (ling-rs/web/src/policy.rs) and by the desktop app's main process. Both run every case in ling-rs/web/vectors/, so the two cannot drift (specs/DREAMFERENCE_MIGHTLING_ASK.md \u00a72.3). It lives in this crate, not in desktop/bridge/, because the launcher's build copies ling-rs/ into the Codex export and nothing outside it. A request in `airgappedRefusedRequests` is allowed only while `/airgapped` is off for the thread it names (`threadId`; the configured level when it names none), as the launcher resolves it; at `on` it is refused, with its reason from `airgappedRefusalReasons` when it has one.",
   "allowedRequests": [
     "initialize",
     "account/read",
@@ -42,6 +42,7 @@
     "thread/goal/get",
     "thread/goal/set",
     "thread/goal/clear",
+    "thread/shellCommand",
     "turn/start",
     "turn/steer",
     "turn/interrupt",
@@ -120,8 +121,12 @@
   "airgappedRefusedRequests": [
     "plugin/install",
     "marketplace/add",
-    "marketplace/upgrade"
+    "marketplace/upgrade",
+    "thread/shellCommand"
   ],
+  "airgappedRefusalReasons": {
+    "thread/shellCommand": "airgapped is on, and a ! command runs in your own shell with no sandbox, which is what takes a command's network away; run /airgapped off first, or ask the agent to run it in its sandbox"
+  },
   "airgappedRefusedImportItems": [
     "PLUGINS"
   ],

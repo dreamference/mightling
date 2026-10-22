@@ -323,6 +323,8 @@ Where the check goes, decided in Phase 0 in this order:
 
 Work also disables the Full Access row at `on`, but as a courtesy, not as the enforcement.
 
+**At `off` the app behaves like Codex's** (owner's decision, 2026-10-22; MIGHTLING_AIRGAPPED §14.13): Full Access is selectable, and the composer's `!command` (`thread/shellCommand`, user-initiated, run in the user's shell with no sandbox) is allowed. The policy refuses that request at `on`; since no patch gates it in the app-server, the enforcers' refusal is the binding one, and Electron's fails closed when `ling airgapped` does not answer.
+
 ### 8.3 Sessions and Night Shift
 
 Threads the app starts are ordinary Codex sessions in `~/.mightling/sessions`. Today Night Shift ignores an app-server entirely (§5). An always-open desktop app must not block every night, and process scanning cannot tell a busy server from an idle one. So: **the bridge writes a busy marker** `$CODEX_HOME/night/busy/<pid>`, where `<pid>` is **the `ling app-server` process's** (the bridge's child, so the night run can check it without knowing about windows), holding the ids of the threads with a live turn. It is written on `turn/started`, rewritten on `turn/completed`, and removed when the last turn ends or the server exits. Night Shift's admission treats a marker whose pid is alive (signal 0, the probe `_probe_direct_kill` uses) and whose `/proc/<pid>/exe` is the installed `ling` (or, since 2026-10-07, a program of that name running `app-server`, so the app's bundled `ling` counts: `NightShiftHost._is_app_server`, DESKTOP_ELECTRON §9) as an open session, and deletes any other marker: a window killed hard leaves a marker with a dead pid, which the next check prunes. The night run's own `ling exec` processes are unaffected.

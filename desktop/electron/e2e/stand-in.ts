@@ -291,6 +291,19 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       else unlisted[id] = started;
       return answer({ thread: started, model: "qwen3.8-27b", modelProvider: "local", cwd: p.cwd });
     }
+    case "thread/shellCommand": {
+      // A ! command, as Codex runs one: its own turn, a commandExecution item from the user's shell.
+      const id = "turn-" + next++;
+      const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
+      const item = { type: "commandExecution", id: "sh" + id, command: p.command, cwd: (own && own.cwd) || fetcher, processId: null, source: "userShell",
+        status: "inProgress", commandActions: [], exitCode: null, durationMs: null, aggregatedOutput: null };
+      answer({});
+      say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
+      say({ method: "item/started", params: { threadId: p.threadId, turnId: id, item } });
+      say({ method: "item/commandExecution/outputDelta", params: { threadId: p.threadId, turnId: id, itemId: item.id, delta: "On branch main\\n" } });
+      say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { ...item, status: "completed", exitCode: 0, durationMs: 12, aggregatedOutput: "On branch main\\nnothing to commit, working tree clean\\n" } } });
+      return say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [], status: "completed", error: null } } });
+    }
     case "turn/start": {
       const id = "turn-" + next++;
       if (/^[ni]/.test(String(p.threadId))) {
