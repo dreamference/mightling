@@ -1,4 +1,4 @@
-# Night 15, the engine smoke night (owner, 2026-10-20): ling-engine main against SGLang v0.5.21 on node-b.
+# Night 15, the engine smoke night (owner, 2026-10-20): ling-engine main against SGLang v0.5.21 on the engine's development machine.
 # 20 tasks drawn from fresh-150k-1of3.txt (sha256 e3291546b9c2; night 14 runs the whole third), none in nights 12-13's lists
 # (fresh-50h, fresh-50i); by repository in the third's proportions (django 11, sympy 4, sphinx 2, pytest 1, astropy 1,
 # requests 1), seed 20261020 (random.Random(seed).sample per repository, repositories in sorted order).

@@ -1,0 +1,55 @@
+# 50 fresh SWE-bench Verified tasks for night 8, default against apply-patch-function, 60-minute limit
+# (scripts/swe_bench_night1.sh; specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §22), drawn 2026-10-14
+# from the 79 tasks validated on this machine outside sample-100.txt and verified-mismatch-exclude.txt (68), fresh-50.txt (50), fresh-50b.txt (50), fresh-50c.txt (50), seed 20261014.
+# Stratified to sample-100.txt's mix (easy/medium/hard 59/16/25 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
+# wanted 30/8/12, drawn 31/8/11 (1 filled from other tiers, which were short).
+astropy__astropy-14182
+django__django-11099
+django__django-11451
+django__django-11749
+django__django-11820
+django__django-12262
+django__django-12273
+django__django-12304
+django__django-12713
+django__django-13513
+django__django-13810
+django__django-13933
+django__django-14007
+django__django-14238
+django__django-14315
+django__django-14765
+django__django-15098
+django__django-15268
+django__django-15467
+django__django-15554
+django__django-15569
+django__django-15741
+django__django-15851
+django__django-15987
+django__django-16032
+django__django-16595
+django__django-17029
+django__django-9296
+psf__requests-1766
+psf__requests-6028
+pylint-dev__pylint-7277
+pytest-dev__pytest-5787
+pytest-dev__pytest-6202
+pytest-dev__pytest-7324
+sphinx-doc__sphinx-10466
+sphinx-doc__sphinx-9367
+sphinx-doc__sphinx-9591
+sympy__sympy-12419
+sympy__sympy-12481
+sympy__sympy-13757
+sympy__sympy-15349
+sympy__sympy-17630
+sympy__sympy-18189
+sympy__sympy-18199
+sympy__sympy-19040
+sympy__sympy-21379
+sympy__sympy-21596
+sympy__sympy-21930
+sympy__sympy-22914
+sympy__sympy-23824

@@ -1,0 +1,57 @@
+# Shard 3 of 3 of fresh-150k.txt (150 tasks, sha256 ab1258778ee6 of its sorted ids): 50 tasks,
+# split by `ling-admin swe-bench shard --balance-by fresh-61j.txt` (SweBenchShards), balanced by difficulty tier, by
+# membership of fresh-61j.txt (20 of fresh-61j.txt's 61) and by repository. NOT the tasks of `swe-bench run --subset fresh-150k.txt --shard 3/3`,
+# which balances by tier and repository only: run this file as the list itself.
+# Tiers frozen in SweBenchDifficulty; easy = solved by >= 75% of strong submissions, hard < 40%.
+# Mix: easy/medium/hard 29/8/13; django 29, sympy 9, sphinx 4, astropy 2, pytest 2, scikit-learn 2, pylint 1, seaborn 1.
+# The whole list: easy/medium/hard 89/24/37; django 86, sympy 27, sphinx 12, astropy 8, pytest 6, scikit-learn 5, requests 3, pylint 2, seaborn 1.
+astropy__astropy-14309
+astropy__astropy-14598
+django__django-11066
+django__django-11265
+django__django-11433
+django__django-11848
+django__django-11964
+django__django-12050
+django__django-12406
+django__django-12663
+django__django-13012
+django__django-13028
+django__django-13401
+django__django-13449
+django__django-13513
+django__django-13794
+django__django-13809
+django__django-13820
+django__django-13821
+django__django-14017
+django__django-14771
+django__django-15277
+django__django-15368
+django__django-15499
+django__django-15731
+django__django-15987
+django__django-16136
+django__django-16139
+django__django-16612
+django__django-16667
+django__django-17087
+mwaskom__seaborn-3187
+pylint-dev__pylint-8898
+pytest-dev__pytest-5787
+pytest-dev__pytest-7521
+scikit-learn__scikit-learn-25747
+scikit-learn__scikit-learn-25973
+sphinx-doc__sphinx-10435
+sphinx-doc__sphinx-11445
+sphinx-doc__sphinx-9258
+sphinx-doc__sphinx-9698
+sympy__sympy-12489
+sympy__sympy-15875
+sympy__sympy-16597
+sympy__sympy-17139
+sympy__sympy-18211
+sympy__sympy-19495
+sympy__sympy-19954
+sympy__sympy-21847
+sympy__sympy-24661

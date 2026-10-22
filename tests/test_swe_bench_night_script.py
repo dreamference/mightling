@@ -6,6 +6,7 @@ no model server. `start` (systemd-run, the worktree checkout) is never run here.
 """
 
 import os
+import pathlib
 import stat
 import subprocess
 
@@ -15,20 +16,36 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "scripts", "swe_bench_night1.sh")
 
 
-def night(tmp_path, arms):
+def night(tmp_path, arms, ling=None, **extra):
     """Runs the night's `run` step with `arms`; returns (exit status, recorded admin calls, D)."""
     calls = tmp_path / "calls.txt"
     fake = tmp_path / "python"
-    # The script calls `"$PY" -c <code> <ling-admin arguments>`: drop the two, record the rest.
-    fake.write_text(f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n')
+    # The script calls `"$PY" -c <code> <ling-admin arguments>`: drop the two, record the rest; asked
+    # for the installed ling, it names `ling`.
+    fake.write_text(
+        f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}"; exit 0;; esac\n'
+        f'shift 2\necho "$*" >> "{calls}"\n'
+    )
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
     task_list.write_text("# two tasks\nacme__widget-1\nacme__widget-2\n")
     folder = tmp_path / "night4"
     folder.mkdir()
-    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder),
-           "NIGHT": "4", "PREFIX": "n4", "ARMS": arms, "REFINE": "0"}
-    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "WT": ROOT,
+        "PY": str(fake),
+        "LIST": str(task_list),
+        "D": str(folder),
+        "NIGHT": "4",
+        "PREFIX": "n4",
+        "ARMS": arms,
+        "REFINE": "0",
+        **extra,
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60
+    )
     recorded = calls.read_text().splitlines() if calls.exists() else []
     return result.returncode, recorded, folder
 
@@ -43,10 +60,17 @@ def test_the_restart_arm_reaches_only_the_candidates_round(tmp_path):
     record, candidate = runs(recorded)
     assert "--name n4-default " in record
     assert "--restart-after-compactions" not in record and "--task-rules" not in record
-    assert "--name n4-restart-2 " in candidate and candidate.count("--restart-after-compactions 2") == 1
+    assert (
+        "--name n4-restart-2 " in candidate
+        and candidate.count("--restart-after-compactions 2") == 1
+    )
     assert "--task-rules" not in candidate
-    assert "swe-bench eval n4-default --drop-test-hunks --remove-images" in recorded
-    assert "swe-bench eval n4-restart-2 --drop-test-hunks --remove-images" in recorded
+    assert (
+        "swe-bench eval n4-default --drop-test-hunks --remove-images --image-chunk 25" in recorded
+    )
+    assert (
+        "swe-bench eval n4-restart-2 --drop-test-hunks --remove-images --image-chunk 25" in recorded
+    )
     assert "swe-bench report n4-restart-2 --against n4-default" in recorded
     assert (folder / "restart-2-against-default.txt").exists()
 
@@ -56,7 +80,9 @@ def test_task_rules_and_the_restart_arm_stack_with_a_plus(tmp_path):
     assert status == 0
     record, candidate = runs(recorded)
     assert "--name n4-tests-v2-issue-v1 " in record
-    assert "--task-rules tests-v2,issue-v1" in record and "--restart-after-compactions" not in record
+    assert (
+        "--task-rules tests-v2,issue-v1" in record and "--restart-after-compactions" not in record
+    )
     assert "--name n4-tests-v2-issue-v1-restart-2 " in candidate
     assert "--task-rules tests-v2,issue-v1 --restart-after-compactions 2" in candidate
 
@@ -85,14 +111,18 @@ def test_the_apply_patch_arm_reaches_only_the_candidates_round(tmp_path):
 
 
 # `apply-patch-function` too: the pinned Codex has no function form, and ling refuses to start with one.
-@pytest.mark.parametrize("arm", ["apply-patch", "apply-patch-func", "apply_patch-function", "apply-patch-function"])
+@pytest.mark.parametrize(
+    "arm", ["apply-patch", "apply-patch-func", "apply_patch-function", "apply-patch-function"]
+)
 def test_a_misspelt_apply_patch_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default {arm}")
     assert status == 2 and runs(recorded) == []
     assert (folder / "failed").exists() and not (folder / "done").exists()
 
 
-def test_night_6s_record_arm_is_the_freeform_exec_tool_and_the_candidate_the_launchers_choice(tmp_path):
+def test_night_6s_record_arm_is_the_freeform_exec_tool_and_the_candidate_the_launchers_choice(
+    tmp_path,
+):
     status, recorded, folder = night(tmp_path, "exec-tool-freeform default")
     assert status == 0 and (folder / "done").exists()
     record, candidate = runs(recorded)
@@ -108,7 +138,9 @@ def test_night_6s_record_arm_is_the_freeform_exec_tool_and_the_candidate_the_lau
     assert "--restart-after-compactions 2 --exec-tool function" in runs(recorded)[1]
 
 
-@pytest.mark.parametrize("arm", ["exec-tool", "exec-tool-auto", "exec-tool-off", "exec_tool-function", "exec-tool-func"])
+@pytest.mark.parametrize(
+    "arm", ["exec-tool", "exec-tool-auto", "exec-tool-off", "exec_tool-function", "exec-tool-func"]
+)
 def test_a_misspelt_exec_tool_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"{arm} default")
     assert status == 2 and runs(recorded) == []
@@ -119,20 +151,40 @@ def test_night_10s_arms_pin_codexs_turn_end_key_off_and_on(tmp_path):
     status, recorded, folder = night(tmp_path, "turn-end-compaction-off turn-end-compaction-on")
     assert status == 0 and (folder / "done").exists()
     record, candidate = runs(recorded)
-    assert "--name n4-turn-end-compaction-off " in record and record.count("--turn-end-compaction off") == 1
-    assert "--name n4-turn-end-compaction-on " in candidate and candidate.count("--turn-end-compaction on") == 1
+    assert (
+        "--name n4-turn-end-compaction-off " in record
+        and record.count("--turn-end-compaction off") == 1
+    )
+    assert (
+        "--name n4-turn-end-compaction-on " in candidate
+        and candidate.count("--turn-end-compaction on") == 1
+    )
     assert "--task-rules" not in record and "--task-rules" not in candidate
-    assert "swe-bench report n4-turn-end-compaction-on --against n4-turn-end-compaction-off" in recorded
+    assert (
+        "swe-bench report n4-turn-end-compaction-on --against n4-turn-end-compaction-off"
+        in recorded
+    )
     assert (folder / "turn-end-compaction-on-against-turn-end-compaction-off.txt").exists()
     # A percentage of the usable window, and stacking with the other arms like any part.
     stacked = tmp_path / "stacked"
     stacked.mkdir()
-    _, recorded, _ = night(stacked, "turn-end-compaction-off turn-end-compaction-20+exec-tool-function")
+    _, recorded, _ = night(
+        stacked, "turn-end-compaction-off turn-end-compaction-20+exec-tool-function"
+    )
     assert "--turn-end-compaction 20 --exec-tool function" in runs(recorded)[1]
 
 
-@pytest.mark.parametrize("arm", ["turn-end-compaction", "turn-end-compaction-auto", "turn_end_compaction-on",
-                                 "turn-end-compaction-0", "turn-end-compaction-100", "turn-end-on"])
+@pytest.mark.parametrize(
+    "arm",
+    [
+        "turn-end-compaction",
+        "turn-end-compaction-auto",
+        "turn_end_compaction-on",
+        "turn-end-compaction-0",
+        "turn-end-compaction-100",
+        "turn-end-on",
+    ],
+)
 def test_a_misspelt_turn_end_compaction_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"{arm} turn-end-compaction-on")
     assert status == 2 and runs(recorded) == []
@@ -147,33 +199,60 @@ def test_start_refuses_a_turn_end_night_where_only_one_arm_pins_the_key(tmp_path
     assert runs(recorded) == [] and verdicts == [] and units == [] and not folder.exists()
     both = tmp_path / "both"
     both.mkdir()
-    result, recorded, verdicts, units, folder = start(both, "turn-end-compaction-off turn-end-compaction-on")
+    result, recorded, verdicts, units, folder = start(
+        both, "turn-end-compaction-off turn-end-compaction-on"
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     record, candidate = runs(recorded)
-    assert "--name n7-smoke-turn-end-compaction-off-" in record and record.count("--turn-end-compaction off") == 1
-    assert "--name n7-smoke-turn-end-compaction-on-" in candidate and candidate.count("--turn-end-compaction on") == 1
+    assert (
+        "--name n7-smoke-turn-end-compaction-off-" in record
+        and record.count("--turn-end-compaction off") == 1
+    )
+    assert (
+        "--name n7-smoke-turn-end-compaction-on-" in candidate
+        and candidate.count("--turn-end-compaction on") == 1
+    )
     assert len(units) == 1
 
 
 @pytest.mark.parametrize("reads_it", [False, True])
-def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch(tmp_path, reads_it):
+def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch(
+    tmp_path, reads_it
+):
     # `start` with stand-ins: no unit is active (systemctl), git succeeds and changes nothing,
     # and the venv's Python names a fake `ling` and an install folder without the indexers.
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     ling = tmp_path / "ling"
-    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL ..." if reads_it else b"\x7fELF ... 1.6.0 ...")
+    ling.write_bytes(
+        b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL ..."
+        if reads_it
+        else b"\x7fELF ... 1.6.0 ..."
+    )
     for name, body in (("systemctl", "exit 1"), ("git", "exit 0")):
         tool = bin_dir / name
         tool.write_text(f"#!/bin/bash\n{body}\n")
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
     fake = tmp_path / "python"
-    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{tmp_path / "install"}";; esac\n')
+    fake.write_text(
+        f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{tmp_path / "install"}";; esac\n'
+    )
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
-           "D": str(tmp_path / "night6"), "NIGHT": "6", "UNIT": "ling-swe-night6-test", "LIVE_UNIT": "ling-swe-night5-test",
-           "ARMS": "exec-tool-freeform default", "LIST": str(tmp_path / "list.txt")}
-    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "WT": ROOT,
+        "PY": str(fake),
+        "D": str(tmp_path / "night6"),
+        "NIGHT": "6",
+        "UNIT": "ling-swe-night6-test",
+        "LIVE_UNIT": "ling-swe-night5-test",
+        "ARMS": "exec-tool-freeform default",
+        "LIST": str(tmp_path / "list.txt"),
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60
+    )
     assert result.returncode == 1
     refused = f"{ling} does not read DREAMFERENCE_MIGHTLING_EXEC_TOOL" in result.stdout
     assert refused is not reads_it
@@ -183,25 +262,46 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_exec_tool_switch
     assert not (tmp_path / "night6").exists()
 
 
-def start(tmp_path, arms, smoke_fails=None, task_timeout=""):
+def start(
+    tmp_path,
+    arms,
+    smoke_fails=None,
+    task_timeout="",
+    tasks=("acme__widget-1", "acme__widget-2"),
+    free_gb=None,
+    **extra,
+):
+    """Runs `start` with stand-ins for everything it reaches.
+
+    No unit is active (systemctl), git succeeds and changes nothing, systemd-run records its
+    arguments, and the venv's Python names a fake `ling` and a fake install folder, records every `ling-admin` call and every smoke verdict,
+    and fails the verdict of the arm named in `smoke_fails`. With `free_gb`, `df` says that much is
+    free. git answers `rev-parse HEAD` with REF and records its calls in git.txt. Returns (result, admin
+    calls, verdicts, systemd-run calls, D). `ling_bytes` (in `extra`) is the fake `ling`'s content.
     """
-    Runs `start` with stand-ins for everything it reaches: no unit is active (systemctl), git
-    succeeds and changes nothing, systemd-run records its arguments, and the venv's Python names a
-    fake `ling` and a fake install folder, records every `ling-admin` call and every smoke verdict,
-    and fails the verdict of the arm named in `smoke_fails`. Returns (result, admin calls, verdicts,
-    systemd-run calls, D).
-    """
+    ling_bytes = extra.pop("ling_bytes", None)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     ling = tmp_path / "ling"
-    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL DREAMFERENCE_MIGHTLING_APPLY_PATCH DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ...")
+    ling.write_bytes(
+        ling_bytes
+        or b"\x7fELF ... DREAMFERENCE_MIGHTLING_EXEC_TOOL DREAMFERENCE_MIGHTLING_APPLY_PATCH "
+        b"DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ..."
+    )
     install = tmp_path / "install"
     (install / "bin").mkdir(parents=True)
     for tool in ("ling-code", "codebase-memory-mcp"):
         (install / "bin" / tool).write_text("#!/bin/bash\n")
         (install / "bin" / tool).chmod(0o755)
     units = tmp_path / "systemd-run.txt"
-    for name, body in (("systemctl", "exit 1"), ("git", "exit 0"), ("systemd-run", f'echo "$*" >> "{units}"')):
+    git_log = tmp_path / "git.txt"
+    git_body = (
+        f'echo "$*" >> "{git_log}"\ncase "$*" in *rev-parse*HEAD*) echo "$REF";; esac\nexit 0'
+    )
+    tools = [("systemctl", "exit 1"), ("git", git_body), ("systemd-run", f'echo "$*" >> "{units}"')]
+    if free_gb is not None:
+        tools.append(("df", f'echo "Avail"; echo " {free_gb}G"'))
+    for name, body in tools:
         tool = bin_dir / name
         tool.write_text(f"#!/bin/bash\n{body}\n")
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
@@ -219,54 +319,96 @@ esac
 """)
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
-    task_list.write_text("acme__widget-1\nacme__widget-2\n")
+    task_list.write_text("".join(f"{task}\n" for task in tasks))
     folder = tmp_path / "night7"
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
-           "D": str(folder), "NIGHT": "7", "PREFIX": "n7", "UNIT": "ling-swe-night7-test",
-           "LIVE_UNIT": "ling-swe-night6-test", "ARMS": arms, "LIST": str(task_list), "RESERVE_GB": "0",
-           "TASK_TIMEOUT": task_timeout}
-    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "WT": ROOT,
+        "PY": str(fake),
+        "D": str(folder),
+        "NIGHT": "7",
+        "PREFIX": "n7",
+        "UNIT": "ling-swe-night7-test",
+        "LIVE_UNIT": "ling-swe-night6-test",
+        "ARMS": arms,
+        "LIST": str(task_list),
+        "RESERVE_GB": "0",
+        "TASK_TIMEOUT": task_timeout,
+        **extra,
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60
+    )
     read = lambda path: path.read_text().splitlines() if path.exists() else []  # noqa: E731
     return result, read(calls), read(verdicts), read(units), folder
 
 
 def test_start_smokes_every_arm_with_its_own_options_before_the_unit(tmp_path):
-    result, recorded, verdicts, units, folder = start(tmp_path, "default exec-tool-function", task_timeout="60m")
+    result, recorded, verdicts, units, folder = start(
+        tmp_path, "default exec-tool-function", task_timeout="60m"
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     record, candidate = runs(recorded)
     # One real task per arm, a run of its own each, the arm's options and nothing else.
-    assert "--instances sympy__sympy-13480 --name n7-smoke-default-" in record and "--exec-tool" not in record
-    assert "--name n7-smoke-exec-tool-function-" in candidate and candidate.count("--exec-tool function") == 1
+    assert (
+        "--instances sympy__sympy-13480 --name n7-smoke-default-" in record
+        and "--exec-tool" not in record
+    )
+    assert (
+        "--name n7-smoke-exec-tool-function-" in candidate
+        and candidate.count("--exec-tool function") == 1
+    )
     assert "--code-index universal --mask off --prompt default" in candidate
     assert [line.split()[3] for line in verdicts] == ["default", "exec-tool-function"]
     # From the worktree, with the smoke's own config: a short limit and no nudges.
     run_name, _, _, _, pythonpath = verdicts[0].split()
     assert run_name in record and pythonpath == ROOT
     smoke_config = next((tmp_path / "smoke").glob("n7-*/dreamference.toml")).read_text()
-    assert 'task_timeout = "6m"' in smoke_config and "nudges = 0" in smoke_config and "max_parallel = 1" in smoke_config
+    assert (
+        'task_timeout = "6m"' in smoke_config
+        and "nudges = 0" in smoke_config
+        and "max_parallel = 1" in smoke_config
+    )
     # Only then the unit, with the night's own limit in its config.
-    assert len(units) == 1 and "--unit=ling-swe-night7-test" in units[0] and "TASK_TIMEOUT=60m" in units[0]
+    assert (
+        len(units) == 1
+        and "--unit=ling-swe-night7-test" in units[0]
+        and "TASK_TIMEOUT=60m" in units[0]
+    )
     assert 'task_timeout = "60m"' in (folder / "dreamference.toml").read_text()
     assert "✅ Started ling-swe-night7-test" in result.stdout
 
 
 def test_start_refuses_when_an_arm_fails_its_smoke_and_touches_nothing_else(tmp_path):
-    result, recorded, verdicts, units, folder = start(tmp_path, "default drop-outputs+exec-tool-function",
-                                                      smoke_fails="drop-outputs+exec-tool-function")
+    result, recorded, verdicts, units, folder = start(
+        tmp_path,
+        "default drop-outputs+exec-tool-function",
+        smoke_fails="drop-outputs+exec-tool-function",
+    )
     assert result.returncode == 1
-    assert "❌ Night 7 not started: arm drop-outputs+exec-tool-function failed its smoke check" in result.stdout
+    assert (
+        "❌ Night 7 not started: arm drop-outputs+exec-tool-function failed its smoke check"
+        in result.stdout
+    )
     assert len(runs(recorded)) == 2 and len(verdicts) == 2
     assert units == [] and not folder.exists()
 
 
 def test_start_stops_at_the_first_arm_that_fails_its_smoke(tmp_path):
-    result, recorded, verdicts, units, folder = start(tmp_path, "default tests-v2", smoke_fails="default")
+    result, recorded, verdicts, units, folder = start(
+        tmp_path, "default tests-v2", smoke_fails="default"
+    )
     assert result.returncode == 1 and len(runs(recorded)) == 1 and len(verdicts) == 1
     assert units == [] and not folder.exists()
     # Without TASK_TIMEOUT a night keeps the runner's default limit.
     (tmp_path / "again").mkdir()
     result, _, _, _, folder = start(tmp_path / "again", "default tests-v2")
-    assert result.returncode == 0 and "task_timeout" not in (folder / "dreamference.toml").read_text()
+    assert (
+        result.returncode == 0 and "task_timeout" not in (folder / "dreamference.toml").read_text()
+    )
+
+
 def test_the_drop_outputs_arm_reaches_only_its_round_and_stacks(tmp_path):
     status, recorded, folder = night(tmp_path, "default drop-outputs")
     assert status == 0 and (folder / "done").exists()
@@ -282,7 +424,9 @@ def test_the_drop_outputs_arm_reaches_only_its_round_and_stacks(tmp_path):
     assert "--drop-old-outputs --exec-tool function" in runs(recorded)[1]
 
 
-@pytest.mark.parametrize("arm", ["drop-output", "drop_outputs", "drop-outputs-on", "drop-old-outputs"])
+@pytest.mark.parametrize(
+    "arm", ["drop-output", "drop_outputs", "drop-outputs-on", "drop-old-outputs"]
+)
 def test_a_misspelt_drop_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default {arm}")
     assert status == 2 and runs(recorded) == []
@@ -295,18 +439,35 @@ def test_start_refuses_an_installed_ling_that_does_not_read_the_drop_switch(tmp_
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     ling = tmp_path / "ling"
-    ling.write_bytes(b"\x7fELF ... DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ..." if reads_it else b"\x7fELF ... 1.6.0 ...")
+    ling.write_bytes(
+        b"\x7fELF ... DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS ..."
+        if reads_it
+        else b"\x7fELF ... 1.6.0 ..."
+    )
     for name, body in (("systemctl", "exit 1"), ("git", "exit 0")):
         tool = bin_dir / name
         tool.write_text(f"#!/bin/bash\n{body}\n")
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
     fake = tmp_path / "python"
-    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{tmp_path / "install"}";; esac\n')
+    fake.write_text(
+        f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{tmp_path / "install"}";; esac\n'
+    )
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
-           "D": str(tmp_path / "night7"), "NIGHT": "7", "UNIT": "ling-swe-night7-test", "LIVE_UNIT": "ling-swe-night6-test",
-           "ARMS": "default drop-outputs", "LIST": str(tmp_path / "list.txt")}
-    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "WT": ROOT,
+        "PY": str(fake),
+        "D": str(tmp_path / "night7"),
+        "NIGHT": "7",
+        "UNIT": "ling-swe-night7-test",
+        "LIVE_UNIT": "ling-swe-night6-test",
+        "ARMS": "default drop-outputs",
+        "LIST": str(tmp_path / "list.txt"),
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60
+    )
     assert result.returncode == 1
     refused = f"{ling} does not read DREAMFERENCE_MIGHTLING_DROP_OLD_OUTPUTS" in result.stdout
     assert refused is not reads_it
@@ -325,10 +486,23 @@ def best_of_night(tmp_path, arms="default", best_of="3"):
     task_list.write_text("# two tasks\nacme__widget-1\nacme__widget-2\n")
     folder = tmp_path / "night11"
     folder.mkdir()
-    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder),
-           "NIGHT": "11", "PREFIX": "n11", "ARMS": arms, "REFINE": "0", "BEST_OF": best_of,
-           "CHOOSER_SERVER": "http://localhost:8000", "CHOOSER_SEED": "20261013"}
-    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "WT": ROOT,
+        "PY": str(fake),
+        "LIST": str(task_list),
+        "D": str(folder),
+        "NIGHT": "11",
+        "PREFIX": "n11",
+        "ARMS": arms,
+        "REFINE": "0",
+        "BEST_OF": best_of,
+        "CHOOSER_SERVER": "http://localhost:8000",
+        "CHOOSER_SEED": "20261013",
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60
+    )
     recorded = calls.read_text().splitlines() if calls.exists() else []
     return result.returncode, recorded, folder
 
@@ -337,18 +511,31 @@ def test_best_of_three_runs_the_arm_three_times_then_chooser_v1_and_the_report(t
     status, recorded, folder = best_of_night(tmp_path)
     assert status == 0 and (folder / "done").exists() and not (folder / "failed").exists()
     rounds = runs(recorded)
-    assert [r.split("--name ")[1].split()[0] for r in rounds] == ["n11-default-1", "n11-default-2", "n11-default-3"]
+    assert [r.split("--name ")[1].split()[0] for r in rounds] == [
+        "n11-default-1",
+        "n11-default-2",
+        "n11-default-3",
+    ]
     assert all("--eval --remove-images" in r and "--task-rules" not in r for r in rounds)
-    assert 'attempt 2 of 3' in rounds[1]
+    assert "attempt 2 of 3" in rounds[1]
     # No drop-test-hunks regrade: the chooser reads the plain gradings.
     assert not any("--drop-test-hunks" in line for line in recorded)
     assert "swe-bench report n11-default-3 --against n11-default-1" in recorded
     # The chooser comes after every round, over the three, with v1's measured seed.
-    chooser = next(i for i, line in enumerate(recorded) if "--runs n11-default-1,n11-default-2,n11-default-3 --seed" in line)
+    chooser = next(
+        i
+        for i, line in enumerate(recorded)
+        if "--runs n11-default-1,n11-default-2,n11-default-3 --seed" in line
+    )
     assert chooser > max(recorded.index(r) for r in rounds)
-    assert recorded[chooser].startswith("http://localhost:8000 --runs ") and "--seed 20261013" in recorded[chooser]
+    assert (
+        recorded[chooser].startswith("http://localhost:8000 --runs ")
+        and "--seed 20261013" in recorded[chooser]
+    )
     assert f"--out {folder}/chooser-v1" in recorded[chooser]
-    report = next(line for line in recorded if f"--chooser {folder}/chooser-v1/summary.json" in line)
+    report = next(
+        line for line in recorded if f"--chooser {folder}/chooser-v1/summary.json" in line
+    )
     assert report.startswith("n11-default-1,n11-default-2,n11-default-3 ")
 
 
@@ -361,7 +548,10 @@ def test_best_of_takes_exactly_one_arm(tmp_path):
 def test_without_best_of_the_night_is_the_two_arm_night(tmp_path):
     status, recorded, _ = best_of_night(tmp_path, arms="default apply-patch-off", best_of="1")
     assert status == 0
-    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n11-default", "n11-apply-patch-off"]
+    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == [
+        "n11-default",
+        "n11-apply-patch-off",
+    ]
     assert not any("--seed 20261013" in line for line in recorded)
 
 
@@ -370,33 +560,61 @@ def test_the_engine_ab_serves_each_arm_on_the_remote_machine_and_restores_produc
     # Python records each ling-admin call with the model server the round was pointed at.
     calls, remote = tmp_path / "calls.txt", tmp_path / "remote.txt"
     fake = tmp_path / "python"
-    fake.write_text(f'#!/bin/bash\nshift 2\necho "${{DREAMFERENCE_VLLM_HOST:-local}} $*" >> "{calls}"\n')
+    fake.write_text(
+        f'#!/bin/bash\nshift 2\necho "${{DREAMFERENCE_VLLM_HOST:-local}} $*" >> "{calls}"\n'
+    )
     bindir = tmp_path / "bin"
     bindir.mkdir()
     ssh = bindir / "ssh"
-    ssh.write_text(f'#!/bin/bash\ncat > /dev/null\nargs="$*"\necho "$args" >> "{remote}"\n'
-                   'case "$args" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;;'
-                   ' *restore*) echo restored ;; esac\n')
+    ssh.write_text(
+        f'#!/bin/bash\ncat > /dev/null\nargs="$*"\necho "$args" >> "{remote}"\n'
+        'case "$args" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;;'
+        " *restore*) echo restored ;; esac\n"
+    )
     for path in (fake, ssh):
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
     task_list.write_text("acme__widget-1\n")
     folder = tmp_path / "night12"
     folder.mkdir()
-    arms = "exec-tool-function+apply-patch-off+on-sglang exec-tool-function+apply-patch-off+on-engine"
-    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder), "NIGHT": "12",
-           "PREFIX": "n12", "ARMS": arms, "REFINE": "0", "PATH": f"{bindir}:{os.environ['PATH']}"}
-    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    arms = (
+        "exec-tool-function+apply-patch-off+on-sglang exec-tool-function+apply-patch-off+on-engine"
+    )
+    env = {
+        **os.environ,
+        "WT": ROOT,
+        "PY": str(fake),
+        "LIST": str(task_list),
+        "D": str(folder),
+        "NIGHT": "12",
+        "PREFIX": "n12",
+        "ARMS": arms,
+        "REFINE": "0",
+        "REMOTE": "node-b",
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     recorded = calls.read_text().splitlines()
     rounds = [line for line in recorded if " swe-bench run " in line]
     assert rounds[0].startswith("http://node-b.local:30000 swe-bench run ")
     assert "--name n12-exec-tool-function-apply-patch-off-on-sglang " in rounds[0]
     assert rounds[1].startswith("http://node-b.local:8300 swe-bench run ")
-    assert all("--exec-tool function" in r and "--apply-patch off" in r and "on-" not in r.split("--name")[0] for r in rounds)
+    assert all(
+        "--exec-tool function" in r
+        and "--apply-patch off" in r
+        and "on-" not in r.split("--name")[0]
+        for r in rounds
+    )
     asked = remote.read_text().splitlines()
     # One restore once both rounds have run: the EXIT trap's is cleared then.
-    assert [line.split("serve ")[-1] if "serve" in line else "restore" for line in asked] == ["sglang", "engine", "restore"]
+    assert [line.split("serve ")[-1] if "serve" in line else "restore" for line in asked] == [
+        "sglang",
+        "engine",
+        "restore",
+    ]
     assert all(line.startswith("-o BatchMode=yes node-b bash -s -- ") for line in asked)
     # The regrades need no model server and run after production is back.
     assert all(line.startswith("local ") for line in recorded if " swe-bench eval " in line)
@@ -408,14 +626,17 @@ def test_a_misspelt_model_server_arm_ends_the_night_before_any_round(tmp_path, a
     assert status == 2 and not runs(recorded) and (folder / "failed").exists()
 
 
-HELPER = os.path.join(ROOT, "scripts", "engine_ab_remote.sh")
+HELPER = f"{ROOT}/scripts/engine_ab_remote.sh"
 
 
 @pytest.fixture
 def remote(tmp_path):
-    """node-b in miniature for scripts/engine_ab_remote.sh: stand-in `docker` (m0-prod8000 running),
-    `curl` (every port answers) and `ss` (every port free) on PATH, a drafter and target snapshot of its own, and
-    the GPU lock under the test's folder. Returns (run, docker calls, lock path, AB_DIR); any lease is killed after."""
+    """The engine's machine in miniature for scripts/engine_ab_remote.sh.
+
+    Stand-in `docker` (m0-prod8000 running), `curl` (every port answers) and `ss` (every port free) on
+    PATH, a drafter and target snapshot of its own, and the GPU lock under the test's folder. Returns
+    (run, docker calls, lock path, AB_DIR); any lease is killed after.
+    """
     bindir, state, ab_dir = tmp_path / "bin", tmp_path / "state", tmp_path / "ab-n12"
     for folder in (bindir, state, ab_dir):
         folder.mkdir()
@@ -423,9 +644,9 @@ def remote(tmp_path):
     calls = tmp_path / "docker.txt"
     stubs = {
         "docker": f'#!/bin/bash\necho "$*" >> "{calls}"\ncase "$1" in\n'
-                  f'  ps) case "$*" in *m0-prod8000*) [ -e "{state}/m0" ] && echo c0ffee ;; esac ;;\n'
-                  f'  stop) rm -f "{state}/m0" ;;\n  start) touch "{state}/m0" ;;\n  inspect) echo true ;;\nesac\n',
-        "curl": "#!/bin/bash\necho '{\"data\": [{\"id\": \"m\", \"owned_by\": \"sglang\"}]}'\n",
+        f'  ps) case "$*" in *m0-prod8000*) [ -e "{state}/m0" ] && echo c0ffee ;; esac ;;\n'
+        f'  stop) rm -f "{state}/m0" ;;\n  start) touch "{state}/m0" ;;\n  inspect) echo true ;;\nesac\n',
+        "curl": '#!/bin/bash\necho \'{"data": [{"id": "m", "owned_by": "sglang"}]}\'\n',
         "ss": "#!/bin/bash\nexit 0\n",
     }
     for name, body in stubs.items():
@@ -436,16 +657,33 @@ def remote(tmp_path):
     draft.mkdir()
     model.mkdir()
     (draft / "model.safetensors").write_bytes(b"drafter")
-    digest = subprocess.run(["sha256sum", str(draft / "model.safetensors")], capture_output=True, text=True).stdout.split()[0]
+    digest = subprocess.run(
+        ["sha256sum", str(draft / "model.safetensors")], capture_output=True, text=True
+    ).stdout.split()[0]
     lock = tmp_path / ".ling-gpu.lock"
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "HOME": str(tmp_path), "AB_DIR": str(ab_dir),
-           "MODEL_DIR": str(model), "DRAFT": str(draft), "DRAFT_SHA256": digest, "GPU_LOCK": str(lock),
-           "GPU_LOCK_WAIT": "3", "SETTLE_S": "0"}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "AB_DIR": str(ab_dir),
+        "MODEL_DIR": str(model),
+        "DRAFT": str(draft),
+        "DRAFT_SHA256": digest,
+        "GPU_LOCK": str(lock),
+        "GPU_LOCK_WAIT": "3",
+        "SETTLE_S": "0",
+    }
 
     def run(*args, **extra):
-        with open(HELPER) as script:
-            return subprocess.run(["bash", "-s", "--", *args], stdin=script, env={**env, **extra},
-                                  capture_output=True, text=True, timeout=60)
+        with pathlib.Path(HELPER).open() as script:
+            return subprocess.run(
+                ["bash", "-s", "--", *args],
+                stdin=script,
+                env={**env, **extra},
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
 
     yield run, calls, lock, ab_dir
     for pid_file in tmp_path.glob("ab-*/gpu-lease.pid"):
@@ -458,6 +696,7 @@ def lock_free(lock):
 
 def wait_until(check, seconds=10.0):
     import time
+
     deadline = time.time() + seconds
     while time.time() < deadline:
         if check():
@@ -487,17 +726,20 @@ def test_the_night_holds_the_engines_gpu_lock_from_its_first_serve_until_product
 
 def test_serve_waits_for_engine_work_holding_the_gpu_lock_and_touches_nothing_without_it(remote):
     import fcntl
+
     run, calls, lock, ab_dir = remote
-    with open(lock, "w") as held:
+    with pathlib.Path(lock).open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
         result = run("serve", "sglang")
     assert result.returncode == 1 and "was not free within 3 s" in result.stderr
-    assert "m0-prod8000" not in (calls.read_text() if calls.exists() else "").replace("ps -q -f name=^m0-prod8000$", "")
+    assert "m0-prod8000" not in (calls.read_text() if calls.exists() else "").replace(
+        "ps -q -f name=^m0-prod8000$", ""
+    )
     assert not (ab_dir / "gpu-lease.pid").exists()
 
 
 def test_a_lease_no_restore_ends_lets_the_gpu_lock_go_by_itself(remote):
-    run, calls, lock, ab_dir = remote
+    run, _calls, lock, _ab_dir = remote
     assert run("serve", "sglang", HOLD_MAX="1").returncode == 0
     assert wait_until(lambda: lock_free(lock), seconds=15)
 
@@ -509,41 +751,62 @@ def test_the_night_folder_reaches_the_helper_and_the_unit(tmp_path):
     bindir = tmp_path / "bin"
     bindir.mkdir()
     ssh = bindir / "ssh"
-    ssh.write_text(f'#!/bin/bash\ncat > /dev/null\necho "$*" >> "{remote}"\n'
-                   'case "$*" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;; *) echo restored ;; esac\n')
+    ssh.write_text(
+        f'#!/bin/bash\ncat > /dev/null\necho "$*" >> "{remote}"\n'
+        'case "$*" in *"serve sglang"*) echo "ready sglang" ;; *"serve engine"*) echo "ready ling-engine" ;;'
+        " *) echo restored ;; esac\n"
+    )
     for path in (fake, ssh):
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     task_list = tmp_path / "list.txt"
     task_list.write_text("acme__widget-1\n")
     folder = tmp_path / "night15"
     folder.mkdir()
-    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder), "NIGHT": "15",
-           "PREFIX": "n15", "ARMS": "default+on-sglang default+on-engine", "REFINE": "0",
-           "REMOTE_AB_DIR": "/home/user/ab-n15", "PATH": f"{bindir}:{os.environ['PATH']}"}
-    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "WT": ROOT,
+        "PY": str(fake),
+        "LIST": str(task_list),
+        "D": str(folder),
+        "NIGHT": "15",
+        "PREFIX": "n15",
+        "ARMS": "default+on-sglang default+on-engine",
+        "REFINE": "0",
+        "REMOTE": "node-b",
+        "REMOTE_AB_DIR": "/home/user/ab-n15",
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     asked = remote.read_text().splitlines()
-    assert asked and all(line.startswith("-o BatchMode=yes node-b AB_DIR=/home/user/ab-n15 bash -s -- ") for line in asked)
+    assert asked and all(
+        line.startswith("-o BatchMode=yes node-b AB_DIR=/home/user/ab-n15 bash -s -- ")
+        for line in asked
+    )
     # The unit gets the remote's names with the rest of the night's settings.
-    with open(SCRIPT) as script:
+    with pathlib.Path(SCRIPT).open() as script:
         body = script.read()
     assert '--setenv=REMOTE_AB_DIR="$REMOTE_AB_DIR"' in body and '--setenv=REMOTE="$REMOTE"' in body
 
 
 def test_restore_keep_stops_the_arms_and_keeps_the_gpu_lock_for_the_night(remote):
-    run, calls, lock, ab_dir = remote
+    run, calls, lock, _ab_dir = remote
     assert run("serve", "sglang").returncode == 0
     kept = run("restore", "keep")
     assert kept.returncode == 0 and "kept" in kept.stdout, kept.stderr
     assert not lock_free(lock)
-    assert "start m0-prod8000" not in calls.read_text() and "rm -f ab-n12-sglang" in calls.read_text()
+    assert (
+        "start m0-prod8000" not in calls.read_text() and "rm -f ab-n12-sglang" in calls.read_text()
+    )
     assert run("serve", "engine", GPU_LOCK_WAIT="1").stderr.count("already the night's") == 1
     assert run("restore").returncode == 0
     assert wait_until(lambda: lock_free(lock))
 
 
 def test_restore_keep_with_no_lease_is_a_plain_restore(remote):
-    run, calls, lock, ab_dir = remote
+    run, calls, _lock, _ab_dir = remote
     restored = run("restore", "keep")
     assert restored.returncode == 0 and "restored" in restored.stdout
     assert wait_until(lambda: "start m0-prod8000" in calls.read_text())
@@ -563,7 +826,11 @@ def test_the_next_night_adopts_the_lease_so_the_gpu_lock_is_never_let_go(remote,
     assert decoy != lease
     # The earlier night's restore ends its decoy and brings production back; the lock stays taken.
     assert run("restore").returncode == 0
-    assert wait_until(lambda: "start m0-prod8000" in calls.read_text() and not (earlier / "gpu-lease.pid").exists())
+    assert wait_until(
+        lambda: (
+            "start m0-prod8000" in calls.read_text() and not (earlier / "gpu-lease.pid").exists()
+        )
+    )
     assert subprocess.run(["kill", "-0", decoy], capture_output=True).returncode != 0
     assert not lock_free(lock)
     # The later night serves under the adopted lease, with its own SGLang container's name, then lets the lock go.
@@ -575,7 +842,7 @@ def test_the_next_night_adopts_the_lease_so_the_gpu_lock_is_never_let_go(remote,
 
 
 def test_adopt_refuses_without_a_live_lease_to_take(remote, tmp_path):
-    run, calls, lock, earlier = remote
+    run, _calls, _lock, earlier = remote
     later = tmp_path / "ab-n15"
     later.mkdir()
     refused = run("adopt", str(earlier), AB_DIR=str(later))
@@ -584,16 +851,22 @@ def test_adopt_refuses_without_a_live_lease_to_take(remote, tmp_path):
 
 
 def disk_night(tmp_path, free_after_stop, **extra):
-    """A night whose first round stops short once ("3 not run yet") with `free_after_stop` GB left on a stand-in df,
-    which reads 500 GB once the next poll comes. Returns (result, recorded admin calls, D)."""
+    """A night whose first round stops short once ("3 not run yet").
+
+    A stand-in df says `free_after_stop` GB are left, and 500 GB once the next poll comes. Returns
+    (result, recorded admin calls, D).
+    """
     calls, state = tmp_path / "calls.txt", tmp_path / "state"
     state.mkdir()
     (state / "free").write_text(f"{free_after_stop}\n")
     fake = tmp_path / "python"
-    fake.write_text(f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n'
-                    f'case "$*" in "swe-bench report n4-default") '
-                    f'[ -e "{state}/resumed" ] || {{ [ -e "{state}/stopped" ] && echo "INCOMPLETE          3 not run yet"; }} ;;\n'
-                    f'  "swe-bench run "*n4-default\\ *) [ -e "{state}/stopped" ] && touch "{state}/resumed"; touch "{state}/stopped" ;; esac\n')
+    fake.write_text(
+        f'#!/bin/bash\nshift 2\necho "$*" >> "{calls}"\n'
+        f'case "$*" in "swe-bench report n4-default") '
+        f'[ -e "{state}/resumed" ] || {{ [ -e "{state}/stopped" ] && echo "INCOMPLETE          3 not run yet"; }} ;;\n'
+        f'  "swe-bench run "*n4-default\\ *) [ -e "{state}/stopped" ] && touch "{state}/resumed";'
+        f' touch "{state}/stopped" ;; esac\n'
+    )
     bindir = tmp_path / "bin"
     bindir.mkdir()
     (bindir / "df").write_text(f'#!/bin/bash\necho Avail\necho "$(cat "{state}/free")G"\n')
@@ -604,18 +877,38 @@ def disk_night(tmp_path, free_after_stop, **extra):
     task_list.write_text("acme__widget-1\n")
     folder = tmp_path / "night4"
     folder.mkdir()
-    env = {**os.environ, "WT": ROOT, "PY": str(fake), "LIST": str(task_list), "D": str(folder), "NIGHT": "4",
-           "PREFIX": "n4", "ARMS": "default tests-v2", "REFINE": "0", "PATH": f"{bindir}:{os.environ['PATH']}",
-           "DISK_POLL_S": "1", **extra}
-    result = subprocess.run(["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "WT": ROOT,
+        "PY": str(fake),
+        "LIST": str(task_list),
+        "D": str(folder),
+        "NIGHT": "4",
+        "PREFIX": "n4",
+        "ARMS": "default tests-v2",
+        "REFINE": "0",
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "DISK_POLL_S": "1",
+        **extra,
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60
+    )
     return result, calls.read_text().splitlines(), folder
 
 
 def test_a_round_stopped_for_disk_pauses_the_night_and_resumes_the_same_round(tmp_path):
     result, recorded, folder = disk_night(tmp_path, 90)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == ["n4-default", "n4-default", "n4-tests-v2"]
-    assert "paused: 90G free, the reserve is 100G" in result.stdout and "n4-default resumed: 500G free" in result.stdout
+    assert [r.split("--name ")[1].split()[0] for r in runs(recorded)] == [
+        "n4-default",
+        "n4-default",
+        "n4-tests-v2",
+    ]
+    assert (
+        "paused: 90G free, the reserve is 100G" in result.stdout
+        and "n4-default resumed: 500G free" in result.stdout
+    )
     assert not (folder / "failed").exists()
 
 
@@ -629,3 +922,147 @@ def test_a_disk_that_stays_short_fails_the_night_after_the_pause_bound(tmp_path)
     result, recorded, folder = disk_night(tmp_path, 90, DISK_PAUSE_MAX_S="0")
     assert result.returncode == 1 and (folder / "failed").exists()
     assert "the disk stayed short" in result.stdout and len(runs(recorded)) == 1
+
+
+def test_every_round_and_regrade_takes_the_image_chunk_and_a_round_its_shard(tmp_path):
+    status, recorded, _ = night(tmp_path, "default tests-v2")
+    assert status == 0
+    assert all(
+        "--eval --remove-images --image-chunk 25 " in r and "--shard" not in r
+        for r in runs(recorded)
+    )
+    sharded = tmp_path / "sharded"
+    sharded.mkdir()
+    status, recorded, _ = night(sharded, "default tests-v2", IMAGE_CHUNK="10", SHARD="2/3")
+    assert status == 0
+    assert all("--image-chunk 10 --shard 2/3 " in r for r in runs(recorded)), runs(recorded)
+    assert (
+        "swe-bench eval n4-tests-v2 --drop-test-hunks --remove-images --image-chunk 10" in recorded
+    )
+
+
+def test_start_needs_disk_for_one_chunk_of_the_largest_repository(tmp_path):
+    tasks = [f"django__django-{n}" for n in range(86)] + ["sympy__sympy-1"]
+    # 25 of django's 86 images at 3 GB, no reserve: 75 GB. 70 free is too little, 80 enough.
+    result, recorded, _, units, folder = start(
+        tmp_path, "default tests-v2", tasks=tasks, free_gb=70
+    )
+    assert result.returncode == 1 and runs(recorded) == [] and units == [] and not folder.exists()
+    assert (
+        "Tasks: 87; largest repository: 86, at most 25 of its images at once; disk needed about 75G, free 70G."
+        in result.stdout
+    )
+    (tmp_path / "enough").mkdir()
+    result, recorded, _, units, folder = start(
+        tmp_path / "enough", "default tests-v2", tasks=tasks, free_gb=80
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "IMAGE_CHUNK=25" in units[0] and "SHARD=" in units[0]
+    # The whole repository at once (IMAGE_CHUNK=0) needs 258 GB.
+    (tmp_path / "whole").mkdir()
+    result, _, _, _, _ = start(
+        tmp_path / "whole", "default tests-v2", tasks=tasks, free_gb=200, IMAGE_CHUNK="0"
+    )
+    assert (
+        result.returncode == 1
+        and "at most 86 of its images at once; disk needed about 258G" in result.stdout
+    )
+
+
+def test_start_passes_the_shard_to_the_unit_but_never_to_a_smoke(tmp_path):
+    result, recorded, _, units, _ = start(tmp_path, "default tests-v2", free_gb=500, SHARD="1/3")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(runs(recorded)) == 2 and not any("--shard" in r for r in runs(recorded))
+    assert "SHARD=1/3" in units[0] and "(this machine: shard 1/3)" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"SHARD": "3"}, {"SHARD": "0/3"}, {"SHARD": "4/3"}, {"SHARD": "a/b"}, {"IMAGE_CHUNK": "x"}],
+)
+def test_start_refuses_a_malformed_shard_or_chunk_before_anything_runs(tmp_path, extra):
+    result, recorded, _, units, folder = start(tmp_path, "default tests-v2", free_gb=500, **extra)
+    assert result.returncode == 2 and runs(recorded) == [] and units == [] and not folder.exists()
+
+
+PINNED_REF = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_a_pinned_series_builds_ling_once_records_it_and_never_rebuilds(tmp_path):
+    import hashlib
+
+    first = tmp_path / "first"
+    first.mkdir()
+    result, recorded, _, units, _ = start(
+        first, "default tests-v2", free_gb=500, REF=PINNED_REF, PINS=str(tmp_path / "pins")
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    built = hashlib.sha256((first / "ling").read_bytes()).hexdigest()
+    record = tmp_path / "pins" / f"ling-{PINNED_REF}.sha256"
+    assert record.read_text().split()[0] == built and PINNED_REF in record.read_text()
+    assert recorded.count("codex build") == 1 and f"LING_PIN_SHA256={built}" in units[0]
+    # The pinned commit is here (git cat-file succeeds), so nothing is fetched.
+    assert not any(
+        line.startswith("-C") and " fetch " in f" {line} "
+        for line in (first / "git.txt").read_text().splitlines()
+    )
+    # The next night of the series: the same build, found, not rebuilt.
+    second = tmp_path / "second"
+    second.mkdir()
+    result, recorded, _, units, _ = start(
+        second, "default tests-v2", free_gb=500, REF=PINNED_REF, PINS=str(tmp_path / "pins")
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "codex build" not in recorded and f"LING_PIN_SHA256={built}" in units[0]
+    assert "no fetch past it, no rebuild" in result.stdout
+
+
+def test_a_pinned_series_refuses_a_ling_that_is_not_its_build(tmp_path):
+    pins = tmp_path / "pins"
+    pins.mkdir()
+    (pins / f"ling-{PINNED_REF}.sha256").write_text(
+        f"{'0' * 64}  /somewhere/ling  {PINNED_REF}  2026-10-20\n"
+    )
+    result, recorded, _, units, folder = start(
+        tmp_path, "default tests-v2", free_gb=500, REF=PINNED_REF, PINS=str(pins)
+    )
+    assert result.returncode == 1 and "is not the build pinned for" in result.stdout
+    assert (
+        "codex build" not in recorded
+        and runs(recorded) == []
+        and units == []
+        and not folder.exists()
+    )
+
+
+def test_an_unpinned_ref_neither_builds_nor_records(tmp_path):
+    result, recorded, _, units, _ = start(
+        tmp_path, "default tests-v2", free_gb=500, PINS=str(tmp_path / "pins")
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "codex build" not in recorded and not (tmp_path / "pins").exists()
+    assert "--setenv=LING_PIN_SHA256= " in units[0]
+    assert any(" fetch " in f" {line} " for line in (tmp_path / "git.txt").read_text().splitlines())
+
+
+def test_each_round_of_a_pinned_night_checks_the_build(tmp_path):
+    import hashlib
+
+    ling = tmp_path / "ling"
+    ling.write_bytes(b"the pinned build")
+    pin = hashlib.sha256(ling.read_bytes()).hexdigest()
+    status, recorded, folder = night(tmp_path, "default tests-v2", ling=ling, LING_PIN_SHA256=pin)
+    assert status == 0 and len(runs(recorded)) == 2 and (folder / "done").exists()
+    other = tmp_path / "other"
+    other.mkdir()
+    status, recorded, folder = night(other, "default tests-v2", ling=ling, LING_PIN_SHA256="f" * 64)
+    assert (
+        status == 1
+        and runs(recorded) == []
+        and "pinned ling check" in (folder / "failed").read_text()
+    )
+
+
+def test_a_model_server_arm_with_no_remote_machine_named_ends_the_night_before_its_round(tmp_path):
+    status, recorded, folder = night(tmp_path, "default+on-sglang default+on-engine", REMOTE="")
+    assert status == 1 and not runs(recorded) and (folder / "failed").exists()

@@ -1,4 +1,4 @@
-"""`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}`
+"""`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}`
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §3).
 
 The parser and the dispatch live here so the CLI controller only registers and calls them.
@@ -8,9 +8,11 @@ import argparse
 import json
 import shutil
 import time
-from typing import Any
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, Final
 
-from dreamference.swe_bench import swe_bench_settings
+from dreamference.swe_bench import swe_bench_settings, swe_bench_shards
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
@@ -21,6 +23,11 @@ from dreamference.swe_bench.swe_bench_report import SweBenchReport
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
+from dreamference.swe_bench.swe_bench_shard_merge import SweBenchShardMerge
+from dreamference.swe_bench.swe_bench_shards import SweBenchShards
+
+# The commands on one list split across machines (`dispatch_lists`): `shard` first, then `merge`.
+LIST_COMMANDS: Final[tuple[str, str]] = ("shard", "merge")
 
 
 class SweBenchCommand:
@@ -76,6 +83,93 @@ class SweBenchCommand:
             help="nonthinking: the model card's non-thinking sampling (temperature 0.7, top_p 0.8, "
             "top_k 20, presence_penalty 1.5), filled in by the model gate; default: the server's "
             "own (the checkpoint's thinking-mode values). Needs a gate started by this version",
+        )
+
+    @classmethod
+    def add_chunk_arguments(
+        cls, run: argparse.ArgumentParser, evaluate: argparse.ArgumentParser
+    ) -> None:
+        """Adds `--remove-images` and `--image-chunk` to `run` and `eval`, and `--shard` to `run`.
+
+        Args:
+            run: `swe-bench run`'s parser.
+            evaluate: `swe-bench eval`'s parser.
+        """
+        run.add_argument(
+            "--remove-images",
+            action="store_true",
+            help="With --eval: work one repository at a time, in chunks of at most --image-chunk instances, "
+            "and remove a chunk's images once it is graded",
+        )
+        evaluate.add_argument(
+            "--remove-images",
+            action="store_true",
+            help="Grade one repository at a time, in chunks of at most --image-chunk instances, and "
+            "remove the images this grading pulled once their chunk is graded",
+        )
+        run.add_argument(
+            "--image-chunk",
+            type=int,
+            default=None,
+            metavar="N",
+            help="With --eval --remove-images: the most instances of one repository whose images are on "
+            "disk at once (default [swe_bench] image_chunk, 25; 0: the whole repository)",
+        )
+        run.add_argument(
+            "--shard",
+            default=None,
+            metavar="I/K",
+            help="A new run covers only the I-th of K shards of the selected instances, balanced by "
+            "difficulty and repository and the same on every machine, so K machines share one list; "
+            "`swe-bench merge` puts the K runs back together",
+        )
+        evaluate.add_argument(
+            "--image-chunk",
+            type=int,
+            default=None,
+            metavar="N",
+            help="With --remove-images: the most instances of one repository graded at once "
+            "(default [swe_bench] image_chunk, 25; 0: the whole repository)",
+        )
+
+    @classmethod
+    def add_list_parsers(cls, add: Callable[..., argparse.ArgumentParser]) -> None:
+        """Adds `swe-bench shard` and `swe-bench merge`, the commands on a list split across machines.
+
+        Args:
+            add: The `swe-bench` subparsers' `add_parser`.
+        """
+        shard = add(
+            "shard", help="Split a task list into K balanced shards, written as lists of their own"
+        )
+        shard.add_argument("list", help="The task list, one instance id per line")
+        shard.add_argument("--shards", type=int, required=True, metavar="K", help="How many shards")
+        shard.add_argument(
+            "--out-dir",
+            default=None,
+            help="Where to write <list>-<I>of<K>.txt (default: beside the list)",
+        )
+        shard.add_argument(
+            "--dataset", default="verified", help="The dataset the ids are from (default verified)"
+        )
+        shard.add_argument(
+            "--balance-by",
+            action="append",
+            default=[],
+            metavar="OTHER",
+            help="Also spread the tasks of this other list evenly over the shards (repeatable), e.g. "
+            "the fresh ones; the shards are then not those run --shard makes, and say so",
+        )
+
+        merge = add(
+            "merge",
+            help="Put the runs of one list's shards together as one run, which report reads like any other",
+        )
+        merge.add_argument("name", help="The merged run's name")
+        merge.add_argument(
+            "runs",
+            nargs="+",
+            help="The shards' runs (copy a run made on another machine into this machine's runs directory first)",
         )
 
     @classmethod
@@ -159,11 +253,6 @@ class SweBenchCommand:
         )
         run.add_argument(
             "--eval", action="store_true", help="Grade the predictions when the agent phase ends"
-        )
-        run.add_argument(
-            "--remove-images",
-            action="store_true",
-            help="With --eval: work one repository at a time and remove its images once it is graded",
         )
         run.add_argument(
             "--code-index",
@@ -300,12 +389,8 @@ class SweBenchCommand:
             help="Grade the same predictions again with every test file left out of each patch, "
             "as a separate grading (eval-drop-test-hunks/); no agent runs",
         )
-        evaluate.add_argument(
-            "--remove-images",
-            action="store_true",
-            help="Grade one repository at a time and remove the images this grading pulled once "
-            "their repository is graded",
-        )
+
+        cls.add_chunk_arguments(run, evaluate)
 
         report = commands.add_parser(
             "report", help="Print the resolved rate and what it was measured with"
@@ -322,6 +407,8 @@ class SweBenchCommand:
         )
 
         commands.add_parser("status", help="Runs, their progress, images and disk")
+
+        cls.add_list_parsers(commands.add_parser)
 
         clean = commands.add_parser(
             "clean",
@@ -383,11 +470,18 @@ class SweBenchCommand:
                 loop_guard=args.loop_guard,
                 output_budget=args.output_budget,
                 sampling=args.sampling,
+                shard=args.shard,
+                image_chunk=args.image_chunk,
             )
         if command == "eval":
             return cls.evaluate(
-                args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images
+                args.run,
+                DROP_TEST_HUNKS if args.drop_test_hunks else None,
+                args.remove_images,
+                args.image_chunk,
             )
+        if command in LIST_COMMANDS:
+            return cls.dispatch_lists(args)
         if command == "report":
             return cls.report(
                 args.run, args.against, DROP_TEST_HUNKS if args.drop_test_hunks else None
@@ -396,8 +490,28 @@ class SweBenchCommand:
             return cls.status()
         if command == "clean":
             return cls.clean(args.run, args.images)
-        print("usage: ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}")
+        print("usage: ling-admin swe-bench {setup,smoke,run,eval,report,status,clean,shard,merge}")
         return 2
+
+    @classmethod
+    def dispatch_lists(cls, args: argparse.Namespace) -> int:
+        """Runs `swe-bench shard` or `swe-bench merge`.
+
+        Args:
+            args: The parsed command line, its `swe_bench_command` one of `LIST_COMMANDS`.
+
+        Returns:
+            int: The command's exit status.
+        """
+        if args.swe_bench_command == LIST_COMMANDS[0]:
+            return cls.shard(
+                Path(args.list),
+                args.shards,
+                Path(args.out_dir) if args.out_dir else None,
+                args.dataset,
+                [Path(other) for other in args.balance_by],
+            )
+        return SweBenchShardMerge.merge(args.name, args.runs)
 
     @classmethod
     def _ids(cls, text: str | None) -> list[str] | None:
@@ -582,19 +696,30 @@ class SweBenchCommand:
 
     @classmethod
     def evaluate(
-        cls, name: str | None, variant: str | None = None, remove_images: bool = False
+        cls,
+        name: str | None,
+        variant: str | None = None,
+        remove_images: bool = False,
+        image_chunk: int | None = None,
     ) -> int:
         """Grades a run's predictions that are not graded yet.
 
         Args:
             name: The run; None for the latest.
             variant: A grading series other than the plain one (`drop-test-hunks`), or None.
-            remove_images: Grade one repository at a time and remove the images the grading
-                pulled once their repository is graded.
+            remove_images: Grade one repository at a time, in chunks of at most `image_chunk`
+                instances, and remove the images the grading pulled once their chunk is graded.
+            image_chunk: The most instances of one repository graded at once; None takes
+                `[swe_bench] image_chunk`, 0 the whole repository.
 
         Returns:
             int: 0 when the harness ran.
         """
+        if image_chunk is not None and image_chunk < 0:
+            print(  # noqa: T201 — CLI output
+                f"❌ --image-chunk {image_chunk}: a number of instances, 0 for a whole repository."
+            )
+            return 1
         store = cls._store(name)
         if store is None:
             return 1
@@ -610,8 +735,9 @@ class SweBenchCommand:
             )
             return 1
         if remove_images:
-            # One repository at a time, as `run --eval --remove-images` does: an image this grading
-            # pulled goes once its repository is graded, so the disk holds one repository's.
+            # One repository at a time, in chunks, as `run --eval --remove-images` does: an image this
+            # grading pulled goes once its chunk is graded, so the disk holds one chunk's.
+            chunk = settings.image_chunk if image_chunk is None else image_chunk
             manifest = store.manifest() or {}
             rows = {
                 row["instance_id"]: row
@@ -623,7 +749,7 @@ class SweBenchCommand:
                 if prediction["instance_id"] in rows
             ]
             results = {}
-            for group in SweBenchRunner.by_repository(ids, rows).values():
+            for group in SweBenchRunner.image_chunks(ids, rows, chunk):
                 images = [
                     manifest["images"][i]["image"] for i in group if i in manifest.get("images", {})
                 ]
@@ -647,6 +773,72 @@ class SweBenchCommand:
             f"✅ {store.name}: {len(results)} graded, {resolved} resolved. "
             f"`ling-admin swe-bench report {store.name}` prints the report."
         )
+        return 0
+
+    @classmethod
+    def shard(
+        cls,
+        source: Path,
+        count: int,
+        out_dir: Path | None = None,
+        dataset: str = "verified",
+        balance_by: list[Path] | None = None,
+    ) -> int:
+        """Writes a task list's shards as lists of their own (`SweBenchShards.write`).
+
+        They are the same tasks `run --subset <list> --shard I/K` covers on each machine, unless
+        `balance_by` names lists whose tasks are spread evenly too.
+
+        Args:
+            source: The task list.
+            count: How many shards.
+            out_dir: Where to write them; None for the list's own folder.
+            dataset: The dataset the ids are from, for their repositories.
+            balance_by: Other lists whose tasks each shard holds as evenly as the split can.
+
+        Returns:
+            int: 0 when the shards were written.
+        """
+        if SweBenchShards.parse(f"1/{count}") is None:
+            print(f"❌ --shards {count}: from 1 to {swe_bench_shards.MAX_SHARDS}.")  # noqa: T201 — CLI output
+            return 1
+
+        def read(path: Path) -> list[str] | None:
+            try:
+                return [
+                    line.strip()
+                    for line in path.read_text().splitlines()
+                    if line.strip() and not line.startswith("#")
+                ]
+            except OSError as error:
+                print(f"❌ {path}: {error}")  # noqa: T201 — CLI output
+                return None
+
+        ids = read(source)
+        others = {path.name: read(path) for path in balance_by or []}
+        if ids is None or any(other is None for other in others.values()):
+            return 1
+        empty = [name for name, other in others.items() if not set(other or []) & set(ids)]
+        if empty:
+            print(f"❌ --balance-by {', '.join(empty)}: no task of {source.name} is in it.")  # noqa: T201 — CLI output
+            return 1
+        rows = {row["instance_id"]: row for row in SweBenchHarness.rows(dataset)}
+        unknown = sorted(set(ids) - set(rows))
+        if not rows or unknown:
+            print(  # noqa: T201 — CLI output
+                f"❌ Not in {dataset}: "
+                f"{', '.join(unknown[:5]) or 'the dataset is not downloaded (swe-bench setup)'}."
+            )
+            return 1
+        repos = {instance_id: str(rows[instance_id].get("repo", "")) for instance_id in ids}
+        balanced = {name: other for name, other in others.items() if other is not None}
+        for path in SweBenchShards.write(
+            source, ids, repos, count, out_dir or source.parent, balanced or None
+        ):
+            shard = [
+                line for line in path.read_text().splitlines() if line and not line.startswith("#")
+            ]
+            print(f"✅ {path}: {len(shard)} tasks, {SweBenchShards.mix(shard, repos)}")  # noqa: T201 — CLI output
         return 0
 
     @classmethod
