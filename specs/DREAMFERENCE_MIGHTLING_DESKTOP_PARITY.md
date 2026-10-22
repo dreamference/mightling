@@ -394,6 +394,7 @@ The vendor's Linux bindings (read from its commands reference, 143 rows) equal i
 |---|---|---|
 | General | Command menu | Ctrl+Shift+P or Ctrl+K |
 | | Settings; keyboard shortcuts | Ctrl+, ; Ctrl+/ |
+| | New window (Mightling's, 2026-10-22, DESKTOP_ELECTRON §13) | Ctrl+Shift+N |
 | | Open folder | Ctrl+O |
 | | Back / forward | Ctrl+[ / Ctrl+] (and mouse back / forward) |
 | | Font size + / − / reset | Ctrl+= / Ctrl+- / Ctrl+0 |
