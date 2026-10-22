@@ -1,6 +1,6 @@
 # Mightling Sync: one set of threads on every device, served by the user's own node
 
-**Status:** proposed (2026-10-22), nothing built. The facts about Codex's storage in §2 were read from the pinned source (`rust-v0.158.0`, `codex-rs/rollout/`, `codex-rs/state/`) and from a node's `~/.mightling` on 2026-10-22; anything not checked is marked **unverified** and is a Phase 0 measurement (§12).
+**Status:** proposed (2026-10-22), nothing built; **the owner's answers to §0.1 given the same day** and folded in (scope matches Codex's, §1.1; every paired device has full control by default). The facts about Codex's storage in §2 were read from the pinned source (`rust-v0.158.0`, `codex-rs/rollout/`, `codex-rs/state/`) and from a node's `~/.mightling` on 2026-10-22; anything not checked is marked **unverified** and is a Phase 0 measurement (§12).
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 
@@ -19,23 +19,24 @@
 ## 0. Decisions, stated first
 
 1. **The node is the sync hub, inside `ling web`.** The primary node's `ling web` gains a sync service under `/api/sync/`. `ling web` already runs there, already pairs devices with a one-time code and a device credential, already serves the phone's browser and the Telegram Mini App, and already enforces `policy.json`. A second server process would duplicate all of that. With several nodes, one is the hub (the primary, `ling node list`); the others are devices like a laptop.
-2. **Rollouts are the source of truth; databases never travel.** A thread is its rollout file, Codex's append-only JSONL under `sessions/`. The SQLite files in `~/.mightling` (`state_5`, `thread_history_1`, `logs_2`, `goals_1`, `queue_1`, `memories_1`) are either projections that Codex rebuilds from rollouts or machine-local state; copying a live WAL database between machines corrupts it. Sync moves rollouts and a few small append-only files (§4), and each device's Codex projects them as it does its own.
-3. **One writer per thread: the device that holds the code.** A turn runs where the thread's working tree is, because the agent's commands, sandbox and git repository are there (NODE §3). Every other device sees the thread live and may send a message, answer an approval or stop the turn. The hub forwards these to the owning device, whose own `policy.json` enforcement vets them as if typed there. Moving a thread to another device is an explicit **hand-over** (§6.4), never automatic.
-4. **Off until the user turns it on, per device.** `ling sync enable` on the node and on each device; nothing changes for a user who never runs it: no port, no unit, no file, the egress audit's verdict as today. `ling sync disable` stops it and keeps the local data.
-5. **Only the user's own machines.** Sync runs on the trusted LAN or over the remote-access overlay, to the node and nowhere else. The rented box of REMOTE_ACCESS relays ciphertext and stores nothing, as now. No vendor cloud, no account, no telemetry.
-6. **Phone notifications go through what the user already set up.** A finished turn, a waiting approval or a Night Shift result reaches the phone through the bridge the user has on (Signal Note to Self, Telegram, Matrix), as a short notice with a link. Web Push is offered only as an explicit opt-in with a content-free payload (§7.4), because even an encrypted push passes the browser vendor's push service.
-7. **The phone gets a real app surface without an app store.** `ling web`'s mobile layout becomes an installable web app (a PWA) over the overlay, where the node's CA gives it a secure context. On the bare LAN, without TLS, it stays the text-only page decided on 2026-10-07 (ASK §4.4). The Telegram Mini App stays as built.
+2. **The scope is Codex's (owner, 2026-10-22).** Interactive threads, reachable live from every paired device, while files, credentials, settings, skills and memories stay on the machine where they live, as Codex does across its surfaces (§1.1). Anything Codex only offers through a vendor account or cloud (its cloud tasks, sign-in) has no counterpart here beyond what the node already runs.
+3. **Rollouts are the source of truth; databases never travel.** A thread is its rollout file, Codex's append-only JSONL under `sessions/`. The SQLite files in `~/.mightling` (`state_5`, `thread_history_1`, `logs_2`, `goals_1`, `queue_1`, `memories_1`) are either projections that Codex rebuilds from rollouts or machine-local state; copying a live WAL database between machines corrupts it. Sync moves rollouts and a few small append-only files (§4) to the hub, which serves them to every paired device; copying them into another computer's own `~/.mightling` is an opt-in beyond Codex (`[sync] replicate`, §4).
+4. **One writer per thread: the device that holds the code.** A turn runs where the thread's working tree is, because the agent's commands, sandbox and git repository are there (NODE §3). Every other device sees the thread live and, by default, may send a message, answer an approval, stop the turn, change the model or start a new thread on that device (§6.3). The hub forwards these to the owning device, whose own `policy.json` enforcement vets them as if typed there. Moving a thread to another device is an explicit **hand-over** (§6.4), never automatic.
+5. **Off until the user turns it on, per device.** `ling sync enable` on the node and on each device; nothing changes for a user who never runs it: no port, no unit, no file, the egress audit's verdict as today. `ling sync disable` stops it and keeps the local data.
+6. **Only the user's own machines.** Sync runs on the trusted LAN or over the remote-access overlay, to the node and nowhere else. The rented box of REMOTE_ACCESS relays ciphertext and stores nothing, as now. No vendor cloud, no account, no telemetry.
+7. **Phone notifications go through what the user already set up.** A finished turn, a waiting approval or a Night Shift result reaches the phone through the bridge the user has on (Signal Note to Self, Telegram, Matrix), as a short notice with a link. Web Push is offered only as an explicit opt-in with a content-free payload (§7.4), because even an encrypted push passes the browser vendor's push service.
+8. **The phone gets a real app surface without an app store.** `ling web`'s mobile layout becomes an installable web app (a PWA) over the overlay, where the node's CA gives it a secure context. On the bare LAN, without TLS, it stays the text-only page decided on 2026-10-07 (ASK §4.4). The Telegram Mini App stays as built.
 
-### 0.1 For the owner to confirm
+### 0.1 The owner's answers (2026-10-22)
 
-| # | Question | Proposed default |
+| # | Question | Answer |
 |---|---|---|
-| O1 | Sync inside `ling web` (decision 1), or a separate `ling sync serve` process on the node? | Inside `ling web` |
-| O2 | Do `ling exec` sessions sync? They are often scripts, and SWE-bench and Night Shift use their own homes anyway. | No: interactive threads only (TUI, app, web, bridges); `[sync] exec = true` turns them on |
-| O3 | Codex's memories (`memories_1.sqlite`) and the user's skills and custom prompts: sync them? | Not in the first phases; skills and prompts in Phase 4 as files, memories never until Codex has an export |
-| O4 | Pairing scopes: may a newly paired phone control turns, or only watch? | The pairing screen asks; "watch" is the default for phones, "watch and control" for computers |
-| O5 | Hand-over with code that is not pushed: carry a git bundle of the thread's branch and its uncommitted diff through the node? | Yes, Phase 3, opt-in per hand-over, refused at `/airgapped on` on either end |
-| O6 | Web Push at all (§7.4)? | Built, off by default |
+| O1 | Sync inside `ling web` (decision 1), or a separate `ling sync serve` process on the node? | **Inside `ling web`**, as proposed |
+| O2 | Which threads sync? | **Interactive threads (TUI, app, web, bridges), and otherwise what Codex does** (§1.1): every thread reachable live from every paired device; `ling exec` sessions are not Codex threads a user browses and stay out (`[sync] exec = true` turns them on); copying transcripts into other computers' own stores is opt-in (`[sync] replicate`) |
+| O3 | Codex's memories, the user's skills and custom prompts, settings: sync them? | **Follows from O2: no.** Codex keeps them per machine (§1.1), so they stay on each device |
+| O4 | Pairing scopes: may a paired phone control turns, or only watch? | **Every paired device, phones included, gets full control by default** (send, approve, stop, change the model, start a thread); changeable per device (`ling web devices --scope <device> watch`) |
+| O5 | Hand-over with code that is not pushed: carry a git bundle through the node? | **Opt-in**, per hand-over, as proposed; refused at `/airgapped on` on either end |
+| O6 | Web Push (§7.4)? | **Opt-in**, built and off by default, as proposed |
 
 ---
 
@@ -49,6 +50,20 @@ The upstream vendor's desktop app, its CLI and its web and mobile surfaces share
 - **A phone surface** with notifications.
 
 Mightling can meet all four without a cloud, because the user's node is always on and is already where the model runs.
+
+### 1.1 What Codex shares, and the default scope that follows (read 2026-10-22, public material only)
+
+| Surface or state | What Codex does | Mightling's default |
+|---|---|---|
+| **CLI, IDE extension and desktop app on one machine** | Share one home (`~/.codex`): `config.toml`, sessions, skills, rules and memories. The vendor's docs: "The CLI and IDE extension share the same config" ([Config basics](https://learn.chatgpt.com/docs/config-file/config-basic)) | Already the same: `ling`, `ling web` and the app share `~/.mightling` (DESKTOP §6.9) |
+| **Local threads on a second computer** | Not shared. Threads and projects stay tied to the machine they ran on; cross-device sync of local chats is an open feature request ([openai/codex#21803](https://github.com/openai/codex/issues/21803), [#14067](https://github.com/openai/codex/discussions/14067)) | Reachable live from the other computer through the hub, not copied into its store; `[sync] replicate = true` copies them (beyond Codex) |
+| **The phone (preview since 2026-05-14)** | Connects to the user's machines where Codex runs and "loads the live state from that environment": all threads, approvals, plugins and project context; review output, approve commands, change models, start new threads. "Your files, credentials, permissions, and local setup stay on the machine where Codex is operating", with updates in real time through a vendor relay that "keeps active session state and context synced anywhere you're signed in" ([Work with Codex from anywhere](https://openai.com/index/work-with-codex-from-anywhere/)) | The same contract through the user's own node: the hub is the relay, holds the threads' transcripts, and forwards control to the machine that owns each thread (§6). No vendor account |
+| **Remote SSH environments** | The desktop app runs projects and threads inside remote hosts from the user's SSH configuration, reachable from the phone through the same relay (same page) | Out of scope here; nodes and jobs over SSH are NODE §13 |
+| **Cloud tasks** | Run on the vendor's computers; started and continued from desktop, web and mobile ([Using Codex Cloud](https://help.openai.com/en/articles/20001545-using-codex-cloud)) | No cloud. The counterpart is Night Shift on the user's node, whose results the hub lists on every device (§4) |
+| **Settings, skills, memories** | Per machine, in `~/.codex`; nothing found in the vendor's docs that syncs them between computers | Per device, never synced (O3) |
+| **Sign-in** | A ChatGPT account on every surface | Device pairing with the node (ASK §4.3); no account |
+
+The default scope is therefore: interactive threads, live and controllable from every paired device, with the transcripts on the hub so that a device can read them while their owner is off; settings, skills, memories and code stay where they are.
 
 ---
 
@@ -97,12 +112,14 @@ Mightling can meet all four without a cloud, because the user's node is always o
 
 | Item | Syncs | How |
 |---|---|---|
-| Rollouts of interactive threads (TUI, desktop Work and Ask, `ling web`, the phone bridges' threads) | Yes | Append-only by offset (§5.2) |
+| Rollouts of interactive threads (TUI, desktop Work and Ask, `ling web`, the phone bridges' threads) | Yes, to the hub, served to every paired device | Append-only by offset (§5.2) |
+| The same rollouts copied into another computer's own `~/.mightling` | No by default: Codex does not (§1.1) | `[sync] replicate = true` on that computer (§5.2) |
 | Archive state | Yes | A metadata event; each device moves the file between `sessions/` and `archived_sessions/` itself |
 | Thread names | Yes | `session_index.jsonl` entries, append-only, with the device and a hybrid logical clock |
-| Desktop pins, projects (path, display name), unread marks | Yes | Small documents, last writer wins per field (§8) |
+| Desktop pins, unread marks, the project list (path, display name, per device) | Yes, as the thread list's metadata | Small documents, last writer wins per field (§8) |
+| Settings (`config.toml`), skills, rules, custom prompts, memories | **No**: per machine, as in Codex (O3, §1.1) | |
 | Night Shift results and inbox | Already on the node; the hub indexes them so every device lists them | Read from the node's files |
-| `ling exec` rollouts | No by default (O2) | `[sync] exec = true` |
+| `ling exec` rollouts | No by default (O2): not threads a user browses | `[sync] exec = true` |
 | Ask scratch folders (`ask/<id>/`), attachments over 20 MB | No | A synced thread shows "attachment kept on <device>" |
 | The SQLite databases | **Never** | Each device projects its own from rollouts (§2) |
 | `config.toml`, the model catalog, credentials, the web token, the Gmail and Telegram tokens, pairing keys | **Never** | Machine-local by design |
@@ -118,7 +135,7 @@ Mightling can meet all four without a cloud, because the user's node is always o
 ### 5.1 Identity
 
 - **Devices.** Each device has an id (the node id for nodes; a random 128-bit id for others) and a display name. Pairing (ASK §4.3, the same 8-digit code and QR code) gives a non-browser agent a device secret of 256 bits, stored at `~/.mightling/sync/device.toml` (0600). `ling web devices` lists sync agents beside browsers; `ling web revoke <device>` ends both.
-- **Scopes** (O4): `watch` (read threads, follow live) and `control` (send, approve, stop, hand over). Owner-device uploads need neither: a device may always publish its own threads.
+- **Scopes** (O4): `control` (read and follow threads; send, approve, stop, change the model, start a thread, hand over) is the default for **every** paired device, phones included. `watch` (read and follow only) is a per-device restriction: `ling web devices --scope <device> watch`, or Settings › Devices. Owner-device uploads need neither: a device may always publish its own threads.
 - **Threads** keep Codex's thread id (the UUID in the rollout's name). The hub records the **owner device** (the device whose rollout it is) and a **repository identity** for the working tree: the root commit's hash and the hash of the `origin` URL, never the path or the URL itself.
 
 ### 5.2 Rollouts: append-only by offset
@@ -126,7 +143,7 @@ Mightling can meet all four without a cloud, because the user's node is always o
 - **The hub's copy** of a rollout is its uncompressed bytes, kept in 1 MiB chunks, each with a SHA-256 and a chain hash over the chunks before it, so an offset plus its chain hash names a prefix exactly.
 - **Upload** from the owner: `PUT /api/sync/rollouts/<thread>?offset=<n>&prefix=<chain hash>` with the new bytes. The hub accepts only if `offset` equals its length and the prefix hash matches; otherwise it answers with its length and hash, and the agent resumes from there.
 - **Compression.** When Codex replaces a finished `.jsonl` by `.jsonl.zst`, the agent reads through the decompressed stream; the logical bytes, and so the offsets, are unchanged. A downloaded rollout is written as plain `.jsonl`, and the receiving Codex compresses it on its own schedule. (**Unverified:** that Codex's compression never changes content; Phase 0 checks it on real files.)
-- **Download** to other devices: `GET /api/sync/rollouts/<thread>?offset=<n>`. A new thread is written to `sessions/YYYY/MM/DD/<the owner's file name>` through a temporary file and a rename; growth is appended. The agent never writes a thread for which the local Codex holds a writer lock (`thread-writer-locks/`), and never a thread its own device owns.
+- **Reading** from other devices: `GET /api/sync/rollouts/<thread>?offset=<n>`. By default a device reads a thread it does not own from the hub on open, renders it, and writes nothing to its own `~/.mightling`, as Codex's phone reads the live state of the machine (§1.1). With `[sync] replicate = true` it also downloads: a new thread is written to `sessions/YYYY/MM/DD/<the owner's file name>` through a temporary file and a rename; growth is appended. The agent never writes a thread for which the local Codex holds a writer lock (`thread-writer-locks/`), and never a thread its own device owns.
 - **The manifest.** `GET /api/sync/manifest?since=<cursor>` lists every change after a cursor: rollout lengths, names, archive state, metadata, tombstones. The cursor is the hub's own sequence number, never a device clock.
 
 ### 5.3 Making Codex see a downloaded thread
@@ -151,11 +168,11 @@ Deleting a thread on any device with `control` writes a tombstone. Every device 
 
 ### 6.2 Following
 
-A device opens a thread owned elsewhere and subscribes to it on the hub. It renders with the same Work and Ask components, under a banner: "Running on the laptop · watching". The hub buffers the last 2,000 events of a running turn, so a phone that opens late catches up.
+A device opens a thread owned elsewhere and subscribes to it on the hub. It renders with the same Work and Ask components, under a banner: "Running on the laptop". The hub buffers the last 2,000 events of a running turn, so a phone that opens late catches up.
 
 ### 6.3 Answering
 
-- **The commands:** a device with `control` may send a message, answer an approval and stop the turn.
+- **The commands:** a device with `control` (the default, O4) may send a message, answer an approval, stop the turn and change the thread's model, and may start a new thread on an online device, in one of that device's projects, as Codex's phone does (§1.1).
 - **The route:** the hub forwards the command to the owner's agent, which calls its own app-server as if the user had acted there. The owner's enforcer applies `policy.json` to it, and a command it refuses is refused with the same message as locally.
 - **Approvals:** an approval answered remotely is shown on the owner's screen as "approved from the phone".
 - **When the owner is offline:** the banner says so, with when it was last seen.
@@ -225,7 +242,7 @@ A phone chat's thread is a node thread. With sync on, it is listed on the laptop
 ## 10. Storage, retention and limits
 
 - **Store:** `~/.mightling/sync/hub/` on the node. Its default cap is 20 GB, against 20 MB of real use today. Above the cap, rollouts of threads untouched for 180 days that are not pinned are dropped from the hub and marked "kept on <device>". The owner's own copy is never touched by the hub.
-- **Devices** keep what they downloaded until the thread is deleted. A small laptop can set `[sync] keep_days = 30`, after which older threads it doesn't own are dropped locally, listed, and fetched again on open.
+- **Devices with `replicate` on** keep what they downloaded until the thread is deleted. A small laptop can set `[sync] keep_days = 30`, after which older threads it doesn't own are dropped locally, listed, and fetched again on open.
 - **Back-pressure:** at most 4 uploads and 4 downloads at once per agent.
 - **Throttling:** live events are batched every 100 ms. A rollout line over 8 MB (a large tool output) is synced, but shown truncated on a phone.
 
@@ -254,7 +271,7 @@ The desktop app gets the same in Settings › Sync, and a "Running on the laptop
 | **1. History everywhere** | Hub store and routes, the sync agent, rollouts, names, archive state, tombstones, pairing scopes, `ling sync` commands, `audit egress --sync` | A thread started in the laptop's app appears in the node's `ling web` and the phone's browser within 5 s of its first item; deleting it anywhere deletes it everywhere; the audit passes |
 | **2. Live** | Live fan-out, following, remote send, approve and stop, the offline queue, the banner, notices through the bridges | From the phone, answer an approval raised by a desktop Work turn and see the turn continue; a TUI turn followed item by item |
 | **3. Hand-over** | Ownership transfer; the optional bundle (O5) | A desktop thread continued on the node in the same repository, the transcript one file; with `--with-code`, an unpushed branch arrives as `handover/<thread>` |
-| **4. Phone app and the rest** | The PWA over the overlay, Web Push (opt-in), pins, projects and unread marks, skills and prompts as files (O3) | The PWA installed on an Android phone and an iPhone over the overlay; a push notice with no content in its payload, verified on the wire |
+| **4. Phone app and the rest** | The PWA over the overlay, Web Push (opt-in), pins, projects and unread marks; `[sync] replicate` | The PWA installed on an Android phone and an iPhone over the overlay; a push notice with no content in its payload, verified on the wire |
 
 ---
 
@@ -265,7 +282,8 @@ The desktop app gets the same in Settings › Sync, and a "Running on the laptop
   - chain hashes stay stable across compression;
   - manifest cursors never skip, after restarts too;
   - tombstones outlive a 30-day absence;
-  - scopes: a `watch` device's control command is refused.
+  - scopes: a new pairing gets `control`; a device restricted to `watch` has its control commands refused.
+  - scope: settings, skills, memories and `ling exec` rollouts never reach the hub by default (asserted on the wire); without `replicate`, reading another device's thread writes nothing under `~/.mightling`.
 - **The agent:**
   - never writes a thread with a local writer lock, and never one its device owns;
   - writes through a temporary file and a rename;
