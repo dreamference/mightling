@@ -46,6 +46,8 @@ export interface BottomPanelProps {
   onClose: (id: string) => void;
   onEdit: () => void;
   onHide: () => void;
+  /** Into a window of its own, or (`docks`, in that window) back into the thread's (several windows); null where there are no windows. */
+  detach?: { docks: boolean; run: () => void } | null;
 }
 
 export function BottomPanel(props: BottomPanelProps) {
@@ -94,7 +96,12 @@ export function BottomPanel(props: BottomPanelProps) {
           <button key={action.name} className="link-button" title={action.script} onClick={() => props.onRun(action)}><Icon name={actionIcon(action.icon)} size={12} /> {action.name}</button>
         ))}
         {props.project ? <button className="link-button" onClick={props.onEdit}>Environment…</button> : null}
-        <button className="icon" aria-label="Hide the bottom panel" title={`Hide (${shortcutLabel("bottomPanel")})`} onClick={props.onHide}><Icon name="x" size={14} /></button>
+        {props.detach ? (
+          <button className="icon" aria-label={props.detach.docks ? "Dock the terminal" : "Terminal in its own window"} title={props.detach.docks ? "Back into the thread's window" : "Open the terminal in a window of its own"} onClick={props.detach.run}>
+            <Icon name={props.detach.docks ? "dock" : "externalLink"} size={14} />
+          </button>
+        ) : null}
+        {props.detach?.docks ? null : <button className="icon" aria-label="Hide the bottom panel" title={`Hide (${shortcutLabel("bottomPanel")})`} onClick={props.onHide}><Icon name="x" size={14} /></button>}
       </header>
       {props.problems.map((problem) => <div key={problem} className="notice">{problem}</div>)}
       <div className="panel-body">

@@ -43,6 +43,8 @@ export interface ReviewPaneProps {
   notice: (error: unknown) => void;
   /** Opens a changed file in a file tab of its own (Phase 3 item 1), at a line or the top. */
   onOpenFile: ((path: string, line: number | null) => void) | null;
+  /** Into a window of its own, or (`docks`, in that window) back into the thread's (several windows); null where there are no windows. */
+  detach?: { docks: boolean; run: () => void } | null;
 }
 
 interface Draft {
@@ -415,6 +417,11 @@ export function ReviewPane(props: ReviewPaneProps) {
         <span className="spacer" />
         <button className="icon" title={props.layout === "split" ? "Show the diff in one column" : "Show the old and the new side by side"} aria-label="Switch the view" onClick={() => props.setLayout(props.layout === "split" ? "unified" : "split")}>{props.layout === "split" ? "One column" : "Side by side"}</button>
         <button className="icon" title="Read the repository again" aria-label="Refresh" onClick={() => void load()}><Icon name="undo" size={14} /></button>
+        {props.detach ? (
+          <button className="icon" aria-label={props.detach.docks ? "Dock the diff" : "Diff in its own window"} title={props.detach.docks ? "Back into the thread's window" : "Open the diff in a window of its own"} onClick={props.detach.run}>
+            <Icon name={props.detach.docks ? "dock" : "externalLink"} size={14} />
+          </button>
+        ) : null}
       </header>
       <nav className="review-scopes" aria-label="Scope">
         {SCOPES.filter((entry) => windowGit || entry.id === "turn").map((entry) => (

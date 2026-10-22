@@ -164,7 +164,7 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 
 | Codex app | Mechanism | Mightling | Phase |
 |---|---|---|---|
-| One window; three surfaces: Chat, Work, Codex (Alt+1/2/3 on Windows and Linux) | window | **Mightling's:** two views, Ask and Work, **Built**; since item 2 (2026-10-16) Alt+1 / Alt+2 switch them, handled by the page (the menu shows the keys without registering them), so Ctrl+1–9 are free for threads | 2 |
+| One window; three surfaces: Chat, Work, Codex (Alt+1/2/3 on Windows and Linux) | window | **Mightling's:** two views, Ask and Work, **Built**; since item 2 (2026-10-16) Alt+1 / Alt+2 switch them, handled by the page (the menu shows the keys without registering them), so Ctrl+1–9 are free for threads. **Several windows since 2026-10-22** (the owner's decision, DESKTOP_ELECTRON §13): File › New Window (Ctrl/Cmd+Shift+N), each window its own thread or project on the one app-server | 2 |
 | Sidebar: projects with pinned ones on top, Recents, New chat, Scheduled, Plugins (pinnable), Code Review, Search chats; toggle Ctrl+B | window; `project/list`, `thread/list`, `threadSection/*` | **Built** (2026-10-16, items 2 and 3; Scheduled, item 12, merged 2026-10-17, 84d52b3; Plugins, item 11, merged 2026-10-17, f0477c6, and 2026-10-18, 1d9eb48): pinned threads first, then Recent (folding), the user's sections, then projects with pinned projects on top; rename, search, archive; Ctrl+B. Sections are kept in the window's preferences until `threadSection/*` is in `policy.json` | 2 |
 | Pin a project or a chat | `thread/metadata/update` (pin flag), window prefs for projects | **Built** (2026-10-16): in the window's preferences, since the protocol has no pin flag (`thread/metadata/update` carries none); Ctrl+Alt+P; Ctrl+Z unpins | 2 |
 | Mark chat unread; unread indicators; next chat needing attention (Ctrl+Alt+A); clear all (Shift+Esc) | window state over `thread/status/changed`, `item/*/requestApproval` | **Built** (2026-10-16): a turn that ends while its thread is not in front (or the window is not focused) leaves it unread; a mark for a waiting approval or question; Ctrl+Shift+U, Ctrl+Alt+A, Shift+Esc | 2 |
@@ -176,7 +176,7 @@ Status words: **Built** (the UI exists in the app today), **Allowed** (the metho
 | Font size: increase / decrease / reset (Ctrl+= / Ctrl+- / Ctrl+0) | window (`webContents.setZoomLevel` or a CSS variable) | **Built** (2026-10-16): CSS zoom on the page in steps, kept in the window's preferences, also a slider in Settings › General | 2 |
 | Undo / redo the last app action (archive, rename, pin…) | window | **Built** (2026-10-16): archive (undone by `thread/unarchive`) and rename; Ctrl+Z belongs to a text field when one has focus; pin joins with item 3 | 2 |
 | Full screen (F11), quit (Ctrl+Q), close tab or window (Ctrl+W) | window | **Built** (2026-10-16): F11 and Ctrl+Q from the page's keymap; Ctrl+W closes the frontmost surface (the review pane, then the bottom panel) and never the window, Ctrl+Shift+T reopens it, Ctrl+Alt+W closes both; tabs proper come with item 9 | 2 |
-| Pop-out: a chat in its own window, **Always on top** | window | **Built** (2026-10-16): the header's pop-out and the row menu open the thread in a second window on the same app-server (the main process tags each window's request ids and answers a later window's `initialize` itself, `windows.ts`), with **Always on top** | 2 |
+| Pop-out: a chat in its own window, **Always on top** | window | **Built** (2026-10-16): the header's pop-out and the row menu open the thread in a second window on the same app-server (the main process tags each window's request ids and answers a later window's `initialize` itself, `windows.ts`), with **Always on top**; since 2026-10-22 the pop-out takes the thread's composer with it, and any other window showing the thread mirrors it read-only (DESKTOP_ELECTRON §13); the terminal and the diff detach into windows of their own the same way | 2 |
 | Quick chat (Ctrl+Alt+N): an ordinary chat of the vendor's chat surface beside Codex | the vendor's Chat surface | **Built** (2026-10-16), **Mightling's:** Ask is Quick chat; Ctrl+Alt+N opens a new question | 2 |
 | Side chat (Ctrl+Alt+S): a status recap without interrupting the main chat | a second thread with the main thread's context | **Built** (2026-10-16): `thread/fork`, then a turn asking for a short recap with nothing changed, opened in a pop-out (in a browser, selected) | 2 |
 | Standalone chat (Ctrl+Alt+O): a chat with no project | `thread/start` with `cwd` = home | **Built** (2026-10-16): a new thread in the home folder | 2 |
@@ -394,6 +394,7 @@ The vendor's Linux bindings (read from its commands reference, 143 rows) equal i
 |---|---|---|
 | General | Command menu | Ctrl+Shift+P or Ctrl+K |
 | | Settings; keyboard shortcuts | Ctrl+, ; Ctrl+/ |
+| | New window (Mightling's, 2026-10-22, DESKTOP_ELECTRON §13) | Ctrl+Shift+N |
 | | Open folder | Ctrl+O |
 | | Back / forward | Ctrl+[ / Ctrl+] (and mouse back / forward) |
 | | Font size + / − / reset | Ctrl+= / Ctrl+- / Ctrl+0 |
@@ -604,7 +605,7 @@ The rows of §9.3, as items numbered on from Phase 3, in order of user impact. E
 33. **Dictation.** A dictionary (names, paths, symbols) passed to the speech-to-text sidecar as its prompt; Ctrl+Shift+V starts and stops dictation.
 34. **Pets and Night Shift status.** The pet keeps its place; its menu lists threads that need you; a Blocked state for a thread whose approval cannot be asked.
 35. **Deep links.** `ling://threads/new?prompt&path`, `ling://new?originUrl` (the open workspace whose git remote matches), `ling://settings/<page>`, `ling://automations`, `ling://plugins/<id>` opening that plugin; a `path` that is not an absolute existing folder is ignored.
-36. **Menu and tray.** File: New thread, Open folder, Settings; Window: the pop-outs; the tray shows how many threads run and wait.
+36. **Menu and tray.** File: New thread, Open folder, Settings; Window: the pop-outs; the tray shows how many threads run and wait. (2026-10-22: File › New Window and the Window menu's Terminal and Diff in Their Own Windows are built, DESKTOP_ELECTRON §13.)
 37. **Subagent marks.** One colour and glyph per subagent, from its id, in the panel, the stream and the sidebar.
 38. **Terminal tabs.** New tab › Terminal in the tab area; Settings says where terminal tabs open.
 39. **Preview and files.** Comments on an area and several before sending; address-bar suggestions from the tab's own history (no web search); CSV as a table; **Open in the preview tab** on an HTML artifact.
@@ -745,6 +746,7 @@ Cloud or account features left out, as in §2.21: Work Cloud sync and the Local/
 9. **Smaller ones:** the worktree keep-count across all repositories rather than per repository (the vendor's count); office previews through an installed converter; `tectonic` (§7 question 4); Import's automatic updates (writes into `~/.mightling` unasked); a curated list of recommended MCP servers; mirroring the vendor's site annotation API (its namespace is the vendor's); saving "always allow this command prefix" and network amendments from the approval card.
 10. **Observation.** Installing the Linux preview on the MSI desktop to look at its pre-sign-in screens only (it adds the vendor's package repository); this study did not.
 11. ~~**The 2026-10-03 bundle reading**~~ **Decided 2026-10-21 (the owner): removed** from §1, §8, DESKTOP §1 and §4.6 and its sources, and DESKTOP_ELECTRON §2; a history rewrite later takes it out of the history.
+12. ~~**One window**~~ **Decided 2026-10-22 (the owner): several windows, with detachable terminal and diff panes; built** (branch `desktop/multi-window`, DESKTOP_ELECTRON §13). Replaces the one-window rule of 2026-10-09 (ASK §18.6): every window on the one app-server, the channel routed per window and vetted as before, one composer per thread enforced in the main process, the single-instance lock kept, window positions restored.
 
 [agent-approvals-security]: https://learn.chatgpt.com/docs/agent-approvals-security
 [artifacts-viewer]: https://learn.chatgpt.com/docs/artifacts-viewer

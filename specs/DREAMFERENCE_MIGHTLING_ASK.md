@@ -505,6 +505,8 @@ No live service was touched: no model server, no installed `ling`, a scratch `HO
 
 ### 18.6 One window, one app-server in the app (branch `desktop/one-app-server`, 2026-10-09)
 
+> **Superseded in part (2026-10-22):** one app-server stands; one window does not. The app has several windows on that app-server, routed per window and vetted as before, with one composer per thread ([DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) §13, the owner's decision).
+
 **The decision (the user's, 2026-10-09).** The menu's Ask no longer opens a window of its own on `ling web`: it brings the app window forward on Ask. While the app runs, the app itself starts exactly one app-server on `~/.mightling`, the app window's own over stdio (§18.1). This settles §2.1 for the desktop app the first way §17 named, the policy in the main process; `ling web` keeps its own app-server on its socket, for browsers and phones, unchanged.
 
 **What changed in the app** (`desktop/electron/`):
