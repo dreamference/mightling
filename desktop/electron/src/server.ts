@@ -159,8 +159,10 @@ export class AppServer {
     // composed text is stdout, whole.
     const { LOG_FORMAT: _format, RUST_LOG: _level, ...composeEnv } = launch.env;
     const prompt = name ? { name, text: await composePrompt(launch.ling, name, root, composeEnv) } : null;
-    // The configured air-gap level, for what it decides: installs, imports, thread openers.
-    const on = levelMatters(message) ? (await airgapped(launch.ling, null)).level === "on" : false;
+    // The configured air-gap level, for what it decides: installs, imports, thread openers. A
+    // `ling airgapped` that did not answer counts as on: refusing an install is the safe side.
+    const level = levelMatters(message) ? await airgapped(launch.ling, null) : null;
+    const on = level !== null && (level.level === "on" || level.source.startsWith("unknown"));
     const prompts = new MessagePrompts(root, prompt, on);
     const vetted = vetOutgoing(message, this.pending, prompts);
     const child = this.child;
