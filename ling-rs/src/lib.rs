@@ -490,8 +490,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     }
     // `ling plugin add` and `marketplace add|upgrade` fetch with git outside the sandbox: refused
     // at a configured `on` (plugins.rs).
+    // Codex's own subcommand, not the launcher's: it runs on in Codex unless refused here.
     if let Some(index) = subcommand
-        && user_args[index] == "plugin"
+        && user_args[index].as_str() == "plugin"
         && std::env::var_os(UPSTREAM_TESTS_ENV).is_none()
     {
         let configured = airgapped::resolve(None);

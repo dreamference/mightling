@@ -58,7 +58,7 @@ pub fn install_refusal(rest: &[String], level: Level, source: &str) -> Option<St
         return None;
     }
     Some(format!(
-        "Plugins not changed: airgapped is on ({source}). Installing a plugin or adding or upgrading a marketplace fetches it with git from outside the sandbox, which is what takes the network away at on.\nTo install one: ling airgapped default off, then run this again."
+        "Plugins not changed: airgapped is on ({source}). Installing a plugin or adding or upgrading a marketplace fetches it with git from outside the sandbox, which is what takes the network away at on.\nTo install one, turn the air gap off first (ling airgapped shows where on comes from), then run this again."
     ))
 }
 
@@ -79,7 +79,7 @@ pub fn with_level(args: Vec<OsString>, user_args: &[String], level: Level) -> Re
         return Ok(args);
     }
     if enabled_by_user(user_args) {
-        return Err("Plugins are off while airgapped is on: a plugin's MCP servers run outside the sandbox, with the network. Drop the plugins setting, or run ling airgapped default off first.".to_string());
+        return Err("Plugins are off while airgapped is on: a plugin's MCP servers run outside the sandbox, with the network. Drop the plugins setting, or turn the air gap off first (ling airgapped shows where on comes from).".to_string());
     }
     let mut args = args.into_iter();
     let mut out: Vec<OsString> = args.next().into_iter().collect();
@@ -109,7 +109,7 @@ mod tests {
             let rest = strings(form);
             let reason = install_refusal(&rest, Level::On, "DREAMFERENCE_MIGHTLING_AIRGAPPED").unwrap_or_else(|| panic!("{form:?}"));
             assert!(reason.starts_with("Plugins not changed: airgapped is on (DREAMFERENCE_MIGHTLING_AIRGAPPED)."), "{reason}");
-            assert!(reason.contains("ling airgapped default off"));
+            assert!(reason.contains("turn the air gap off first"));
             assert_eq!(install_refusal(&rest, Level::Off, "default"), None, "{form:?}");
         }
     }
