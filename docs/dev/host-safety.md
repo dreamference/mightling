@@ -35,3 +35,5 @@ The fix needs root: `ling-admin host setup` installs `/etc/apparmor.d/puffin-bwr
 The profile was loaded on this machine on 2026-10-03: from a throwaway systemd user unit, `bwrap --unshare-user --unshare-net true` and `ling sandbox -- true` both succeed, and `ling-admin host check` reports nothing to do. Another GB10 still needs `host setup` once.
 
 The desktop app's Chromium sandbox meets the same rule; see [desktop.md](desktop.md).
+
+**Without sudo** (specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md, 2026-10-22): there is no route for `ling`'s sandbox on 24.04 (the pinned Codex's Landlock fallback refuses a restricted filesystem), so `ling` probes `bwrap` at start (`ling-rs/src/userns.rs`) and prints the exact one-time command an administrator runs, and refuses `/airgapped on` while the sandbox cannot start. Ubuntu 25.04 and later ship `bwrap-userns-restrict` for `/usr/bin/bwrap`, and the sandbox works there with no step (measured on 26.04). Two profiles attaching to the same binary make AppArmor attach neither (openai/codex#38715), so `host setup` loads a profile already there instead of writing `puffin-bwrap` beside it, and removes ours where both are.

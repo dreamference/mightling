@@ -79,6 +79,7 @@ pub mod summary_cap;
 
 pub mod update;
 pub mod usage;
+pub mod userns;
 pub mod vision;
 #[cfg(unix)]
 pub mod web;
@@ -486,6 +487,14 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         bail!("{reason}");
     }
     for line in airgapped::windows_sandbox_lines(&user_args) {
+        notice::say(&line);
+    }
+    // On Linux, bubblewrap refused its namespaces (Ubuntu 24.04 with no profile for it) refuses a
+    // configured `on` and is said at every start, with the fix (userns.rs).
+    if let Some(reason) = userns::airgapped_conflict_now(configured.level) {
+        bail!("{reason}");
+    }
+    for line in userns::startup_lines_now(airgapped::full_access_selected(&user_args)) {
         notice::say(&line);
     }
     // On macOS the sandbox's network is set once, now: a configured `on` takes it away here.
