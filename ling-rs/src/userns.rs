@@ -498,6 +498,14 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_airgapped_command_asks_the_probe_before_on() {
+        fake(Some(refused()));
+        let lines = crate::airgapped::command(None::<String>, "on");
+        fake(None);
+        assert!(lines[0].starts_with("Airgapped not changed: /usr/bin/bwrap is refused"), "{lines:?}");
+    }
+
+    #[test]
     fn airgapped_on_is_refused_not_claimed_without_the_sandbox() {
         assert_eq!(on_refusal(&Sandbox::Works, &Host::default()), None);
         let lines = on_refusal(&refused(), &ubuntu_2404(vec![])).expect("refused");
