@@ -36,7 +36,7 @@ This spec adds no slash command of its own. (When it was written the patch budge
 
 | Command | Phase | Effect |
 |---|---|---|
-| `ling-admin audit egress [--tui \| --app \| --web \| --docs] [--prompt "…"] [--json]` | 1 | Traces one session (the four flags are mutually exclusive, §10.5, §10.7, §10.8; `--docs` ignores `--prompt` and `--json`); prints destinations, processes, verdict; exit 0 on pass, 1 on an unexpected destination, 2 when the trace itself failed. |
+| `ling-admin audit egress [--tui \| --app \| --web \| --docs \| --sync] [--prompt "…"] [--json]` | 1 | Traces one session (the flags are mutually exclusive, §10.5, §10.7, §10.8; `--docs` and `--sync` refuse `--prompt`; `--sync` is [MIGHTLING_SYNC](./DREAMFERENCE_MIGHTLING_SYNC.md) §17.5); prints destinations, processes, verdict; exit 0 on pass, 1 on an unexpected destination, 2 when the trace itself failed. |
 | `ling --airlock …` or `airlock = true` in `$CODEX_HOME/config.toml` | 2 | Runs `ling` in the airlock. The launcher handles the flag before Codex parses its arguments, like `ling app`, so it needs no patch. |
 | `ling airlock log [--since 1d]` | 2 | Prints the ledger (§4.4). |
 

@@ -163,7 +163,52 @@ pub fn withdraw_pairing_codes(state: &Path) {
     let _ = std::fs::remove_dir_all(state.join("pairing"));
 }
 
-/// One paired device, as `devices.json` keeps it: never the token itself.
+/// What a paired device is: a browser (its token is a cookie that opens the UI), or a sync agent
+/// (`ling sync enable` on another machine, specs/DREAMFERENCE_MIGHTLING_SYNC.md §5.1), whose token
+/// is a bearer secret that opens `/api/sync/` and nothing else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeviceKind {
+    Browser,
+    Sync,
+}
+
+impl DeviceKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            DeviceKind::Browser => "browser",
+            DeviceKind::Sync => "sync",
+        }
+    }
+}
+
+/// What a paired device may do with other devices' threads (SYNC §5.1, the owner's answer O4):
+/// `control` is every new pairing's, phones included; `watch` reads and follows only. A device may
+/// always publish its own threads, whatever its scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Control,
+    Watch,
+}
+
+impl Scope {
+    pub fn name(self) -> &'static str {
+        match self {
+            Scope::Control => "control",
+            Scope::Watch => "watch",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Scope> {
+        match text {
+            "control" => Some(Scope::Control),
+            "watch" => Some(Scope::Watch),
+            _ => None,
+        }
+    }
+}
+
+/// One paired device, as `devices.json` keeps it: never the token itself. A file written before
+/// sync existed has neither `kind` nor `scope`: its devices are browsers with `control`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Device {
     pub id: String,
@@ -171,6 +216,8 @@ pub struct Device {
     pub token_sha256: String,
     pub created: u64,
     pub last_used: u64,
+    pub kind: DeviceKind,
+    pub scope: Scope,
 }
 
 fn devices_path(state: &Path) -> PathBuf {
@@ -189,6 +236,11 @@ pub fn load_devices(state: &Path) -> Vec<Device> {
                 token_sha256: item.get("token_sha256")?.as_str()?.to_string(),
                 created: item.get("created")?.as_u64()?,
                 last_used: item.get("last_used")?.as_u64()?,
+                kind: match item.get("kind").and_then(Value::as_str) {
+                    Some("sync") => DeviceKind::Sync,
+                    _ => DeviceKind::Browser,
+                },
+                scope: item.get("scope").and_then(Value::as_str).and_then(Scope::parse).unwrap_or(Scope::Control),
             })
         })
         .collect()
@@ -197,7 +249,10 @@ pub fn load_devices(state: &Path) -> Vec<Device> {
 fn save_devices(state: &Path, devices: &[Device]) -> std::io::Result<()> {
     let items: Vec<Value> = devices
         .iter()
-        .map(|d| json!({"id": d.id, "name": d.name, "token_sha256": d.token_sha256, "created": d.created, "last_used": d.last_used}))
+        .map(|d| {
+            json!({"id": d.id, "name": d.name, "token_sha256": d.token_sha256, "created": d.created, "last_used": d.last_used,
+                "kind": d.kind.name(), "scope": d.scope.name()})
+        })
         .collect();
     write_private(&devices_path(state), &serde_json::to_string_pretty(&items).unwrap_or_default())
 }
@@ -209,8 +264,13 @@ pub fn clean_device_name(name: &str) -> String {
     if cleaned.is_empty() { "unnamed device".to_string() } else { cleaned }
 }
 
-/// Pairs a device: returns its id and the token its cookie carries.
+/// Pairs a browser: returns its id and the token its cookie carries.
 pub fn add_device(state: &Path, name: &str) -> std::io::Result<(String, String)> {
+    add_device_of(state, name, DeviceKind::Browser)
+}
+
+/// Pairs a device of either kind, with `control` (O4): returns its id and its token, 256 bits.
+pub fn add_device_of(state: &Path, name: &str, kind: DeviceKind) -> std::io::Result<(String, String)> {
     let token = random_hex(32);
     let id = random_hex(4);
     let mut devices = load_devices(state);
@@ -220,16 +280,43 @@ pub fn add_device(state: &Path, name: &str) -> std::io::Result<(String, String)>
         token_sha256: sha256_hex(&token),
         created: now_secs(),
         last_used: now_secs(),
+        kind,
+        scope: Scope::Control,
     });
     save_devices(state, &devices)?;
     Ok((id, token))
 }
 
-/// The device a cookie's token belongs to, its last use brought up to date (at most once a minute).
+/// `ling web devices --scope <device> watch|control`: by id or exact name. Returns the devices changed.
+pub fn set_scope(state: &Path, which: &str, scope: Scope) -> std::io::Result<Vec<Device>> {
+    let mut devices = load_devices(state);
+    let mut changed = Vec::new();
+    for device in devices.iter_mut().filter(|d| d.id == which || d.name == which) {
+        device.scope = scope;
+        changed.push(device.clone());
+    }
+    if !changed.is_empty() {
+        save_devices(state, &devices)?;
+    }
+    Ok(changed)
+}
+
+/// The browser a cookie's token belongs to. A sync agent's secret is no cookie: it opens only
+/// `/api/sync/` ([`sync_device_for_token`]).
 pub fn device_for_token(state: &Path, token: &str) -> Option<Device> {
+    device_of_kind(state, token, DeviceKind::Browser)
+}
+
+/// The sync agent a bearer secret belongs to.
+pub fn sync_device_for_token(state: &Path, token: &str) -> Option<Device> {
+    device_of_kind(state, token, DeviceKind::Sync)
+}
+
+/// The device of `kind` a token belongs to, its last use brought up to date (at most once a minute).
+fn device_of_kind(state: &Path, token: &str, kind: DeviceKind) -> Option<Device> {
     let hash = sha256_hex(token);
     let mut devices = load_devices(state);
-    let index = devices.iter().position(|d| same_secret(&d.token_sha256, &hash))?;
+    let index = devices.iter().position(|d| d.kind == kind && same_secret(&d.token_sha256, &hash))?;
     let now = now_secs();
     if now.saturating_sub(devices[index].last_used) >= 60 {
         devices[index].last_used = now;
@@ -381,10 +468,46 @@ mod tests {
         let device = device_for_token(&state, &token).unwrap();
         assert_eq!((device.id.as_str(), device.name.as_str()), (id.as_str(), "Owner's phone"));
         assert!(device_for_token(&state, "wrong").is_none());
+        assert_eq!((device.kind, device.scope), (DeviceKind::Browser, Scope::Control));
         assert_eq!(revoke_device(&state, &id).unwrap().len(), 1);
         assert!(device_for_token(&state, &token).is_none());
         #[cfg(unix)]
         assert_eq!(mode(&state.join("devices.json")), 0o600);
+    }
+
+    #[test]
+    fn a_sync_secret_is_no_cookie_and_a_cookie_no_sync_secret() {
+        let state = scratch("kinds");
+        let (_, browser) = add_device(&state, "phone").unwrap();
+        let (agent_id, agent) = add_device_of(&state, "laptop", DeviceKind::Sync).unwrap();
+        assert!(device_for_token(&state, &browser).is_some());
+        assert!(device_for_token(&state, &agent).is_none(), "an agent's secret opens no page");
+        assert!(sync_device_for_token(&state, &browser).is_none(), "a cookie is no agent");
+        let device = sync_device_for_token(&state, &agent).unwrap();
+        assert_eq!((device.id.as_str(), device.kind, device.scope), (agent_id.as_str(), DeviceKind::Sync, Scope::Control));
+    }
+
+    #[test]
+    fn every_pairing_gets_control_and_a_scope_can_be_narrowed() {
+        let state = scratch("scopes");
+        let (id, token) = add_device(&state, "phone").unwrap();
+        assert_eq!(set_scope(&state, "phone", Scope::Watch).unwrap().len(), 1);
+        assert_eq!(device_for_token(&state, &token).unwrap().scope, Scope::Watch);
+        assert_eq!(set_scope(&state, &id, Scope::Control).unwrap().len(), 1);
+        assert_eq!(device_for_token(&state, &token).unwrap().scope, Scope::Control);
+        assert!(set_scope(&state, "nobody", Scope::Watch).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_devices_file_from_before_sync_reads_as_browsers_with_control() {
+        let state = scratch("old-file");
+        write_private(
+            &state.join("devices.json"),
+            r#"[{"id":"ab12","name":"phone","token_sha256":"x","created":1,"last_used":2}]"#,
+        )
+        .unwrap();
+        let devices = load_devices(&state);
+        assert_eq!((devices[0].kind, devices[0].scope), (DeviceKind::Browser, Scope::Control));
     }
 
     #[test]
