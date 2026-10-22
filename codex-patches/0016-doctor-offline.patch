@@ -1,5 +1,4 @@
 diff --git a/codex-rs/cli/src/doctor.rs b/codex-rs/cli/src/doctor.rs
-index d701431..d27f0cd 100644
 --- a/codex-rs/cli/src/doctor.rs
 +++ b/codex-rs/cli/src/doctor.rs
 @@ -1202,3 +1202,14 @@ fn config_toml_details(config: &Config, details: &mut Vec<String>) {
@@ -30,7 +29,6 @@ index d701431..d27f0cd 100644
 +    }
      let mut details = vec![format!("reachability mode: {}", plan.description)];
 diff --git a/codex-rs/cli/src/doctor/updates.rs b/codex-rs/cli/src/doctor/updates.rs
-index fbad7d9..f1cc726 100644
 --- a/codex-rs/cli/src/doctor/updates.rs
 +++ b/codex-rs/cli/src/doctor/updates.rs
 @@ -53,2 +53,5 @@ const DESKTOP_UPDATE_URL: &str =

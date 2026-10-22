@@ -1,5 +1,4 @@
 diff --git a/codex-rs/core/Cargo.toml b/codex-rs/core/Cargo.toml
-index 693fbd7..1444e51 100644
 --- a/codex-rs/core/Cargo.toml
 +++ b/codex-rs/core/Cargo.toml
 @@ -73,2 +73,3 @@ codex-thread-store = { workspace = true }
@@ -7,7 +6,6 @@ index 693fbd7..1444e51 100644
 +ling-tools = { path = "../ling/tools" }
  codex-utils-absolute-path = { workspace = true }
 diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
-index f8faf45..6e42f4a 100644
 --- a/codex-rs/core/src/client.rs
 +++ b/codex-rs/core/src/client.rs
 @@ -946,3 +946,3 @@ impl ModelClient {
@@ -20,7 +18,6 @@ index f8faf45..6e42f4a 100644
 +                    let item = ling_tools::from_server(item);
                      items_added.push(item.clone());
 diff --git a/codex-rs/core/src/tools/router.rs b/codex-rs/core/src/tools/router.rs
-index d9f1f63..4203a11 100644
 --- a/codex-rs/core/src/tools/router.rs
 +++ b/codex-rs/core/src/tools/router.rs
 @@ -257,2 +257,3 @@ impl ToolRouter {

@@ -1,5 +1,4 @@
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index 6350671..99bbc92 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -156,9 +156,11 @@ enum Subcommand {
@@ -15,7 +14,6 @@ index 6350671..99bbc92 100644
  
      /// Manage external MCP servers for Codex.
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
-index 301de2e..bf335d8 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -306,6 +306,8 @@ impl SlashCommand {

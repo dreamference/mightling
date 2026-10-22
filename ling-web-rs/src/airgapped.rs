@@ -44,6 +44,11 @@ pub const SEAL_DIR: &str = "ling-airgapped";
 /// Set by Codex for a command it runs without a network.
 pub const SANDBOX_NETWORK_DISABLED_ENV_VAR: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
 
+/// `off` keeps the read-only sandbox's commands off the network at `off` too ([`read_only_network`]).
+/// The launcher sets it in `ling`'s own environment when the user chose
+/// `sandbox_workspace_write.network_access = false`, in `config.toml` or with `-c`.
+pub const READ_ONLY_NETWORK_ENV_VAR: &str = "DREAMFERENCE_MIGHTLING_READ_ONLY_NETWORK";
+
 /// A level, ordered by strictness: `Off < On`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -421,6 +426,22 @@ pub fn sealed_for_env(get: impl Fn(&str) -> Option<String>) -> bool {
     resolve_with(&[thread.as_str(), session.as_str()], environment).level == Level::On
 }
 
+/// Whether a command Codex would run in its read-only sandbox gets the network. Sandboxed commands
+/// have the network whenever `/airgapped` is off (owner decision, 2026-10-22), and Codex's read-only
+/// sandbox has no network setting of its own, so it is widened here: asked by Codex's sandbox
+/// manager for every command whose permissions are exactly the read-only ones (patch 0031), with
+/// the command's environment as `get`, as [`sealed_for_env`] takes it. Not at `on`, and not when the
+/// user said no network ([`READ_ONLY_NETWORK_ENV_VAR`] in this process's environment).
+pub fn read_only_network(get: impl Fn(&str) -> Option<String>) -> bool {
+    read_only_network_allowed(std::env::var(READ_ONLY_NETWORK_ENV_VAR).ok().as_deref()) && !sealed_for_env(get)
+}
+
+/// Whether [`READ_ONLY_NETWORK_ENV_VAR`]'s value leaves the read-only sandbox its network: anything
+/// but `off`, `false`, `0` or `no`.
+pub fn read_only_network_allowed(setting: Option<&str>) -> bool {
+    !setting.is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "off" | "false" | "0" | "no"))
+}
+
 /// What Codex is told when it may not take a permission profile: the allowed set of its error.
 pub const FULL_ACCESS_ALLOWED: &str = "[read-only, workspace-write]: airgapped is on, and Full Access runs commands with no sandbox, which is what takes their network away";
 pub const SEAL_ROOT_ALLOWED: &str = "[folders that do not hold the air-gap seals]: a command that could write there could lift them";
@@ -684,6 +705,21 @@ mod tests {
             ENV_VAR => Some("off".to_string()),
             _ => None,
         }));
+    }
+
+    #[test]
+    fn the_read_only_sandbox_has_the_network_unless_on_or_switched_off() {
+        let map = |var: &'static str, value: &'static str| move |key: &str| (key == var).then(|| value.to_string());
+        for value in [None, Some(""), Some("on"), Some("true"), Some("1")] {
+            assert!(read_only_network_allowed(value), "{value:?}");
+        }
+        for value in ["off", "OFF", " false ", "0", "no"] {
+            assert!(!read_only_network_allowed(Some(value)), "{value}");
+        }
+        if read_only_network_allowed(std::env::var(READ_ONLY_NETWORK_ENV_VAR).ok().as_deref()) {
+            assert!(read_only_network(map(ENV_VAR, "off")));
+        }
+        assert!(!read_only_network(map(ENV_VAR, "on")));
     }
 
     #[test]

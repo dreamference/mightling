@@ -1,5 +1,4 @@
 diff --git a/codex-rs/app-server/Cargo.toml b/codex-rs/app-server/Cargo.toml
-index ad0a5fb..9f913aa 100644
 --- a/codex-rs/app-server/Cargo.toml
 +++ b/codex-rs/app-server/Cargo.toml
 @@ -54,2 +54,3 @@ codex-goal-extension = { workspace = true }
@@ -7,7 +6,6 @@ index ad0a5fb..9f913aa 100644
 +ling-launcher = { path = "../ling" }
  codex-guardian-v2 = { workspace = true }
 diff --git a/codex-rs/app-server/src/extensions.rs b/codex-rs/app-server/src/extensions.rs
-index c2d6d6d..c1c205d 100644
 --- a/codex-rs/app-server/src/extensions.rs
 +++ b/codex-rs/app-server/src/extensions.rs
 @@ -95,2 +95,3 @@ pub(crate) fn thread_extensions(
@@ -15,7 +13,6 @@ index c2d6d6d..c1c205d 100644
 +    ling_launcher::cave::install(&mut builder);
      codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index d081494..1ef016e 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -2051,2 +2051,3 @@ async fn run_debug_prompt_input_command(
@@ -23,7 +20,6 @@ index d081494..1ef016e 100644
 +    ling_launcher::cave::install(&mut extensions);
      codex_skills_extension::install(&mut extensions, |config: &Config| {
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
-index 878517b..fce548a 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -538,2 +538,3 @@ impl ChatWidget {
@@ -39,7 +35,6 @@ index 878517b..fce548a 100644
 +            | SlashCommand::Cavemode
              | SlashCommand::DebugConfig
 diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
-index f1992b8..2652f76 100644
 --- a/codex-rs/tui/src/slash_command.rs
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -15,2 +15,3 @@ pub enum SlashCommand {

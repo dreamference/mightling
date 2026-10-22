@@ -1,5 +1,4 @@
 diff --git a/codex-rs/core/Cargo.toml b/codex-rs/core/Cargo.toml
-index 1444e51..aaccc56 100644
 --- a/codex-rs/core/Cargo.toml
 +++ b/codex-rs/core/Cargo.toml
 @@ -33,2 +33,3 @@ codex-context-fragments = { workspace = true }
@@ -7,7 +6,6 @@ index 1444e51..aaccc56 100644
 +ling-airgapped = { path = "../ling/airgapped" }
  codex-core-plugins = { workspace = true }
 diff --git a/codex-rs/core/src/config/mod.rs b/codex-rs/core/src/config/mod.rs
-index a782af1..555813a 100644
 --- a/codex-rs/core/src/config/mod.rs
 +++ b/codex-rs/core/src/config/mod.rs
 @@ -4246,2 +4246,3 @@ impl Config {
