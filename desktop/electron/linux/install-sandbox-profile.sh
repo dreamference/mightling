@@ -19,6 +19,10 @@ PROFILE="/etc/apparmor.d/$PROFILE_NAME"
 # scratch folder (tests/test_desktop.py).
 PROFILES_DIR=${MIGHTLING_APPARMOR_DIR:-/etc/apparmor.d}
 SYSCTL=${MIGHTLING_USERNS_SYSCTL:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}
+# Setuid sandbox helpers Chromium browsers install as root. Without an administrator, Chromium
+# runs an unpacked build (a binary the user owns) with one named by CHROME_DEVEL_SANDBOX; `ling app`
+# does that by itself (specs/DREAMFERENCE_MIGHTLING_NO_SUDO.md). The variable is for the tests.
+HELPERS=${MIGHTLING_SANDBOX_HELPERS-/opt/google/chrome/chrome-sandbox /opt/microsoft/msedge/msedge-sandbox /opt/brave.com/brave/chrome-sandbox}
 
 DIR=$(cd "$(dirname "$0")" && pwd -P)
 BINARY="$DIR/Mightling"
@@ -67,6 +71,12 @@ EOF
 echo "Mightling's sandbox needs an AppArmor profile for $BINARY. The commands, as root:"
 echo "  sudo tee $PROFILE    (the profile below)"
 echo "  sudo apparmor_parser -r -T -W $PROFILE"
+for HELPER in $HELPERS; do
+    if [ -f "$HELPER" ] && [ -u "$HELPER" ] && [ "$(stat -c %u "$HELPER" 2>/dev/null)" = 0 ]; then
+        echo "Without an administrator: ling app, or  CHROME_DEVEL_SANDBOX=$HELPER $BINARY  uses that browser's setuid sandbox helper instead."
+        break
+    fi
+done
 if [ "$1" = "--print" ]; then
     echo
     profile

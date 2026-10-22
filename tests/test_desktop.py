@@ -693,6 +693,8 @@ def _script_env(tmp_path: Path, restricted: bool) -> dict:
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "MIGHTLING_APPARMOR_DIR": str(profiles),
         "MIGHTLING_USERNS_SYSCTL": str(sysctl),
+        # No setuid helper unless a test names one (this machine's Google Chrome has one).
+        "MIGHTLING_SANDBOX_HELPERS": "",
     }
 
 
@@ -710,6 +712,11 @@ def test_an_unpacked_build_carries_its_own_profile_script():
     assert 'profile $PROFILE_NAME "$BINARY" flags=(unconfined) {' in script and "userns," in script
     # No SUID helper and no --no-sandbox as a way out.
     assert "--no-sandbox" not in script and "chmod 4755" not in script
+    # Without an administrator it names a Chromium browser's own root-owned helper, if one is there.
+    assert (
+        "/opt/google/chrome/chrome-sandbox" in script and "CHROME_DEVEL_SANDBOX=$HELPER" in script
+    )
+    assert '[ -u "$HELPER" ]' in script and 'stat -c %u "$HELPER"' in script
 
 
 def test_the_script_prints_the_commands_before_sudo_runs(tmp_path):
@@ -732,6 +739,7 @@ def test_the_script_prints_the_commands_before_sudo_runs(tmp_path):
     binary = str(folder.resolve() / "Mightling")
     assert "sudo tee /etc/apparmor.d/mightling-unpacked" in result.stdout
     assert "sudo apparmor_parser -r -T -W /etc/apparmor.d/mightling-unpacked" in result.stdout
+    assert "Without an administrator" not in result.stdout
     assert (tmp_path / "root.log").read_text().splitlines() == [
         "tee /etc/apparmor.d/mightling-unpacked",
         "apparmor_parser -r -T -W /etc/apparmor.d/mightling-unpacked",
