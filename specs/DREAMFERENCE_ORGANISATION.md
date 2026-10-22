@@ -65,7 +65,7 @@ Commit identity, for every team alike: the bot, `dreamference-<team>[bot] <ID+dr
 
 ### 2.4 Desktop (`desktop`)
 
-- **Mission:** one window, Ask and Work, `ling` inside, egress closed in the main process.
+- **Mission:** Ask and Work in as many windows as the user opens, all on one app-server, `ling` inside, egress closed in the main process.
 - **Owns:** `desktop/`, `dreamference/chat/desktop_*.py`, `ling-rs/src/app.rs`; co-owns `ling-rs/web/policy.json`.
 - **GitHub team:** `@dreamference/desktop`. **Bot:** `dreamference-desktop[bot]`. **Address:** `desktop@dreamference.ai`.
 - **Review duty:** the IPC channel stays vetted against the shared policy; peer reviewer for Web & Ask.

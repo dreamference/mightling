@@ -72,7 +72,8 @@ import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Pla
 import { findRanges, mark } from "./find";
 import { nearBottom } from "./follow";
 import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, stepThread, threadLink, toggled, type Section } from "./threads";
-import { TerminalHub, terminalMessage, type TerminalSession } from "./terminal";
+import { TerminalHub, decode, terminalMessage, type TerminalSession } from "./terminal";
+import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsState } from "./windows";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { ExportDialog } from "./ExportDialog";
 import { threadContext, withThreadContext } from "./tonight";
@@ -102,11 +103,20 @@ type View = "ask" | "work";
 const HOST = bridge.host();
 
 function initialView(): View {
-  return typeof location !== "undefined" && (location.hash === "#work" || location.hash.startsWith("#popout=")) ? "work" : "ask";
+  return typeof location !== "undefined" && (location.hash === "#work" || location.hash.startsWith("#popout=") || location.hash.startsWith("#pane=")) ? "work" : "ask";
 }
 
 /** A pop-out window's thread (`#popout=<id>`, DESKTOP_PARITY §2.1): that thread alone, no sidebar. */
 const POPOUT: string | null = typeof location !== "undefined" && location.hash.startsWith("#popout=") ? decodeURIComponent(location.hash.slice(8)) : null;
+
+/** A detached pane's window (`#pane=<kind>&thread=<id>`, DESKTOP_ELECTRON §13): one thread's terminal or diff, docked back when it closes. */
+const PANE = typeof location !== "undefined" ? paneOf(location.hash) : null;
+
+/** The thread a server request is about, if it names one. */
+const requestThread = (request: ServerRequest): string | null => {
+  const thread = (request.params as { threadId?: unknown } | undefined)?.threadId;
+  return typeof thread === "string" ? thread : null;
+};
 
 /** A file picked, pasted or dropped for the next message, not yet sent. */
 interface PendingFile {
@@ -297,8 +307,17 @@ export function App() {
   const [newEnvs, setNewEnvs] = useState<bridge.LocalEnvironment[]>([]);
   const [editingEnv, setEditingEnv] = useState(false);
   const [missingWorktree, setMissingWorktree] = useState<string | null>(null);
-  const hub = useMemo(() => new TerminalHub(client), [client]);
+  // In the app a tab drawn here starts from what it showed so far, which the main process keeps (several windows, §13).
+  const hub = useMemo(() => new TerminalHub(client, bridge.terminals.available() ? (processId) => bridge.terminals.backlog(processId).then(decode) : null), [client]);
   const [terminals, setTerminals] = useState<TerminalSession[]>([]);
+  /** Who holds which thread's composer (several windows; null in a browser, where everything is this page's). */
+  const [windowsState, setWindowsState] = useState<WindowsState | null>(null);
+  const windowsRef = useRef(windowsState);
+  windowsRef.current = windowsState;
+  /** This window's panes detached into windows of their own (`paneKey`), until they dock back. */
+  const [detached, setDetached] = useState<Set<string>>(new Set());
+  /** What the main process may ask of this page about windows and panes; set further down, where those handlers are. */
+  const windowEvents = useRef<{ docked: (pane: PaneKind, thread: string) => void; paneAction: (action: bridge.PaneAction) => void; command: (command: "detachTerminal" | "detachReview") => void }>({ docked: () => {}, paneAction: () => {}, command: () => {} });
   const [front, setFront] = useState<{ id: string; tick: number } | null>(null);
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
@@ -332,8 +351,9 @@ export function App() {
     const lines = linesAsked(args);
     const reply = (text: string, success = true) => client.respond(request.id, { contentItems: [{ type: "inputText", text }], success });
     if (tool === TERMINAL_TOOL) {
-      const tabs = terminalsRef.current.filter((tab) => tab.threadId === threadId)
-        .map((tab) => ({ title: tab.title, cwd: tab.cwd, running: tab.exitCode === null, output: hub.tail(tab.processId, MAX_LINES) }));
+      // The whole of each tab's output as the app keeps it, whichever window started the tab.
+      const tabs = await Promise.all(terminalsRef.current.filter((tab) => tab.threadId === threadId)
+        .map(async (tab) => ({ title: tab.title, cwd: tab.cwd, running: tab.exitCode === null, output: await hub.tailFrom(tab.processId, MAX_LINES) })));
       return reply(terminalAnswer(tabs, lines));
     }
     if (tool === CONSOLE_TOOL) {
@@ -396,7 +416,12 @@ export function App() {
       client.request("model/list", {}).then((answer) => setModels((answer as { data?: Model[] }).data ?? [])).catch(() => setModels([]));
       // A browser has no launch target: `ling web` answers null.
       if (target?.cwd) setNewCwd(target.cwd);
-      const first = POPOUT ?? target?.thread ?? null;
+      // Several windows (§13): who holds which composer, and every terminal tab of the app.
+      if (bridge.windows.available()) {
+        bridge.windows.state().then(setWindowsState).catch(() => {});
+        bridge.terminals.list().then(setTerminals).catch(() => {});
+      }
+      const first = POPOUT ?? PANE?.thread ?? target?.thread ?? null;
       if (first) {
         const resumed = await client.request("thread/resume", { threadId: first, model: started.served_model });
         loader.markLoaded(first);
@@ -434,12 +459,18 @@ export function App() {
     client.onServerRequest = (request) => {
       // An MCP server's question shows in its thread (item 14); only the vendor's identity check is declined unseen.
       if (ASKED.has(request.method) && (request.method !== "mcpServer/elicitation/request" || shownElicitation(request.params))) dispatch({ type: "serverRequest", request });
-      else answerUnasked(request).catch(notice);
+      // Every window hears the request; one answers it (windows.ts `answersFor`): the composer's, or the most recent.
+      else if (answersFor(windowsRef.current, requestThread(request), PANE !== null)) answerUnasked(request).catch(notice);
     };
     let stop: (() => void) | undefined;
     bridge.listenBridge({
       view: (next) => showView(next),
       link: (target) => linkRef.current(target),
+      windows: (next) => setWindowsState(next),
+      terminals: (list) => setTerminals(list),
+      docked: (pane, thread) => windowEvents.current.docked(pane, thread),
+      paneAction: (action) => windowEvents.current.paneAction(action),
+      command: (command) => windowEvents.current.command(command),
       task: (event) => setTasks((list) => {
         if (event.kind === "started") {
           setFront({ id: event.id, tick: Date.now() });
@@ -548,6 +579,16 @@ export function App() {
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
   const selected = selectedView && isAskThread(selectedView.thread, askRoot) === (view === "ask") ? selectedView : null;
+  // Several windows (§13): the main process is told what this window shows, and gives the thread's
+  // composer to one window. A pop-out took its thread's when it opened, so it says nothing before
+  // the thread is in front; a detached pane has no composer and says nothing.
+  const shownThread = selected?.thread.id ?? null;
+  useEffect(() => {
+    if (!bridge.windows.available() || PANE || state.server !== "ready" || (POPOUT && shownThread === null)) return;
+    bridge.windows.showing(view, shownThread).then(setWindowsState).catch(() => {});
+  }, [view, shownThread, state.server]);
+  /** Whether this window sends for the thread in front, or mirrors it read-only while another window holds its composer. */
+  const composerHere = composerOf(windowsState, shownThread) === "here";
   // An incognito question in front (DESKTOP_PARITY_CLAUDE §4.3): an ephemeral Ask thread. Leaving it, to
   // another question, a new one, Work or a setting that changes the thread shown, deletes it: its turn
   // stopped, the server let go of it, its folder and every file in it removed by the main process (which
@@ -1074,7 +1115,7 @@ export function App() {
   };
 
   const stop = () => {
-    if (!selected?.activeTurnId) return;
+    if (!selected?.activeTurnId || !composerHere) return;
     client.request("turn/interrupt", { threadId: selected.thread.id, turnId: selected.activeTurnId }).catch(notice);
   };
 
@@ -1307,6 +1348,8 @@ export function App() {
     fontSmaller: () => updatePrefs({ fontScale: nextScale(prefsRef.current.fontScale, -1) }),
     fontReset: () => updatePrefs({ fontScale: 1 }),
     toggleSidebar: () => updatePrefs({ sidebarHidden: !prefsRef.current.sidebarHidden }),
+    // New Window (§13): another window on this one's view, on the same app-server; the app only.
+    newWindow: () => { if (bridge.windows.available()) bridge.windows.open(view).catch(notice); },
     undoAction: () => void undoAction(false),
     redoAction: () => void undoAction(true),
     closeTab: closeSurface,
@@ -1675,13 +1718,23 @@ export function App() {
     openTerminal(action.name, action.script);
   };
 
-  /** A new terminal tab for the shown thread, in the folder it works in, under the composer's permissions. */
-  const openTerminal = (title = "Terminal", script: string | null = null) => {
-    const cwd = workFolder ?? (view === "work" ? newCwd.trim() || null : null);
+  /**
+   * A new terminal tab for the shown thread (or for `forThread`, which a detached terminal pane asks
+   * for), in the folder it works in, under the composer's permissions. In the app every window is
+   * told of it, and of its exit, which the server answers to this window alone.
+   */
+  const openTerminal = (title = "Terminal", script: string | null = null, forThread: string | null = null) => {
+    const other = forThread !== null && forThread !== selected?.thread.id ? state.threads[forThread]?.thread ?? null : null;
+    const cwd = other ? other.cwd : workFolder ?? (view === "work" ? newCwd.trim() || null : null);
     if (!cwd) return notice("Open a thread in a project, or name a project folder, to open a terminal there.");
-    const session = hub.start({ threadId: selected?.thread.id ?? null, cwd, profile, shell: prefs.terminalShell, size: { rows: 24, cols: 100 }, title, script },
-      (processId, code, error) => setTerminals((list) => list.map((entry) => (entry.processId === processId ? { ...entry, exitCode: code, error } : entry))));
+    const session = hub.start({ threadId: other ? other.id : selected?.thread.id ?? null, cwd, profile, shell: prefs.terminalShell, size: { rows: 24, cols: 100 }, title, script },
+      (processId, code, error) => {
+        setTerminals((list) => list.map((entry) => (entry.processId === processId ? { ...entry, exitCode: code, error } : entry)));
+        if (bridge.terminals.available()) bridge.terminals.publish({ ...session, exitCode: code, error }).catch(() => {});
+      });
     setTerminals((list) => [...list, session]);
+    if (bridge.terminals.available()) bridge.terminals.publish(session).catch(notice);
+    if (other) return;
     updatePrefs({ bottomPanel: true });
     setFront({ id: session.processId, tick: Date.now() });
   };
@@ -1691,6 +1744,51 @@ export function App() {
     if (session && session.exitCode === null) hub.terminate(processId).catch(() => {});
     hub.forget(processId);
     setTerminals((list) => list.filter((entry) => entry.processId !== processId));
+    if (bridge.terminals.available()) bridge.terminals.forget(processId).catch(() => {});
+  };
+
+  /**
+   * The thread's terminal or diff into a window of its own (the pane's header button, the Window
+   * menu), or back when it is out already; in a detached pane's own window, back into the thread's.
+   */
+  const detachPane = (kind: PaneKind) => {
+    if (!bridge.windows.available()) return;
+    if (PANE) {
+      bridge.windows.dock(PANE.kind, PANE.thread).catch(notice);
+      return;
+    }
+    const thread = selected?.thread.id ?? null;
+    if (!thread || view !== "work") return notice(`Open a thread in Work first: its ${kind === "terminal" ? "terminal" : "diff"} moves into a window of its own.`);
+    const key = paneKey(kind, thread);
+    if (detached.has(key)) {
+      bridge.windows.dock(kind, thread).catch(notice);
+      return;
+    }
+    bridge.windows.detach(kind, thread).then(() => {
+      setDetached((keys) => new Set(keys).add(key));
+      if (kind === "review") closeTabKey(REVIEW_TAB.key);
+    }).catch(notice);
+  };
+  windowEvents.current = {
+    command: (command) => detachPane(command === "detachTerminal" ? "terminal" : "review"),
+    // A pane docked back: it shows here again, if its thread is in front.
+    docked: (pane, thread) => {
+      setDetached((keys) => {
+        const next = new Set(keys);
+        next.delete(paneKey(pane, thread));
+        return next;
+      });
+      if (selectedRef.current !== thread) return;
+      if (pane === "review") setReviewOpen(true);
+      else updatePrefs({ bottomPanel: true });
+    },
+    // What a detached pane asks of this window, which holds the thread's composer and permissions.
+    paneAction: (action) => {
+      if (action.kind === "newTerminal") openTerminal("Terminal", null, action.thread);
+      else if (action.kind === "compose") setDraftFor(draftKeyOf("work", action.thread), (text) => (text.trim() ? `${text.trimEnd()}\n\n${action.text}` : action.text));
+      else if (action.thread === selectedRef.current) openFile(action.path, action.line);
+      else notice("Show the thread in this window to open its file.");
+    },
   };
 
   /** The tab's recent output into the composer: what lets the agent read a dev server's or a build's output. */
@@ -1732,7 +1830,7 @@ export function App() {
   /** Enter or Esc on the first open approval of the shown thread. */
   const answerByKey = (key: "approve" | "decline") => {
     const request = threadRequests[0];
-    if (!request) return false;
+    if (!request || !composerHere) return false;
     const result = keyAnswer(request.method, key, request.params as Record<string, unknown>);
     if (!result) return false;
     answer(request, result);
@@ -1951,6 +2049,7 @@ export function App() {
     })();
     const shellKeys: [ReturnType<typeof keyAction>, string][] = [
       [keyAction("commandMenu"), "commandMenu"],
+      [keyAction("newWindow"), "newWindow"],
       [keyAction("shortcuts"), "shortcuts"],
       [keyAction("openFolder"), "openFolder"],
       [keyAction("back"), "back"],
@@ -2249,6 +2348,59 @@ export function App() {
     ? prefs.followUp === "queue" ? "Queue a follow-up for the next turn…" : "Steer the running turn…"
     : view === "ask" ? "Ask anything… ($ for a skill, / for commands)" : "Ask Mightling… (@ for a file, $ for a skill, / for commands)";
 
+  if (PANE) {
+    // A detached pane's window (§13): the thread's terminal tabs or its diff alone, live, docked back
+    // when it closes. What needs the thread's composer or permissions is asked of the window it came from.
+    const paneThread = state.threads[PANE.thread]?.thread ?? null;
+    const dockPane = () => void bridge.windows.dock(PANE.kind, PANE.thread).catch(notice);
+    return (
+      <div className={`work view-work pane-window pane-${PANE.kind}`}>
+        <main className="thread-pane">
+          <header className="bar" onDoubleClick={() => bridge.windowControl("maximize").catch(() => {})}>
+            <span className="title">{PANE.kind === "terminal" ? "Terminal" : "Diff"} · {paneThread ? workLabel(paneThread) : "Thread"}</span>
+            <span className="spacer" />
+            <button className="icon bar-action" aria-label="Dock" title="Back into the thread's window" onClick={dockPane}><Icon name="dock" size={16} /></button>
+          </header>
+          {state.notices.map((message, index) => (
+            <div key={index} className="notice" onClick={() => dispatch({ type: "dismissNotice", index })}>{message}</div>
+          ))}
+          {PANE.kind === "terminal" ? (
+            <BottomPanel tasks={[]} environment={null} problems={[]} project={null}
+              terminals={terminals.filter((entry) => entry.threadId === PANE.thread)} hub={hub} front={front}
+              onNewTerminal={() => void bridge.windows.relay({ kind: "newTerminal" }).catch(notice)} onCloseTerminal={closeTerminal}
+              onSendToThread={(processId) => {
+                const session = terminals.find((entry) => entry.processId === processId);
+                void hub.tailFrom(processId).then((output) => {
+                  if (!session || !output) return notice("The terminal has shown nothing yet.");
+                  return bridge.windows.relay({ kind: "compose", text: terminalMessage(session.cwd, output) });
+                }).catch(notice);
+              }}
+              onRun={() => {}} onStop={() => {}} onClose={() => {}} onEdit={() => {}} onHide={dockPane}
+              detach={{ docks: true, run: dockPane }} />
+          ) : (
+            <div className="review-pane">
+              <ReviewPane
+                cwd={composeRoot} threadId={PANE.thread}
+                turnDiff={lastTurnDiff(selected)}
+                airgapOn={airgap?.level === "on"}
+                layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
+                editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
+                refreshKey={turnsDone(selected)}
+                onComments={(comments) => void bridge.windows.relay({ kind: "compose", text: comments }).catch(notice)}
+                onRevertTurn={null}
+                generateMessage={(root, diff) => commitMessage(client, listen, root, modelChoice ?? servedModel, diff, prefs.commitPrompt ?? undefined)}
+                forcePushDefault={prefs.forcePush}
+                notice={notice}
+                onOpenFile={(path, line) => void bridge.windows.relay({ kind: "openFile", path, line }).catch(notice)}
+                detach={{ docks: true, run: dockPane }}
+              />
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${tabsShown ? (prefs.layout === "tabs" ? " review-open tabs-full" : " review-open") : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
@@ -2482,7 +2634,10 @@ export function App() {
             </div>
           ) : <p className="empty">{startingProject ? `A new thread in the project ${startingProject.name}${primaryFolder(startingProject) ? ` (${primaryFolder(startingProject)})` : ""}: write the first message below.` : newCwd.trim() ? `A new thread in ${newCwd.trim()}: write the first message below.` : "Open a thread, or name a project folder for a new one."}</p>}
           {threadRequests.map((request) => (
-            <Approval key={JSON.stringify(request.id)} request={request} airgappedOn={airgap?.level === "on"} onAnswer={(result) => answer(request, result)} />
+            // Mirrored read-only while another window holds the thread's composer: that window answers.
+            <div key={JSON.stringify(request.id)} className={composerHere ? "approval-host" : "approval-host mirrored"} inert={!composerHere}>
+              <Approval request={request} airgappedOn={airgap?.level === "on"} onAnswer={(result) => answer(request, result)} />
+            </div>
           ))}
           {otherRequests > 0 ? <div className="notice">{otherRequests} other thread(s) are waiting for an answer.</div> : null}
         </div>
@@ -2503,7 +2658,15 @@ export function App() {
           <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
             onSet={(objective) => setGoal({ objective, status: "active" })} onStatus={(status) => setGoal({ status })} onClear={clearGoal} />
         ) : null}
-        {canCompose ? (
+        {canCompose && !composerHere && selected ? (
+          // Another window holds this thread's composer (several windows, §13): this one follows the thread read-only.
+          <div className="composer-mirror" role="status">
+            <span>This thread's composer is in another window. This one follows the thread, read-only.</span>
+            <span className="spacer" />
+            <button className="link-button" onClick={() => void bridge.windows.showThread(selected.thread.id).catch(notice)}>Go to that window</button>
+            <button className="primary" onClick={() => void bridge.windows.take(selected.thread.id).then(setWindowsState).catch(notice)}>Use the composer here</button>
+          </div>
+        ) : canCompose ? (
           <Composer
             draft={draft} setDraft={setDraft} placeholder={placeholder}
             prediction={selected && !selected.activeTurnId ? suggestions[selected.thread.id]?.[0] ?? null : null}
@@ -2556,13 +2719,20 @@ export function App() {
             plan={planAvailable ? planning.has(planKey) : null} onTogglePlan={togglePlan}
           />
         ) : null}
-        {prefs.bottomPanel && view === "work" && bridge.git.available() ? (
+        {prefs.bottomPanel && view === "work" && bridge.git.available() && selected && detached.has(paneKey("terminal", selected.thread.id)) ? (
+          <div className="pane-away" role="status">
+            <Icon name="terminal" size={14} /><span>This thread's terminal is in a window of its own.</span>
+            <span className="spacer" />
+            <button className="link-button" onClick={() => detachPane("terminal")}>Dock it here</button>
+          </div>
+        ) : prefs.bottomPanel && view === "work" && bridge.git.available() ? (
           <BottomPanel tasks={tasks} environment={environment} problems={envs?.problems ?? []} project={envProject}
             terminals={terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null))} hub={hub} front={front}
             onNewTerminal={() => openTerminal()} onCloseTerminal={closeTerminal} onSendToThread={sendTerminal}
             onRun={runAction} onStop={(id) => void bridge.stopTask(id).catch(notice)}
             onClose={(id) => setTasks((list) => list.filter((task) => task.id !== id))}
-            onEdit={() => setEditingEnv(true)} onHide={() => updatePrefs({ bottomPanel: false })} />
+            onEdit={() => setEditingEnv(true)} onHide={() => updatePrefs({ bottomPanel: false })}
+            detach={bridge.windows.available() && selected ? { docks: false, run: () => detachPane("terminal") } : null} />
         ) : null}
       </main>
       {editingEnv && envProject ? (
@@ -2609,6 +2779,7 @@ export function App() {
               forcePushDefault={prefs.forcePush}
               notice={notice}
               onOpenFile={openFile}
+              detach={bridge.windows.available() && selected ? { docks: false, run: () => detachPane("review") } : null}
             />
           ) : (
             artifactKind(tab.path) && !tab.line ? (

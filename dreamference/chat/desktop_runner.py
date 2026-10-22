@@ -5,12 +5,12 @@ This module provides the DesktopRunner class, which builds and launches the Elec
 `desktop/electron` (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), built the way the Codex
 desktop app is built: Electron Forge, with `ling` bundled inside as `resources/ling`.
 
-The app has one window, the Mightling UI built from `desktop/ui` and bundled by the same Vite
-build as the main process. It shows Ask (the menu's former Chat, which showed the Onyx web UI until
-2026-10-08 and was a window of its own on `ling web` until 2026-10-09) and Work, both on the one
-`ling app-server` the app starts (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6). It needs neither
-Onyx nor `ling web`, so nothing is checked before the window opens: it says on its own start-up
-screen what it is waiting for.
+The app's windows show the Mightling UI built from `desktop/ui` and bundled by the same Vite build
+as the main process. Each shows Ask (the menu's former Chat, which showed the Onyx web UI until
+2026-10-08 and was a window of its own on `ling web` until 2026-10-09) or Work, all on the one
+`ling app-server` the app starts (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6; several windows since
+2026-10-22, DESKTOP_ELECTRON §13). It needs neither Onyx nor `ling web`, so nothing is checked
+before a window opens: it says on its own start-up screen what it is waiting for.
 
 It follows the same shape as the agent runners: provision the tooling if it is missing, then hand
 off to a subprocess.
