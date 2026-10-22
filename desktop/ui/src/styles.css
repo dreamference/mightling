@@ -959,3 +959,14 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .night-details pre { max-height: 40vh; overflow: auto; }
 .night-transcript { white-space: pre-wrap; font-family: var(--font-code); font-size: 12.5px; background: var(--code-bg); border-radius: var(--radius-sm); padding: 8px 10px; }
 .night-context { display: block; margin: 4px 0 8px; color: var(--muted); }
+
+/* Several windows (DESKTOP_ELECTRON §13): a thread mirrored read-only while another window holds its
+   composer, a pane away in a window of its own, and that pane's window. */
+.composer-mirror { display: flex; align-items: center; gap: 10px; max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 6px auto 16px; padding: 10px 14px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); background: var(--raised); color: var(--muted); }
+.composer-mirror .spacer, .pane-away .spacer { flex: 1; }
+.approval-host.mirrored { opacity: 0.6; }
+.pane-away { display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); }
+.work.pane-window { grid-template-columns: 1fr; }
+.work.pane-window .sidebar { display: none; }
+.pane-window .bottom-panel { flex: 1; height: auto; border-top: none; }
+.pane-window .review-pane { flex: 1; min-height: 0; border-left: none; }

@@ -139,7 +139,7 @@ Outside the package:
 
 **The web UI is `ling web`** (`ling-rs/web`, port 3100) and the desktop app the same page; the Onyx web chat is retired (spec `specs/DREAMFERENCE_MIGHTLING_ASK.md` §19). Image search and voice are sidecars behind both (`ling-admin images`, `ling-admin voice`); `server start` on a node starts them. Details: [docs/dev/cli.md](docs/dev/cli.md#sidecars-behind-ling-web-and-the-app).
 
-**The desktop app** is stock Electron with `ling` inside and one window: it shows Ask and Work (the menu, the tray and `ling app` switch its view, never open another) and talks to its own `ling app-server`, the app's only one, over one IPC channel, vetted by the main process against `ling-rs/web/policy.json`, the file `ling web` enforces (both run its conformance cases); egress is closed in the main process and audited with `--app`. Details: [docs/dev/desktop.md](docs/dev/desktop.md).
+**The desktop app** is stock Electron with `ling` inside: several windows (New Window; a thread, the terminal or the diff popped out), each Ask or Work, all on its own `ling app-server`, the app's only one (single-instance lock); one IPC channel routed per window, one composer per thread, every message vetted by the main process against `ling-rs/web/policy.json`, the file `ling web` enforces (both run its conformance cases); egress is closed in the main process and audited with `--app`.
 
 **The code index**, `ling-code` (`ling-code-rs/`), answers `def`/`refs`/`callers`/… from codebase-memory's graph and scip stores; queries only read, indexing runs outside the sandbox under one host-wide memory budget, and a submodule is indexed only if it is yours or you ask. Details: [docs/dev/code-index.md](docs/dev/code-index.md).
 

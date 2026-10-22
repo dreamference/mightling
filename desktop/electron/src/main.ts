@@ -1,17 +1,21 @@
-// The app window and the one IPC channel between its page and this process
-// (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3). Every message from the page is checked to
-// come from that window before it is acted on. The app window (`app://`) shows Ask and Work, as
-// `ling web` does: this process enforces the same policy (policy.ts) and keeps the Ask folders
-// (ask.ts). It is the app's only window, and its app-server the app's only one: the menu's Ask,
-// the tray's and `ling app` alone show Ask in it. Until 2026-10-09 they opened a second window on
-// `ling web`, whose own app-server shared `~/.mightling` with this one
-// (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
+// The app's windows and the one IPC channel between their pages and this process
+// (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3, §13). Every message from a page is checked to
+// come from one of the app's windows before it is acted on. A full window (`app://`) shows Ask and
+// Work, as `ling web` does: this process enforces the same policy (policy.ts) and keeps the Ask
+// folders (ask.ts). The app has several windows since 2026-10-22 (New Window, Ctrl/Cmd+Shift+N; a
+// thread popped out; a terminal or diff pane detached), each showing its own thread or project, and
+// one app-server, the app's only one: the channel is multiplexed per window (windows.ts), and a
+// thread open in two windows has one composer. The menu's Ask and Work, the tray and `ling app`
+// bring the most recent window forward, or open one when none is open; a second `ling app` hands
+// over to this instance (the single-instance lock, bootstrap.ts). Until 2026-10-22 the app had one
+// window; until 2026-10-09 the menu's Ask opened a second one on `ling web`, whose own app-server
+// shared `~/.mightling` with this one (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
 import fs from "node:fs";
 import path from "node:path";
 import * as knowledge from "./knowledge";
 import * as userFs from "./userfs";
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, FAILED, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped, setDefault } from "./airgapped";
@@ -32,7 +36,9 @@ import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, readRepo
 import { Nodes } from "./nodes";
 import { docsAdd, docsReindex, docsRemove, docsStatus, locate, syncKnowledge } from "./docs";
 import { Tasks } from "./tasks";
-import { RequestRouter } from "./windows";
+import { PANE_KINDS, WindowHub, paneAction, type PaneKind, type WindowKind } from "./windows";
+import { TerminalMirror } from "./terminal-mirror";
+import { WindowSession, cascade, follow } from "./window-state";
 import * as worktree from "./worktree";
 import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./shell";
 import { Notices } from "./notices";
@@ -54,6 +60,30 @@ export interface MainOptions {
 
 type View = "ask" | "work";
 
+/** What a link or a second `ling app` names for a window to show (args.ts). */
+type LinkPayload = Extract<ForView, { channel: "link" }>["payload"];
+
+interface AppWindow {
+  win: BrowserWindow;
+  kind: WindowKind;
+  /** What the window opened on, and what `work/target` answers it: a folder or a thread from `ling app` or a link. */
+  target: WorkTarget;
+  /** The view a full window shows now (its page says), for New Window and the session. */
+  view?: View;
+  /** A detached pane: which, whose thread, and the window it came from (its webContents id). */
+  pane?: { kind: PaneKind; thread: string; parent: number };
+}
+
+interface Opening {
+  kind: WindowKind;
+  view?: View;
+  popout?: string;
+  pane?: { kind: PaneKind; thread: string; parent: number };
+  target?: WorkTarget;
+  bounds?: Electron.Rectangle;
+  maximized?: boolean;
+}
+
 const resourcesPath = () => (app.isPackaged ? process.resourcesPath : null);
 
 export async function main(options: MainOptions): Promise<void> {
@@ -61,8 +91,8 @@ export async function main(options: MainOptions): Promise<void> {
   // never Vite's dev server.
   serve(path.join(__dirname, "..", "renderer", "main_window"));
 
-  let window: BrowserWindow | null = null;
-  let target: WorkTarget = options.work ?? { cwd: null, thread: null };
+  /** Every window of the app's own page, by its webContents id: full windows, pop-outs and detached panes. */
+  const appWindows = new Map<number, AppWindow>();
   // Hidden for the audit's session and for an end-to-end test (`MIGHTLING_HIDDEN=1`).
   const show = options.audit === null && !process.env.MIGHTLING_HIDDEN;
 
@@ -72,43 +102,57 @@ export async function main(options: MainOptions): Promise<void> {
   nativeTheme.themeSource = themeChoice(prefs.read().theme);
   const shownTheme = (): Theme => (nativeTheme.shouldUseDarkColors ? "dark" : "light");
   const notices = new Notices();
-  /** Pop-outs: a thread in a window of its own, on the same app-server (windows.ts). */
-  const popouts = new Map<number, BrowserWindow>();
-  const router = new RequestRouter();
-  const windows = () => [window, ...popouts.values()].filter((entry): entry is BrowserWindow => entry !== null && !entry.isDestroyed());
-  /** The app window or a pop-out the sender is, or null for anything else. */
+  /** Who shows what, who owns each thread's composer, and the routing of the one channel (windows.ts). */
+  const hub = new WindowHub();
+  /** The terminal tabs every window sees, with their recent output (terminal-mirror.ts). */
+  const terminals = new TerminalMirror();
+  /** The full windows open now, for the next start (window-state.ts); the audit's session keeps none. */
+  const session = new WindowSession(path.join(app.getPath("userData"), "windows.json"), path.join(app.getPath("userData"), "window-state-work.json"));
+  const alive = (entry: BrowserWindow | null | undefined): entry is BrowserWindow => entry !== null && entry !== undefined && !entry.isDestroyed();
+  const windows = () => [...appWindows.values()].map((entry) => entry.win).filter(alive);
+  /** The app's window the sender is (a full one, a pop-out or a pane), or null for anything else. */
   const windowFor = (senderId: number) => windows().find((entry) => entry.webContents.id === senderId) ?? null;
+  /** The most recently focused window of one of `kinds` (a hidden one counts: the tray brings it back). */
+  const recent = (kinds: WindowKind[] = ["full"]): BrowserWindow | null => {
+    const id = hub.mostRecent(kinds);
+    const entry = id === null ? undefined : appWindows.get(Number(id));
+    return alive(entry?.win) ? entry.win : null;
+  };
   const send = (target: BrowserWindow, message: ForView) => {
     const contents = target.webContents;
     if (contents.isDestroyed()) return;
     for (const piece of chunked(message)) contents.send(CHANNEL_FOR_VIEW, piece);
+  };
+  /** Tells every window who owns which thread's composer and who answers for the rest. */
+  const sendWindows = () => {
+    for (const target of windows()) send(target, { channel: "windows", payload: hub.state(String(target.webContents.id)) });
+  };
+  const sendTerminals = () => {
+    const list = terminals.list();
+    for (const target of windows()) send(target, { channel: "terminals", payload: list });
   };
   const deliver = (message: ForView) => {
     if (message.channel === "work://message") {
       // A finished turn, an approval or a question waiting: a notification, as Settings › Notifications says;
       // a click shows the thread.
       const notice = notices.take(message.payload, () => prefs.read());
-      if (notice) {
-        notify(windows(), notice, () => {
-          showView("work");
-          if (notice.threadId) deliver({ channel: "link", payload: { cwd: null, thread: notice.threadId } });
-        });
-      }
+      if (notice) notify(windows(), notice, () => showThread(notice.threadId ?? null));
       if (petStatus.observe(message.payload)) sendPet();
-      const routed = router.incoming(message.payload);
+      terminals.observe(message.payload);
+      const routed = hub.incoming(message.payload);
       for (const target of windows()) {
         if (routed.to === "all" || String(target.webContents.id) === routed.to) send(target, { channel: "work://message", payload: routed.payload });
       }
       return;
     }
     if (message.channel === "work://exit") {
-      router.reset();
+      hub.reset();
+      terminals.clear();
+      sendTerminals();
       petStatus.reset();
       sendPet();
     }
-    // The menu's view and a link are for the app window; the rest for every window.
-    const targets = message.channel === "view" || message.channel === "link" ? [window].filter((entry): entry is BrowserWindow => entry !== null && !entry.isDestroyed()) : windows();
-    for (const target of targets) send(target, message);
+    for (const target of windows()) send(target, message);
   };
   const server = new AppServer(resourcesPath(), {
     deliver,
@@ -118,31 +162,125 @@ export async function main(options: MainOptions): Promise<void> {
     },
   });
 
-  /** Brings the app window forward on `view`, opening it when it is not open. */
-  const showView = (view: View) => {
-    if (window && !window.isDestroyed()) {
-      if (window.isMinimized()) window.restore();
-      if (show) {
-        window.show();
-        window.focus();
+  /** Opens a window of the app: a full one, a thread popped out, or a pane detached from `parent`. */
+  function openWindow(opening: Opening): BrowserWindow {
+    const win = openWork({
+      preload: path.join(__dirname, "preload.cjs"), show, theme: shownTheme(), view: opening.view,
+      popout: opening.popout, pane: opening.pane ? { kind: opening.pane.kind, thread: opening.pane.thread } : undefined,
+      bounds: opening.bounds, maximized: opening.maximized,
+    });
+    const id = win.webContents.id;
+    const key = String(id);
+    appWindows.set(id, { win, kind: opening.kind, target: opening.target ?? { cwd: null, thread: null }, view: opening.view, pane: opening.pane });
+    hub.open(key, opening.kind);
+    if (opening.popout) hub.show(key, opening.popout, true);
+    if (opening.kind === "full" && options.audit === null) {
+      session.add(key, { view: opening.view ?? "ask", ...(opening.bounds ? { bounds: opening.bounds } : {}), ...(opening.maximized ? { maximized: true } : {}) },
+        () => ({ bounds: win.getNormalBounds(), maximized: win.isMaximized() }));
+      follow(win, (state) => session.update(key, state));
+    }
+    win.on("focus", () => {
+      hub.focus(key);
+      session.focused(key);
+      sendWindows();
+    });
+    // Settings › General: closing the last full window can leave the app in the tray (DESKTOP_PARITY_CLAUDE
+    // §4.2), so Quick Entry and running turns go on; off by default, and never in the audit's session.
+    // Quit (Ctrl+Q, the tray, the menu, a signal) still ends everything. Any other window just closes.
+    win.on("close", (event) => {
+      if (opening.kind !== "full") return;
+      const others = [...appWindows.values()].some((entry) => entry.kind === "full" && entry.win !== win && alive(entry.win));
+      if (!quitting && !others && options.audit === null && prefs.read().keepInTray === true) {
+        event.preventDefault();
+        win.hide();
+        return;
       }
-      deliver({ channel: "view", payload: view });
+      if (options.audit === null) session.closing(key, quitting || !others);
+    });
+    win.on("closed", () => {
+      appWindows.delete(id);
+      hub.close(key);
+      // A pane goes with the window it was detached from; a pane closed docks back into it.
+      for (const entry of appWindows.values()) if (entry.pane?.parent === id && alive(entry.win)) entry.win.close();
+      const parent = opening.pane ? appWindows.get(opening.pane.parent) : undefined;
+      if (opening.pane && parent && alive(parent.win)) send(parent.win, { channel: "pane://docked", payload: { pane: opening.pane.kind, thread: opening.pane.thread } });
+      sendWindows();
+    });
+    sendWindows();
+    return win;
+  }
+
+  /**
+   * Brings the most recent full window forward on `view` (and what `link` names), opening one when
+   * none is open: the menu's Ask and Work, the tray, `ling app`, a link, the pet, Quick Entry.
+   */
+  const showView = (view: View, link?: LinkPayload) => {
+    const existing = recent(["full"]);
+    if (existing) {
+      if (existing.isMinimized()) existing.restore();
+      if (show) {
+        existing.show();
+        existing.focus();
+      }
+      send(existing, { channel: "view", payload: view });
+      if (link) {
+        const entry = appWindows.get(existing.webContents.id);
+        if (entry) entry.target = { cwd: link.cwd, thread: link.thread };
+        send(existing, { channel: "link", payload: link });
+      }
+      return existing;
+    }
+    return openWindow({ kind: "full", view, target: link ? { cwd: link.cwd, thread: link.thread } : undefined });
+  };
+  /** Shows a thread: the window whose composer it is, brought forward, or the most recent full window. */
+  const showThread = (thread: string | null) => {
+    const owner = thread ? hub.owner(thread) : null;
+    const entry = owner === null ? undefined : appWindows.get(Number(owner));
+    if (entry && alive(entry.win)) {
+      if (entry.win.isMinimized()) entry.win.restore();
+      if (show) {
+        entry.win.show();
+        entry.win.focus();
+      }
       return;
     }
-    window = openWork({ preload: path.join(__dirname, "preload.cjs"), show, view, theme: shownTheme() });
-    window.on("closed", () => (window = null));
-    // Settings › General: closing the window can leave the app in the tray (DESKTOP_PARITY_CLAUDE §4.2),
-    // so Quick Entry and running turns go on; off by default, and never in the audit's session. Quit
-    // (Ctrl+Q, the tray, the menu, a signal) still ends everything.
-    window.on("close", (event) => {
-      if (quitting || options.audit !== null || prefs.read().keepInTray !== true) return;
-      event.preventDefault();
-      window?.hide();
-    });
+    showView("work", thread ? { cwd: null, thread } : undefined);
+  };
+  /** New Window (Ctrl/Cmd+Shift+N): a full window beside the one it came from, on its view, showing nothing yet. */
+  const newWindow = (from: BrowserWindow | null, view?: View) => {
+    const source = from && appWindows.get(from.webContents.id)?.kind === "full" ? from : recent(["full"]);
+    const bounds = source ? cascade(source.getNormalBounds(), screen.getDisplayMatching(source.getNormalBounds()).workArea) : undefined;
+    return openWindow({ kind: "full", view: view ?? (source ? appWindows.get(source.webContents.id)?.view : undefined) ?? "ask", bounds });
+  };
+  /** Detaches a thread's pane from `parent` into a window of its own, or brings the one already detached forward. */
+  const detach = (parent: BrowserWindow, kind: PaneKind, thread: string) => {
+    for (const entry of appWindows.values()) {
+      if (entry.pane && entry.pane.kind === kind && entry.pane.thread === thread && alive(entry.win)) {
+        if (show) entry.win.focus();
+        return entry.win;
+      }
+    }
+    return openWindow({ kind: "pane", pane: { kind, thread, parent: parent.webContents.id } });
+  };
+  /** Docks a thread's pane back: its window closes, and the window it came from shows it again. */
+  const dock = (kind: PaneKind, thread: string) => {
+    for (const entry of appWindows.values()) if (entry.pane && entry.pane.kind === kind && entry.pane.thread === thread && alive(entry.win)) entry.win.close();
   };
   let quitting = false;
-  app.on("before-quit", () => (quitting = true));
-  const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };
+  app.on("before-quit", () => {
+    quitting = true;
+    session.freeze();
+  });
+  const actions = {
+    openAsk: () => showView("ask"),
+    openWork: () => showView("work"),
+    newWindow: (from: BrowserWindow | null) => newWindow(from),
+    // The Window menu's pane items: the page of the window in front decides (detach, or dock back).
+    pane: (kind: PaneKind, from: BrowserWindow | null) => {
+      const target = from && appWindows.has(from.webContents.id) ? from : recent(["full", "popout", "pane"]);
+      if (target) send(target, { channel: "command", payload: kind === "terminal" ? "detachTerminal" : "detachReview" });
+    },
+  };
 
   /** Gives every window the theme shown now: its background, its title bar's symbols, the page's tokens. */
   function paintTheme(): void {
@@ -210,13 +348,12 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "pet/open": {
         const thread = petStatus.focus();
-        showView(thread ? "work" : "ask");
-        if (thread) deliver({ channel: "link", payload: { cwd: null, thread } });
+        if (thread) showThread(thread);
+        else showView("ask");
         return null;
       }
       case "pet/ask":
-        showView("ask");
-        deliver({ channel: "link", payload: { cwd: null, thread: null, page: "ask", prompt: String(message.prompt ?? "").slice(0, 4000) } });
+        showView("ask", { cwd: null, thread: null, page: "ask", prompt: String(message.prompt ?? "").slice(0, 4000) });
         return null;
       case "pet/hide":
         prefs.write({ petShown: false });
@@ -276,8 +413,7 @@ export async function main(options: MainOptions): Promise<void> {
         hideQuick();
         if (!prompt) return null;
         // A new Ask question, sent at once, in the app window brought forward.
-        showView("ask");
-        deliver({ channel: "link", payload: { cwd: null, thread: null, page: "ask", prompt, send: true } });
+        showView("ask", { cwd: null, thread: null, page: "ask", prompt, send: true });
         return null;
       }
       case "quick/hide":
@@ -302,6 +438,7 @@ export async function main(options: MainOptions): Promise<void> {
   };
 
   installMenu(actions);
+  app.on("will-quit", () => session.flush());
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
   installTray(path.join(__dirname, "..", "..", "icons"), { ...actions, quickQuestion: toggleQuick });
 
@@ -368,21 +505,74 @@ export async function main(options: MainOptions): Promise<void> {
       case "work/start":
         return server.start();
       case "work/send": {
-        // The page answering a request for the user (an approval): the pet stops waiting on it.
-        const sent = message.message as { id?: unknown; method?: unknown; result?: unknown; error?: unknown };
-        if (sent && sent.id !== undefined && sent.method === undefined && petStatus.answered(sent.id)) sendPet();
-        const routed = router.outgoing(String(own.webContents.id), message.message);
+        // Routed per window, refused when the thread's composer is in another window (windows.ts),
+        // then vetted against the policy like every message (server.ts).
+        const routed = hub.outgoing(String(own.webContents.id), message.message);
         if (routed.reply) send(own, { channel: "work://message", payload: routed.reply });
         if (routed.send !== null) await server.send(routed.send);
+        // The page answered a request for the user (an approval): the pet stops waiting on it.
+        const sent = message.message as { id?: unknown; method?: unknown; result?: unknown; error?: unknown };
+        if (sent && sent.id !== undefined && sent.method === undefined && petStatus.answered(sent.id)) sendPet();
         return null;
       }
-      case "window/popout": {
-        const popout = openWork({ preload: path.join(__dirname, "preload.cjs"), show, popout: message.thread, theme: shownTheme() });
-        const id = popout.webContents.id;
-        popouts.set(id, popout);
-        popout.on("closed", () => popouts.delete(id));
+      case "window/popout":
+        // The thread moves into a window of its own and takes its composer with it.
+        openWindow({ kind: "popout", popout: String(message.thread) });
+        return null;
+      case "window/new":
+        newWindow(own, message.view === "work" ? "work" : message.view === "ask" ? "ask" : undefined);
+        return null;
+      case "window/state":
+        return hub.state(String(own.webContents.id));
+      case "window/showing": {
+        // The page says what it shows: the composer's owner may change, and the session keeps the view.
+        const entry = appWindows.get(own.webContents.id);
+        const view: View = message.view === "work" ? "work" : "ask";
+        if (entry && entry.kind === "full" && entry.view !== view) {
+          entry.view = view;
+          if (options.audit === null) session.update(String(own.webContents.id), { view });
+        }
+        hub.show(String(own.webContents.id), typeof message.thread === "string" ? message.thread : null);
+        sendWindows();
+        return hub.state(String(own.webContents.id));
+      }
+      case "window/take":
+        if (typeof message.thread !== "string" || hub.shown(String(own.webContents.id)) !== message.thread) throw new Error("a window takes the composer of the thread it shows");
+        hub.show(String(own.webContents.id), message.thread, true);
+        sendWindows();
+        return hub.state(String(own.webContents.id));
+      case "window/show-thread":
+        showThread(typeof message.thread === "string" ? message.thread : null);
+        return null;
+      case "window/detach": {
+        if (!PANE_KINDS.includes(message.pane) || typeof message.thread !== "string" || !message.thread) throw new Error("detach the terminal or the diff of a thread");
+        if (appWindows.get(own.webContents.id)?.kind === "pane") throw new Error("a pane is already detached");
+        detach(own, message.pane, message.thread);
         return null;
       }
+      case "window/dock":
+        if (!PANE_KINDS.includes(message.pane) || typeof message.thread !== "string") throw new Error("dock the terminal or the diff of a thread");
+        dock(message.pane, message.thread);
+        return null;
+      case "pane/relay": {
+        // A detached pane's request for the window it came from (a new terminal, text for the composer, a file to open).
+        const entry = appWindows.get(own.webContents.id);
+        const parent = entry?.pane ? appWindows.get(entry.pane.parent) : undefined;
+        if (!entry?.pane || !parent || !alive(parent.win)) throw new Error("only a detached pane asks the window it came from");
+        const action = paneAction(message.action, entry.pane.thread);
+        send(parent.win, { channel: "pane://action", payload: action });
+        return null;
+      }
+      case "terminal/list":
+        return terminals.list();
+      case "terminal/publish":
+        if (terminals.publish(message.session)) sendTerminals();
+        return null;
+      case "terminal/forget":
+        if (terminals.forget(message.processId)) sendTerminals();
+        return null;
+      case "terminal/backlog":
+        return terminals.backlog(message.processId);
       case "window/always-on-top":
         own.setAlwaysOnTop(Boolean(message.on));
         return own.isAlwaysOnTop();
@@ -484,7 +674,7 @@ export async function main(options: MainOptions): Promise<void> {
         server.stop();
         return null;
       case "work/target":
-        return target;
+        return appWindows.get(own.webContents.id)?.target ?? { cwd: null, thread: null };
       case "work/airgapped": {
         const ling = findLing(resourcesPath());
         return ling ? airgapped(ling, message.thread) : { level: "off", source: "ling is not installed" };
@@ -778,7 +968,7 @@ export async function main(options: MainOptions): Promise<void> {
         return chosen.canceled ? null : chosen.filePaths[0] ?? null;
       }
       default:
-        throw new Error(`the app window does not send ${(message as { type: string }).type}`);
+        throw new Error(`the app's windows do not send ${(message as { type: string }).type}`);
     }
   }
 
@@ -788,25 +978,21 @@ export async function main(options: MainOptions): Promise<void> {
   // message, not the query, is what the page follows.
   nativeTheme.on("updated", paintTheme);
 
-  // A second instance, or a `mightling://` link: show what it asked for, in the one window.
+  // A second instance (the single-instance lock hands it over), or a `ling://` link: show what it
+  // asked for in the most recent window, or in a new one when none is open; never a second app.
   app.on("second-instance", (_event, argv, _cwd, data) => {
     const extra = (data as { argv?: string[] } | undefined)?.argv ?? argv.slice(1);
     const asked = require("./args").workTarget(extra) as WorkTarget | null;
     // `ling://quick`: the box, as the shortcut opens it (a Wayland desktop's own key binding).
     if (asked?.page === "quick") return toggleQuick();
-    if (asked) {
-      target = asked;
-      showView("work");
-      deliver({ channel: "link", payload: target });
-    } else showView("ask");
+    if (asked) showView("work", asked);
+    else showView("ask");
   });
   app.on("open-url", (event, url) => {
     event.preventDefault();
     const asked = require("./args").linkTarget(url) as WorkTarget;
     if (asked.page === "quick") return toggleQuick();
-    target = asked;
-    showView("work");
-    deliver({ channel: "link", payload: target });
+    showView("work", asked);
   });
   app.on("window-all-closed", () => {
     tasks.stopAll();
@@ -852,7 +1038,15 @@ export async function main(options: MainOptions): Promise<void> {
   // which holds a libuv worker for good (app.e2e.ts, "quits while a read hangs").
   if (process.env.MIGHTLING_TEST_PENDING_READ) void userFs.readText(process.env.MIGHTLING_TEST_PENDING_READ).catch(() => {});
 
-  showView(options.work ? "work" : "ask");
+  // The windows open when the app last quit, where they were (window-state.ts), then the one
+  // `ling app` asked for: no argument opens Ask, a folder, a thread or `--work` open Work, in the most
+  // recent window. The audit's session opens one hidden window and no other.
+  const restored = options.audit === null ? session.restored() : [];
+  for (const [index, saved] of restored.entries()) {
+    const last = index === restored.length - 1;
+    openWindow({ kind: "full", view: last ? (options.work ? "work" : "ask") : saved.view, bounds: saved.bounds, maximized: saved.maximized, target: last ? options.work ?? undefined : undefined });
+  }
+  if (restored.length === 0) showView(options.work ? "work" : "ask", options.work ?? undefined);
   // The pet, when Settings › Pets has it on (never in the egress audit's session).
   if (options.audit === null) syncPet();
   // Earlier questions (recall.ts): the skill and the copies' folder as Settings › Memories says.
@@ -867,8 +1061,8 @@ export async function main(options: MainOptions): Promise<void> {
     }
     // The preview tab under audit: the audit's page in a preview, laid over the (hidden) window as a tab would be.
     const page = auditPreview();
-    if (page && window) {
-      const host = window;
+    const host = recent(["full"]);
+    if (page && host) {
       void previews.open(host, "audit", page, null).then(() => previews.place("audit", { x: 0, y: 0, width: 800, height: 600 }, true))
         .catch((error) => console.error(`ling-app: the audit's preview: ${error instanceof Error ? error.message : String(error)}`));
     }

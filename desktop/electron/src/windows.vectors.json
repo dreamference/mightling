@@ -1,0 +1,925 @@
+{
+ "comment": "The desktop app's window routing (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §13), run by windows.test.ts through WindowHub and then the policy (policy.ts) with the stubs of ling-rs/web/vectors/outgoing.json, as the main process runs every message: `open`, `close`, `focus` and `show` (with `take`) are window events; `from` is a window's message, which is sent (`send`, the vetted message), answered here (`reply`), dropped (`nothing`) or refused; `server` is a message from the app-server and where it goes; `owner` and `fallback` check who holds a thread's composer and who answers for threads nobody shows. A server request adds its id to the pending answers, as the app-server's reader does. Ids are `<window>␟<the window's id as JSON>` once tagged.",
+ "scenarios": [
+  {
+   "name": "each window's requests are tagged with the window and answered to it alone",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "full"
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "clientInfo": {
+        "name": "mightling",
+        "version": "1"
+       }
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "1␟1",
+      "method": "initialize",
+      "params": {
+       "clientInfo": {
+        "name": "mightling",
+        "version": "1"
+       }
+      }
+     }
+    },
+    {
+     "server": {
+      "id": "1␟1",
+      "result": {
+       "userAgent": "ling"
+      }
+     },
+     "to": "1",
+     "payload": {
+      "id": 1,
+      "result": {
+       "userAgent": "ling"
+      }
+     }
+    },
+    {
+     "from": "1",
+     "message": {
+      "method": "initialized"
+     },
+     "expect": "send",
+     "send": {
+      "method": "initialized"
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "clientInfo": {
+        "name": "mightling",
+        "version": "1"
+       }
+      }
+     },
+     "expect": "reply",
+     "reply": {
+      "id": 1,
+      "result": {
+       "userAgent": "ling"
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "method": "initialized"
+     },
+     "expect": "nothing"
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": 7,
+      "method": "thread/read",
+      "params": {
+       "threadId": "t1"
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "1␟7",
+      "method": "thread/read",
+      "params": {
+       "threadId": "t1"
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 7,
+      "method": "thread/read",
+      "params": {
+       "threadId": "t1"
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "2␟7",
+      "method": "thread/read",
+      "params": {
+       "threadId": "t1"
+      }
+     }
+    },
+    {
+     "server": {
+      "id": "2␟7",
+      "result": {
+       "thread": "b"
+      }
+     },
+     "to": "2",
+     "payload": {
+      "id": 7,
+      "result": {
+       "thread": "b"
+      }
+     }
+    },
+    {
+     "server": {
+      "id": "1␟7",
+      "error": {
+       "code": 1,
+       "message": "no"
+      }
+     },
+     "to": "1",
+     "payload": {
+      "id": 7,
+      "error": {
+       "code": 1,
+       "message": "no"
+      }
+     }
+    },
+    {
+     "server": {
+      "method": "turn/started",
+      "params": {
+       "threadId": "t1",
+       "turn": {
+        "id": "u1"
+       }
+      }
+     },
+     "to": "all",
+     "payload": {
+      "method": "turn/started",
+      "params": {
+       "threadId": "t1",
+       "turn": {
+        "id": "u1"
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "after the server exits, the next window to initialize sends its own initialize",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "full"
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "clientInfo": {
+        "name": "mightling",
+        "version": "1"
+       }
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "1␟1",
+      "method": "initialize",
+      "params": {
+       "clientInfo": {
+        "name": "mightling",
+        "version": "1"
+       }
+      }
+     }
+    },
+    {
+     "server": {
+      "id": "1␟1",
+      "result": {
+       "userAgent": "ling"
+      }
+     },
+     "to": "1",
+     "payload": {
+      "id": 1,
+      "result": {
+       "userAgent": "ling"
+      }
+     }
+    },
+    {
+     "reset": true
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "clientInfo": {
+        "name": "mightling",
+        "version": "1"
+       }
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "2␟1",
+      "method": "initialize",
+      "params": {
+       "clientInfo": {
+        "name": "mightling",
+        "version": "1"
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "every window is held to the policy: a method off the allow-list, a prompt by turn/start, a thread opener's dropped fields",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "popout"
+    },
+    {
+     "open": "3",
+     "kind": "pane"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 3,
+      "method": "feedback/upload",
+      "params": {}
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "3",
+     "message": {
+      "id": 3,
+      "method": "account/login/start",
+      "params": {}
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 4,
+      "method": "turn/start",
+      "params": {
+       "threadId": "t9",
+       "prompt": "ask",
+       "input": []
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "3",
+     "message": {
+      "id": 5,
+      "method": "thread/start",
+      "params": {
+       "cwd": "/w",
+       "baseInstructions": "mine",
+       "model": "m"
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "3␟5",
+      "method": "thread/start",
+      "params": {
+       "cwd": "/w",
+       "model": "m"
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "method": "thread/started"
+     },
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "a thread open in two windows has one composer: the first to show it; the other may read but not send",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "full"
+    },
+    {
+     "show": "1",
+     "thread": "t1"
+    },
+    {
+     "show": "2",
+     "thread": "t1"
+    },
+    {
+     "owner": "t1",
+     "is": "1"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 2,
+      "method": "turn/start",
+      "params": {
+       "threadId": "t1",
+       "input": []
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 3,
+      "method": "turn/steer",
+      "params": {
+       "threadId": "t1",
+       "input": [],
+       "expectedTurnId": "u1"
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 4,
+      "method": "turn/interrupt",
+      "params": {
+       "threadId": "t1",
+       "turnId": "u1"
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 5,
+      "method": "thread/queue/add",
+      "params": {
+       "threadId": "t1"
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 6,
+      "method": "thread/read",
+      "params": {
+       "threadId": "t1"
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "2␟6",
+      "method": "thread/read",
+      "params": {
+       "threadId": "t1"
+      }
+     }
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": 2,
+      "method": "turn/start",
+      "params": {
+       "threadId": "t1",
+       "input": []
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "1␟2",
+      "method": "turn/start",
+      "params": {
+       "threadId": "t1",
+       "input": []
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 7,
+      "method": "turn/start",
+      "params": {
+       "threadId": "t2",
+       "input": []
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "2␟7",
+      "method": "turn/start",
+      "params": {
+       "threadId": "t2",
+       "input": []
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "taking the composer over moves it; closing or leaving the thread passes it to the most recent window still showing it",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "full"
+    },
+    {
+     "open": "3",
+     "kind": "full"
+    },
+    {
+     "show": "1",
+     "thread": "t1"
+    },
+    {
+     "show": "2",
+     "thread": "t1"
+    },
+    {
+     "show": "3",
+     "thread": "t1"
+    },
+    {
+     "show": "2",
+     "thread": "t1",
+     "take": true
+    },
+    {
+     "owner": "t1",
+     "is": "2"
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": 2,
+      "method": "turn/start",
+      "params": {
+       "threadId": "t1",
+       "input": []
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "focus": "1"
+    },
+    {
+     "focus": "3"
+    },
+    {
+     "close": "2"
+    },
+    {
+     "owner": "t1",
+     "is": "3"
+    },
+    {
+     "show": "3",
+     "thread": null
+    },
+    {
+     "owner": "t1",
+     "is": "1"
+    },
+    {
+     "show": "1",
+     "thread": "t5"
+    },
+    {
+     "owner": "t1",
+     "is": null
+    },
+    {
+     "from": "3",
+     "message": {
+      "id": 9,
+      "method": "turn/start",
+      "params": {
+       "threadId": "t1",
+       "input": []
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "3␟9",
+      "method": "turn/start",
+      "params": {
+       "threadId": "t1",
+       "input": []
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a thread popped out takes the composer with it",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "show": "1",
+     "thread": "t1"
+    },
+    {
+     "open": "2",
+     "kind": "popout"
+    },
+    {
+     "show": "2",
+     "thread": "t1",
+     "take": true
+    },
+    {
+     "owner": "t1",
+     "is": "2"
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": 2,
+      "method": "turn/interrupt",
+      "params": {
+       "threadId": "t1",
+       "turnId": "u1"
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "close": "2"
+    },
+    {
+     "owner": "t1",
+     "is": "1"
+    }
+   ]
+  },
+  {
+   "name": "a detached pane never owns a composer and sends no turn, though it may run its terminals",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "pane"
+    },
+    {
+     "show": "2",
+     "thread": "t1"
+    },
+    {
+     "owner": "t1",
+     "is": null
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 2,
+      "method": "turn/start",
+      "params": {
+       "threadId": "t1",
+       "input": []
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 3,
+      "method": "command/exec/write",
+      "params": {
+       "processId": "term-1",
+       "deltaBase64": "bHMK"
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "2␟3",
+      "method": "command/exec/write",
+      "params": {
+       "processId": "term-1",
+       "deltaBase64": "bHMK"
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": 4,
+      "method": "command/exec/terminate",
+      "params": {
+       "processId": "term-1"
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "2␟4",
+      "method": "command/exec/terminate",
+      "params": {
+       "processId": "term-1"
+      }
+     }
+    },
+    {
+     "fallback": "1"
+    }
+   ]
+  },
+  {
+   "name": "an approval reaches every window, is answered only from the composer's window, and only once",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "full"
+    },
+    {
+     "open": "3",
+     "kind": "pane"
+    },
+    {
+     "show": "1",
+     "thread": "t1"
+    },
+    {
+     "show": "2",
+     "thread": "t1"
+    },
+    {
+     "server": {
+      "id": "srv-1",
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+       "threadId": "t1",
+       "turnId": "u1",
+       "itemId": "i1"
+      }
+     },
+     "to": "all",
+     "payload": {
+      "id": "srv-1",
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+       "threadId": "t1",
+       "turnId": "u1",
+       "itemId": "i1"
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": "srv-1",
+      "result": {
+       "decision": "accept"
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "3",
+     "message": {
+      "id": "srv-1",
+      "result": {
+       "decision": "accept"
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": "srv-1",
+      "result": {
+       "decision": "accept"
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "srv-1",
+      "result": {
+       "decision": "accept"
+      }
+     }
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": "srv-1",
+      "result": {
+       "decision": "accept"
+      }
+     },
+     "expect": "refused"
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": "srv-404",
+      "result": {}
+     },
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "a server request about a thread no window shows is answered once, by whichever window answers first",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "full"
+    },
+    {
+     "focus": "1"
+    },
+    {
+     "fallback": "1"
+    },
+    {
+     "server": {
+      "id": "srv-2",
+      "method": "item/tool/call",
+      "params": {
+       "threadId": "t7",
+       "turnId": "u1",
+       "callId": "c1",
+       "tool": "terminal_output",
+       "arguments": {}
+      }
+     },
+     "to": "all",
+     "payload": {
+      "id": "srv-2",
+      "method": "item/tool/call",
+      "params": {
+       "threadId": "t7",
+       "turnId": "u1",
+       "callId": "c1",
+       "tool": "terminal_output",
+       "arguments": {}
+      }
+     }
+    },
+    {
+     "from": "1",
+     "message": {
+      "id": "srv-2",
+      "result": {
+       "contentItems": [],
+       "success": true
+      }
+     },
+     "expect": "send",
+     "send": {
+      "id": "srv-2",
+      "result": {
+       "contentItems": [],
+       "success": true
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": "srv-2",
+      "result": {
+       "contentItems": [],
+       "success": true
+      }
+     },
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "a resolved request is forgotten, so a later one with the same id is judged afresh",
+   "steps": [
+    {
+     "open": "1",
+     "kind": "full"
+    },
+    {
+     "open": "2",
+     "kind": "full"
+    },
+    {
+     "show": "1",
+     "thread": "t1"
+    },
+    {
+     "server": {
+      "id": "srv-1",
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+       "threadId": "t1",
+       "turnId": "u1",
+       "itemId": "i1"
+      }
+     },
+     "to": "all",
+     "payload": {
+      "id": "srv-1",
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+       "threadId": "t1",
+       "turnId": "u1",
+       "itemId": "i1"
+      }
+     }
+    },
+    {
+     "server": {
+      "method": "serverRequest/resolved",
+      "params": {
+       "threadId": "t1",
+       "requestId": "srv-1"
+      }
+     },
+     "to": "all",
+     "payload": {
+      "method": "serverRequest/resolved",
+      "params": {
+       "threadId": "t1",
+       "requestId": "srv-1"
+      }
+     }
+    },
+    {
+     "from": "2",
+     "message": {
+      "id": "srv-1",
+      "result": {
+       "decision": "accept"
+      }
+     },
+     "expect": "refused"
+    }
+   ]
+  }
+ ]
+}
