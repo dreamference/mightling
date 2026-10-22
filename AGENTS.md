@@ -67,7 +67,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 - **Byte-identical copies** are compared by tests: the air-gap resolver (`ling-rs/airgapped/` and `ling-web-rs/src/airgapped.rs`) and the node locator (`ling-rs/node-locator/` and `ling-web-rs/src/node_locator.rs`). Change both or neither.
 - **Never write the user's choices into the repository** where a clone or the agent could write them: submodule indexing choices live in `$CODEX_HOME/ling-code.toml`, a node's advertisement in `~/.config/dreamference/node-advertise.json`, and for `/airgapped` the strictest of the repository's and the user's config wins.
 - The specification is `specs/`, one document per area, indexed by `specs/README.md` (which also lists the code defects found when the specs were reconciled with the code on 2026-09-28). There is no single `DREAMFERENCE_SPEC.md` any more; read the one document you need.
-- `.gemini/`, `.antigravity/`, `.dreamference/` are gitignored leftovers from other tooling, not part of the project (`.dreamference/` at a workspace root is also where the context engine writes its index).
+- `.gemini/`, `.antigravity/`, `.dreamference/` are gitignored leftovers of other tools (`.dreamference/` at a workspace root also holds the context engine's index).
 
 ## Where things live
 
@@ -109,7 +109,7 @@ Outside the package:
 
 `ling-admin` (`dreamference.cli:main`) has about thirty subcommand groups (`init`, `run`, `server`, `codex`, `node`, `night`, `desktop`, `audit`, …); every command rejects unknown arguments. The full list: [docs/dev/cli.md](docs/dev/cli.md).
 
-`ling`, the terminal agent, is **not** Python: it is the Rust binary `CodexBrandedBuilder` builds, linked at `~/.local/bin/ling`, so every Codex flag and subcommand works natively (`ling -a on-request "…"`, `ling exec …`, `ling resume --last`). The old `chat` subcommand that started the agent was removed once the agent stopped being a Python wrapper; `ling-admin run "…"` remains for one-shot tasks with any configured agent. `ling-search` and `ling-fetch` are Rust binaries from `ling-web-rs/`, installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is only the MCP server's copy of the same behaviour.
+`ling`, the terminal agent, is **not** Python: it is the Rust binary `CodexBrandedBuilder` builds, linked at `~/.local/bin/ling`, so every Codex flag and subcommand works natively. The old `chat` subcommand that started the agent was removed once the agent stopped being a Python wrapper; `ling-admin run "…"` remains for one-shot tasks with any configured agent. `ling-search` and `ling-fetch` are Rust binaries from `ling-web-rs/`, installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is only the MCP server's copy of the same behaviour.
 
 ## Architecture in brief
 
@@ -129,6 +129,8 @@ Outside the package:
 
 **`/airgapped`** has two levels, `off` and `on`; `on` gives every sandboxed command an empty network namespace, enforced in Codex's sandbox helper (patch `0019`), and is never allowed together with Full Access. Details: [docs/dev/airgapped.md](docs/dev/airgapped.md).
 
+**Where edits land:** in place, as in Codex; `/worktree on` starts new TUI sessions in a worktree, `/worktree apply` brings changes back. Details: [docs/dev/launcher.md](docs/dev/launcher.md#where-edits-land-worktree).
+
 **Skills from other agents** are linked under `~/.mightling/skills/from-<agent>/` at every start and budgeted, with no Codex patch. Details: [docs/dev/skills.md](docs/dev/skills.md).
 
 **Night Shift** is two halves that share only files: `/night add` queues a task, `ling-admin night run` (a user timer) runs each in its own git worktree and memory-capped scope, three attempts by default (`[night] best_of`, chooser v1 picks one); the runner commits, and nothing is merged or pushed. Details: [docs/dev/night-shift.md](docs/dev/night-shift.md).
@@ -145,7 +147,7 @@ Outside the package:
 
 **The local file index**, `ling-docs` (`ling-docs-rs/`), indexes the user's collections (`~/Documents`, `~/Downloads` by default) for `docs_search`/`docs_read`, opens no socket, and indexes in bwrap under the same memory budget. Details: [docs/dev/local-file-index.md](docs/dev/local-file-index.md).
 
-**Phone messengers** ship with Mightling and are **off until a command turns one on**: `ling signal setup` (Signal, linked to the owner's account, Note to Self only), `ling chat start` after `ling chat telegram setup` or `ling-admin matrix start` (Matrix over Tailscale, Telegram). One surface: `ling signal …` and `ling chat …` are launcher subcommands; the small `ling-signal` binary is only the daemon a system account runs. signal-cli and its Java runtime are fetched by setup, pinned by URL and SHA-256. `stop` disables, and the egress audit names every bridge that is on. Details: [docs/dev/messengers.md](docs/dev/messengers.md).
+**Phone messengers** ship with Mightling and are **off until a command turns one on**: `ling signal setup` (Signal, linked to the owner's account, Note to Self only), `ling chat start` after `ling chat telegram setup` or `ling-admin matrix start` (Matrix over Tailscale, Telegram). One surface: `ling signal …` and `ling chat …` are launcher subcommands; the small `ling-signal` binary is only the daemon a system account runs. `stop` disables, and the egress audit names every bridge that is on. Details: [docs/dev/messengers.md](docs/dev/messengers.md).
 
 **The context engine** (`context_engine/`, `ling-admin index` and `mcp`) writes `.dreamference/context_index.json` and `context.db`; its indexing is bounded because it runs beside a resident model server. Details: [docs/dev/context-engine.md](docs/dev/context-engine.md).
 
@@ -194,4 +196,4 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 - [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
 - [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
 - [docs/dev/cli.md](docs/dev/cli.md): every `ling-admin` subcommand, the sidecars behind `ling web` and the app
-- [docs/dev/sessions.md](docs/dev/sessions.md): the parallel work streams of 2026-10-10 and their status board (retired)
+- [docs/dev/sessions.md](docs/dev/sessions.md): the work streams of 2026-10-10 (retired)

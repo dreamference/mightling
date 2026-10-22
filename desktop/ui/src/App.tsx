@@ -82,7 +82,7 @@ import { ProjectPage } from "./ProjectPage";
 import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollection, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
-import { carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
+import { carry, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkAt, forkThread, listQueue, movedQueue, reorderQueued, sendMessage, steerQueued, takeBack, updateQueued, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
@@ -405,7 +405,10 @@ export function App() {
       // The worktree settings the codex-worktree crate reads too ([desktop] in config.toml).
       client.request("config/read", {}).then((answer) => {
         const config = (answer as { config?: Record<string, unknown> }).config ?? null;
-        setWtSettings(worktreeSettings((config as { desktop?: Record<string, unknown> | null } | null)?.desktop));
+        const desktop = (config as { desktop?: Record<string, unknown> | null } | null)?.desktop;
+        setWtSettings(worktreeSettings(desktop));
+        // Local or Worktree for new threads: the user's choice, shared with `/worktree on|off`.
+        setNewChoice((choice) => ({ ...choice, mode: defaultCheckout(desktop) }));
         setBoard({ on: boardOn(config), sqliteHome: sqliteHome(config) });
       }).catch(() => {});
       // Night Shift's inbox: finished tasks since Scheduled was last opened.

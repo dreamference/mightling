@@ -25,7 +25,7 @@ use std::process::Stdio;
 use serde_json::Value;
 use serde_json::json;
 
-const USAGE: &str = "Usage: /night [list] | /night add [--test \"<cmd>\"] [--on <node>] [--best-of N] <task> | /night show <id> | /night drop <id> | /night report";
+const USAGE: &str = "Usage: /night [list] | /night add [--test \"<cmd>\"] [--on <node>] [--best-of N] <task> | /night show <id> | /night apply <id> | /night drop <id> | /night report";
 
 /// Statuses after which a task is finished for the night: the startup line counts them.
 const FINISHED: &[&str] = &["done", "no-change", "stalled", "failed", "interrupted"];
@@ -42,6 +42,9 @@ pub enum Request {
     /// (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.9); None leaves it to the table.
     Add { test: Option<String>, on: Option<String>, best_of: Option<u32>, task: String },
     Show(String),
+    /// Brings a finished task's branch into the checkout it is asked from, as uncommitted changes
+    /// (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11.10).
+    Apply(String),
     Drop(String),
     Report,
     Usage(String),
@@ -59,8 +62,9 @@ impl Request {
         match verb {
             "" | "list" if rest.is_empty() => Request::List,
             "report" if rest.is_empty() => Request::Report,
-            "show" | "drop" => match rest.split_whitespace().collect::<Vec<_>>().as_slice() {
+            "show" | "apply" | "drop" => match rest.split_whitespace().collect::<Vec<_>>().as_slice() {
                 [id] if verb == "show" => Request::Show(id.to_string()),
+                [id] if verb == "apply" => Request::Apply(id.to_string()),
                 [id] => Request::Drop(id.to_string()),
                 _ => Request::Usage(USAGE.to_string()),
             },
@@ -306,6 +310,7 @@ pub fn run(dir: &Path, request: Request, cwd: &Path) -> Vec<String> {
         Request::List => list(dir, &repo),
         Request::Add { test, on, best_of, task } => add(dir, &repo, cwd, test, on, best_of, &task),
         Request::Show(id) => show(dir, &repo, &id),
+        Request::Apply(id) => apply(dir, &repo, cwd, &id),
         Request::Drop(id) => drop_task(dir, &repo, &id),
         Request::Report => report(dir, &repo),
     }
@@ -458,6 +463,39 @@ fn show(dir: &Path, repo: &Path, id: &str) -> Vec<String> {
     lines
 }
 
+/// `/night apply <id>`: the task's branch, from its base, applied to the checkout `cwd` is in as
+/// uncommitted changes, all or nothing (worktree.rs's `apply_between`, shared with
+/// `/worktree apply`). The runner never merges; this is the user's step, taken when they ask.
+fn apply(dir: &Path, repo: &Path, cwd: &Path, id: &str) -> Vec<String> {
+    let Some(task) = find(dir, repo, id) else {
+        return vec![format!("No task {id} for this repository (see /night list).")];
+    };
+    let id = text(&task, "id");
+    let Some(branch) = task["result"]["branch"].as_str() else {
+        return vec![format!("{id} is {}: it has no branch to apply.", text(&task, "status"))];
+    };
+    let mut lines = Vec::new();
+    if let Some(at) = task["applied"]["at"].as_str() {
+        lines.push(format!("{id} was applied before, at {at}."));
+    }
+    match crate::worktree::apply_between(cwd, &text(&task, "base"), branch, branch) {
+        Ok(applied) => {
+            let into = git(cwd, &["rev-parse", "--show-toplevel"]).unwrap_or_else(|| cwd.display().to_string());
+            let at = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+            let noted = update_task(dir, &id, |task| {
+                task["applied"] = json!({"at": at, "into": into});
+                Ok(())
+            });
+            lines.extend(applied);
+            if let Err(error) = noted {
+                lines.push(format!("(Could not note it in the task: {error}.)"));
+            }
+        }
+        Err(refused) => lines.extend(refused),
+    }
+    lines
+}
+
 fn drop_task(dir: &Path, repo: &Path, id: &str) -> Vec<String> {
     let Some(found) = find(dir, repo, id) else {
         return vec![format!("No task {id} for this repository (see /night list).")];
@@ -550,7 +588,8 @@ pub fn startup_line(dir: &Path, cwd: &Path) -> Option<String> {
         .iter()
         .filter_map(|status| counts.get(*status).map(|count| format!("{count} {status}")))
         .collect();
-    Some(format!("Night Shift: {} — /night report", summary.join(", ")))
+    let apply = if counts.contains_key("done") { "; /night apply <id> brings a branch's changes here" } else { "" };
+    Some(format!("Night Shift: {} — /night report{apply}", summary.join(", ")))
 }
 
 /// Read-modify-write of one task under `tasks/<id>.lock`, the lock `ling-admin night run`
@@ -780,12 +819,45 @@ mod tests {
     }
 
     #[test]
+    fn apply_brings_a_finished_branch_here_as_uncommitted_changes() {
+        let (repo, dir) = repo("apply");
+        let lines = run(&dir, Request::from_line("add Make it return True"), &repo);
+        let id = lines[0].split_whitespace().nth(1).unwrap_or_default().to_string();
+        assert_eq!(run(&dir, Request::Apply(id.clone()), &repo), vec![format!("{id} is queued: it has no branch to apply.")]);
+        // What the runner leaves after a task: a commit on night/<id>, the record's result naming it.
+        let git_in = |args: &[&str]| {
+            let _ = Command::new("git").arg("-C").arg(&repo).args(["-c", "user.email=t@t", "-c", "user.name=t"]).args(args).output();
+        };
+        let branch = format!("night/{id}");
+        git_in(&["checkout", "-q", "-b", &branch]);
+        std::fs::write(repo.join("auth.py"), "def login():\n    return True\n").unwrap_or_default();
+        git_in(&["add", "-A"]);
+        git_in(&["commit", "-q", "-m", "night: it"]);
+        git_in(&["checkout", "-q", "-"]);
+        let _ = update_task(&dir, &id, |task| {
+            task["status"] = json!("done");
+            task["result"] = json!({"branch": branch});
+            Ok(())
+        });
+        assert!(!repo.join("auth.py").exists());
+        let lines = run(&dir, Request::Apply(id.clone()), &repo);
+        assert!(lines[0].starts_with(&format!("Applied {branch} to")), "{lines:?}");
+        assert!(std::fs::read_to_string(repo.join("auth.py")).unwrap_or_default().contains("True"));
+        // Applied again over itself: refused whole, and said to have been applied before.
+        let lines = run(&dir, Request::Apply(id.clone()), &repo);
+        assert!(lines[0].contains("was applied before"), "{lines:?}");
+        assert!(lines[1].starts_with("Not applied"), "{lines:?}");
+        let _ = std::fs::remove_dir_all(repo.parent().unwrap_or(&repo));
+    }
+
+    #[test]
     fn parses_every_form_of_the_slash_command() {
         assert_eq!(Request::from_line(""), Request::List);
         assert_eq!(Request::from_line("list"), Request::List);
         assert_eq!(Request::from_line("report"), Request::Report);
         assert_eq!(Request::from_line("show 20260101-0100-abc"), Request::Show("20260101-0100-abc".into()));
         assert_eq!(Request::from_line("drop abc"), Request::Drop("abc".into()));
+        assert_eq!(Request::from_line("apply abc"), Request::Apply("abc".into()));
         assert_eq!(
             Request::from_line("add Fix the flaky test.\nThen run it twice."),
             Request::Add { test: None, on: None, best_of: None, task: "Fix the flaky test.\nThen run it twice.".into() }
@@ -1030,7 +1102,7 @@ mod tests {
         }
         assert_eq!(
             startup_line(&dir, &repo).as_deref(),
-            Some("Night Shift: 2 done, 1 stalled — /night report")
+            Some("Night Shift: 2 done, 1 stalled — /night report; /night apply <id> brings a branch's changes here")
         );
         assert_eq!(startup_line(&dir, &repo), None);
     }

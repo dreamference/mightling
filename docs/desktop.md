@@ -251,9 +251,14 @@ accent, background and text colours of the theme in front; each theme keeps its 
   that combination for every client.
 - **One app:** opening `ling app` again brings the running window forward; `mightling://thread/<id>`
   links open Work on that thread.
+- **Local or Worktree** under the composer of a new thread in a git project. **Local**, the
+  default as in Codex's app, edits your checkout in place, so your editor sees every change.
+  **Worktree** gives the thread its own checkout from the branch you pick; the thread's header says
+  where its work is, and **Hand off** brings it to your local checkout. `/worktree on` in `ling`
+  (or `ling worktree on`) makes Worktree the default here too.
 - **Ask one click away**, in the same window's sidebar.
 
-Not there yet: review, git worktrees, settings pages and choosing a model (it is shown, not chosen).
+Not there yet: review, settings pages and choosing a model (it is shown, not chosen).
 Night Shift holds back while a Work turn is running, and the machine stays awake until it ends.
 
 ## Notes
