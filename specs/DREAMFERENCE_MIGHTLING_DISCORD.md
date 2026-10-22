@@ -1,6 +1,6 @@
 # Mightling on Discord: a third adapter for `ling chat`
 
-**Status:** Proposed (2026-10-21), nothing built. The owner asked that day for a Discord integration "at least as private as our Telegram implementation". Discord's platform was read from its own pages on 2026-10-21 (sources in §14); anything a primary source did not confirm is marked **unverified**, and what can only be learnt with a real Discord application is Phase 0 (§10), which the owner runs. No Discord application or account was created for this spec.
+**Status:** Proposed (2026-10-21); decided by the owner on 2026-10-22, every proposal of §0.1 accepted; nothing built, and the build waits for Telegram's Phase 0 and the shared Phase 2 (D9). The owner asked that day for a Discord integration "at least as private as our Telegram implementation". Discord's platform was read from its own pages on 2026-10-21 (sources in §14); anything a primary source did not confirm is marked **unverified**, and what can only be learnt with a real Discord application is Phase 0 (§10), which the owner runs. No Discord application or account was created for this spec.
 
 **Spec owner:** the owner. **Depends on:** [MIGHTLING_CHAT](./DREAMFERENCE_MIGHTLING_CHAT.md) (the bridge, its hub and §16's fixes), [MIGHTLING_TELEGRAM_MOONSHOT](./DREAMFERENCE_MIGHTLING_TELEGRAM_MOONSHOT.md) (approvals with nonces, the partial kept, `blocks.rs`, the Mini App of §15), [MIGHTLING_SIGNAL](./DREAMFERENCE_MIGHTLING_SIGNAL.md) §19 (images, the gap rule, bounds, the phone prompt, quick follow-ups), [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) (Ask threads, `ling web`, the bridge policy), [MIGHTLING_REMOTE_ACCESS](./DREAMFERENCE_MIGHTLING_REMOTE_ACCESS.md) (the HTTPS front for the browser link), [MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md).
 
@@ -8,7 +8,7 @@
 
 ## 0. Decisions, stated first
 
-These are proposals; the ones the owner must confirm are listed again in §0.1.
+The owner accepted every proposal on 2026-10-22; the decisions are listed again in §0.1.
 
 - **Discord is the least private of the four messengers, and the bridge says so.** Like Telegram, every message and answer is stored on Discord's servers where Discord can read it; Discord does not encrypt text end to end and said on 2026-05-18 it has "no current plans to extend E2EE to text messages". Unlike Telegram, Discord's privacy policy states that it proactively scans attachments and other content, and a Discord bot can read back its whole DM history, so a stolen token exposes every past message, not only the next ones (§2). The bridge cannot change either; it matches Telegram on everything it controls and adds two compensations (no streamed partials by default, and the bot's answers deleted after a set time if the owner wants).
 - **"At least as private as Telegram", measured.** On everything the bridge decides, the Discord adapter puts no more on Discord's servers than the Telegram adapter puts on Telegram's: what the owner sends, the final answers and the approval texts. No inbound port, no webhook, DM with a paired user only, off until a typed consent, paused at `/airgapped on`, link previews off. Where the platform itself is worse (scanning, history readable by the token), the consent text says it in plain words.
@@ -21,14 +21,16 @@ These are proposals; the ones the owner must confirm are listed again in §0.1.
 - **Not built:** server channels with other people, voice channels and Activities in them, user-installed commands in other people's DMs and servers, the HTTP interactions endpoint, webhook events, a self-bot, and any Discord AI feature (§6).
 - **Phase 0 runs on a throwaway application** the owner creates, never one that will carry the owner's real conversations (§10).
 
-### 0.1 For the owner to confirm
+### 0.1 Decided (the owner, 2026-10-22)
 
-| # | Decision | Proposed |
+Every proposal was accepted as written.
+
+| # | Decision | Decided |
 |---|---|---|
 | D1 | **Streaming**: typing indicator, a status line with Stop, then the whole answer (default); `[chat] discord_stream = true` turns on edited partials, with a consent line of its own | Whole answers by default |
 | D2 | **Where the bot lives**: a DM only; a one-person private server with a forum channel (each post an Ask thread) as a later option (§3.12) | DM only in Phase 1; the server in Phase 3 if wanted |
 | D3 | **How the owner adds the app**: user install (no server at all) if Phase 0 shows the bot then receives plain DMs; otherwise a private server whose only purpose is to share one with the bot | Whatever Phase 0 shows works with the fewest servers |
-| D4 | **Deleting the bot's answers**: `[chat] discord_keep_hours` (0 keeps them). The owner's own messages cannot be deleted by a bot | Offered, off by default (0); the owner chooses a number |
+| D4 | **Deleting the bot's answers**: `[chat] discord_keep_hours` (0 keeps them). The owner's own messages cannot be deleted by a bot | No automatic deletion: `discord_keep_hours` stays 0 |
 | D5 | **The front-end**: a link button to `ling web` over the tailnet (`/app` and the status line), never an Activity | Yes |
 | D6 | **The token's home**: `~/.mightling/chat/discord.json` beside Telegram's token (readable by the agent's commands, CHAT §6), or a system account as Signal's keys are | Same as Telegram for Phase 1; revisit with Telegram together |
 | D7 | **The app's terms and privacy policy**: Discord's Developer Terms ask every application for a privacy policy and a way to report problems; for an app whose developer is its only user, a one-paragraph policy (nothing kept beyond the node, nothing shared) linked in the app's settings | Yes, a fixed text in the docs that setup points to |
