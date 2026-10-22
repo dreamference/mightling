@@ -247,8 +247,11 @@ accent, background and text colours of the theme in front; each theme keeps its 
 - **Approvals in the conversation**, Stop (or Esc), steering while a turn runs, and undo of the last
   turn.
 - **Context use** with a Compress button, the served model and the `/airgapped` level.
-- **A permission picker** that greys out Full Access at `/airgapped on`; the server itself refuses
-  that combination for every client.
+- **A permission picker** with Read only, Workspace and Full Access, as in Codex. Full Access is
+  greyed out only at `/airgapped on`; the server itself refuses that combination for every client.
+- **`!` commands:** `!git status` in the composer runs the command in your own shell, in the
+  thread's folder and with no sandbox, as in the Codex app, and shows its output in the thread. It
+  is refused at `/airgapped on`, since nothing would keep it off the network.
 - **One app:** opening `ling app` again brings the running window forward; `mightling://thread/<id>`
   links open Work on that thread.
 - **Local or Worktree** under the composer of a new thread in a git project. **Local**, the

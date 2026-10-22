@@ -15,7 +15,9 @@ ling web stop
 
 The page opens on **Ask**, questions with no project, each in a scratch folder of its own; **Work**,
 your projects and their threads, is one click away. Every request needs a sign-in, on this machine
-too: `ling web open` signs your browser in with a link that works once.
+too: `ling web open` signs your browser in with a link that works once. Work behaves as in the
+desktop app: Full Access can be chosen unless `/airgapped` is on, and `!command` in the composer runs
+in your own shell on the machine running `ling web`, with no sandbox (refused at `/airgapped on`).
 
 The page follows the browser's light or dark theme. **Settings › Appearance** can keep it on
 **Light** or **Dark** instead; a browser remembers that choice for itself, so a phone and a computer

@@ -673,6 +673,18 @@ pub fn user_airgap_level() -> ling_airgapped::Resolved {
     ling_airgapped::resolve_from(None, environment.as_deref(), &configs)
 }
 
+/// Whether `/airgapped` is `on` for a thread (the configured level for none), as the launcher
+/// resolves it (`ling_airgapped::resolve`, what `ling airgapped --thread` prints): read in this
+/// process's folder and, when the thread's own folder `cwd` is known, in that one too, the stricter
+/// winning, so a repository whose `dreamference.toml` asks for `on` is not missed.
+pub fn thread_airgapped_on(thread: Option<&str>, cwd: Option<&std::path::Path>) -> bool {
+    let ids = [thread.unwrap_or_default()];
+    ling_airgapped::resolve(&ids).level == ling_airgapped::Level::On
+        || cwd.is_some_and(|cwd| {
+            ling_airgapped::resolve_in(&ids, std::env::var(ling_airgapped::ENV_VAR).ok(), cwd).level == ling_airgapped::Level::On
+        })
+}
+
 /// `ling web open`'s link: trades the one-time code for a session cookie.
 async fn login(State(server): State<Arc<Server>>, Query(query): Query<HashMap<String, String>>) -> Response {
     let code = query.get("code").map(String::as_str).unwrap_or_default();

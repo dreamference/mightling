@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { POLICY, namedPrompt, parsePolicy, vetOutgoing, type PromptSource } from "./policy";
+import { POLICY, airgapThread, namedPrompt, parsePolicy, threadPlace, vetOutgoing, type PromptSource } from "./policy";
 
 const WEB = path.join(__dirname, "..", "..", "..", "ling-rs", "web");
 
@@ -71,6 +71,35 @@ describe("the policy", () => {
     expect(namedPrompt({ id: 1, method: "thread/start", params: { prompt: "nonsense" } })).toBeNull();
     expect(namedPrompt({ id: 1, method: "thread/resume", params: { prompt: "ask" } })).toBeNull();
     expect(namedPrompt({ id: 1, method: "thread/start", params: {} })).toBeNull();
+  });
+
+  it("judges a request refused at on by the thread it names, and gives the ! command its own reason", () => {
+    expect(airgapThread({ id: 1, method: "thread/shellCommand", params: { threadId: "t1", command: "ls" } })).toBe("t1");
+    expect(airgapThread({ id: 1, method: "plugin/install", params: { pluginName: "x" } })).toBeNull();
+    expect(airgapThread({ id: 1, method: "turn/start", params: { threadId: "t1" } })).toBeNull();
+    const asked: (string | null)[] = [];
+    const sealed: PromptSource = {
+      composed: (name) => name,
+      newScratchFolder: () => "SCRATCH",
+      scratchFolderOf: () => null,
+      airgappedOn: (thread) => (asked.push(thread), thread === "sealed"),
+    };
+    const shell = (thread: string) => ({ id: 1, method: "thread/shellCommand", params: { threadId: thread, command: "ls" } });
+    expect(() => vetOutgoing(shell("open"), new Set(), sealed)).not.toThrow();
+    expect(() => vetOutgoing(shell("sealed"), new Set(), sealed)).toThrow(/airgapped is on, and a ! command/);
+    expect(asked).toEqual(["open", "sealed"]);
+  });
+
+  it("reads a thread and its folder from what the server says", () => {
+    expect(threadPlace({ method: "thread/started", params: { thread: { id: "t1", cwd: "/work/repo" } } })).toEqual({ thread: "t1", cwd: "/work/repo" });
+    expect(threadPlace({ id: 3, result: { thread: { id: "t2", cwd: "/work/other" } } })).toEqual({ thread: "t2", cwd: "/work/other" });
+    expect(threadPlace({ id: 4, result: {} })).toBeNull();
+  });
+
+  it("refuses a reason for a request not refused at on", () => {
+    const file = JSON.parse(fs.readFileSync(path.join(WEB, "policy.json"), "utf8"));
+    expect(() => parsePolicy({ ...file, airgappedRefusalReasons: { "thread/list": "no" } })).toThrow();
+    expect(() => parsePolicy({ ...file, airgappedRefusalReasons: { "thread/shellCommand": 1 } })).toThrow();
   });
 
   it("refuses a policy whose scratch prompt is not named", () => {

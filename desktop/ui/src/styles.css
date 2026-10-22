@@ -330,6 +330,7 @@ html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, h
 .item > summary:hover, .item details > summary:hover, .turn-diff > summary:hover { color: var(--text); }
 .item > summary code, .item details > summary code { font-size: 12.5px; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .item.reasoning pre { color: var(--muted); font-family: var(--font-ui); font-size: 13px; padding-left: 12px; border-left: 2px solid var(--line); }
+.item.command .shell-mark { flex: none; font-family: var(--font-code); font-weight: 600; color: var(--muted); }
 .item.command pre { background: var(--code-bg); border: 1px solid var(--line); padding: 10px 12px; border-radius: var(--radius-sm); max-height: 320px; overflow: auto; }
 .diffstat { flex: none; font-family: var(--font-code); font-size: 12px; }
 .diffstat .plus { color: var(--add-text); }

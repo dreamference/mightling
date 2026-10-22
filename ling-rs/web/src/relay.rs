@@ -35,6 +35,7 @@ use crate::app_server::Upstream;
 use crate::ask;
 use crate::policy::Incoming;
 use crate::policy::classify;
+use crate::policy::thread_place;
 use crate::server::Server;
 
 /// What a tab's connection shares with the task reading the app-server.
@@ -45,6 +46,8 @@ struct Shared {
     /// Thread openers whose new thread works in an Ask folder, by request id: answered, the folder
     /// is named after the thread.
     openers: Mutex<HashMap<String, PathBuf>>,
+    /// The folder each thread works in, as the server named it (`thread_place`).
+    places: Mutex<HashMap<String, PathBuf>>,
 }
 
 struct Tab {
@@ -193,7 +196,11 @@ impl Tab {
         };
         // The configured level, as `ling airgapped` prints it: installs and plugins follow it.
         let airgapped_on = ling_airgapped::resolve(&[]).level == ling_airgapped::Level::On;
-        let prompts = ask::MessagePrompts { root: &ask_root, composed, created: Mutex::new(None), airgapped_on };
+        let thread_folder = message
+            .pointer("/params/threadId")
+            .and_then(Value::as_str)
+            .and_then(|thread| self.shared.places.lock().unwrap_or_else(|p| p.into_inner()).get(thread).cloned());
+        let prompts = ask::MessagePrompts { root: &ask_root, composed, created: Mutex::new(None), airgapped_on, thread_folder };
         let vetted = {
             let mut pending = self.shared.pending.lock().unwrap_or_else(|p| p.into_inner());
             policy.vet_outgoing(&message, &mut pending, &prompts)?
@@ -237,6 +244,9 @@ fn deliver(server: &Server, shared: &Shared, out: &mpsc::UnboundedSender<Value>,
         let _ = out.send(event("work://protocol-error", Value::String(text.to_string())));
         return;
     };
+    if let Some((thread, cwd)) = thread_place(&value) {
+        shared.places.lock().unwrap_or_else(|p| p.into_inner()).insert(thread, PathBuf::from(cwd));
+    }
     match kind {
         Incoming::ServerRequest { key, .. } => {
             shared.pending.lock().unwrap_or_else(|p| p.into_inner()).insert(key);

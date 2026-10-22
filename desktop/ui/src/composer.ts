@@ -123,6 +123,16 @@ export function parseSlash(text: string): { command: SlashCommand; args: string 
   return command ? { command, args: (match[2] ?? "").trim() } : null;
 }
 
+/**
+ * A message that is a `!` shell command, as the Codex app reads one: `!` first, then the command,
+ * run in the user's own shell in the thread's folder (`thread/shellCommand`); null for anything
+ * else, a bare `!` included. Allowed only while `/airgapped` is off: the policy refuses it at `on`.
+ */
+export function parseShell(text: string): string | null {
+  const match = text.trim().match(/^!\s*([\s\S]+)$/);
+  return match ? match[1].trim() : null;
+}
+
 /** Skills whose name or description matches, enabled ones first. */
 export function matchSkills(skills: SkillMetadata[], query: string): SkillMetadata[] {
   const q = query.toLowerCase();

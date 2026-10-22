@@ -89,6 +89,7 @@ export const COMPOSER_METHODS: ReadonlySet<string> = new Set([
   "turn/start",
   "turn/steer",
   "turn/interrupt",
+  "thread/shellCommand",
   "review/start",
   "thread/compact/start",
   "thread/revert",

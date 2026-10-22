@@ -1,4 +1,5 @@
-// The composer items of DESKTOP_PARITY_CLAUDE §4.6 (decided 2026-10-21) end to end: the packaged main
+// The composer items of DESKTOP_PARITY_CLAUDE §4.6 (decided 2026-10-21), and the `!` command
+// (MIGHTLING_AIRGAPPED §14.13, decided 2026-10-22), end to end: the packaged main
 // process and page against the scripted stand-in for `ling app-server` (stand-in.ts). Needs a display
 // and the Vite build (`npm run package` first).
 //   npm run e2e -- composer
@@ -8,7 +9,7 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { closeApp, closeLeftovers, launch } from "./apps";
-import { projectFolders, received, writeStandIn } from "./stand-in";
+import { projectFolders, received, runs, writeStandIn } from "./stand-in";
 
 const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.cjs");
 
@@ -67,6 +68,48 @@ test("a long paste is an attachment: a file in the question's folder in Ask, a b
     await page.keyboard.press("Enter");
     await expect.poll(() => JSON.stringify(received(home).filter((line) => line.method === "turn/start").pop()?.params)).toContain("What do these retries say?\\n\\nPasted text 1:\\n```\\n2026-10-21 12:00 fetch retry 0");
     expect(fs.readdirSync(fetcher).filter((name) => name.startsWith("pasted-"))).toEqual([]);
+  } finally {
+    await closeApp(app);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a ! command runs in the user's shell at /airgapped off with its output in the thread, and is refused at on", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-app-shell-"));
+  const codexHome = path.join(home, ".mightling");
+  const askRoot = path.join(codexHome, "ask");
+  const { fetcher, website } = projectFolders(home);
+  for (const folder of [path.join(askRoot, "q-1a2b3c"), fetcher, website]) fs.mkdirSync(folder, { recursive: true });
+  const ling = writeStandIn(home, askRoot);
+  const app = await launch({ args: [main], env: { ...process.env, HOME: home, CODEX_HOME: codexHome, MIGHTLING_BIN: ling, MIGHTLING_LEGACY_MIGRATION: "0", MIGHTLING_HIDDEN: "1" } });
+  const shells = () => received(home).filter((line) => line.method === "thread/shellCommand").map((line) => line.params);
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+    await page.locator(".thread", { hasText: "GB10" }).waitFor({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+    await page.locator(".thread", { hasText: "Compress the hero" }).click();
+    const composer = page.locator(".composer textarea");
+
+    // Off: the command goes to the server as the user typed it, and its output shows, open, marked as the user's.
+    await composer.fill("!git status");
+    await page.keyboard.press("Enter");
+    await expect.poll(shells).toEqual([{ threadId: "w3", command: "git status" }]);
+    const shown = page.locator(".item.command.user-shell");
+    await expect(shown).toContainText("nothing to commit, working tree clean");
+    await expect(shown.locator(".shell-mark")).toHaveText("!");
+    await expect(composer).toHaveValue("");
+    // The level was asked of the launcher for that thread, here and in the thread's own folder.
+    const asked = runs(home).filter((args) => args[0] === "airgapped" && args.includes("w3"));
+    expect(asked.length).toBeGreaterThanOrEqual(1);
+
+    // On: refused by the main process before it reaches the server; the words stay in the composer.
+    fs.writeFileSync(path.join(home, "airgapped-on"), "");
+    await composer.fill("!curl example.com");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".notice").last()).toContainText("airgapped is on", { timeout: 10_000 });
+    await expect(composer).toHaveValue("!curl example.com");
+    expect(shells()).toHaveLength(1);
   } finally {
     await closeApp(app);
     fs.rmSync(home, { recursive: true, force: true });

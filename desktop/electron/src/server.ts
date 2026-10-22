@@ -17,10 +17,10 @@ import { command } from "./platform";
 import path from "node:path";
 import readline from "node:readline";
 
-import { airgapped } from "./airgapped";
+import { airgapped, airgappedOn } from "./airgapped";
 import { MessagePrompts, askRoot, canonicalRoot, composePrompt, forgetIncognito, isFolder, linkThread, markIncognito, sweepIncognito, writeUpload, type Upload } from "./ask";
 import { BusyTracker, busyMarker, classify, codexHome, findLing, servedModel } from "./bridge";
-import { POLICY, levelMatters, namedPrompt, vetOutgoing } from "./policy";
+import { POLICY, airgapThread, levelMatters, namedPrompt, threadPlace, vetOutgoing } from "./policy";
 import type { ForView, Started } from "./api";
 
 export interface ServerEvents {
@@ -34,6 +34,8 @@ export class AppServer {
   private readonly pending = new Set<string>();
   /** Thread openers whose new thread works in an Ask folder, by request id: answered, the folder is named after the thread. */
   private readonly openers = new Map<string, string>();
+  /** The folder each thread works in, as the server named it (`threadPlace`): a thread's air-gap level is read there too. */
+  private readonly places = new Map<string, string>();
   /** How the server was started: the same `ling` and environment compose the named prompts. */
   private launch: { ling: string; env: NodeJS.ProcessEnv } | null = null;
   private busy = new BusyTracker();
@@ -55,6 +57,7 @@ export class AppServer {
     this.launch = { ling, env };
     this.pending.clear();
     this.openers.clear();
+    this.places.clear();
     this.busy = new BusyTracker();
     this.marker = home && child.pid ? busyMarker(home, child.pid) : null;
     readline.createInterface({ input: child.stdout }).on("line", (line) => this.incoming(line));
@@ -80,6 +83,8 @@ export class AppServer {
   private incoming(line: string): void {
     if (line.trim() === "") return;
     const [kind, value] = classify(line);
+    const place = kind.kind === "notProtocol" ? null : threadPlace(value);
+    if (place) this.places.set(place.thread, place.cwd);
     switch (kind.kind) {
       case "notProtocol":
         // Fails loudly: something wrote on the protocol channel.
@@ -130,6 +135,7 @@ export class AppServer {
     this.child = null;
     this.pending.clear();
     this.openers.clear();
+    this.places.clear();
     this.busy = new BusyTracker();
     if (this.marker) {
       try {
@@ -161,8 +167,13 @@ export class AppServer {
     const prompt = name ? { name, text: await composePrompt(launch.ling, name, root, composeEnv) } : null;
     // The configured air-gap level, for what it decides: installs, imports, thread openers. A
     // `ling airgapped` that did not answer counts as on: refusing an install is the safe side.
-    const level = levelMatters(message) ? await airgapped(launch.ling, null) : null;
-    const on = level !== null && (level.level === "on" || level.source.startsWith("unknown"));
+    // A request refused at `on` that names a thread (a `!` command) is judged by that thread's level,
+    // in this folder and in the thread's own, failing closed (`airgappedOn` in airgapped.ts).
+    const thread = airgapThread(message);
+    const level = thread === null && levelMatters(message) ? await airgapped(launch.ling, null) : null;
+    const on = thread !== null
+      ? await airgappedOn(launch.ling, thread, this.places.get(thread) ?? null)
+      : level !== null && (level.level === "on" || level.source.startsWith("unknown"));
     const prompts = new MessagePrompts(root, prompt, on);
     const vetted = vetOutgoing(message, this.pending, prompts);
     const child = this.child;
