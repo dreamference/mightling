@@ -75,6 +75,8 @@ NON_INTERACTIVE: Final[frozenset] = frozenset(
         "loop-guard",
         "guard",
         "worktree",
+        # The sync agent's unit runs `ling sync agent` (specs/DREAMFERENCE_MIGHTLING_SYNC.md).
+        "sync",
     }
 )
 

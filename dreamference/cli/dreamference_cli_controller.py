@@ -1302,8 +1302,14 @@ class DreamferenceCLIController:
             "in a repository with Claude Code's files",
         )
         audit_egress_mode.add_argument("--docs", action="store_true", help="Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing")
+        audit_egress_mode.add_argument(
+            "--sync",
+            action="store_true",
+            help="Trace one sync agent cycle instead (`ling sync agent --once`) against a throwaway hub: "
+            "it must reach the node's ling web port and nothing else",
+        )
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
-        audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web or docs)")
+        audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>-<session>.json (the session is exec, tui, app, web, docs or sync)")
         audit_egress_parser.add_argument("--ling-docs-bin", default=None, help=argparse.SUPPRESS)
 
         # Command: ling-admin node (offer this machine to the local network as a Mightling node)
@@ -2656,6 +2662,9 @@ class DreamferenceCLIController:
                               "search over a fixture folder, with no ling session to prompt.")
                         sys.exit(2)
                     sys.exit(DocsEgressAudit.run(ling_docs=args.ling_docs_bin, write_json=args.json))
+                if args.sync:
+                    from dreamference.audit import SyncEgressAudit
+                    sys.exit(SyncEgressAudit.from_cli(prompt=args.prompt, write_json=args.json))
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
                 sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui, app=args.app, web=args.web,
                                          compat=args.compat is not None))

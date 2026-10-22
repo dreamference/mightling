@@ -31,6 +31,8 @@ pub mod qr;
 pub mod relay;
 pub mod server;
 pub mod sidecars;
+pub mod sync_hub;
+pub mod sync_store;
 pub mod telegram_app;
 
 pub use cli::Environment;

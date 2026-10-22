@@ -138,6 +138,12 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/devices"),
     ("POST", "/devices/pair"),
     ("POST", "/devices/revoke"),
+    ("POST", "/devices/scope"),
+    ("GET", "/api/sync/status"),
+    ("GET", "/api/sync/threads"),
+    ("GET", "/api/sync/manifest"),
+    ("PUT", "/api/sync/rollouts/01a0f1ae-2da4-7942-99ae-c3151dc137cc?offset=0"),
+    ("POST", "/api/sync/threads/01a0f1ae-2da4-7942-99ae-c3151dc137cc/delete"),
     ("GET", "/anything-else"),
 ];
 
