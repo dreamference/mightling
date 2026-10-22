@@ -1,0 +1,286 @@
+# SPDX-License-Identifier: Apache-2.0
+# Excerpt of SGLang v0.5.21, python/sglang/srt/entrypoints/openai/serving_responses.py, lines
+# 1206-1484 verbatim (OpenAIServingResponses: the Responses input -> chat history conversion), from
+# the image the registry pins (QWEN38_SGLANG_IMAGE); the whole file's sha256 is
+# ed490a69c960cafa7fc97129e585d176993fb63dbda66468ac9b86770813a00d.
+# Used by tests/test_sglang_phase_merge.py; Copyright the SGLang authors, Apache License 2.0.
+class OpenAIServingResponses:
+    @staticmethod
+    def _normalize_response_content_part_for_chat(content_part: Any) -> Any:
+        # Default detail=\"auto\" and lift flat min/max_dynamic_patch onto
+        # image_url so the image preprocessor sees them.
+        if hasattr(content_part, "model_dump"):
+            content_part = content_part.model_dump(exclude_none=True)
+        if not isinstance(content_part, dict):
+            return content_part
+
+        part_type = content_part.get("type")
+        if part_type in ("input_text", "output_text"):
+            return {"type": "text", "text": content_part.get("text", "")}
+
+        if part_type == "input_image":
+            image_url = content_part.get("image_url")
+            if isinstance(image_url, dict):
+                image_url_obj = image_url.copy()
+            else:
+                image_url_obj = {"url": image_url}
+            if not image_url_obj.get("detail"):
+                image_url_obj["detail"] = content_part.get("detail") or "auto"
+            for key in ("min_dynamic_patch", "max_dynamic_patch"):
+                if key in content_part and key not in image_url_obj:
+                    image_url_obj[key] = content_part[key]
+            return {"type": "image_url", "image_url": image_url_obj}
+
+        if part_type == "text":
+            return content_part
+
+        if part_type == "image_url":
+            image_url = content_part.get("image_url")
+            if isinstance(image_url, str):
+                image_url = {
+                    "url": image_url,
+                    "detail": content_part.get("detail", "auto"),
+                }
+            elif isinstance(image_url, dict):
+                image_url = image_url.copy()
+                if not image_url.get("detail"):
+                    image_url["detail"] = content_part.get("detail") or "auto"
+            return {**content_part, "image_url": image_url}
+
+        return content_part
+
+    @staticmethod
+    def _flatten_tool_output(output: Any) -> str:
+        """``output`` may be a string or an array of content parts (OpenAI allows
+        both); the chat tool message needs a string."""
+        if isinstance(output, list):
+            return "".join(p.get("text", "") for p in output if isinstance(p, dict))
+        return output
+
+    @staticmethod
+    def _chat_tool_call_message(message: dict, name: Any, arguments: str) -> dict:
+        return {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": message.get("call_id") or message.get("id"),
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments},
+                }
+            ],
+        }
+
+    @classmethod
+    def _normalize_response_message_for_chat(cls, message: Any) -> Any:
+        """Convert one Responses-API input item to a chat-completions message."""
+        if hasattr(message, "model_dump"):
+            message = message.model_dump(exclude_none=True)
+        if not isinstance(message, dict):
+            return message
+
+        # Most chat templates only recognize system/user/assistant/tool; collapse
+        # ``developer`` to ``system`` at the boundary, labelled so the instruction
+        # tier survives the collapse.
+        if message.get("role") == "developer":
+            message = {
+                **message,
+                "role": "system",
+                "content": label_developer_content(message.get("content")),
+            }
+
+        msg_type = message.get("type")
+        if msg_type == "function_call":
+            # Coerce ``arguments`` to a valid JSON-object string so the chat
+            # template's unconditional ``orjson.loads`` survives truncated or
+            # dict-shaped echoes.
+            raw = message.get("arguments")
+            if isinstance(raw, str):
+                try:
+                    parsed = orjson.loads(raw) if raw else None
+                except orjson.JSONDecodeError:
+                    parsed = None
+                if not isinstance(parsed, dict):
+                    raw = "{}"
+            elif isinstance(raw, dict):
+                raw = orjson.dumps(raw).decode("utf-8")
+            else:
+                raw = "{}"
+            return cls._chat_tool_call_message(message, message.get("name"), raw)
+        if msg_type == "custom_tool_call":
+            # Replay through the same single-string shim the tool was offered as.
+            return cls._chat_tool_call_message(
+                message,
+                message.get("name"),
+                encode_custom_tool_input(message.get("input") or ""),
+            )
+        if msg_type in ("function_call_output", "custom_tool_call_output"):
+            return {
+                "role": "tool",
+                "tool_call_id": message.get("call_id"),
+                "content": cls._flatten_tool_output(message.get("output", "")),
+            }
+        # Reasoning items render as {role: assistant, reasoning_content};
+        # empty ones drop instead of injecting an empty assistant block.
+        if msg_type == "reasoning":
+            # Prefer ``summary``; fall back to ``content`` only when summary
+            # is empty, since clients often populate both with the same text.
+            def _collect(parts):
+                out: list[str] = []
+                for entry in parts or []:
+                    if isinstance(entry, dict):
+                        text = entry.get("text")
+                        if text:
+                            out.append(text)
+                return out
+
+            text_parts = _collect(message.get("summary"))
+            if not text_parts:
+                text_parts = _collect(message.get("content"))
+            if not text_parts:
+                # A store=false client may replay only the opaque blob.
+                restored = decode_reasoning_state(message.get("encrypted_content"))
+                if restored:
+                    text_parts = [restored]
+            if not text_parts:
+                return None
+            return {
+                "role": "assistant",
+                "reasoning_content": "\n".join(text_parts),
+            }
+        if msg_type not in (None, "message"):
+            raise ValueError(f"Unsupported Responses API input item type: {msg_type!r}")
+
+        content = message.get("content")
+        if not isinstance(content, list):
+            return {
+                k: v
+                for k, v in message.items()
+                if v is not None and k not in ("id", "status", "type")
+            }
+
+        return {
+            k: v
+            for k, v in {
+                **message,
+                "content": [
+                    cls._normalize_response_content_part_for_chat(part)
+                    for part in content
+                ],
+            }.items()
+            if v is not None and k not in ("id", "status", "type")
+        }
+
+    @staticmethod
+    def _merge_consecutive_assistant_messages(
+        messages: list,
+    ) -> list:
+        """Collapse runs of consecutive ``assistant`` dicts into one entry,
+        joining ``content`` and concatenating ``tool_calls`` and
+        ``reasoning_content`` so a logical turn renders as a single block."""
+        merged: list = []
+        for msg in messages:
+            if (
+                isinstance(msg, dict)
+                and msg.get("role") == "assistant"
+                and merged
+                and isinstance(merged[-1], dict)
+                and merged[-1].get("role") == "assistant"
+                and merged[-1].get("phase") == msg.get("phase")
+            ):
+                prev = merged[-1] = dict(merged[-1])
+                # Lift mixed str/list content to list parts so non-text parts
+                # (e.g. image_url) survive when the two sides differ in shape.
+                new_content = msg.get("content")
+                if new_content is not None and new_content != "":
+                    prev_content = prev.get("content")
+                    if prev_content is None or prev_content == "":
+                        prev["content"] = new_content
+                    elif isinstance(prev_content, str) and isinstance(new_content, str):
+                        sep = "\n\n" if prev_content and new_content else ""
+                        prev["content"] = prev_content + sep + new_content
+                    else:
+
+                        def _as_parts(c):
+                            if isinstance(c, list):
+                                return list(c)
+                            if isinstance(c, str) and c:
+                                return [{"type": "text", "text": c}]
+                            return []
+
+                        prev["content"] = _as_parts(prev_content) + _as_parts(
+                            new_content
+                        )
+                new_calls = msg.get("tool_calls")
+                if new_calls:
+                    prev_calls = prev.get("tool_calls") or []
+                    prev["tool_calls"] = prev_calls + list(new_calls)
+                new_reasoning = msg.get("reasoning_content")
+                if new_reasoning:
+                    prev_reasoning = prev.get("reasoning_content")
+                    prev["reasoning_content"] = (
+                        f"{prev_reasoning}\n{new_reasoning}"
+                        if prev_reasoning
+                        else new_reasoning
+                    )
+                continue
+            merged.append(msg)
+        return merged
+
+    def _response_input_history(self, request: ResponsesRequest) -> list:
+        history = (
+            list(self.msg_store[request.previous_response_id])
+            if request.previous_response_id is not None
+            else []
+        )
+        if isinstance(request.input, str):
+            history.append({"role": "user", "content": request.input})
+        else:
+            history.extend(request.input)
+        return history
+
+    def _construct_input_messages(
+        self,
+        request: ResponsesRequest,
+        prev_response: Optional[ResponsesResponse] = None,
+    ) -> list[ChatCompletionMessageParam]:
+        messages: list[ChatCompletionMessageParam] = []
+        if request.instructions:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": request.instructions,
+                }
+            )
+
+        for input_item in self._response_input_history(request):
+            normalized = self._normalize_response_message_for_chat(input_item)
+            if normalized is not None:
+                messages.append(normalized)
+
+        # One Responses-API assistant turn maps to multiple input items
+        # (message + function_call(s)); collapse them into one chat message
+        # so chat templates render a single assistant block per turn.
+        messages = self._merge_consecutive_assistant_messages(messages)
+
+        # Most chat templates expect a single leading ``system`` message;
+        # coalesce any ``instructions`` + interleaved ``developer`` entries.
+        system_chunks: list[str] = []
+        other_msgs: list = []
+        for m in messages:
+            if isinstance(m, dict) and m.get("role") == "system":
+                content = m.get("content")
+                if isinstance(content, str):
+                    system_chunks.append(content)
+                elif isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict):
+                            text = part.get("text")
+                            if isinstance(text, str):
+                                system_chunks.append(text)
+            else:
+                other_msgs.append(m)
+        if system_chunks:
+            return [
+                {"role": "system", "content": "\n\n".join(system_chunks)}
+            ] + other_msgs
+        return other_msgs

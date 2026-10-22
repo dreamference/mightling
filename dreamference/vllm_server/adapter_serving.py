@@ -5,9 +5,9 @@ they are passed only when an adapter is installed for the model being launched: 
 launch line is exactly what it was, with nothing to recompile and nothing for the recipe drift
 check to report. With adapters, `server start` checks every installed one again (signature, files,
 configuration, base), gives the engine those that pass at its start (their modules fix the GPU
-pool's module set, which a later load cannot widen), mounts the recipe's runtime patch over the
-image's `/v1/responses`, starts the engine with an API key only the gate holds, and writes the
-verified list the gate loads from. Adapters need the gate: a launch without it serves none.
+pool's module set, which a later load cannot widen), adds the adapters' runtime patch to the
+file mounted over the image's `/v1/responses`, starts the engine with an API key only the gate
+holds, and writes the verified list the gate loads from. Adapters need the gate: a launch without it serves none.
 """
 
 import json
@@ -151,22 +151,6 @@ class AdapterServing:
         ]
 
     @classmethod
-    def docker_args(cls, recipe: dict[str, Any], adapters: list[dict[str, object]]) -> list[str]:
-        """The `docker run` options serving adapters adds: the runtime patches' mounts.
-
-        Args:
-            recipe: The model's launch overrides.
-            adapters: `launch_adapters()`'s answer.
-
-        Returns:
-            list[str]: Volume options; nothing without adapters.
-        """
-        lora = recipe.get("lora")
-        if not adapters or not isinstance(lora, dict):
-            return []
-        return SGLangRuntimePatcher.mount_args(list(lora.get("runtime_patches") or []))
-
-    @classmethod
     def with_headroom(
         cls, recipe: dict[str, Any], adapters: list[dict[str, object]]
     ) -> dict[str, Any]:
@@ -253,8 +237,9 @@ class AdapterServing:
         if not adapters or not isinstance(lora, dict):
             cls.clear()
             return True
+        # One file with the recipe's own patch and the adapters' (the launch mounts it).
         problem = SGLangRuntimePatcher.prepare(
-            docker_image, list(lora.get("runtime_patches") or [])
+            docker_image, SGLangRuntimePatcher.for_launch(recipe, lora=True)
         )
         if problem:
             console.print(f"⚠️  Adapters are not served at this start: {problem}.")
