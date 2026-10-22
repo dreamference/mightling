@@ -118,6 +118,7 @@ export function ScheduledView(props: {
                         ))}
                         {opened.details?.session && props.onOpenThread ? <button className="link-button" onClick={() => { props.onClose(); props.onOpenThread?.(opened.details!.session!); }}>Open as a thread</button> : null}
                       </nav>
+                      {entry.status === "done" ? <p className="planned-note">Not merged: the changes are on <code>{entry.branch}</code>. <code>ling night apply {entry.id}</code> in {name(entry.repo)} brings them into your checkout as uncommitted changes.</p> : null}
                       {opened.details === null ? <p className="empty small">Reading the run…</p> : opened.tab === "result" ? (
                         opened.details.result ? <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(opened.details.result) }} /> : <p className="empty small">The run left no message.</p>
                       ) : opened.tab === "diff" ? (

@@ -82,6 +82,7 @@ pub mod usage;
 pub mod vision;
 #[cfg(unix)]
 pub mod web;
+pub mod worktree;
 
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
@@ -121,7 +122,7 @@ const COMMANDS_WITHOUT_MODEL: &[&str] = &[
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard", "guard",
+    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -463,6 +464,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(refine::run_cli(&user_args[index + 1..]));
     }
+    // `worktree` shows or sets where new sessions edit, and lists, applies or discards worktree
+    // sessions (worktree.rs), as `/worktree on|off|status|apply|discard` does inside one.
+    if let Some(index) = subcommand
+        && user_args[index] == "worktree"
+    {
+        std::process::exit(worktree::run_cli(&user_args[index + 1..]));
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
@@ -530,6 +538,18 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         .context("could not resolve CODEX_HOME")?
         .as_path()
         .to_path_buf();
+    // Where the session's edits land (worktree.rs; specs/DREAMFERENCE_MIGHTLING_WORKTREE.md): in
+    // place by default, as in Codex; in worktree mode a new interactive session moves into a fresh
+    // worktree on a branch of its own before anything below reads the working folder.
+    let session_dir = code_index::session_dir(&user_args);
+    let prepared = worktree::prepare(args, user_args, &codex_home, interactive, &session_dir);
+    if let Some(cwd) = &prepared.cwd {
+        std::env::set_current_dir(cwd).with_context(|| format!("could not move into {}", cwd.display()))?;
+    }
+    for line in &prepared.lines {
+        notice::say(line);
+    }
+    let (args, user_args) = (prepared.args, prepared.user_args);
     // Which system prompt a new session gets (prompt.rs; specs/DREAMFERENCE_MIGHTLING_PROMPT.md).
     let chosen = prompt::resolve(&codex_home);
     for line in prompt::startup_lines(&chosen, interactive) {
@@ -594,6 +614,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
     // The TUI starts at its own cave level when nothing is configured (cave.rs; spec §11.5).
     cave::set_tui(tui);
+    // The footer names the folder and the branch edits land in, unless the user chose a status line.
+    let args = worktree::with_status_line(args, &user_args, &codex_home, tui);
     // The compatibility mode's renderer and key map, for this session only (compat_tui.rs).
     let args = if compat_tui::applies(compat_mode.mode, tui) {
         compat_tui::prepare(args, &user_args, &codex_home, &code_index::session_dir(&user_args))
