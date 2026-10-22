@@ -115,7 +115,7 @@ pub fn sandbox_lines(sandbox: &ChromiumSandbox, binary: &Path) -> Vec<String> {
             format!("   For the app's own sandbox, {fix}."),
         ],
         ChromiumSandbox::Missing => vec![
-            format!("⚠️ No AppArmor profile lets {} create Chromium's sandbox (kernel.apparmor_restrict_unprivileged_userns=1), and no setuid sandbox helper from a Chromium browser is installed: the app will stop at start.", binary.display()),
+            format!("⚠️ No AppArmor profile lets {} create Chromium's sandbox (kernel.apparmor_restrict_unprivileged_userns=1), and no setuid sandbox helper from a Chromium browser can stand in for it (none is installed, or the binary is not yours, which Chromium requires): the app will stop at start.", binary.display()),
             format!("   The fix: {fix}."),
         ],
     }
