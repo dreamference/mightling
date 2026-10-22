@@ -335,15 +335,10 @@ fn ago(seconds: u64) -> String {
 fn status(environment: &Environment, as_json: bool) -> i32 {
     let codex_home = &environment.codex_home;
     let hub = sync_store::hub_dir(codex_home).join("hub.json").exists().then(|| {
-        let on = sync_store::enabled(codex_home);
-        let store = on.then(|| sync_store::Store::open(codex_home).ok()).flatten();
+        // Read, never opened: opening repairs files, which only the running `ling web` may do.
+        let (threads, bytes) = sync_store::summary(codex_home);
         let agents = auth::load_devices(&environment.web_state()).iter().filter(|device| device.kind == auth::DeviceKind::Sync).count();
-        json!({
-            "enabled": on,
-            "threads": store.as_ref().map(|store| store.threads().len()),
-            "bytes": store.as_ref().map(sync_store::Store::bytes),
-            "devices": agents,
-        })
+        json!({ "enabled": sync_store::enabled(codex_home), "threads": threads, "bytes": bytes, "devices": agents })
     });
     let device = DeviceFile::load(codex_home);
     let last: Option<Value> = std::fs::read_to_string(agent::status_path(codex_home)).ok().and_then(|text| serde_json::from_str(&text).ok());
