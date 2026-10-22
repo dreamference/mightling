@@ -191,7 +191,9 @@ impl Tab {
             }
             None => None,
         };
-        let prompts = ask::MessagePrompts { root: &ask_root, composed, created: Mutex::new(None) };
+        // The configured level, as `ling airgapped` prints it: installs and plugins follow it.
+        let airgapped_on = ling_airgapped::resolve(&[]).level == ling_airgapped::Level::On;
+        let prompts = ask::MessagePrompts { root: &ask_root, composed, created: Mutex::new(None), airgapped_on };
         let vetted = {
             let mut pending = self.shared.pending.lock().unwrap_or_else(|p| p.into_inner());
             policy.vet_outgoing(&message, &mut pending, &prompts)?

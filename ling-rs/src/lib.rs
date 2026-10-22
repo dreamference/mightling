@@ -66,6 +66,7 @@ pub mod night;
 pub mod node;
 pub mod node_command;
 pub mod notice;
+pub mod plugins;
 pub mod prompt;
 pub mod proxy;
 pub mod refine;
@@ -487,6 +488,17 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(worktree::run_cli(&user_args[index + 1..]));
     }
+    // `ling plugin add` and `marketplace add|upgrade` fetch with git outside the sandbox: refused
+    // at a configured `on` (plugins.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "plugin"
+        && std::env::var_os(UPSTREAM_TESTS_ENV).is_none()
+    {
+        let configured = airgapped::resolve(None);
+        if let Some(reason) = plugins::install_refusal(&user_args[index + 1..], configured.level, &configured.source.label()) {
+            bail!("{reason}");
+        }
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
@@ -514,6 +526,11 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     }
     // On macOS the sandbox's network is set once, now: a configured `on` takes it away here.
     let args = match airgapped::with_launch_policy(args, &user_args, configured.level) {
+        Ok(args) => args,
+        Err(reason) => bail!("{reason}"),
+    };
+    // At a configured `on` no plugin loads: its MCP servers would run outside the sandbox (plugins.rs).
+    let args = match plugins::with_level(args, &user_args, configured.level) {
         Ok(args) => args,
         Err(reason) => bail!("{reason}"),
     };
@@ -1343,6 +1360,8 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     // offered a choice that cannot work and resolved that model at every thread start ("Unknown
     // model gpt-5.6-luna", 1.7 tests). Only when absent, so a user can turn it back on.
     set_if_absent(features, "guardian_approval", false);
+    // Plugins are allowed; the vendor's remote catalogue and plugin sharing are not (plugins.rs).
+    plugins::close_vendor_features(features);
 
     // Sandboxed commands have the network whenever /airgapped is off (owner decision, 2026-10-22):
     // without it the workspace-write sandbox also blocks DNS, and `pip install`, `git fetch` and the
