@@ -700,7 +700,11 @@ class VLLMServerManager:
                                           AdapterServing.with_headroom(recipe, adapters), token_env)
             for env_key, env_val in sorted(SGLangLaunchBuilder.container_env().items()):
                 cmd.extend(["-e", f"{env_key}={env_val}"])
-            cmd.extend(AdapterServing.docker_args(recipe, adapters))
+            # The recipe's runtime patches of the image's Python (with the adapters' while they
+            # are served), written by start_server before the launch.
+            from dreamference.vllm_server.sglang_runtime_patcher import SGLangRuntimePatcher
+            cmd.extend(SGLangRuntimePatcher.mount_args(
+                SGLangRuntimePatcher.for_launch(recipe, lora=bool(adapters))))
             # The image's own entrypoint, as the recipe this entry follows runs it.
             cmd.append(docker_image)
             cmd.extend(SGLangLaunchBuilder.server_args(
@@ -1747,6 +1751,22 @@ class VLLMServerManager:
                       "   then differs from the one the registry entry was written for: update the patches in\n"
                       "   model_matrix_registry.py before serving it.")
                 raise SystemExit(1)
+
+        # The recipe's runtime patches of the image's own Python (the /v1/responses history
+        # merge), mounted on every launch. A patch pinned to another image, a file that is not the
+        # pinned one, or an anchor that no longer matches means the fix would silently not be there:
+        # the start stops instead.
+        if SGLangLaunchBuilder.is_sglang(overrides):
+            from dreamference.vllm_server.sglang_runtime_patcher import SGLangRuntimePatcher
+
+            runtime_patches = SGLangRuntimePatcher.for_launch(overrides, lora=False)
+            problem = SGLangRuntimePatcher.prepare(docker_image, runtime_patches) if runtime_patches else None
+            if problem:
+                raise SystemExit(
+                    f"❌ The recipe's SGLang runtime patch could not be prepared: {problem}.\n"
+                    "   Serving the image unpatched would bring back what the patch fixes. Check the\n"
+                    "   patch against the image's file and update runtime_patches in\n"
+                    "   model_matrix_registry.py before serving it.")
 
         if not SGLangLaunchBuilder.is_sglang(overrides):
             self._reset_stale_compile_cache(
