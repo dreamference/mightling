@@ -9,6 +9,7 @@ Shift's, imported, not copied: a benchmark run and a night run exclude each othe
 import hashlib
 import re
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -631,10 +632,12 @@ class SweBenchRunner:
                     f"❌ Could not create the internal Docker network {swe_bench_settings.NETWORK_NAME}."
                 )
                 return 1
-            # The model gate refuses every request but this run's while the block lasts (§18).
-            with cls.gate_hold(
-                store, vllm_host, SweBenchDocker.subnet(swe_bench_settings.NETWORK_NAME), label
-            ) as hold:
+            # The model gate refuses every request but this run's while the block lasts (§18). A server on
+            # another machine (`vllm_host` naming it) has no gate of this machine's in front of it, so this
+            # machine's gate is left open and the run waits for other requests there as it would without one.
+            remote = cls.remote_server(vllm_host)
+            subnet = None if remote else SweBenchDocker.subnet(swe_bench_settings.NETWORK_NAME)
+            with cls.gate_hold(store, vllm_host, subnet, label) as hold:
                 idle = settings.idle_minutes if idle_minutes is None else idle_minutes
                 if hold.priority():
                     # Nobody else can reach the model now: an open session cannot start a turn, so
@@ -743,8 +746,18 @@ class SweBenchRunner:
                 model_url = f"http://{gateway}:{urlparse(vllm_host).port or 8000}"
                 run_prompt = str(manifest.get("prompt") or DEFAULT_RUN_PROMPT)
                 lanes, lane_notes = cls.lanes(vllm_host, served, settings, parallel)
-                lanes[0]["model_url"] = model_url
-                relays = cls.open_relays(gateway, lanes[1:])
+                if remote:
+                    # The containers reach the gateway only, and the gateway's port is this machine's: the
+                    # other machine's server gets a relay there, as a replica lane does.
+                    print(
+                        f"   The model server is another machine's ({vllm_host}): reached through a relay "
+                        "on the run's network gateway.",
+                        flush=True,
+                    )
+                    relays = cls.open_relays(gateway, lanes)
+                else:
+                    lanes[0]["model_url"] = model_url
+                    relays = cls.open_relays(gateway, lanes[1:])
                 for note in lane_notes:
                     print(f"   {note}")
                 cave = manifest.get("cave_mode") or swe_bench_settings.SWE_BENCH_CAVE_MODE
@@ -1083,6 +1096,25 @@ class SweBenchRunner:
                 return True
             tail = chunk[-len(needle) :]
         return False
+
+    @classmethod
+    def remote_server(cls, vllm_host: str) -> bool:
+        """
+        Whether the configured model server is another machine's (an engine A/B serves the agent from the
+        engine's development machine): its host is neither loopback nor one of this machine's names.
+
+        Args:
+            vllm_host: The configured model server's base URL.
+
+        Returns:
+            bool: True when the containers must reach it through a relay on the gateway.
+        """
+        host = (urlparse(vllm_host).hostname or "").lower().rstrip(".")
+        if host in ("", "localhost", "::1", "0.0.0.0") or host.startswith("127."):
+            return False
+        names = {socket.gethostname().lower(), socket.getfqdn().lower()}
+        names |= {name + ".local" for name in list(names)}
+        return host not in names
 
     @classmethod
     def open_relays(cls, gateway: str, lanes: list[dict[str, Any]]) -> list[SweBenchRelay]:

@@ -1,0 +1,54 @@
+# 50 fresh SWE-bench Verified tasks for night 12, ling-engine against SGLang serving the same agent (the production bar's A/B), both on node-b with the ScaleSearch drafter, 60-minute limit, drawn 2026-10-18
+# from the 93 tasks validated on this machine outside sample-100.txt and verified-mismatch-exclude.txt (68), fresh-50e.txt (50), fresh-50f.txt (50), fresh-30g.txt (30), seed 20261018.
+# Stratified to sample-100.txt's mix (easy/medium/hard 59/16/25 of 100; easy = solved by >= 75% of strong submissions, hard < 40%):
+# wanted 30/8/12, drawn 30/8/12.
+astropy__astropy-14182
+django__django-10554
+django__django-11099
+django__django-11119
+django__django-11141
+django__django-11451
+django__django-11532
+django__django-11728
+django__django-11749
+django__django-11820
+django__django-12262
+django__django-12708
+django__django-12713
+django__django-12741
+django__django-13786
+django__django-13810
+django__django-14315
+django__django-15098
+django__django-15268
+django__django-15525
+django__django-15554
+django__django-15572
+django__django-15851
+django__django-16032
+django__django-16082
+django__django-16493
+django__django-16527
+django__django-16819
+psf__requests-6028
+pylint-dev__pylint-7277
+pytest-dev__pytest-6202
+pytest-dev__pytest-7324
+sphinx-doc__sphinx-9281
+sphinx-doc__sphinx-9367
+sphinx-doc__sphinx-9591
+sphinx-doc__sphinx-9602
+sympy__sympy-12419
+sympy__sympy-12481
+sympy__sympy-13480
+sympy__sympy-13757
+sympy__sympy-14976
+sympy__sympy-15349
+sympy__sympy-15809
+sympy__sympy-17630
+sympy__sympy-18199
+sympy__sympy-19040
+sympy__sympy-21596
+sympy__sympy-22914
+sympy__sympy-23262
+sympy__sympy-23950
