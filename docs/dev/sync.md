@@ -1,0 +1,40 @@
+# Sync: threads from every device on the node
+
+Developer notes behind `ling sync`. Spec: `specs/DREAMFERENCE_MIGHTLING_SYNC.md`; what Phase 0 measured is its §16, Phase 1 as built its §17. Built 2026-10-22, **off by default and not released** until the owner has tried it.
+
+## The pieces
+
+| Where | What |
+|---|---|
+| `ling-rs/web/src/sync_store.rs` | The hub's store under `~/.mightling/sync/hub/` (0700): one file per rollout plus its record, tombstones, the sequence number; the prefix hash (`Chain`, 1 MiB chunks chained); the hybrid clock (`Hlc`, `Clock`); the transcript a device shows (`items_of`) |
+| `ling-rs/web/src/sync_hub.rs` | The routes under `/api/sync/`, each a 404 until `hub.json` says the hub is on |
+| `ling-rs/web/src/auth.rs` | `DeviceKind` (`browser`, `sync`) and `Scope` (`control`, `watch`) on every paired device |
+| `ling-rs/sync/` (`ling-sync`) | The agent (`agent.rs`), its client of the hub (`client.rs`), the scan of Codex's folders (`scan.rs`), `device.toml` and `[sync]` (`config.rs`), `ling sync …` (`cli.rs`) |
+| `ling-rs/src/sync.rs` | The launcher's routing, and the node found by the node tiers without asking its model server |
+| `desktop/ui/src/sync.ts`, `SyncedView.tsx` | Other devices in `ling web`'s sidebar: the list, the transcript, Archive and Delete |
+| `dreamference/audit/sync_egress_audit.py` | `ling-admin audit egress --sync` |
+
+`ling-sync` depends on `ling-web-server` (the store's hash, clock and ids, `auth::write_private`), as `ling-chat` does, so its tests run a real hub on loopback.
+
+## Rules that are easy to break
+
+- **Off means nothing.** No route answers, no folder is created, no unit is written until `ling sync enable`. `Server::sync_store()` asks for `hub.json` on every request and opens the store only then; `Agent::load` returns `None` without `device.toml`. Each surface has a test.
+- **An agent's secret is not a cookie, and a cookie is not an agent.** `auth::device_for_token` finds browsers only and `sync_device_for_token` agents only; the guard lets a bearer secret through on `/api/sync/` alone.
+- **Codex's files are changed only by Codex.** A deletion or an archive state decided elsewhere is applied with `ling delete --force`, `ling archive` and `ling unarchive`. Moving a rollout by hand breaks Codex's reads of it (Phase 0); a downloaded rollout's turns are never projected, so nothing of another device's is written into `~/.mightling` (`[sync] replicate` is not built, for that reason).
+- **The node is found, never stored**, and only an address on the user's own network is a hub (`cli::hub_base`). The resolver must not ask the model server (`node::resolve`, not `node::resolve_host`): the audit allows the hub's port alone.
+- **A rollout, not a thread, is the unit.** A revert writes a new rollout that starts from a byte offset of the one before; the hub keeps both and the transcript follows `history_base`.
+- **The bridge policy is untouched.** Nothing here is an app-server method; Phase 2's forwarded commands will be, with their conformance cases in both enforcers.
+
+## Tests
+
+- `cargo test` in a copy of `ling-rs/web` (beside `../airgapped`) and of `ling-rs/sync` (beside `../web` and `../airgapped`): the store, the routes' guard, and the agent end to end against a real hub on loopback with a stand-in `ling` (`ling-rs/sync/tests/sync.rs`). The web crate's `night_shift_is_queued_and_read_for_a_phone_bridge` reads the real user's `[chat] night_repos`: run the suite with a scratch `HOME` (and `CARGO_HOME`, `RUSTUP_HOME` set).
+- In the export: `cargo test --release -p ling-launcher -p ling-web-server -p ling-sync`.
+- `desktop/ui`: `src/sync.test.ts`. Python: `tests/test_sync_egress_audit.py`.
+
+## Trying it
+
+1. On the node: `ling web start --lan` (an advertised node), then `ling sync enable`.
+2. On the node: `ling web pair`; on the laptop: `ling sync enable` and type the code (or `--code`).
+3. Start a thread in the laptop's app; within a few seconds it is under **Other devices** in the node's `ling web`, in the node's browser and on the phone's.
+4. `ling sync status` on either; `ling-admin audit egress --sync` on the node.
+5. `ling sync disable` stops it and keeps everything; `ling sync forget` deletes the hub's store (node) or the pairing (device).

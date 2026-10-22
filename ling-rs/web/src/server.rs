@@ -96,6 +96,8 @@ pub struct Server {
     pairing_failures: AtomicU32,
     busy: Mutex<HashMap<u64, BusyTracker>>,
     next_tab: AtomicU64,
+    /// The sync hub's store, opened on the first request after `ling sync enable` (sync_hub.rs).
+    sync: Mutex<Option<Arc<crate::sync_store::Store>>>,
 }
 
 impl Server {
@@ -113,12 +115,40 @@ impl Server {
             pairing_failures: AtomicU32::new(0),
             busy: Mutex::new(HashMap::new()),
             next_tab: AtomicU64::new(1),
+            sync: Mutex::new(None),
             config,
         }))
     }
 
     pub fn ask_root(&self) -> PathBuf {
         ask::root(&self.config.codex_home)
+    }
+
+    /// The sync hub's store while the hub is on (specs/DREAMFERENCE_MIGHTLING_SYNC.md): asked on
+    /// every request, so `ling sync enable` and `disable` need no restart, and nothing is opened
+    /// or written while it is off.
+    pub fn sync_store(&self) -> Option<Arc<crate::sync_store::Store>> {
+        let mut cached = self.sync.lock().unwrap_or_else(|p| p.into_inner());
+        if !crate::sync_store::enabled(&self.config.codex_home) {
+            *cached = None;
+            return None;
+        }
+        if cached.is_none() {
+            *cached = crate::sync_store::Store::open(&self.config.codex_home).ok().map(Arc::new);
+        }
+        cached.clone()
+    }
+
+    /// A wrong pairing code; ten withdraw every pending one (shared by `/pair` and `/api/sync/pair`).
+    pub fn pairing_failed(&self) {
+        if self.pairing_failures.fetch_add(1, Ordering::Relaxed) + 1 >= auth::PAIRING_ATTEMPTS {
+            auth::withdraw_pairing_codes(&self.config.state_dir);
+            self.pairing_failures.store(0, Ordering::Relaxed);
+        }
+    }
+
+    pub fn pairing_succeeded(&self) {
+        self.pairing_failures.store(0, Ordering::Relaxed);
     }
 
     pub fn new_tab_id(&self) -> u64 {
@@ -137,6 +167,13 @@ impl Server {
         }
         if let Some(token) = auth::cookie(cookies, auth::DEVICE_COOKIE)
             && auth::device_for_token(&self.config.state_dir, token).is_some()
+        {
+            return true;
+        }
+        // A sync agent's secret opens the hub's routes and nothing else (sync_hub.rs).
+        if path.starts_with("/api/sync/")
+            && let Some(secret) = header_str(headers, header::AUTHORIZATION).and_then(|value| value.strip_prefix("Bearer "))
+            && auth::sync_device_for_token(&self.config.state_dir, secret.trim()).is_some()
         {
             return true;
         }
@@ -249,6 +286,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/devices", get(devices_page))
         .route("/devices/pair", post(devices_pair))
         .route("/devices/revoke", post(devices_revoke))
+        .route("/devices/scope", post(devices_scope))
+        .merge(crate::sync_hub::routes())
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(server.clone(), guard))
         .with_state(server)
@@ -267,7 +306,8 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
         return secured(text(StatusCode::FORBIDDEN, "Requests from other sites are refused.\n"));
     }
     let path = request.uri().path();
-    let public = matches!(path, "/login" | "/pair" | "/pair.css");
+    // `/api/sync/pair` answers 404 while the hub is off, and pairs an agent only with a code.
+    let public = matches!(path, "/login" | "/pair" | "/pair.css" | "/api/sync/pair");
     if !public && !server.authenticated(path, headers) {
         let response = if path == "/" || path == "/index.html" {
             html(StatusCode::UNAUTHORIZED, assets::LOCKED_HTML)
@@ -717,6 +757,27 @@ async fn devices_revoke(State(server): State<Arc<Server>>, headers: HeaderMap, F
     html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), &server.config.lan_names, None, notice.as_deref(), now_secs()))
 }
 
+/// Narrows a device to watching other devices' threads, or gives it control again (SYNC §5.1).
+async fn devices_scope(State(server): State<Arc<Server>>, headers: HeaderMap, Form(form): Form<HashMap<String, String>>) -> Response {
+    if !server.owner_session(&headers) {
+        return html(StatusCode::FORBIDDEN, &devices::device_page());
+    }
+    let state = &server.config.state_dir;
+    let id = form.get("device").map(String::as_str).unwrap_or_default();
+    let notice = match form.get("scope").map(String::as_str).and_then(auth::Scope::parse) {
+        None => Some("A scope is control or watch.".to_string()),
+        Some(scope) => match auth::set_scope(state, id, scope) {
+            Ok(changed) if changed.is_empty() => Some("No paired device has that id.".to_string()),
+            Ok(_) => None,
+            Err(err) => Some(format!("Could not change it: {err}")),
+        },
+    };
+    if notice.is_none() {
+        return (StatusCode::SEE_OTHER, [(header::LOCATION, "/devices")]).into_response();
+    }
+    html(StatusCode::OK, &devices::owner_page(&auth::load_devices(state), &server.config.lan_names, None, notice.as_deref(), now_secs()))
+}
+
 /// The pairing form: a code from `ling web pair` and a name for this device.
 async fn pair(State(server): State<Arc<Server>>, Form(form): Form<HashMap<String, String>>) -> Response {
     let code = form.get("code").map(|code| code.trim().to_string()).unwrap_or_default();
@@ -733,10 +794,7 @@ async fn pair(State(server): State<Arc<Server>>, Form(form): Form<HashMap<String
         };
     }
     // Ten wrong codes withdraw every pending one: guessing eight digits takes far more.
-    if server.pairing_failures.fetch_add(1, Ordering::Relaxed) + 1 >= auth::PAIRING_ATTEMPTS {
-        auth::withdraw_pairing_codes(state);
-        server.pairing_failures.store(0, Ordering::Relaxed);
-    }
+    server.pairing_failed();
     tokio::time::sleep(Duration::from_millis(500)).await;
     html(StatusCode::UNAUTHORIZED, &assets::pair_html(Some("That code is wrong or has expired. Run `ling web pair` for a new one.")))
 }

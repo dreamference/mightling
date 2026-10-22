@@ -124,12 +124,21 @@ paired devices only; then come back here.</p></section>\n",
     } else {
         body.push_str("<ul>");
         for device in devices {
+            // Every pairing may control other devices' threads (SYNC §5.1); one can be narrowed to
+            // watching, and widened again.
+            let (kind, scope, other, label) = match device.scope {
+                crate::auth::Scope::Control => (device.kind, "can control threads", "watch", "Watch only"),
+                crate::auth::Scope::Watch => (device.kind, "watches only", "control", "Allow control"),
+            };
+            let kind = if kind == crate::auth::DeviceKind::Sync { "sync agent, " } else { "" };
             body.push_str(&format!(
-                "<li><span>{}<small>paired {}, last used {}</small></span>\
+                "<li><span>{}<small>{kind}{scope}; paired {}, last used {}</small></span>\
+<form method=\"post\" action=\"/devices/scope\"><input type=\"hidden\" name=\"device\" value=\"{}\"><input type=\"hidden\" name=\"scope\" value=\"{other}\"><button type=\"submit\">{label}</button></form>\
 <form method=\"post\" action=\"/devices/revoke\"><input type=\"hidden\" name=\"device\" value=\"{}\"><button type=\"submit\">Revoke</button></form></li>",
                 escape(&device.name),
                 ago(device.created, now),
                 ago(device.last_used, now),
+                escape(&device.id),
                 escape(&device.id)
             ));
         }
@@ -158,7 +167,15 @@ mod tests {
     use super::*;
 
     fn device(name: &str) -> Device {
-        Device { id: "ab12cd34".to_string(), name: name.to_string(), token_sha256: "secret-hash".to_string(), created: 0, last_used: 0 }
+        Device {
+            id: "ab12cd34".to_string(),
+            name: name.to_string(),
+            token_sha256: "secret-hash".to_string(),
+            created: 0,
+            last_used: 0,
+            kind: crate::auth::DeviceKind::Browser,
+            scope: crate::auth::Scope::Control,
+        }
     }
 
     #[test]

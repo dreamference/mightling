@@ -76,6 +76,8 @@ pub mod rename;
 pub mod signal;
 pub mod skills;
 pub mod summary_cap;
+#[cfg(unix)]
+pub mod sync;
 
 pub mod update;
 pub mod usage;
@@ -117,13 +119,13 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync",
 ];
 
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree",
+    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -431,6 +433,19 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         #[cfg(not(unix))]
         {
             eprintln!("`ling chat` is not available on Windows yet: it reaches the agent through `ling web`.");
+            std::process::exit(2);
+        }
+    }
+    // `sync` is one set of threads on every device, through the node's `ling web` (sync.rs;
+    // specs/DREAMFERENCE_MIGHTLING_SYNC.md).
+    if let Some(index) = subcommand
+        && user_args[index] == "sync"
+    {
+        #[cfg(unix)]
+        std::process::exit(sync::run_cli(&user_args[index + 1..]).await);
+        #[cfg(not(unix))]
+        {
+            eprintln!("`ling sync` is not available on Windows yet: the hub is part of `ling web`.");
             std::process::exit(2);
         }
     }
