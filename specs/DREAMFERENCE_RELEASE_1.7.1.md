@@ -14,6 +14,7 @@ description: the release workflow publishes it as it stands (`scripts/release_no
 | Area | Merges |
 |---|---|
 | Security: the sandbox and the host's control sockets | e0544b6 |
+| The model server: SGLang's history keeps an announcement with its tool call | 046b126 |
 | Phones: Telegram topics, voice, images and files in, files back, Night Shift, bounds, a fresh thread after a silence, quick follow-ups, the Mini App | 5764057, ef66653, 10d0de8, 2111639, 12dc2ed, 1da1f45, 00d0d66, e71cbe1, 4f02b20, 1305969 |
 | Desktop app: dark mode, Settings › Node, Quick Entry, Ask's files, projects, Activity, export, the agent reading terminals and the preview, MCP questions, hook trust, keys, fixes | a1b6f18, 868c287, 06c1fab, f77a6fc, 868d665, 7921c8f, 642e8d7, d3678b4, 11cbfec, ec3900e, 2b61a54, e4a6f4d, 8e6ec30, ce831b4, ef8a167, 2900576, 80fc098, 10a4f1d, ac08ed2, 0fca917, 59e1e15, f349c44 |
 | `ling`: the compatibility mode (`ling --compat claude`) | 549879c, 6f425be, 09000d2, 9a018a6, 60b5799, 4b4aeff, 5bcf9d1, 56bb9bf, d55f8e1 |
@@ -43,6 +44,12 @@ mounted the system read-only, which does not stop a program from talking to a so
 could reach Docker's (and, for a user in the `docker` group, act as root on the host). Every
 sandboxed command now finds Docker, containerd, Podman, the D-Bus buses, the systemd user manager,
 snapd and Mightling's own runtime folder closed. Full Access, which has no sandbox, is unchanged.
+
+**The agent no longer stops after saying what it will do.** Since the model server moved to
+SGLang 0.5.21 (2026-10-18), its `/v1/responses` rebuilt a conversation's history with the agent's
+commentary split from the tool calls that followed it, so the model learnt to announce its work and
+end the turn. A patch applied at every SGLang launch keeps them together again. It cost about 15 to
+20 points on our SWE-bench runs; an updated node applies it at its next `ling-admin server start`.
 
 **Your phone does more.** On every bridge (Signal, Telegram, Matrix): voice messages are transcribed
 on the node by the local speech-to-text, said back and answered; images and files are passed on,
