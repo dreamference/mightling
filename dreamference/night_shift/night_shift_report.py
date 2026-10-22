@@ -62,7 +62,13 @@ class NightShiftReport:
             lines.append(
                 f"- `git -C {task['repo']} diff {task['base'][:12]}..{task['result']['branch']}`"
             )
-        if not branches:
+        if branches:
+            lines.append(
+                "- Nothing was merged into your checkout. `ling night apply <id>` (or `/night apply <id>`), "
+                "run in the repository, brings a task's changes there as uncommitted changes; "
+                "it refuses, changing nothing, if they conflict with yours."
+            )
+        else:
             lines.append("- No branch to review.")
         lines.append("- `git worktree list` shows the worktrees kept for interrupted tasks.")
         return lines
@@ -84,7 +90,10 @@ class NightShiftReport:
         if task.get("status") == "sent":
             lines.append("- Not finished there yet: its branch comes back with a later run.")
         if result.get("branch"):
-            lines.append(f"- Branch: `{result['branch']}`")
+            lines.append(
+                f"- Branch: `{result['branch']}`, not merged; "
+                f"`ling night apply {task.get('id')}` brings it into your checkout"
+            )
         if result.get("diff_stat"):
             summary = result["diff_stat"].splitlines()[-1].strip()
             lines.append(f"- Changes: {summary}")

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { WorktreeLink } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import { initialState, projects, reduce } from "./store";
-import { DEFAULT_KEEP, carry, cleanupVictims, projectFolder, protectedOwners, turnCwd, worktreeSettings } from "./worktrees";
+import { DEFAULT_KEEP, carry, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings } from "./worktrees";
 
 const link: WorktreeLink = {
   checkout: "/home/u/.mightling/worktrees/ab12/app", cwd: "/home/u/.mightling/worktrees/ab12/app/src",
@@ -55,5 +55,13 @@ describe("worktree threads", () => {
     expect(DEFAULT_KEEP).toBe(15);
     expect(worktreeSettings({ "git-worktree-root": " /data/wt ", "worktree-auto-cleanup-enabled": false, "worktree-keep-count": 4 })).toEqual({ root: "/data/wt", autoCleanup: false, keep: 4 });
     expect(worktreeSettings({ "worktree-keep-count": 0 }).keep).toBe(DEFAULT_KEEP);
+  });
+
+  it("start a new thread Local unless the user chose worktrees (`/worktree on`)", () => {
+    expect(defaultCheckout(null)).toBe("local");
+    expect(defaultCheckout({})).toBe("local");
+    expect(defaultCheckout({ "mightling-worktree-mode": "local" })).toBe("local");
+    expect(defaultCheckout({ "mightling-worktree-mode": "nonsense" })).toBe("local");
+    expect(defaultCheckout({ "mightling-worktree-mode": "worktree" })).toBe("worktree");
   });
 });

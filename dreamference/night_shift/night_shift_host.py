@@ -74,6 +74,7 @@ NON_INTERACTIVE: Final[frozenset] = frozenset(
         "cavemode",
         "loop-guard",
         "guard",
+        "worktree",
     }
 )
 
