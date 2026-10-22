@@ -94,6 +94,22 @@ pub fn forget(codex_home: &Path) -> std::io::Result<()> {
     }
 }
 
+/// How many threads and bytes the hub holds, read from the records without opening the store, which
+/// repairs files and so is for the running server alone (`ling sync status`).
+pub fn summary(codex_home: &Path) -> (usize, u64) {
+    let mut threads = std::collections::BTreeSet::new();
+    let mut bytes = 0;
+    for entry in std::fs::read_dir(hub_dir(codex_home).join("rollouts")).into_iter().flatten().flatten() {
+        if entry.path().extension().is_some_and(|extension| extension == "json")
+            && let Some(record) = std::fs::read_to_string(entry.path()).ok().and_then(|text| serde_json::from_str::<Record>(&text).ok())
+        {
+            threads.insert(record.thread);
+            bytes += record.length;
+        }
+    }
+    (threads.len(), bytes)
+}
+
 /// A thread or rollout id as Codex writes it: a UUID in lowercase hex. Nothing else names a file here.
 pub fn valid_id(id: &str) -> bool {
     let bytes = id.as_bytes();
@@ -1275,7 +1291,9 @@ mod tests {
         assert!(!hub_dir(&home).exists());
         set_enabled(&home, true).unwrap();
         assert!(enabled(&home));
-        Store::open(&home).unwrap();
+        let store = Store::open(&home).unwrap();
+        store.append(ID, &agent("lap1"), &Upload::first(FILE), b"{}\n").unwrap();
+        assert_eq!(summary(&home), (1, 3));
         set_enabled(&home, false).unwrap();
         assert!(!enabled(&home) && hub_dir(&home).join("rollouts").exists());
         forget(&home).unwrap();
