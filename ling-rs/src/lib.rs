@@ -121,7 +121,7 @@ const COMMANDS_WITHOUT_MODEL: &[&str] = &[
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard",
+    "signal", "refine", "compat", "cavemode", "loop-guard", "guard",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
