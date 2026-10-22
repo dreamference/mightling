@@ -98,7 +98,12 @@ export class MessagePrompts implements PromptSource {
   /** The folder a vetted `thread/start` created, if it created one. */
   created: string | null = null;
 
-  constructor(private readonly root: string, private readonly prompt: { name: string; text: string } | null) {}
+  constructor(
+    private readonly root: string,
+    private readonly prompt: { name: string; text: string } | null,
+    /** The configured air-gap level was `on` when the message arrived (`ling airgapped`). */
+    private readonly airgapped = false,
+  ) {}
 
   composed(name: string): string {
     if (this.prompt && this.prompt.name === name) return this.prompt.text;
@@ -116,6 +121,10 @@ export class MessagePrompts implements PromptSource {
 
   scratchFolderOf(threadId: string): string | null {
     return folderOf(this.root, threadId);
+  }
+
+  airgappedOn(): boolean {
+    return this.airgapped;
   }
 }
 

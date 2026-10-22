@@ -62,8 +62,13 @@
     "skills/list",
     "skills/config/write",
     "plugin/list",
+    "plugin/read",
+    "plugin/installed",
     "plugin/install",
     "plugin/uninstall",
+    "marketplace/add",
+    "marketplace/remove",
+    "marketplace/upgrade",
     "config/mcpServer/reload",
     "hooks/list",
     "mcpServerStatus/list",
@@ -111,9 +116,18 @@
   ],
   "scratchSandbox": "workspace-write",
   "importRequest": "externalAgentConfig/import",
-  "refusedImportItems": [
+  "refusedImportItems": [],
+  "airgappedRefusedRequests": [
+    "plugin/install",
+    "marketplace/add",
+    "marketplace/upgrade"
+  ],
+  "airgappedRefusedImportItems": [
     "PLUGINS"
   ],
+  "airgappedThreadConfig": {
+    "features.plugins": false
+  },
   "windowToolsField": "windowTools",
   "windowTools": {
     "mightling_terminal_output": {

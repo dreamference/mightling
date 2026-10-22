@@ -17,9 +17,10 @@ import { command } from "./platform";
 import path from "node:path";
 import readline from "node:readline";
 
+import { airgapped } from "./airgapped";
 import { MessagePrompts, askRoot, canonicalRoot, composePrompt, forgetIncognito, isFolder, linkThread, markIncognito, sweepIncognito, writeUpload, type Upload } from "./ask";
 import { BusyTracker, busyMarker, classify, codexHome, findLing, servedModel } from "./bridge";
-import { POLICY, namedPrompt, vetOutgoing } from "./policy";
+import { POLICY, levelMatters, namedPrompt, vetOutgoing } from "./policy";
 import type { ForView, Started } from "./api";
 
 export interface ServerEvents {
@@ -158,7 +159,9 @@ export class AppServer {
     // composed text is stdout, whole.
     const { LOG_FORMAT: _format, RUST_LOG: _level, ...composeEnv } = launch.env;
     const prompt = name ? { name, text: await composePrompt(launch.ling, name, root, composeEnv) } : null;
-    const prompts = new MessagePrompts(root, prompt);
+    // The configured air-gap level, for what it decides: installs, imports, thread openers.
+    const on = levelMatters(message) ? (await airgapped(launch.ling, null)).level === "on" : false;
+    const prompts = new MessagePrompts(root, prompt, on);
     const vetted = vetOutgoing(message, this.pending, prompts);
     const child = this.child;
     if (!child || !child.stdin.writable) throw new Error("the agent's server is not running");

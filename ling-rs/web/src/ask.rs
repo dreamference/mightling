@@ -88,6 +88,8 @@ pub struct MessagePrompts<'a> {
     pub composed: Option<(String, String)>,
     /// The folder a vetted `thread/start` created, if it created one.
     pub created: Mutex<Option<PathBuf>>,
+    /// Whether the configured air-gap level is `on`, read when the message arrived.
+    pub airgapped_on: bool,
 }
 
 impl PromptSource for MessagePrompts<'_> {
@@ -106,6 +108,10 @@ impl PromptSource for MessagePrompts<'_> {
 
     fn scratch_folder_of(&self, thread_id: &str) -> Option<String> {
         folder_of(self.root, thread_id).map(|folder| folder.to_string_lossy().into_owned())
+    }
+
+    fn airgapped_on(&self) -> bool {
+        self.airgapped_on
     }
 }
 
