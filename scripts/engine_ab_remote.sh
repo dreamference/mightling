@@ -6,6 +6,8 @@
 #   ssh second-puffin bash -s -- serve engine < scripts/engine_ab_remote.sh   ling-serve
 #   ssh second-puffin bash -s -- restore < scripts/engine_ab_remote.sh        both arms stopped, m0-prod8000 back
 #   ssh second-puffin bash -s -- status < scripts/engine_ab_remote.sh
+#   ssh second-puffin AB_DIR=~/ab-n15 bash -s -- adopt ~/ab-n12 < scripts/engine_ab_remote.sh   (see below)
+#   ssh second-puffin bash -s -- restore keep < scripts/engine_ab_remote.sh   arms stopped, the GPU lock kept
 #
 # `serve` stops m0-prod8000 and the other arm, starts the arm and waits until /v1/models answers, then prints
 # `ready <owned_by>`; it exits non-zero when the arm does not come up. Both arms load the same files: the target
@@ -21,9 +23,18 @@
 # (`ab-n12-gpu-lease`, its pid in AB_DIR/gpu-lease.pid), which later `serve`s reuse and `restore` ends once
 # production is started again. The lease ends by itself after HOLD_MAX (30 h) in case no `restore` ever comes.
 # ~/gpu.lock stays the inner lock between this helper's own `serve` and `restore`; the GPU lock is always taken first.
+#
+# One night hands the GPU lock to the next without letting go of it (night 12 to the engine smoke night, 2026-10-20,
+# with the engine agents' windows already queued on the lock): `adopt FROM_DIR`, run with the next night's AB_DIR
+# after the earlier night's last `serve`, records the earlier night's lease as this AB_DIR's and leaves a decoy in
+# FROM_DIR (a process with the lease's name that holds no lock), which the earlier night's `restore` then ends while
+# production comes back; the lock stays taken until this AB_DIR's own `restore`. `restore keep` stops the arms and
+# keeps the lease (the night script's `start`, between its smokes and the night, so that no waiter takes the lock in
+# the gap); with no lease it is a plain `restore`. SG_NAME follows AB_DIR (ab-n12-sglang for ~/ab-n12), so one night's
+# late restore never removes the next night's SGLang container.
 set -u
 AB_DIR=${AB_DIR:-$HOME/ab-n12}
-SG_NAME=ab-n12-sglang
+SG_NAME=${SG_NAME:-$(basename "$AB_DIR")-sglang}
 SG_PORT=${SG_PORT:-30000}
 ENGINE_PORT=${ENGINE_PORT:-8300}
 SG_IMAGE=lmsysorg/sglang@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469
@@ -75,9 +86,9 @@ port_free() {  # port, seconds: waits until nothing listens on it; names the hol
 keep_logs() {  # the SGLang arm's container log, kept before the container goes
     docker logs "$SG_NAME" > "$AB_DIR/sglang-$(date +%Y%m%d-%H%M%S).log" 2>&1
 }
-lease_pid() {  # the live lease process holding the GPU lock for the night, or nothing
+lease_pid() {  # the live lease process holding the GPU lock for the night (of AB_DIR, or of folder $1), or nothing
     local p
-    p=$(cat "$AB_DIR/gpu-lease.pid" 2>/dev/null)
+    p=$(cat "${1:-$AB_DIR}/gpu-lease.pid" 2>/dev/null)
     [ -n "$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q "^$HOLDER " && echo "$p"
 }
 take_lease() {  # the GPU lock, held from now until `restore` by a detached lease process
@@ -139,7 +150,30 @@ serve)
     log "arm $arm ready on $port ($own)"
     echo "ready $own"
     ;;
+adopt)
+    from=${2:-}
+    [ -n "$from" ] && [ -d "$from" ] && [ "$(cd "$from" && pwd -P)" != "$(cd "$AB_DIR" && pwd -P)" ] \
+        || { log "adopt: no other night's folder ${from:-(none given)}"; exit 2; }
+    if p=$(lease_pid); then log "adopt: the GPU lock is already this night's (lease $p)"; echo "adopted $p"; exit 0; fi
+    real=$(lease_pid "$from") || { log "adopt: no live lease in $from"; exit 1; }
+    flock -n "$GPU_LOCK" true && { log "adopt: the GPU lock is free, so lease $real holds nothing"; exit 1; }
+    setsid nohup bash -c "exec -a $HOLDER sleep $HOLD_MAX" > /dev/null 2>&1 < /dev/null 8>&- 9>&- &
+    decoy=$!
+    sleep 0.5
+    tr '\0' ' ' < "/proc/$decoy/cmdline" 2>/dev/null | grep -q "^$HOLDER " || { log "adopt: the decoy did not start"; exit 1; }
+    echo "$real" > "$AB_DIR/gpu-lease.pid"
+    echo "$decoy" > "$from/gpu-lease.pid.new" && mv "$from/gpu-lease.pid.new" "$from/gpu-lease.pid"
+    log "adopted lease $real (the GPU lock) from $from; the decoy $decoy left there holds no lock"
+    echo "adopted $real"
+    ;;
 restore)
+    if [ "${2:-}" = keep ] && p=$(lease_pid); then
+        exec 9> "$HOME/gpu.lock"; flock -w 1800 9
+        stop_arms
+        log "arms stopped; the GPU lock kept for the night (lease $p)"
+        echo "kept"
+        exit 0
+    fi
     # The stop and the start run detached from this ssh session, so production comes back even when the caller
     # is stopped or its connection drops halfway (a stopped night unit has 90 s before systemd kills it). The night's
     # lease on the GPU lock ends only after production is started; with no lease, the GPU lock is taken for the
@@ -162,5 +196,5 @@ restore)
 status)
     echo "sglang: $(answers "$SG_PORT") engine: $(answers "$ENGINE_PORT") m0-prod8000: $(answers 8000) lease: $(lease_pid)"
     ;;
-*) echo "usage: engine_ab_remote.sh serve sglang|engine | restore | status" >&2; exit 2 ;;
+*) echo "usage: engine_ab_remote.sh serve sglang|engine | restore [keep] | adopt FROM_DIR | status" >&2; exit 2 ;;
 esac
