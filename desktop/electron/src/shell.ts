@@ -6,10 +6,14 @@ import path from "node:path";
 import { BrowserWindow, Menu, Notification, Tray, app, nativeImage, powerSaveBlocker } from "electron";
 
 export interface ShellActions {
-  /** The app window on Ask (the menu's former Chat, a window of its own until 2026-10-09). */
+  /** The most recent window on Ask (the menu's former Chat, a window of its own until 2026-10-09), or a new one when none is open. */
   openAsk(): void;
-  /** The app window on Work. */
+  /** The most recent window on Work, or a new one. */
   openWork(): void;
+  /** New Window (DESKTOP_ELECTRON §13): another full window, beside the one in front. */
+  newWindow?(from: BrowserWindow | null): void;
+  /** The Window menu's Terminal and Diff items: the window in front detaches its pane, or docks it back. */
+  pane?(kind: "terminal" | "review", from: BrowserWindow | null): void;
   /** Quick Entry's box (quick.ts). */
   quickQuestion?(): void;
 }
@@ -18,7 +22,7 @@ export function installMenu(actions: ShellActions): void {
   // The page handles every shortcut itself, from its keymap (desktop/ui/src/keymap.json, rebindable
   // in Settings), so the menu shows the keys without registering them (`registerAccelerator: false`):
   // Ctrl+W closes a tab in the page, never the window; Alt+1/Alt+2 switch the view (DESKTOP_PARITY
-  // §2.19), leaving Ctrl+1–9 for threads.
+  // §2.19), leaving Ctrl+1–9 for threads; Ctrl+Shift+N (Cmd+Shift+N on a Mac) opens a new window.
   const shown = (accelerator: string) => ({ accelerator, registerAccelerator: false });
   const template: Electron.MenuItemConstructorOptions[] = [
     // On a Mac the first menu is the application's (About, Hide, Quit), named after it.
@@ -26,6 +30,7 @@ export function installMenu(actions: ShellActions): void {
     {
       label: "File",
       submenu: [
+        ...(actions.newWindow ? [{ label: "New Window", ...shown("CmdOrCtrl+Shift+N"), click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => actions.newWindow?.(window instanceof BrowserWindow ? window : null) }, { type: "separator" } as const] : []),
         { label: "Ask", ...shown("Alt+1"), click: () => actions.openAsk() },
         { label: "Work", ...shown("Alt+2"), click: () => actions.openWork() },
         { type: "separator" },
@@ -34,7 +39,18 @@ export function installMenu(actions: ShellActions): void {
     },
     { label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
     { label: "View", submenu: [{ label: "Full screen", ...shown("F11"), click: (_item, window) => window?.setFullScreen(!window.isFullScreen()) }, ...(app.isPackaged ? [] : [{ role: "toggleDevTools" } as const])] },
-    { label: "Window", submenu: [{ role: "minimize" }] },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        ...(actions.pane ? [
+          { type: "separator" } as const,
+          // In the window it came from: into a window of its own; in the pane's own window, or once detached: back.
+          { label: "Terminal in Its Own Window", click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => actions.pane?.("terminal", window instanceof BrowserWindow ? window : null) },
+          { label: "Diff in Its Own Window", click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => actions.pane?.("review", window instanceof BrowserWindow ? window : null) },
+        ] : []),
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -80,7 +96,6 @@ export function keepAwake(busy: boolean): void {
   }
 }
 
-/** A desktop notification, silent, when the window is not in front (or always when asked); a click runs `onClick`. */
 /**
  * Shows a notification unless the app is in front: "in front" is any of its windows focused, a
  * pop-out as much as the main window (Settings › Notifications' "when the window is not in front").

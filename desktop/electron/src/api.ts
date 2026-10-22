@@ -3,6 +3,9 @@
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3). `desktop/ui/src/bridge.ts` holds the page's
 // copy of these shapes.
 
+import type { TerminalSession } from "./terminal-mirror";
+import type { PaneAction, PaneKind, WindowsState } from "./windows";
+
 /** The channel names, as the Codex app names them: `<app>_desktop:message-from-view` and `-for-view`. */
 export const CHANNEL_FROM_VIEW = "mightling_desktop:message-from-view";
 export const CHANNEL_FOR_VIEW = "mightling_desktop:message-for-view";
@@ -109,6 +112,26 @@ export type FromView =
   /** A thread in a window of its own, and a window kept above the others (DESKTOP_PARITY §2.1). */
   | { type: "window/popout"; thread: string }
   | { type: "window/always-on-top"; on: boolean }
+  /** Several windows (windows.ts, DESKTOP_ELECTRON §13): New Window, on a view or the sender's. */
+  | { type: "window/new"; view?: "ask" | "work" }
+  /** Who owns which thread's composer, for this window. */
+  | { type: "window/state" }
+  /** The page shows a thread (or none) on a view: the composer's owner and the session follow. */
+  | { type: "window/showing"; view: "ask" | "work"; thread: string | null }
+  /** "Use the composer here": the thread this window shows takes its composer from the other window. */
+  | { type: "window/take"; thread: string }
+  /** Bring the window whose composer a thread is forward. */
+  | { type: "window/show-thread"; thread: string }
+  /** A thread's terminal or diff into a window of its own, and back. */
+  | { type: "window/detach"; pane: PaneKind; thread: string }
+  | { type: "window/dock"; pane: PaneKind; thread: string }
+  /** A detached pane's request for the window it came from (windows.ts `paneAction`). */
+  | { type: "pane/relay"; action: unknown }
+  /** The terminal tabs every window sees (terminal-mirror.ts): the list, a tab started or ended, one closed, a tab's recent output. */
+  | { type: "terminal/list" }
+  | { type: "terminal/publish"; session: unknown }
+  | { type: "terminal/forget"; processId: string }
+  | { type: "terminal/backlog"; processId: string }
   /** The user's home folder: where a thread with no project works (Ctrl+Alt+O). */
   | { type: "app/home" }
   /** Settings › Profile and Personalization (insights.ts): statistics from the session files; `$CODEX_HOME/AGENTS.md`. */
@@ -184,7 +207,17 @@ export type ForView =
   | { channel: "theme"; payload: "light" | "dark" }
   | { channel: "pet://state"; payload: { working: number; waiting: number; finished: number; size: "small" | "medium" | "large"; image: string | null } }
   /** Show Ask or Work: the menu, a second instance or a link asked for one. */
-  | { channel: "view"; payload: "ask" | "work" };
+  | { channel: "view"; payload: "ask" | "work" }
+  /** Who owns which thread's composer (windows.ts), sent to each window whenever it changes. */
+  | { channel: "windows"; payload: WindowsState }
+  /** Every terminal tab (terminal-mirror.ts), whenever the list changes. */
+  | { channel: "terminals"; payload: TerminalSession[] }
+  /** A pane detached from this window closed: it shows here again. */
+  | { channel: "pane://docked"; payload: { pane: PaneKind; thread: string } }
+  /** A pane detached from this window asks for something (windows.ts `paneAction`). */
+  | { channel: "pane://action"; payload: PaneAction }
+  /** The Window menu's pane items, for the page in front: detach (or dock back) the terminal or the diff. */
+  | { channel: "command"; payload: "detachTerminal" | "detachReview" };
 
 export interface Started {
   served_model: string | null;

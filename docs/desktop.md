@@ -201,9 +201,30 @@ ling app --thread <id>        # Work, on an existing thread
 ling app                      # the app window on Ask
 ```
 
-There is one window. The menu's **Ask** and **Work** entries (Alt+1 and Alt+2), the tray icon's
-and `ling app` bring it forward on the view asked for; none opens a second window. In 1.5 the
-menu's Ask opened a separate window on [`ling web`](web.md#ling-web-ask-and-work-in-a-browser),
+### Several windows
+
+**File › New Window** (Ctrl+Shift+N) opens another window, and each window shows its own question,
+thread or project. All of them talk to the app's one agent server: no window starts a second one,
+and everything a window sends is checked by the same rules. The menu's **Ask** and **Work** entries
+(Alt+1 and Alt+2), the tray icon's and `ling app` bring the window you used last forward on the view
+asked for, or open one if none is open; a second `ling app` or a `ling://` link never starts a
+second copy of the app. The windows you had open when you quit come back where they were, on the
+view they showed. Closing the last window quits the app, as before (unless Settings › General keeps
+it in the tray).
+
+A thread open in two windows has **one composer**: the window that showed it first, or the one it
+was popped out into, sends its messages, answers its approvals and stops its turns. The other
+window follows the thread read-only and says so above where the composer would be, with **Go to
+that window** and **Use the composer here**, which moves the composer to it.
+
+The **terminal** and the **diff** can each have a window of their own: the button in the terminal
+panel's or the review pane's header, or **Window › Terminal in Its Own Window** and **Diff in Its
+Own Window**. The detached pane stays live (its terminals are the same shells, its diff follows the
+thread's turns); close its window, or press its **Dock** button, and it goes back where it was. A
+new terminal opened from a detached pane runs with the thread's permissions, as one opened in the
+thread's window does.
+
+In 1.5 the menu's Ask opened a separate window on [`ling web`](web.md#ling-web-ask-and-work-in-a-browser),
 which ran a second agent server on the same `~/.mightling`; the app no longer starts or uses
 `ling web`. `ling web` itself is unchanged, for browsers and phones.
 

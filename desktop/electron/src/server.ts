@@ -89,6 +89,10 @@ export class AppServer {
         break;
       case "notification": {
         const params = (value as { params?: unknown }).params;
+        // A request the server resolved (answered in another window, or ended with its turn) takes no answer any more.
+        if (kind.method === "serverRequest/resolved" && typeof params === "object" && params !== null && "requestId" in params) {
+          this.pending.delete(JSON.stringify((params as { requestId: unknown }).requestId));
+        }
         if (this.busy.observe(kind.method, params)) {
           if (this.marker) {
             try {
