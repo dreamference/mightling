@@ -178,8 +178,9 @@ when you already know the URL, or to read one source in full.
 
 Do not say you cannot browse the web. You can, through these commands, unless a later message says web access is off for this session.
 
-Do not use `curl` or `wget` for this. They are frequently blocked by the sandbox and return nothing,
-which looks like the site being down rather than the command being unavailable.
+To read the web, prefer these to `curl` or `wget`: they return readable text rather than raw HTML.
+Your commands do have the network unless this session is air-gapped (a message says so when it is),
+so `curl`, `git fetch`, `pip install` and `npm install` work when the task needs them.
 
 There is no web search *tool* — do not look for one. Search is a shell command, shown above.
 
@@ -1176,6 +1177,19 @@ pub fn model_catalog_with_adapters(model: &ServedModel, adapters: &[adapter::Ada
     json!({ "models": models })
 }
 
+/// `catalog` with Codex's sentence about the read-only sandbox replaced in every entry when that
+/// sandbox has the network (`open`): Codex words it from the session's permission profile, which
+/// says "restricted" for read-only, while patch 0031 gives each command the network below `on`.
+/// Below `on` only: at `on`, and when the user said no network, Codex's own sentence is right.
+pub fn with_read_only_network(mut catalog: serde_json::Value, open: bool) -> serde_json::Value {
+    if open && let Some(models) = catalog["models"].as_array_mut() {
+        for entry in models {
+            entry["model_messages"] = json!({"permissions": {"read_only": airgapped::READ_ONLY_SANDBOX_TEXT}});
+        }
+    }
+    catalog
+}
+
 /// Writes the catalogs and brings `config.toml` up to what a local session needs.
 ///
 /// The catalogs are rewritten on every launch, because the served model can change between runs.
@@ -1196,16 +1210,20 @@ pub fn configure_codex_home(
     std::fs::create_dir_all(codex_home)?;
     let catalog_path = codex_home.join("model_catalog.json");
     let default_text = prompt::compose(&prompt::Prompt::default_prompt(), parts);
+    // Whether the read-only sandbox has the network in a session starting now (patch 0031).
+    let open = airgapped::read_only_network_now();
     write_atomically(
         &catalog_path,
-        serde_json::to_string_pretty(&model_catalog_with_adapters(model, adapters, &default_text))?.as_bytes(),
+        serde_json::to_string_pretty(&with_read_only_network(model_catalog_with_adapters(model, adapters, &default_text), open))?
+            .as_bytes(),
     )?;
     let chosen_catalog = if chosen.is_default() {
         None
     } else {
         let path = prompt::catalog_file(codex_home, chosen);
         let text = prompt::compose(chosen, parts);
-        write_atomically(&path, serde_json::to_string_pretty(&model_catalog_with_adapters(model, adapters, &text))?.as_bytes())?;
+        let catalog = with_read_only_network(model_catalog_with_adapters(model, adapters, &text), open);
+        write_atomically(&path, serde_json::to_string_pretty(&catalog)?.as_bytes())?;
         Some(path)
     };
 
@@ -1280,8 +1298,11 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     // model gpt-5.6-luna", 1.7 tests). Only when absent, so a user can turn it back on.
     set_if_absent(features, "guardian_approval", false);
 
-    // Without network access the workspace-write sandbox also blocks DNS, and the web commands in
-    // the prompt fail with "Temporary failure in name resolution".
+    // Sandboxed commands have the network whenever /airgapped is off (owner decision, 2026-10-22):
+    // without it the workspace-write sandbox also blocks DNS, and `pip install`, `git fetch` and the
+    // web commands fail with "Temporary failure in name resolution". Only when absent, so
+    // `network_access = false` stays the user's; it then holds for the read-only sandbox too, which
+    // has no key of its own and is given the network by patch 0031 (airgapped.rs).
     let sandbox = table(doc.as_table_mut(), "sandbox_workspace_write");
     set_if_absent(sandbox, "network_access", true);
     // The built-in `skill-installer` downloads a skill from github.com/openai/skills into

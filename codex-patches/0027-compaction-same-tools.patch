@@ -1,5 +1,4 @@
 diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
-index 6e42f4a..1346273 100644
 --- a/codex-rs/core/src/client.rs
 +++ b/codex-rs/core/src/client.rs
 @@ -946,3 +946,3 @@ impl ModelClient {

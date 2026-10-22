@@ -1,5 +1,4 @@
 diff --git a/codex-rs/cli/Cargo.toml b/codex-rs/cli/Cargo.toml
-index 4fed766..0381e99 100644
 --- a/codex-rs/cli/Cargo.toml
 +++ b/codex-rs/cli/Cargo.toml
 @@ -26,2 +26,3 @@ workspace = true
@@ -7,7 +6,6 @@ index 4fed766..0381e99 100644
 +ling-launcher = { path = "../ling" }
  chrono = { workspace = true }
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index 003136b..6350671 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -1033,3 +1033,3 @@ async fn cli_main(

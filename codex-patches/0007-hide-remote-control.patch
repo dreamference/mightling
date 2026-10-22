@@ -1,5 +1,4 @@
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index 4d7984d..a89bd04 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -170,6 +170,8 @@ enum Subcommand {
