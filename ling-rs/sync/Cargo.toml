@@ -17,12 +17,15 @@ name = "ling_sync"
 path = "src/lib.rs"
 
 [dependencies]
+futures = { version = "0.3", default-features = false, features = ["std"] }
 ling-airgapped = { path = "../airgapped" }
 ling-web-server = { path = "../web" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+# The agent as a host talks to an app-server over its Unix socket (live.rs), as `ling web` does.
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
 toml = "0.9.5"
 # `ling sync exclude` edits the user's configuration in place, keeping its comments.
 toml_edit = "0.24.0"

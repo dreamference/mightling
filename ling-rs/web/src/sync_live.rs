@@ -300,7 +300,7 @@ impl Live {
 
     /// A host's post: its events and answers in, the commands meant for it out. `owner_of` names a
     /// thread's owner as the store has it (None for a thread not published yet).
-    pub fn host_post(&self, caller: &Caller, post: HostPost, owner_of: &dyn Fn(&str) -> Option<String>, title_of: &dyn Fn(&str) -> String) -> Vec<Command> {
+    pub fn host_post(&self, caller: &Caller, post: HostPost, owner_of: &dyn Fn(&str) -> Option<String>, title_of: &dyn Fn(&str) -> Option<String>) -> Vec<Command> {
         let now = SystemTime::now();
         let mut inner = self.lock();
         let host_id = if post.host.trim().is_empty() { caller.device.clone() } else { post.host.chars().take(64).collect() };
@@ -325,8 +325,10 @@ impl Live {
             if event.thread.is_empty() || event.thread.len() > 128 || owner_of(&event.thread).is_some_and(|owner| owner != caller.device) {
                 continue;
             }
+            // A thread the store does not hold yet (its rollout not uploaded, or kept on the
+            // device by `[sync] exclude`) is buffered but shown to nobody and makes no notice.
             let title = title_of(&event.thread);
-            self.ingest(&mut inner, &caller.device, &event.thread, event.message, &title, now);
+            self.ingest(&mut inner, &caller.device, &event.thread, event.message, title.as_deref(), now);
             changed = true;
         }
         for ack in post.acks {
@@ -392,7 +394,7 @@ impl Live {
         out
     }
 
-    fn ingest(&self, inner: &mut Inner, device: &str, thread: &str, message: Value, title: &str, now: SystemTime) {
+    fn ingest(&self, inner: &mut Inner, device: &str, thread: &str, message: Value, title: Option<&str>, now: SystemTime) {
         let text = message.to_string();
         let message = if text.len() > EVENT_CAP {
             json!({ "method": message.get("method").cloned().unwrap_or(Value::Null), "params": { "threadId": thread, "truncated": text.len() } })
@@ -403,7 +405,7 @@ impl Live {
         let seq = inner.seq;
         let live = inner.threads.entry(thread.to_string()).or_default();
         live.owner = device.to_string();
-        if !title.is_empty() {
+        if let Some(title) = title {
             live.title = title.to_string();
         }
         let method = message.get("method").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -430,7 +432,7 @@ impl Live {
         while live.events.len() > BUFFER {
             live.events.pop_front();
         }
-        if let Some((kind, text)) = notice {
+        if let Some((kind, text)) = notice.filter(|_| title.is_some()) {
             let due = live.last_notice.is_none_or(|at| now.duration_since(at).unwrap_or_default() >= NOTICE_EVERY);
             if due {
                 live.last_notice = Some(now);
@@ -587,8 +589,8 @@ mod tests {
         (thread == T).then(|| "lap".to_string())
     }
 
-    fn title(_: &str) -> String {
-        "Fix the login".to_string()
+    fn title(thread: &str) -> Option<String> {
+        (thread == T).then(|| "Fix the login".to_string())
     }
 
     fn post(events: Vec<Value>, holding: &[&str]) -> HostPost {

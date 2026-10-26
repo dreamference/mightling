@@ -340,7 +340,7 @@ async fn host(State(server): State<Arc<Server>>, Query(query): Query<HashMap<Str
     let wait = query.get("wait").and_then(|value| value.parse::<u64>().ok()).map(Duration::from_secs).unwrap_or_default().min(MAX_WAIT);
     let threads = owners(&store);
     let owner_of = |thread: &str| threads.get(thread).map(|(owner, _, _)| owner.clone());
-    let title_of = |thread: &str| threads.get(thread).map(|(_, _, title)| title.clone()).unwrap_or_default();
+    let title_of = |thread: &str| threads.get(thread).map(|(_, _, title)| title.clone());
     let idle = sync_live::HostPost { events: Vec::new(), acks: Vec::new(), ..post.clone() };
     let mut commands = live.host_post(&caller, post, &owner_of, &title_of);
     let deadline = tokio::time::Instant::now() + wait;
@@ -358,13 +358,14 @@ async fn follow(State(server): State<Arc<Server>>, Path(thread): Path<String>, Q
     let (Some(store), Some(live)) = (hub(&server), server.sync_live()) else { return not_found() };
     let after = query.get("after").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
     let wait = query.get("wait").and_then(|value| value.parse::<u64>().ok()).map(Duration::from_secs).unwrap_or_default().min(MAX_WAIT);
+    // Only a thread the store holds is followed: one kept on its device (`[sync] exclude`) never is.
+    let Some((owner, owner_name, _)) = owners(&store).get(&thread).cloned() else { return refused(Refusal::NotFound) };
     let seen = live.seq();
     let mut following = live.follow(&thread, after);
     if following.events.is_empty() && !wait.is_zero() {
         live.wait_past(seen.max(after), wait).await;
         following = live.follow(&thread, after);
     }
-    let (owner, owner_name) = owners(&store).get(&thread).map(|(owner, name, _)| (owner.clone(), name.clone())).unwrap_or_default();
     let presence = live.presence(&owner);
     let events: Vec<Value> = following.events.into_iter().map(|(seq, message)| json!({ "seq": seq, "message": message })).collect();
     json_response(

@@ -165,6 +165,17 @@ impl HubClient {
         self.post(&format!("/api/sync/threads/{thread}/withdraw"), json!({})).await
     }
 
+    /// A host's post (`/api/sync/host`, SYNC §18.2): its events and acks; the answer carries the
+    /// commands for it. With `wait`, held by the hub until a command comes.
+    pub async fn host(&self, body: Value, wait: u64) -> Result<Value, String> {
+        let builder = self.request(reqwest::Method::POST, &format!("/api/sync/host?wait={wait}")).json(&body);
+        let response = self.send(builder).await?;
+        if !response.status().is_success() {
+            return Err(refusal(response).await);
+        }
+        response.json().await.map_err(|err| err.to_string())
+    }
+
     /// Ends this device's credential on the hub (`ling sync forget`).
     pub async fn forget(&self) -> Result<Value, String> {
         self.post("/api/sync/forget", json!({})).await
