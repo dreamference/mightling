@@ -369,6 +369,28 @@ Everything below was done by the agents over `ssh amd-box`, with no one at the s
 
   A person at the box then: Start › **Windows Security** › **App & browser control** › **Smart App Control settings** › **Off**, confirm. Then reopen the same page and check that **On** can be selected (no need to select it). Turning it back on later takes the same three clicks and **On**. A device can no longer return to Evaluation once it has left it.
 
+### 13.3 The Windows client against the GB10 node, v1.7.0, 2026-10-26
+
+1.7.1 was not published yet, so this is **v1.7.0**. It was installed as §5.1 describes, `irm …/releases/latest/download/install.ps1 | iex`, in an SSH session of the box's administrator. Such a session holds the elevated token, so `install.ps1` took its "already running as Administrator" branch and **no UAC prompt** appeared. Smart App Control was still in **Evaluation** throughout.
+
+| Step | Result |
+|---|---|
+| `install.ps1` | **Bug 1:** the user `PATH` was left broken. On a fresh profile the user `Path` holds one entry (`…\Microsoft\WindowsApps`). `$UserPath -split ";" \| Where-Object { $_ }` then returns a string, not an array, so `$Entries + $InstallDir` concatenates the two into `…\WindowsAppsC:\Users\<user>\AppData\Local\Programs\Mightling\bin`. A new terminal then finds neither `ling` nor the WindowsApps commands (`winget`). CI misses it because the runner's user `Path` has several entries. The fix is `@(…)` around the pipeline. Writing the value back with `SetEnvironmentVariable` also turns the `REG_EXPAND_SZ` value into `REG_SZ` |
+| `install.ps1`, the sandbox | **Bug 2 (over SSH):** `$User = "$env:USERDOMAIN\$env:USERNAME"`. Windows OpenSSH sets `USERDOMAIN=WORKGROUP` on a machine outside a domain, so `ling sandbox setup` failed with `LookupAccountNameW failed for WORKGROUP\<user>: 1332`, and the client was left without a sandbox. Setup succeeded with `USERDOMAIN` set to the computer's name. `[Security.Principal.WindowsIdentity]::GetCurrent().Name` names the same user without trusting the environment. The firewall rule for mDNS was added |
+| `ling --version` | `ling 1.7.0` |
+| `ling node list` | both GB10 nodes on the LAN found by mDNS **over Wi-Fi**, each with its model and 262,144-token window read from `/v1/models` |
+| `ling node use <gx10>` | stores the node id, its name and the address last seen |
+| `ling exec` "list the files here and say which is largest", elevated sandbox | the model answered, but **every command failed**: `Failed to create unified exec process: timed out after 15000ms connecting runner pipe-in` (one attempt: logon error 267). *Probably the SSH session (no interactive desktop) rather than the product*; to repeat at the screen |
+| the same, `-c windows.sandbox=unelevated` | **pass**: `powershell.exe` exits `0xC0000142` (no desktop), the model falls back to `cmd.exe /c dir` and answers correctly (b.txt, 5,002 bytes) |
+| `ling audit egress` (elevated) | **pass**: 6 connections, all to the node's port 8000; no DNS lookups; `ling-code.exe` and `ling.exe` started |
+| Desktop app `Mightling-Setup-1.7.0-x64.exe` (fetched with `curl.exe`, unsigned) | `/S` installs per user in 26 s (exit 0), with a Start menu entry and an Apps entry, under `%LOCALAPPDATA%\Programs\Mightling\App`. Started, it runs its own `ling app-server` (`resources\ling.exe -c features.code_mode_host=true app-server`). Its Electron profile is under `%USERPROFILE%\.local\share\dev.dreamference.mightling`, a Linux-style path on Windows |
+| Smart App Control (Evaluation) | no CodeIntegrity audit or block events (3076/3077) for any Mightling file; `ling.exe` and the app ran |
+| Defender | no detections; its log shows only signature updates and configuration events |
+
+Both `install.ps1` bugs are fixed in **1.7.1** (the `PATH` array, and the user named from the process token).
+
+**Still for a person at the box** (§5.5 steps 9–13): the download in a browser, which is what SmartScreen judges (`curl.exe` sets no Mark of the Web); the UAC prompt as a standard user; whether the **elevated sandbox** runs commands in an interactive session; the app's window (Ask, then Work); sleep and wake; and Smart App Control off (§13.2).
+
 ---
 
 ## Sources
