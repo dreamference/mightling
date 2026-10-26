@@ -1,6 +1,6 @@
 # Signing and notarising the macOS builds
 
-The owner's decision of 2026-10-26: enrol in the Apple Developer Program and ship the macOS builds signed with a **Developer ID** and **notarised** by Apple. Everything in the workflows is ready; what remains is the owner's, below: the certificate and the API key, dropped in as six secrets of the `release` environment. The Ed25519 signature of `SHA256SUMS` (specs/DREAMFERENCE_RELEASE_SIGNING.md) is unchanged and independent of this.
+Prepared 2026-10-26 so that the macOS builds can ship signed with a **Developer ID** and **notarised** by Apple once there is an Apple Developer Program membership. The membership is to be an **organisation** enrolment of the company, not a personal account; the entity is still to be decided, so nothing is signed yet. Everything in the workflows is ready and strictly gated: until the six secrets of the `release` environment exist, every build is the unsigned preview it was. What remains is the owner's checklist below. The Ed25519 signature of `SHA256SUMS` (specs/DREAMFERENCE_RELEASE_SIGNING.md) is unchanged and independent of this.
 
 ## What the workflows do
 
@@ -45,9 +45,10 @@ The account's name, the team's name and the Team ID are owner data: they go into
 
 ## The owner's checklist
 
-1. **Choose how to enrol.** A Developer ID certificate carries the enrolled name, and so does every signed binary: anyone can read it (`codesign -dv`, the Finder's info on the app). An *individual* enrolment publishes the owner's legal name with every release. An *organisation* enrolment shows Dreamference instead; it needs a D-U-N-S number for the US company (free from Dun & Bradstreet, can take a few days). For an anonymous owner, enrol as the organisation.
-2. **Enrol** at developer.apple.com/programs/enroll (99 USD a year) and wait for the approval mail.
-3. **Make the key and the request on the Mac mini** (`ssh mac`; macOS 12.3's own LibreSSL is enough, no Xcode tools; do not run `git` there, it pops up the tools dialog):
+1. **Settle the legal entity.** A Developer ID certificate names the enrolled party, and so does every binary signed with it: anyone can read it (`codesign -dv`, Gatekeeper, the Finder's info on the app). **Never enrol with an individual (personal) account: it puts that person's legal name in every signature, on every release, for good.** An organisation enrolment shows the company's legal entity name exactly as registered (for example "Developer ID Application: <Entity name> (<Team ID>)"), so pick the entity before enrolling; renaming later means a new certificate.
+2. **Get a D-U-N-S number** for that entity (free from Dun & Bradstreet through Apple's lookup at developer.apple.com/enroll/duns-lookup; allow a few days to two weeks). The legal name and address in the D-U-N-S record must match what is entered at enrolment.
+3. **Enrol as an organisation** at developer.apple.com/programs/enroll with an Apple Account made for the company (99 USD a year). Apple verifies the entity and that the enrolling person may bind it (it may phone); wait for the approval mail. The enrolling person becomes the Account Holder, the only role that can create Developer ID certificates.
+4. **Make the key and the request on the Mac mini** (`ssh mac`; macOS 12.3's own LibreSSL is enough, no Xcode tools; do not run `git` there, it pops up the tools dialog):
    ```bash
    ssh mac
    mkdir -m 700 ~/mightling-signing && cd ~/mightling-signing
@@ -55,8 +56,8 @@ The account's name, the team's name and the Team ID are owner data: they go into
    openssl req -new -key developer-id.key -out developer-id.csr -subj "/CN=Developer ID/C=US"
    ```
    Copy the request to the machine with the browser: `scp mac:mightling-signing/developer-id.csr .`
-4. **Create the certificate** (Account Holder only): developer.apple.com → Certificates, IDs & Profiles → Certificates → **+** → **Developer ID Application** (G2 Sub-CA) → upload `developer-id.csr` → download `developerID_application.cer`.
-5. **Make the `.p12` on the Mac mini**, with Apple's intermediate inside, so the runner can build the chain:
+5. **Create the certificate** (Account Holder only): developer.apple.com → Certificates, IDs & Profiles → Certificates → **+** → **Developer ID Application** (G2 Sub-CA) → upload `developer-id.csr` → download `developerID_application.cer`.
+6. **Make the `.p12` on the Mac mini**, with Apple's intermediate inside, so the runner can build the chain:
    ```bash
    scp developerID_application.cer mac:mightling-signing/
    ssh mac
@@ -69,8 +70,8 @@ The account's name, the team's name and the Team ID are owner data: they go into
      -certfile developer-id-g2.pem -name "Developer ID Application" -out developer-id.p12
    ```
    It asks for an export password: that is `APPLE_DEVELOPER_ID_P12_PASSWORD`. (LibreSSL writes the 3DES `.p12` the runner's `security import` reads; with OpenSSL 3 elsewhere, add `-legacy`.)
-6. **Create the API key**: appstoreconnect.apple.com → Users and Access → Integrations → App Store Connect API → Team Keys (the first time, the Account Holder requests access) → **+** → name `mightling-notary`, access **Developer** → **Download** `AuthKey_<KeyID>.p8` (offered once only). Note the Key ID and the Issuer ID shown above the list.
-7. **Add the six secrets** from the GB10 (or any machine with `gh` signed in), so no value is typed on a command line:
+7. **Create the API key**: appstoreconnect.apple.com → Users and Access → Integrations → App Store Connect API → Team Keys (the first time, the Account Holder requests access) → **+** → name `mightling-notary`, access **Developer** → **Download** `AuthKey_<KeyID>.p8` (offered once only). Note the Key ID and the Issuer ID shown above the list.
+8. **Add the six secrets** from the GB10 (or any machine with `gh` signed in), so no value is typed on a command line:
    ```bash
    ssh mac 'base64 -i ~/mightling-signing/developer-id.p12' | gh secret set APPLE_DEVELOPER_ID_P12 --env release --repo dreamference/mightling
    base64 -w0 AuthKey_*.p8 | gh secret set APPLE_API_KEY_P8 --env release --repo dreamference/mightling
@@ -78,8 +79,8 @@ The account's name, the team's name and the Team ID are owner data: they go into
      gh secret set "$name" --env release --repo dreamference/mightling    # prompts for the value
    done
    ```
-8. **Keep a backup** of `developer-id.p12` (with its password) and the `.p8` where the Ed25519 release key is kept (LastPass), then delete `~/mightling-signing` on the Mac mini and the downloaded `.p8` and `.cer`.
-9. **Try it before a release** (optional, no release made): Actions → Mac preview → Run workflow on `main` with **sign** ticked. Its "Apple signing" step must say "Signing with the Developer ID", and the run must end green (it bundles the newest client artifacts; osx-sign re-signs the `ling` inside). The next release is then signed with nothing else to change.
+9. **Keep a backup** of `developer-id.p12` (with its password) and the `.p8` where the Ed25519 release key is kept (LastPass), then delete `~/mightling-signing` on the Mac mini and the downloaded `.p8` and `.cer`.
+10. **Try it before a release** (optional, no release made): Actions → Mac preview → Run workflow on `main` with **sign** ticked. Its "Apple signing" step must say "Signing with the Developer ID", and the run must end green (it bundles the newest client artifacts; osx-sign re-signs the `ling` inside). The next release is then signed with nothing else to change.
 
 After the first signed release: update `docs/desktop.md` (On a Mac: the Open Anyway steps and the keychain paragraph), DESKTOP_ELECTRON §10, and revisit `--use-mock-keychain` (`egress.ts`), which was there because every ad-hoc build asked for the keychain again.
 
