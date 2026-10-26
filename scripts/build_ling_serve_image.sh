@@ -12,6 +12,11 @@
 # IMAGE:<first 12 of COMMIT>; publish it with `docker push`, then pin the pushed digest in
 # QWEN38_LING_IMAGE (dreamference/hardware/model_matrix_registry.py) and the commit in
 # QWEN38_LING_ENGINE_COMMIT.
+#
+# Vision (for the next engine image, not bdda3a2's, which has none): a ling-serve built with vision
+# starts with `--vision on` by default and then needs libpng16-16t64, libwebp7 and libjpeg-turbo8
+# in the image (libnvjpeg optional), or it does not start. Add them to docker/ling-serve/Dockerfile's
+# apt list with that engine, and check the image's ldd output again.
 set -euo pipefail
 COMMIT=${1:?usage: build_ling_serve_image.sh COMMIT [BINARY]}
 BINARY=${2:-}
