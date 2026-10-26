@@ -227,11 +227,12 @@ fn request_index(request: Request) -> Result<String> {
 }
 
 /// `docs.toml` with the default collections added when their folders exist (best effort: inside
-/// the agent's sandbox the file cannot be written, and nothing is added there).
+/// the agent's sandbox the file cannot be written, and nothing is added there). Only in the
+/// user's own agent home, or when asked for explicitly ([`config::indexes_unasked`]).
 fn load_docs() -> Result<DocsToml> {
     let mut docs = DocsToml::load()?;
     let mut probe = docs.clone();
-    if !probe.ensure_defaults(&config::user_home()).is_empty() && probe.save().is_ok() {
+    if config::indexes_unasked() && !probe.ensure_defaults(&config::user_home()).is_empty() && probe.save().is_ok() {
         docs = probe;
     }
     Ok(docs)

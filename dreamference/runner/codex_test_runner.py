@@ -478,6 +478,8 @@ class CodexTestRunner:
         environment.pop("RUST_BACKTRACE", None)
         environment.pop("DREAMFERENCE_CONFIG_PATH", None)
         environment.pop("CODEX_HOME", None)
+        # No test starts the file index over the real home's folders (docs/dev/testing.md).
+        environment["DREAMFERENCE_MIGHTLING_DOCS"] = "0"
         if linker_dir:
             # GNU ld peaks at ~4 GB linking a test binary, and six links at once overran a 22 GiB
             # cap. The toolchain's own lld needs a fraction of that and nothing installed.

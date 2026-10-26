@@ -89,6 +89,7 @@ def test_the_tests_see_an_empty_home_and_no_model_server(tmp_path):
     assert environment["MIGHTLING_UPSTREAM_TESTS"] == "1"
     assert environment["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:9"
     assert "CODEX_HOME" not in environment and "DREAMFERENCE_CONFIG_PATH" not in environment
+    assert environment["DREAMFERENCE_MIGHTLING_DOCS"] == "0"
     assert "RUST_BACKTRACE" not in environment and environment["RUST_LIB_BACKTRACE"] == "0"
     assert environment["PATH"].startswith("/tools")
     assert environment["RUSTY_V8_ARCHIVE"] == "a"

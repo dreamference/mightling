@@ -28,6 +28,32 @@ use serde::{Deserialize, Serialize};
 
 use crate::discover::Kind;
 
+/// The version of a kind's extractor, recorded with each collection (§7.5): when it differs from
+/// the recorded one, that kind's files are read again, and of their chunks only those whose text
+/// changed are embedded again. Bump a kind's number when a change to its extractor changes the
+/// text it gives; a new ling-docs binary on its own changes none. PDFs and pictures carry the OCR
+/// engine's version as well, since OCR reads their pages.
+pub fn extractor_version(kind: Kind) -> String {
+    let version: u32 = match kind {
+        Kind::Text | Kind::Markdown | Kind::Rst | Kind::Org | Kind::Tex => 1,
+        Kind::Pdf => 1,
+        Kind::Docx | Kind::Odt | Kind::Html => 1,
+        Kind::Eml | Kind::Mbox => 1,
+        Kind::Csv | Kind::Xlsx | Kind::Xls | Kind::Ods => 1,
+        Kind::Pptx | Kind::Odp => 1,
+        Kind::Image => 1,
+    };
+    match kind {
+        Kind::Pdf | Kind::Image => format!("{version}+rapidocr-{}", crate::ocr::RAPIDOCR_VERSION),
+        _ => version.to_string(),
+    }
+}
+
+/// Every kind's [`extractor_version`], by the kind's stored name.
+pub fn extractor_versions() -> std::collections::BTreeMap<String, String> {
+    Kind::ALL.iter().map(|k| (k.as_str().to_string(), extractor_version(*k))).collect()
+}
+
 /// A located piece of a document: a page, a section, a block of lines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Unit {

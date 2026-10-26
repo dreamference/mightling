@@ -8,6 +8,8 @@
 //! a collection whose files changed, once they have been quiet for a few seconds.
 //! At most one `ling-docs index` runs at a time; none starts while Night Shift or a benchmark
 //! holds the runner lock. It exits when its parent does; an index run in flight finishes alone.
+//! It runs only in the user's own agent home, `~/.mightling`, unless `DREAMFERENCE_MIGHTLING_DOCS`
+//! is set on explicitly: a scratch `CODEX_HOME` beside the real `HOME` indexes nothing by itself.
 
 use std::fs::File;
 use std::process::{Child, Command, Stdio};
@@ -45,6 +47,11 @@ pub fn next_run(pending: &mut Vec<Request>) -> Option<Vec<String>> {
 pub fn run(parent: Option<i32>) -> Result<()> {
     let settings = Settings::load();
     if !settings.enabled {
+        return Ok(());
+    }
+    // Not the user's own agent home (a test's, a check's, an audit's scratch `CODEX_HOME`): no
+    // default collections and no indexing nobody asked for (§9, config::indexes_unasked).
+    if !config::indexes_unasked() {
         return Ok(());
     }
     let dir = config::docs_dir();

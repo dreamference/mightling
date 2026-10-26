@@ -1264,6 +1264,7 @@ def test_a_task_from_another_machine_runs_in_the_job_sandbox_with_its_own_home(s
     assert os.path.expanduser("~") in [argv[i + 1] for i, word in enumerate(argv) if word == "--tmpfs"]
     variables = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
     assert variables["CODEX_HOME"] == str(home) and variables["DREAMFERENCE_MIGHTLING_GMAIL"] == "false"
+    assert variables["DREAMFERENCE_MIGHTLING_DOCS"] == "0"                   # no file index over the owner's folders
     assert variables["DREAMFERENCE_MIGHTLING_AIRGAPPED"] == "on" and variables["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:8000"
     assert variables["DREAMFERENCE_MIGHTLING_ADAPTER"] == ""                  # the base (adapters §10.4)
     assert variables["NO_PROXY"] == variables["no_proxy"] == "localhost,127.0.0.1,::1"

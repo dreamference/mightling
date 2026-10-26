@@ -226,6 +226,29 @@ the release says in §17.
   surrounding snippet; adjacent chunks of the same document are merged.
 - No reranking by the main model in v1 (it costs model time the agent needs); revisit after §12.
 
+### 7.5 When an index is embedded again
+
+**Decided 2026-10-26 (owner):** a collection is embedded again in full **only** when the embedding
+model or the chunking changes; a new `ling-docs` binary on its own never causes it. Each database
+records its staleness key in `meta`:
+
+- `model`, `dim` and `model_sha` (a SHA-256 over `model.onnx` and `tokenizer.json`, recomputed only
+  when their size or time differs from `model_stat`, so reinstalling the same bytes costs one hash
+  and nothing else): any of them changed → every chunk is chunked again and embedded again;
+- `chunking` (`tokens=512 overlap=0.15 chunker=1`, `config::chunking_key`): changed → every
+  document is chunked again **from its stored units**, without reading its file, and only chunks
+  whose text changed lose their vectors;
+- `extractors`, one version per kind (`extract::extractor_version`, PDFs and pictures with the OCR
+  engine's version): a kind whose version changed has its files read again, failed ones included,
+  and nothing else is.
+
+A part of the key the database has not recorded yet (one written by an older `ling-docs`) is taken
+as the current value and recorded: adding a part never re-embeds. Whenever a document's chunks are
+written again (a new extractor, OCR's pages merged in, a re-chunking) a chunk whose embedded text
+(title, heading, text) has the same SHA-256 as one before keeps its vector. A schema change
+migrates the stored metadata in place (`store::MIGRATIONS`, one transaction, never touching
+vectors); a database of a newer schema than the binary knows is left alone, not rebuilt.
+
 ## 8. Interfaces
 
 ### 8.1 Command line
@@ -290,6 +313,12 @@ collections settings page built the same day (§19.2): Settings › Your documen
   code-index scopes.
 - **Night Shift and benchmarks:** indexing yields to a model load and does not run while the
   Night Shift runner lock is held (CPU contention skews benchmark timings).
+- **Only in the user's own agent home** (2026-10-26): the session adds the default collections and
+  indexes on its own only when `CODEX_HOME` is `~/.mightling` (or unset), or when
+  `DREAMFERENCE_MIGHTLING_DOCS` is set on explicitly. A scratch `CODEX_HOME` beside the real `HOME`
+  (a test, a check, an audit, a Night Shift task) once embedded all of `~/Downloads` from nothing,
+  twice in a day, for half an hour each, and held up a benchmark night; `ling docs add` and
+  `reindex` are still obeyed in any home.
 - Disk: the database size per collection is shown in `status`; a cap applied to each collection's
   database (`docs_max_index_gb`, default 10, a global setting of §11, not a `docs.toml` field)
   defers further indexing with a message.
