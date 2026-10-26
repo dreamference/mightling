@@ -32,6 +32,7 @@ pub mod relay;
 pub mod server;
 pub mod sidecars;
 pub mod sync_hub;
+pub mod sync_live;
 pub mod sync_store;
 pub mod telegram_app;
 

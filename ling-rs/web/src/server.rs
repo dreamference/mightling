@@ -102,6 +102,8 @@ pub struct Server {
     next_tab: AtomicU64,
     /// The sync hub's store, opened on the first request after `ling sync enable` (sync_hub.rs).
     sync: Mutex<Option<Arc<crate::sync_store::Store>>>,
+    /// The hub's live half: following and answering turns (sync_live.rs).
+    live: Mutex<Option<Arc<crate::sync_live::Live>>>,
 }
 
 impl Server {
@@ -120,6 +122,7 @@ impl Server {
             busy: Mutex::new(HashMap::new()),
             next_tab: AtomicU64::new(1),
             sync: Mutex::new(None),
+            live: Mutex::new(None),
             config,
         }))
     }
@@ -141,6 +144,17 @@ impl Server {
             *cached = crate::sync_store::Store::open(&self.config.codex_home).ok().map(Arc::new);
         }
         cached.clone()
+    }
+
+    /// The hub's live half while the hub is on: in memory, but for the queue of messages waiting
+    /// for an offline device.
+    pub fn sync_live(&self) -> Option<Arc<crate::sync_live::Live>> {
+        let mut cached = self.live.lock().unwrap_or_else(|p| p.into_inner());
+        if !crate::sync_store::enabled(&self.config.codex_home) {
+            *cached = None;
+            return None;
+        }
+        Some(cached.get_or_insert_with(|| Arc::new(crate::sync_live::Live::new(crate::sync_store::hub_dir(&self.config.codex_home)))).clone())
     }
 
     /// A wrong pairing code; ten withdraw every pending one (shared by `/pair` and `/api/sync/pair`).

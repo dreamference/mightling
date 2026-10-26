@@ -417,3 +417,48 @@ Off until `ling sync enable`, per device; with it never run there is no unit, no
 ### 17.6 Not built (later phases)
 
 Live following, remote send, approve and stop, the offline queue and the bridges' notices (Phase 2); hand-over and its bundle (Phase 3; `ling sync handover` says so); the PWA, Web Push, pins, projects and unread marks, and `[sync] replicate` (Phase 4, and see §16.1); the hub's 20 GB cap and 180-day trimming (§10; the store holds 20 MB today). §15's changes to the other specs wait for Phase 2, when the paper's paragraph becomes true.
+
+---
+
+## 18. Phase 2: live turns from every device (built 2026-10-26, for 1.8.0)
+
+Behind the same switch as Phase 1: nothing here runs, listens or answers before `ling sync enable`, and every route below answers 404 while the hub is off.
+
+### 18.1 Hosts
+
+A **host** is a process on a device that holds an app-server connection and so can see a turn as it runs and act on it. Two kinds:
+
+- **The desktop app's main process** (`desktop/electron/src/sync-host.ts`): the app's one app-server is its child on stdio, so only the main process can follow it. It hosts every thread loaded there. It runs only while the device is paired (`~/.mightling/sync/device.toml`) and the agent has found the hub (`agent-status.json` names it); it talks to the hub and nothing else.
+- **The sync agent** (`ling-rs/sync/src/live.rs`), attached as one more client to an app-server that listens on a Unix socket on the same machine: `ling web`'s (`$XDG_RUNTIME_DIR/mightling/app-server.sock`) and Codex's control socket (`$CODEX_HOME/app-server-control/app-server-control.sock`). A TUI started while a server listens on the control socket runs on that server (Phase 0, §16.3), so its turns are followed token by token and its approvals answered from another device, with no patch; a TUI on its own in-process server is followed through its rollout, item by item (§6.1). The agent never starts an app-server.
+
+A device is **online** while one of its hosts has posted in the last 40 s.
+
+### 18.2 The host protocol
+
+`POST /api/sync/host?wait=<s>` with the device's own sync secret (an agent credential; a browser cannot host):
+
+```json
+{ "host": "<random id per process>", "kind": "desktop" | "agent",
+  "holding": ["<thread>", …], "models": ["<model>", …], "projects": ["<folder>", …],
+  "events": [{ "thread": "<thread>", "message": { <an app-server message, as received> } }],
+  "acks": [{ "id": <command>, "ok": true | false, "error": "…", "thread": "<thread>" }] }
+```
+
+- **events:** for threads of this device only, the notifications in `sync_live::FOLLOWED` (`turn/started`, `turn/completed`, `item/started`, `item/completed`, `item/agentMessage/delta`, `serverRequest/resolved`, `thread/status/changed`, `thread/name/updated`, `error`) and every server request that names a thread (`params.threadId`), with its `id`. Deltas are batched every 100 ms. An event over 256 KB is kept as a stub.
+- **The answer:** `{"commands": [ … ]}`, each `{ "id", "kind": "send" | "approve" | "stop" | "start", "thread", "text", "model", "request", "decision", "cwd", "by" }`, delivered once. With `wait` and nothing to deliver, the hub holds the post until a command comes (at most 30 s). A command goes to the host holding its thread, or, when no host of the device holds it, to any of them (a host can resume a thread).
+- **Carrying a command out** is the host's own act, through its own copy of `policy.json`, exactly as if the user had acted there:
+  - `send`: `thread/resume` if the thread is not loaded in that host's server, then `turn/start` (`turn/steer` while a turn runs), with `model` when given; that is also how a device changes the thread's model.
+  - `approve`: the answer to the waiting server request (`{"decision": "accept" | "decline"}`), which the policy takes only for a request that is waiting. Only the two approvals in `sync_live::ANSWERABLE` are answered from elsewhere; a tool asking for input or an MCP elicitation is answered on the device.
+  - `stop`: `turn/interrupt`.
+  - `start`: `thread/start` in one of the folders the host offered (`projects`), then `turn/start`; the ack names the new thread.
+  - The ack says how it went, with the policy's or the server's refusal as the error. A command not acknowledged in 120 s fails ("the device did not say how it went"). The desktop app shows "Approved from <device>" (or sent, or stopped) on the owner's screen.
+
+### 18.3 Following and answering
+
+- `GET /api/sync/live/<thread>?after=<seq>&wait=<s>`: the thread's events after that number (the last 2,000 are kept), whether a turn runs and its id, the approvals waiting, the messages queued for it, the owner and whether it is online (with when it was last seen), and the models it offers. `reset: true` means the follower fell behind the buffer and should read the transcript again.
+- `POST /api/sync/commands` with `{kind, thread | device, text, model, request, decision, cwd}`, from any device with `control` (403 for `watch`): 200 with the command, its state `queued` (the owner is online) or `waiting` (offline: only a message waits, at most 10 per thread for 24 hours, in `queue.json`, delivered in order); 409 for an approval, a stop or a new thread to an offline device; 429 when ten messages already wait. `GET /api/sync/commands/<id>` says how it went: `queued`, `waiting`, `delivered`, `done`, `failed` (with why) or `expired`.
+- `GET /api/sync/notices?after=<seq>`: "Turn finished: <title>" and "Approval needed: <title>", at most one per thread per 5 minutes. The phone bridges (`ling chat`'s Telegram and Matrix, and Signal) pass them into the owner's chat when `[chat] sync_notices` is on (on by default once the hub is on), never at `/airgapped on` for Telegram; the text is the thread's title, never its content.
+
+### 18.4 Where it shows
+
+`ling web`'s **Other devices** opens a thread live: the transcript, then the turn as it streams, a banner ("Running on the laptop", or "The laptop is offline, last seen …; messages wait up to 24 hours"), the approvals waiting with Approve and Decline, a composer with the device's models, Stop while a turn runs, the messages still queued, and "New thread on <device>" in one of its folders. A `watch` device sees the same without the controls.
