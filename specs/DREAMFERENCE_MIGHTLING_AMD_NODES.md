@@ -348,6 +348,26 @@ Read over SSH from gx10-1a2b (`ssh amd-box`, resolved by mDNS at use time). The 
 | Free disk | 1,794 GB |
 | Smart App Control | state 2 (evaluation) as delivered |
 | SSH | Windows OpenSSH, default shell PowerShell 5.1, the dedicated key |
+| LAN chips | 2 × Realtek Gaming 2.5GbE (both unplugged); Wi-Fi MediaTek MT7925 (Wi-Fi 7), linked at 103 Mbps |
+| BitLocker / device encryption | off (`manage-bde`: fully decrypted), so a BIOS change needs no recovery key |
+| Sleep states | Modern Standby (S0 low-power idle) and hibernate; no S3 |
+
+### 13.2 Brought up to date over SSH, 2026-10-26
+
+Everything below was done by the agents over `ssh amd-box`, with no one at the screen. An SSH session of an administrator gets the full (elevated) token, so nothing here raised a UAC prompt.
+
+- **Windows Update.** The Windows Update Agent's COM API (`Microsoft.Update.Session`, Microsoft Update service included) run as a one-off SYSTEM scheduled task: an SSH logon is a network logon, and the API's download and install calls belong in a local session. Installed: the October 2026 cumulative and .NET updates (KB5127647, KB5127648, KB5127690), the Defender platform (4.18.26090.9), the Security platform and MSRT. Left alone: two driver offers the API marks as interactive (an AOC monitor INF and "AMD System Driver Update 1.0.20.0"). Build **26200.9711** (25H2). One reboot.
+- **AMD Software: Adrenalin Edition 26.10.1** (2026-10-20, the newest WHQL; 26.2.2 is the floor §5.3 asked for), downloaded on the box from the link in AMD's release notes (`drivers.amd.com` wants a Referer of `www.amd.com`), Authenticode-signed by Advanced Micro Devices, and installed silently with `<package>.exe -INSTALL -LOG <file>` from a SYSTEM task. The box shipped with Adrenalin **26.3.1** (driver 32.0.23033.1002, which reads as 25.30.33.01). The installer **refuses with error 202 while Windows Update waits for a reboot**: update first, reboot, then install. Driver now **32.0.32015.7029** (AMD Software 26.10.1). One reboot.
+- **The GPU carve-out (VGM) is 96 GB, set without a BIOS visit.** AMD's ADLX library, which every driver installs (`amdadlx64.dll`), has an `IADLXVariableGraphicsMemory` interface: `GetAvailableOptions`, `SetOption`, and the change applies at the next boot. A 60-line C client from ADLX's own sample (cross-compiled with `zig cc -target x86_64-windows-gnu`) listed the options (Minimum 0.5 GB, Medium 32, High 64, and Custom 0.5 / 1 / 2 / 4 / 8 / 16 / 32 / 64 / **96** GB), set Custom 96 GB, and after one reboot reads it back as current. Windows now sees **31.6 GB** of RAM, and the adapter reports 96 GB of dedicated memory. This works over SSH with no one logged in, and it is the path for the Windows node's provisioning (§6.2) as well.
+- **Power.** The Windows power mode is **Best performance** (the overlay `ded574b5-…` on Balanced, the only scheme a Modern Standby machine offers). On mains the box no longer sleeps or hibernates, and the display sleeps after 30 minutes. ACEMAGIC's own modes ("three flexible modes providing up to 140 W", §1.1) belong to the firmware, chosen by a button or in the BIOS. The agents found **no Windows interface that reads or sets them**: no vendor tool is installed and no platform-management device is present. The BIOS name ends in `120W`. Which mode the box is in is for a person at the box to check before §13.4's numbers are compared with other machines.
+- **Smart App Control: off is the owner's click, and turning it back on needs Microsoft's workaround.** The state was still **Evaluation** (expires 2026-12-10). The only supported switch is the Windows Security app. Microsoft's own write-ups warn against forcing `VerifiedAndReputablePolicyState` in the registry. And the October cumulative update this box has just installed (**KB5127648**) carries a known issue: once Smart App Control is off, the **On** option may be greyed out. Microsoft's documented workaround, two feature overrides, was applied before anything was turned off, so that the way back stays open:
+
+  ```
+  reg add "HKLM\SYSTEM\CurrentControlSet\Policies\Microsoft\FeatureManagement\Overrides" /v 2883193997 /t REG_DWORD /d 1 /f
+  reg add "HKLM\SYSTEM\CurrentControlSet\Policies\Microsoft\FeatureManagement\Overrides" /v 2850574478 /t REG_DWORD /d 1 /f
+  ```
+
+  A person at the box then: Start › **Windows Security** › **App & browser control** › **Smart App Control settings** › **Off**, confirm. Then reopen the same page and check that **On** can be selected (no need to select it). Turning it back on later takes the same three clicks and **On**. A device can no longer return to Evaluation once it has left it.
 
 ---
 
