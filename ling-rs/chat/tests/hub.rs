@@ -92,6 +92,15 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                         } else {
                             json!({ "reports": [{ "name": "2026-10-21.md", "text": "## app\n- 20261021-1300-abc: done" }], "latest": "2026-10-21.md" })
                         }
+                    } else if path.starts_with("/api/sync/notices") {
+                        // Sync's notices: the first look sees the newest is 4, then one more comes.
+                        if path.ends_with("after=0") {
+                            json!({ "notices": [{ "seq": 4, "text": "Turn finished: Old" }], "latest": 4 })
+                        } else if path.ends_with("after=4") {
+                            json!({ "notices": [{ "seq": 5, "thread": "t", "device": "lap", "kind": "approval", "text": "Approval needed: Fix the login" }], "latest": 5 })
+                        } else {
+                            json!({ "notices": [], "latest": 5 })
+                        }
                     } else {
                         json!({})
                     };
@@ -904,3 +913,27 @@ async fn the_morning_report_is_pushed_once_to_the_messengers_named() {
     assert_eq!(std::fs::read_to_string(rig.dir.join("night-report-seen")).unwrap(), "2026-10-21.md");
 }
 
+
+/// Sync's notices go to Signal and Matrix chats by default, once each, nothing old after a fresh
+/// start, and never to Telegram unless named.
+#[tokio::test]
+async fn a_sync_notice_is_passed_on_once_to_the_messengers_named() {
+    let mut rig = rig("sync-notices", default_script(), false, |config| config.report_interval = Duration::from_millis(150));
+    rig.inbound.send(text("matrix:!r:x", "hello")).unwrap();
+    rig.inbound.send(text(CHAT, "hello")).unwrap();
+    settle().await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let mut passed = Vec::new();
+    while let Ok(out) = rig.matrix.try_recv() {
+        if let Outbound::Notice { text, .. } = out
+            && text.contains("Approval needed")
+        {
+            passed.push(text);
+        }
+    }
+    assert_eq!(passed, ["Approval needed: Fix the login (open Other devices in Mightling)"]);
+    while let Ok(out) = rig.telegram.try_recv() {
+        assert!(!matches!(&out, Outbound::Notice { text, .. } if text.contains("Approval needed") || text.contains("Turn finished")), "Telegram only when named");
+    }
+    assert_eq!(std::fs::read_to_string(rig.dir.join("sync-notice-seen")).unwrap(), "5");
+}
