@@ -76,10 +76,11 @@ class ToolCallCanary:
         }
 
     @classmethod
-    def run(cls, host: str, model_id: str, model_key: Optional[str] = None,
+    def run(cls, host: str, model_id: str, model_key: Optional[str] = None,  # noqa: PLR0913
             timeout: float = TOOL_CALL_CANARY_TIMEOUT_S,
             post: Optional[Callable[..., Any]] = None,
-            clock: Callable[[], float] = time.monotonic) -> Tuple[bool, str]:
+            clock: Callable[[], float] = time.monotonic,
+            engine: str | None = None) -> Tuple[bool, str]:
         """
         Sends the request and judges the answer.
 
@@ -90,6 +91,8 @@ class ToolCallCanary:
             timeout (float): Seconds the whole check may take.
             post (Optional[Callable[..., Any]]): `requests.post`, replaceable in tests.
             clock (Callable[[], float]): The clock the limit is measured on.
+            engine (str | None): The engine serving it (`server start --engine`); None is the
+                model's default. Names what to suspect: a flag for SGLang, ling-serve's own code.
 
         Returns:
             Tuple[bool, str]: Whether a well-formed call came back, and one line saying what came
@@ -106,7 +109,7 @@ class ToolCallCanary:
         try:
             if response.status_code != 200:
                 body = (getattr(response, "text", "") or "").strip().replace("\n", " ")[:160]
-                return False, cls.refusal(response.status_code, body, model_key)
+                return False, cls.refusal(response.status_code, body, model_key, engine)
             try:
                 events, finished = cls.read_events(response.iter_lines(decode_unicode=True),
                                                    started + timeout, clock)
@@ -119,7 +122,7 @@ class ToolCallCanary:
         if not finished:
             return False, (f"no complete answer within {timeout:.0f} s "
                            f"(the server is busy, or the stream never ended)")
-        return cls.verdict(events, model_key, clock() - started)
+        return cls.verdict(events, model_key, clock() - started, engine)
 
     @classmethod
     def read_events(cls, lines: Iterable[Any], deadline: float,
@@ -160,7 +163,7 @@ class ToolCallCanary:
 
     @classmethod
     def verdict(cls, events: List[Dict[str, Any]], model_key: Optional[str],
-                elapsed: float) -> Tuple[bool, str]:
+                elapsed: float, engine: str | None = None) -> Tuple[bool, str]:
         """
         Judges the events: one `function_call` item naming the tool, with a call id and arguments
         that are a JSON object carrying the required argument.
@@ -169,6 +172,7 @@ class ToolCallCanary:
             events (List[Dict[str, Any]]): The events, in order.
             model_key (Optional[str]): The registry key, to name the parsers.
             elapsed (float): Seconds the check took.
+            engine (str | None): The engine serving it; None is the model's default.
 
         Returns:
             Tuple[bool, str]: The result and its line.
@@ -181,7 +185,7 @@ class ToolCallCanary:
         calls = [item for item in items if item.get("type") == "function_call"]
         text = cls.text_of(items, events, "message", "response.output_text")
         reasoning = cls.text_of(items, events, "reasoning", "response.reasoning")
-        parsers = cls.parsers(model_key)
+        parsers = cls.parsers(model_key, engine)
         if not calls:
             if any(mark in text for mark in CALL_MARKUP):
                 return False, (f"the model wrote the call as text and the server did not read it: "
@@ -209,7 +213,7 @@ class ToolCallCanary:
         return True, f"{TOOL_NAME} {json.dumps(arguments)[:60]} in {elapsed:.1f} s"
 
     @classmethod
-    def refusal(cls, status: int, body: str, model_key: Optional[str]) -> str:
+    def refusal(cls, status: int, body: str, model_key: Optional[str], engine: str | None = None) -> str:
         """
         The line for a request the server refused.
 
@@ -217,13 +221,14 @@ class ToolCallCanary:
             status (int): The HTTP status.
             body (str): The start of the response body.
             model_key (Optional[str]): The registry key.
+            engine (str | None): The engine serving it; None is the model's default.
 
         Returns:
             str: What came back and what is likely at fault.
         """
         if status == 400:
             return (f"the server refused the request (HTTP 400: {body!r}): the chat template"
-                    f"{cls.parsers(model_key)['template']} or the server's Responses support is at fault")
+                    f"{cls.parsers(model_key, engine)['template']} or the server's Responses support is at fault")
         if status == 404:
             return "the server has no /v1/responses (HTTP 404): ling cannot use it"
         return f"the server answered HTTP {status} ({body!r})"
@@ -277,12 +282,13 @@ class ToolCallCanary:
         return "".join(part for part in parts if isinstance(part, str))
 
     @classmethod
-    def parsers(cls, model_key: Optional[str]) -> Dict[str, str]:
+    def parsers(cls, model_key: Optional[str], engine: str | None = None) -> Dict[str, str]:
         """
         How the served model's registry entry names its parsers and template, for the warning.
 
         Args:
             model_key (Optional[str]): The registry key, or None when the served id is not in it.
+            engine (str | None): The engine serving it; None is the model's default.
 
         Returns:
             Dict[str, str]: `tool`, `reasoning` and `template` phrases.
@@ -291,11 +297,21 @@ class ToolCallCanary:
         if model_key:
             from dreamference.hardware import get_model_launch_overrides
             try:
-                overrides = get_model_launch_overrides(model_key) or {}
+                overrides = get_model_launch_overrides(model_key, engine) or {}
             except Exception:
                 overrides = {}
         tool = overrides.get("tool_call_parser")
         reasoning = overrides.get("reasoning_parser")
+        from dreamference.hardware import ModelMatrixRegistry
+        from dreamference.hardware.model_matrix_registry import ENGINE_LING
+
+        if overrides and ModelMatrixRegistry.engine_of(overrides) == ENGINE_LING:
+            # ling-serve parses and renders in its own code: no flag or template file to name.
+            return {
+                "tool": f"ling-serve's built-in {tool or 'qwen3_coder'} tool-call parsing",
+                "reasoning": f"its {reasoning or 'qwen3'} reasoning split",
+                "template": ", or the chat template compiled into ling-serve",
+            }
         template = ""
         if overrides.get("chat_template_patches"):
             template = (f", patched at launch from {model_key}'s chat_template_patches "

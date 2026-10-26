@@ -115,15 +115,17 @@ def test_flexible_model_alias_resolution():
     aliases = [
         "qwen3.8-27b-nvfp4-dflash2",
         "RadixArk/Qwen3.8-27B-NVFP4",
-        "Qwen 3.8 27B (NVFP4 + DFlash2, SGLang)",
-        "qwen 3.8 27b (nvfp4 + dflash2, sglang)",
+        "Qwen 3.8 27B (NVFP4 + DFlash2)",
+        "qwen 3.8 27b (nvfp4 + dflash2)",
     ]
     for name in aliases:
         spec = ModelMatrixRegistry.get_spec(name)
         assert spec is not None, f"Failed to get spec for {name}"
         assert spec.hf_repo_id == "RadixArk/Qwen3.8-27B-NVFP4"
         assert resolve_model_hf_repo(name) == "RadixArk/Qwen3.8-27B-NVFP4"
-        assert get_model_launch_overrides(name).get("max_model_len") == 262144
+        # ling-serve's context (the nights'), and SGLang's in the fallback recipe.
+        assert get_model_launch_overrides(name).get("max_model_len") == 65536
+        assert get_model_launch_overrides(name, "sglang").get("max_model_len") == 262144
         assert model_declares_own_quantization(name) is True
 
 def test_download_model_functions():
@@ -178,7 +180,8 @@ def test_the_minima_candidate_differs_from_production_in_the_checkpoint_alone():
         DEFAULT_MODEL_ALIAS, ModelMatrixRegistry, QWEN38_LORA_RECIPE, QWEN38_SGLANG_RECIPE)
     key = "qwen3.8-27b-minima-nvfp4-dflash2"
     candidate = ModelMatrixRegistry.get_launch_overrides(key)
-    production = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS)
+    # Production's SGLang recipe, the default model's fallback since 1.7.2 (ling-serve is its default).
+    production = ModelMatrixRegistry.get_launch_overrides(DEFAULT_MODEL_ALIAS, "sglang")
     assert DEFAULT_MODEL_ALIAS == "qwen3.8-27b-nvfp4-dflash2"
     # Production adds only its adapters' settings, which Minima never takes: every one of its
     # layers is NVFP4, and LoRA on an NVFP4 layer crashed the probe's start under torch.compile.

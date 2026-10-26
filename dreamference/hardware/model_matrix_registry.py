@@ -255,6 +255,66 @@ QWEN38_LORA_RECIPE: Final[dict[str, Any]] = {
 }
 
 
+# The engines a recipe may name in `engine` (vLLM when it names none).
+ENGINE_VLLM: Final[str] = "vllm"
+ENGINE_SGLANG: Final[str] = "sglang"
+ENGINE_LING: Final[str] = "ling"
+
+# ling-engine (github.com/dreamference/ling-engine), the server written for this one model: the
+# default engine of qwen3.8-27b-nvfp4-dflash2 since 1.7.2 (ling-engine
+# specs/DREAMFERENCE_LING_ENGINE_INTEGRATION.md §12), with SGLang one setting away
+# (`server start --engine sglang`, or `server_engine = "sglang"` in the config) until the engine's
+# M5 release gate. Its quality was measured on SWE-bench nights 12 and 15 against SGLang and night
+# 17 against SGLang with the phase-merge fix; output is bit for bit the engine's own checks'
+# (speculation and tree verification exact), so the drafter moves speed alone.
+#
+# The commit the image's ling-serve was built from (the full hash, never abbreviated): what was
+# night-tested, recorded in the image's labels (`org.opencontainers.image.revision`,
+# `ai.dreamference.ling-engine.commit`). Anything that depends on the engine's version (a file only
+# some engines read) asks this, with `git merge-base --is-ancestor`, never a string comparison.
+QWEN38_LING_ENGINE_COMMIT: Final[str] = "79c38c7648d06a5657ff488195059348cfcd5f4a"
+
+# ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
+# aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push.
+QWEN38_LING_IMAGE: Final[str] = (
+    "ghcr.io/dreamference/ling-serve@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+)
+
+# The launch nights 12, 15 and 17 measured (Mightling's scripts/engine_ab_remote.sh), on Mightling's
+# pinned checkpoint and drafter. What ling-serve's command line has no flag for is not here: it
+# renders the chat template itself (the patched template's behaviour, checked against it by the
+# engine's bench/template_test.py), serves only the qwen3_coder tool format and the qwen3 reasoning
+# split, idles without spinning (no --sleep-on-idle), and takes no API key and no memory fraction.
+# Its memory is what --max-context and its sessions allocate (about 57 GB in all at 65,536 tokens,
+# engine §12), bounded from outside by the container's cgroup cap, which `gpu_memory_utilization`
+# and `container_headroom_gb` size as for SGLang, so the host-safety envelope does not change with
+# the engine.
+QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
+    "engine": ENGINE_LING,
+    "docker_image": QWEN38_LING_IMAGE,
+    "engine_commit": QWEN38_LING_ENGINE_COMMIT,
+    "revision": QWEN38_SGLANG_RECIPE["revision"],
+    # ling-serve's --max-context: the KV and state of each resident session are allocated at this
+    # size at start. 65,536 is what the nights served (SGLang's recipe serves 262,144).
+    "max_model_len": 65536,
+    "gpu_memory_utilization": 0.50,
+    "container_headroom_gb": 24.0,
+    # The formats ling-serve parses, compiled in (no flags): named for `status` and the start
+    # checks' messages, as SGLang's recipe names its parsers.
+    "tool_call_parser": "qwen3_coder",
+    "reasoning_parser": "qwen3",
+    # The same drafter as SGLang's recipe, at the same 12 tokens a step (--draft-block).
+    "speculative_config": {
+        key: QWEN38_SGLANG_RECIPE["speculative_config"][key]
+        for key in ("method", "model", "revision", "num_speculative_tokens")
+    },
+    # The nights' flags beyond the defaults: each speculative step as captured CUDA graphs, and
+    # programmatic dependent launch. Tree verification, the megakernel stages, two sessions and a
+    # batch of two are the engine's defaults at QWEN38_LING_ENGINE_COMMIT.
+    "extra_args": ["--graphs", "--pdl"],
+}
+
+
 class ModelMatrixRegistry:
     """
     Registry holding qualified models for NVIDIA GB10 hardware and short alias resolution logic.
@@ -263,16 +323,18 @@ class ModelMatrixRegistry:
     # Static registry of supported target models and speculative draft models
     MATRIX: Final[Dict[str, ModelSpec]] = {
         "qwen3.8-27b-nvfp4-dflash2": ModelSpec(
-            name="Qwen 3.8 27B (NVFP4 + DFlash2, SGLang)",
+            name="Qwen 3.8 27B (NVFP4 + DFlash2)",
             params_b=27.0,
             supported_precisions=["NVFP4"],
             min_memory_gb=20.0,
             max_memory_gb=70.0,
             compatible_gb10=True,
             notes=(
-                "The one entry served by SGLang instead of vLLM (`engine: sglang`), because the speed "
-                "is in the drafter and only SGLang runs it: DFlash2 is a block-diffusion drafter "
-                "vLLM supports only through an unmerged pull request.\n\n"
+                "Served by ling-engine's ling-serve since 1.7.2 (`engine: ling`, QWEN38_LING_RECIPE), "
+                "with SGLang's recipe one setting away (`server start --engine sglang`). Not vLLM, "
+                "because the speed is in the drafter: DFlash2 is a block-diffusion drafter vLLM "
+                "supports only through an unmerged pull request. The measurements below are "
+                "SGLang's.\n\n"
                 "Measured here (2026-09-29, single stream, temperature 0, thinking off, median of "
                 "three after a warm-up, decode net of time to first token): prose 25.5, code 50.3, "
                 "JSON 87.0 tok/s with the PyTorch sampler (24.1 / 47.5 / 82.5 before it); TTFT 0.22 s; "
@@ -300,7 +362,9 @@ class ModelMatrixRegistry:
                 "reasoning-effort default."
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
-            launch_overrides={**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE},
+            launch_overrides=QWEN38_LING_RECIPE,
+            # The fallback: production's engine until 1.7.2, and the only one that serves adapters.
+            engine_recipes={ENGINE_SGLANG: {**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE}},
             supports_vision=True,
         ),
         # Night 2's candidate (specs/DREAMFERENCE_MODELS.md §2.2), not a default: production
@@ -411,17 +475,24 @@ class ModelMatrixRegistry:
         return None
 
     @classmethod
-    def get_lora_recipe(cls, model_key: str) -> dict[str, Any] | None:
+    def get_lora_recipe(cls, model_key: str, engine: str | None = None) -> dict[str, Any] | None:
         """The LoRA settings a model is served with, if it serves adapters at all.
 
         Args:
             model_key (str): Model alias, HF repo ID, or display name.
+            engine (str | None): The engine whose recipe is asked; None asks every engine the
+                model has, default first (an adapter fits the checkpoint whichever engine is
+                chosen; only the one that serves adapters names how).
 
         Returns:
             dict[str, Any] | None: A copy of the recipe's `lora` key, or None.
         """
-        lora = cls.get_launch_overrides(model_key).get("lora")
-        return dict(lora) if isinstance(lora, dict) else None
+        engines = [engine] if engine else cls.engines(model_key)
+        for name in engines:
+            lora = cls.get_launch_overrides(model_key, name).get("lora")
+            if isinstance(lora, dict):
+                return dict(lora)
+        return None
 
     @classmethod
     def resolve_hf_repo(cls, model_key: str) -> str:
@@ -468,21 +539,65 @@ class ModelMatrixRegistry:
         return None
 
     @classmethod
-    def get_launch_overrides(cls, model_key: str) -> Dict[str, Any]:
+    def get_launch_overrides(cls, model_key: str, engine: str | None = None) -> dict[str, Any]:
         """
-        Retrieves the per-model vLLM launch recipe for the given alias, repo ID, or display name.
+        Retrieves the per-model launch recipe for the given alias, repo ID, or display name.
 
         Args:
             model_key (str): Model alias, HF repo ID, or display name. Unrecognized keys
                 yield an empty recipe, leaving the caller on global defaults.
+            engine (str | None): The engine to serve it with (`vllm`, `sglang`, `ling`); None,
+                or the default recipe's own engine, is the default recipe (`launch_overrides`),
+                another one the model's recipe for that engine (`engine_recipes`).
 
         Returns:
-            Dict[str, Any]: Copy of the model's launch_overrides, safe for the caller to mutate.
+            Dict[str, Any]: Copy of the recipe, safe for the caller to mutate.
+
+        Raises:
+            ValueError: When the model has no recipe for that engine.
         """
         if not model_key:
             return {}
         spec = cls.get_spec(model_key)
-        return dict(spec.launch_overrides) if spec else {}
+        if not spec:
+            return {}
+        if not engine or engine.lower() == cls.engine_of(spec.launch_overrides):
+            return dict(spec.launch_overrides)
+        recipe = spec.engine_recipes.get(engine.lower())
+        if recipe is None:
+            raise ValueError(
+                f"{model_key} has no recipe for the engine '{engine}'; its engines: "
+                f"{', '.join(cls.engines(model_key))}."
+            )
+        return dict(recipe)
+
+    @classmethod
+    def engine_of(cls, recipe: dict[str, Any]) -> str:
+        """Names the engine a recipe runs on.
+
+        Args:
+            recipe (dict[str, Any]): A launch recipe.
+
+        Returns:
+            str: `launch_overrides['engine']`, lower case; `vllm` when it names none.
+        """
+        return str(recipe.get("engine") or ENGINE_VLLM).lower()
+
+    @classmethod
+    def engines(cls, model_key: str) -> list[str]:
+        """Lists the engines a model can be served with.
+
+        Args:
+            model_key (str): Model alias, HF repo ID, or display name.
+
+        Returns:
+            list[str]: The default recipe's engine first, then the others'; empty for an unknown model.
+        """
+        spec = cls.get_spec(model_key) if model_key else None
+        if not spec:
+            return []
+        default = cls.engine_of(spec.launch_overrides)
+        return [default, *(name for name in spec.engine_recipes if name != default)]
 
     @classmethod
     def get_speculative_draft_repo(cls, model_key: str) -> Optional[str]:

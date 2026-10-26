@@ -23,8 +23,9 @@ def resolve_model_hf_repo(model_key: str) -> str:
 def model_key_for_served_id(served_id: str, preferred: Optional[str] = None) -> Optional[str]:
     return ModelMatrixRegistry.key_for_served_id(served_id, preferred)
 
-def get_model_launch_overrides(model_key: str) -> Dict[str, Any]:
-    return ModelMatrixRegistry.get_launch_overrides(model_key)
+def get_model_launch_overrides(model_key: str, engine: str | None = None) -> dict[str, Any]:
+    """The model's launch recipe for an engine (ModelMatrixRegistry.get_launch_overrides)."""
+    return ModelMatrixRegistry.get_launch_overrides(model_key, engine)
 
 def get_speculative_draft_repo(model_key: str) -> Optional[str]:
     return ModelMatrixRegistry.get_speculative_draft_repo(model_key)

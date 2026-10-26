@@ -320,7 +320,69 @@ class DreamferenceCLIController:
         return rows
 
     @classmethod
-    def _run_tool_call_canary(cls, vllm_mgr, requested_model: Optional[str]) -> Optional[bool]:
+    def _server_engine(cls, model: str, requested: str | None, from_flag: bool) -> str | None:
+        """Resolves the engine `server start` serves a model with, and says which it is.
+
+        Args:
+            model (str): The model to serve.
+            requested (str | None): `--engine`, else the config's `server_engine`, else None.
+            from_flag (bool): Whether `requested` came from `--engine` (for the message).
+
+        Returns:
+            str | None: The engine to pass on; None for the model's own default.
+
+        Raises:
+            SystemExit: When the model has no recipe for the requested engine.
+        """
+        from dreamference.hardware import ModelMatrixRegistry
+        from dreamference.hardware.model_matrix_registry import (
+            ENGINE_LING,
+            ENGINE_SGLANG,
+            ENGINE_VLLM,
+        )
+
+        engines = ModelMatrixRegistry.engines(model) or [ENGINE_VLLM]
+        if requested and requested not in engines:
+            where = "--engine" if from_flag else "server_engine in the config"
+            print(f"❌ {model} cannot be served with {requested} ({where}); "
+                  f"its engines: {', '.join(engines)}.")
+            raise SystemExit(2)
+        chosen = requested or engines[0]
+        names = {ENGINE_LING: "ling-serve (ling-engine)", ENGINE_SGLANG: "SGLang", ENGINE_VLLM: "vLLM"}
+        others = [name for name in engines if name != chosen]
+        line = f"⚙️  Engine: {names.get(chosen, chosen)}"
+        if others:
+            line += "; also: " + ", ".join(f"--engine {name}" for name in others)
+        print(line)
+        return requested
+
+    @classmethod
+    def _suggest_engine_fallback(cls, model: str, engine: str | None, what: str) -> None:
+        """After a failed start check on ling-serve, names SGLang as the fallback.
+
+        Never switches by itself: the user decides, with one flag or one config key.
+
+        Args:
+            model (str): The model being served.
+            engine (str | None): The engine `server start` resolved (None: the model's default).
+            what (str): What failed, for the message ("the NVFP4 canary", "to start", ...).
+        """
+        from dreamference.hardware import ModelMatrixRegistry
+        from dreamference.hardware.model_matrix_registry import ENGINE_LING, ENGINE_SGLANG
+
+        engines = ModelMatrixRegistry.engines(model)
+        running = engine or (engines[0] if engines else None)
+        if running != ENGINE_LING or ENGINE_SGLANG not in engines:
+            return
+        print(f"💡 ling-serve failed {what}. SGLang serves the same model and was production's engine "
+              "until 1.7.2:\n"
+              "     ling-admin server stop && ling-admin server start --engine sglang\n"
+              "   To keep it: server_engine = \"sglang\" in ~/.config/dreamference/config.toml. "
+              "Please report the failure with `docker logs dreamference-vllm-<port>`.")
+
+    @classmethod
+    def _run_tool_call_canary(cls, vllm_mgr, requested_model: Optional[str],
+                              engine: str | None = None) -> Optional[bool]:
         """
         Checks that the served model returns a well-formed tool call through `ling`'s own API path,
         a streamed `/v1/responses` request (ToolCallCanary). A failure is a warning naming the parser
@@ -331,6 +393,8 @@ class DreamferenceCLIController:
             vllm_mgr: The server manager; its `host` and `get_models()` are used.
             requested_model (Optional[str]): The model `server start` was asked for, preferred when the
                 served id maps to more than one registry entry.
+            engine (str | None): The engine `server start` resolved (None: the model's default); a
+                failure on ling-serve names the SGLang fallback.
 
         Returns:
             Optional[bool]: Whether the call was well formed; None when no model was reported.
@@ -344,12 +408,13 @@ class DreamferenceCLIController:
         print(f"🧪 Checking a tool call through /v1/responses (at most {TOOL_CALL_CANARY_TIMEOUT_S:.0f} s)...")
         # The server is asked which model it serves, never the configuration.
         model_key = model_key_for_served_id(models[0], requested_model)
-        passed, line = ToolCallCanary.run(vllm_mgr.host, models[0], model_key)
+        passed, line = ToolCallCanary.run(vllm_mgr.host, models[0], model_key, engine=engine)
         if passed:
             print(f"✅ Tool call well formed: {line}")
         else:
             print(f"⚠️  Tool-call check failed: {line}.")
             print("   The server is up, but ling's sessions will not get tool calls until this is fixed.")
+            cls._suggest_engine_fallback(model_key or requested_model or "", engine, "the tool-call check")
         return passed
 
     @classmethod
@@ -436,17 +501,34 @@ class DreamferenceCLIController:
 
         # A server behind the model gate listens on loopback; rebuilt the same way, so the gate's
         # host and port, and the adapters only a gated launch serves, are not reported as drift.
+        # Against the recipe of the engine that runs, which may be the model's fallback.
+        from dreamference.hardware import ModelMatrixRegistry
+        from dreamference.hardware.model_matrix_registry import (
+            ENGINE_LING,
+            ENGINE_SGLANG,
+            ENGINE_VLLM,
+        )
+        from dreamference.vllm_server.ling_serve_launch_builder import LING_SERVE_PROGRAM
         from dreamference.vllm_server.model_gate import ENGINE_BIND_ADDRESS
+        from dreamference.vllm_server.sglang_launch_builder import SGLANG_ENTRY_POINT
+
+        running_engine = ENGINE_VLLM
+        if LING_SERVE_PROGRAM in running_cmd:
+            running_engine = ENGINE_LING
+        elif SGLANG_ENTRY_POINT in running_cmd:
+            running_engine = ENGINE_SGLANG
+        engine = running_engine if running_engine in ModelMatrixRegistry.engines(model) else None
         try:
             expected_full = VLLMServerManager().build_launch_command(
-                model=model, port=port, gate=ENGINE_BIND_ADDRESS in running_cmd)
+                model=model, port=port, gate=ENGINE_BIND_ADDRESS in running_cmd, engine=engine)
         except Exception:
             return {}
 
         # Keep only the server's own arguments: from the first flag after the engine's entry
-        # point, `serve <model>` for vLLM and `python3 -m sglang.launch_server` for SGLang.
+        # point, `serve <model>` for vLLM, `python3 -m sglang.launch_server` for SGLang and
+        # `ling-serve` for ling-engine.
         def server_args(argv: "list[str]") -> "list[str]":
-            for entry in ("serve", "sglang.launch_server"):
+            for entry in (LING_SERVE_PROGRAM, "serve", "sglang.launch_server"):
                 if entry in argv:
                     argv = argv[argv.index(entry) + 1:]
                     break
@@ -455,7 +537,7 @@ class DreamferenceCLIController:
 
         # The expected command also carries docker's own flags before the image; an entry point
         # must be present to know where the server's begin.
-        if not any(entry in expected_full for entry in ("serve", "sglang.launch_server")):
+        if not any(entry in expected_full for entry in (LING_SERVE_PROGRAM, "serve", "sglang.launch_server")):
             return {}
         expected_argv = server_args(expected_full)
         running_argv = server_args(running_cmd)
@@ -506,6 +588,7 @@ class DreamferenceCLIController:
 
         cmd: "list[str]" = []
         image = ""
+        labels: dict[str, str] = {}
         try:
             insp = subprocess.run(
                 ["docker", "inspect", container], capture_output=True, text=True, timeout=15
@@ -515,8 +598,19 @@ class DreamferenceCLIController:
                 if data:
                     cmd = data[0].get("Config", {}).get("Cmd", []) or []
                     image = data[0].get("Config", {}).get("Image", "") or ""
+                    labels = data[0].get("Config", {}).get("Labels") or {}
         except (subprocess.SubprocessError, OSError, ValueError):
             pass
+
+        from dreamference.vllm_server.ling_serve_launch_builder import LingServeLaunchBuilder
+
+        ling_args = LingServeLaunchBuilder.server_args_of(cmd)
+        if ling_args is not None:
+            # ling-serve: none of vLLM's knobs below exist; its own are few.
+            facts.update(LingServeLaunchBuilder.facts(image, labels, ling_args))
+            served_key = cls._served_key(vllm_host, model_alias)
+            facts.update(cls._detect_recipe_drift(served_key, port, cmd))
+            return facts
 
         def flag(name: str) -> Optional[str]:
             """Value following `name` on the container's actual command line, if present."""
@@ -587,17 +681,28 @@ class DreamferenceCLIController:
             # Against the recipe of the model actually running, not the configured one: `server
             # start --model` may serve another, and comparing an SGLang server with a vLLM recipe
             # reported every flag as drift.
-            served_key = model_alias
-            try:
-                import requests
-
-                served = requests.get(f"{vllm_host}/v1/models", timeout=5).json()["data"][0]["id"]
-                served_key = model_key_for_served_id(served, preferred=model_alias) or model_alias
-            except Exception:
-                pass
-            facts.update(cls._detect_recipe_drift(served_key, port, cmd))
+            facts.update(cls._detect_recipe_drift(cls._served_key(vllm_host, model_alias), port, cmd))
 
         return facts
+
+    @classmethod
+    def _served_key(cls, vllm_host: str, model_alias: str) -> str:
+        """The registry key of the model the server at `vllm_host` serves, else `model_alias`.
+
+        Args:
+            vllm_host (str): Base URL of the server.
+            model_alias (str): Configured model, the answer when the server does not say.
+
+        Returns:
+            str: The served model's registry key.
+        """
+        try:
+            import requests
+
+            served = requests.get(f"{vllm_host}/v1/models", timeout=5).json()["data"][0]["id"]
+            return model_key_for_served_id(served, preferred=model_alias) or model_alias
+        except Exception:
+            return model_alias
 
     @classmethod
     def _run_google(cls, command: str | None) -> None:
@@ -1166,6 +1271,10 @@ class DreamferenceCLIController:
         # checkpoint on the old image and only the /v1/models listing told the truth.
         start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
         start_server_parser.add_argument("--port", type=int, default=8000, help="Port for the model server's /v1 API")
+        start_server_parser.add_argument(
+            "--engine", choices=("ling", "sglang"), default=None,
+            help="Engine to serve the model with (default: server_engine in the config, else the "
+                 "model's own: ling-serve for the default model, SGLang its fallback).")
         start_server_parser.add_argument("--no-gate", action="store_true", help="Serve the port from the engine itself, without the model gate that lets a SWE-bench run refuse other requests")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
@@ -2447,6 +2556,9 @@ class DreamferenceCLIController:
                 if ModelMatrixRegistry.removed_in(args.model):
                     print(f"❌ {ModelMatrixRegistry.removed_message(args.model, configured=from_config)}")
                     sys.exit(1)
+                # The engine: --engine for this start, else the configured one, else the model's own.
+                engine = cls._server_engine(args.model, args.engine or config.server_engine,
+                                            from_flag=bool(args.engine))
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 # A machine that loads a model is a node; an advertised one says `loading`.
                 from dreamference.node import NodeAdvertiser
@@ -2496,7 +2608,7 @@ class DreamferenceCLIController:
             
                 # Start monitoring thread before server launch
                 from dreamference.hardware import get_model_launch_overrides
-                recipe_env_keys = set(get_model_launch_overrides(args.model).get("env", {}).keys())
+                recipe_env_keys = set(get_model_launch_overrides(args.model, engine).get("env", {}).keys())
                 monitor = create_model_loading_monitor(vllm_mgr, recipe_env_keys=recipe_env_keys)
                 monitor.start()
             
@@ -2529,6 +2641,7 @@ class DreamferenceCLIController:
                         background=True,
                         docker_image=getattr(args, "docker_image", None),
                         gate=not getattr(args, "no_gate", False),
+                        engine=engine,
                     )
                 
                     # Print progress while server is initializing
@@ -2575,14 +2688,17 @@ class DreamferenceCLIController:
                                     text = resp.json()["choices"][0]["text"].strip()
                                     if text and all(c == "!" for c in text if c.strip()):
                                         print("❌ NVFP4 Canary Failed: Output corrupted (all '!'). Wrong SM12x CUTLASS backend selected.")
+                                        cls._suggest_engine_fallback(args.model, engine, "the NVFP4 canary")
                                     else:
                                         print("✅ NVFP4 Canary Passed: Output is healthy.")
                                 else:
                                     print(f"⚠️  NVFP4 Canary skipped: API returned {resp.status_code}")
+                                    cls._suggest_engine_fallback(args.model, engine, "the NVFP4 canary")
                             except Exception as e:
                                 print(f"⚠️  NVFP4 Canary failed to execute: {e}")
+                                cls._suggest_engine_fallback(args.model, engine, "the NVFP4 canary")
 
-                        cls._run_tool_call_canary(vllm_mgr, args.model)
+                        cls._run_tool_call_canary(vllm_mgr, args.model, engine)
 
                         # By now the sidecar's 0.6B load has usually finished under the main
                         # model's. A brief poll reports its state either way — its /health is the
@@ -2606,8 +2722,19 @@ class DreamferenceCLIController:
                                 print(f"🌫️  Diffusion sidecar at {diffusion_mgr.host}/v1 — "
                                       f"still loading in background (state: {state})")
 
+                    else:
+                        # The container stopped before the server answered (`docker logs -f` ended).
+                        print(f"\n❌ The model server stopped before it answered. Its log: "
+                              f"docker logs dreamference-vllm-{args.port}")
+                        cls._suggest_engine_fallback(args.model, engine, "to start")
+
                     # Do not block: exit after health check passes (server keeps running)
                     
+                except RuntimeError:
+                    # Before the container ran (the image, Docker, the hardware): the fallback is
+                    # named, the error itself is reported as before.
+                    cls._suggest_engine_fallback(args.model, engine, "to start")
+                    raise
                 except KeyboardInterrupt:
                     print("\n⏹️  Shutting down server...")
                     if vllm_mgr.process:
