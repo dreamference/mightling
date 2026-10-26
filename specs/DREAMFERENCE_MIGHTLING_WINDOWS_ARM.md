@@ -685,8 +685,46 @@ Severity: **1.7.1** blocks the release now being cut; **1.7.2** is the next patc
 **W7. `install.ps1` over SSH as a standard user reports a decline, not the cause (1.7.2, small).** "The Administrator prompt was declined or failed (… requires an interactive window station.)" reads as if someone said no; a reinstall then also prints "Windows sandbox: NOT set up" when the sandbox from an earlier setup is still in place. *Fix:* when the session has no interactive window station, say "the sandbox setup needs a desktop session; run `ling sandbox setup` there, or ask an administrator", and check `sandbox_setup_is_complete` before saying it is not set up.
 
 **W8. `ling-code` on Windows points at commands that do not exist there (1.7.2, small).** With indexing Linux-only (§12), the query's "run `ling-code index`" and `status`'s "`ling-admin code setup`" lead nowhere on a Windows client. *Fix:* on Windows, say that the index is built on Linux nodes only for now.
+- *Fixed for 1.7.2* (branch `fix/windows-w8-w9-messages`): `paths.rs` has `indexing_here()` (the condition `indexing_supported()` checks, so Linux only: a macOS client had the same dead pointers) and hint functions that take it as a parameter, tested both ways on any machine. Where nothing indexes, the query's answer (CLI and MCP), the "universal layer not built yet" note, `status`'s universal and exact lines, an unreadable store's error and `submodules`' re-index line say "the index is built on Linux nodes only for now" and name neither `ling-code index`, `ling-admin code setup` nor rg (W9: not shipped either); `status` no longer lists the missing indexer tools there. On Linux every message is as before.
 
 **W9. `ling doctor` says "Codex" on Windows and wants ripgrep (1.7.2, small).** Its Defender check reads "Microsoft Defender can interfere with Codex. Verify Codex exclusions" and lists `codex.exe` and a "signed Codex app"; its search check warns that `rg.exe` is missing, which the Windows release does not ship. *Fix:* name `ling.exe` and the Mightling helpers in the Defender check (or drop the check until signing), and either ship `rg.exe` in the Windows assets or mark search as provided by the shell.
+- *Read from source (2026-10-26), no launcher-side fix:* both texts are literals in the pinned Codex's doctor (`cli/src/doctor/security.rs:69` and `:115`, `runtime.rs:97` and `:102`), printed by one `print!` of the whole report after every check has run. The launcher's `rebrand()` rewrites prompts it hands to Codex, never Codex's own output, and `prepare_args` has no hook after a subcommand. Re-running `doctor` as a child with its output piped and rewritten would make the doctor's own terminal check report "stdout is not a terminal" and switch its colours off, a false report to fix a label, so it is not done. **The search warning is not a broken feature:** `rg_command()` is used only by the doctor and by thread search (`thread-store/src/local/search_threads.rs`, the app's `thread/search`), and thread search falls back to scanning the files itself when `rg.exe` is missing (`rollout/src/search.rs`, `NotFound` → `scan_rollout_matches`); the agent's own commands do not go through it. So "mark search as provided" is the honest choice, and shipping `rg.exe` buys only speed (it would also need `install.ps1`'s `$Optional`, `package_mightling.py`'s Windows list and a pinned, checksummed download in `windows.yml`).
+- *The patch it needs* (Codex, `cli/src/doctor/`), 1,793 bytes as `diff -U1` with git headers: `security.rs:69` the Windows targets `"ling.exe; codex-windows-sandbox-setup.exe; codex-command-runner.exe; codex-code-mode-host.exe (Mightling)"` (no "signed Codex app": the preview is unsigned); `:115` on Windows only `"{product} can interfere with Mightling. Verify its exclusions."` (the Linux text stays, so `security_tests.rs:80` needs no overlay); `runtime.rs:89-91` on Windows a missing `rg.exe` is `CheckStatus::Ok`, and the summary `"rg.exe not installed; thread search scans the files itself"`. The Defender half alone is 959 bytes. The series is at 56,813 of 58,000 bytes and the rest is reserved, so it waits for the owner: raise the cap by ~1.8 KB, or take the Defender half alone into the reserve, or leave both warnings and say in the Windows notes that they are expected.
+
+  ```diff
+  diff --git a/codex-rs/cli/src/doctor/security.rs b/codex-rs/cli/src/doctor/security.rs
+  --- a/codex-rs/cli/src/doctor/security.rs
+  +++ b/codex-rs/cli/src/doctor/security.rs
+  @@ -68,3 +68,3 @@
+       let targets = if cfg!(target_os = "windows") {
+  -        "signed Codex app; codex.exe; codex-windows-sandbox-setup.exe; codex-command-runner.exe; codex-code-mode-host.exe"
+  +        "ling.exe; codex-windows-sandbox-setup.exe; codex-command-runner.exe; codex-code-mode-host.exe (Mightling)"
+       } else if cfg!(target_os = "macos") {
+  @@ -114,3 +114,7 @@
+                   CheckStatus::Warning,
+  -                format!("{product} can interfere with Codex. Verify Codex exclusions."),
+  +                if cfg!(windows) {
+  +                    format!("{product} can interfere with Mightling. Verify its exclusions.")
+  +                } else {
+  +                    format!("{product} can interfere with Codex. Verify Codex exclusions.")
+  +                },
+               )
+  diff --git a/codex-rs/cli/src/doctor/runtime.rs b/codex-rs/cli/src/doctor/runtime.rs
+  --- a/codex-rs/cli/src/doctor/runtime.rs
+  +++ b/codex-rs/cli/src/doctor/runtime.rs
+  @@ -89,3 +89,4 @@
+                   details.push(format!("search command readiness: {err}"));
+  -                CheckStatus::Warning
+  +                // Mightling ships no rg.exe; thread search scans the files itself (rollout search.rs).
+  +                if cfg!(windows) { CheckStatus::Ok } else { CheckStatus::Warning }
+               }
+  @@ -95,2 +96,5 @@
+       let summary = match status {
+  +        CheckStatus::Ok if cfg!(windows) && which::which(&rg_command).is_err() => {
+  +            "rg.exe not installed; thread search scans the files itself".to_string()
+  +        }
+           CheckStatus::Ok => format!("search command found ({provider}); execution not verified"),
+  ```
 
 **W10. Each user's install replaces the machine's mDNS firewall rules, and the app's rule names a file that does not exist (1.7.2).** The elevated half of `install.ps1` removes and recreates `Mightling-mDNS-ling` and `Mightling-mDNS-ling-app` by fixed name, machine-wide, with `-Program` in the installing user's `%LOCALAPPDATA%`. On a PC with two users, the second install takes the first user's rule away, and deleting the second user leaves a rule for a missing file. `Mightling-mDNS-ling-app` names `bin\ling-app.exe`, but the desktop app is `Programs\Mightling\App\Mightling.exe` and runs its own `resources\ling.exe`, neither of which the rule covers. Severity is bounded: `ling node list` found both nodes for a user with no rule at all (row 8; a browse's answers come back to the query it sent), so the rule matters for unsolicited announcements only. *Fix:* one rule per program path (the name carries a short hash of the path), removed only when its own path is reinstalled or uninstalled (W5); the app's rules for `App\Mightling.exe` and `App\resources\ling.exe`, added by the app's installer or by `install.ps1` when the app is present.
 
