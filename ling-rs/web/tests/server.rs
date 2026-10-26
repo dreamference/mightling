@@ -77,6 +77,8 @@ fn config(dir: &Path, port: u16, lan_names: Vec<String>) -> Config {
         images_dir: dir.join("images"),
         // Nothing listens on port 9 (discard): a test that needs the service starts its own.
         speech_addr: "127.0.0.1:9".to_string(),
+        // Never the real ~/.config/dreamference/config.toml: a scratch one, absent unless a test writes it.
+        user_config: Some(dir.join("user/.config/dreamference/config.toml")),
         state_dir,
         port,
         lan_names,

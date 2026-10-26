@@ -123,6 +123,7 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
         images_dir: scratch.dir.join("images"),
         // Nothing listens on port 9 (discard); the chat link uses neither sidecar.
         speech_addr: "127.0.0.1:9".to_string(),
+        user_config: None,
         state_dir: state_dir.clone(),
         port,
         lan_names: Vec::new(),
@@ -220,6 +221,7 @@ async fn a_chat_message_reaches_the_agent_through_ling_web_an_approval_comes_bac
         images_dir: scratch.dir.join("images"),
         // Nothing listens on port 9 (discard); the chat link uses neither sidecar.
         speech_addr: "127.0.0.1:9".to_string(),
+        user_config: None,
         state_dir: state_dir.clone(),
         port,
         lan_names: Vec::new(),

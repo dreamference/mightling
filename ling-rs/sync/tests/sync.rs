@@ -96,6 +96,8 @@ async fn hub(dir: &Path, enabled: bool) -> Hub {
         launch: Launch { ling: dir.join("no-ling"), env: Vec::new(), log: state_dir.join("app-server.log") },
         images_dir: dir.join("images"),
         speech_addr: "127.0.0.1:9".to_string(),
+        // Never the real ~/.config/dreamference/config.toml: a scratch one, absent unless a test writes it.
+        user_config: Some(dir.join("user/.config/dreamference/config.toml")),
         state_dir,
         port,
         lan_names: Vec::new(),
