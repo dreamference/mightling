@@ -270,16 +270,16 @@ ENGINE_LING: Final[str] = "ling"
 #
 # The commit the image's ling-serve was built from (the full hash, never abbreviated), recorded in
 # the image's labels (`org.opencontainers.image.revision`, `ai.dreamference.ling-engine.commit`).
-# 1.7.2: f5ab951, the night-tested 79c38c7 plus a parse-only tool-call fix (branch
+# 1.7.2: bdda3a2, the night-tested b8e9451 plus a parse-only tool-call fix (branch
 # fix/toolcall-text), greedy output token for token night 15's binary on agentlong and
 # --spec-check passing; the image carries that very binary (sha256 598e5520…9ef41f1; builds embed
 # their paths, so a rebuild differs).
-QWEN38_LING_ENGINE_COMMIT: Final[str] = "f5ab9512883655420e216250630e506f9a9a2ea4"
+QWEN38_LING_ENGINE_COMMIT: Final[str] = "bdda3a244a9cd24742346dce806561f7441405fd"
 
 # What the engine at that commit has that an asset or a launch may depend on, so the runtime asks
 # a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
-# drafter) from ling-engine 7417523 on. A checkout-only test keeps the list true to the commit's
-# ancestry. Empty at f5ab951.
+# drafter) from ling-engine ec9dce8 on. A checkout-only test keeps the list true to the commit's
+# ancestry. Empty at bdda3a2.
 QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
 
 # ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an

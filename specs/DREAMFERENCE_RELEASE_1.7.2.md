@@ -5,20 +5,20 @@ server's section; the rest of the release is still to be written into it ({{TBD}
 between the two rules is the GitHub release's description: the release workflow publishes it as it
 stands (`scripts/release_notes.py`), and refuses it while a `{{TBD` marker is left.
 
-**The engine.** ling-engine f5ab9512883655420e216250630e506f9a9a2ea4: 79c38c7, the commit
+**The engine.** ling-engine bdda3a244a9cd24742346dce806561f7441405fd: b8e9451, the commit
 SWE-bench nights 12 and 15 tested, plus the parse-only tool-call fix of branch `fix/toolcall-text`
 (the owner's rule of 2026-10-20: a later commit only if the engine's checks show it bit-exact). Its
 binary, sha256 598e552006bdff32ce0a33ba45e6b9f938cd65610989dec861677946e9ef41f1, is greedy-identical
 to night 15's on agentlong (16 of 16 turns, every streamed event) and passes `--spec-check`; the
-image carries that very file. Night 17 (2026-10-26 to 27) compares 79c38c7 with SGLang carrying the
+image carries that very file. Night 17 (2026-10-26 to 27) compares b8e9451 with SGLang carrying the
 phase-merge fix.
 
 **Before publishing:**
-- **The image** pushed to `ghcr.io/dreamference/ling-serve` (it is built: `:f5ab95128836`, the
+- **The image** pushed to `ghcr.io/dreamference/ling-serve` (it is built: `:bdda3a244a9c`, the
   verified binary; `scripts/build_ling_serve_image.sh`), made public, and its digest pinned in
   `QWEN38_LING_IMAGE` ({{TBD digest}}); `test_the_image_digest_is_a_real_pin_not_the_placeholder`
   fails until then.
-- **Long context** (the nights ran 65,536), done on node-b on 2026-10-26 with the f5ab951 image:
+- **Long context** (the nights ran 65,536), done on node-b on 2026-10-26 with the bdda3a2 image:
   started at 262,144 in 40 s (host memory +60 GB, 46 GB left available), both needles of a
   204,857-token prompt answered exactly, prefill ~850-900 tokens/s at that length, decode 39.6
   tokens/s there (74.9 at short context), `ling-run --spec-check` on the long prompt passed (tokens

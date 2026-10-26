@@ -86,7 +86,7 @@ limits:
   with an earlier one but differs inside the same message is read in full (at ~850-900 tokens per
   second near 200K tokens, nearly four minutes).
 
-Measured on a GB10 on 2026-10-26 (ling-engine f5ab951, 262,144-token context): ready in 40 s, about
+Measured on a GB10 on 2026-10-26 (ling-engine bdda3a2, 262,144-token context): ready in 40 s, about
 60 GB of memory in use while serving; a 600-token code answer at 74.9 tokens per second; a
 204,857-token prompt with two facts hidden at 45% and 85% of its length answered both exactly, with
 decode at 39.6 tokens per second at that length.
