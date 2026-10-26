@@ -215,6 +215,23 @@ jobs:
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+      # `ling uninstall` (WINDOWS_ARM section 16.4) on what install.ps1 installed: the folder (the
+      # running ling.exe by a detached step once it exits), the user's Path entry and the mDNS rule.
+      # The runner is an administrator, so the firewall step runs without a prompt.
+      - name: ling uninstall
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "mightling-install\bin"
+          $program = Join-Path $dir "ling.exe"
+          & $program uninstall --yes
+          if ($LASTEXITCODE -ne 0) { throw "ling uninstall failed (exit $LASTEXITCODE)" }
+          $ErrorActionPreference = "Stop"
+          Start-Sleep -Seconds 15
+          if (Test-Path $dir) { Get-ChildItem -Force $dir | Format-Table Name; throw "$dir is still there" }
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if (($userPath -split ";") -contains $dir) { throw "the install folder is still on the user's PATH" }
+          $rules = @(Get-NetFirewallRule | Where-Object { $_.Name -like "Mightling-mDNS-*" } | Where-Object { ($_ | Get-NetFirewallApplicationFilter).Program -eq $program })
+          if ($rules.Count -ne 0) { throw "the mDNS rule for $program is still there" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:

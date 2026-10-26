@@ -77,6 +77,7 @@ NON_INTERACTIVE: Final[frozenset] = frozenset(
         "worktree",
         # The sync agent's unit runs `ling sync agent` (specs/DREAMFERENCE_MIGHTLING_SYNC.md).
         "sync",
+        "uninstall",
     }
 )
 

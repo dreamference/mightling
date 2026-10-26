@@ -133,7 +133,11 @@ Mightling node on your network. From 1.7.2, `install.ps1` (above) checks the one
 the release's signed `SHA256SUMS` and runs it silently: it installs for you alone, with no
 administrator, under `%LOCALAPPDATA%\Programs\Mightling\App`, and adds a Start menu entry. The
 installers are not signed, so Smart App Control must be off. `ling update` updates it with the
-command-line client; to remove the app, use Settings → Apps → Installed apps.
+command-line client; to remove the app, use Settings → Apps → Installed apps. `ling uninstall`
+removes the command-line client only, and leaves the app and its firewall rules. The app's
+installer needs no administrator, so it adds no firewall rule itself: `install.ps1` adds the rules
+for the app's programs in the same run, so the app hears nodes announce themselves (an app
+installed by hand gets them at the next `install.ps1`).
 
 ## Other ways to install
 

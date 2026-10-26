@@ -187,3 +187,17 @@ def test_ci_computes_the_same_names(program, name):
         [sys.executable, "-c", code, program], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == name
+
+
+@pytest.mark.parametrize(("program", "name"), VECTORS)
+def test_ling_uninstall_names_the_rules_the_same_way(program, name):
+    """`ling uninstall` (ling-rs/src/uninstall.rs) removes what install.ps1 made: its tests hold these pairs."""
+    source = (ROOT / "ling-rs" / "src" / "uninstall.rs").read_text(encoding="utf-8")
+    assert f'rule_name(r"{program}"), "{name}"' in source
+
+
+def test_ling_uninstall_removes_rules_by_program_as_install_ps1_does():
+    source = (ROOT / "ling-rs" / "src" / "uninstall.rs").read_text(encoding="utf-8")
+    assert "$_.Name -like '{RULE_PREFIX}*'" in source
+    assert "$Program.StartsWith($_, 'OrdinalIgnoreCase')" in source
+    assert 'pub const RULE_PREFIX: &str = "Mightling-mDNS-";' in source

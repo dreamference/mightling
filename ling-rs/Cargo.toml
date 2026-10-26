@@ -84,7 +84,9 @@ ling-signal = { path = "signal" }
 # Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), the
 # same windows-sys release the Codex workspace already builds.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
+# `ling uninstall` (src/uninstall.rs) takes its folder out of the user's Path in the registry and
+# tells running programs.
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging"] }
 # Whether the elevated sandbox is set up, asked exactly as Codex asks it (src/airgapped.rs).
 codex-windows-sandbox = { workspace = true }
 # `ling audit egress`: the ETW real-time trace (src/audit.rs; WINDOWS_ARM §14).
