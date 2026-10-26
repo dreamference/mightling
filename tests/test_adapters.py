@@ -37,6 +37,20 @@ COMMIT = "1" * 40
 LAYER = "base_model.model.model.language_model.layers"
 
 
+@pytest.fixture
+def roomy_disk(monkeypatch):
+    """The receiving node has room for the adapter.
+
+    The check reads the real disk, and a CI runner has less free than an adapter's margin.
+    """
+    import types
+
+    monkeypatch.setattr(
+        "dreamference.node.node_adapter_sync.shutil.disk_usage",
+        lambda path: types.SimpleNamespace(total=4 << 40, used=2 << 40, free=2 << 40),
+    )
+
+
 @pytest.fixture(scope="module")
 def keys(tmp_path_factory):
     """Two session keys: one standing in for the release key, one for a stranger's."""
@@ -539,7 +553,7 @@ def staged_repo(tmp_path, keys, **changes):
     return folder
 
 
-def test_a_node_installs_a_signed_adapter_it_receives(tmp_path, keys, monkeypatch):
+def test_a_node_installs_a_signed_adapter_it_receives(tmp_path, keys, monkeypatch, roomy_disk):
     from dreamference.node.node_adapter_sync import NodeAdapterSync
 
     monkeypatch.setattr(
@@ -551,7 +565,7 @@ def test_a_node_installs_a_signed_adapter_it_receives(tmp_path, keys, monkeypatc
 
 
 def test_a_node_refuses_a_tampered_or_unsigned_adapter_and_adds_nothing(
-    tmp_path, keys, monkeypatch
+    tmp_path, keys, monkeypatch, roomy_disk
 ):
     from dreamference.node.node_adapter_sync import NodeAdapterSync
 
@@ -564,7 +578,7 @@ def test_a_node_refuses_a_tampered_or_unsigned_adapter_and_adds_nothing(
 
 
 def test_a_node_serving_another_base_keeps_the_adapter_as_a_base_mismatch(
-    tmp_path, keys, monkeypatch, capsys
+    tmp_path, keys, monkeypatch, capsys, roomy_disk
 ):
     from dreamference.node.node_adapter_sync import NodeAdapterSync
 
