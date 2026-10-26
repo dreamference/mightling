@@ -1,0 +1,136 @@
+# Rebuild one published release's Python source archive and wheel from its tag, and sign the
+# release's SHA256SUMS again. Run by hand (workflow_dispatch) from main: the signing key lives in
+# the `release` environment, which only main and release/* can use.
+#
+# What it changes on the release: dreamference-<version>.tar.gz, dreamference-<version>-py3-none-any.whl,
+# SHA256SUMS (only those two lines) and SHA256SUMS.sig. Every other asset (the binaries, their
+# per-target .sha256sums, install.sh, install.ps1, the installers) is left as published, and the
+# run fails if any of them no longer matches the release's current, verified SHA256SUMS.
+#
+# Every action is pinned to a commit, with its tag in a comment, as in release.yml.
+name: Rebuild release sources
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The published release whose sources are rebuilt, e.g. v1.7.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check the tag
+        id: version
+        run: |
+          [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || { echo "::error::$TAG is not vX.Y.Z"; exit 1; }
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel, as release.yml does
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed -i -E "s/version=\"[^\"]+\"/version=\"$VERSION\"/" setup.py && grep -n 'version=' setup.py
+          pip install build
+          python -m build
+          ls -l dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-dist
+          path: dist/*
+          if-no-files-found: error
+
+  resign:
+    needs: build
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    environment: release
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            ling-rs/release-signing.pub
+          sparse-checkout-cone-mode: false
+          path: source
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-dist
+          path: dist
+      - name: Download the release and check it as published
+        run: |
+          mkdir old && cd old
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
+          grep -v '^#' ../source/ling-rs/release-signing.pub | awk 'NF {print "mightling-release " $1 " " $2}' > ../trusted
+          if [[ -f release-key-transition.pub ]]; then
+            cp ../trusted ../endorsers
+            ssh-keygen -Y verify -f ../endorsers -I mightling-release -n mightling-release-key \
+              -s release-key-transition.pub.sig < release-key-transition.pub
+            grep -v '^#' release-key-transition.pub | awk 'NF {print "mightling-release " $1 " " $2}' >> ../trusted
+          fi
+          ssh-keygen -Y verify -f ../trusted -I mightling-release -n mightling-release -s SHA256SUMS.sig < SHA256SUMS
+          sha256sum -c --strict SHA256SUMS
+      - name: Write and sign the new SHA256SUMS
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          sdist="dreamference-$VERSION.tar.gz"
+          wheel="dreamference-$VERSION-py3-none-any.whl"
+          for f in "$sdist" "$wheel"; do
+            [[ -f "dist/$f" ]] || { echo "::error::the build made no $f"; ls dist; exit 1; }
+            grep -q "  $f\$" old/SHA256SUMS || { echo "::error::SHA256SUMS of $TAG lists no $f"; exit 1; }
+          done
+          # Only the two lines change; every other line stays byte for byte.
+          awk -v s="$sdist" -v w="$wheel" -v hs="$(sha256sum "dist/$sdist" | cut -d' ' -f1)" \
+              -v hw="$(sha256sum "dist/$wheel" | cut -d' ' -f1)" \
+              '$2 == s {print hs "  " s; next} $2 == w {print hw "  " w; next} {print}' old/SHA256SUMS > SHA256SUMS
+          diff old/SHA256SUMS SHA256SUMS || true
+          [[ -n "$RELEASE_SIGNING_KEY" ]] || { echo "::error::RELEASE_SIGNING_KEY is not set"; exit 1; }
+          key="$(mktemp -d)/release-ed25519"
+          ( umask 077 && printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key" )
+          ssh-keygen -q -Y sign -f "$key" -n mightling-release SHA256SUMS
+          rm -f "$key"
+          ssh-keygen -Y verify -f trusted -I mightling-release -n mightling-release -s SHA256SUMS.sig < SHA256SUMS
+          { cat SHA256SUMS; sha256sum SHA256SUMS SHA256SUMS.sig; } > attested.sha256
+          cp "dist/$sdist" "dist/$wheel" .
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: attested.sha256
+      - name: Replace the four assets
+        run: |
+          # The signature last: until it lands, a client sees a sums file the old signature does not
+          # cover and refuses the release, never the other way round.
+          gh release upload "$TAG" "dreamference-$VERSION.tar.gz" "dreamference-$VERSION-py3-none-any.whl" \
+            SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" SHA256SUMS.sig --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Check the release as a client will
+        run: |
+          mkdir new && cd new
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
+          ssh-keygen -Y verify -f ../trusted -I mightling-release -n mightling-release -s SHA256SUMS.sig < SHA256SUMS
+          sha256sum -c --strict SHA256SUMS
