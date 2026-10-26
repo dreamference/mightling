@@ -69,7 +69,16 @@ def step(name: str, title: str) -> dict[str, object]:
     return next(s for s in steps(name) if s.get("name") == title)
 
 
-@pytest.mark.parametrize("name", ["mac-preview.yml", "build-clients.yml", "release.yml"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "mac-preview.yml",
+        "build-clients.yml",
+        "release.yml",
+        "release-build.yml",
+        "release-dry-run.yml",
+    ],
+)
 def test_every_run_block_parses_with_bash_n(tmp_path: Path, name: str) -> None:
     jobs = workflow(name)["jobs"]
     assert isinstance(jobs, dict)
@@ -184,12 +193,21 @@ def test_the_app_is_signed_after_packaging_run_then_stapled_before_the_dmg() -> 
 def test_the_release_asks_for_signing_and_says_which_mac_app_it_carries() -> None:
     jobs = workflow("release.yml")["jobs"]
     assert isinstance(jobs, dict)
-    assert jobs["ling-clients"]["with"]["sign"] is True
-    assert jobs["desktop-mac"]["with"]["sign"] is True
+    # The release asks release-build.yml for signing, which hands it to both macOS workflows.
+    assert jobs["build"]["uses"] == "./.github/workflows/release-build.yml"
+    assert jobs["build"]["with"]["sign"] is True
+    build = workflow("release-build.yml")
+    built = build["jobs"]
+    assert isinstance(built, dict)
+    assert built["ling-clients"]["with"]["sign"] == "${{ inputs.sign }}"
+    assert built["desktop-mac"]["with"]["sign"] == "${{ inputs.sign }}"
     # Environment secrets reach a called job through its own `environment`, not from the caller.
-    assert "secrets" not in jobs["ling-clients"] and "secrets" not in jobs["desktop-mac"]
+    for called in (jobs["build"], built["ling-clients"], built["desktop-mac"]):
+        assert "secrets" not in called
+    outputs = trigger(build)["workflow_call"]["outputs"]  # type: ignore[index]
+    assert outputs["mac_signed"]["value"] == "${{ jobs.desktop-mac.outputs.signed }}"
     publish = next(s for s in jobs["release"]["steps"] if s.get("name") == "Publish GitHub release")
-    assert publish["env"]["MAC_SIGNED"] == "${{ needs.desktop-mac.outputs.signed }}"
+    assert publish["env"]["MAC_SIGNED"] == "${{ needs.build.outputs.mac_signed }}"
     run = str(publish["run"])
     assert (
         run.index('[[ "$MAC_SIGNED" == "true" ]]')

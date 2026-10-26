@@ -18,6 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS_YML = ROOT / ".github" / "workflows" / "windows.yml"
 RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_BUILD_YML = ROOT / ".github" / "workflows" / "release-build.yml"
 INSTALLER_NSI = ROOT / "desktop" / "electron" / "windows" / "installer.nsi"
 INSTALL_PS1 = ROOT / "install.ps1"
 UPDATE_RS = ROOT / "ling-rs" / "src" / "update.rs"
@@ -57,7 +58,8 @@ def test_the_installers_are_the_desktop_artifacts_the_release_collects():
     # The release downloads every artifact of the run, the called Windows workflow's included,
     # and checksums every file it carries in the signed SHA256SUMS.
     release = RELEASE_YML.read_text()
-    assert "uses: ./.github/workflows/windows.yml" in release
+    assert "uses: ./.github/workflows/release-build.yml" in release
+    assert "uses: ./.github/workflows/windows.yml" in RELEASE_BUILD_YML.read_text()
     assert "merge-multiple: true" in release
     assert "mapfile -t files < <(find artifacts -type f | sort)" in release
 
@@ -103,7 +105,7 @@ def test_install_ps1_finds_the_installer_windows_yml_names_for_its_own_machine(v
 
 def test_install_ps1_checks_the_installer_then_runs_it_silently_with_no_mark_of_the_web():
     text = INSTALL_PS1.read_text()
-    check = text.index('if ($Actual -ne $AllSums[$SetupName])')
+    check = text.index("if ($Actual -ne $AllSums[$SetupName])")
     unblock = text.index("Unblock-File -Path $AppSetup")
     run = text.index('Start-Process -FilePath $AppSetup -ArgumentList "/S" -PassThru -Wait')
     assert check < unblock < run
@@ -113,7 +115,10 @@ def test_install_ps1_checks_the_installer_then_runs_it_silently_with_no_mark_of_
     assert placed < run < cleaned
     assert "[switch]$NoApp" in text and "if (-not $NoApp)" in text
     # The same switch, run silently, as windows.yml's own install checks it.
-    assert 'Start-Process -FilePath $setup.FullName -ArgumentList "/S" -PassThru -Wait' in WINDOWS_YML.read_text()
+    assert (
+        'Start-Process -FilePath $setup.FullName -ArgumentList "/S" -PassThru -Wait'
+        in WINDOWS_YML.read_text()
+    )
 
 
 def test_ling_update_updates_the_app_install_ps1_recorded():
@@ -124,7 +129,9 @@ def test_ling_update_updates_the_app_install_ps1_recorded():
     assert 'pub const APP_RECORD: &str = "desktop-app";' in update
     assert '$Record = Join-Path (Split-Path -Parent $InstallDir) "desktop-app"' in install
     assert '@("path=$AppDir", "version=$Tag")' in install
-    assert 'name.starts_with("Mightling-Setup-") && name.ends_with(&format!("-{arch}.exe"))' in update
+    assert (
+        'name.starts_with("Mightling-Setup-") && name.ends_with(&format!("-{arch}.exe"))' in update
+    )
     assert installer_name("1.7.2", "x64").startswith("Mightling-Setup-")
     # Run the same way: silently, after the same SHA256SUMS check.
     assert '.arg("/S")' in update
