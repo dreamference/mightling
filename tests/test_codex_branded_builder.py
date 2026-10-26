@@ -44,6 +44,18 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert status.stdout == ""
 
 
+def test_the_codex_submodule_is_committed_as_a_submodule():
+    # A worktree whose codex/ was replaced by a symlink to another checkout's committed that symlink
+    # once (release/1.7.1, 266ae50): the Windows build then found no codex/.github/actions and the
+    # release run failed. The index must hold codex as a submodule (mode 160000), never a link.
+    listed = subprocess.run(
+        ["git", "-C", builder_module.REPO_ROOT, "ls-files", "-s", "codex"], capture_output=True, text=True
+    )
+    if listed.returncode != 0 or not listed.stdout:
+        pytest.skip("not a git checkout")
+    assert listed.stdout.split()[0] == "160000", listed.stdout
+
+
 def test_the_patches_stay_small():
     # Anything bigger than a hook or a one-line string belongs in ling-rs/, which Cargo compiles
     # into the same binary; the patches are only the places Codex has to call it or say "Mightling".

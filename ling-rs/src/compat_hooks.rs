@@ -683,7 +683,8 @@ mod tests {
         });
         let out = translate_input(input);
         assert_eq!(out["tool_name"], "Edit");
-        assert_eq!(out["tool_input"]["file_path"], "/w/src/a.rs");
+        // The cwd joined with the patch's path: Windows writes its own separator between them.
+        assert_eq!(out["tool_input"]["file_path"].as_str().map(|path| path.replace('\\', "/")).as_deref(), Some("/w/src/a.rs"));
         assert_eq!(out["tool_input"]["old_string"], "old line");
         assert_eq!(out["tool_input"]["new_string"], "new line");
         let add = translate_input(json!({"cwd": "/w", "tool_name": "apply_patch",

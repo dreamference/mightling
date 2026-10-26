@@ -335,7 +335,9 @@ mod tests {
     fn codexs_command_list_is_the_pinned_tuis() {
         // Every name the pinned TUI's SlashCommand enum serializes, read from its source: a new
         // Codex command, or a renamed one, fails here until CODEX_COMMANDS has it.
-        let source = include_str!("../../tui/src/slash_command.rs");
+        // A Windows checkout may have CRLF line endings.
+        let source = include_str!("../../tui/src/slash_command.rs").replace("\r\n", "\n");
+        let source = source.as_str();
         let start = source.find("pub enum SlashCommand").unwrap();
         let body = &source[start..source[start..].find("\n}\n").unwrap() + start];
         let mut names = Vec::new();

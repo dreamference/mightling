@@ -511,7 +511,8 @@ mod tests {
             Places { cwd, home: Some(self.root.join("home")), managed: self.root.join("etc/CLAUDE.md"), root: repo, agents_files }
         }
         fn names(&self, memory: &Memory) -> Vec<String> {
-            memory.files.iter().map(|f| f.path.strip_prefix(&self.root).unwrap().display().to_string()).collect()
+            // `/` on every system, so the expected names read the same on Windows.
+            memory.files.iter().map(|f| f.path.strip_prefix(&self.root).unwrap().display().to_string().replace('\\', "/")).collect()
         }
     }
 

@@ -34,7 +34,8 @@ describe("earlier questions", () => {
     writeRecall(h, "t1", 100, "# NVFP4\n\nAnswer one");
     writeRecall(h, "t2", 200, "# Memory\n\nAnswer two");
     expect(recallIndex(h)).toEqual({ t1: 100, t2: 200 });
-    expect(fs.statSync(path.join(h, HISTORY_DIR, "t1.md")).mode & 0o777).toBe(0o600);
+    // POSIX modes only: Windows has none (its ACLs keep the profile private).
+    if (process.platform !== "win32") expect(fs.statSync(path.join(h, HISTORY_DIR, "t1.md")).mode & 0o777).toBe(0o600);
     expect(() => writeRecall(h, "../evil", 1, "x")).toThrow(/thread id/);
     expect(() => writeRecall(h, "t3", 1, 42)).toThrow(/text/);
     // A long one keeps its start.
