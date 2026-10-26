@@ -218,6 +218,8 @@ mod tests {
         dir
     }
 
+    // Unix only: elsewhere `Cache::at` keeps no cache, since it cannot check who owns the folder.
+    #[cfg(unix)]
     #[test]
     fn an_answer_is_reused_within_the_hour_and_not_after() {
         let cache = Cache::at(scratch("ttl")).unwrap();
@@ -234,6 +236,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(cache.dir());
     }
 
+    // Unix only: elsewhere `Cache::at` keeps no cache, since it cannot check who owns the folder.
+    #[cfg(unix)]
     #[test]
     fn searches_that_go_out_are_spaced() {
         let cache = Cache::at(scratch("spacing")).unwrap();
