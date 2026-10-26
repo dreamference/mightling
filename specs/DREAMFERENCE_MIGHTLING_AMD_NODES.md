@@ -391,6 +391,44 @@ Both `install.ps1` bugs are fixed in **1.7.1** (the `PATH` array, and the user n
 
 **Still for a person at the box** (§5.5 steps 9–13): the download in a browser, which is what SmartScreen judges (`curl.exe` sets no Mark of the Web); the UAC prompt as a standard user; whether the **elevated sandbox** runs commands in an interactive session; the app's window (Ask, then Work); sleep and wake; and Smart App Control off (§13.2).
 
+### 13.4 First engine measurements on Windows (§9 Phase 1, part), 2026-10-26
+
+**Setup.** Windows 11 25H2 (26200.9711), AMD Software 26.10.1, VGM **96 GB**, Windows power mode **Best performance** on mains. The firmware's power mode is unknown: it cannot be read from Windows, and the BIOS name ends in `120W` (§13.2). These are first numbers, not a tuned configuration. Engine: upstream **llama.cpp `b11907`** (2026-10-26) release zips `win-vulkan-x64` and `win-rocm-10.0-x64`, both SHA-256 checked against the release. The ROCm zip no longer bundles `hipblas.dll`, so `ggml-hip.dll` fails to load (error 126) and the build finds no device on its own. It ran with **TheRock 10.0.0 for gfx1151** (`therock-dist-windows-gfx1151-10.0.0.tar.gz` from `stable.repo.amd.com`, 1.68 GB, SHA-256 `1293927b…0ce38`) first on `PATH`. Model: unsloth **`Qwen3.8-27B-UD-Q4_K_XL.gguf`** (16.34 GiB) at revision `4ca72078…`, SHA-256 matching Hugging Face's. Its own MTP layers serve `--spec-type draft-mtp`, so the separate `MTP/` sidecar was not needed. Flash attention on, the model loaded without mmap (`-lm none`), all layers on the GPU. Downloads for this section came to about 21 GB.
+
+**`llama-bench`, no drafting** (`-p 512 -n 128 -d 0,32768 -r 2`; tok/s):
+
+| Backend | prefill pp512, empty | prefill pp512 at 32K | decode tg128, empty | decode tg128 at 32K |
+|---|---|---|---|---|
+| Vulkan | 264 | 169 | 12.3 | 10.9 |
+| ROCm (TheRock 10.0) | **301** | **226** | 11.8 | 10.5 |
+
+**`llama-server` through `/v1/chat/completions`**, 400 tokens at temperature 0 with thinking off, on a prose prompt and a code prompt. The text was read: coherent English and a Python function with a docstring, the same opening on every configuration.
+
+| Backend | Drafting | decode, prose | decode, code | MTP acceptance |
+|---|---|---|---|---|
+| Vulkan | none | 11.9 | 12.1 | — |
+| Vulkan | MTP, 4 draft tokens | 14.6 | **28.6** | 37% prose, 79% code |
+| ROCm | MTP, 4 draft tokens | 14.1 | 23.7 | 37% prose, 80% code |
+
+**Memory.** The GPU's dedicated use peaked at **19.1 GB (Vulkan) and 19.9 GB (ROCm)** across the bench, 32K depth included, with under 1 GB of shared memory. Windows kept at least 22.3 GB of its 31.6 GB free. So the 27B does not need the 96 GB carve-out. That carve-out is for Flash-Next (§6.2).
+
+**Against the figures earlier in this document.**
+
+- Plain decode (about 12 tok/s empty, about 11 at 32K) matches gufo's autoregressive **12.4** on Linux (§3.1). The bandwidth bound is the same on Windows.
+- **Prefill is what Windows costs.** ROCm's 301 / 226 tok/s at 0 / 32K stands against llama.cpp's **348 / 239** on Linux and gufo's 648 / 413. Vulkan is 15–25% below ROCm at depth.
+- Production's GB10 prefills at about **1,700 tok/s** (MODELS §2): **7.5 times** this box's best at 32K.
+- MTP decode on code (24–29 tok/s) reaches the GB10's prose figure (25.5), but not its code figure (50.3).
+- AMD's own Windows figure, "up to 24.5" with MTP = 4 (§3.1), lies between this box's prose (14–15) and code (24–29) results.
+- By §4's method (2,000-token tail, 200-token answer), one **Work turn at 32K** costs about 2,000 ÷ 226 + 200 ÷ ~13 ≈ **24 s on ROCm** and about 27 s on Vulkan. That is against §4's ~19 s estimate for llama.cpp on Linux and **~5–6 s** on the GB10. **Ask** on this box (14–15 tok/s on prose with MTP) is slower than §4's estimate of ~22–25 tok/s for Windows.
+
+**Not measured yet.**
+
+- Flash-Next (93–111 GB of GGUF; the 96 GB carve-out is now in place) and gufo's Windows port.
+- The DFlash2 drafter, and prefill at 64K.
+- The tool-call canary through `/v1/responses` from `ling exec` against a server on the box.
+- Package power: no reading from Windows.
+- The same runs on cable instead of Wi-Fi. The model is local, so that changes the downloads, not these numbers.
+
 ---
 
 ## Sources
