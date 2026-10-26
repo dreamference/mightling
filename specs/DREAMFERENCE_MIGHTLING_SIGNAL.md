@@ -902,7 +902,7 @@ After an answer, the bridge asks `ling web` for the files the agent changed in t
 
 ### 19.8 Speed and feedback (branch `signal/latency`, 2026-10-26; streaming is the owner's decision of the same day)
 
-The owner found answers over Signal slow. What the rollouts, the journal and `ling signal status` on gx10-9428 showed:
+The owner found answers over Signal slow. What the rollouts, the journal and `ling signal status` on gx10-1a2b showed:
 
 - **The model server was fast and idle** (a short completion through the gate: 0.35 s).
 - **The 2026-10-25 question took 40.1 s of agent time**, measured from the turn's user item to its answer: the first model call 3.2 s, `ling-search --read` 3.1 s, the second call 6.6 s (an 8,000-token prefill of what the search returned), **`image_search` 14.1 s**, and 12.8 s writing a 494-token answer that embedded `/images/…` links no phone bridge can show. In Note to Self nothing showed for all of it: no typing (Note to Self has none), no receipt, and the first progress note only after a minute. The owner asked the same question again on Telegram 57 s after the Signal answer had been written.
