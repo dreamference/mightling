@@ -14,10 +14,10 @@ image carries that very file. Night 17 (2026-10-26 to 27) compares b8e9451 with 
 phase-merge fix.
 
 **Before publishing:**
-- **The image** pushed to `ghcr.io/dreamference/ling-serve` (it is built: `:bdda3a244a9c`, the
-  verified binary; `scripts/build_ling_serve_image.sh`), made public, and its digest pinned in
-  `QWEN38_LING_IMAGE` ({{TBD digest}}); `test_the_image_digest_is_a_real_pin_not_the_placeholder`
-  fails until then.
+- **The image** `ghcr.io/dreamference/ling-serve:bdda3a244a9c` (the verified binary;
+  `scripts/build_ling_serve_image.sh`), pushed on 2026-10-26 and pinned in `QWEN38_LING_IMAGE` as
+  `sha256:87807c50350cdf2338b840d86c6a5ce0fc076ab88d1610eaf0459061ec1e6f8c`; linked to the
+  mightling repository by its source label. Made public: {{TBD the owner's click}}.
 - **Long context** (the nights ran 65,536), done on node-b on 2026-10-26 with the bdda3a2 image:
   started at 262,144 in 40 s (host memory +60 GB, 46 GB left available), both needles of a
   204,857-token prompt answered exactly, prefill ~850-900 tokens/s at that length, decode 39.6

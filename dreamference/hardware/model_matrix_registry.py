@@ -283,9 +283,10 @@ QWEN38_LING_ENGINE_COMMIT: Final[str] = "bdda3a244a9cd24742346dce806561f7441405f
 QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
 
 # ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
-# aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push.
+# aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push
+# (ghcr.io/dreamference/ling-serve:bdda3a244a9c, pushed 2026-10-26; linux/arm64, 682 MB).
 QWEN38_LING_IMAGE: Final[str] = (
-    "ghcr.io/dreamference/ling-serve@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    "ghcr.io/dreamference/ling-serve@sha256:87807c50350cdf2338b840d86c6a5ce0fc076ab88d1610eaf0459061ec1e6f8c"
 )
 
 # The DFlash2 drafters ling-serve can run, pinned by commit. Speculation is exact, so the drafter
