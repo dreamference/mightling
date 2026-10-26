@@ -64,15 +64,15 @@
           <h3>Mac and Linux clients</h3>
           <p>Your other computers use the GB10's model over the local network. On a Mac or another Linux machine,
             the same command above installs the <code>ling</code> client; it finds the GB10 by itself.</p>
-          <p>The Mac desktop app is an <b>unsigned preview</b>:
-            <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#on-a-mac-preview">how to install and open it</a>.</p>
+          <p>From 1.7.2 it also puts the desktop app in Applications on a Mac, ready to open (<code>--no-app</code>
+            leaves it out).</p>
         </div>
         <div class="client">
           <h3>Windows client <span class="tag">preview</span></h3>
           <div class="cmd has-copy"><button class="copy" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">Copy</button>
 <pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
-          <p>In PowerShell. It installs without administrator rights, then Windows asks once to set up the
-            agent's sandbox. Not signed yet, so Smart App Control must be off.
+          <p>In PowerShell. It installs without administrator rights (from 1.7.2 the desktop app too), then
+            Windows asks once to set up the agent's sandbox. Not signed yet, so Smart App Control must be off.
             <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Read the script</a>.</p>
         </div>
       </div>
@@ -94,21 +94,13 @@
     <p class="sub">Mightling 1.7.0's desktop app holds Ask and Work in one window. Work is a full workbench for
       agent sessions: a composer with files, skills and commands, a review pane to stage, revert and commit,
       worktrees, terminal tabs, and a file tree and file tabs beside the thread. On your other computers it is a
-      client of your GB10, which it finds on the local network. Check each download against the release's signed
-      <code>SHA256SUMS</code> first.</p>
+      client of your GB10, which it finds on the local network.</p>
     <div class="pillars">
       <div class="pillar">
         <h3>macOS <span class="tag">preview</span></h3>
-        <p><code>Mightling-1.7.0-arm64-preview.dmg</code> for Apple silicon and the <code>x64</code> one for
-          Intel, macOS 12 or later. It is not signed with an Apple Developer ID or notarized, so macOS refuses it
-          the first time:</p>
-        <ol>
-          <li>Drag Mightling onto Applications.</li>
-          <li>Open it once; macOS says it cannot verify it. Click Done.</li>
-          <li>System Settings → Privacy &amp; Security → <b>Open Anyway</b>.</li>
-        </ol>
-        <p>On macOS 14 and earlier, Control-click the app and choose Open instead.
-          <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#on-a-mac-preview">Step by step</a>.</p>
+        <p>From 1.7.2, <a href="#install">the install command</a> puts Mightling in Applications beside
+          <code>ling</code>, and it opens like any other app. Apple silicon and Intel, macOS 12 or later.
+          Run the command again to update it.</p>
       </div>
       <div class="pillar">
         <h3>Linux</h3>
@@ -120,13 +112,22 @@
       </div>
       <div class="pillar">
         <h3>Windows 11 <span class="tag">preview</span></h3>
-        <p>New in 1.7: an installer, <code>Mightling-Setup-1.7.0-x64.exe</code> for x86-64 and
-          the <code>arm64</code> one for Windows on Arm, with <code>ling.exe</code> inside. It installs for you alone,
-          without administrator rights, and adds a Start menu entry; Settings → Apps removes it.</p>
-        <p>Not signed yet: SmartScreen warns the first time (More info, then Run anyway), and Smart App Control
-          must be off. To update, run the next release's installer.</p>
+        <p>From 1.7.2, <a href="#install">the PowerShell line</a> installs the app as well, for you alone and
+          without administrator rights, with a Start menu entry; Settings → Apps removes it. Run the line again
+          to update it. Smart App Control must be off.</p>
       </div>
     </div>
+    <details class="other"><summary>Other ways to install</summary>
+      <p>The release page also carries the Mac dmg (<code>Mightling-&lt;version&gt;-arm64-preview.dmg</code>, or
+        <code>x64</code> for Intel) and the Windows installer (<code>Mightling-Setup-&lt;version&gt;-x64.exe</code>, or
+        <code>arm64</code>). They are unsigned previews: downloaded in a browser, they are stopped the first time.
+        Check each against the release's signed <code>SHA256SUMS</code> first.</p>
+      <ul>
+        <li>macOS 15 and later: drag Mightling to Applications and open it once, then System Settings › Privacy
+          &amp; Security › <b>Open Anyway</b>. On macOS 14 and earlier, Control-click the app › Open.</li>
+        <li>Windows: SmartScreen › <b>More info</b> › <b>Run anyway</b>. Smart App Control must be off.</li>
+      </ul>
+    </details>
     <p class="sub after">Also in 1.7.0: Night Shift can try a task several times and keep the best attempt
       (<code>/night add --best-of N</code>), one machine can run several Signal bridges, and a client chooses
       between two nodes on one network without losing the one it knows.

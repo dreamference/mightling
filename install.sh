@@ -2,7 +2,7 @@
 # Installs Mightling from a release, with no checkout of the repository and nothing compiled.
 #
 #   ./install.sh [--role client|node] [--version X.Y.Z] [--no-advertise]
-#                [--from <dir>] [--no-host-setup] [--no-model]
+#                [--from <dir>] [--no-host-setup] [--no-model] [--no-app]
 #
 # What it installs depends on the machine:
 #
@@ -10,7 +10,11 @@
 #            `ling-code` and, on Linux, `ling-docs` when the release carries them): prebuilt
 #            binaries, downloaded from the release, checked against its checksum file, placed in
 #            ~/.local/share/dreamference/mightling/bin and linked into ~/.local/bin. Releases carry it
-#            for arm64 and x86-64 Linux and for macOS (Apple silicon and Intel).
+#            for arm64 and x86-64 Linux and for macOS (Apple silicon and Intel). On a Mac it also
+#            installs the desktop app, Mightling.app, from the release's dmg for that Mac (checked
+#            against SHA256SUMS like everything else), into /Applications when you can write
+#            there and ~/Applications otherwise; --no-app leaves it out. Downloaded with curl, it
+#            carries no quarantine mark, so the unsigned preview opens with no Gatekeeper dialog.
 #   node     the client, plus `ling-admin` (the Python package, from the release's wheel, in a
 #            virtualenv of its own) and everything else a node needs, with no question asked:
 #            python3-venv where the system lacks it; the host settings a model load needs, and
@@ -41,13 +45,15 @@
 # --no-advertise keeps the node off the local network (`ling-admin node enable` offers it later).
 #
 # It downloads the same assets, by the same names and with the same checks, as `ling update`
-# (ling-rs/src/update.rs), so a machine installed this way is updated by that command.
+# (ling-rs/src/update.rs), so a machine installed this way is updated by that command. `ling
+# update` leaves the Mac's desktop app as it is; running this script again updates it too.
 #
 # The repository is public, so no token is needed. One is used when present (GH_TOKEN,
 # GITHUB_TOKEN, or a logged-in `gh`): it raises GitHub's rate limit, and it is what reads a private
 # fork named by MIGHTLING_RELEASE_REPO.
 # MIGHTLING_RELEASE_REPO names another repository (a fork), MIGHTLING_RELEASE_API another API root (the
-# tests' stand-in server); MIGHTLING_INSTALL_DIR and MIGHTLING_VENV move the two directories.
+# tests' stand-in server); MIGHTLING_INSTALL_DIR and MIGHTLING_VENV move the two directories, and
+# MIGHTLING_APP_DIR the folder the Mac's app goes into.
 #
 # Releases from 1.5.0 on are signed: SHA256SUMS, which lists every file of the release, carries an
 # Ed25519 signature by Mightling's release key (SHA256SUMS.sig), checked here with OpenSSH's
@@ -86,6 +92,8 @@ ADVERTISE=1
 FROM=""
 HOST_SETUP=1
 MODEL=1
+APP=1
+APP_DIR="${MIGHTLING_APP_DIR:-}"
 
 # A line that cannot be written (a reader that went away) is dropped, never the end of the run.
 say()  { printf '%s\n' "$*" 2>/dev/null || true; }
@@ -114,6 +122,7 @@ while [ $# -gt 0 ]; do
         --from=*)    FROM="${1#*=}"; shift ;;
         --no-host-setup) HOST_SETUP=0; shift ;;
         --no-model)  MODEL=0; shift ;;
+        --no-app)    APP=0; shift ;;
         -h|--help)   usage; exit 0 ;;
         *)           fail "unknown argument: $1 (see --help)" ;;
     esac
@@ -185,7 +194,9 @@ fi
 
 WORK="$(mktemp -d)"
 KEEPALIVE=""
+MOUNTED=""
 cleanup() {
+    if [ -n "$MOUNTED" ]; then hdiutil detach "$MOUNTED" -force -quiet 2>/dev/null || true; fi
     rm -rf "$WORK"
     if [ -n "$KEEPALIVE" ]; then kill "$KEEPALIVE" 2>/dev/null || true; fi
 }
@@ -425,6 +436,30 @@ for name in $REQUIRED $OPTIONAL; do
     INSTALLED="$INSTALLED $name"
 done
 
+# The desktop app on a Mac: the release's dmg for this Mac (mac-preview.yml names it
+# Mightling-<version>-<arm64|x64>[-preview].dmg), checked against the release-wide SHA256SUMS,
+# which the signature above covers, before anything is placed. A release without one (a Mac build
+# is optional in release.yml) installs the terminal agent alone. curl sets no quarantine mark, so
+# neither the dmg nor the app copied out of it meets Gatekeeper's first-launch dialog.
+APP_DMG=""
+if [ "$APP" = 1 ] && [ "$os" = "apple-darwin" ]; then
+    case "$arch" in aarch64) app_arch="arm64" ;; *) app_arch="x64" ;; esac
+    dmg="$(awk -F'\t' -v pattern="^Mightling-.*-$app_arch(-preview)?[.]dmg\$" '$1 ~ pattern {print $1; exit}' "$WORK/assets.tsv")"
+    if [ -z "$dmg" ]; then
+        say "ℹ️  Release $TAG carries no desktop app for this Mac; installing the terminal agent only."
+    elif ! { [ -f "$WORK/SHA256SUMS" ] || fetch SHA256SUMS; }; then
+        say "⚠️  Release $TAG has no SHA256SUMS to check $dmg against; the desktop app is left out."
+    else
+        wanted="$(awk -v file="$dmg" '{ f = $2; sub(/^\*/, "", f); if (f == file) { print $1; exit } }' "$WORK/SHA256SUMS")"
+        [ -n "$wanted" ] || fail "SHA256SUMS has no checksum for $dmg; nothing was installed."
+        say "📦 Downloading the desktop app ($dmg) ..."
+        fetch "$dmg" || fail "could not download $dmg; nothing was installed."
+        [ "$(sha256 "$WORK/$dmg")" = "$wanted" ] \
+            || fail "$dmg does not match its checksum in SHA256SUMS; nothing was installed."
+        APP_DMG="$dmg"
+    fi
+fi
+
 # The product was called Puffin before 1.5 (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4). An old
 # installation's folder becomes the new one, keeping the code index's tools in it, and the old
 # command links go: the old names are not kept as aliases. `ling` moves the agent's home and the
@@ -463,6 +498,49 @@ done
 printf '%s\n' "$TAG" > "$INSTALL_DIR/VERSION"
 say "✅ Installed$INSTALLED in $INSTALL_DIR/bin"
 step done "Mightling $TAG installed:$INSTALLED"
+
+# The app goes where a copy already is, else into /Applications when this user may write there
+# (an administrator of the Mac may), else ~/Applications, which needs no one's permission. It is
+# copied out of the mounted dmg under a hidden name and renamed over the old one, so a failure
+# leaves the previous app in place.
+if [ -n "$APP_DMG" ]; then
+    if [ -z "$APP_DIR" ]; then
+        for candidate in /Applications "$HOME/Applications"; do
+            if [ -d "$candidate/Mightling.app" ] && [ -w "$candidate" ]; then APP_DIR="$candidate"; break; fi
+        done
+    fi
+    if [ -z "$APP_DIR" ]; then
+        if [ -d /Applications ] && [ -w /Applications ]; then APP_DIR="/Applications"; else APP_DIR="$HOME/Applications"; fi
+    fi
+    APP_PATH="$APP_DIR/Mightling.app"
+    # A dmg that somehow carries the mark would pass it on to everything mounted from it.
+    xattr -d com.apple.quarantine "$WORK/$APP_DMG" 2>/dev/null || true
+    mkdir -p "$WORK/dmg" "$APP_DIR"
+    rm -rf "$APP_DIR/.Mightling.app.new"
+    if ! hdiutil attach "$WORK/$APP_DMG" -nobrowse -readonly -noverify -noautoopen -quiet -mountpoint "$WORK/dmg" >> "$WORK/app.log" 2>&1; then
+        say "⚠️  Could not open $APP_DMG ($(tail -n 1 "$WORK/app.log")); the desktop app was not installed."
+        step failed "desktop app: $APP_DMG did not mount; run this script again"
+    else
+        MOUNTED="$WORK/dmg"
+        if [ -d "$WORK/dmg/Mightling.app" ] && ditto "$WORK/dmg/Mightling.app" "$APP_DIR/.Mightling.app.new" >> "$WORK/app.log" 2>&1; then
+            hdiutil detach "$WORK/dmg" -quiet >> "$WORK/app.log" 2>&1 || hdiutil detach "$WORK/dmg" -force -quiet 2>/dev/null || true
+            MOUNTED=""
+            rm -rf "$APP_DIR/.Mightling.app.old"
+            if [ -e "$APP_PATH" ]; then mv "$APP_PATH" "$APP_DIR/.Mightling.app.old"; fi
+            mv "$APP_DIR/.Mightling.app.new" "$APP_PATH"
+            rm -rf "$APP_DIR/.Mightling.app.old"
+            xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
+            say "✅ Installed the desktop app: $APP_PATH (open it from Launchpad or Spotlight)"
+            step done "desktop app installed: $APP_PATH"
+        else
+            rm -rf "$APP_DIR/.Mightling.app.new"
+            say "⚠️  Could not copy Mightling.app out of $APP_DMG; the desktop app was not installed."
+            step failed "desktop app: could not copy it out of $APP_DMG; run this script again"
+        fi
+    fi
+elif [ "$APP" = 0 ] && [ "$os" = "apple-darwin" ]; then
+    step off "desktop app: --no-app"
+fi
 
 # -- the node --------------------------------------------------------------------------------
 

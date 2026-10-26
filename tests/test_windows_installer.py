@@ -1,7 +1,8 @@
 """The Windows desktop app's release path (1.7.0): `windows.yml` builds an NSIS installer per
 architecture, the release workflow publishes whatever its artifacts hold and names the installers in
-its notes, and nothing else fetches a Windows desktop asset (`ling update` and install.ps1 install
-the command-line client only; no release ever carried the earlier zip).
+its notes, and install.ps1 installs it silently beside the command-line client (the owner's
+decision of 2026-10-26: the one-line installers are the supported way to install), while `ling
+update` updates the command-line client only. No release ever carried the earlier zip.
 
 The workflow files and the NSIS script are read as text: nothing here runs makensis unless one is
 named in `MIGHTLING_TEST_MAKENSIS` (with `NSISDIR` for a bundle such as electron-builder's).
@@ -84,11 +85,37 @@ def test_ci_checks_the_entry_the_installer_writes():
     assert '"Uninstall Mightling.exe"' in windows
 
 
-def test_nothing_else_fetches_a_windows_desktop_asset():
-    # The command-line client's installers and `ling update` know only the per-target .gz assets.
-    for path in (INSTALL_PS1, UPDATE_RS):
-        text = path.read_text()
-        assert "Mightling-Setup" not in text and "Mightling-win32" not in text, path
+@pytest.mark.parametrize("version", ["1.7.0", "1.7.2", "1.8.0-rc.1"])
+def test_install_ps1_finds_the_installer_windows_yml_names_for_its_own_machine(version):
+    text = INSTALL_PS1.read_text()
+    pattern = re.search(r'\$_ -match "(\^Mightling-Setup-[^"]+)"', text).group(1)
+    assert '$AppArch = if ($Arch -eq "aarch64") { "arm64" } else { "x64" }' in text
+    for arch, other in (("arm64", "x64"), ("x64", "arm64")):
+        own = pattern.replace("$AppArch", arch)
+        assert re.fullmatch(own, installer_name(version, arch), re.IGNORECASE)
+        assert not re.fullmatch(own, installer_name(version, other), re.IGNORECASE)
+    assert "Mightling-win32" not in text
+
+
+def test_install_ps1_checks_the_installer_then_runs_it_silently_with_no_mark_of_the_web():
+    text = INSTALL_PS1.read_text()
+    check = text.index('if ($Actual -ne $AllSums[$SetupName])')
+    unblock = text.index("Unblock-File -Path $AppSetup")
+    run = text.index('Start-Process -FilePath $AppSetup -ArgumentList "/S" -PassThru -Wait')
+    assert check < unblock < run
+    # The installer runs after the client's files are in place and before the download folder goes.
+    placed = text.index("Move-Item -Force -Path (Join-Path $Work")
+    cleaned = text.index("} finally {\n    Remove-Item -Recurse -Force -Path $Work")
+    assert placed < run < cleaned
+    assert "[switch]$NoApp" in text and "if (-not $NoApp)" in text
+    # The same switch, run silently, as windows.yml's own install checks it.
+    assert 'Start-Process -FilePath $setup.FullName -ArgumentList "/S" -PassThru -Wait' in WINDOWS_YML.read_text()
+
+
+def test_ling_update_fetches_no_windows_desktop_asset():
+    # `ling update` knows only the per-target .gz assets; the app is updated by install.ps1 again.
+    text = UPDATE_RS.read_text()
+    assert "Mightling-Setup" not in text and "Mightling-win32" not in text
 
 
 @pytest.mark.skipif(not os.environ.get("MIGHTLING_TEST_MAKENSIS"), reason="no makensis named in MIGHTLING_TEST_MAKENSIS")

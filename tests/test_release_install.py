@@ -194,6 +194,22 @@ esac
     "usermod": r'''echo "usermod $*" >> "$HOME/root.log"; echo "$(cat "$HOME/groups-db" 2>/dev/null || echo tester) docker" > "$HOME/groups-db"''',
     "loginctl": r'''echo "loginctl $*" >> "$HOME/root.log"; [ "$1" = enable-linger ] && mkdir -p "$MIGHTLING_LINGER_DIR" && touch "$MIGHTLING_LINGER_DIR/$2"''',
     "sg": r'''echo "sg $*" >> "$HOME/sg.log"; [ "$1" = docker ] && [ "$2" = -c ] && exec sh -c "$3"''',
+    # A Mac's disk-image tools. `attach` "mounts" the dmg at its -mountpoint as a Mightling.app
+    # whose Info.plist holds the dmg's bytes (FAKE_HDIUTIL_FAIL: the attach fails); each call is
+    # recorded in $HOME/hdiutil.log, and xattr's in $HOME/xattr.log.
+    "hdiutil": r'''
+echo "hdiutil $*" >> "$HOME/hdiutil.log"
+if [ "$1" = attach ]; then
+    [ -n "$FAKE_HDIUTIL_FAIL" ] && { echo "hdiutil: attach failed - image not recognized" >&2; exit 1; }
+    dmg="$2"; mount=""
+    while [ $# -gt 0 ]; do [ "$1" = -mountpoint ] && mount="$2"; shift; done
+    mkdir -p "$mount/Mightling.app/Contents"
+    cp "$dmg" "$mount/Mightling.app/Contents/Info.plist"
+fi
+exit 0
+''',
+    "ditto": r'''cp -R "$1" "$2"''',
+    "xattr": r'''echo "xattr $*" >> "$HOME/xattr.log"''',
     # $HOME/upgrades: the `Inst` lines of `apt-get -s full-upgrade`.
     "apt-get": r'''
 echo "apt-get $*" >> "$HOME/apt.log"
@@ -437,6 +453,104 @@ def test_a_mac_is_never_installed_as_a_node(tmp_path, release_server):
     assert result.returncode == 1
     assert "macOS" in result.stderr and "client" in result.stderr
     assert server.requests == []
+
+
+# -- the desktop app on a Mac ------------------------------------------------------------------
+
+def mac_release(target="aarch64-apple-darwin", listed=None):
+    """A Mac client's release: its binaries and both dmgs that mac-preview.yml builds, signed."""
+    assets = binaries(signed=False, target=target)
+    for arch in ("arm64", "x64"):
+        assets[f"Mightling-9.9.9-{arch}-preview.dmg"] = f"the {arch} app".encode()
+    return sign(assets, listed=listed)
+
+
+def asset_requested(server, name):
+    index = list(server.assets).index(name)
+    return any(path.endswith(f"/releases/assets/{index}") for path, _ in server.requests)
+
+
+@pytest.mark.parametrize("uname_m, target, arch", [
+    ("arm64", "aarch64-apple-darwin", "arm64"),
+    ("x86_64", "x86_64-apple-darwin", "x64"),
+])
+def test_a_mac_gets_the_desktop_app_from_its_own_dmg_with_no_quarantine(tmp_path, release_server, uname_m,
+                                                                         target, arch):
+    server = release_server(mac_release(target))
+    result = run_install(tmp_path, server, uname_s="Darwin", uname_m=uname_m)
+    assert result.returncode == 0, result.stdout + result.stderr
+    app = tmp_path / "Applications/Mightling.app"
+    # /Applications does not exist here, so the app goes to ~/Applications, which needs no admin.
+    assert (app / "Contents/Info.plist").read_text() == f"the {arch} app"
+    assert (tmp_path / ".local/bin/ling").is_symlink()
+    other = "x64" if arch == "arm64" else "arm64"
+    assert not asset_requested(server, f"Mightling-9.9.9-{other}-preview.dmg")
+    attach = logged(tmp_path, "hdiutil.log").splitlines()[0]
+    assert attach.startswith("hdiutil attach ") and f"-{arch}-preview.dmg" in attach
+    for flag in ("-nobrowse", "-readonly", "-noautoopen", "-mountpoint"):
+        assert flag in attach.split()
+    assert "hdiutil detach" in logged(tmp_path, "hdiutil.log")
+    # Downloaded with curl, nothing carries the mark; it is cleared anyway, never added.
+    assert f"xattr -dr com.apple.quarantine {app}" in logged(tmp_path, "xattr.log")
+    assert not (tmp_path / "Applications/.Mightling.app.new").exists()
+    assert f"Installed the desktop app: {app}" in result.stdout
+
+
+def test_running_it_again_replaces_the_app_in_place(tmp_path, release_server):
+    stale = tmp_path / "Applications/Mightling.app/Contents"
+    stale.mkdir(parents=True)
+    (stale / "left-over").write_text("from the last release")
+    result = run_install(tmp_path, release_server(mac_release()), uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (stale / "Info.plist").read_text() == "the arm64 app"
+    assert not (stale / "left-over").exists()
+    assert sorted(path.name for path in (tmp_path / "Applications").iterdir()) == ["Mightling.app"]
+
+
+def test_a_dmg_that_fails_its_checksum_installs_nothing(tmp_path, release_server):
+    server = release_server(mac_release(listed={"Mightling-9.9.9-arm64-preview.dmg": "0" * 64}))
+    result = run_install(tmp_path, server, uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 1
+    assert "Mightling-9.9.9-arm64-preview.dmg does not match its checksum" in result.stderr
+    assert nothing_installed(tmp_path) and not (tmp_path / "Applications").exists()
+    assert logged(tmp_path, "hdiutil.log") == ""
+
+
+def test_no_app_installs_the_terminal_agent_alone(tmp_path, release_server):
+    server = release_server(mac_release())
+    result = run_install(tmp_path, server, "--no-app", uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / ".local/bin/ling").is_symlink()
+    assert not (tmp_path / "Applications").exists()
+    assert not asset_requested(server, "Mightling-9.9.9-arm64-preview.dmg")
+
+
+def test_a_release_without_a_mac_app_installs_the_terminal_agent(tmp_path, release_server):
+    # A Mac build is optional in release.yml: its absence is said, and is no failure.
+    result = run_install(tmp_path, release_server(binaries(target="aarch64-apple-darwin")),
+                         uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "carries no desktop app for this Mac" in result.stdout
+    assert (tmp_path / ".local/bin/ling").is_symlink()
+
+
+def test_a_dmg_that_does_not_mount_leaves_the_terminal_agent_installed(tmp_path, release_server):
+    result = run_install(tmp_path, release_server(mac_release()), uname_s="Darwin", uname_m="arm64",
+                         env_extra={"FAKE_HDIUTIL_FAIL": "1"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "the desktop app was not installed" in result.stdout
+    assert (tmp_path / ".local/bin/ling").is_symlink()
+    assert not (tmp_path / "Applications/Mightling.app").exists()
+
+
+def test_linux_never_downloads_the_mac_app(tmp_path, release_server):
+    assets = binaries(signed=False)
+    assets["Mightling-9.9.9-arm64-preview.dmg"] = b"the arm64 app"
+    server = release_server(sign(assets))
+    result = run_install(tmp_path, server, "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not asset_requested(server, "Mightling-9.9.9-arm64-preview.dmg")
+    assert logged(tmp_path, "hdiutil.log") == ""
 
 
 # -- the node, unattended -----------------------------------------------------------------------

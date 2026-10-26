@@ -166,6 +166,9 @@ footer a { color: var(--ink-soft); }
 }
 a.fn { font-size: 11px; font-weight: 600; vertical-align: super; line-height: 0; margin-left: 3px; text-decoration: none; }
 details.method { margin-top: 18px; }
+details.other { margin-top: 18px; }
+details ul { margin: 10px 0 0; padding-left: 20px; color: var(--ink-soft); }
+details li { margin: 6px 0; }
 .footnotes { margin: 18px 0 0; padding-left: 22px; color: var(--ink-soft); font-size: 14px; }
 .footnotes li { margin: 4px 0; overflow-wrap: anywhere; }
 .footnotes li:target { color: var(--ink); }
