@@ -1,5 +1,5 @@
 {
-  "comment": "Conformance cases for policy.json (specs/DREAMFERENCE_MIGHTLING_ASK.md §2.3, §13). Every implementation of the policy runs every case with the same stubs, at the air-gap level the case names in `airgapped` (\"off\" when absent): a named prompt's composed text is the string \"PROMPT:<name>\"; the scratch folders it creates are \"SCRATCH/1\", \"SCRATCH/2\", ... in order of creation, counted across the whole file; and a thread whose id starts with \"ask-\" is an existing Ask thread whose folder is \"ASK/<id>\" (no other thread has one). `pending` lists the ids (as JSON text) of server requests waiting for an answer before the case. `out` is the exact message forwarded to the app-server, compared as JSON values; `pendingAfter` the ids still waiting after it.",
+  "comment": "Conformance cases for policy.json (specs/DREAMFERENCE_MIGHTLING_ASK.md §2.3, §13). Every implementation of the policy runs every case with the same stubs, at the air-gap level the case names in `airgapped` (\"off\" when absent): a named prompt's composed text is the string \"PROMPT:<name>\"; the scratch folders it creates are \"SCRATCH/1\", \"SCRATCH/2\", ... in order of creation, counted across the whole file; and a thread whose id starts with \"ask-\" or \"chat-\" is an existing Ask thread whose folder is \"ASK/<id>\" (no other thread has one). `pending` lists the ids (as JSON text) of server requests waiting for an answer before the case. `out` is the exact message forwarded to the app-server, compared as JSON values; `pendingAfter` the ids still waiting after it.",
   "cases": [
     {
       "name": "an allowed request passes unchanged, its jsonrpc field removed",
@@ -62,7 +62,20 @@
       "name": "a phone bridge's thread (`chat`) is an Ask thread too: its prompt, a fresh scratch folder as cwd, a sandbox rooted there",
       "message": {"id": 10, "method": "thread/start", "params": {"prompt": "chat", "cwd": "/home/user", "sandbox": "danger-full-access"}},
       "accept": true,
-      "out": {"id": 10, "method": "thread/start", "params": {"baseInstructions": "PROMPT:chat", "cwd": "SCRATCH/3", "sandbox": "workspace-write"}}
+      "out": {"id": 10, "method": "thread/start", "params": {"baseInstructions": "PROMPT:chat", "cwd": "SCRATCH/3", "sandbox": "workspace-write", "config": {"mcp_servers.mightling_images.enabled": false, "mcp_servers.mightling_images.command": "true"}}}
+    },
+    {
+      "name": "a phone's thread resumed (known by its folder, chat-…) keeps its config: no image search, whatever the bridge asked",
+      "message": {"id": 10, "method": "thread/resume", "params": {"threadId": "chat-1", "config": {"mcp_servers.mightling_images.enabled": true}}},
+      "accept": true,
+      "out": {"id": 10, "method": "thread/resume", "params": {"threadId": "chat-1", "cwd": "ASK/chat-1", "sandbox": "workspace-write", "config": {"mcp_servers.mightling_images.enabled": false, "mcp_servers.mightling_images.command": "true"}}}
+    },
+    {
+      "name": "a phone's thread at airgapped on gets both configs: no plugins, no image search",
+      "airgapped": "on",
+      "message": {"id": 10, "method": "thread/start", "params": {"prompt": "chat"}},
+      "accept": true,
+      "out": {"id": 10, "method": "thread/start", "params": {"baseInstructions": "PROMPT:chat", "cwd": "SCRATCH/4", "sandbox": "workspace-write", "config": {"features.plugins": false, "mcp_servers.mightling_images.enabled": false, "mcp_servers.mightling_images.command": "true"}}}
     },
     {
       "name": "a prompt name outside namedPrompts is refused",

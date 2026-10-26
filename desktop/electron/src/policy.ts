@@ -59,6 +59,8 @@ export interface Policy {
   airgappedRefusedImportItems: ReadonlySet<string>;
   /** The `config` overrides a thread opener gets at `on`: no plugins. */
   airgappedThreadConfig: Readonly<JsonObject>;
+  /** The `config` a thread of a named prompt gets, started or resumed (a phone's: no image search). */
+  promptThreadConfig: ReadonlyMap<string, Readonly<JsonObject>>;
   /** The `thread/start` field naming the window's own tools (the terminal's output, the preview's console); the policy writes their definitions as `dynamicTools`. */
   windowToolsField: string;
   windowTools: ReadonlyMap<string, unknown>;
@@ -110,6 +112,12 @@ export function parsePolicy(value: unknown): Policy {
     airgappedRefusedImportItems: new Set(strings(value, "airgappedRefusedImportItems")),
     airgappedRefusalReasons: reasons(value, "airgappedRefusalReasons"),
     airgappedThreadConfig: isObject(value.airgappedThreadConfig) ? value.airgappedThreadConfig : (() => { throw new Error("policy.json: `airgappedThreadConfig` must be an object"); })(),
+    promptThreadConfig: new Map(
+      Object.entries(value.promptThreadConfig === undefined ? {} : isObject(value.promptThreadConfig) ? value.promptThreadConfig : (() => { throw new Error("policy.json: `promptThreadConfig` must be an object"); })()).map(([name, config]) => {
+        if (!isObject(config)) throw new Error(`policy.json: the config of the prompt \`${name}\` must be an object`);
+        return [name, config] as [string, JsonObject];
+      }),
+    ),
     windowToolsField: string(value, "windowToolsField"),
     windowTools: new Map(Object.entries(isObject(value.windowTools) ? value.windowTools : (() => { throw new Error("policy.json: `windowTools` must be an object"); })()) as [string, unknown][]),
   };
@@ -182,6 +190,12 @@ export function levelMatters(message: unknown, policy: Policy = POLICY): boolean
   return policy.airgappedRefusedRequests.has(method) || policy.threadOpeners.has(method) || method === policy.importRequest;
 }
 
+/** The prompt with a config of its own whose threads live in `folder` (`<prompt>-<hex>`). */
+function promptOfFolder(policy: Policy, folder: string): string | undefined {
+  const base = folder.split("/").pop() ?? folder;
+  return [...policy.promptThreadConfig.keys()].find((prompt) => base.startsWith(`${prompt}-`));
+}
+
 /** Puts a thread in its scratch folder: whatever the page said about where it works and what it may write is replaced. */
 function confine(policy: Policy, params: JsonObject, folder: string): void {
   for (const field of policy.scratchFields) delete params[field];
@@ -207,11 +221,17 @@ function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSo
     if (tools.length) params.dynamicTools = tools;
   }
   // At `on` the thread starts without plugins, whatever the page asked (`config` is dropped).
-  if (prompts.airgappedOn(null) && Object.keys(policy.airgappedThreadConfig).length) params.config = { ...policy.airgappedThreadConfig };
-  if (!(policy.promptField in params)) return params;
+  let config: JsonObject = prompts.airgappedOn(null) ? { ...policy.airgappedThreadConfig } : {};
+  // A resumed thread of a prompt with a config of its own is known by its folder's name.
+  const resumedAs = existing === null ? undefined : promptOfFolder(policy, existing);
+  if (resumedAs !== undefined) config = { ...config, ...policy.promptThreadConfig.get(resumedAs) };
+  const named = policy.promptField in params;
   const name = params[policy.promptField];
   delete params[policy.promptField];
-  if (typeof name !== "string") throw new Error(`\`${policy.promptField}\` must name a prompt`);
+  if (named && typeof name !== "string") throw new Error(`\`${policy.promptField}\` must name a prompt`);
+  if (typeof name === "string" && policy.promptThreadConfig.has(name)) config = { ...config, ...policy.promptThreadConfig.get(name) };
+  if (Object.keys(config).length) params.config = config;
+  if (typeof name !== "string") return params;
   if (!policy.namedPrompts.has(name)) {
     throw new Error(`no prompt named "${name}" may be chosen here; named prompts: ${[...policy.namedPrompts].sort().join(", ")}`);
   }

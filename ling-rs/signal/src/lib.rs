@@ -20,4 +20,5 @@ pub mod rpc;
 pub mod serve;
 pub mod setup;
 pub mod state;
+pub mod timing;
 pub mod unit;

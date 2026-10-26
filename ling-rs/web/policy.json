@@ -133,6 +133,12 @@
   "airgappedThreadConfig": {
     "features.plugins": false
   },
+  "promptThreadConfig": {
+    "chat": {
+      "mcp_servers.mightling_images.enabled": false,
+      "mcp_servers.mightling_images.command": "true"
+    }
+  },
   "windowToolsField": "windowTools",
   "windowTools": {
     "mightling_terminal_output": {

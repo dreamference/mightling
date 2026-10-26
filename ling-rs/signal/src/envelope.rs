@@ -140,6 +140,15 @@ pub fn parse(params: &Value, own: OwnAccount) -> Option<Envelope> {
     Some(Envelope { source_uuid, source_number, source_device, timestamp, body })
 }
 
+/// When Signal's server took the message from the sender and when it handed it to this device
+/// (signal-cli's `serverReceivedTimestamp` and `serverDeliveredTimestamp`, milliseconds since the
+/// epoch, on the server's clock), for the bridge's timing lines; either may be missing.
+pub fn server_times(params: &Value) -> (Option<u64>, Option<u64>) {
+    let envelope = params.get("envelope");
+    let field = |name: &str| envelope.and_then(|e| e.get(name)).and_then(Value::as_u64).filter(|&ms| ms > 0);
+    (field("serverReceivedTimestamp"), field("serverDeliveredTimestamp"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +169,14 @@ mod tests {
         assert_eq!(text, "hello");
         assert_eq!(attachments.len(), 1);
         assert!(attachments[0].is_image());
+    }
+
+    #[test]
+    fn the_servers_times_are_read_when_signal_cli_gives_them() {
+        let params = json!({"envelope": {"sourceUuid": "me", "timestamp": 5, "serverReceivedTimestamp": 7, "serverDeliveredTimestamp": 9,
+            "syncMessage": {"sentMessage": {"destinationUuid": "me", "message": "q?", "timestamp": 5}}}});
+        assert_eq!(server_times(&params), (Some(7), Some(9)));
+        assert_eq!(server_times(&json!({"envelope": {"timestamp": 5, "serverDeliveredTimestamp": 0}})), (None, None));
     }
 
     #[test]

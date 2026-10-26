@@ -23,6 +23,7 @@ use crate::bridge::Action;
 use crate::bridge::AgentEvent;
 use crate::bridge::Bridge;
 use crate::bridge::Info;
+use crate::bridge::StatusLine;
 use crate::bridge::Uploaded;
 use crate::envelope;
 use crate::envelope::Attachment;
@@ -36,6 +37,8 @@ use crate::rpc::SignalCli;
 use crate::state;
 use crate::state::Config;
 use crate::state::Conversation;
+use crate::timing;
+use crate::timing::Timing;
 
 /// Waits between attempts to reach `ling web`.
 const BACKOFF_S: [u64; 5] = [1, 2, 5, 10, 30];
@@ -43,6 +46,9 @@ const BACKOFF_S: [u64; 5] = [1, 2, 5, 10, 30];
 const DISAPPEARING_S: u64 = 7 * 24 * 3600;
 /// How often the air-gap level is asked for.
 const AIRGAP_EVERY: Duration = Duration::from_secs(5);
+/// Edits of one status line, the answer's included: Signal's clients keep at most ten versions of
+/// a message (§19.8).
+const STATUS_EDITS: u32 = 8;
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -53,6 +59,16 @@ struct Agent {
     incoming: UnboundedReceiver<Incoming>,
     /// The `work/start` call, until its answer arrives; then the protocol handshake is sent.
     starting: Option<u64>,
+}
+
+/// The answer's message on the phone (§19.8): its timestamp, which an edit names.
+struct OpenStatus {
+    timestamp: u64,
+    edits: u32,
+    /// The question is done: the next message replaces it.
+    closing: bool,
+    /// An edit failed: no more are tried, and the answer comes whole, as a message of its own.
+    broken: bool,
 }
 
 struct Daemon {
@@ -80,6 +96,9 @@ struct Daemon {
     /// The last Night Shift report sent (§19.7), and whether reports come here at all.
     night_seen: Option<String>,
     night_reports: bool,
+    status: Option<OpenStatus>,
+    /// The question in hand's timing, for the journal (§19.8).
+    timing: Option<Timing>,
 }
 
 /// Why the daemon stopped.
@@ -122,6 +141,8 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
     let info = Info { node: config.node.clone(), bridge_version: env!("CARGO_PKG_VERSION").to_string(), signal_cli_version: config.signal_cli_version.clone() };
     let mut bridge = Bridge::new(conversation.current.clone(), conversation.recent.clone(), info);
     bridge.last_activity_ms = conversation.last_activity_ms;
+    // Note to Self shows no typing: a status line shows the work instead (§19.8).
+    bridge.status_line = matches!(config.mode, Mode::Linked { .. });
     let mut daemon = Daemon {
         state_dir: state_dir.to_path_buf(),
         runtime_dir: runtime_dir.map(Path::to_path_buf),
@@ -141,6 +162,8 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
         held_attachments: HashSet::new(),
         night_seen: conversation.night_seen.clone(),
         night_reports: true,
+        status: None,
+        timing: None,
     };
     daemon.sweep_attachments(SystemTime::now());
     daemon.poll_airgap().await;
@@ -333,6 +356,7 @@ impl Daemon {
                 for translated in self.translator.read(&message) {
                     match translated {
                         Translated::Event(event) => {
+                            self.time_event(&event);
                             let actions = self.bridge.on_agent(event, now_ms());
                             self.carry_out(actions).await;
                         }
@@ -369,8 +393,17 @@ impl Daemon {
         match self.gate.check(&envelope, &self.config.mode, fingerprint.as_deref(), now) {
             Verdict::Accept(message) => {
                 self.last_owner_message_ms = Some(now);
+                let (server_received, server_delivered) = envelope::server_times(&params);
+                eprintln!("{}", timing::received_line(message.timestamp, server_received, server_delivered, now));
+                let was_busy = self.bridge.is_busy();
                 self.held_attachments.extend(message.attachments.iter().map(|a| a.id.clone()));
+                let id = message.timestamp;
                 let actions = self.bridge.on_message(message, now);
+                // Timed from here when it starts work now; one that joins or waits is timed with
+                // the question it joins, or from when it is taken from the queue.
+                if !was_busy && self.bridge.is_busy() {
+                    self.timing = Some(Timing::new(id, now));
+                }
                 self.carry_out(actions).await;
                 self.save_conversation();
             }
@@ -416,16 +449,99 @@ impl Daemon {
         self.send_with(message, &[]).await;
     }
 
-    async fn send_with(&mut self, message: &Styled, attachments: &[String]) {
-        let Some(owner) = self.owner() else { return };
-        // Linked: into the owner's Note to Self, marked as the bridge's (§4.2). Dedicated: to the owner.
-        let params = if self.linked() {
+    /// Sends one message, and returns its timestamp once signal-cli has sent it. The first message
+    /// after a question's status line closed is sent as an edit of the line, so the line becomes the
+    /// answer; should the edit fail, it is sent as a message of its own (§19.8).
+    /// `send`'s parameters. Linked: into the owner's Note to Self, marked as the bridge's (§4.2).
+    /// Dedicated: to the owner.
+    fn send_params(&self, message: &Styled, attachments: &[String]) -> Option<Value> {
+        let owner = self.owner()?;
+        Some(if self.linked() {
             rpc::note_to_self_params(&crate::format::prefixed(message, crate::format::LINKED_MARKER), attachments)
         } else {
             rpc::send_params(&owner, message, attachments)
+        })
+    }
+
+    async fn send_with(&mut self, message: &Styled, attachments: &[String]) -> Option<u64> {
+        let params = self.send_params(message, attachments)?;
+        let replaces = self.status.take_if(|line| line.closing);
+        if let Some(line) = replaces.filter(|line| attachments.is_empty() && !line.broken && line.edits <= STATUS_EDITS) {
+            match self.signal.call("send", rpc::as_edit(params.clone(), line.timestamp)).await {
+                Ok(result) => return rpc::sent_timestamp(&result).or(Some(line.timestamp)),
+                Err(err) => self.note_error(format!("could not replace the status line, sending the message instead: {err}")),
+            }
+        }
+        match self.signal.call("send", params).await {
+            Ok(result) => Some(rpc::sent_timestamp(&result).unwrap_or_else(now_ms)),
+            Err(err) => {
+                self.note_error(format!("could not send to Signal: {err}"));
+                None
+            }
+        }
+    }
+
+    /// The answer's message (§19.8): opened as a message (the status line, or the answer's first
+    /// words), changed by edits while there are edits to spare and they work.
+    async fn status_line(&mut self, line: StatusLine) {
+        let message = match &line {
+            StatusLine::Open(text) | StatusLine::Update(text) => Styled::plain(text),
+            StatusLine::Stream(markdown) => {
+                // The first part of the answer so far, marked as unfinished; the rest comes with
+                // the whole answer.
+                let mut part = crate::format::reply(markdown).parts.into_iter().next().unwrap_or_default();
+                part.text.push_str(" …");
+                part
+            }
+            StatusLine::Close => {
+                if let Some(line) = self.status.as_mut() {
+                    line.closing = true;
+                }
+                return;
+            }
         };
-        if let Err(err) = self.signal.call("send", params).await {
-            self.note_error(format!("could not send to Signal: {err}"));
+        let open = matches!(line, StatusLine::Open(_)) || (matches!(line, StatusLine::Stream(_)) && self.status.as_ref().is_none_or(|line| line.closing));
+        if open {
+            self.status = None;
+            let sent = self.send_with(&message, &[]).await;
+            if let Some(timestamp) = sent {
+                self.status = Some(OpenStatus { timestamp, edits: 0, closing: false, broken: false });
+                if let Some(timing) = self.timing.as_mut().filter(|t| t.status_ms.is_none()) {
+                    timing.status_ms = Some(now_ms());
+                }
+            }
+            return;
+        }
+        let Some(params) = self.send_params(&message, &[]) else { return };
+        let Some(line) = self.status.as_mut().filter(|line| !line.closing && !line.broken && line.edits < STATUS_EDITS) else { return };
+        line.edits += 1;
+        let timestamp = line.timestamp;
+        if let Err(err) = self.signal.call("send", rpc::as_edit(params, timestamp)).await {
+            self.note_error(format!("could not edit the answer's message; the answer will come whole: {err}"));
+            if let Some(line) = self.status.as_mut() {
+                line.broken = true;
+            }
+        }
+    }
+
+    /// Marks the agent's side of the question in hand's timing.
+    fn time_event(&mut self, event: &AgentEvent) {
+        let Some(timing) = self.timing.as_mut() else { return };
+        let now = now_ms();
+        match event {
+            AgentEvent::Delta { .. } | AgentEvent::ToolStarted { .. } if timing.first_output_ms.is_none() => timing.first_output_ms = Some(now),
+            AgentEvent::TurnCompleted { .. } => timing.answered_ms = Some(now),
+            _ => {}
+        }
+    }
+
+    /// After the question in hand's answer (or why there is none) was sent: its timing line.
+    fn timed_send(&mut self, acked: Option<u64>) {
+        if self.timing.as_ref().is_some_and(|t| t.answered_ms.is_some())
+            && acked.is_some()
+            && let Some(timing) = self.timing.take()
+        {
+            eprintln!("{}", timing::answered_line(&timing, now_ms()));
         }
     }
 
@@ -439,9 +555,12 @@ impl Daemon {
         let owner = self.owner();
         match action {
             Action::Reply(reply) => {
+                let mut acked = None;
                 for part in &reply.parts {
-                    self.send_text(part).await;
+                    let sent = self.send_with(part, &[]).await;
+                    acked = acked.or(sent);
                 }
+                self.timed_send(acked);
                 if let Some(markdown) = reply.attachment {
                     let path = self.state_dir.join("outbox").join("answer.md");
                     if state::write_private(&path, markdown.as_bytes()).is_ok() {
@@ -450,7 +569,11 @@ impl Daemon {
                     }
                 }
             }
-            Action::Notice(text) => self.send_text(&Styled::plain(&text)).await,
+            Action::Notice(text) => {
+                let acked = self.send_with(&Styled::plain(&text), &[]).await;
+                self.timed_send(acked);
+            }
+            Action::Status(line) => self.status_line(line).await,
             Action::Cavemode { thread, text } => {
                 let said = match agent::cavemode(self.config.port, &self.cookie, thread.as_deref(), &text).await {
                     Ok(said) | Err(said) => said,
@@ -539,6 +662,10 @@ impl Daemon {
                 Box::pin(self.carry_out(actions)).await;
             }
             Action::StartTurn { thread, text, images } => {
+                let timing = self.timing.get_or_insert_with(|| Timing::new(0, now_ms()));
+                if timing.handed_ms.is_none() {
+                    timing.handed_ms = Some(now_ms());
+                }
                 let input = agent::turn_input(&text, &images);
                 self.request("turn/start", json!({ "threadId": thread, "input": input }), Pending::StartTurn { thread: thread.clone() }).await;
             }

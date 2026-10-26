@@ -226,6 +226,19 @@ pub fn note_to_self_params(message: &Styled, attachments: &[String]) -> Value {
 
 /// `getAttachment` params: one attachment of a Note to Self message, which linked mode does not
 /// download with the rest (`--ignore-attachments`). The answer carries the file as base64 `data`.
+/// The same message sent as an edit of the earlier one sent at `timestamp` (signal-cli's
+/// `--edit-timestamp`): the bridge's status line in Note to Self, which the answer replaces
+/// (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.8).
+pub fn as_edit(mut params: Value, timestamp: u64) -> Value {
+    params["editTimestamp"] = json!(timestamp);
+    params
+}
+
+/// The timestamp a `send` gave the message, which is its id for a later edit.
+pub fn sent_timestamp(result: &Value) -> Option<u64> {
+    result.get("timestamp").and_then(Value::as_u64)
+}
+
 pub fn get_attachment_params(id: &str, own_number: &str) -> Value {
     json!({ "id": id, "recipient": own_number })
 }
@@ -307,6 +320,10 @@ mod tests {
         let params = note_to_self_params(&render("**ok**"), &[]);
         assert_eq!(params, json!({"noteToSelf": true, "message": "ok", "textStyle": ["0:2:BOLD"]}));
         assert!(params.get("recipient").is_none());
+        let edit = as_edit(note_to_self_params(&render("done"), &[]), 42);
+        assert_eq!(edit, json!({"noteToSelf": true, "message": "done", "editTimestamp": 42}));
+        assert_eq!(sent_timestamp(&json!({"timestamp": 42, "results": []})), Some(42));
+        assert_eq!(sent_timestamp(&json!({})), None);
         assert_eq!(get_attachment_params("abc", "+1555"), json!({"id": "abc", "recipient": "+1555"}));
         assert_eq!(base64_decode("aGVsbG8gd29ybGQ=").unwrap(), b"hello world");
         assert_eq!(base64_decode("AAEC/w==").unwrap(), vec![0, 1, 2, 255]);
