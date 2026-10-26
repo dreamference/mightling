@@ -32,6 +32,14 @@
 # keeps the lease (the night script's `start`, between its smokes and the night, so that no waiter takes the lock in
 # the gap); with no lease it is a plain `restore`. SG_NAME follows AB_DIR (ab-n12-sglang for ~/ab-n12), so one night's
 # late restore never removes the next night's SGLang container.
+#
+# SGLang's runtime patches (night 17, 2026-10-26): the registry's launches mount patched copies of image files
+# (SGLangRuntimePatcher: on v0.5.21, `serving_responses.py` with the phase merge). This launch does not go through
+# the registry, so the same files are copied into AB_DIR/sglang-patches/ with a `mounts` file there, one
+# `<file> <path in the container>` per line, and each is mounted read-only (serve.py's `--volume`). With a mount
+# whose path is `serving_responses.py`, `serve sglang` then asks the server the phase question before it says
+# ready: one history with and without `phase: "commentary"` on the announcement before a tool call must cost the
+# same prompt tokens (the patched merge ignores the phase; v0.5.21's own does not), else the arm is stopped.
 set -u
 AB_DIR=${AB_DIR:-$HOME/ab-n12}
 SG_NAME=${SG_NAME:-$(basename "$AB_DIR")-sglang}
@@ -83,6 +91,39 @@ port_free() {  # port, seconds: waits until nothing listens on it; names the hol
     log "port $1 is still taken: $(ss -ltnpH "sport = :$1" 2>/dev/null | head -1)"
     return 1
 }
+sg_volumes() {  # serve.py's `--volume` for each runtime patch in AB_DIR/sglang-patches/mounts
+    local file target
+    [ -s "$AB_DIR/sglang-patches/mounts" ] || return 0
+    while read -r file target; do
+        [ -n "$file" ] || continue
+        [ -s "$AB_DIR/sglang-patches/$file" ] || { log "runtime patch $file is missing"; return 1; }
+        printf -- '--volume\n%s\n' "$AB_DIR/sglang-patches/$file:$target:ro"
+    done < "$AB_DIR/sglang-patches/mounts"
+}
+phase_probe() {  # port: `same N` when the phase merge is in force, `differ A B` when it is not
+    [ -n "${PHASE_PROBE_CMD:-}" ] && { $PHASE_PROBE_CMD "$1"; return; }  # tests stand in for the server
+    python3 - "http://127.0.0.1:$1" "${SERVED_NAME:-RadixArk/Qwen3.8-27B-NVFP4}" <<'PY'
+import json, sys, urllib.request
+base, model = sys.argv[1], sys.argv[2]
+def items(phase):
+    note = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "I will list the files first."}]}
+    if phase:
+        note["phase"] = phase
+    return [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "What files are in the repository?"}]},
+            note,
+            {"type": "function_call", "call_id": "call_1", "name": "shell", "arguments": json.dumps({"command": ["ls"]})},
+            {"type": "function_call_output", "call_id": "call_1", "output": "README.md\nsetup.py\n"}]
+def tokens(phase):
+    tool = {"type": "function", "name": "shell", "description": "Run a command", "parameters": {"type": "object",
+            "properties": {"command": {"type": "array", "items": {"type": "string"}}}}}
+    body = {"model": model, "input": items(phase), "max_output_tokens": 16, "store": False, "tools": [tool]}
+    request = urllib.request.Request(base + "/v1/responses", json.dumps(body).encode(), {"Content-Type": "application/json"})
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=120) as response:
+        return json.load(response)["usage"]["input_tokens"]
+a, b = tokens("commentary"), tokens(None)
+print(f"same {a}" if a == b else f"differ {a} {b}")
+PY
+}
 keep_logs() {  # the SGLang arm's container log, kept before the container goes
     docker logs "$SG_NAME" > "$AB_DIR/sglang-$(date +%Y%m%d-%H%M%S).log" 2>&1
 }
@@ -123,6 +164,14 @@ serve)
     case "$arm" in sglang) port=$SG_PORT; container=$SG_NAME ;; engine) port=$ENGINE_PORT; container= ;;
         *) log "serve: no arm $arm (sglang or engine)"; exit 2 ;; esac
     port_free "$port" 120 || { stop_arms; exit 1; }
+    volumes=()
+    if [ "$arm" = sglang ]; then
+        mounts=$(sg_volumes) || { stop_arms; exit 1; }
+        [ -n "$mounts" ] && mapfile -t volumes <<< "$mounts"
+        if [ "${#volumes[@]}" -gt 0 ] && ! grep -q -- '"--volume"' "$AB_DIR/serve.py"; then
+            log "$AB_DIR/serve.py has no --volume for the runtime patches"; exit 1
+        fi
+    fi
     [ "$arm" = engine ] && { [ "$(sha256sum "$AB_DIR/ling-serve" | cut -d' ' -f1)" = "$(cat "$AB_DIR/ling-serve.sha256")" ] || { log "ling-serve is not the pinned binary"; exit 1; }; }
     own=
     for attempt in 1 2; do
@@ -131,7 +180,8 @@ serve)
             python3 "$AB_DIR/serve.py" "$SG_NAME" --image "$SG_IMAGE" --port "$SG_PORT" \
                 --set speculative-num-draft-tokens 12 \
                 --set speculative-draft-model-path /root/.cache/dreamference/drafters/dflash2-nvfp4-scalesearch \
-                --drop cuda-graph-max-bs --set cuda-graph-max-bs-decode 8 > "$AB_DIR/sglang.cmd" 9>&- || { log "serve.py failed"; exit 1; } ;;
+                --drop cuda-graph-max-bs --set cuda-graph-max-bs-decode 8 "${volumes[@]}" > "$AB_DIR/sglang.cmd" 9>&- \
+                || { log "serve.py failed"; exit 1; } ;;
         engine)
             setsid "$AB_DIR/ling-serve" --model "$MODEL" --draft "$DRAFT" --host 0.0.0.0 --port "$ENGINE_PORT" \
                 --served-model-name RadixArk/Qwen3.8-27B-NVFP4 --max-context 65536 --draft-block 12 --graphs --pdl \
@@ -147,6 +197,15 @@ serve)
     done
     [ -n "$own" ] || exit 1
     [ -n "$container" ] && keep_logs
+    if [ "$arm" = sglang ] && grep -q 'serving_responses.py$' "$AB_DIR/sglang-patches/mounts" 2>/dev/null; then
+        mounted=$(docker inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' "$SG_NAME" 2>/dev/null)
+        case "$mounted" in *serving_responses.py*) ;; *) log "the phase-merge patch is not mounted in $SG_NAME"; stop_arms; exit 1 ;; esac
+        probe=$(phase_probe "$port" 2>&1 | tail -1)
+        case "$probe" in
+            same\ *) log "phase merge in force: ${probe#same } prompt tokens with and without phase commentary" ;;
+            *) log "phase merge NOT in force ($probe)"; stop_arms; exit 1 ;;
+        esac
+    fi
     log "arm $arm ready on $port ($own)"
     echo "ready $own"
     ;;
