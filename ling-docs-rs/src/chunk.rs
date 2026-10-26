@@ -38,8 +38,20 @@ pub struct Chunk {
 /// The text that is embedded for a chunk: the document's title and the chunk's heading path
 /// prepended, which the stored text does not carry (§7.2).
 pub fn embed_text(title: &str, chunk: &Chunk) -> String {
-    let head = if chunk.heading.is_empty() { title.to_string() } else { format!("{title} | {}", chunk.heading) };
-    format!("{head}\n{}", chunk.text)
+    embed_input(title, &chunk.heading, &chunk.text)
+}
+
+/// [`embed_text`] from the parts a stored chunk has.
+pub fn embed_input(title: &str, heading: &str, text: &str) -> String {
+    let head = if heading.is_empty() { title.to_string() } else { format!("{title} | {heading}") };
+    format!("{head}\n{text}")
+}
+
+/// The SHA-256 of exactly what is embedded for a chunk: a chunk written again with the same key
+/// keeps its vector (§7.5), so a document read again embeds only the chunks whose text changed.
+pub fn text_hash(title: &str, heading: &str, text: &str) -> [u8; 32] {
+    use sha2::Digest;
+    sha2::Sha256::digest(embed_input(title, heading, text).as_bytes()).into()
 }
 
 /// A piece of a long unit: a sentence or a line, with the line it came from; an empty piece marks

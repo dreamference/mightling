@@ -159,7 +159,8 @@ args = sys.argv[1:]
 json.dump({{"args": args, "cwd": os.getcwd(), "CODEX_HOME": os.environ.get("CODEX_HOME"),
            "config": open(os.environ["DREAMFERENCE_CONFIG_PATH"]).read(),
            "host": os.environ.get("DREAMFERENCE_VLLM_HOST"),
-           "adapter": os.environ.get("DREAMFERENCE_MIGHTLING_ADAPTER")}}, open({str(calls)!r}, "w"))
+           "adapter": os.environ.get("DREAMFERENCE_MIGHTLING_ADAPTER"),
+           "docs": os.environ.get("DREAMFERENCE_MIGHTLING_DOCS")}}, open({str(calls)!r}, "w"))
 shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
 open(args[len(args) - 2], "w").write("pong")
 """)
@@ -168,6 +169,8 @@ open(args[len(args) - 2], "w").write("pong")
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_ADAPTER", "rust")
+    # Even a caller that switched the file index on: the throwaway home never starts it.
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_DOCS", "1")
     code = EgressAudit.run(write_json=True, mightling_bin="/opt/ling", vllm_host="http://localhost:8000")
     out = capsys.readouterr().out
     assert code == 0 and "✅ Egress audit: pass" in out
@@ -179,6 +182,7 @@ open(args[len(args) - 2], "w").write("pong")
     assert call["CODEX_HOME"] != str(home) and not os.path.exists(call["CODEX_HOME"])
     assert os.path.basename(call["cwd"]) == "repo" and not os.path.exists(call["cwd"])
     assert 'vllm_host = "http://localhost:8000"' in call["config"] and "code_index_enabled = false" in call["config"]
+    assert call["docs"] == "0"
     # The audited session is on the base, whatever adapter the user starts sessions with (adapters §10.4).
     assert call["adapter"] == ""
     # The JSON result is written to the real CODEX_HOME, and says which build it was.

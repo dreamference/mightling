@@ -803,3 +803,220 @@ fn extract_prints_pages_and_names_the_scans_without_a_scope() {
     assert!(!output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "failed: not a PDF, or damaged");
 }
+
+/// `ling-docs <args>` with a given user home and agent home, and nothing of the real machine's.
+fn docs_command(args: &[&str], user: &Path, agent: &Path, cwd: &Path, docs_setting: Option<&str>) -> std::process::Output {
+    let mut command = Command::new(exe());
+    command
+        .args(args)
+        .current_dir(cwd)
+        .env("HOME", user)
+        .env("CODEX_HOME", agent)
+        .env("DREAMFERENCE_CONFIG_PATH", cwd.join("no-config.toml"))
+        .env("XDG_RUNTIME_DIR", cwd.join("no-run"))
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+        .env_remove("DREAMFERENCE_MIGHTLING_DOCS");
+    if let Some(value) = docs_setting {
+        command.env("DREAMFERENCE_MIGHTLING_DOCS", value);
+    }
+    command.output().unwrap()
+}
+
+/// What happened on 2026-10-26: a check ran `ling` with a scratch `CODEX_HOME` beside the real
+/// `HOME`, the session added `~/Documents` and `~/Downloads` to the empty home and embedded all
+/// of them from nothing. A scratch home now adds and indexes nothing unless asked.
+#[test]
+fn a_scratch_agent_home_adds_no_collections_and_indexes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let user = root.join("user");
+    for folder in ["Documents", "Downloads"] {
+        std::fs::create_dir_all(user.join(folder)).unwrap();
+        std::fs::write(user.join(folder).join("note.md"), "# Note\n\nsomething to index\n").unwrap();
+    }
+    let scratch = root.join("scratch/codexhome");
+    std::fs::create_dir_all(&scratch).unwrap();
+    // A parent that has exited: the session stops at its first look, after its setup.
+    let mut gone = Command::new("true").spawn().unwrap();
+    gone.wait().unwrap();
+    let parent = gone.id().to_string();
+
+    let output = docs_command(&["session", "--parent-pid", &parent], &user, &scratch, &root, None);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(!scratch.join("docs.toml").exists(), "no default collections in a scratch home");
+    assert!(!scratch.join("docs").exists(), "no index, no lock, no run");
+    let listed = docs_command(&["list", "--json"], &user, &scratch, &root, None);
+    assert_eq!(String::from_utf8_lossy(&listed.stdout).trim(), "[]");
+    assert!(!scratch.join("docs.toml").exists());
+
+    // Asked for explicitly, a scratch home has them.
+    let listed = docs_command(&["list", "--json"], &user, &scratch, &root, Some("1"));
+    let names: Vec<String> = serde_json::from_slice::<Vec<serde_json::Value>>(&listed.stdout).unwrap().iter().map(|c| c["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["documents", "downloads"]);
+
+    // The user's own home, `~/.mightling`, has them without asking.
+    let own = user.join(".mightling");
+    let output = docs_command(&["session", "--parent-pid", &parent], &user, &own, &root, None);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let toml = std::fs::read_to_string(own.join("docs.toml")).unwrap();
+    assert!(toml.contains("name = \"documents\"") && toml.contains("name = \"downloads\""), "{toml}");
+}
+
+/// A stand-in model with files: the hash embedder under a model's name, dimension and files.
+struct FileModel {
+    inner: HashEmbedder,
+    name: &'static str,
+    files: Vec<PathBuf>,
+}
+
+impl ling_docs::embed::Embed for FileModel {
+    fn dim(&self) -> usize { self.inner.dim }
+    fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> { ling_docs::embed::Embed::embed(&self.inner, text) }
+    fn name(&self) -> &str { self.name }
+    fn model_files(&self) -> Vec<PathBuf> { self.files.clone() }
+}
+
+/// Every chunk's vector, by chunk id.
+fn vectors(db: &Path) -> Vec<(i64, Option<Vec<u8>>)> {
+    let conn = ling_docs::store::open_ro(db).unwrap().unwrap();
+    let mut stmt = conn.prepare("SELECT id, vector FROM chunks ORDER BY id").unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+}
+
+/// A collection of a few Markdown and text files, indexed once with the test embedder.
+fn indexed_collection(home: &Path) -> DocsToml {
+    let root = home.join("Documents");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("acme.md"), "# Acme\n\n## Termination\n\nEither party may terminate with ninety days of notice.\n").unwrap();
+    std::fs::write(root.join("plain.txt"), (1..=40).map(|i| format!("line {i} about volcanoes\n")).collect::<String>()).unwrap();
+    std::fs::write(root.join("notes.md"), "# Notes\n\nGlaciers retreat in summer.\n").unwrap();
+    let mut docs = DocsToml::default();
+    docs.ensure_defaults(home);
+    docs.save().unwrap();
+    docs
+}
+
+#[test]
+fn a_new_binary_with_the_same_model_embeds_nothing_again() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let docs = indexed_collection(&home);
+    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    assert_eq!(index::run(&env(&host, &home, exe()), &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    let db = ling_docs::config::db_path("documents");
+    let before = vectors(&db);
+    assert!(!before.is_empty() && before.iter().all(|(_, v)| v.is_some()));
+
+    // The upgrade: another binary, at another path, and a database an older ling-docs wrote,
+    // without the parts of the staleness key it did not know.
+    let upgraded = home.join("bin/ling-docs");
+    std::fs::create_dir_all(upgraded.parent().unwrap()).unwrap();
+    std::fs::copy(exe(), &upgraded).unwrap();
+    {
+        let conn = ling_docs::store::open_rw(&db).unwrap();
+        conn.execute("DELETE FROM meta WHERE key IN ('chunking', 'extractors', 'model_stat', 'model_sha')", []).unwrap();
+    }
+    host.started.lock().unwrap().clear();
+    assert_eq!(index::run(&env(&host, &home, upgraded.clone()), &docs, None, false).unwrap(), vec![("documents".to_string(), Outcome::Ok)]);
+    assert!(host.started.lock().unwrap().is_empty(), "nothing changed: no scope at all");
+    assert_eq!(vectors(&db), before);
+
+    // A new file: only its own chunks are embedded, and the key is recorded on the way.
+    std::fs::write(home.join("Documents/new.md"), "# New\n\nFresh words about basalt.\n").unwrap();
+    index::run(&env(&host, &home, upgraded), &docs, None, false).unwrap();
+    let after = vectors(&db);
+    assert_eq!(after.len(), before.len() + 1);
+    assert_eq!(&after[..before.len()], &before[..], "the old chunks keep their vectors");
+    let log = std::fs::read_to_string(ling_docs::config::docs_dir().join("logs/documents-embed.log")).unwrap();
+    assert!(log.contains("documents: 1 documents written") && log.contains("documents: 1 chunks embedded"), "{log}");
+    let conn = ling_docs::store::open_ro(&db).unwrap().unwrap();
+    assert_eq!(ling_docs::store::get_meta(&conn, "chunking").unwrap(), Some(ling_docs::config::chunking_key()));
+    assert!(ling_docs::store::get_meta(&conn, "extractors").unwrap().is_some());
+}
+
+#[test]
+fn a_model_change_embeds_every_chunk_again_and_nothing_else_does() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let docs = indexed_collection(&home);
+    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let mut env = env(&host, &home, exe());
+    index::run(&env, &docs, None, false).unwrap();
+    let db = ling_docs::config::db_path("documents");
+    let total = vectors(&db).len();
+    let events = home.join("events.jsonl");
+    std::fs::write(&events, b"").unwrap();
+    let model = home.join("model");
+    std::fs::create_dir_all(&model).unwrap();
+    std::fs::write(model.join("model.onnx"), b"weights v1").unwrap();
+    std::fs::write(model.join("tokenizer.json"), b"{\"vocab\": 1}").unwrap();
+    let run = |name: &'static str, dim: usize| -> (usize, String) {
+        let embedder = FileModel { inner: HashEmbedder { dim }, name, files: ling_docs::embed::model_files_in(&model) };
+        let mut log = Vec::new();
+        let (_, done) = index::index_worker("documents", &db, &events, &embedder, &ling_docs::chunk::Words, &mut log).unwrap();
+        (done, String::from_utf8(log).unwrap())
+    };
+    // The same model, its files' hash recorded for the first time: nothing embedded again.
+    assert_eq!(run("hash-test", 64).0, 0);
+    // The same bytes installed again (a new time on the files): hashed, the same, nothing.
+    std::fs::write(model.join("model.onnx"), b"weights v1").unwrap();
+    assert_eq!(run("hash-test", 64).0, 0);
+    // The chunking's key changes but its chunks come out the same: kept, nothing embedded.
+    {
+        let conn = ling_docs::store::open_rw(&db).unwrap();
+        ling_docs::store::set_meta(&conn, "chunking", "tokens=256 overlap=0.1 chunker=0").unwrap();
+    }
+    let (done, log) = run("hash-test", 64);
+    assert_eq!(done, 0, "{log}");
+    assert!(log.contains("the chunking changed: 3 documents chunked again\n"), "{log}");
+    // The coordinator starts the worker when the model's files change.
+    std::fs::write(model.join("model.onnx"), b"weights v2").unwrap();
+    env.model_dir = model.clone();
+    host.started.lock().unwrap().clear();
+    index::run(&env, &docs, None, false).unwrap();
+    assert!(host.started.lock().unwrap().iter().any(|(unit, _)| unit.starts_with("mightling-index-docs-documents-e")), "the worker checks the new files");
+    // A new revision under the same name, a new dimension, a new model: every chunk again.
+    let (done, log) = run("hash-test", 64);
+    assert_eq!(done, total, "{log}");
+    assert!(log.contains("the model's files changed"), "{log}");
+    assert_eq!(run("hash-test", 32).0, total);
+    assert_eq!(run("another-model", 32).0, total);
+    assert_eq!(run("another-model", 32).0, 0);
+}
+
+#[test]
+fn an_extractor_change_reads_only_its_kind_again_and_embeds_only_changed_chunks() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (_dir, home) = scratch_home();
+    let docs = indexed_collection(&home);
+    let host = LocalHost { dir: home.join("locks"), started: Mutex::new(Vec::new()) };
+    let env = env(&host, &home, exe());
+    index::run(&env, &docs, None, false).unwrap();
+    let db = ling_docs::config::db_path("documents");
+    let before = vectors(&db);
+    // The Markdown extractor of the database is older than this build's.
+    {
+        let conn = ling_docs::store::open_rw(&db).unwrap();
+        let mut versions = ling_docs::extract::extractor_versions();
+        versions.insert("markdown".into(), "0".into());
+        ling_docs::store::set_meta(&conn, "extractors", &serde_json::to_string(&versions).unwrap()).unwrap();
+    }
+    host.started.lock().unwrap().clear();
+    index::run(&env, &docs, None, false).unwrap();
+    let started = host.started.lock().unwrap().clone();
+    assert!(started.iter().any(|(unit, _)| unit.starts_with("mightling-index-docs-documents-x")), "{started:?}");
+    let log = std::fs::read_to_string(ling_docs::config::docs_dir().join("logs/documents-embed.log")).unwrap();
+    assert!(log.contains("documents: 2 documents written"), "the two Markdown files, not the text file: {log}");
+    assert!(log.contains("documents: 0 chunks embedded"), "their text came back the same: {log}");
+    // The same vectors, under the new chunks' ids.
+    let sorted = |v: Vec<(i64, Option<Vec<u8>>)>| {
+        let mut v: Vec<Option<Vec<u8>>> = v.into_iter().map(|(_, v)| v).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(sorted(vectors(&db)), sorted(before));
+    // Nothing left to read: the next run starts nothing.
+    host.started.lock().unwrap().clear();
+    index::run(&env, &docs, None, false).unwrap();
+    assert!(host.started.lock().unwrap().is_empty());
+}

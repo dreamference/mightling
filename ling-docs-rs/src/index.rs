@@ -268,14 +268,21 @@ pub fn index_collection(env: &Env, collection: &Collection) -> Result<Outcome> {
         return Ok(Outcome::Failed(format!("{} is not there", collection.root.display())));
     }
     let mut conn = store::open_rw(&db)?;
+    // A kind whose extractor changed is read again; nothing else is (§7.5).
+    store::mark_stale_extractors(&conn, &crate::extract::extractor_versions())?;
     let found = discover::walk(collection, &env.user_home, env.settings.ocr);
     let scan = scan(&mut conn, &found.candidates)?;
     store::set_meta(&conn, "skipped_unopened", &serde_json::to_string(&found.skipped)?)?;
     let missing_vectors: i64 = conn.query_row("SELECT count(*) FROM chunks WHERE vector IS NULL", [], |r| r.get(0))?;
     let pending: i64 = conn.query_row("SELECT count(*) FROM documents WHERE status = 'pending'", [], |r| r.get(0))?;
     let ocr_due = ocr_ready(env).is_none() && !store::awaiting_ocr(&conn)?.is_empty();
+    // The index worker checks the staleness key (§7.5); it is started for that only when the
+    // chunking changed or the model's files did (their size or time: the worker hashes them).
+    let recorded = |key: &str| store::get_meta(&conn, key).ok().flatten();
+    let key_due = recorded("chunking").is_some_and(|c| c != config::chunking_key())
+        || recorded("model_stat").is_some_and(|s| s != crate::embed::files_stat(&crate::embed::model_files_in(&env.model_dir)));
     drop(conn);
-    if scan.jobs.is_empty() && missing_vectors == 0 && pending == 0 && !ocr_due {
+    if scan.jobs.is_empty() && missing_vectors == 0 && pending == 0 && !ocr_due && !key_due {
         return Ok(Outcome::Ok);
     }
     if !env.host.can_create_scopes() {
@@ -1011,7 +1018,7 @@ pub fn index_worker_with(collection: &str, db: &Path, events: &Path, embedder: &
                 });
                 let record = serde_json::json!({ "read": result.pages.len(), "low": low, "routes": routes, "send_below": send_below,
                     "pages": result.pages.iter().map(|p| (p.page, (p.confidence * 1000.0).round() / 1000.0)).collect::<Vec<_>>() }).to_string();
-                let chunks = crate::chunk::chunk(&units, counter, config::CHUNK_TOKENS, 0.15);
+                let chunks = crate::chunk::chunk(&units, counter, config::CHUNK_TOKENS, config::CHUNK_OVERLAP);
                 store::write_ocr(&mut conn, id, &title, &units, &chunks, &remaining, &record)?;
                 written += 1;
             }
@@ -1027,20 +1034,14 @@ pub fn index_worker_with(collection: &str, db: &Path, events: &Path, embedder: &
                 } else {
                     Path::new(&path).file_stem().map(|s| s.to_string_lossy().replace('_', " ")).unwrap_or_default()
                 };
-                let chunks = crate::chunk::chunk(&result.units, counter, config::CHUNK_TOKENS, 0.15);
+                let chunks = crate::chunk::chunk(&result.units, counter, config::CHUNK_TOKENS, config::CHUNK_OVERLAP);
                 store::write_document(&mut conn, id, &title, result.pages, &result.needs_ocr, &result.units, &chunks, now)?;
                 written += 1;
             }
         }
     }
     writeln!(log, "{collection}: {written} documents written")?;
-    // Vectors of another model are never mixed with this one's.
-    let model = store::get_meta(&conn, "model")?;
-    if model.as_deref() != Some(embedder.name()) {
-        conn.execute("UPDATE chunks SET vector = NULL", [])?;
-        store::set_meta(&conn, "model", embedder.name())?;
-        store::set_meta(&conn, "dim", &embedder.dim().to_string())?;
-    }
+    reconcile(&mut conn, embedder, counter, log)?;
     let todo: Vec<(i64, String, String, String)> = conn
         .prepare("SELECT c.id, d.title, c.heading, c.text FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE c.vector IS NULL ORDER BY c.id")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
@@ -1065,6 +1066,67 @@ pub fn index_worker_with(collection: &str, db: &Path, events: &Path, embedder: &
     }
     writeln!(log, "{collection}: {done} chunks embedded in {seconds:.1} s")?;
     Ok((written, done))
+}
+
+/// The staleness key (§7.5, the owner's decision of 2026-10-26): every chunk is embedded again
+/// only when the embedding model changes (its name, its files' SHA-256, its dimension), and the
+/// documents are chunked again, keeping the vectors of chunks whose text is unchanged, only when
+/// the chunking changes. A new ling-docs binary changes neither. A part of the key the database
+/// has not recorded (an older ling-docs wrote it) is taken as the current one, so recording a new
+/// part never embeds anything again.
+pub fn reconcile(conn: &mut Connection, embedder: &dyn crate::embed::Embed, counter: &dyn crate::chunk::TokenCount, log: &mut dyn std::io::Write) -> Result<()> {
+    let recorded = |conn: &Connection, key: &str| store::get_meta(conn, key);
+    let files = embedder.model_files();
+    let stat = crate::embed::files_stat(&files);
+    let sha = if files.is_empty() {
+        None
+    } else {
+        match (recorded(conn, "model_stat")?, recorded(conn, "model_sha")?) {
+            (Some(s), Some(sha)) if s == stat => Some(sha),
+            _ => Some(crate::embed::files_sha256(&files)?),
+        }
+    };
+    let differs = |conn: &Connection, key: &str, now: &str| -> Result<bool> { Ok(recorded(conn, key)?.is_some_and(|v| v != now)) };
+    let mut why = Vec::new();
+    if differs(conn, "model", embedder.name())? {
+        why.push("the embedding model");
+    }
+    if differs(conn, "dim", &embedder.dim().to_string())? {
+        why.push("the embedding dimension");
+    }
+    if let Some(sha) = &sha {
+        if differs(conn, "model_sha", sha)? {
+            why.push("the model's files");
+        }
+    }
+    let model_changed = !why.is_empty();
+    let chunking = config::chunking_key();
+    if differs(conn, "chunking", &chunking)? {
+        why.push("the chunking");
+    }
+    if !why.is_empty() {
+        // Chunked again from the stored text (the tokenizer counts the tokens, so a new model
+        // may move boundaries too); chunks whose text is unchanged keep their vectors.
+        let documents: Vec<(i64, String)> = conn.prepare("SELECT id, title FROM documents WHERE status = 'ok' ORDER BY id")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        for (id, title) in &documents {
+            let units = store::units(conn, *id)?;
+            let chunks = crate::chunk::chunk(&units, counter, config::CHUNK_TOKENS, config::CHUNK_OVERLAP);
+            store::replace_chunks(conn, *id, title, &chunks)?;
+        }
+        if model_changed {
+            // Vectors of another model are never mixed with this one's.
+            conn.execute("UPDATE chunks SET vector = NULL", [])?;
+        }
+        writeln!(log, "{} changed: {} documents chunked again{}", why.join(", "), documents.len(), if model_changed { ", every chunk embedded again" } else { "" })?;
+    }
+    store::set_meta(conn, "model", embedder.name())?;
+    store::set_meta(conn, "dim", &embedder.dim().to_string())?;
+    store::set_meta(conn, "chunking", &chunking)?;
+    if let Some(sha) = sha {
+        store::set_meta(conn, "model_stat", &stat)?;
+        store::set_meta(conn, "model_sha", &sha)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

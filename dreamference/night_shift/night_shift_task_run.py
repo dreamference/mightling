@@ -786,6 +786,9 @@ class NightShiftTaskRun:
             REFINE_ENV: "off",
             # Gmail is this node's owner's; a task from another machine is never told about it.
             "DREAMFERENCE_MIGHTLING_GMAIL": "false",
+            # The task's own CODEX_HOME is not the owner's: its `ling` starts no file index over
+            # the owner's folders (docs/dev/testing.md).
+            "DREAMFERENCE_MIGHTLING_DOCS": "0",
         }
         if self.model_host:
             variables["DREAMFERENCE_VLLM_HOST"] = self.model_host

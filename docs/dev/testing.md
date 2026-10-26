@@ -21,6 +21,7 @@ conftest now fails any real `docker` command that changes something (reads like 
 - Night Shift's tests use a scripted stand-in for `ling` and never create a real scope or unit ([night-shift.md](night-shift.md)).
 - SWE-bench's tests never start a container or touch the real cache ([swe-bench.md](swe-bench.md)).
 - `ling-docs` tests never run with the real `HOME` ([local-file-index.md](local-file-index.md)).
+- **A harness that runs the real `ling` with a scratch `CODEX_HOME` sets `DREAMFERENCE_MIGHTLING_DOCS=0`** (the egress audit, a Night Shift task, `ling-admin codex test`; do the same in any ad-hoc check). On 2026-10-26 two checks run right after `codex build`, each with a fresh `CODEX_HOME` beside the real `HOME`, had the launcher's `ling-docs session` add `~/Documents` and `~/Downloads` to the empty home and embed all of `~/Downloads` from nothing (2 h 10 min of CPU in 32 minutes), which held up that night's SWE-bench run. `ling-docs` now indexes on its own only in `~/.mightling` (LOCAL_INDEX §9), but the variable keeps the session from starting at all. A harness that gives the session its own `HOME` as well (`audit egress --docs`, `--sync`, the desktop e2e) is safe as it is.
 - The vLLM launcher is tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`; [models-and-engines.md](models-and-engines.md)).
 
 ## The built binary and the model server

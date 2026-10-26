@@ -7,7 +7,7 @@
 //! `query: ` prefix and documents none, as the model card prescribes. Inputs are cut at 512
 //! tokens, as Phase 0's embedding runs were.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Context, Result};
@@ -29,6 +29,45 @@ pub trait Embed {
     fn embed(&self, text: &str) -> Result<Vec<f32>>;
     /// A name recorded with the vectors, so vectors of another model are never mixed in.
     fn name(&self) -> &str;
+    /// The files the vectors depend on (the model and its tokenizer): their SHA-256 is recorded
+    /// with the vectors too, so a new revision under the same name is embedded again (§7.5).
+    fn model_files(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+}
+
+/// The installed model's files, in a model directory.
+pub const MODEL_FILES: [&str; 2] = ["model.onnx", "tokenizer.json"];
+
+/// The model files of a model directory.
+pub fn model_files_in(dir: &Path) -> Vec<PathBuf> {
+    MODEL_FILES.iter().map(|name| dir.join(name)).collect()
+}
+
+/// The files' sizes and modification times: when unchanged, the recorded hash still holds and the
+/// files are not read again (a reinstall of the same bytes changes this, not the hash).
+pub fn files_stat(files: &[PathBuf]) -> String {
+    use std::os::unix::fs::MetadataExt;
+    files
+        .iter()
+        .map(|f| match std::fs::metadata(f) {
+            Ok(m) => format!("{}:{}:{}.{}", f.file_name().unwrap_or_default().to_string_lossy(), m.len(), m.mtime(), m.mtime_nsec()),
+            Err(_) => format!("{}:-", f.file_name().unwrap_or_default().to_string_lossy()),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A SHA-256 over the files' names and contents' SHA-256, in order.
+pub fn files_sha256(files: &[PathBuf]) -> Result<String> {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    for f in files {
+        hasher.update(f.file_name().unwrap_or_default().to_string_lossy().as_bytes());
+        hasher.update([0u8]);
+        hasher.update(crate::discover::hash(f).with_context(|| format!("reading {}", f.display()))?.as_bytes());
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// The model's tokenizer, which also counts tokens for chunking.
@@ -73,6 +112,7 @@ pub struct OnnxEmbedder {
     pub tokenizer: ModelTokenizer,
     dim: usize,
     name: String,
+    files: Vec<PathBuf>,
 }
 
 /// Loads ONNX Runtime from the lib directory, once per process.
@@ -104,7 +144,7 @@ impl OnnxEmbedder {
             .commit_from_file(&model)
             .with_context(|| format!("loading {}", model.display()))?;
         let dim = 768;
-        Ok(OnnxEmbedder { session: Mutex::new(session), tokenizer, dim, name: crate::config::MODEL_NAME.to_string() })
+        Ok(OnnxEmbedder { session: Mutex::new(session), tokenizer, dim, name: crate::config::MODEL_NAME.to_string(), files: model_files_in(model_dir) })
     }
 }
 
@@ -115,6 +155,10 @@ impl Embed for OnnxEmbedder {
 
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn model_files(&self) -> Vec<PathBuf> {
+        self.files.clone()
     }
 
     fn embed(&self, text: &str) -> Result<Vec<f32>> {

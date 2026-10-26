@@ -18,6 +18,19 @@ pub const MODEL_NAME: &str = "snowflake-arctic-embed-m-v2.0-int8";
 /// Target chunk size in the model's tokens (§7.2, §15.4).
 pub const CHUNK_TOKENS: usize = 512;
 
+/// The share of a window a long unit's next window repeats (§7.2).
+pub const CHUNK_OVERLAP: f64 = 0.15;
+
+/// The chunker's own version: bumped only when a change to `chunk.rs` moves chunk boundaries.
+pub const CHUNKER_VERSION: u32 = 1;
+
+/// What decides where chunks end, recorded with a collection (§7.5): when it differs, the
+/// documents are chunked again from their stored text and only chunks whose text changed are
+/// embedded again. A new binary on its own never changes it.
+pub fn chunking_key() -> String {
+    format!("tokens={CHUNK_TOKENS} overlap={CHUNK_OVERLAP} chunker={CHUNKER_VERSION}")
+}
+
 /// The agent's home: `$CODEX_HOME`, else `~/.mightling`.
 pub fn home() -> PathBuf {
     if let Some(dir) = std::env::var_os("CODEX_HOME").filter(|d| !d.is_empty()) {
@@ -29,6 +42,27 @@ pub fn home() -> PathBuf {
 /// The user's home directory.
 pub fn user_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Whether ling-docs may add the default collections and index without being asked (§5.1, §9):
+/// only in the user's own agent home, `~/.mightling`. A scratch `CODEX_HOME` (a test, a check, an
+/// audit, a Night Shift task) would otherwise index the real `~/Documents` and `~/Downloads` from
+/// nothing into a throwaway database: found 2026-10-26, two such runs embedding all of
+/// `~/Downloads` for half an hour each. `DREAMFERENCE_MIGHTLING_DOCS=1`, set explicitly, asks
+/// for it in another home; `ling docs add` and `reindex` are asked for in any home.
+pub fn indexes_unasked() -> bool {
+    indexes_unasked_for(&home(), &user_home(), std::env::var("DREAMFERENCE_MIGHTLING_DOCS").ok().as_deref())
+}
+
+/// [`indexes_unasked`] for a given agent home, user home and `DREAMFERENCE_MIGHTLING_DOCS`.
+pub fn indexes_unasked_for(agent_home: &Path, user_home: &Path, setting: Option<&str>) -> bool {
+    if let Some(value) = setting.map(str::trim).filter(|v| !v.is_empty()) {
+        if !matches!(value.to_lowercase().as_str(), "0" | "false" | "no" | "off") {
+            return true;
+        }
+    }
+    let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    canonical(agent_home) == canonical(&user_home.join(".mightling"))
 }
 
 /// `docs.toml`: the collections. User-level only, never read from a repository or a collection.
@@ -296,6 +330,20 @@ mod tests {
         let s = Settings::from_sources(&table, &env);
         assert!(s.enabled);
         assert_eq!(s.bm25_weight, 0.25);
+    }
+
+    #[test]
+    fn only_the_users_own_home_indexes_unasked() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("user");
+        std::fs::create_dir_all(user.join(".mightling")).unwrap();
+        assert!(indexes_unasked_for(&user.join(".mightling"), &user, None));
+        assert!(indexes_unasked_for(&user.join(".mightling/"), &user, Some("")), "the same folder, written another way");
+        let scratch = dir.path().join("scratch/codexhome");
+        assert!(!indexes_unasked_for(&scratch, &user, None), "a scratch CODEX_HOME beside the real HOME");
+        assert!(!indexes_unasked_for(&scratch, &user, Some("0")));
+        assert!(indexes_unasked_for(&scratch, &user, Some("1")), "asked for explicitly");
+        assert!(indexes_unasked_for(&scratch, &user, Some("on")));
     }
 
     #[test]

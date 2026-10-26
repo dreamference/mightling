@@ -231,6 +231,9 @@ class EgressAudit:
         reply_path = os.path.join(work_dir, "reply.txt")
         env = dict(os.environ)
         env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
+        # The environment wins over the config file: a caller's DREAMFERENCE_MIGHTLING_DOCS must
+        # not start a file index over the real home's folders from the throwaway CODEX_HOME.
+        env["DREAMFERENCE_MIGHTLING_DOCS"] = "0"
         # The base: the audited session is the same whatever adapter the user starts sessions with.
         from dreamference.runner.codex_installer import ADAPTER_ENV, WORKTREE_ENV
         env[ADAPTER_ENV] = ""
