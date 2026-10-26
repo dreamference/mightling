@@ -19,7 +19,10 @@ phase-merge fix.
   the commit in `QWEN38_LING_ENGINE_COMMIT` ({{TBD digest}}).
 - **Long context** (the nights ran 65,536): ling-serve starts at 262,144 within the container's
   cap, a ~205K-token needle question answers correctly, decode speed at that length is recorded,
-  and `ling-run --spec-check` passes on the long prompt ({{TBD result}}).
+  and `ling-run --spec-check` passes on the long prompt. Done on node-b on 2026-10-26 with the
+  f5ab951 image: started at 262,144 in 40 s (host memory +60 GB, 46 GB left available), both needles
+  of a 204,857-token prompt answered exactly, prefill ~850-900 tokens/s at that length, decode 39.6
+  tokens/s there (74.9 at short context), spec-check passed (tokens and state identical).
 - **The drafter:** ScaleSearch if its upload is on the Hub in time, else RTN ({{TBD which}}).
 - **The live test on the node:** `server stop`, `server start` with ling-serve, `/v1/models`, a
   `ling exec` task, a phone bridge, the desktop app and the egress audit ({{TBD date and result}}).
