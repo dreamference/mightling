@@ -1576,8 +1576,7 @@ class VLLMServerManager:
                 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18). If the gate cannot start, the
                 engine serves `port` itself, as before the gate.
             engine (str | None): The engine to serve the model with; None is the model's
-                default recipe's (ling-serve for the default model since 1.7.2, SGLang one
-                setting away).
+                default recipe's (SGLang for the default model; ling-serve is opt-in since 1.7.2).
 
         Returns:
             Optional[subprocess.Popen]: Popen object if background=True, else None.

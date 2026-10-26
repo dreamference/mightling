@@ -133,7 +133,7 @@ Launch local vLLM server optimized for GB10 unified memory.
 |---|---|
 | `--model` | Model name to serve (default: the configured main model; examples: qwen3.8-27b-nvfp4-dflash2, llama-3.3-70b) |
 | `--port` | Port for the model server's /v1 API. |
-| `--engine` | Engine to serve the model with (default: server_engine in the config, else the model's own: ling-serve for the default model, SGLang its fallback). One of: `ling`, `sglang`. |
+| `--engine` | Engine to serve the model with (default: server_engine in the config, else the model's own: SGLang for the default model; ling-serve is opt-in). One of: `ling`, `sglang`. |
 | `--no-gate` | Serve the port from the engine itself, without the model gate that lets a SWE-bench run refuse other requests. |
 | `--quantization` | Quantization method (int8, fp8, awq) |
 | `--draft-model` | Speculative decoding draft model (e.g. qwen2.5-coder-1.5b) |

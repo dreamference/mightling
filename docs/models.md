@@ -8,7 +8,7 @@ to tune by hand.
 
 | Alias | Model | Parameters | Precision | Memory needed | Images |
 |---|---|---|---|---|---|
-| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by ling-serve (SGLang as the fallback) | 27B | NVFP4 | 20 – 70 GB | on SGLang |
+| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B, NVFP4, with DFlash2 speculative decoding, served by SGLang | 27B | NVFP4 | 20 – 70 GB | yes |
 | `qwen3.8-27b-dflash2-draft` | DFlash2 drafter for Qwen3.8-27B (not served on its own) | ~1B | NVFP4 | 1 – 2 GB | no |
 | `qwen3.8-27b-minima-nvfp4-dflash2` (candidate, under evaluation) | Qwen3.8-27B with every layer in NVFP4 ("Minima"), same server settings and drafter as the default | 27B | NVFP4 | 19 – 70 GB | no |
 
@@ -20,58 +20,76 @@ ling-admin model list
 
 ## The default model
 
-`qwen3.8-27b-nvfp4-dflash2` is RadixArk's NVFP4 quantisation of Qwen3.8-27B with DFlash2, a
-drafter that proposes 12 tokens at a time for the model to check in one pass.
+`qwen3.8-27b-nvfp4-dflash2` is RadixArk's NVFP4 quantisation of Qwen3.8-27B, served by **SGLang**
+rather than vLLM, because its speed comes from a drafter only SGLang runs: DFlash2, which proposes
+12 tokens at a time for the model to check in one pass. The recipe follows
+[hasso5703/dgx-spark-qwen38](https://github.com/hasso5703/dgx-spark-qwen38), measured on a GB10.
 
-Since 1.7.2 it is served by **ling-serve**, the server of
+Measured on a GB10, single-stream, 2026-10-09, with 12 draft tokens (`scripts/decode_speed.py`):
+
+| Output | Tokens per second |
+|---|---|
+| Prose | 32.0 |
+| Code | 68.6 |
+| JSON | 84.1 |
+| Reading a prompt | ~1,800 (a 13K-token prompt in 7.3 s; ~1,000 at 116K tokens) |
+
+It reads images, holds a 262K-token context (a fact planted in the middle of a 116K-token prompt was
+found), and while serving leaves about 38 GB of memory free, so several agents can work at once:
+four `ling` tasks in parallel finished in 23 seconds.
+
+Server settings it runs with (from the registry):
+
+| Setting | Value |
+|---|---|
+| Server | SGLang v0.5.19, pinned by digest |
+| Checkpoint | `RadixArk/Qwen3.8-27B-NVFP4`, pinned commit |
+| Context length | 262,144 tokens |
+| Concurrent requests | 8 |
+| Memory fraction | 0.50 |
+| Speculative decoding | DFlash2, `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`, 12 tokens |
+| Tool calls / reasoning parsers | `qwen3_coder` / `qwen3` |
+| Thinking | `ling` asks for none; chat thinks at medium effort unless told otherwise |
+
+### ling-serve, opt-in
+
+Since 1.7.2 the default model can also be served by **ling-serve**, the server of
 [ling-engine](https://github.com/dreamference/ling-engine), written for this one model on the GB10.
-Its speculation is exact (what the drafter proposes changes the speed, never the output), it
-verifies the drafter's candidates as a tree, and it was tested against SGLang on SWE-bench nights
-before it became the default. It runs in its own small image (`ghcr.io/dreamference/ling-serve`,
-pinned by digest, its ling-engine commit in the image's labels), behind the same container limits
-and host-safety checks as SGLang.
-
-| Setting | ling-serve (default) | SGLang (fallback) |
-|---|---|---|
-| Image | `ghcr.io/dreamference/ling-serve`, pinned by digest | `lmsysorg/sglang` v0.5.21, pinned by digest |
-| Checkpoint | `RadixArk/Qwen3.8-27B-NVFP4`, pinned commit | the same |
-| Speculative decoding | DFlash2, `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`, 12 tokens, tree verification | the same drafter, 12 tokens, chain |
-| Context length | 262,144 tokens | 262,144 tokens |
-| Requests at once | 2 (two resident sessions); more wait | 8 |
-| Container memory cap | the same as SGLang's (memory fraction 0.50 plus 24 GB) | memory fraction 0.50 |
-| Tool calls / reasoning | `qwen3_coder` / `qwen3`, built in | `qwen3_coder` / `qwen3` parsers |
-| Images | not read: an image arrives as the text `[image]` | read |
-| Adapters (LoRA) | not served | served |
-| API key (`--api-key`) | not supported | supported |
-
-`ling` asks the server what it serves (the model, its context length, whether it reads images), so
-nothing has to be configured on the clients when the engine changes.
-
-### Serving with SGLang instead
-
-SGLang serves the same checkpoint with the same drafter and was the engine until 1.7.2. Switch for
-one start:
+SGLang stays the default; ling-serve becomes the default once it reads images, serves adapters and
+runs more than two requests at once. Switch for one start:
 
 ```bash
-ling-admin server stop && ling-admin server start --engine sglang
+ling-admin server stop && ling-admin server start --engine ling
 ```
 
-or keep it, in `~/.config/dreamference/config.toml` (or `DREAMFERENCE_SERVER_ENGINE=sglang`):
+or keep it, in `~/.config/dreamference/config.toml` (or `DREAMFERENCE_SERVER_ENGINE=ling`):
 
 ```toml
-server_engine = "sglang"
+server_engine = "ling"
 ```
 
-Use SGLang when you need image input, LoRA adapters, an API key or more than two requests running
-at once. If ling-serve fails one of `server start`'s checks (it does not answer, the NVFP4 canary or
-the tool-call check fails), `server start` says so and prints the command above; it never switches
-engine by itself.
+Back to SGLang: remove that line, or `ling-admin server start --engine sglang`. If ling-serve fails
+one of `server start`'s checks (it does not answer, the NVFP4 canary or the tool-call check fails),
+`server start` says so and prints the command to go back; it never switches engine by itself.
 
-SGLang measured on a GB10, single-stream, 2026-10-09, with 12 draft tokens
-(`scripts/decode_speed.py`): prose 32.0, code 68.6, JSON 84.1 tokens per second, reading a prompt at
-~1,800 tokens per second (~1,000 at 116K tokens). The recipe follows
-[hasso5703/dgx-spark-qwen38](https://github.com/hasso5703/dgx-spark-qwen38). It reads images, holds
-a 262K-token context, and while serving leaves about 38 GB of memory free.
+It serves the same checkpoint with the same drafter and the same 262,144-token context, from its
+own small image (`ghcr.io/dreamference/ling-serve`, pinned by digest, the ling-engine commit in its
+labels), inside the same container limits and host-safety checks. Its speculation is exact (the
+drafter changes the speed, never the output) and it verifies the drafter's guesses as a tree. Its
+limits:
+
+- **No images.** An image arrives as the text `[image]`; `ling` and the phone bridges learn this
+  from the server and send text.
+- **No LoRA adapters**, and no API key (`--api-key` is refused).
+- **Two requests at once**; a third waits until one finishes.
+- **Changing the end of a long prompt reads it again**: a new prompt that shares a long beginning
+  with an earlier one but differs inside the same message is read in full (at ~850-900 tokens per
+  second near 200K tokens, nearly four minutes).
+
+Measured on a GB10 on 2026-10-26 (ling-engine f5ab951, 262,144-token context): ready in 40 s, about
+60 GB of memory in use while serving; a 600-token code answer at 74.9 tokens per second; a
+204,857-token prompt with two facts hidden at 45% and 85% of its length answered both exactly, with
+decode at 39.6 tokens per second at that length.
 
 ## Changing models
 

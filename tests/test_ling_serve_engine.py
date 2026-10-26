@@ -1,4 +1,4 @@
-"""ling-engine's ling-serve as the default model's engine, SGLang one setting away (1.7.2).
+"""ling-engine's ling-serve beside SGLang for the default model, opt-in in 1.7.2.
 
 ling-engine specs/DREAMFERENCE_LING_ENGINE_INTEGRATION.md §12: the registry names the engine, the
 launch builder emits only what follows the image, and the container comes from the same `docker run`
@@ -47,24 +47,25 @@ def flag(args: list[str], name: str) -> str:
     return args[args.index(name) + 1]
 
 
-def test_the_default_model_is_served_by_ling_serve_with_sglang_as_its_fallback():
-    assert ModelMatrixRegistry.engines(DEFAULT_MODEL_ALIAS) == [ENGINE_LING, ENGINE_SGLANG]
+def test_sglang_stays_the_default_and_ling_serve_is_opt_in():
+    # The owner's decision (2026-10-26): ling-serve becomes the default once it reads images,
+    # serves adapters and runs more than two requests at once.
+    assert ModelMatrixRegistry.engines(DEFAULT_MODEL_ALIAS) == [ENGINE_SGLANG, ENGINE_LING]
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
-    assert recipe["engine"] == ENGINE_LING
-    fallback = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
-    assert fallback["engine"] == ENGINE_SGLANG and fallback["docker_image"] == QWEN38_SGLANG_IMAGE
-    # The fallback keeps everything SGLang needs: the template patches, the runtime patch and adapters.
-    assert fallback["chat_template_patches"] and fallback["runtime_patches"] and fallback["lora"]
+    assert recipe["engine"] == ENGINE_SGLANG and recipe["docker_image"] == QWEN38_SGLANG_IMAGE
+    assert recipe["chat_template_patches"] and recipe["runtime_patches"] and recipe["lora"]
     # Naming the default's own engine is the default recipe.
-    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING) == recipe
-    with pytest.raises(ValueError, match="engines: ling, sglang"):
+    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG) == recipe
+    ling = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    assert ling["engine"] == ENGINE_LING and "lora" not in ling
+    with pytest.raises(ValueError, match="engines: sglang, ling"):
         get_model_launch_overrides(DEFAULT_MODEL_ALIAS, "vllm")
 
 
 def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
     # Another agent fetches files by this field (only for engines at or after a commit), so it
     # must be the full hash an ancestry check takes.
-    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
+    recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     assert recipe["engine_commit"] == QWEN38_LING_ENGINE_COMMIT
     # 1.7.2's engine: 79c38c7 plus the parse-only tool-call fix; no sparse head yet (7417523).
     assert QWEN38_LING_ENGINE_COMMIT.startswith("f5ab951")
@@ -75,8 +76,8 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
 
 
 def test_both_engines_serve_the_same_checkpoint_and_context():
-    ling = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
-    sglang = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
+    ling = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    sglang = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
     assert ling["revision"] == sglang["revision"]
     assert ling["max_model_len"] == sglang["max_model_len"] == 262144
     assert ling["speculative_config"]["num_speculative_tokens"] == 12
@@ -86,7 +87,7 @@ def test_both_engines_serve_the_same_checkpoint_and_context():
 
 
 def test_ling_serve_runs_inside_the_same_guarded_container_with_the_nights_flags():
-    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS)
+    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, engine=ENGINE_LING)
     prefix, server = split_at_image(cmd, QWEN38_LING_IMAGE)
     sglang_prefix, _ = split_at_image(
         VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, engine=ENGINE_SGLANG),
@@ -155,7 +156,9 @@ def test_every_flag_the_builder_emits_is_one_ling_serve_parses():
         "--side-prefill",
     }
     for gate in (False, True):
-        cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=gate)
+        cmd = VLLMServerManager().build_launch_command(
+            model=DEFAULT_MODEL_ALIAS, gate=gate, engine=ENGINE_LING
+        )
         _, server = split_at_image(cmd, QWEN38_LING_IMAGE)
         assert {a for a in server if a.startswith("--")} <= known
 
@@ -163,7 +166,9 @@ def test_every_flag_the_builder_emits_is_one_ling_serve_parses():
 def test_behind_the_gate_ling_serve_listens_on_loopback_and_the_gate_runs_in_its_image():
     from dreamference.vllm_server.model_gate import ModelGate
 
-    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
+    cmd = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, gate=True, engine=ENGINE_LING
+    )
     _, server = split_at_image(cmd, QWEN38_LING_IMAGE)
     assert flag(server, "--host") == "127.0.0.1"
     assert flag(server, "--port") == str(ModelGate.engine_port(8000))
@@ -172,17 +177,19 @@ def test_behind_the_gate_ling_serve_listens_on_loopback_and_the_gate_runs_in_its
     assert gate[gate.index(QWEN38_LING_IMAGE) - 1] == "python3"
     assert re.search(r"^\s+python3 \\$", DOCKERFILE.read_text(), re.M)
 
-    open_cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=False)
+    open_cmd = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, gate=False, engine=ENGINE_LING
+    )
     _, open_server = split_at_image(open_cmd, QWEN38_LING_IMAGE)
     assert flag(open_server, "--host") == "0.0.0.0" and flag(open_server, "--port") == "8000"
 
 
 def test_an_api_key_is_refused_on_ling_serve_and_names_the_fallback():
     with pytest.raises(RuntimeError, match="--engine sglang"):
-        VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, api_key="secret")
-    cmd = VLLMServerManager().build_launch_command(
-        model=DEFAULT_MODEL_ALIAS, api_key="secret", engine=ENGINE_SGLANG
-    )
+        VLLMServerManager().build_launch_command(
+            model=DEFAULT_MODEL_ALIAS, api_key="secret", engine=ENGINE_LING
+        )
+    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, api_key="secret")
     assert "secret" in cmd
 
 
@@ -191,7 +198,7 @@ def test_the_served_id_names_the_default_entry():
     assert model_key_for_served_id(SERVED_ID, DEFAULT_MODEL_ALIAS) == DEFAULT_MODEL_ALIAS
 
 
-def test_the_sglang_fallback_still_serves_adapters_and_ling_serve_none(monkeypatch):
+def test_sglang_serves_adapters_and_ling_serve_none(monkeypatch):
     from dreamference.vllm_server.adapter_serving import AdapterServing
 
     # Adapters are verified against the checkpoint whichever engine serves it.
@@ -204,12 +211,12 @@ def test_the_sglang_fallback_still_serves_adapters_and_ling_serve_none(monkeypat
         AdapterServing, "launch_adapters", classmethod(lambda cls, key: [{"name": "x"}])
     )
     monkeypatch.setattr(AdapterServing, "clear", classmethod(lambda cls: cleared.append(True)))
-    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, QWEN38_LING_IMAGE, True) is True
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, QWEN38_LING_IMAGE, True, ENGINE_LING) is True
     assert cleared == [True]
 
 
 def test_server_args_of_finds_ling_serves_own_arguments():
-    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS)
+    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, engine=ENGINE_LING)
     args = LingServeLaunchBuilder.server_args_of(cmd)
     assert args is not None and args[0] == "--model"
     sglang = VLLMServerManager().build_launch_command(
@@ -247,9 +254,9 @@ def test_server_start_names_the_engine_and_refuses_one_the_model_lacks(capsys):
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController as Cli
 
     assert Cli._server_engine(DEFAULT_MODEL_ALIAS, None, from_flag=False) is None
-    assert "ling-serve" in capsys.readouterr().out
-    assert Cli._server_engine(DEFAULT_MODEL_ALIAS, "sglang", from_flag=True) == "sglang"
-    assert "Engine: SGLang" in capsys.readouterr().out
+    assert "Engine: SGLang; also: --engine ling" in capsys.readouterr().out
+    assert Cli._server_engine(DEFAULT_MODEL_ALIAS, "ling", from_flag=True) == "ling"
+    assert "Engine: ling-serve" in capsys.readouterr().out
     with pytest.raises(SystemExit) as stop:
         Cli._server_engine("qwen3.8-27b-minima-nvfp4-dflash2", "ling", from_flag=True)
     assert stop.value.code == 2
@@ -259,11 +266,12 @@ def test_server_start_names_the_engine_and_refuses_one_the_model_lacks(capsys):
 def test_a_failed_check_on_ling_serve_names_the_sglang_fallback_and_switches_nothing(capsys):
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController as Cli
 
-    Cli._suggest_engine_fallback(DEFAULT_MODEL_ALIAS, None, "the tool-call check")
+    Cli._suggest_engine_fallback(DEFAULT_MODEL_ALIAS, "ling", "the tool-call check")
     out = capsys.readouterr().out
     assert "ling-serve failed the tool-call check" in out
     assert "ling-admin server start --engine sglang" in out
-    # On SGLang itself, or a model without the fallback, nothing is suggested.
+    # On SGLang (the default), or a model without ling-serve, nothing is suggested.
+    Cli._suggest_engine_fallback(DEFAULT_MODEL_ALIAS, None, "to start")
     Cli._suggest_engine_fallback(DEFAULT_MODEL_ALIAS, "sglang", "to start")
     Cli._suggest_engine_fallback("qwen3.8-27b-minima-nvfp4-dflash2", None, "to start")
     assert capsys.readouterr().out == ""
@@ -272,11 +280,13 @@ def test_a_failed_check_on_ling_serve_names_the_sglang_fallback_and_switches_not
 def test_the_drift_check_compares_ling_serve_with_its_own_recipe():
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController as Cli
 
-    running = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
+    running = VLLMServerManager().build_launch_command(
+        model=DEFAULT_MODEL_ALIAS, gate=True, engine=ENGINE_LING
+    )
     assert Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, running) == {
         "Recipe Match": "Running flags match the registry recipe"
     }
-    # The fallback running is compared with the fallback's recipe, not reported as all drift.
+    # SGLang, the default, is compared with its own recipe, not reported as all drift.
     sglang = VLLMServerManager().build_launch_command(
         model=DEFAULT_MODEL_ALIAS, gate=True, engine=ENGINE_SGLANG
     )
@@ -338,12 +348,12 @@ def test_start_server_on_ling_serve_pulls_its_image_and_prepares_nothing_of_sgla
     _stub_start(monkeypatch, mgr, calls)
     # The launch itself is stubbed out (no command to run); what happened before it is the point.
     with pytest.raises(TypeError):
-        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True)
+        mgr.start_server(model=DEFAULT_MODEL_ALIAS, background=True, engine=ENGINE_LING)
     assert calls["image"] == QWEN38_LING_IMAGE
     assert "template" not in calls and "runtime_patch" not in calls and "reset" not in calls
 
 
-def test_start_server_on_the_fallback_prepares_sglangs_patches(monkeypatch):
+def test_start_server_on_sglang_prepares_its_patches(monkeypatch):
     mgr = VLLMServerManager()
     calls: dict = {}
     _stub_start(monkeypatch, mgr, calls)
@@ -370,7 +380,7 @@ def test_the_drafter_is_one_pinned_constant_away_from_the_scalesearch_one():
         QWEN38_SCALESEARCH_DRAFTER,
     )
 
-    drafter = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)["speculative_config"]
+    drafter = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)["speculative_config"]
     assert drafter["model"] == QWEN38_LING_DRAFTER["model"]
     assert drafter["revision"] == QWEN38_LING_DRAFTER["revision"]
     # Whatever ling-serve runs is pinned by commit and sized by a matrix entry.
@@ -378,14 +388,25 @@ def test_the_drafter_is_one_pinned_constant_away_from_the_scalesearch_one():
     assert ModelMatrixRegistry.get_spec(drafter["model"]) is not None
     assert QWEN38_LING_DRAFTER in (QWEN38_RTN_DRAFTER, QWEN38_SCALESEARCH_DRAFTER)
     _, server = split_at_image(
-        VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS), QWEN38_LING_IMAGE
+        VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, engine=ENGINE_LING),
+        QWEN38_LING_IMAGE,
     )
     repo = QWEN38_LING_DRAFTER["model"].replace("/", "--")
     assert flag(server, "--draft").endswith(f"models--{repo}/snapshots/{drafter['revision']}")
 
 
 def test_the_image_digest_is_a_real_pin_not_the_placeholder():
-    # The registry holds a placeholder digest until the image is pushed to GHCR; a node's default
-    # `server start` cannot pull it, so this stays red until the pushed digest is pinned.
+    # The registry holds a placeholder digest until the image is pushed to GHCR; a node's
+    # `server start --engine ling` cannot pull it, so this stays red until the pushed digest is pinned.
     digest = QWEN38_LING_IMAGE.rsplit(":", 1)[1]
     assert len(set(digest)) > 1, "pin the digest GHCR gave the push in QWEN38_LING_IMAGE"
+
+
+def test_the_tool_call_checks_hints_name_ling_serves_own_parsing():
+    from dreamference.vllm_server.tool_call_canary import ToolCallCanary
+
+    ling = ToolCallCanary.parsers(DEFAULT_MODEL_ALIAS, ENGINE_LING)
+    assert "ling-serve's built-in qwen3_coder" in ling["tool"]
+    assert "compiled into ling-serve" in ling["template"]
+    sglang = ToolCallCanary.parsers(DEFAULT_MODEL_ALIAS)
+    assert sglang["tool"] == "--tool-call-parser qwen3_coder"

@@ -79,27 +79,19 @@ def flag(cmd, name):
     return cmd[cmd.index(name) + 1]
 
 
-# Adapters are served by the default model's SGLang fallback; ling-serve, its default engine, serves none.
-SGLANG = "sglang"
-
-
 # -- the recipe ----------------------------------------------------------------------------------
 
 
 def test_without_an_installed_adapter_the_launch_line_is_unchanged(verified):
     mgr = VLLMServerManager()
-    assert "--enable-lora" not in mgr.build_launch_command(
-        model=DEFAULT_MODEL_ALIAS, engine=SGLANG, gate=True
-    )
+    assert "--enable-lora" not in mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
 
 
 def test_an_installed_adapter_turns_on_the_recipes_lora_flags_behind_the_gate(verified):
     install()
     mgr = VLLMServerManager()
-    plain = mgr.build_launch_command(
-        model=DEFAULT_MODEL_ALIAS, engine=SGLANG, gate=True, serve_adapters=False
-    )
-    cmd = mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, engine=SGLANG, gate=True)
+    plain = mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True, serve_adapters=False)
+    cmd = mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
     assert flag(cmd, "--max-lora-rank") == str(QWEN38_LORA_RECIPE["max_lora_rank"]) == "16"
     assert (flag(cmd, "--max-loras-per-batch"), flag(cmd, "--max-loaded-loras")) == ("4", "8")
     assert "--lora-strict-loading" in cmd and "--lora-target-modules" not in cmd
@@ -116,18 +108,10 @@ def test_an_installed_adapter_turns_on_the_recipes_lora_flags_behind_the_gate(ve
     # The loaded adapters are host memory the container's cap counts.
     assert memory_cap(cmd) == memory_cap(plain) + 1
     # Behind no gate, or with a caller's API key, nothing is served: the engine's key is the gate's.
-    assert "--enable-lora" not in mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, engine=SGLANG)
+    assert "--enable-lora" not in mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS)
     assert "--enable-lora" not in mgr.build_launch_command(
-        model=DEFAULT_MODEL_ALIAS, engine=SGLANG, gate=True, api_key="k"
+        model=DEFAULT_MODEL_ALIAS, gate=True, api_key="k"
     )
-
-
-def test_ling_serve_never_serves_adapters(verified):
-    install()
-    cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
-    assert "ling-serve" in cmd and not any("lora" in a for a in cmd)
-    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is True
-    assert not (AdapterServing.gate_dir() / "adapters.json").exists()
 
 
 def test_minima_never_serves_adapters(verified):
@@ -143,7 +127,7 @@ def test_an_adapter_that_fails_its_check_is_not_served(monkeypatch, capsys):
         classmethod(lambda cls, entry, base: "adapter_model.safetensors does not match"),
     )
     assert "--enable-lora" not in VLLMServerManager().build_launch_command(
-        model=DEFAULT_MODEL_ALIAS, engine=SGLANG, gate=True
+        model=DEFAULT_MODEL_ALIAS, gate=True
     )
     assert "rust is not served" in capsys.readouterr().out
 
@@ -222,10 +206,10 @@ def test_prepare_writes_the_gates_list_or_removes_it(verified, monkeypatch):
     monkeypatch.setattr(
         SGLangRuntimePatcher, "prepare", classmethod(lambda cls, image, patches: None)
     )
-    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True, engine=SGLANG) is True
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is True
     assert not (AdapterServing.gate_dir() / LIST_FILE).exists()
     install()
-    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True, engine=SGLANG) is True
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is True
     listing = json.loads((AdapterServing.gate_dir() / LIST_FILE).read_text())
     assert listing["base"] == BASE and listing["max_loaded"] == 8
     assert listing["adapters"]["rust"]["path"].startswith(
@@ -239,7 +223,7 @@ def test_prepare_writes_the_gates_list_or_removes_it(verified, monkeypatch):
     monkeypatch.setattr(
         SGLangRuntimePatcher, "prepare", classmethod(lambda cls, image, patches: "no file")
     )
-    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True, engine=SGLANG) is False
+    assert AdapterServing.prepare(DEFAULT_MODEL_ALIAS, "image", gated=True) is False
     assert not (AdapterServing.gate_dir() / LIST_FILE).exists()
 
 

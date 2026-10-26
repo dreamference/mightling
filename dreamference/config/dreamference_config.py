@@ -35,9 +35,9 @@ DEFAULT_TOOL_CALL_PARSER: Final[str] = "hermes"
 DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
 
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
-# The engine `server start` serves the model with: None is the model's own default (ling-serve for
-# the default model since 1.7.2); `sglang` keeps it on SGLang (the fallback), `ling` names
-# ling-engine. `server start --engine` overrides it for one start.
+# The engine `server start` serves the model with: None is the model's own default (SGLang for the
+# default model); `ling` opts into ling-engine's ling-serve (1.7.2), `sglang` names SGLang.
+# `server start --engine` overrides it for one start.
 DEFAULT_SERVER_ENGINE: Final[str | None] = None
 SERVER_ENGINES: Final[tuple] = ("ling", "sglang", "vllm")
 DEFAULT_CAVE_MODE: Final[bool] = False

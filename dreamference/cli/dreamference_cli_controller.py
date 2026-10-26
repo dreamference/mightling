@@ -358,7 +358,7 @@ class DreamferenceCLIController:
 
     @classmethod
     def _suggest_engine_fallback(cls, model: str, engine: str | None, what: str) -> None:
-        """After a failed start check on ling-serve, names SGLang as the fallback.
+        """After a failed start check on ling-serve, names SGLang, the default engine, to go back to.
 
         Never switches by itself: the user decides, with one flag or one config key.
 
@@ -374,10 +374,10 @@ class DreamferenceCLIController:
         running = engine or (engines[0] if engines else None)
         if running != ENGINE_LING or ENGINE_SGLANG not in engines:
             return
-        print(f"💡 ling-serve failed {what}. SGLang serves the same model and was production's engine "
-              "until 1.7.2:\n"
+        print(f"💡 ling-serve failed {what}. SGLang, the default engine, serves the same model:\n"
               "     ling-admin server stop && ling-admin server start --engine sglang\n"
-              "   To keep it: server_engine = \"sglang\" in ~/.config/dreamference/config.toml. "
+              "   To stay on it, remove server_engine = \"ling\" from ~/.config/dreamference/config.toml "
+              "(or DREAMFERENCE_SERVER_ENGINE). "
               "Please report the failure with `docker logs dreamference-vllm-<port>`.")
 
     @classmethod
@@ -394,7 +394,7 @@ class DreamferenceCLIController:
             requested_model (Optional[str]): The model `server start` was asked for, preferred when the
                 served id maps to more than one registry entry.
             engine (str | None): The engine `server start` resolved (None: the model's default); a
-                failure on ling-serve names the SGLang fallback.
+                failure on ling-serve names SGLang to go back to.
 
         Returns:
             Optional[bool]: Whether the call was well formed; None when no model was reported.
@@ -501,7 +501,7 @@ class DreamferenceCLIController:
 
         # A server behind the model gate listens on loopback; rebuilt the same way, so the gate's
         # host and port, and the adapters only a gated launch serves, are not reported as drift.
-        # Against the recipe of the engine that runs, which may be the model's fallback.
+        # Against the recipe of the engine that runs, which may be one other than the model's default.
         from dreamference.hardware import ModelMatrixRegistry
         from dreamference.hardware.model_matrix_registry import (
             ENGINE_LING,
@@ -1274,7 +1274,7 @@ class DreamferenceCLIController:
         start_server_parser.add_argument(
             "--engine", choices=("ling", "sglang"), default=None,
             help="Engine to serve the model with (default: server_engine in the config, else the "
-                 "model's own: ling-serve for the default model, SGLang its fallback).")
+                 "model's own: SGLang for the default model; ling-serve is opt-in).")
         start_server_parser.add_argument("--no-gate", action="store_true", help="Serve the port from the engine itself, without the model gate that lets a SWE-bench run refuse other requests")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
@@ -2731,7 +2731,7 @@ class DreamferenceCLIController:
                     # Do not block: exit after health check passes (server keeps running)
                     
                 except RuntimeError:
-                    # Before the container ran (the image, Docker, the hardware): the fallback is
+                    # Before the container ran (the image, Docker, the hardware): SGLang is
                     # named, the error itself is reported as before.
                     cls._suggest_engine_fallback(args.model, engine, "to start")
                     raise

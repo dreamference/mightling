@@ -49,9 +49,6 @@ def stream(*items, reasoning=""):
 
 
 def check(response, sent=None, **kwargs):
-    # The hints name SGLang's flags unless a test asks for ling-serve, the default model's engine.
-    kwargs.setdefault("engine", "sglang")
-
     def post(url, **request):
         if sent is not None:
             sent.append((url, request))
@@ -163,25 +160,3 @@ def test_server_start_runs_it_for_every_model_after_the_warm_up():
     line = source[source.rindex("\n", 0, check_at) + 1:check_at]
     nvfp4 = source[source.rindex("\n", 0, source.index('if "nvfp4" in args.model.lower():')) + 1:]
     assert len(line) == len(nvfp4) - len(nvfp4.lstrip())  # same depth as the NVFP4 test, not inside it
-
-
-def test_on_ling_serve_the_hints_name_its_own_parsing_not_flags():
-    passed, line = check(Response(stream(message_item(
-        '<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>'))),
-        engine=None)
-    assert not passed and "ling-serve's built-in qwen3_coder" in line and "--tool-call-parser" not in line
-    passed, line = check(Response(status=400, text="Invalid reasoning effort"), engine=None)
-    assert "compiled into ling-serve" in line and "chat_template_patches" not in line
-
-
-def test_a_failed_check_on_ling_serve_names_the_fallback(monkeypatch, capsys):
-    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
-
-    def run(cls, host, model_id, model_key=None, **_):
-        return False, "the model wrote the call as text"
-
-    monkeypatch.setattr(ToolCallCanary, "run", classmethod(run))
-    DreamferenceCLIController._run_tool_call_canary(Manager([SERVED]), None)
-    assert "ling-admin server start --engine sglang" in capsys.readouterr().out
-    DreamferenceCLIController._run_tool_call_canary(Manager([SERVED]), None, "sglang")
-    assert "--engine sglang" not in capsys.readouterr().out

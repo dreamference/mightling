@@ -260,13 +260,13 @@ ENGINE_VLLM: Final[str] = "vllm"
 ENGINE_SGLANG: Final[str] = "sglang"
 ENGINE_LING: Final[str] = "ling"
 
-# ling-engine (github.com/dreamference/ling-engine), the server written for this one model: the
-# default engine of qwen3.8-27b-nvfp4-dflash2 since 1.7.2 (ling-engine
-# specs/DREAMFERENCE_LING_ENGINE_INTEGRATION.md §12), with SGLang one setting away
-# (`server start --engine sglang`, or `server_engine = "sglang"` in the config) until the engine's
-# M5 release gate. Its quality was measured on SWE-bench nights 12 and 15 against SGLang and night
-# 17 against SGLang with the phase-merge fix; output is bit for bit the engine's own checks'
-# (speculation and tree verification exact), so the drafter moves speed alone.
+# ling-engine (github.com/dreamference/ling-engine), the server written for this one model
+# (ling-engine specs/DREAMFERENCE_LING_ENGINE_INTEGRATION.md §12): opt-in for
+# qwen3.8-27b-nvfp4-dflash2 in 1.7.2 (`server start --engine ling`, or `server_engine = "ling"` in
+# the config), SGLang staying the default until ling-serve reads images, serves adapters and runs
+# more than two requests at once (the owner's decision of 2026-10-26). Its quality was measured on
+# SWE-bench nights 12 and 15 against SGLang and night 17 against SGLang with the phase-merge fix;
+# speculation and tree verification are exact, so the drafter moves speed alone.
 #
 # The commit the image's ling-serve was built from (the full hash, never abbreviated), recorded in
 # the image's labels (`org.opencontainers.image.revision`, `ai.dreamference.ling-engine.commit`).
@@ -354,18 +354,17 @@ class ModelMatrixRegistry:
     # Static registry of supported target models and speculative draft models
     MATRIX: Final[Dict[str, ModelSpec]] = {
         "qwen3.8-27b-nvfp4-dflash2": ModelSpec(
-            name="Qwen 3.8 27B (NVFP4 + DFlash2)",
+            name="Qwen 3.8 27B (NVFP4 + DFlash2, SGLang)",
             params_b=27.0,
             supported_precisions=["NVFP4"],
             min_memory_gb=20.0,
             max_memory_gb=70.0,
             compatible_gb10=True,
             notes=(
-                "Served by ling-engine's ling-serve since 1.7.2 (`engine: ling`, QWEN38_LING_RECIPE), "
-                "with SGLang's recipe one setting away (`server start --engine sglang`). Not vLLM, "
-                "because the speed is in the drafter: DFlash2 is a block-diffusion drafter vLLM "
-                "supports only through an unmerged pull request. The measurements below are "
-                "SGLang's.\n\n"
+                "Served by SGLang (`engine: sglang`), with ling-engine's ling-serve beside it, opt-in "
+                "since 1.7.2 (`server start --engine ling`, QWEN38_LING_RECIPE). Not vLLM, because "
+                "the speed is in the drafter: DFlash2 is a block-diffusion drafter vLLM supports "
+                "only through an unmerged pull request. The measurements below are SGLang's.\n\n"
                 "Measured here (2026-09-29, single stream, temperature 0, thinking off, median of "
                 "three after a warm-up, decode net of time to first token): prose 25.5, code 50.3, "
                 "JSON 87.0 tok/s with the PyTorch sampler (24.1 / 47.5 / 82.5 before it); TTFT 0.22 s; "
@@ -393,9 +392,11 @@ class ModelMatrixRegistry:
                 "reasoning-effort default."
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
-            launch_overrides=QWEN38_LING_RECIPE,
-            # The fallback: production's engine until 1.7.2, and the only one that serves adapters.
-            engine_recipes={ENGINE_SGLANG: {**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE}},
+            launch_overrides={**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE},
+            # ling-serve, opt-in in 1.7.2 (`server start --engine ling`, `server_engine = "ling"`):
+            # the default once it reads images, serves adapters and runs more than two requests at
+            # once (the owner's decision of 2026-10-26).
+            engine_recipes={ENGINE_LING: QWEN38_LING_RECIPE},
             supports_vision=True,
         ),
         # Night 2's candidate (specs/DREAMFERENCE_MODELS.md §2.2), not a default: production
