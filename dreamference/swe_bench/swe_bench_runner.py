@@ -28,6 +28,7 @@ from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_hooks import HOOK_SETS, SweBenchHooks
+from dreamference.swe_bench.swe_bench_image_cache import SweBenchImageCache
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_instance_run import (
     SCRATCH_MOUNT,
@@ -900,7 +901,7 @@ class SweBenchRunner:
                             else None
                         )
                         if pulled:
-                            SweBenchImages.remove([image])
+                            SweBenchImageCache.release([image], settings)
                         if record is None:
                             print(
                                 f"❌ {instance_id} has no index, and a run measures one arm: not started."
@@ -971,12 +972,13 @@ class SweBenchRunner:
                             graded_now = list(manifest["instances"]) if group is None else group
                             SweBenchEvaluator.grade(store, settings, only=graded_now)
                             if cycling and not stopped:
-                                SweBenchImages.remove(
+                                SweBenchImageCache.release(
                                     [
                                         manifest["images"][i]["image"]
                                         for i in graded_now
                                         if i in manifest["images"]
-                                    ]
+                                    ],
+                                    settings,
                                 )
                         if stopped:
                             print(f"⏸️  Stopped: {stopped}. Run the same command again to resume.")
