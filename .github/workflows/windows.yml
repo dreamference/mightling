@@ -133,6 +133,14 @@ jobs:
           Start-Sleep -Seconds 3
           $env:MIGHTLING_RELEASE_API = "http://127.0.0.1:8787"
           $env:MIGHTLING_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "mightling-install\bin"
+          # A fresh profile's user PATH: one entry, REG_EXPAND_SZ, with a variable in it. install.ps1
+          # once glued its folder onto a lone entry and rewrote the value as REG_SZ.
+          $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Environment")
+          $noExpand = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+          $savedPath = $envKey.GetValue("Path", $null, $noExpand)
+          $savedKind = if ($null -ne $savedPath) { $envKey.GetValueKind("Path") } else { $null }
+          $fresh = "%USERPROFILE%\AppData\Local\Microsoft\WindowsApps"
+          $envKey.SetValue("Path", $fresh, [Microsoft.Win32.RegistryValueKind]::ExpandString)
           try {
             Write-Host "PowerShell $($PSVersionTable.PSVersion)"
             & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
@@ -143,8 +151,10 @@ jobs:
             & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
             if ($LASTEXITCODE -ne 0) { throw "a second install.ps1 failed" }
             Get-ChildItem $env:MIGHTLING_INSTALL_DIR | Format-Table Name, Length
-            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-            if (-not (($userPath -split ";") -contains $env:MIGHTLING_INSTALL_DIR)) { throw "the install folder is not on the user's PATH" }
+            $rawPath = $envKey.GetValue("Path", "", $noExpand)
+            Write-Host "user PATH: $rawPath ($($envKey.GetValueKind("Path")))"
+            if ($rawPath -ne "$fresh;$($env:MIGHTLING_INSTALL_DIR)") { throw "the user's PATH is not its one entry and the install folder" }
+            if ($envKey.GetValueKind("Path") -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { throw "the user's PATH is no longer REG_EXPAND_SZ" }
             # The runner is already an administrator, so install.ps1's one elevated step ran without
             # a prompt: the sandbox's accounts and the mDNS rule must exist now.
             Get-NetFirewallRule -Name "Mightling-mDNS-ling" | Format-List Name, DisplayName, Profile, Enabled
@@ -152,6 +162,9 @@ jobs:
             if (-not (Get-LocalUser | Where-Object { $_.Name -like "CodexSandboxOffline*" })) { throw "the sandbox's offline account was not created" }
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+            # The runner's own PATH back, with the install folder (the later steps use it).
+            if ($null -ne $savedPath) { $envKey.SetValue("Path", "$savedPath;$($env:MIGHTLING_INSTALL_DIR)", $savedKind) }
+            $envKey.Close()
           }
       # Phase 2 (WINDOWS_ARM §7, §14, §18): the refusal at `on`, the offline account taking a
       # sandboxed command's network away, and the egress audit over ETW, against a stand-in model

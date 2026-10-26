@@ -87,7 +87,28 @@ def test_without_an_installed_adapter_the_launch_line_is_unchanged(verified):
     assert "--enable-lora" not in mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
 
 
-def test_an_installed_adapter_turns_on_the_recipes_lora_flags_behind_the_gate(verified):
+def test_an_installed_adapter_turns_on_the_recipes_lora_flags_behind_the_gate(
+    verified, monkeypatch
+):
+    # A GB10's memory: on a smaller host (a CI runner) the cap is clamped by the host reserve with
+    # and without the adapters, and their extra gigabyte cannot show.
+    from dreamference.hardware.hardware_telemetry import HardwareTelemetry
+
+    monkeypatch.setattr(
+        "dreamference.hardware.hardware_manager.HardwareManager.detect_gb10_hardware",
+        classmethod(
+            lambda cls: HardwareTelemetry(
+                is_gb10=True,
+                gpu_name="NVIDIA GB10",
+                driver_version="0",
+                arch="aarch64",
+                total_unified_memory_gb=128.0,
+                available_memory_gb=128.0,
+                used_memory_gb=0.0,
+                vram_gb=0.0,
+            )
+        ),
+    )
     install()
     mgr = VLLMServerManager()
     plain = mgr.build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True, serve_adapters=False)

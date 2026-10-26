@@ -33,7 +33,8 @@ const SPEC_TOKENS = [
 ];
 
 /** The stylesheet without its comments, which may name a selector no rule uses. */
-const rules = css.replace(/\/\*[\s\S]*?\*\//g, "");
+// A Windows checkout may have CRLF line endings; the rules below are matched with \n.
+const rules = css.replace(/\r\n/g, "\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
 describe("the look", () => {
   it("keeps every token of §3.6 on :root, with the specified radii and durations", () => {

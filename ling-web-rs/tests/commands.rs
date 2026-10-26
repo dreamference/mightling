@@ -317,6 +317,8 @@ fn search_reports_every_failed_engine() {
     );
 }
 
+// Unix only: on Windows ling-search keeps no cache (`Cache::at` cannot check the folder's owner).
+#[cfg(unix)]
 #[test]
 fn a_repeated_search_is_answered_from_the_cache() {
     let server =
@@ -553,8 +555,13 @@ fn fetch_stops_downloading_at_the_size_cap() {
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(printed["text"].as_str().unwrap().len(), 100_000);
     assert_eq!(printed["truncated"], true);
-    let output = fetch(&[&server.base, "--max-chars", "10"], &[]);
-    // Failed once on x86-64 Windows (run 37628134383) and passed on every other run: say what was printed.
+    let mut output = fetch(&[&server.base, "--max-chars", "10"], &[]);
+    // On x86-64 Windows the stand-in's connection is sometimes reset before the first bytes are
+    // read (os error 10054; runs 37628134383 and 40346887496, never elsewhere): one retry, so the
+    // size cap is what is tested, not the runner's socket teardown.
+    if cfg!(windows) && stdout(&output).contains("os error 10054") {
+        output = fetch(&[&server.base, "--max-chars", "10"], &[]);
+    }
     assert!(
         stdout(&output).ends_with("aaaaaaaaaa\n\n[truncated at 10 chars]\n"),
         "stdout: {:?}\nstderr: {}",
