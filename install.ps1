@@ -163,14 +163,24 @@ try {
 # -- PATH ------------------------------------------------------------------------------------
 
 if (-not $NoPath) {
-    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $Entries = @()
-    if ($UserPath) { $Entries = $UserPath -split ";" | Where-Object { $_ } }
+    # The registry value itself, unexpanded, and written back as the kind it was: the .NET
+    # environment calls expand %USERPROFILE% and the like on read and write REG_SZ, which would
+    # freeze every entry that depends on another variable.
+    $Key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Environment")
+    $UserPath = [string]$Key.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $Kind = if ($Key.GetValueNames() -contains "Path") { $Key.GetValueKind("Path") } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+    # Always an array: with one entry (a fresh profile has just WindowsApps) PowerShell returns a
+    # string, and + then glued the install folder onto it (`...\WindowsAppsC:\...`).
+    $Entries = @($UserPath -split ";" | Where-Object { $_ })
     if (-not ($Entries -contains $InstallDir)) {
-        # Writing the user scope also broadcasts the change, so new terminals see it.
-        [Environment]::SetEnvironmentVariable("Path", (($Entries + $InstallDir) -join ";"), "User")
+        $Key.SetValue("Path", (($Entries + $InstallDir) -join ";"), $Kind)
+        # Setting and clearing a user variable through .NET broadcasts WM_SETTINGCHANGE, so new
+        # terminals see the PATH just written.
+        [Environment]::SetEnvironmentVariable("MIGHTLING_PATH_CHANGED", "1", "User")
+        [Environment]::SetEnvironmentVariable("MIGHTLING_PATH_CHANGED", $null, "User")
         Say "Added $InstallDir to your PATH (new terminals see it)."
     }
+    $Key.Close()
     if (-not (($env:Path -split ";") -contains $InstallDir)) { $env:Path = "$env:Path;$InstallDir" }
 }
 
@@ -192,7 +202,9 @@ if ($NoSandbox) {
 } else {
     # Named now, as the user who ran this: with an administrator's credentials typed over the
     # shoulder of a standard user, the elevated process runs as that administrator instead.
-    $User = "$env:USERDOMAIN\$env:USERNAME"
+    # The account's own name: $env:USERDOMAIN is the workgroup over OpenSSH, and the sandbox's
+    # setup then fails with 1332 (no mapping between account names and security IDs).
+    $User = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".mightling" }
     New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
     $Step = Join-Path ([IO.Path]::GetTempPath()) ("mightling-elevated-" + [Guid]::NewGuid().ToString("N"))

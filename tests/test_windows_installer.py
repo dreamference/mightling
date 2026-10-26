@@ -58,10 +58,12 @@ def test_the_installers_are_the_desktop_artifacts_the_release_collects():
     release = RELEASE_YML.read_text()
     assert "uses: ./.github/workflows/windows.yml" in release
     assert "merge-multiple: true" in release
-    assert 'mapfile -t files < <(find artifacts -type f | sort)' in release
+    assert "mapfile -t files < <(find artifacts -type f | sort)" in release
 
 
-@pytest.mark.parametrize("version, expected", [("1.7.0", "1.7.0"), ("1.7.0-rc.1", "1.7.0"), ("1.7.1+ci", "1.7.1")])
+@pytest.mark.parametrize(
+    "version, expected", [("1.7.0", "1.7.0"), ("1.7.0-rc.1", "1.7.0"), ("1.7.1+ci", "1.7.1")]
+)
 def test_a_pre_release_version_still_gives_windows_a_four_number_file_version(version, expected):
     assert numeric(version) == expected
     nsi = INSTALLER_NSI.read_text()
@@ -70,7 +72,9 @@ def test_a_pre_release_version_still_gives_windows_a_four_number_file_version(ve
     assert re.fullmatch(r"\d+\.\d+\.\d+\.0", f"{expected}.0")
     # The full version is still what the Apps list shows and CI checks.
     assert 'WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"' in nsi
-    assert '"/DVERSION=$env:MIGHTLING_VERSION" "/DNUMERIC_VERSION=$numeric"' in WINDOWS_YML.read_text()
+    assert (
+        '"/DVERSION=$env:MIGHTLING_VERSION" "/DNUMERIC_VERSION=$numeric"' in WINDOWS_YML.read_text()
+    )
 
 
 def test_ci_checks_the_entry_the_installer_writes():
@@ -91,7 +95,10 @@ def test_nothing_else_fetches_a_windows_desktop_asset():
         assert "Mightling-Setup" not in text and "Mightling-win32" not in text, path
 
 
-@pytest.mark.skipif(not os.environ.get("MIGHTLING_TEST_MAKENSIS"), reason="no makensis named in MIGHTLING_TEST_MAKENSIS")
+@pytest.mark.skipif(
+    not os.environ.get("MIGHTLING_TEST_MAKENSIS"),
+    reason="no makensis named in MIGHTLING_TEST_MAKENSIS",
+)
 @pytest.mark.parametrize("version", ["1.7.0", "1.7.0-rc.1"])
 def test_makensis_builds_the_installer(tmp_path, version):
     app = tmp_path / "out" / "Mightling-win32-x64"
@@ -100,14 +107,47 @@ def test_makensis_builds_the_installer(tmp_path, version):
     resources = tmp_path / "resources"
     resources.mkdir()
     # A one-image .ico: the header, one directory entry and a 1x1 BMP-less PNG would do; NSIS reads the header only.
-    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4c10000000049454e44ae426082")
-    entry = bytes([1, 1, 0, 0, 1, 0, 32, 0]) + len(png).to_bytes(4, "little") + (22).to_bytes(4, "little")
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4c10000000049454e44ae426082"
+    )
+    entry = (
+        bytes([1, 1, 0, 0, 1, 0, 32, 0])
+        + len(png).to_bytes(4, "little")
+        + (22).to_bytes(4, "little")
+    )
     (resources / "icon.ico").write_bytes(bytes([0, 0, 1, 0, 1, 0]) + entry + png)
     out = tmp_path / "Mightling-Setup.exe"
     result = subprocess.run(
-        [os.environ["MIGHTLING_TEST_MAKENSIS"], "-V2", f"-DVERSION={version}", f"-DNUMERIC_VERSION={numeric(version)}",
-         "-DARCH=x64", f"-DSOURCE={app}", f"-DOUTFILE={out}", str(INSTALLER_NSI)],
-        capture_output=True, text=True,
+        [
+            os.environ["MIGHTLING_TEST_MAKENSIS"],
+            "-V2",
+            f"-DVERSION={version}",
+            f"-DNUMERIC_VERSION={numeric(version)}",
+            "-DARCH=x64",
+            f"-DSOURCE={app}",
+            f"-DOUTFILE={out}",
+            str(INSTALLER_NSI),
+        ],
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert out.stat().st_size > 0
+
+
+def test_install_ps1_adds_its_folder_to_a_one_entry_path_and_keeps_its_kind():
+    # A fresh profile's user PATH has one entry; `-split | Where-Object` then returns a string,
+    # and `+` glued the folder onto it (`...\WindowsAppsC:\...`), so ling and winget stopped
+    # resolving. Found on a real Windows machine, 1.7.1. windows.yml runs it with such a PATH.
+    text = INSTALL_PS1.read_text(encoding="utf-8")
+    assert '$Entries = @($UserPath -split ";" | Where-Object { $_ })' in text
+    # Read unexpanded and written back as the kind it was, never turned into REG_SZ.
+    assert "DoNotExpandEnvironmentNames" in text and '$Key.SetValue("Path"' in text
+    assert '[Environment]::SetEnvironmentVariable("Path"' not in text
+
+
+def test_install_ps1_names_the_user_by_their_account_not_the_workgroup():
+    # Over OpenSSH $env:USERDOMAIN is WORKGROUP, and the sandbox's setup failed with 1332.
+    text = INSTALL_PS1.read_text(encoding="utf-8")
+    assert "[Security.Principal.WindowsIdentity]::GetCurrent().Name" in text
+    assert "$env:USERDOMAIN\\$env:USERNAME" not in text
