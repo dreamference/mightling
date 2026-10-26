@@ -91,7 +91,7 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
         return Ok(context.status().join("\n"));
     }
     if !context.has_index() {
-        return Ok("no code index for this repository yet; run `ling-code index`".to_string());
+        return Ok(crate::paths::no_index_yet(crate::paths::indexing_here(), false));
     }
     let (mut answer, body) = match name {
         "def" => (context.def(&text("name"))?, None),

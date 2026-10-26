@@ -210,7 +210,7 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
         if context.repo.state_dir().join("code_index.building").exists() {
             println!("index not ready yet: it is being built; use rg until `ling-code status` reports it ready");
         } else {
-            println!("no code index for this repository yet; run `ling-code index`, and use rg meanwhile");
+            println!("{}", ling_code::paths::no_index_yet(ling_code::paths::indexing_here(), true));
         }
         return Ok(ExitCode::from(3));
     }
