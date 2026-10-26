@@ -98,6 +98,11 @@ module.exports = {
         "Mightling finds your Mightling node (a GB10) on the local network and talks to its model server and web UI.",
       // ling-rs/node-locator's SERVICE_TYPE, without the domain: the bundled `ling` browses for it.
       NSBonjourServices: ["_mightling-node._tcp"],
+      // The composer's dictation (egress.ts grantsRequest, audio only): macOS shows this text when
+      // it asks, and ends an app that touches the microphone without it. With the Developer ID
+      // signature, the hardened runtime also needs the audio-input entitlement (mac/entitlements.mjs).
+      NSMicrophoneUsageDescription:
+        "Mightling listens only while you dictate a message, and transcribes it on your own Mightling setup, never on the internet.",
     },
     // The asar holds what the app loads: the Vite build (main, preload, Work's page), the icons
     // and package.json. Sources, configs, tests, the staged
