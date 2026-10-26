@@ -439,13 +439,14 @@ pub fn fallback_setting(codex_config_text: &str) -> Option<String> {
 /// The command Codex runs for the hook: this binary and `compat memory`, quoted for the shell
 /// Codex starts it through.
 pub fn hook_command(exe: &Path) -> String {
-    let path = exe.display().to_string();
-    let quoted = if path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) {
-        path
-    } else {
-        format!("'{}'", path.replace('\'', "'\\''"))
-    };
-    format!("{quoted} compat memory")
+    hook_command_for(exe, cfg!(windows))
+}
+
+/// [`hook_command`] for either shell: a POSIX shell's single quotes, or `cmd.exe`'s double quotes
+/// on Windows, which single quotes broke there (`CLAUDE.md` never reached the model; WINDOWS_ARM
+/// §23.4 W1).
+pub fn hook_command_for(exe: &Path, windows: bool) -> String {
+    format!("{} compat memory", crate::compaction::quote_program(&exe.display().to_string(), windows))
 }
 
 /// Puts `-c` settings right after the program name.
@@ -667,8 +668,12 @@ mod tests {
 
     #[test]
     fn the_hook_command_is_quoted_for_the_shell() {
-        assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling compat memory");
-        assert_eq!(hook_command(Path::new("/home/a b/ling")), "'/home/a b/ling' compat memory");
+        assert_eq!(hook_command_for(Path::new("/opt/ling/bin/ling"), false), "/opt/ling/bin/ling compat memory");
+        assert_eq!(hook_command_for(Path::new("/home/a b/ling"), false), "'/home/a b/ling' compat memory");
+        assert_eq!(
+            hook_command_for(Path::new(r"C:\Users\Jane Doe\AppData\Local\Programs\Mightling\bin\ling.exe"), true),
+            r#""C:\Users\Jane Doe\AppData\Local\Programs\Mightling\bin\ling.exe" compat memory"#
+        );
     }
 
     #[test]

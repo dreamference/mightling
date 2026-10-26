@@ -1,0 +1,14 @@
+diff --git a/codex-rs/windows-sandbox-rs/src/desktop.rs b/codex-rs/windows-sandbox-rs/src/desktop.rs
+--- a/codex-rs/windows-sandbox-rs/src/desktop.rs
++++ b/codex-rs/windows-sandbox-rs/src/desktop.rs
+@@ -216,3 +216,4 @@
+         let private_desktop = PrivateDesktop::create(logs_base_dir)?;
+-        let startup_name = to_wide(format!("Winsta0\\{}", private_desktop.name));
++        // Mightling: the caller's window station, not Winsta0 (SSH has another).
++        let startup_name = to_wide(&private_desktop.name);
+         Ok(Self {
+@@ -252,3 +253,3 @@
+             },
+-            startup_name: to_wide(format!("Winsta0\\{name}")),
++            startup_name: to_wide(name),
+         })
