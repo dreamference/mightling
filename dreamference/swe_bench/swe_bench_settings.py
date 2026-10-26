@@ -78,6 +78,15 @@ DEFAULT_DISK_RESERVE: Final[str] = "100G"
 # whole repository at once, as before 2026-10-20, when a 150-task night's 86 django tasks would have
 # needed about 200 GB of images at once).
 DEFAULT_IMAGE_CHUNK: Final[int] = 25
+# The image cache (SWE_BENCH spec §30): instance images of these task lists stay on disk after their
+# chunk is graded, so the next night on the same list pulls nothing; none by default.
+DEFAULT_IMAGE_CACHE_LISTS: Final[tuple[str, ...]] = ()
+# Free disk the cache keeps: below it, cached images not in use go first, least recently used. Empty: the
+# disk reserve plus IMAGE_CACHE_HEADROOM.
+DEFAULT_IMAGE_CACHE_FLOOR: Final[str] = ""
+IMAGE_CACHE_HEADROOM: Final[str] = "20G"
+# When each cached image was last used by a run, for the eviction order.
+IMAGE_CACHE_RECORD: Final[Path] = CACHE_DIR / "image-cache.json"
 
 
 class SweBenchSettings:
@@ -103,6 +112,11 @@ class SweBenchSettings:
         self.eval_timeout_s: int = duration(table.get("eval_timeout", DEFAULT_EVAL_TIMEOUT))
         self.disk_reserve: str = str(table.get("disk_reserve", DEFAULT_DISK_RESERVE))
         self.image_chunk: int = max(0, int(table.get("image_chunk", DEFAULT_IMAGE_CHUNK)))
+        lists = table.get("image_cache_lists", DEFAULT_IMAGE_CACHE_LISTS)
+        self.image_cache_lists: list[str] = (
+            [lists] if isinstance(lists, str) else [str(p) for p in lists]
+        )
+        self.image_cache_floor: str = str(table.get("image_cache_floor", DEFAULT_IMAGE_CACHE_FLOOR))
         # Paired nodes serving the same model add lanes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3).
         self.nodes: Any = table.get("nodes", "paired")
 

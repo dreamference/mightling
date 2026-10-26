@@ -17,6 +17,7 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_hooks import HOOK_SETS
+from dreamference.swe_bench.swe_bench_image_cache import SweBenchImageCache
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_instance_run import REFINE_VERSIONS, TASK_RULES
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
@@ -782,8 +783,8 @@ class SweBenchCommand:
                 ]
                 absent = [image for image in images if SweBenchDocker.image_digest(image) is None]
                 results = SweBenchEvaluator.grade(store, settings, only=group, variant=variant)
-                SweBenchImages.remove(
-                    [image for image in absent if SweBenchDocker.image_digest(image)]
+                SweBenchImageCache.release(
+                    [image for image in absent if SweBenchDocker.image_digest(image)], settings
                 )
         else:
             results = SweBenchEvaluator.grade(store, settings, variant=variant)
@@ -916,6 +917,14 @@ class SweBenchCommand:
             )
         images = SweBenchImages.local_images()
         print(f"Images: {len(images)} instance image(s) present")
+        settings = swe_bench_settings.SweBenchSettings()
+        if settings.image_cache_lists:
+            cached = SweBenchImageCache.cached_images(settings)
+            kept = sum(1 for entry in images if entry["image"] in cached)
+            print(  # noqa: T201 — CLI output
+                f"Image cache: {kept} of the {len(cached)} image(s) of {', '.join(settings.image_cache_lists)} "
+                f"present; floor {SweBenchImageCache.floor_bytes(settings) / 1024**3:.0f} GiB free"
+            )
         swe_bench_settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
         free = shutil.disk_usage(swe_bench_settings.CACHE_DIR).free
         print(

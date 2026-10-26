@@ -31,6 +31,16 @@ def night(tmp_path, arms, ling=None, **extra):
     task_list.write_text("# two tasks\nacme__widget-1\nacme__widget-2\n")
     folder = tmp_path / "night4"
     folder.mkdir()
+    # systemctl never reaches this machine's units: it lists INDEX_SCOPES as active index runs and records stops.
+    stand_ins = tmp_path / "stand-ins"
+    stand_ins.mkdir(exist_ok=True)
+    (stand_ins / "systemctl").write_text(
+        "#!/bin/bash\n"
+        'case "$*" in *list-units*mightling-index*)\n'
+        '    for u in $INDEX_SCOPES; do echo "$u loaded active running x"; done ;;\n'
+        f'  *" stop "*) echo "$*" >> "{tmp_path / "systemctl.txt"}" ;; esac\nexit 0\n'
+    )
+    (stand_ins / "systemctl").chmod(0o755)
     env = {
         **os.environ,
         "WT": ROOT,
@@ -43,6 +53,7 @@ def night(tmp_path, arms, ling=None, **extra):
         "REFINE": "0",
         **extra,
     }
+    env["PATH"] = f"{stand_ins}:{env.get('PATH', os.environ['PATH'])}"
     result = subprocess.run(
         ["bash", SCRIPT, "run"], env=env, capture_output=True, text=True, timeout=60
     )
@@ -1256,3 +1267,45 @@ def test_a_pinned_series_still_waits_for_another_night_that_runs(tmp_path):
     assert "Not building the pinned ling while ling-swe-night13.service" in result.stdout
     assert "ling-swe-chain14" not in result.stdout.split("while", 1)[1].split("runs", 1)[0]
     assert "codex build" not in recorded and units == [] and not folder.exists()
+
+
+def test_a_night_that_wins_ignores_open_sessions_in_every_round(tmp_path):
+    status, recorded, _ = night(tmp_path, "default tests-v2", NIGHT_WINS="1")
+    assert status == 0 and runs(recorded)
+    assert all("--ignore-open-sessions" in r for r in runs(recorded))
+    quiet = tmp_path / "quiet"
+    quiet.mkdir()
+    status, recorded, _ = night(quiet, "default tests-v2")
+    assert status == 0 and not any("--ignore-open-sessions" in r for r in runs(recorded))
+
+
+def test_a_night_that_wins_waits_out_an_index_run_then_stops_it(tmp_path):
+    scope = "mightling-index-docs-downloads-e1-1.scope"
+    status, recorded, _ = night(
+        tmp_path, "default tests-v2", NIGHT_WINS="1", INDEX_SCOPES=scope, INDEX_WAIT_S="0"
+    )
+    assert status == 0 and len(runs(recorded)) == 2
+    assert f"--user stop {scope}" in (tmp_path / "systemctl.txt").read_text()
+
+
+def test_a_night_by_hand_leaves_index_runs_to_the_runner(tmp_path):
+    scope = "mightling-index-docs-downloads-e1-1.scope"
+    status, _, _ = night(tmp_path, "default tests-v2", INDEX_SCOPES=scope, INDEX_WAIT_S="0")
+    assert status == 0 and not (tmp_path / "systemctl.txt").exists()
+
+
+def test_the_image_cache_reaches_the_nights_and_the_smokes_settings(tmp_path):
+    with pathlib.Path(SCRIPT).open() as script:
+        body = script.read()
+    assert body.count("cache_toml; }") == 2
+    result = subprocess.run(
+        ["bash", "-c", f'source <(sed -n "/^cache_toml()/,/^}}/p" {SCRIPT}); cache_toml'],
+        env={**os.environ, "IMAGE_CACHE_LISTS": "/l/a.txt /l/b.txt", "IMAGE_CACHE_FLOOR": "175G"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert (
+        result.stdout
+        == 'image_cache_lists = ["/l/a.txt", "/l/b.txt"]\nimage_cache_floor = "175G"\n'
+    )

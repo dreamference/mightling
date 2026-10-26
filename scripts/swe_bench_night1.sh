@@ -42,6 +42,16 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 # and the runner's own check (which stops starting instances below it) use the same number.
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
+# Nights win over interactive use (owner, 2026-10-26): with NIGHT_WINS=1 the smokes and rounds do not wait for, or
+# refuse on, an open Mightling session (`swe-bench run --ignore-open-sessions`), and an index run (`ling-code` or
+# `ling-docs` indexing, a mightling-index-* scope) is waited out for up to INDEX_WAIT_S before each, then stopped
+# (the index resumes on a later scan). Both logged. Off by default: a night started by hand waits as before.
+NIGHT_WINS=${NIGHT_WINS:-0}
+INDEX_WAIT_S=${INDEX_WAIT_S:-900}
+# The image cache (SWE_BENCH spec §30): IMAGE_CACHE_LISTS (task-list paths, space-separated) keeps those lists'
+# instance images after their chunk is graded, while IMAGE_CACHE_FLOOR (e.g. 175G) stays free; empty: no cache.
+IMAGE_CACHE_LISTS=${IMAGE_CACHE_LISTS:-}
+IMAGE_CACHE_FLOOR=${IMAGE_CACHE_FLOOR:-}
 # The disk guard (owner, 2026-10-21: night 12 failed on 10-20 when other work's build trees took the disk under it):
 # a round that stops for disk (`swe-bench run` stops below the reserve; its report says instances not run) pauses
 # instead of failing the night: the night waits until RESERVE_GB + DISK_RESUME_GB is free, checking every
@@ -235,6 +245,31 @@ disk_pause() {
 # The options every round and regrade takes: the image chunk, and the round's shard of the list.
 chunk_flags() { echo "--image-chunk $IMAGE_CHUNK"; }
 shard_flags() { [ -n "$SHARD" ] && echo "--shard $SHARD"; }
+# The `swe-bench run` options a night adds when it wins over interactive use.
+session_flags() { [ "$NIGHT_WINS" = 1 ] && echo "--ignore-open-sessions"; }
+index_runs() { systemctl --user list-units --no-legend --plain --state=active 'mightling-index-*.scope' 2>/dev/null | awk '{print $1}'; }
+# With NIGHT_WINS=1: waits for no index run, up to INDEX_WAIT_S, then stops what is left; logged either way.
+wait_out_index() {
+    [ "$NIGHT_WINS" = 1 ] || return 0
+    local waited=0 runs
+    runs=$(index_runs)
+    [ -z "$runs" ] && return 0
+    log "⏳ index run(s) active ($(echo $runs)): waiting up to $((INDEX_WAIT_S / 60)) min ($1)"
+    while runs=$(index_runs); [ -n "$runs" ] && [ "$waited" -lt "$INDEX_WAIT_S" ]; do sleep 30; waited=$((waited + 30)); done
+    if [ -n "$runs" ]; then
+        log "🛑 index run(s) still active after $((waited / 60)) min: stopping $(echo $runs); they resume on a later scan"
+        for unit in $runs; do systemctl --user stop "$unit"; done
+    else
+        log "✅ the index run(s) ended after $((waited / 60)) min"
+    fi
+}
+# The `[swe_bench]` lines of the image cache, for a night's and a smoke's dreamference.toml.
+cache_toml() {
+    [ -n "$IMAGE_CACHE_LISTS" ] || return 0
+    printf 'image_cache_lists = [%s]\n' "$(for list in $IMAGE_CACHE_LISTS; do printf '"%s", ' "$list"; done | sed 's/, $//')"
+    [ -n "$IMAGE_CACHE_FLOOR" ] && printf 'image_cache_floor = "%s"\n' "$IMAGE_CACHE_FLOOR"
+    return 0
+}
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
 
 # The smoke check: one real task per arm (SMOKE_INSTANCE), with the night's settings and the arm's
@@ -251,7 +286,7 @@ smoke() {
     mkdir -p "$SMOKE_DIR" || return 1
     { cat "$WT/dreamference.toml"
       printf '\n[swe_bench]\nmax_parallel = 1\ndisk_reserve = "%sG"\nnodes = "none"\ntask_timeout = "%s"\nnudges = 0\n' \
-          "$RESERVE_GB" "$SMOKE_TIMEOUT"; } > "$SMOKE_DIR/dreamference.toml"
+          "$RESERVE_GB" "$SMOKE_TIMEOUT"; cache_toml; } > "$SMOKE_DIR/dreamference.toml"
     for arm in $ARMS; do
         name=$(arm_name "$arm")
         extra=$(arm_flags "$arm") || return 2
@@ -262,11 +297,12 @@ smoke() {
             echo "❌ Night $NIGHT not started: arm $arm's model server ($server on $REMOTE) did not come up."
             return 1
         fi
+        wait_out_index "before the smoke of $arm"
         echo "🔥 Smoke check of arm $arm: $SMOKE_INSTANCE as run $run (limit $SMOKE_TIMEOUT)..."
         ( cd "$WT" && export PYTHONPATH="$WT" DREAMFERENCE_CONFIG_PATH="$SMOKE_DIR/dreamference.toml" &&
           timeout -s INT -k 2m 25m "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" \
               swe-bench run --instances "$SMOKE_INSTANCE" --name "$run" --code-index universal --mask off \
-              --prompt default $extra --label "night $NIGHT smoke, $name arm" ) > "$SMOKE_DIR/$name.log" 2>&1
+              --prompt default $extra $(session_flags) --label "night $NIGHT smoke, $name arm" ) > "$SMOKE_DIR/$name.log" 2>&1
         rc=$?
         ( cd "$WT" && PYTHONPATH="$WT" "$PY" -c "import sys; from dreamference.swe_bench.swe_bench_arm_smoke import SweBenchArmSmoke; sys.exit(SweBenchArmSmoke.check(sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]))" \
             "$run" "$SMOKE_INSTANCE" "$rc" "$arm" )
@@ -427,6 +463,13 @@ start() {
     need=$(( at_once * IMAGE_GB + RESERVE_GB ))
     free=$(df --output=avail -BG "$HOME/.cache" | tail -1 | tr -dc '0-9')
     echo "Tasks: $count${SHARD:+ (this machine: shard $SHARD)}; largest repository: $largest, at most $at_once of its images at once; disk needed about ${need}G, free ${free}G."
+    if [ "$free" -lt "$need" ] && [ -n "$IMAGE_CACHE_LISTS" ]; then
+        # Cached images make room for the night first, least recently used first.
+        ( cd "$WT" && PYTHONPATH="$WT" "$PY" -c "import sys; from dreamference.swe_bench import SweBenchImageCache, SweBenchSettings
+removed = SweBenchImageCache.evict(SweBenchSettings(), floor=int(sys.argv[1]) * 1024**3)
+print(f'🧹 {len(removed)} cached image(s) removed to make room for the night.')" "$need" )
+        free=$(df --output=avail -BG "$HOME/.cache" | tail -1 | tr -dc '0-9')
+    fi
     if [ "$free" -lt "$need" ]; then
         echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
         echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
@@ -448,7 +491,7 @@ start() {
     fi
     mkdir -p "$D"
     { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\nnodes = "none"\n' "$RESERVE_GB"
-      [ -n "$TASK_TIMEOUT" ] && printf 'task_timeout = "%s"\n' "$TASK_TIMEOUT"; } \
+      [ -n "$TASK_TIMEOUT" ] && printf 'task_timeout = "%s"\n' "$TASK_TIMEOUT"; cache_toml; } \
         > "$D/dreamference.toml"
     if [ "$BEST_OF" -gt 1 ]; then
         what="best-of-$BEST_OF (chooser v1) against a single run, $ARMS arm"
@@ -459,7 +502,7 @@ start() {
         --description="SWE-bench night $NIGHT: $what" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=NIGHT="$NIGHT" --setenv=ARMS="$ARMS" --setenv=REFINE="$REFINE" --setenv=TASK_TIMEOUT="$TASK_TIMEOUT" \
         --setenv=IMAGE_CHUNK="$IMAGE_CHUNK" --setenv=SHARD="$SHARD" --setenv=LING_PIN_SHA256="$LING_PIN_SHA256" \
-        --setenv=RESERVE_GB="$RESERVE_GB" \
+        --setenv=RESERVE_GB="$RESERVE_GB" --setenv=NIGHT_WINS="$NIGHT_WINS" --setenv=INDEX_WAIT_S="$INDEX_WAIT_S" \
         --setenv=BEST_OF="$BEST_OF" --setenv=CHOOSER_SERVER="$CHOOSER_SERVER" --setenv=CHOOSER_SEED="$CHOOSER_SEED" \
         --setenv=REMOTE="$REMOTE" --setenv=REMOTE_HOST="$REMOTE_HOST" --setenv=REMOTE_AB_DIR="$REMOTE_AB_DIR" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1" \
@@ -501,8 +544,9 @@ best_of_run() {
         round="$PREFIX-$name-$k"
         check_pin
         log "round $round (attempt $k of $BEST_OF)"
+        wait_out_index "before round $round"
         admin swe-bench run --subset "$LIST" --name "$round" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) \
+            --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) $(session_flags) \
             --label "night $NIGHT, $name arm, attempt $k of $BEST_OF"
         rc=$?
         log "$round finished ($rc)"
@@ -581,8 +625,10 @@ run() {
         log "round $PREFIX-$name"
         while :; do
             # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
+            wait_out_index "before round $PREFIX-$name"
             admin swe-bench run --subset "$LIST" --name "$PREFIX-$name" --code-index universal --mask off \
-                --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) --label "night $NIGHT, $name arm"
+                --prompt default $extra --eval --remove-images $(chunk_flags) $(shard_flags) $(session_flags) \
+                --label "night $NIGHT, $name arm"
             rc=$?
             log "$PREFIX-$name finished ($rc)"
             df -h / | tail -1

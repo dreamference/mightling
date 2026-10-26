@@ -8,6 +8,7 @@ from dreamference.swe_bench.swe_bench_settings import SweBenchSettings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
+from dreamference.swe_bench.swe_bench_image_cache import SweBenchImageCache
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_code_index import SweBenchCodeIndex
@@ -38,6 +39,7 @@ __all__ = [
     "SweBenchGateHold",
     "SweBenchHarness",
     "SweBenchHooks",
+    "SweBenchImageCache",
     "SweBenchImages",
     "SweBenchInstanceRun",
     "SweBenchIssueGate",
