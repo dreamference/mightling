@@ -101,6 +101,8 @@ presentations, and scanned PDFs and images through offline OCR.
 - **On Windows, `ling-search` keeps no answer cache**, so a repeated search goes out again rather
   than being answered from the last hour's results. The cache needs to check who owns its folder,
   which this release does on Linux and macOS only.
+- **`ling --compat claude` on Windows** hands Claude Code's hooks file paths that mix `\` and `/`
+  (`C:\work\src/a.rs`). Windows accepts both; a hook that compares paths as text may not match.
 
 ---
 
