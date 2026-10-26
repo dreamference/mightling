@@ -21,8 +21,9 @@ irm https://github.com/dreamference/mightling/releases/latest/download/install.p
 ```
 
 The app is an unsigned preview, but a file a script downloads carries no browser quarantine mark
-or Mark of the Web, so it opens without Gatekeeper's or SmartScreen's first-launch dialog. Run the
-same command again to update it: `ling update` updates the terminal agent, not the app.
+or Mark of the Web, so it opens without Gatekeeper's or SmartScreen's first-launch dialog.
+`ling update` then updates the app with the terminal agent, from the same release and under the
+same checks (it leaves the app alone while it is running: quit it and run `ling update` again).
 `--no-app` (macOS) or `-NoApp` (Windows) leaves the app out.
 
 On Linux, the easiest way is the `.deb` on the release page: it installs the app, its launcher
@@ -121,7 +122,7 @@ is the cookies of pages opened in the preview tab, which are stored without it. 
 once the app is signed with a Developer ID.
 
 What the preview does not do yet: `ling app` in a Mac terminal does not open it (open it from
-Applications or Spotlight), it does not update itself (run the install command again), and closing
+Applications or Spotlight), it does not update itself (`ling update` does), and closing
 its window quits it, as on Linux.
 
 ## On Windows (preview)
@@ -131,9 +132,8 @@ From 1.7.0 a release carries `Mightling-Setup-<version>-arm64.exe` (Windows on A
 Mightling node on your network. From 1.7.2, `install.ps1` (above) checks the one for your PC against
 the release's signed `SHA256SUMS` and runs it silently: it installs for you alone, with no
 administrator, under `%LOCALAPPDATA%\Programs\Mightling\App`, and adds a Start menu entry. The
-installers are not signed, so Smart App Control must be off. To update, run the PowerShell line
-again (`ling update` updates the command-line client only); to remove the app, use Settings → Apps
-→ Installed apps.
+installers are not signed, so Smart App Control must be off. `ling update` updates it with the
+command-line client; to remove the app, use Settings → Apps → Installed apps.
 
 ## Other ways to install
 

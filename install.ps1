@@ -22,8 +22,9 @@ by this script rather than a browser, the installer carries no Mark of the Web, 
 does not stop it.
 
 It downloads the same assets, by the same names and with the same checks, as `ling update`
-(ling-rs/src/update.rs), so a machine installed this way is updated by that command. `ling update`
-leaves the desktop app as it is; running this script again updates it too.
+(ling-rs/src/update.rs), so a machine installed this way is updated by that command, the desktop
+app included: the script records the app it installed (desktop-app, beside the bin folder), and
+`ling update` updates an app it finds recorded, under the same checks.
 
 PREVIEW. Windows builds are not signed yet. Smart App Control, which is on in new Windows 11
 installs, blocks unsigned programs outright: it must be off to run Mightling (Windows Security,
@@ -200,6 +201,14 @@ try {
         try {
             $Process = Start-Process -FilePath $AppSetup -ArgumentList "/S" -PassThru -Wait
             $AppResult = if ($Process.ExitCode -eq 0) { "ok" } else { "the installer exited with $($Process.ExitCode)" }
+            if ($AppResult -eq "ok") {
+                # What `ling update` reads to update the app too (update.rs, APP_RECORD).
+                $AppKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Mightling"
+                $AppDir = (Get-ItemProperty -Path $AppKey -ErrorAction SilentlyContinue).InstallLocation
+                if (-not $AppDir) { $AppDir = Join-Path $env:LOCALAPPDATA "Programs\Mightling\App" }
+                $Record = Join-Path (Split-Path -Parent $InstallDir) "desktop-app"
+                Set-Content -Path $Record -Encoding UTF8 -Value @("path=$AppDir", "version=$Tag")
+            }
         } catch {
             $AppResult = $_.Exception.Message
         }

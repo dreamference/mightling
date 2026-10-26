@@ -54,7 +54,7 @@ Windows 11, in PowerShell (a preview; from 1.7.2 it installs the desktop app too
 irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex
 ```
 
-Run the same command again to update the app; `ling update` updates the terminal agent.
+`ling update` then updates the terminal agent and the app together.
 Other ways to install: the release page's dmg and Windows installer are unsigned previews that
 macOS and Windows stop the first time ([first-launch steps](docs/desktop.md#other-ways-to-install)).
 
