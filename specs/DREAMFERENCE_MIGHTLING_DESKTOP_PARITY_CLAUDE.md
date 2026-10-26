@@ -174,6 +174,8 @@ Sign-in, plans and usage limits; cloud sessions, Cowork in a virtual machine and
 | 9 | **Diagrams in answers** (Mermaid, inline charts) (§2.3) | M | Bundle Mermaid in the renderer, no script from the answer | **Shared** with DESKTOP_PARITY §2.4 |
 | 10 | **One context menu on every path** (attach, open in editor, show in folder, copy path) (§2.5) | M | Window only | **Shared** with DESKTOP_PARITY §2.5, §2.8 |
 
+What is left of this table and of the list below it is ordered and tracked in [DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md) §16, the parity backlog (2026-10-27).
+
 Below the ten: one-file MCP extensions (§6 question 5), seeing and editing memories one by one, export a question as Markdown, permanent delete and multi-select, a readable-font preset, a first-run page, "Show logs", interface languages.
 
 ---
