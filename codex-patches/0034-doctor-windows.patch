@@ -1,0 +1,18 @@
+diff --git a/codex-rs/cli/src/doctor/security.rs b/codex-rs/cli/src/doctor/security.rs
+--- a/codex-rs/cli/src/doctor/security.rs
++++ b/codex-rs/cli/src/doctor/security.rs
+@@ -34,2 +34,5 @@
+ pub(super) async fn check() -> DoctorCheck {
++    if cfg!(windows) && super::MIGHTLING_DOCTOR_OFFLINE {
++        return DoctorCheck::new("security.endpoint", "security", CheckStatus::Ok, "not checked: ling.exe is unsigned; exclude its folder if Defender slows it");
++    }
+     endpoint_check(endpoint_products().await)
+diff --git a/codex-rs/cli/src/doctor/runtime.rs b/codex-rs/cli/src/doctor/runtime.rs
+--- a/codex-rs/cli/src/doctor/runtime.rs
++++ b/codex-rs/cli/src/doctor/runtime.rs
+@@ -93,2 +93,5 @@
+     };
++    if cfg!(windows) && super::MIGHTLING_DOCTOR_OFFLINE && status != CheckStatus::Ok {
++        return DoctorCheck::new("runtime.search", "search", CheckStatus::Ok, "no rg.exe: thread search reads the files itself").details(details);
++    }
+ 
