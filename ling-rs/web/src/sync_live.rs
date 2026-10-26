@@ -173,6 +173,8 @@ struct Host {
 struct ThreadLive {
     owner: String,
     events: VecDeque<(u64, Value)>,
+    /// The number of the newest event dropped from the buffer: a follower behind it missed some.
+    dropped: u64,
     turn: Option<String>,
     pending: BTreeMap<String, Value>,
     title: String,
@@ -430,7 +432,9 @@ impl Live {
         }
         live.events.push_back((seq, message));
         while live.events.len() > BUFFER {
-            live.events.pop_front();
+            if let Some((seq, _)) = live.events.pop_front() {
+                live.dropped = seq;
+            }
         }
         if let Some((kind, text)) = notice.filter(|_| title.is_some()) {
             let due = live.last_notice.is_none_or(|at| now.duration_since(at).unwrap_or_default() >= NOTICE_EVERY);
@@ -449,7 +453,8 @@ impl Live {
         let inner = self.lock();
         let mut following = Following { next: after.max(inner.seq), ..Following::default() };
         if let Some(live) = inner.threads.get(thread) {
-            following.reset = live.events.front().is_some_and(|(first, _)| after > 0 && *first > after + 1);
+            // Numbers are shared by every thread, so a gap is no loss; only a dropped event is.
+            following.reset = after > 0 && live.dropped > after;
             following.events = live.events.iter().filter(|(seq, _)| *seq > after).cloned().collect();
             following.running = live.turn.is_some();
             following.turn = live.turn.clone().filter(|turn| !turn.is_empty());
@@ -707,6 +712,11 @@ mod tests {
         assert_eq!(seen.events.len(), BUFFER);
         assert!(!seen.reset, "from the start, the buffer is all there is");
         assert!(live.follow(T, 10).reset);
+        // A follower that saw every event of this thread is never told to reload, however far
+        // other threads moved the numbers on.
+        let next = live.follow(T, 0).next;
+        live.host_post(&laptop, post(vec![json!({ "method": "turn/started", "params": { "threadId": T, "turn": { "id": "x" } } })], &[T]), &owners, &title);
+        assert!(!live.follow(T, next).reset);
         let huge = json!({ "method": "item/completed", "params": { "threadId": T, "item": { "text": "x".repeat(EVENT_CAP) } } });
         live.host_post(&laptop, post(vec![huge], &[T]), &owners, &title);
         assert!(live.follow(T, 0).events.last().unwrap().1["params"]["truncated"].as_u64().unwrap() > EVENT_CAP as u64);
