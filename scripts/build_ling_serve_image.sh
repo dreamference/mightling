@@ -8,7 +8,7 @@
 # COMMIT is the full ling-engine commit. Without BINARY, the Release binary is built from a detached
 # worktree of ENGINE_REPO at COMMIT with night 15's recipe (cmake Release with Ninja, `ninja
 # ling-serve`); with BINARY, that already-built binary is used, and its build must have been that
-# recipe at that commit (night 15's ~/ab-n15/ling-serve is 79c38c7's). The image is tagged
+# recipe at that commit (night 15's binary is 79c38c7's; 1.7.2's is f5ab951's, verified by the engine's checks). The image is tagged
 # IMAGE:<first 12 of COMMIT>; publish it with `docker push`, then pin the pushed digest in
 # QWEN38_LING_IMAGE (dreamference/hardware/model_matrix_registry.py) and the commit in
 # QWEN38_LING_ENGINE_COMMIT.

@@ -268,11 +268,19 @@ ENGINE_LING: Final[str] = "ling"
 # 17 against SGLang with the phase-merge fix; output is bit for bit the engine's own checks'
 # (speculation and tree verification exact), so the drafter moves speed alone.
 #
-# The commit the image's ling-serve was built from (the full hash, never abbreviated): what was
-# night-tested, recorded in the image's labels (`org.opencontainers.image.revision`,
-# `ai.dreamference.ling-engine.commit`). Anything that depends on the engine's version (a file only
-# some engines read) asks this, with `git merge-base --is-ancestor`, never a string comparison.
-QWEN38_LING_ENGINE_COMMIT: Final[str] = "79c38c7648d06a5657ff488195059348cfcd5f4a"
+# The commit the image's ling-serve was built from (the full hash, never abbreviated), recorded in
+# the image's labels (`org.opencontainers.image.revision`, `ai.dreamference.ling-engine.commit`).
+# 1.7.2: f5ab951, the night-tested 79c38c7 plus a parse-only tool-call fix (branch
+# fix/toolcall-text), greedy output token for token night 15's binary on agentlong and
+# --spec-check passing; the image carries that very binary (sha256 598e5520…9ef41f1; builds embed
+# their paths, so a rebuild differs).
+QWEN38_LING_ENGINE_COMMIT: Final[str] = "f5ab9512883655420e216250630e506f9a9a2ea4"
+
+# What the engine at that commit has that an asset or a launch may depend on, so the runtime asks
+# a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
+# drafter) from ling-engine 7417523 on. A checkout-only test keeps the list true to the commit's
+# ancestry. Empty at f5ab951.
+QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
 
 # ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
 # aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push.
@@ -310,6 +318,7 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     "engine": ENGINE_LING,
     "docker_image": QWEN38_LING_IMAGE,
     "engine_commit": QWEN38_LING_ENGINE_COMMIT,
+    "engine_features": list(QWEN38_LING_ENGINE_FEATURES),
     "revision": QWEN38_SGLANG_RECIPE["revision"],
     # ling-serve's --max-context: the KV and state of each resident session are allocated at this
     # size at start. SGLang's 262,144, by the owner's decision of 2026-10-26; the nights served

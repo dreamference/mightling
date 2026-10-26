@@ -5,11 +5,13 @@ server's section; the rest of the release is still to be written into it ({{TBD}
 between the two rules is the GitHub release's description: the release workflow publishes it as it
 stands (`scripts/release_notes.py`), and refuses it while a `{{TBD` marker is left.
 
-**The engine.** ling-engine at 79c38c7648d06a5657ff488195059348cfcd5f4a, the commit SWE-bench
-nights 12 and 15 tested, or a later commit whose changes the engine's checks show bit-exact (the
-owner's decision of 2026-10-20). The planned one adds the tool-call parse fix f5ab951 (branch
-`fix/toolcall-text`, parse only): {{TBD the final commit and the binary's sha256}}. Night 17
-(2026-10-26 to 27) compares it with SGLang carrying the phase-merge fix.
+**The engine.** ling-engine f5ab9512883655420e216250630e506f9a9a2ea4: 79c38c7, the commit
+SWE-bench nights 12 and 15 tested, plus the parse-only tool-call fix of branch `fix/toolcall-text`
+(the owner's rule of 2026-10-20: a later commit only if the engine's checks show it bit-exact). Its
+binary, sha256 598e552006bdff32ce0a33ba45e6b9f938cd65610989dec861677946e9ef41f1, is greedy-identical
+to night 15's on agentlong (16 of 16 turns, every streamed event) and passes `--spec-check`; the
+image carries that very file. Night 17 (2026-10-26 to 27) compares 79c38c7 with SGLang carrying the
+phase-merge fix.
 
 **Before publishing:**
 - **The image** built from the final commit (`scripts/build_ling_serve_image.sh`), pushed to
