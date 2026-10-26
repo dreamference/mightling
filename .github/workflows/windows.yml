@@ -174,8 +174,8 @@ jobs:
             Write-Host "refusal: exit $refusedExit, $refused"
             if ($refusedExit -eq 0 -or $refused -notmatch "non-admin sandbox") { throw "the non-admin sandbox was not refused at on" }
             # The elevated sandbox: a command reaches the network at `off` and not at `on`. Plain
-            # HTTP: Windows' curl.exe uses Schannel, which cannot acquire credentials as the
-            # sandbox's account (SEC_E_NO_CREDENTIALS), so an https probe fails at off after connecting.
+            # HTTP: Windows' curl.exe uses Schannel, which acquires no credentials for a restricted
+            # token (SEC_E_NO_CREDENTIALS; WINDOWS_ARM §23.4 W3), so an https probe fails at off.
             $probe = @("sandbox", "-c", "sandbox_mode=workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--", "curl.exe", "-sS", "-m", "20", "-o", "NUL", "-w", "%{http_code}", "http://example.com")
             $env:DREAMFERENCE_MIGHTLING_AIRGAPPED = "off"
             $off = & $ling @probe 2>&1 | Out-String
@@ -195,6 +195,37 @@ jobs:
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+      # https inside the sandbox (WINDOWS_ARM §23.4 W3): Schannel cannot, so sessions set Git to
+      # OpenSSL; here the same setting, given to git directly, must reach GitHub from the sandbox.
+      - name: Git over https in the sandbox
+        shell: powershell
+        run: |
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $git = (Get-Command git.exe).Source
+          $out = & $ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- $git -c http.sslBackend=openssl ls-remote https://github.com/git/git HEAD 2>&1 | Out-String
+          Write-Host "openssl: exit $LASTEXITCODE, $out"
+          if ($LASTEXITCODE -ne 0 -or $out -notmatch "HEAD") { throw "git over OpenSSL did not reach https from the sandbox" }
+          $schannel = & $ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- $git -c http.sslBackend=schannel ls-remote https://github.com/git/git HEAD 2>&1 | Out-String
+          Write-Host "schannel (expected to fail while W3 stands): exit $LASTEXITCODE, $schannel"
+          # The session's own setting: a stand-in model asks for git ls-remote over https, which must
+          # answer from the sandbox with no -c of ours.
+          $ws = Join-Path $env:RUNNER_TEMP "git-tls"
+          New-Item -ItemType Directory -Force $ws | Out-Null
+          Set-Location $ws
+          git init -q
+          $record = Join-Path $env:RUNNER_TEMP "requests-git.jsonl"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8797", "--shell-call", '"git ls-remote https://github.com/git/git HEAD"', "--record", "`"$record`""
+          Start-Sleep -Seconds 3
+          try {
+            $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8797"
+            $session = & $ling -c windows.sandbox=elevated -s workspace-write -c sandbox_workspace_write.network_access=true exec --skip-git-repo-check "list the remote's HEAD" 2>&1 | Out-String
+            Write-Host "session: exit $LASTEXITCODE, $session"
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+          $outputs = @(Get-Content $record | ForEach-Object { $_ | ConvertFrom-Json } | ForEach-Object { $_.input } | Where-Object { $_.type -like "*call_output" } | ForEach-Object { "$($_.output)" })
+          Write-Host "tool output: $outputs"
+          if (-not ($outputs -match "HEAD")) { throw "git over https did not answer in a sandboxed session" }
       # The compatibility mode's hooks run through cmd.exe (WINDOWS_ARM §23.4 W1): CLAUDE.md reaches
       # the model through the memory hook, and a deny rule refuses a tool call through the guard.
       # The stand-in model asks for one shell command that would write probe.txt; with the rule the
