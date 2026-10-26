@@ -280,13 +280,30 @@ QWEN38_LING_IMAGE: Final[str] = (
     "ghcr.io/dreamference/ling-serve@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 )
 
+# The DFlash2 drafters ling-serve can run, pinned by commit. Speculation is exact, so the drafter
+# moves acceptance and speed, never the output. The RTN-calibrated one is SGLang's (every node has
+# it). The ScaleSearch re-quantization of it (ling-engine BACKLOG §19 item 22) is what both arms of
+# SWE-bench nights 12, 15 and 17 ran; it is served once it is on the Hub at a pinned revision
+# (QWEN38_SCALESEARCH_DRAFTER's `revision`, None until the upload), by pointing
+# QWEN38_LING_DRAFTER at it and listing its repository in the matrix beside the RTN drafter's entry
+# (the memory gates size a drafter by its entry before the snapshot is on disk).
+QWEN38_RTN_DRAFTER: Final[dict[str, Any]] = {
+    "model": QWEN38_SGLANG_RECIPE["speculative_config"]["model"],
+    "revision": QWEN38_SGLANG_RECIPE["speculative_config"]["revision"],
+}
+QWEN38_SCALESEARCH_DRAFTER: Final[dict[str, Any]] = {
+    "model": "dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch",
+    "revision": None,
+}
+QWEN38_LING_DRAFTER: Final[dict[str, Any]] = QWEN38_RTN_DRAFTER
+
 # The launch nights 12, 15 and 17 measured (Mightling's scripts/engine_ab_remote.sh), on Mightling's
 # pinned checkpoint and drafter. What ling-serve's command line has no flag for is not here: it
 # renders the chat template itself (the patched template's behaviour, checked against it by the
 # engine's bench/template_test.py), serves only the qwen3_coder tool format and the qwen3 reasoning
 # split, idles without spinning (no --sleep-on-idle), and takes no API key and no memory fraction.
-# Its memory is what --max-context and its sessions allocate (about 57 GB in all at 65,536 tokens,
-# engine §12), bounded from outside by the container's cgroup cap, which `gpu_memory_utilization`
+# Its memory is what --max-context and its sessions allocate (each session's KV and state at the
+# full context, allocated at start), bounded from outside by the container's cgroup cap, which `gpu_memory_utilization`
 # and `container_headroom_gb` size as for SGLang, so the host-safety envelope does not change with
 # the engine.
 QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
@@ -295,18 +312,21 @@ QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
     "engine_commit": QWEN38_LING_ENGINE_COMMIT,
     "revision": QWEN38_SGLANG_RECIPE["revision"],
     # ling-serve's --max-context: the KV and state of each resident session are allocated at this
-    # size at start. 65,536 is what the nights served (SGLang's recipe serves 262,144).
-    "max_model_len": 65536,
+    # size at start. SGLang's 262,144, by the owner's decision of 2026-10-26; the nights served
+    # 65,536, so the long-context checks of the live test (start within the container's cap, a
+    # ~205K-token needle, decode speed, ling-run --spec-check at this length) prove it before release.
+    "max_model_len": 262144,
     "gpu_memory_utilization": 0.50,
     "container_headroom_gb": 24.0,
     # The formats ling-serve parses, compiled in (no flags): named for `status` and the start
     # checks' messages, as SGLang's recipe names its parsers.
     "tool_call_parser": "qwen3_coder",
     "reasoning_parser": "qwen3",
-    # The same drafter as SGLang's recipe, at the same 12 tokens a step (--draft-block).
+    # QWEN38_LING_DRAFTER, at the same 12 tokens a step as SGLang (--draft-block).
     "speculative_config": {
-        key: QWEN38_SGLANG_RECIPE["speculative_config"][key]
-        for key in ("method", "model", "revision", "num_speculative_tokens")
+        "method": "DFLASH",
+        **QWEN38_LING_DRAFTER,
+        "num_speculative_tokens": QWEN38_SGLANG_RECIPE["speculative_config"]["num_speculative_tokens"],
     },
     # The nights' flags beyond the defaults: each speculative step as captured CUDA graphs, and
     # programmatic dependent launch. Tree verification, the megakernel stages, two sessions and a

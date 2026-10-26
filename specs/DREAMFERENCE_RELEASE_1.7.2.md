@@ -15,6 +15,10 @@ owner's decision of 2026-10-20). The planned one adds the tool-call parse fix f5
 - **The image** built from the final commit (`scripts/build_ling_serve_image.sh`), pushed to
   `ghcr.io/dreamference/ling-serve`, made public, and its digest pinned in `QWEN38_LING_IMAGE` with
   the commit in `QWEN38_LING_ENGINE_COMMIT` ({{TBD digest}}).
+- **Long context** (the nights ran 65,536): ling-serve starts at 262,144 within the container's
+  cap, a ~205K-token needle question answers correctly, decode speed at that length is recorded,
+  and `ling-run --spec-check` passes on the long prompt ({{TBD result}}).
+- **The drafter:** ScaleSearch if its upload is on the Hub in time, else RTN ({{TBD which}}).
 - **The live test on the node:** `server stop`, `server start` with ling-serve, `/v1/models`, a
   `ling exec` task, a phone bridge, the desktop app and the egress audit ({{TBD date and result}}).
 - **The suite**, the desktop gate, the Rust tests and `ling-admin codex build` as for 1.7.1.
@@ -29,8 +33,8 @@ line. It was tested against SGLang on SWE-bench before it became the default. Th
 (under 1 GB against SGLang's 34 GB) and runs inside the same container limits and memory-safety
 checks as before.
 
-What changes with it: the context window is 65,536 tokens (SGLang served 262,144), two requests run
-at once and more wait, and it does not read images, serve LoRA adapters or take an API key.
+What changes with it: two requests run at once and more wait, and it does not read images, serve
+LoRA adapters or take an API key. The context window stays 262,144 tokens.
 **SGLang is one flag away** for any of those, with the same checkpoint and drafter:
 
 ```bash

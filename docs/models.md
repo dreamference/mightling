@@ -36,7 +36,7 @@ and host-safety checks as SGLang.
 | Image | `ghcr.io/dreamference/ling-serve`, pinned by digest | `lmsysorg/sglang` v0.5.21, pinned by digest |
 | Checkpoint | `RadixArk/Qwen3.8-27B-NVFP4`, pinned commit | the same |
 | Speculative decoding | DFlash2, `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`, 12 tokens, tree verification | the same drafter, 12 tokens, chain |
-| Context length | 65,536 tokens | 262,144 tokens |
+| Context length | 262,144 tokens | 262,144 tokens |
 | Requests at once | 2 (two resident sessions); more wait | 8 |
 | Container memory cap | the same as SGLang's (memory fraction 0.50 plus 24 GB) | memory fraction 0.50 |
 | Tool calls / reasoning | `qwen3_coder` / `qwen3`, built in | `qwen3_coder` / `qwen3` parsers |
@@ -62,8 +62,8 @@ or keep it, in `~/.config/dreamference/config.toml` (or `DREAMFERENCE_SERVER_ENG
 server_engine = "sglang"
 ```
 
-Use SGLang when you need image input, LoRA adapters, an API key or a context longer than 65,536
-tokens. If ling-serve fails one of `server start`'s checks (it does not answer, the NVFP4 canary or
+Use SGLang when you need image input, LoRA adapters, an API key or more than two requests running
+at once. If ling-serve fails one of `server start`'s checks (it does not answer, the NVFP4 canary or
 the tool-call check fails), `server start` says so and prints the command above; it never switches
 engine by itself.
 

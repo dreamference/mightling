@@ -71,12 +71,12 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
     assert recipe["docker_image"] == QWEN38_LING_IMAGE
 
 
-def test_both_engines_serve_the_same_checkpoint_and_drafter():
+def test_both_engines_serve_the_same_checkpoint_and_context():
     ling = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
     sglang = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_SGLANG)
     assert ling["revision"] == sglang["revision"]
-    for key in ("model", "revision", "num_speculative_tokens"):
-        assert ling["speculative_config"][key] == sglang["speculative_config"][key]
+    assert ling["max_model_len"] == sglang["max_model_len"] == 262144
+    assert ling["speculative_config"]["num_speculative_tokens"] == 12
     # The same memory envelope: the container cap does not change with the engine.
     assert ling["gpu_memory_utilization"] == sglang["gpu_memory_utilization"]
     assert ling["container_headroom_gb"] == sglang["container_headroom_gb"]
@@ -106,11 +106,8 @@ def test_ling_serve_runs_inside_the_same_guarded_container_with_the_nights_flags
     assert flag(server, "--model").endswith(
         "models--RadixArk--Qwen3.8-27B-NVFP4/snapshots/52d1adc5f38aa5ebf099c29ed7025ba34cfbb854"
     )
-    assert flag(server, "--draft").endswith(
-        "models--maurienne-ai--Qwen3.8-27B-DFlash2-NVFP4-RTNcal/snapshots/bd7a934213c47a9e7ef69eef36bb3325f47fd1f1"
-    )
     assert flag(server, "--served-model-name") == SERVED_ID
-    assert flag(server, "--max-context") == "65536"
+    assert flag(server, "--max-context") == "262144"
     assert flag(server, "--draft-block") == "12"
     assert "--graphs" in server and "--pdl" in server
     # Flags ling-serve does not have exit it with status 2 (`unknown argument`).
@@ -283,7 +280,7 @@ def test_the_drift_check_compares_ling_serve_with_its_own_recipe():
     assert Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, sglang) == {
         "Recipe Match": "Running flags match the registry recipe"
     }
-    drifted = [a if a != "65536" else "32768" for a in running]
+    drifted = [a if a != "262144" else "65536" for a in running]
     rows = Cli._detect_recipe_drift(DEFAULT_MODEL_ALIAS, 8000, drifted)
     assert "  drift --max-context" in rows
 
@@ -361,3 +358,24 @@ def test_the_image_records_the_engine_commit_in_its_labels():
     assert 'ai.dreamference.ling-engine.commit="${ENGINE_COMMIT}"' in text
     # The base is pinned by digest, as every image Mightling runs.
     assert re.search(r"^ARG CUDA_BASE=nvidia/cuda@sha256:[0-9a-f]{64}$", text, re.M)
+
+
+def test_the_drafter_is_one_pinned_constant_away_from_the_scalesearch_one():
+    from dreamference.hardware.model_matrix_registry import (
+        QWEN38_LING_DRAFTER,
+        QWEN38_RTN_DRAFTER,
+        QWEN38_SCALESEARCH_DRAFTER,
+    )
+
+    drafter = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)["speculative_config"]
+    assert drafter["model"] == QWEN38_LING_DRAFTER["model"]
+    assert drafter["revision"] == QWEN38_LING_DRAFTER["revision"]
+    # Whatever ling-serve runs is pinned by commit and sized by a matrix entry.
+    assert re.fullmatch(r"[0-9a-f]{40}", drafter["revision"])
+    assert ModelMatrixRegistry.get_spec(drafter["model"]) is not None
+    assert QWEN38_LING_DRAFTER in (QWEN38_RTN_DRAFTER, QWEN38_SCALESEARCH_DRAFTER)
+    _, server = split_at_image(
+        VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS), QWEN38_LING_IMAGE
+    )
+    repo = QWEN38_LING_DRAFTER["model"].replace("/", "--")
+    assert flag(server, "--draft").endswith(f"models--{repo}/snapshots/{drafter['revision']}")

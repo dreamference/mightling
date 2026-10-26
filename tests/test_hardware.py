@@ -123,8 +123,8 @@ def test_flexible_model_alias_resolution():
         assert spec is not None, f"Failed to get spec for {name}"
         assert spec.hf_repo_id == "RadixArk/Qwen3.8-27B-NVFP4"
         assert resolve_model_hf_repo(name) == "RadixArk/Qwen3.8-27B-NVFP4"
-        # ling-serve's context (the nights'), and SGLang's in the fallback recipe.
-        assert get_model_launch_overrides(name).get("max_model_len") == 65536
+        # The same context on ling-serve and on the SGLang fallback (the owner's decision, 2026-10-26).
+        assert get_model_launch_overrides(name).get("max_model_len") == 262144
         assert get_model_launch_overrides(name, "sglang").get("max_model_len") == 262144
         assert model_declares_own_quantization(name) is True
 

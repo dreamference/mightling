@@ -1622,7 +1622,7 @@ class VLLMServerManager:
         # gpu_memory_utilization sizes the KV/activation arena vLLM carves out, and scaling total
         # memory by it says nothing about whether the checkpoint itself fits. A 78 GB checkpoint
         # under a 0.3 recipe used to "require" ~38 GB and sail through this gate.
-        from dreamference.hardware import get_model_launch_overrides, get_speculative_draft_repo
+        from dreamference.hardware import get_model_launch_overrides
         overrides = get_model_launch_overrides(model, engine)
         # Same fallback the launch builder uses, and it has to stay that way. This read used to
         # default to 0.9 against build_launch_command's 0.50, so every model without a recipe — most
@@ -1642,7 +1642,8 @@ class VLLMServerManager:
         # invisible here until 2026-08-15, which under-counted the footprint by the drafter's size
         # and — worse — left it out of the pre-download below, so vLLM would fetch it from inside
         # the container during the load, the one phase where this host cannot afford surprises.
-        recipe_draft_model = get_speculative_draft_repo(model)
+        # The drafter of the engine that runs: the engines' recipes may name different ones.
+        recipe_draft_model = (overrides.get("speculative_config") or {}).get("model") or None
         draft_models = [m for m in (draft_model, recipe_draft_model) if m]
 
         weights_gb = self._estimate_model_weights_gb(model)
