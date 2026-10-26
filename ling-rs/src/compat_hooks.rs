@@ -214,9 +214,37 @@ pub fn groups_from_settings(settings: &Value, origin: Origin, shim: &dyn Fn(&str
 }
 
 /// The shim command Codex runs for a hook: this binary, `compat hook-shim`, and the user's
-/// command as one shell word, readable in Codex's `/hooks` review.
+/// command, quoted for the shell Codex runs hooks through on this platform.
 pub fn shim_command(exe: &Path, command: &str) -> String {
-    format!("{} compat hook-shim -- {}", shell_word(&exe.display().to_string()), shell_word(command))
+    shim_command_for(exe, command, cfg!(windows))
+}
+
+/// [`shim_command`] for either shell. A POSIX shell elsewhere: the command as one shell word,
+/// readable in Codex's `/hooks` review. `cmd.exe /C` on Windows (Codex's hook runner), which knows
+/// no single quotes, expands `%VAR%` even inside double quotes and reads `&|<>^()` as operators:
+/// there the command goes as a hex word ([`hex_word`]) that no shell rule touches, and the program
+/// in double quotes ([`crate::compaction::quote_program`]).
+pub fn shim_command_for(exe: &Path, command: &str, windows: bool) -> String {
+    let exe = exe.display().to_string();
+    if windows {
+        format!("{} compat hook-shim --hex {}", crate::compaction::quote_program(&exe, true), hex_word(command))
+    } else {
+        format!("{} compat hook-shim -- {}", shell_word(&exe), shell_word(command))
+    }
+}
+
+/// Text as a word every shell passes through untouched: its UTF-8 bytes in lowercase hex.
+pub fn hex_word(text: &str) -> String {
+    text.bytes().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// The text of a [`hex_word`], or None when the word is not one.
+pub fn from_hex_word(word: &str) -> Option<String> {
+    if word.len() % 2 != 0 || !word.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = (0..word.len()).step_by(2).map(|index| u8::from_str_radix(&word[index..index + 2], 16).ok()).collect();
+    String::from_utf8(bytes?).ok()
 }
 
 /// A string as one POSIX shell word.
@@ -508,26 +536,67 @@ pub fn translate_output(stdout: &str, event: &str) -> (String, Vec<String>) {
     (output.to_string(), notes)
 }
 
+/// The shell a user's hook command runs in, as Claude Code runs it: `/bin/sh -c` on Unix. On
+/// Windows Claude Code runs hooks in Git Bash; so does the shim when it finds one
+/// (`CLAUDE_CODE_GIT_BASH_PATH`, as Claude Code reads it, or the `bash.exe` beside `git.exe` on
+/// `PATH`), and otherwise `cmd.exe /C`, Codex's own hook shell, given the command as it is written.
+fn hook_shell(command: &str) -> std::process::Command {
+    #[cfg(windows)]
+    {
+        if let Some(bash) = git_bash() {
+            let mut shell = std::process::Command::new(bash);
+            shell.arg("-c").arg(command);
+            return shell;
+        }
+        use std::os::windows::process::CommandExt;
+        let comspec = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
+        let mut shell = std::process::Command::new(comspec);
+        shell.arg("/C").raw_arg(format!("\"{command}\""));
+        shell
+    }
+    #[cfg(not(windows))]
+    {
+        let mut shell = std::process::Command::new("/bin/sh");
+        shell.arg("-c").arg(command);
+        shell
+    }
+}
+
+/// Git for Windows' `bash.exe`: `CLAUDE_CODE_GIT_BASH_PATH`, else the one beside the `git.exe` on
+/// `PATH` (`Git\cmd\git.exe` or `Git\bin\git.exe` → `Git\bin\bash.exe`). Never WSL's
+/// `System32\bash.exe`, which would run the hook in another system.
+#[cfg(windows)]
+fn git_bash() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH").map(PathBuf::from).filter(|path| path.is_file()) {
+        return Some(path);
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).filter(|dir| dir.join("git.exe").is_file()).find_map(|dir| {
+        let git_root = dir.parent()?;
+        [git_root.join("bin").join("bash.exe"), git_root.join("usr").join("bin").join("bash.exe")].into_iter().find(|bash| bash.is_file())
+    })
+}
+
 /// `ling compat hook-shim -- <command>`: runs the user's command with Claude Code's input and
 /// passes its result back to Codex.
 pub fn run_shim(args: &[String]) -> i32 {
     use std::io::Read;
     use std::io::Write;
     let command = match args {
-        [dashes, command] if dashes == "--" => command,
-        _ => {
-            eprintln!("usage: ling compat hook-shim -- <command>");
-            return 2;
-        }
+        [dashes, command] if dashes == "--" => Some(command.clone()),
+        [flag, word] if flag == "--hex" => from_hex_word(word),
+        _ => None,
+    };
+    let Some(command) = command else {
+        eprintln!("usage: ling compat hook-shim -- <command> | --hex <hex>");
+        return 2;
     };
     let mut raw = String::new();
     let _ = std::io::stdin().read_to_string(&mut raw);
     let input = serde_json::from_str::<Value>(&raw).map(translate_input).unwrap_or(Value::Null);
     let event = input["hook_event_name"].as_str().unwrap_or_default().to_string();
     let cwd = input["cwd"].as_str().map(PathBuf::from).or_else(|| std::env::current_dir().ok()).unwrap_or_default();
-    let mut child = match std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(command)
+    let mut child = match hook_shell(&command)
         .current_dir(&cwd)
         .env("CLAUDE_PROJECT_DIR", crate::compat_tui::project_root(&cwd))
         .stdin(std::process::Stdio::piped())
@@ -560,7 +629,7 @@ mod tests {
     use super::*;
 
     fn shim(command: &str) -> String {
-        shim_command(Path::new("/opt/ling"), command)
+        shim_command_for(Path::new("/opt/ling"), command, false)
     }
 
     #[test]
@@ -710,5 +779,21 @@ mod tests {
         assert_eq!(shell_word("/opt/ling"), "/opt/ling");
         assert_eq!(shell_word("npm run lint"), "'npm run lint'");
         assert_eq!(shell_word("echo 'hi'"), "'echo '\\''hi'\\'''");
+    }
+
+    #[test]
+    fn on_windows_the_shim_names_the_command_by_a_hex_word_and_the_program_in_double_quotes() {
+        // cmd.exe would expand %PATH%, cut at & and |, and keep single quotes as text.
+        let command = r#"echo "%PATH%" & npm run lint | findstr ^x 'y' (z) — é"#;
+        let exe = Path::new(r"C:\Users\Jane Doe (x86)\AppData\Local\Programs\Mightling\bin\ling.exe");
+        let line = shim_command_for(exe, command, true);
+        let prefix = r#""C:\Users\Jane Doe (x86)\AppData\Local\Programs\Mightling\bin\ling.exe" compat hook-shim --hex "#;
+        assert!(line.starts_with(prefix), "{line}");
+        let word = &line[prefix.len()..];
+        assert!(word.bytes().all(|byte| byte.is_ascii_hexdigit()), "{word}");
+        assert_eq!(from_hex_word(word).as_deref(), Some(command));
+        assert_eq!(from_hex_word("6"), None);
+        assert_eq!(from_hex_word("zz"), None);
+        assert_eq!(from_hex_word(""), Some(String::new()));
     }
 }
