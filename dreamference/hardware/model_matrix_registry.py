@@ -312,7 +312,8 @@ QWEN38_LING_DRAFTER: Final[dict[str, Any]] = QWEN38_RTN_DRAFTER
 # split, idles without spinning (no --sleep-on-idle), and takes no API key and no memory fraction.
 # Its memory is what --max-context and its sessions allocate (each session's KV and state at the
 # full context, allocated at start): 60 GB at 262,144, measured. Those are device allocations, which
-# the container's cgroup cap does not count (it peaked at 0.4 GB), so what bounds them is
+# the container's cgroup cap does not count (it peaked at 0.4 GB; SGLang's container has about 8 GB
+# charged of its own ~60 GB, so this was already so), and what bounds them is
 # start_server's pre-load check against the 0.50 arena (~61 GB) and the PSI watchdog;
 # `container_headroom_gb` sizes the cap as for SGLang.
 QWEN38_LING_RECIPE: Final[dict[str, Any]] = {

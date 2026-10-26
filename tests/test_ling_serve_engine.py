@@ -382,3 +382,10 @@ def test_the_drafter_is_one_pinned_constant_away_from_the_scalesearch_one():
     )
     repo = QWEN38_LING_DRAFTER["model"].replace("/", "--")
     assert flag(server, "--draft").endswith(f"models--{repo}/snapshots/{drafter['revision']}")
+
+
+def test_the_image_digest_is_a_real_pin_not_the_placeholder():
+    # The registry holds a placeholder digest until the image is pushed to GHCR; a node's default
+    # `server start` cannot pull it, so this stays red until the pushed digest is pinned.
+    digest = QWEN38_LING_IMAGE.rsplit(":", 1)[1]
+    assert len(set(digest)) > 1, "pin the digest GHCR gave the push in QWEN38_LING_IMAGE"
