@@ -1,0 +1,26 @@
+diff --git a/codex-rs/windows-sandbox-rs/src/desktop.rs b/codex-rs/windows-sandbox-rs/src/desktop.rs
+--- a/codex-rs/windows-sandbox-rs/src/desktop.rs
++++ b/codex-rs/windows-sandbox-rs/src/desktop.rs
+@@ -216,3 +216,3 @@
+         let private_desktop = PrivateDesktop::create(logs_base_dir)?;
+-        let startup_name = to_wide(format!("Winsta0\\{}", private_desktop.name));
++        let startup_name = winsta(&private_desktop.name);
+         Ok(Self {
+@@ -252,3 +252,3 @@
+             },
+-            startup_name: to_wide(format!("Winsta0\\{name}")),
++            startup_name: winsta(name),
+         })
+@@ -261,2 +261,12 @@
+ 
++// Mightling: the caller's window station, not Winsta0: SSH runs in a service one.
++fn winsta(desktop: &str) -> Vec<u16> {
++    use windows_sys::Win32::System::StationsAndDesktops::*;
++    let mut name = [0u16; 256];
++    unsafe { GetUserObjectInformationW(GetProcessWindowStation(), UOI_NAME, name.as_mut_ptr().cast(), 512, &mut 0) };
++    let end = name.iter().position(|&c| c == 0).unwrap_or(0);
++    let station = if end > 0 { String::from_utf16_lossy(&name[..end]) } else { "Winsta0".into() };
++    to_wide(format!("{station}\\{desktop}"))
++}
++
+ /// Reuses a private desktop only for the same sandbox account and effective permissions.
