@@ -317,6 +317,8 @@ fn search_reports_every_failed_engine() {
     );
 }
 
+// Unix only: on Windows ling-search keeps no cache (`Cache::at` cannot check the folder's owner).
+#[cfg(unix)]
 #[test]
 fn a_repeated_search_is_answered_from_the_cache() {
     let server =
