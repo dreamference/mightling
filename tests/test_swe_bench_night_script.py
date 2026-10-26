@@ -487,14 +487,18 @@ def test_the_guard_arms_reach_only_their_round_and_stack(tmp_path):
     assert (folder / "test-guard-finish-check-against-default.txt").exists()
 
 
-@pytest.mark.parametrize("arm", ["test-guards", "test_guard", "finish", "finish-checks", "testguard"])
+@pytest.mark.parametrize(
+    "arm", ["test-guards", "test_guard", "finish", "finish-checks", "testguard"]
+)
 def test_a_misspelt_guard_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default {arm}")
     assert status == 2 and runs(recorded) == []
     assert (folder / "failed").exists() and not (folder / "done").exists()
 
 
-@pytest.mark.parametrize(("arm", "variable"), [("test-guard", "TEST_GUARD"), ("finish-check", "FINISH_CHECK")])
+@pytest.mark.parametrize(
+    ("arm", "variable"), [("test-guard", "TEST_GUARD"), ("finish-check", "FINISH_CHECK")]
+)
 @pytest.mark.parametrize("reads_it", [False, True])
 def test_start_refuses_an_installed_ling_without_the_guards(tmp_path, arm, variable, reads_it):
     # As for the drop arm: stand-ins for systemctl, git and the venv's Python.
@@ -509,12 +513,25 @@ def test_start_refuses_an_installed_ling_without_the_guards(tmp_path, arm, varia
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
     fake = tmp_path / "python"
     install = tmp_path / "install"
-    fake.write_text(f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{install}";; esac\n')
+    fake.write_text(
+        f'#!/bin/bash\ncase "$2" in *executable_path*) echo "{ling}";; *) echo "{install}";; esac\n'
+    )
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WT": ROOT, "PY": str(fake),
-           "D": str(tmp_path / "night7"), "NIGHT": "7", "UNIT": "ling-swe-night7-test",
-           "LIVE_UNIT": "ling-swe-night6-test", "ARMS": f"default {arm}", "LIST": str(tmp_path / "list.txt")}
-    result = subprocess.run(["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "WT": ROOT,
+        "PY": str(fake),
+        "D": str(tmp_path / "night7"),
+        "NIGHT": "7",
+        "UNIT": "ling-swe-night7-test",
+        "LIVE_UNIT": "ling-swe-night6-test",
+        "ARMS": f"default {arm}",
+        "LIST": str(tmp_path / "list.txt"),
+    }
+    result = subprocess.run(
+        ["bash", SCRIPT, "start"], env=env, capture_output=True, text=True, timeout=60
+    )
     assert result.returncode == 1
     refused = f"{ling} does not read DREAMFERENCE_MIGHTLING_{variable}" in result.stdout
     assert refused is not reads_it
@@ -692,7 +709,8 @@ def remote(tmp_path):
     stubs = {
         "docker": f'#!/bin/bash\necho "$*" >> "{calls}"\ncase "$1" in\n'
         f'  ps) case "$*" in *m0-prod8000*) [ -e "{state}/m0" ] && echo c0ffee ;; esac ;;\n'
-        f'  stop) rm -f "{state}/m0" ;;\n  start) touch "{state}/m0" ;;\n  inspect) echo true ;;\nesac\n',
+        f'  stop) rm -f "{state}/m0" ;;\n  start) touch "{state}/m0" ;;\n'
+        f'  inspect) case "$*" in *Mounts*) cat "{state}/mounts" 2>/dev/null ;; *) echo true ;; esac ;;\nesac\n',
         "curl": '#!/bin/bash\necho \'{"data": [{"id": "m", "owned_by": "sglang"}]}\'\n',
         "ss": "#!/bin/bash\nexit 0\n",
     }
@@ -1113,3 +1131,84 @@ def test_each_round_of_a_pinned_night_checks_the_build(tmp_path):
 def test_a_model_server_arm_with_no_remote_machine_named_ends_the_night_before_its_round(tmp_path):
     status, recorded, folder = night(tmp_path, "default+on-sglang default+on-engine", REMOTE="")
     assert status == 1 and not runs(recorded) and (folder / "failed").exists()
+
+
+TARGET = "/sgl-workspace/sglang/python/sglang/srt/entrypoints/openai/serving_responses.py"
+
+
+def patched_sglang(tmp_path, ab_dir, volume=True):
+    """Night 17's folder: a runtime patch listed in sglang-patches/mounts.
+
+    Its serve.py records its arguments, and takes `--volume` when `volume`.
+    """
+    patches = ab_dir / "sglang-patches"
+    patches.mkdir()
+    (patches / "serving_responses.py-ed490a69c960-f747c48de5d4").write_text("# patched\n")
+    (patches / "mounts").write_text(f"serving_responses.py-ed490a69c960-f747c48de5d4 {TARGET}\n")
+    record = tmp_path / "serve-args.txt"
+    flag = '"--volume"' if volume else '"--nvtx-patch"'
+    (ab_dir / "serve.py").write_text(
+        f"import sys\n# argparse: {flag}\nopen({str(record)!r}, 'w').write(' '.join(sys.argv[1:]))\n"
+    )
+    return record
+
+
+def probe(tmp_path, answer):
+    script = tmp_path / "probe.sh"
+    script.write_text(f"#!/bin/bash\necho '{answer}'\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_the_sglang_arm_mounts_the_runtime_patch_and_proves_the_phase_merge_before_it_is_ready(
+    remote, tmp_path
+):
+    run, _calls, _lock, ab_dir = remote
+    record = patched_sglang(tmp_path, ab_dir)
+    (tmp_path / "state" / "mounts").write_text(f"/models {TARGET} ")
+    served = run("serve", "sglang", PHASE_PROBE_CMD=probe(tmp_path, "same 342"))
+    assert served.returncode == 0 and "ready sglang" in served.stdout, served.stderr
+    assert (
+        f"--volume {ab_dir}/sglang-patches/serving_responses.py-ed490a69c960-f747c48de5d4:{TARGET}:ro"
+        in (record.read_text())
+    )
+    assert "phase merge in force: 342 prompt tokens" in served.stderr
+
+
+def test_a_phase_merge_not_in_force_stops_the_sglang_arm(remote, tmp_path):
+    run, calls, _lock, ab_dir = remote
+    patched_sglang(tmp_path, ab_dir)
+    (tmp_path / "state" / "mounts").write_text(f"{TARGET} ")
+    served = run("serve", "sglang", PHASE_PROBE_CMD=probe(tmp_path, "differ 350 342"))
+    assert served.returncode == 1 and "phase merge NOT in force (differ 350 342)" in served.stderr
+    assert "rm -f ab-n12-sglang" in calls.read_text()
+
+
+def test_a_patch_that_is_not_mounted_stops_the_sglang_arm_before_any_probe(remote, tmp_path):
+    run, _calls, _lock, ab_dir = remote
+    patched_sglang(tmp_path, ab_dir)
+    served = run("serve", "sglang", PHASE_PROBE_CMD=probe(tmp_path, "same 342"))
+    assert served.returncode == 1 and "the phase-merge patch is not mounted" in served.stderr
+
+
+def test_runtime_patches_need_a_serve_py_that_mounts_them(remote, tmp_path):
+    run, _calls, _lock, ab_dir = remote
+    patched_sglang(tmp_path, ab_dir, volume=False)
+    served = run("serve", "sglang", PHASE_PROBE_CMD=probe(tmp_path, "same 342"))
+    assert served.returncode == 1 and "has no --volume for the runtime patches" in served.stderr
+
+
+def test_without_runtime_patches_the_sglang_arm_starts_as_before(remote, tmp_path):
+    run, _calls, _lock, _ab_dir = remote
+    served = run("serve", "sglang")
+    assert served.returncode == 0 and "phase merge" not in served.stderr
+
+
+def test_the_disk_reserve_reaches_the_unit_so_its_disk_pause_matches_the_runner(tmp_path):
+    # A night started with RESERVE_GB=150 writes that reserve for the runner; the unit's disk pause must
+    # wait for the same reserve, not the default 100.
+    with pathlib.Path(SCRIPT).open() as script:
+        body = script.read()
+    assert '--setenv=RESERVE_GB="$RESERVE_GB"' in body
+    result, _recorded, _folder = disk_night(tmp_path, 140, RESERVE_GB="150")
+    assert result.returncode == 0 and "paused: 140G free, the reserve is 150G" in result.stdout
