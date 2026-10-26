@@ -549,9 +549,23 @@ def test_identifier_comes_from_the_app_config():
     # Repeating it here would let the data directory drift from the one the app really uses.
     assert DesktopRunner._app_identifier() == "dev.dreamference.mightling"
     bootstrap = (ELECTRON / "src" / "early-bootstrap.ts").read_text(encoding="utf-8")
-    assert (
-        'app.setPath("userData", path.join(home, ".local", "share", appConfig.identifier))'
-        in bootstrap
+    assert "dataFolder(process.platform, process.env, appConfig.identifier)" in bootstrap
+    assert 'app.setPath("userData", settleDataFolder(legacy, data))' in bootstrap
+    # Off Windows the folder is still `~/.local/share/<identifier>`, where this runner empties the
+    # cache (data-folder.ts; the cases both it and `ling app` are tested against).
+    rule = (ELECTRON / "src" / "data-folder.ts").read_text(encoding="utf-8")
+    assert 'joined(home, false, [".local", "share", identifier])' in rule
+    vectors = json.loads(
+        (ELECTRON.parent.parent / "ling-rs" / "vectors" / "app-data-folder.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert vectors["identifier"] == DesktopRunner._app_identifier()
+    linux = [case for case in vectors["cases"] if case["platform"] == "linux" and case["expected"]]
+    assert any(
+        case["expected"]
+        == case["env"]["HOME"].rstrip("/") + "/.local/share/" + vectors["identifier"]
+        for case in linux
     )
 
 

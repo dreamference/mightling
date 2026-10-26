@@ -139,6 +139,12 @@ info, then Run anyway), and Smart App Control must be off. To update, run the ne
 installer over it; to remove it, use Settings → Apps → Installed apps. `ling update` and
 `install.ps1` update the command-line client only, not the app.
 
+The app keeps its own data (window positions, preferences, its browser profile) in
+`%LOCALAPPDATA%\dev.dreamference.mightling`, and your threads and settings are in
+`%USERPROFILE%\.mightling`. Removing the app leaves both, so a reinstall picks up where you were;
+delete the folders yourself to remove them too. Versions up to 1.7.1 kept the app's data in
+`%USERPROFILE%\.local\share\dev.dreamference.mightling`; 1.7.2 moves it on its first start.
+
 ## Ask and Work in the app window
 
 The app window talks to one `ling app-server` of its own, the `ling` bundled in the app. Its
