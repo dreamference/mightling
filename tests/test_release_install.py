@@ -494,6 +494,9 @@ def test_a_mac_gets_the_desktop_app_from_its_own_dmg_with_no_quarantine(tmp_path
     assert f"xattr -dr com.apple.quarantine {app}" in logged(tmp_path, "xattr.log")
     assert not (tmp_path / "Applications/.Mightling.app.new").exists()
     assert f"Installed the desktop app: {app}" in result.stdout
+    # The record `ling update` reads to update the app too (update.rs, APP_RECORD).
+    record = tmp_path / ".local/share/dreamference/mightling/desktop-app"
+    assert record.read_text() == f"path={app}\nversion=v9.9.9\n"
 
 
 def test_running_it_again_replaces_the_app_in_place(tmp_path, release_server):
@@ -523,6 +526,7 @@ def test_no_app_installs_the_terminal_agent_alone(tmp_path, release_server):
     assert (tmp_path / ".local/bin/ling").is_symlink()
     assert not (tmp_path / "Applications").exists()
     assert not asset_requested(server, "Mightling-9.9.9-arm64-preview.dmg")
+    assert not (tmp_path / ".local/share/dreamference/mightling/desktop-app").exists()
 
 
 def test_a_release_without_a_mac_app_installs_the_terminal_agent(tmp_path, release_server):

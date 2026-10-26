@@ -45,8 +45,9 @@
 # --no-advertise keeps the node off the local network (`ling-admin node enable` offers it later).
 #
 # It downloads the same assets, by the same names and with the same checks, as `ling update`
-# (ling-rs/src/update.rs), so a machine installed this way is updated by that command. `ling
-# update` leaves the Mac's desktop app as it is; running this script again updates it too.
+# (ling-rs/src/update.rs), so a machine installed this way is updated by that command, the Mac's
+# desktop app included: the script records where it put the app ($MIGHTLING_INSTALL_DIR/
+# desktop-app), and `ling update` updates an app it finds recorded, under the same checks.
 #
 # The repository is public, so no token is needed. One is used when present (GH_TOKEN,
 # GITHUB_TOKEN, or a logged-in `gh`): it raises GitHub's rate limit, and it is what reads a private
@@ -530,6 +531,8 @@ if [ -n "$APP_DMG" ]; then
             mv "$APP_DIR/.Mightling.app.new" "$APP_PATH"
             rm -rf "$APP_DIR/.Mightling.app.old"
             xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
+            # What `ling update` reads to update the app too (update.rs, APP_RECORD).
+            printf 'path=%s\nversion=%s\n' "$APP_PATH" "$TAG" > "$INSTALL_DIR/desktop-app"
             say "✅ Installed the desktop app: $APP_PATH (open it from Launchpad or Spotlight)"
             step done "desktop app installed: $APP_PATH"
         else

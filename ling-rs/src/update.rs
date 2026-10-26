@@ -13,14 +13,24 @@
 //! optional, because earlier releases do not carry them (v1.3.0 has the web commands and no
 //! `ling-code`); the installed ones are then kept.
 //!
+//! On a Mac and on Windows the one-line installers also install the desktop app, and leave a
+//! record of it ([`APP_RECORD`], beside the install folder's `bin`). When that record is there and
+//! the app is still where it says, `ling update` updates the app too, from the same release and
+//! under the same checks: the dmg or the NSIS installer must match its line in the signed
+//! `SHA256SUMS`, and it is downloaded here rather than by a browser, so it carries no quarantine
+//! mark or Mark of the Web (the owner's decision of 2026-10-26, specs/DREAMFERENCE_SETUP.md §3.2).
+//! An app the user installed by hand, with no record, is left alone, and so is one that is running.
+//!
 //! The repository is public, so no token is needed. `GH_TOKEN` or `GITHUB_TOKEN` is sent when set,
 //! which raises GitHub's rate limit; a logged-in `gh`'s token is used only for a fork named by
 //! `MIGHTLING_RELEASE_REPO`. A token only ever goes to `api.github.com`, never to a download URL
 //! the release names (security review 2026-10).
 
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::io::Read;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -190,6 +200,178 @@ fn github_token(repo: &str) -> Option<String> {
     (output.status.success() && !token.is_empty()).then_some(token)
 }
 
+/// The file the one-line installers write beside the install folder's `bin` when they installed the
+/// desktop app: `path=<the app>` and `version=<the release tag>`, one per line.
+pub const APP_RECORD: &str = "desktop-app";
+
+/// What [`APP_RECORD`] says: where the installer put the app, and which release it was.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AppRecord {
+    pub path: PathBuf,
+    pub version: String,
+}
+
+/// Reads an [`APP_RECORD`]'s text; `None` without a path. Windows line endings and the byte-order
+/// mark Windows PowerShell's UTF-8 writes are allowed.
+pub fn parse_app_record(text: &str) -> Option<AppRecord> {
+    let (mut path, mut version) = (String::new(), String::new());
+    for line in text.trim_start_matches('\u{feff}').lines() {
+        match line.trim().split_once('=') {
+            Some(("path", value)) => path = value.trim().to_string(),
+            Some(("version", value)) => version = value.trim().to_string(),
+            _ => {}
+        }
+    }
+    (!path.is_empty()).then(|| AppRecord { path: PathBuf::from(path), version })
+}
+
+/// The text of an [`APP_RECORD`], as the installers write it.
+pub fn format_app_record(record: &AppRecord) -> String {
+    format!("path={}\nversion={}\n", record.path.display(), record.version)
+}
+
+/// Whether an app of `installed` (a tag, `v` or not) is older than the release `latest`.
+pub fn app_is_behind(installed: &str, latest: &str) -> bool {
+    decide(Some(installed.trim_start_matches('v')), latest.trim_start_matches('v')) == Decision::Install
+}
+
+/// The release's desktop app for an operating system and architecture, as `std::env::consts` names
+/// them: the dmg mac-preview.yml builds (`Mightling-<version>-<arm64|x64>[-preview].dmg`) or the
+/// installer windows.yml builds (`Mightling-Setup-<version>-<arm64|x64>.exe`).
+pub fn desktop_app_asset<'a>(names: impl IntoIterator<Item = &'a str>, os: &str, arch: &str) -> Option<String> {
+    let arch = match arch {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        _ => return None,
+    };
+    names
+        .into_iter()
+        .find(|name| match os {
+            "macos" => {
+                !name.starts_with("Mightling-Setup-")
+                    && name.starts_with("Mightling-")
+                    && (name.ends_with(&format!("-{arch}.dmg")) || name.ends_with(&format!("-{arch}-preview.dmg")))
+            }
+            "windows" => name.starts_with("Mightling-Setup-") && name.ends_with(&format!("-{arch}.exe")),
+            _ => false,
+        })
+        .map(str::to_string)
+}
+
+/// Runs a tool and fails with its last line of output when it fails.
+fn run_tool(program: &str, args: &[&OsStr]) -> anyhow::Result<()> {
+    let output = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .with_context(|| format!("could not run {program}"))?;
+    if !output.status.success() {
+        let text = String::from_utf8_lossy(&output.stderr);
+        bail!("{program} failed: {}", text.lines().last().unwrap_or("no output"));
+    }
+    Ok(())
+}
+
+/// Whether the desktop app is running: it is then not replaced under itself (and on Windows the
+/// installer would close it, with any `ling update` running in one of its terminals).
+fn app_is_running() -> bool {
+    let probe = if cfg!(windows) {
+        std::process::Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq Mightling.exe", "/NH"])
+            .output()
+    } else {
+        std::process::Command::new("pgrep").args(["-x", "Mightling"]).output()
+    };
+    match probe {
+        Ok(output) if cfg!(windows) => String::from_utf8_lossy(&output.stdout).contains("Mightling.exe"),
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Puts the app from a checked dmg at `app`, as install.sh does: the dmg mounted read-only at a
+/// folder of `work` and never shown in the Finder, `Mightling.app` copied out with `ditto` under a
+/// hidden name and renamed over the old one (moved aside first, so a failure leaves it in place),
+/// the dmg detached whatever happened, and any quarantine mark cleared. `run` runs a tool; the
+/// tests pass a stand-in.
+pub fn install_app_from_dmg(
+    dmg: &Path,
+    work: &Path,
+    app: &Path,
+    run: &dyn Fn(&str, &[&OsStr]) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let dir = app.parent().context("the app's path has no folder")?;
+    let name = app.file_name().context("the app's path has no name")?.to_string_lossy().into_owned();
+    let staging = dir.join(format!(".{name}.new"));
+    let aside = dir.join(format!(".{name}.old"));
+    let mount = work.join("dmg");
+    std::fs::create_dir_all(&mount)?;
+    let _ = run("xattr", &[OsStr::new("-d"), OsStr::new("com.apple.quarantine"), dmg.as_os_str()]);
+    run(
+        "hdiutil",
+        &[
+            OsStr::new("attach"),
+            dmg.as_os_str(),
+            OsStr::new("-nobrowse"),
+            OsStr::new("-readonly"),
+            OsStr::new("-noverify"),
+            OsStr::new("-noautoopen"),
+            OsStr::new("-quiet"),
+            OsStr::new("-mountpoint"),
+            mount.as_os_str(),
+        ],
+    )?;
+    let _ = std::fs::remove_dir_all(&staging);
+    let copied = run("ditto", &[mount.join("Mightling.app").as_os_str(), staging.as_os_str()]);
+    if run("hdiutil", &[OsStr::new("detach"), mount.as_os_str(), OsStr::new("-quiet")]).is_err() {
+        let _ = run("hdiutil", &[OsStr::new("detach"), mount.as_os_str(), OsStr::new("-force"), OsStr::new("-quiet")]);
+    }
+    if let Err(error) = copied {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    let _ = std::fs::remove_dir_all(&aside);
+    if app.exists() {
+        std::fs::rename(app, &aside).with_context(|| format!("could not move {} aside", app.display()))?;
+    }
+    std::fs::rename(&staging, app)?;
+    let _ = std::fs::remove_dir_all(&aside);
+    let _ = run("xattr", &[OsStr::new("-dr"), OsStr::new("com.apple.quarantine"), app.as_os_str()]);
+    Ok(())
+}
+
+/// Runs a checked NSIS installer silently (`/S`: for this user, no administrator, no window, the
+/// app not started), as install.ps1 does.
+fn install_app_from_setup(setup: &Path) -> anyhow::Result<()> {
+    let status = std::process::Command::new(setup)
+        .arg("/S")
+        .status()
+        .with_context(|| format!("could not run {}", setup.display()))?;
+    if !status.success() {
+        bail!("the installer exited with {status}");
+    }
+    Ok(())
+}
+
+/// The installers' record of the desktop app, when this is a Mac or Windows and the app is still
+/// where it says. A record whose app is gone (removed by the user) is deleted, so the app is not
+/// brought back.
+fn installed_app(install_dir: &Path) -> Option<(PathBuf, AppRecord)> {
+    if !(cfg!(target_os = "macos") || cfg!(windows)) {
+        return None;
+    }
+    let file = install_dir.parent()?.join(APP_RECORD);
+    let record = parse_app_record(&std::fs::read_to_string(&file).ok()?)?;
+    if !record.path.exists() {
+        println!(
+            "ℹ️  The desktop app is no longer at {}; `ling update` stops updating it",
+            record.path.display()
+        );
+        let _ = std::fs::remove_file(&file);
+        return None;
+    }
+    Some((file, record))
+}
+
 /// Runs `ling update`.
 pub async fn run() -> anyhow::Result<()> {
     let Some(target) = target() else {
@@ -234,23 +416,41 @@ pub async fn run() -> anyhow::Result<()> {
     let tag = release["tag_name"].as_str().unwrap_or_default();
     let latest = tag.trim_start_matches('v');
 
-    match decide(MIGHTLING_VERSION, latest) {
-        Decision::UpToDate => {
+    let exe = std::env::current_exe()?.canonicalize()?;
+    let install_dir = exe
+        .parent()
+        .context("the running executable has no parent directory")?;
+    let exe_name = exe
+        .file_name()
+        .context("the running executable has no file name")?
+        .to_string_lossy()
+        .into_owned();
+    let app = installed_app(install_dir).filter(|(_, record)| app_is_behind(&record.version, latest));
+
+    let binaries_due = match decide(MIGHTLING_VERSION, latest) {
+        Decision::UpToDate if app.is_none() => {
             println!("✅ Mightling {latest} is the latest release.");
             return Ok(());
         }
-        Decision::NewerThanRelease => {
+        Decision::NewerThanRelease if app.is_none() => {
             println!(
                 "✅ This Mightling ({}) is newer than the latest release ({latest}); nothing to do.",
                 MIGHTLING_VERSION.unwrap_or_default()
             );
             return Ok(());
         }
-        Decision::Install => match MIGHTLING_VERSION {
-            Some(current) => println!("⬆️  Updating Mightling {current} → {latest}"),
-            None => println!("⬆️  This ling was built from source; installing release {latest}"),
-        },
-    }
+        Decision::UpToDate | Decision::NewerThanRelease => {
+            println!("⬆️  ling is current; updating the desktop app to {latest}");
+            false
+        }
+        Decision::Install => {
+            match MIGHTLING_VERSION {
+                Some(current) => println!("⬆️  Updating Mightling {current} → {latest}"),
+                None => println!("⬆️  This ling was built from source; installing release {latest}"),
+            }
+            true
+        }
+    };
 
     let [mightling_asset, host_asset, sums_asset] = asset_names(&target);
     let assets: HashMap<&str, &str> = release["assets"]
@@ -259,10 +459,8 @@ pub async fn run() -> anyhow::Result<()> {
         .flatten()
         .filter_map(|asset| Some((asset["name"].as_str()?, asset["url"].as_str()?)))
         .collect();
-    for name in [&mightling_asset, &host_asset, &sums_asset] {
-        if !assets.contains_key(name.as_str()) {
-            bail!("release {tag} has no {name}; it carries no ling build for {target}");
-        }
+    if !assets.contains_key(sums_asset.as_str()) {
+        bail!("release {tag} has no {sums_asset}; it carries no ling build for {target}");
     }
 
     let download = |name: String| {
@@ -287,28 +485,111 @@ pub async fn run() -> anyhow::Result<()> {
         assets.contains_key(release_signature::SIGNATURE_ASSET),
     )
     .with_context(|| format!("release {tag}"))?;
-    if signed {
-        verify_signed_sums(&assets, &download, tag, &sums_asset, &sums_bytes).await?;
+    let all_sums = if signed {
+        Some(verify_signed_sums(&assets, &download, tag, &sums_asset, &sums_bytes).await?)
     } else {
         println!(
             "⚠️  release {tag} predates signed releases ({}); it is checked against its \
              checksums only",
             release_signature::SIGNED_SINCE
         );
-    }
+        None
+    };
     let sums = parse_sums(&String::from_utf8(sums_bytes)?);
-    let exe = std::env::current_exe()?.canonicalize()?;
-    let install_dir = exe
-        .parent()
-        .context("the running executable has no parent directory")?;
-    let exe_name = exe
-        .file_name()
-        .context("the running executable has no file name")?
-        .to_string_lossy()
-        .into_owned();
 
-    // Everything is downloaded and verified before anything is replaced, so a failure part-way
-    // leaves the installation as it was.
+    // The desktop app, downloaded and checked against the signed SHA256SUMS with everything else,
+    // before anything is replaced. Written here, not by a browser: no quarantine mark, no Mark of
+    // the Web.
+    let work = std::env::temp_dir().join(format!("ling-update-{}", std::process::id()));
+    let mut staged_app: Option<(PathBuf, PathBuf, AppRecord)> = None;
+    if let Some((record_file, record)) = app {
+        let asset = desktop_app_asset(assets.keys().copied(), std::env::consts::OS, std::env::consts::ARCH);
+        match (asset, &all_sums) {
+            (None, _) => println!("ℹ️  release {tag} carries no desktop app for this machine; keeping the installed one"),
+            (Some(_), None) => println!("ℹ️  release {tag} is not signed, so its desktop app is not installed"),
+            (Some(_), Some(_)) if app_is_running() => println!(
+                "⚠️  The desktop app is running, so it was not updated: quit Mightling, then run `ling update` again"
+            ),
+            (Some(asset), Some(all_sums)) => {
+                let expected = parse_sums(&String::from_utf8_lossy(all_sums))
+                    .remove(&asset)
+                    .with_context(|| format!("{} has no checksum for {asset}; nothing was installed", release_signature::SUMS_ASSET))?;
+                let bytes = download(asset.clone()).await?;
+                if hex_sha256(&bytes) != expected {
+                    bail!("{asset} does not match its checksum in {}; nothing was installed", release_signature::SUMS_ASSET);
+                }
+                std::fs::create_dir_all(&work)?;
+                let staged = work.join(&asset);
+                std::fs::write(&staged, &bytes).with_context(|| format!("could not write {}", staged.display()))?;
+                staged_app = Some((staged, record_file, record));
+            }
+        }
+    }
+    if !binaries_due {
+        return finish_app(staged_app, &work, tag);
+    }
+    let result = install_binaries(
+        &assets, &download, &sums, &sums_asset, &target, tag, install_dir, (mightling_asset, exe_name), host_asset,
+    )
+    .await;
+    if let Err(error) = result {
+        let _ = std::fs::remove_dir_all(&work);
+        return Err(error);
+    }
+    if cfg!(windows) {
+        println!("ℹ️  Windows builds are a preview and are not signed: Smart App Control must be off to run them.");
+    }
+    println!("✅ Mightling {latest} installed in {}", install_dir.display());
+    finish_app(staged_app, &work, tag)
+}
+
+/// Installs the staged desktop app, if any, records its release, and removes the work folder.
+fn finish_app(staged: Option<(PathBuf, PathBuf, AppRecord)>, work: &Path, tag: &str) -> anyhow::Result<()> {
+    let Some((staged, record_file, record)) = staged else {
+        let _ = std::fs::remove_dir_all(work);
+        return Ok(());
+    };
+    println!("📦 Updating the desktop app at {}", record.path.display());
+    let installed = if staged.extension() == Some(OsStr::new("dmg")) {
+        install_app_from_dmg(&staged, work, &record.path, &run_tool)
+    } else {
+        install_app_from_setup(&staged)
+    };
+    let _ = std::fs::remove_dir_all(work);
+    installed.context(
+        "the desktop app was not updated (it stays as it was); run `ling update` again, or the \
+         one-line installer",
+    )?;
+    let updated = AppRecord { path: record.path, version: tag.to_string() };
+    std::fs::write(&record_file, format_app_record(&updated))
+        .with_context(|| format!("could not write {}", record_file.display()))?;
+    println!("✅ Desktop app {tag} installed at {}", updated.path.display());
+    Ok(())
+}
+
+/// Downloads, checks and swaps in the binaries. Everything is downloaded and verified before
+/// anything is replaced, so a failure part-way leaves the installation as it was.
+#[allow(clippy::too_many_arguments)]
+async fn install_binaries<F, Fut>(
+    assets: &HashMap<&str, &str>,
+    download: &F,
+    sums: &HashMap<String, String>,
+    sums_asset: &str,
+    target: &str,
+    tag: &str,
+    install_dir: &Path,
+    (mightling_asset, exe_name): (String, String),
+    host_asset: String,
+) -> anyhow::Result<()>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<Vec<u8>>>,
+{
+    for name in [&mightling_asset, &host_asset] {
+        if !assets.contains_key(name.as_str()) {
+            bail!("release {tag} has no {name}; it carries no ling build for {target}");
+        }
+    }
     let mut wanted = vec![(mightling_asset, exe_name), (host_asset, installed_name(CODE_MODE_HOST))];
     let mut optional: Vec<&str> = optional_commands().to_vec();
     if cfg!(windows) {
@@ -346,10 +627,6 @@ pub async fn run() -> anyhow::Result<()> {
             link_onto_path(install_dir, &installed);
         }
     }
-    if cfg!(windows) {
-        println!("ℹ️  Windows builds are a preview and are not signed: Smart App Control must be off to run them.");
-    }
-    println!("✅ Mightling {latest} installed in {}", install_dir.display());
     Ok(())
 }
 
@@ -385,7 +662,7 @@ async fn verify_signed_sums<F, Fut>(
     tag: &str,
     sums_asset: &str,
     sums_bytes: &[u8],
-) -> anyhow::Result<()>
+) -> anyhow::Result<Vec<u8>>
 where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<Vec<u8>>>,
@@ -415,7 +692,7 @@ where
     )
     .with_context(|| format!("release {tag} failed its signature check; nothing was installed"))?;
     println!("🔏 {} is signed by {signer}", release_signature::SUMS_ASSET);
-    Ok(())
+    Ok(all_sums)
 }
 
 /// The signature check without the network: `SHA256SUMS` must be signed by a trusted key (or one a
@@ -540,6 +817,7 @@ pub fn sweep_old_in(dir: &Path) {
 mod tests {
     use super::*;
     use crate::release_signature::testing::{key_line, sign};
+    use std::ffi::OsString;
     use ed25519_dalek::SigningKey;
 
     /// A release's per-target sums file and the SHA256SUMS that lists it, as the release job
@@ -553,6 +831,116 @@ mod tests {
         .into_bytes();
         let signature = sign(&all, key, release_signature::RELEASE_NAMESPACE);
         (per_target, all, signature)
+    }
+
+    #[test]
+    fn the_installers_record_of_the_app_reads_back() {
+        let record = AppRecord { path: PathBuf::from("/Applications/Mightling.app"), version: "v1.7.2".into() };
+        assert_eq!(parse_app_record(&format_app_record(&record)), Some(record));
+        // install.ps1 writes Windows line endings.
+        let windows = parse_app_record("\u{feff}path=C:\\Users\\a\\AppData\\Local\\Programs\\Mightling\\App\r\nversion=v1.7.2\r\n");
+        assert_eq!(windows.map(|record| record.version), Some("v1.7.2".to_string()));
+        assert_eq!(parse_app_record("version=v1.7.2\n"), None);
+        assert_eq!(parse_app_record("path=\n"), None);
+    }
+
+    #[test]
+    fn the_app_is_updated_only_when_its_release_is_older() {
+        assert!(app_is_behind("v1.7.2", "1.7.3"));
+        assert!(!app_is_behind("v1.7.2", "1.7.2"));
+        assert!(!app_is_behind("v1.8.0", "1.7.2"));
+        // A record without a version is of an unknown release: updated.
+        assert!(app_is_behind("", "1.7.2"));
+    }
+
+    #[test]
+    fn the_app_asset_is_the_one_for_this_machine() {
+        let names = [
+            "ling-aarch64-apple-darwin.sha256sums",
+            "Mightling-1.7.2-arm64-preview.dmg",
+            "Mightling-1.7.2-x64-preview.dmg",
+            "Mightling-Setup-1.7.2-arm64.exe",
+            "Mightling-Setup-1.7.2-x64.exe",
+            "mightling_1.7.2_arm64.deb",
+        ];
+        let pick = |os, arch| desktop_app_asset(names, os, arch);
+        assert_eq!(pick("macos", "aarch64").as_deref(), Some("Mightling-1.7.2-arm64-preview.dmg"));
+        assert_eq!(pick("macos", "x86_64").as_deref(), Some("Mightling-1.7.2-x64-preview.dmg"));
+        assert_eq!(pick("windows", "aarch64").as_deref(), Some("Mightling-Setup-1.7.2-arm64.exe"));
+        assert_eq!(pick("windows", "x86_64").as_deref(), Some("Mightling-Setup-1.7.2-x64.exe"));
+        assert_eq!(pick("linux", "aarch64"), None);
+        // A signed dmg will drop "-preview".
+        assert_eq!(
+            desktop_app_asset(["Mightling-1.8.0-arm64.dmg"], "macos", "aarch64").as_deref(),
+            Some("Mightling-1.8.0-arm64.dmg")
+        );
+    }
+
+    /// A stand-in for hdiutil, ditto and xattr: attach "mounts" an app whose Info.plist says
+    /// `new`, ditto copies it (or fails when `ditto_fails`), and every call is recorded.
+    fn fake_tools(calls: &std::sync::Mutex<Vec<String>>, ditto_fails: bool) -> impl Fn(&str, &[&OsStr]) -> anyhow::Result<()> + '_ {
+        move |program: &str, args: &[&OsStr]| {
+            let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+            calls.lock().unwrap().push(format!("{program} {}", args.join(" ")));
+            match (program, args.first().map(String::as_str)) {
+                ("hdiutil", Some("attach")) => {
+                    let mount = Path::new(&args[args.len() - 1]);
+                    std::fs::create_dir_all(mount.join("Mightling.app/Contents"))?;
+                    std::fs::write(mount.join("Mightling.app/Contents/Info.plist"), "new")?;
+                }
+                ("hdiutil", Some("detach")) => std::fs::remove_dir_all(Path::new(&args[1]).join("Mightling.app"))?,
+                ("ditto", _) if ditto_fails => bail!("ditto: No space left on device"),
+                ("ditto", _) => {
+                    let to = Path::new(&args[1]);
+                    std::fs::create_dir_all(to.join("Contents"))?;
+                    std::fs::copy(Path::new(&args[0]).join("Contents/Info.plist"), to.join("Contents/Info.plist"))?;
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ling-update-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Applications/Mightling.app/Contents")).unwrap();
+        std::fs::write(dir.join("Applications/Mightling.app/Contents/Info.plist"), "old").unwrap();
+        std::fs::write(dir.join("Applications/Mightling.app/Contents/left-over"), "old").unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_dmg_replaces_the_app_in_place_and_is_detached() {
+        let dir = scratch("dmg");
+        let app = dir.join("Applications/Mightling.app");
+        let calls = std::sync::Mutex::new(Vec::new());
+        install_app_from_dmg(&dir.join("app.dmg"), &dir.join("work"), &app, &fake_tools(&calls, false)).unwrap();
+        assert_eq!(std::fs::read_to_string(app.join("Contents/Info.plist")).unwrap(), "new");
+        assert!(!app.join("Contents/left-over").exists());
+        let names: Vec<_> = std::fs::read_dir(dir.join("Applications")).unwrap().flatten().map(|entry| entry.file_name()).collect();
+        assert_eq!(names, vec![OsString::from("Mightling.app")]);
+        let calls = calls.into_inner().unwrap();
+        let attach = calls.iter().position(|call| call.starts_with("hdiutil attach")).unwrap();
+        for flag in ["-nobrowse", "-readonly", "-noautoopen", "-mountpoint"] {
+            assert!(calls[attach].split(' ').any(|word| word == flag), "{}", calls[attach]);
+        }
+        assert!(calls.iter().any(|call| call.starts_with("hdiutil detach")));
+        assert_eq!(calls.last().unwrap(), &format!("xattr -dr com.apple.quarantine {}", app.display()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_copy_that_fails_keeps_the_old_app_and_still_detaches() {
+        let dir = scratch("dmg-fails");
+        let app = dir.join("Applications/Mightling.app");
+        let calls = std::sync::Mutex::new(Vec::new());
+        let result = install_app_from_dmg(&dir.join("app.dmg"), &dir.join("work"), &app, &fake_tools(&calls, true));
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(app.join("Contents/Info.plist")).unwrap(), "old");
+        assert!(!dir.join("Applications/.Mightling.app.new").exists());
+        assert!(calls.into_inner().unwrap().iter().any(|call| call.starts_with("hdiutil detach")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

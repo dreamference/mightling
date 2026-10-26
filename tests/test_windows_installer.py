@@ -1,8 +1,8 @@
 """The Windows desktop app's release path (1.7.0): `windows.yml` builds an NSIS installer per
 architecture, the release workflow publishes whatever its artifacts hold and names the installers in
 its notes, and install.ps1 installs it silently beside the command-line client (the owner's
-decision of 2026-10-26: the one-line installers are the supported way to install), while `ling
-update` updates the command-line client only. No release ever carried the earlier zip.
+decision of 2026-10-26: the one-line installers are the supported way to install), recording it so
+that `ling update` updates it too. No release ever carried the earlier zip.
 
 The workflow files and the NSIS script are read as text: nothing here runs makensis unless one is
 named in `MIGHTLING_TEST_MAKENSIS` (with `NSISDIR` for a bundle such as electron-builder's).
@@ -112,10 +112,19 @@ def test_install_ps1_checks_the_installer_then_runs_it_silently_with_no_mark_of_
     assert 'Start-Process -FilePath $setup.FullName -ArgumentList "/S" -PassThru -Wait' in WINDOWS_YML.read_text()
 
 
-def test_ling_update_fetches_no_windows_desktop_asset():
-    # `ling update` knows only the per-target .gz assets; the app is updated by install.ps1 again.
-    text = UPDATE_RS.read_text()
-    assert "Mightling-Setup" not in text and "Mightling-win32" not in text
+def test_ling_update_updates_the_app_install_ps1_recorded():
+    # The record install.ps1 writes beside its bin folder is the one update.rs reads, by name and
+    # by its two keys, and update.rs looks for the installer by the names windows.yml gives it.
+    update = UPDATE_RS.read_text()
+    install = INSTALL_PS1.read_text()
+    assert 'pub const APP_RECORD: &str = "desktop-app";' in update
+    assert '$Record = Join-Path (Split-Path -Parent $InstallDir) "desktop-app"' in install
+    assert '@("path=$AppDir", "version=$Tag")' in install
+    assert 'name.starts_with("Mightling-Setup-") && name.ends_with(&format!("-{arch}.exe"))' in update
+    assert installer_name("1.7.2", "x64").startswith("Mightling-Setup-")
+    # Run the same way: silently, after the same SHA256SUMS check.
+    assert '.arg("/S")' in update
+    assert "Mightling-win32" not in update
 
 
 @pytest.mark.skipif(not os.environ.get("MIGHTLING_TEST_MAKENSIS"), reason="no makensis named in MIGHTLING_TEST_MAKENSIS")
