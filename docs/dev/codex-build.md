@@ -23,7 +23,7 @@ The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from
 
 ### The patches are one-line hooks and nothing else
 
-30 patches, ~57.3 KB in all (57,280 bytes); `test_the_patches_stay_small` caps them at 58 KB. The cap's history:
+31 patches, ~58.0 KB in all (57,969 bytes, 31 under the cap); `test_the_patches_stay_small` caps them at 58 KB. The cap's history:
 
 - raised from 20 KB on 2026-09-30 for the last on-screen Codex names;
 - to 25 KB on 2026-10-01 for `0017-cave-mode`;
@@ -48,6 +48,7 @@ The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from
 - to 58 KB on 2026-10-21 by the owner, for the vendor names (6,881 bytes; 57,523 in all): `/apps` in the slash-command popup (upstream's `CommandPopup::new` drops it whatever the connectors gate says) and the status card's account line in 0001, and `0030-neutral-vendor-names`, which rewords every user-reachable "ChatGPT"/"OpenAI" string the patches had left: the app page ("Manage in browser", "Install in browser", the sign-in and setup lines; APPS §3), the plugin install flow's app rows, the plugin catalog's "OpenAI Curated" (now "Curated"), the remote catalogs' sign-in hints, the model menu's base-URL warning and the `/hooks` screen's "Right before Codex ends its turn". Not reworded: strings on screens the patches hide (sign-in, feedback), `/usage`'s sign-in error (0011 replaced both callers) and internal errors. Tests: an overlay per changed snapshot, `codex-tests/patches/0004-tests-neutral-vendor-names.patch` for the plugin popup tests, and three inline tests in product files on the skip list with their reason. "Approve for me" (guardian approval, which reviews with the vendor's models) is not a patch: the launcher writes `features.guardian_approval = false` when absent;
 - not raised on 2026-10-22 for `0031-read-only-network` (1,004 bytes: one dependency line and one line in `SandboxManager::transform` that gives the read-only sandbox the network below `/airgapped on`; [airgapped.md](airgapped.md)). Room was made by dropping the series' 59 `index` lines (1,770 bytes), which `git apply` does not need (`0024` never had them); 56,757 in all;
 - not raised on 2026-10-26 for `0032-compat-guard-fails-closed` (467 bytes: a failed `PreToolUse` run of the compatibility mode's guard blocks the call instead of letting it through, for the one case the guard's own `||` fallback cannot answer, a guard killed at its timeout; [launcher.md](launcher.md), WINDOWS_ARM §23.4 W1); 57,280 in all;
+- not raised on 2026-10-26 for `0033-sandbox-window-station` (689 bytes: the Windows sandbox names its private desktop by the desktop alone, in the caller's window station, instead of `Winsta0\<desktop>`, which does not exist over SSH; the launcher's `src/winsta.rs` lets the sandbox into a service window station; WINDOWS_ARM §23.4 W2); 57,969 in all;
 - and to be raised again, explicitly, for each hook that needs it.
 
 Not raised on 2026-10-22, when plugins were allowed at `/airgapped off`: the launcher and the bridge policy do it (`ling-rs/src/plugins.rs`), and the only patch change is 0030's empty Curated tab, which now says the vendor's catalogue is closed in Mightling (33 bytes; overlay `0004-tests-neutral-vendor-names`).
