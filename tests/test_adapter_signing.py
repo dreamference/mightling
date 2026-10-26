@@ -347,7 +347,11 @@ def test_the_steps_run_check_sign_attest_publish_then_the_pull_request() -> None
 def test_the_workflow_uses_only_actions_release_yml_pins_and_interpolates_nothing_into_a_shell() -> (
     None
 ):
-    release_uses = set(re.findall(r"uses: (\S+@[0-9a-f]{40})", RELEASE_WORKFLOW.read_text()))
+    # release.yml's pins and those of release-build.yml, which holds the release's build jobs.
+    release_text = (
+        RELEASE_WORKFLOW.read_text() + RELEASE_WORKFLOW.with_name("release-build.yml").read_text()
+    )
+    release_uses = set(re.findall(r"uses: (\S+@[0-9a-f]{40})", release_text))
     used = [str(s["uses"]) for s in steps() if "uses" in s]
     assert used
     assert set(used) <= release_uses
