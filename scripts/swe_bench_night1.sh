@@ -120,9 +120,18 @@ log() { echo "$(date -Is) $*"; }
 pinned() { [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; }
 installed_ling() { "$PY" -c "from dreamference.runner.codex_branded_builder import CodexBrandedBuilder; print(CodexBrandedBuilder.executable_path())"; }
 
+# The unit this `start` runs in, which is not a night the build would disturb: a chain arms its night from
+# its own unit (ling-swe-chain17 on 2026-10-26 was refused by its own name). CALLER_UNIT names it; without
+# it, the unit that owns this process's cgroup (`systemd-run --user` puts a chain in `<unit>.service`).
+caller_unit() {
+    local unit=${CALLER_UNIT:-}
+    [ -n "$unit" ] || unit=$(sed -n 's|^0::.*/\([^/]*\.service\)$|\1|p' "/proc/$$/cgroup" 2>/dev/null)
+    [ -z "$unit" ] || [[ "$unit" == *.* ]] || unit="$unit.service"
+    echo "$unit"
+}
 # A pinned series' build (see REF above): the recorded build of REF, or, the first time, a build from the
 # worktree, recorded. Sets LING_PIN_SHA256. Never builds while a SWE-bench unit runs, since the build
-# replaces the `ling` a night would be running.
+# replaces the `ling` a night would be running; the unit running this `start` is not counted.
 pin_build() {
     local record="$PINS/ling-$REF.sha256" ling have want busy
     [ "$(git -C "$WT" rev-parse HEAD 2>/dev/null)" = "$REF" ] || { echo "❌ $WT is not at the pinned $REF."; return 1; }
@@ -138,7 +147,8 @@ pin_build() {
         fi
         echo "📌 Pinned to ${REF:0:12} and its recorded build of ling (${want:0:12}): no fetch past it, no rebuild."
     else
-        busy=$(systemctl --user list-units --state=active --plain --no-legend 'ling-swe-*' 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+        busy=$(systemctl --user list-units --state=active --plain --no-legend 'ling-swe-*' 2>/dev/null | awk '{print $1}' \
+            | grep -vxF -- "$(caller_unit)" | tr '\n' ' ')
         [ -z "${busy// /}" ] || { echo "❌ Not building the pinned ling while $busy runs: it would replace that night's ling."; return 1; }
         echo "📌 Pinned to ${REF:0:12} with no build recorded: building ling from $WT (codex build, with its egress audit)..."
         git -C "$WT" submodule update --init codex > /dev/null 2>&1 || { echo "❌ Could not check out the codex submodule in $WT."; return 1; }

@@ -298,7 +298,18 @@ def start(
     git_body = (
         f'echo "$*" >> "{git_log}"\ncase "$*" in *rev-parse*HEAD*) echo "$REF";; esac\nexit 0'
     )
-    tools = [("systemctl", "exit 1"), ("git", git_body), ("systemd-run", f'echo "$*" >> "{units}"')]
+    # systemctl: no unit is active, except those named in ACTIVE_UNITS, which `list-units` lists.
+    systemctl_body = (
+        'if [ "$2" = list-units ]; then\n'
+        '  for u in $ACTIVE_UNITS; do echo "$u loaded active running x"; done; exit 0\n'
+        "fi\n"
+        "exit 1"
+    )
+    tools = [
+        ("systemctl", systemctl_body),
+        ("git", git_body),
+        ("systemd-run", f'echo "$*" >> "{units}"'),
+    ]
     if free_gb is not None:
         tools.append(("df", f'echo "Avail"; echo " {free_gb}G"'))
     for name, body in tools:
@@ -1212,3 +1223,36 @@ def test_the_disk_reserve_reaches_the_unit_so_its_disk_pause_matches_the_runner(
     assert '--setenv=RESERVE_GB="$RESERVE_GB"' in body
     result, _recorded, _folder = disk_night(tmp_path, 140, RESERVE_GB="150")
     assert result.returncode == 0 and "paused: 140G free, the reserve is 150G" in result.stdout
+
+
+@pytest.mark.parametrize("caller", ["ling-swe-chain14", "ling-swe-chain14.service"])
+def test_a_pinned_series_builds_from_its_own_chains_unit(tmp_path, caller):
+    # A chain arms its night from its own ling-swe-* unit (night 17's chain was refused by its own name on
+    # 2026-10-26): the unit that called `start` does not count as a night the build would disturb.
+    result, recorded, _, units, _ = start(
+        tmp_path,
+        "default tests-v2",
+        free_gb=500,
+        REF=PINNED_REF,
+        PINS=str(tmp_path / "pins"),
+        ACTIVE_UNITS="ling-swe-chain14.service",
+        CALLER_UNIT=caller,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert recorded.count("codex build") == 1 and units
+
+
+def test_a_pinned_series_still_waits_for_another_night_that_runs(tmp_path):
+    result, recorded, _, units, folder = start(
+        tmp_path,
+        "default tests-v2",
+        free_gb=500,
+        REF=PINNED_REF,
+        PINS=str(tmp_path / "pins"),
+        ACTIVE_UNITS="ling-swe-chain14.service ling-swe-night13.service",
+        CALLER_UNIT="ling-swe-chain14",
+    )
+    assert result.returncode == 1
+    assert "Not building the pinned ling while ling-swe-night13.service" in result.stdout
+    assert "ling-swe-chain14" not in result.stdout.split("while", 1)[1].split("runs", 1)[0]
+    assert "codex build" not in recorded and units == [] and not folder.exists()
