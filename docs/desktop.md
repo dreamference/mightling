@@ -9,8 +9,24 @@ the agent, `ling`, bundled inside, so typing stays smooth whatever graphics driv
 
 ## Install and run
 
-The easiest way is the `.deb` on the release page: it installs the app, its launcher entry and the
-`ling-app` command. It needs no web server: the app runs the agent itself.
+On a Mac and on Windows, the one-line installer that installs `ling` installs the app too (from
+1.7.2):
+
+```bash
+curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash
+```
+
+```powershell
+irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex
+```
+
+The app is an unsigned preview, but a file a script downloads carries no browser quarantine mark
+or Mark of the Web, so it opens without Gatekeeper's or SmartScreen's first-launch dialog. Run the
+same command again to update it: `ling update` updates the terminal agent, not the app.
+`--no-app` (macOS) or `-NoApp` (Windows) leaves the app out.
+
+On Linux, the easiest way is the `.deb` on the release page: it installs the app, its launcher
+entry and the `ling-app` command. It needs no web server: the app runs the agent itself.
 
 From a checkout:
 
@@ -65,38 +81,18 @@ shows.
 
 ## On a Mac (preview)
 
-The release page carries the app for macOS as a preview: `Mightling-<version>-arm64-preview.dmg`
-for Apple silicon and `Mightling-<version>-x64-preview.dmg` for Intel Macs. On a Mac the app is a
-client: Ask and Work run the `ling` bundled in the app against the model of the GB10 on your
-network. It finds the GB10 the way `ling` does (the node must have run
-`ling-admin node enable`); with several on the network, choose one with `ling node use <name>`.
+The app runs on Apple silicon and Intel Macs, macOS 12 or later. On a Mac it is a client: Ask and
+Work run the `ling` bundled in the app against the model of the GB10 on your network. It finds the
+GB10 the way `ling` does (the node must have run `ling-admin node enable`); with several on the
+network, choose one with `ling node use <name>`.
 
-**It is not signed with an Apple Developer ID and not notarized.** The app carries an ad-hoc
-signature only (Apple silicon runs nothing without one), which proves nothing about who built it, so
-macOS refuses to open it the first time. Check the download first: its SHA-256 is listed in the
-release's `SHA256SUMS`, which is signed.
-
-```bash
-shasum -a 256 ~/Downloads/Mightling-*-preview.dmg    # compare with the line in SHA256SUMS
-```
-
-Then:
-
-1. Open the dmg and drag **Mightling** onto **Applications**. Run it from there, not from the dmg.
-2. Open it once (double-click). macOS says it cannot verify the app; click **Done** (or **OK**).
-3. Open **System Settings → Privacy & Security**, scroll to *Security*, and click **Open Anyway**
-   next to the line about Mightling. Confirm with your password. From then on it opens normally.
-
-On macOS 14 (Sonoma) and earlier there is a shorter way: **Control-click** (or right-click)
-Mightling in Applications, choose **Open**, then **Open** again in the dialog. macOS 15 (Sequoia)
-removed that shortcut; use step 3 there.
-
-Or, in Terminal, remove the quarantine mark the browser put on the download, which is what makes
-macOS ask:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Mightling.app
-```
+`install.sh` (above) installs it from the release's `Mightling-<version>-arm64-preview.dmg` or
+`-x64-preview.dmg`, checked against the signed `SHA256SUMS`, into `/Applications` when your account
+may write there (an administrator's may) and `~/Applications` otherwise. **It is not signed with an
+Apple Developer ID and not notarized**: it carries an ad-hoc signature only (Apple silicon runs
+nothing without one). Installed by the script, it carries no quarantine mark, so macOS opens it
+without asking; a dmg downloaded in a browser is stopped the first time ([other ways to
+install](#other-ways-to-install)).
 
 The first time the app looks for your GB10, macOS asks whether Mightling may find devices on your
 local network: allow it, or the app cannot reach the node (System Settings → Privacy & Security →
@@ -125,19 +121,49 @@ is the cookies of pages opened in the preview tab, which are stored without it. 
 once the app is signed with a Developer ID.
 
 What the preview does not do yet: `ling app` in a Mac terminal does not open it (open it from
-Applications or Spotlight), it does not update itself (download the new dmg), and closing its
-window quits it, as on Linux.
+Applications or Spotlight), it does not update itself (run the install command again), and closing
+its window quits it, as on Linux.
 
 ## On Windows (preview)
 
 From 1.7.0 a release carries `Mightling-Setup-<version>-arm64.exe` (Windows on Arm) and
 `Mightling-Setup-<version>-x64.exe` (x86-64) for Windows 11, with `ling.exe` inside, a client of a
-Mightling node on your network. Check the installer against the release's `SHA256SUMS`, then run it:
-it installs for you alone, with no administrator, under `%LOCALAPPDATA%\Programs\Mightling\App`,
-and adds a Start menu entry. The installers are not signed: SmartScreen warns the first time (More
-info, then Run anyway), and Smart App Control must be off. To update, run the next release's
-installer over it; to remove it, use Settings → Apps → Installed apps. `ling update` and
-`install.ps1` update the command-line client only, not the app.
+Mightling node on your network. From 1.7.2, `install.ps1` (above) checks the one for your PC against
+the release's signed `SHA256SUMS` and runs it silently: it installs for you alone, with no
+administrator, under `%LOCALAPPDATA%\Programs\Mightling\App`, and adds a Start menu entry. The
+installers are not signed, so Smart App Control must be off. To update, run the PowerShell line
+again (`ling update` updates the command-line client only); to remove the app, use Settings → Apps
+→ Installed apps.
+
+## Other ways to install
+
+The release page's dmg and Windows installer can also be downloaded and opened by hand. They are
+unsigned previews, and a browser marks what it downloads, so macOS and Windows stop them the first
+time. Check each download against the release's `SHA256SUMS`, which is signed, first:
+
+```bash
+shasum -a 256 ~/Downloads/Mightling-*-preview.dmg    # compare with the line in SHA256SUMS
+```
+
+On a Mac:
+
+1. Open the dmg and drag **Mightling** onto **Applications**. Run it from there, not from the dmg.
+2. Open it once (double-click). macOS says it cannot verify the app; click **Done** (or **OK**).
+3. On macOS 15 (Sequoia) and later, open **System Settings → Privacy & Security**, scroll to
+   *Security*, and click **Open Anyway** next to the line about Mightling. Confirm with your
+   password. From then on it opens normally. On macOS 14 (Sonoma) and earlier, **Control-click**
+   (or right-click) Mightling in Applications, choose **Open**, then **Open** again in the dialog.
+
+Or, in Terminal, remove the quarantine mark the browser put on the download, which is what makes
+macOS ask:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Mightling.app
+```
+
+On Windows, run the installer; SmartScreen warns the first time: **More info**, then **Run
+anyway**. Smart App Control must be off (Windows Security → App & browser control → Smart App
+Control settings).
 
 ## Ask and Work in the app window
 

@@ -132,7 +132,14 @@ curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/in
 cd ~/my-project && ling
 ```
 
-The script installs only the client: `ling`, `ling-search`, `ling-fetch` and `ling-code`.
+The script installs the client: `ling`, `ling-search`, `ling-fetch` and `ling-code`, and on a
+Mac, from 1.7.2, the [desktop app](desktop.md) as well (`--no-app` leaves it out). On Windows 11,
+the same in PowerShell (a preview; Smart App Control must be off):
+
+```powershell
+irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex
+```
+
 A Mac is never installed as a node. `ling` finds the GB10 on the network by itself and asks before
 it uses a node it has not used before; `ling node list` shows what it found. To name one yourself:
 `MIGHTLING_NODE=<host> ling`.

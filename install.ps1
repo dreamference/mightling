@@ -15,8 +15,15 @@ Private networks, and to run the egress audit; -NoSandbox skips that, and declin
 client without a sandbox. The model runs on a Mightling node on your network (a DGX Spark or another
 GB10): `ling` finds it by itself.
 
+It also installs the desktop app, from the release's Mightling-Setup-<version>-<arm64|x64>.exe
+(checked against SHA256SUMS), silently and for you alone, under
+%LOCALAPPDATA%\Programs\Mightling\App with a Start menu entry; -NoApp leaves it out. Downloaded
+by this script rather than a browser, the installer carries no Mark of the Web, so SmartScreen
+does not stop it.
+
 It downloads the same assets, by the same names and with the same checks, as `ling update`
-(ling-rs/src/update.rs), so a machine installed this way is updated by that command.
+(ling-rs/src/update.rs), so a machine installed this way is updated by that command. `ling update`
+leaves the desktop app as it is; running this script again updates it too.
 
 PREVIEW. Windows builds are not signed yet. Smart App Control, which is on in new Windows 11
 installs, blocks unsigned programs outright: it must be off to run Mightling (Windows Security,
@@ -33,7 +40,8 @@ set, raises GitHub's rate limit and reads a private fork.
 param(
     [string]$Version = "",
     [switch]$NoPath,
-    [switch]$NoSandbox
+    [switch]$NoSandbox,
+    [switch]$NoApp
 )
 
 $ErrorActionPreference = "Stop"
@@ -139,6 +147,33 @@ try {
         $Ready += $Name
     }
 
+    # The desktop app: the release's installer for this PC (windows.yml names it
+    # Mightling-Setup-<version>-<arm64|x64>.exe), checked against the release-wide SHA256SUMS
+    # before anything is installed. A release without one installs the command-line client alone.
+    $AppSetup = $null
+    if (-not $NoApp) {
+        $AppArch = if ($Arch -eq "aarch64") { "arm64" } else { "x64" }
+        $SetupName = @($Assets.Keys | Where-Object { $_ -match "^Mightling-Setup-.+-$AppArch\.exe$" }) | Select-Object -First 1
+        if (-not $SetupName) {
+            Say "  release $Tag carries no desktop app for $Target; installing the command-line client only"
+        } elseif (-not $Assets.ContainsKey("SHA256SUMS")) {
+            Say "  release $Tag has no SHA256SUMS to check $SetupName against; leaving the desktop app out"
+        } else {
+            $AllSums = @{}
+            foreach ($Line in (Get-Content -Path (Get-Asset "SHA256SUMS"))) {
+                $Parts = $Line.Trim() -split "\s+"
+                if ($Parts.Count -ge 2) { $AllSums[$Parts[1].TrimStart("*")] = $Parts[0].ToLower() }
+            }
+            if (-not $AllSums.ContainsKey($SetupName)) { Fail "SHA256SUMS has no checksum for $SetupName; nothing was installed." }
+            $AppSetup = Get-Asset $SetupName
+            $Actual = (Get-FileHash -Algorithm SHA256 -Path $AppSetup).Hash.ToLower()
+            if ($Actual -ne $AllSums[$SetupName]) { Fail "$SetupName does not match its checksum; nothing was installed." }
+            # SmartScreen's first-run check is for files marked as coming from the internet, which
+            # browsers mark; make sure this one carries no such mark.
+            Unblock-File -Path $AppSetup
+        }
+    }
+
     # -- install ---------------------------------------------------------------------------------
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -155,6 +190,19 @@ try {
             Move-Item -Force -Path $Destination -Destination $Aside
         }
         Move-Item -Force -Path (Join-Path $Work "$Name.exe") -Destination $Destination
+    }
+
+    # The NSIS installer, silent (/S): no administrator, no window, and the app is not started.
+    # It closes a running copy of the app before it replaces it.
+    $AppResult = ""
+    if ($AppSetup) {
+        Say "  installing the desktop app"
+        try {
+            $Process = Start-Process -FilePath $AppSetup -ArgumentList "/S" -PassThru -Wait
+            $AppResult = if ($Process.ExitCode -eq 0) { "ok" } else { "the installer exited with $($Process.ExitCode)" }
+        } catch {
+            $AppResult = $_.Exception.Message
+        }
     }
 } finally {
     Remove-Item -Recurse -Force -Path $Work -ErrorAction SilentlyContinue
@@ -264,6 +312,11 @@ Note "audit-exit=$LASTEXITCODE"
 
 Say ""
 Say "Done. Mightling $Tag is in $InstallDir."
+if ($AppResult -eq "ok") {
+    Say "The desktop app is installed: open Mightling from the Start menu."
+} elseif ($AppResult) {
+    Say "The desktop app was NOT installed ($AppResult). If Windows blocked it, Smart App Control is on."
+}
 Say ""
 Say "PREVIEW: these Windows builds are not signed. If Windows blocks ling.exe, Smart App Control"
 Say "is on; turn it off in Windows Security > App & browser control > Smart App Control settings."

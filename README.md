@@ -47,8 +47,16 @@ command before running it. [Read it first](install.sh) if you like.
 
 **On your laptop:** run the same one-liner on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple
 silicon or Intel). It installs the client, which uses the model on your GB10 over your network.
-On a Mac there is also the desktop app, as a preview: the `-preview.dmg` on the release page. It
-is not notarized, so macOS asks you to allow it once ([how](docs/desktop.md#on-a-mac-preview)).
+From 1.7.2 it also puts the desktop app in Applications on a Mac (`--no-app` leaves it out). On
+Windows 11, in PowerShell (a preview; from 1.7.2 it installs the desktop app too):
+
+```powershell
+irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex
+```
+
+Run the same command again to update the app; `ling update` updates the terminal agent.
+Other ways to install: the release page's dmg and Windows installer are unsigned previews that
+macOS and Windows stop the first time ([first-launch steps](docs/desktop.md#other-ways-to-install)).
 
 Already using a coding agent? Paste this into it:
 
@@ -165,7 +173,7 @@ Mightling is developed and tested daily on the ASUS Ascent GX10; the others are 
 **Do I need a GB10?** Yes, to run the model. Your other computers use it as clients: Linux
 (Intel/AMD or Arm) and macOS (Apple silicon or Intel), set up by the same install command. A
 Windows client (Windows 11 on Arm, such as the RTX Spark laptops, and x86-64) has shipped since 1.5.1
-as an unsigned preview, installed with the release's `install.ps1`, and needs Smart App Control off.
+as an unsigned preview, installed with the PowerShell line above, and needs Smart App Control off.
 
 **Does `/airgapped on` work on a Mac?** Yes, enforced by macOS's own sandbox, with one difference:
 there the level is set when `ling` starts (`ling airgapped default on`, then restart), not
