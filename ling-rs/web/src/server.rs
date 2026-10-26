@@ -84,6 +84,10 @@ pub struct Config {
     pub images_dir: PathBuf,
     /// The speech-to-text service `/api/transcribe` passes recordings to (sidecars.rs).
     pub speech_addr: String,
+    /// The user's own configuration file (`~/.config/dreamference/config.toml`), read for the
+    /// `[chat]` settings and Night Shift's phone repositories; None when there is no home. Tests
+    /// point it into their scratch folder, never at the real file.
+    pub user_config: Option<PathBuf>,
 }
 
 pub struct Server {
@@ -563,8 +567,8 @@ async fn cavemode_change(State(server): State<Arc<Server>>, body: axum::body::By
 
 /// How the phone bridges behave, from the `[chat]` table of the user's configuration
 /// (chat_settings.rs), for the Signal bridge, which cannot read the home folder.
-async fn chat_settings(State(_server): State<Arc<Server>>) -> Response {
-    json_response(StatusCode::OK, crate::chat_settings::ChatSettings::load().to_json())
+async fn chat_settings(State(server): State<Arc<Server>>) -> Response {
+    json_response(StatusCode::OK, crate::chat_settings::ChatSettings::load_from(server.config.user_config.as_deref()).to_json())
 }
 
 /// The files an Ask thread's agent changed since a time (`?thread=<id>&since=<ms>`), for a phone
@@ -610,8 +614,10 @@ fn night_dir(server: &Server) -> PathBuf {
 }
 
 fn night_candidates(server: &Server) -> Vec<PathBuf> {
-    let settings = crate::chat_settings::ChatSettings::load();
-    let home = ling_airgapped::user_config_file().and_then(|file| Some(file.parent()?.parent()?.parent()?.to_path_buf()));
+    let user_config = server.config.user_config.as_deref();
+    let settings = crate::chat_settings::ChatSettings::load_from(user_config);
+    // `~` in `night_repos` is the home the file is under (`<home>/.config/dreamference/config.toml`).
+    let home = user_config.and_then(|file| Some(file.parent()?.parent()?.parent()?.to_path_buf()));
     crate::night_phone::repos(&night_dir(server), &settings.night_repos, home.as_deref())
 }
 
