@@ -96,6 +96,12 @@ presentations, and scanned PDFs and images through offline OCR.
 **Web search** keeps answering when engines refuse this machine, with more engines by category and
 `ling-search -c/-t/-l`; `ling-fetch` resolves a Google share link from a phone.
 
+## Known issues
+
+- **On Windows, `ling-search` keeps no answer cache**, so a repeated search goes out again rather
+  than being answered from the last hour's results. The cache needs to check who owns its folder,
+  which this release does on Linux and macOS only.
+
 ---
 
 ## Upgrading from 1.7.0
