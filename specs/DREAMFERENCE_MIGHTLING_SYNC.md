@@ -1,6 +1,6 @@
 # Mightling Sync: one set of threads on every device, served by the user's own node
 
-**Status:** Phases 0 and 1 built (2026-10-22), off until `ling sync enable`, not released until the owner has tried it; Phases 2 to 4 not built. **The owner's answers to §0.1 given the same day** and folded in (scope matches Codex's, §1.1; every paired device has full control by default). The facts about Codex's storage in §2 were read from the pinned source (`rust-v0.158.0`, `codex-rs/rollout/`, `codex-rs/state/`) and from a node's `~/.mightling` on 2026-10-22; what was marked **unverified** was measured in Phase 0 (§16), and Phase 1 as built, with where it departs from the text above, is §17.
+**Status:** Phases 0 and 1 built (2026-10-22) and Phase 2 (2026-10-26, §18, for 1.8.0), all off until `ling sync enable`; Phases 3 and 4 not built. **The owner's answers to §0.1 given the same day** and folded in (scope matches Codex's, §1.1; every paired device has full control by default). The facts about Codex's storage in §2 were read from the pinned source (`rust-v0.158.0`, `codex-rs/rollout/`, `codex-rs/state/`) and from a node's `~/.mightling` on 2026-10-22; what was marked **unverified** was measured in Phase 0 (§16), and Phase 1 as built, with where it departs from the text above, is §17.
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 
@@ -416,7 +416,7 @@ Off until `ling sync enable`, per device; with it never run there is no unit, no
 
 ### 17.6 Not built (later phases)
 
-Live following, remote send, approve and stop, the offline queue and the bridges' notices (Phase 2); hand-over and its bundle (Phase 3; `ling sync handover` says so); the PWA, Web Push, pins, projects and unread marks, and `[sync] replicate` (Phase 4, and see §16.1); the hub's 20 GB cap and 180-day trimming (§10; the store holds 20 MB today). §15's changes to the other specs wait for Phase 2, when the paper's paragraph becomes true.
+Live following, remote send, approve and stop, the offline queue and the bridges' notices are Phase 2, built since (§18); hand-over and its bundle (Phase 3; `ling sync handover` says so); the PWA, Web Push, pins, projects and unread marks, and `[sync] replicate` (Phase 4, and see §16.1); the hub's 20 GB cap and 180-day trimming (§10; the store holds 20 MB today). §15's changes to the other specs wait for Phase 2, when the paper's paragraph becomes true.
 
 ---
 
@@ -457,7 +457,7 @@ A device is **online** while one of its hosts has posted in the last 40 s.
 
 - `GET /api/sync/live/<thread>?after=<seq>&wait=<s>`: the thread's events after that number (the last 2,000 are kept), whether a turn runs and its id, the approvals waiting, the messages queued for it, the owner and whether it is online (with when it was last seen), and the models it offers. `reset: true` means the follower fell behind the buffer and should read the transcript again.
 - `POST /api/sync/commands` with `{kind, thread | device, text, model, request, decision, cwd}`, from any device with `control` (403 for `watch`): 200 with the command, its state `queued` (the owner is online) or `waiting` (offline: only a message waits, at most 10 per thread for 24 hours, in `queue.json`, delivered in order); 409 for an approval, a stop or a new thread to an offline device; 429 when ten messages already wait. `GET /api/sync/commands/<id>` says how it went: `queued`, `waiting`, `delivered`, `done`, `failed` (with why) or `expired`.
-- `GET /api/sync/notices?after=<seq>`: "Turn finished: <title>" and "Approval needed: <title>", at most one per thread per 5 minutes. The phone bridges (`ling chat`'s Telegram and Matrix, and Signal) pass them into the owner's chat when `[chat] sync_notices` is on (on by default once the hub is on), never at `/airgapped on` for Telegram; the text is the thread's title, never its content.
+- `GET /api/sync/notices?after=<seq>`: "Turn finished: <title>" and "Approval needed: <title>", at most one per thread per 5 minutes. The phone bridges (`ling chat`'s Telegram and Matrix, and Signal) pass them into the owner's chat, to the messengers `[chat] sync_notices_to` names (Signal and Matrix by default, Telegram only when named, as for Night Shift's report), never to Telegram at `/airgapped on` and never from Signal at `on`; the text is the thread's title, never its content. While the hub is off the route answers 404 and the bridges pass on nothing.
 
 ### 18.4 Where it shows
 
