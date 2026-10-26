@@ -172,6 +172,14 @@ fn activity(params: &Value) -> Option<String> {
     match item.get("type").and_then(Value::as_str)? {
         "commandExecution" => {
             let command = item.get("command").and_then(Value::as_str).unwrap_or("a command");
+            // The phone prompt's two web commands say what they do; anything else is shown.
+            let words: Vec<&str> = command.split(|c: char| c.is_whitespace() || c == '\'' || c == '"').collect();
+            if words.iter().any(|word| word.ends_with("ling-search")) {
+                return Some("searching the web".to_string());
+            }
+            if words.iter().any(|word| word.ends_with("ling-fetch")) {
+                return Some("reading a page".to_string());
+            }
             let short: String = command.chars().take(80).collect();
             Some(format!("running `{short}`"))
         }
@@ -589,6 +597,15 @@ mod tests {
         );
         assert_eq!(events(&mut t, json!({"method": "item/agentMessage/delta", "params": {"threadId": "a", "delta": "Hi"}})), vec![AgentEvent::Delta { thread: "a".to_string(), text: "Hi".to_string() }]);
         assert_eq!(events(&mut t, json!({"method": "turn/completed", "params": {"threadId": "a", "turn": {"status": "completed"}}})), vec![AgentEvent::TurnCompleted { thread: "a".to_string(), error: None }]);
+    }
+
+    #[test]
+    fn the_web_commands_say_what_they_do() {
+        let started = |command: &str| json!({"threadId": "a", "item": {"type": "commandExecution", "id": "c", "command": command}});
+        assert_eq!(activity(&started("ling-search --read \"birthplace of portugal\" -n 6")).as_deref(), Some("searching the web"));
+        assert_eq!(activity(&started("timeout 30 ling-fetch 'https://example.org'")).as_deref(), Some("reading a page"));
+        assert_eq!(activity(&started("/bin/bash -lc \"ling-search x\"")).as_deref(), Some("searching the web"));
+        assert_eq!(activity(&started("python3 calc.py")).as_deref(), Some("running `python3 calc.py`"));
     }
 
     #[test]

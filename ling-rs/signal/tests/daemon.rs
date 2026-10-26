@@ -38,7 +38,13 @@ fn dedicated_messages() -> Vec<Value> {
 /// A stand-in for signal-cli: every request line goes to `log`; `listIdentities` trusts the owner;
 /// everything else answers with a timestamp. `messages` arrive after two seconds.
 fn fake_signal_cli(dir: &Path, log: &Path, messages: &[Value]) -> PathBuf {
+    fake_signal_cli_editing(dir, log, messages, true)
+}
+
+/// The same, refusing every edit when `edits` is false (as a signal-cli that cannot edit would).
+fn fake_signal_cli_editing(dir: &Path, log: &Path, messages: &[Value], edits: bool) -> PathBuf {
     let path = dir.join("signal-cli");
+    let refuse = if edits { "" } else { r#"*'"editTimestamp"'*) echo "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-1,\"message\":\"no edits\"},\"id\":$id}" ;;"# };
     let incoming = dir.join("incoming.jsonl");
     std::fs::write(&incoming, messages.iter().map(|m| m.to_string() + "\n").collect::<String>()).unwrap();
     let script = format!(
@@ -49,13 +55,15 @@ while IFS= read -r line; do
   printf '%s\n' "$line" >> "$LOG"
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
+    {refuse}
     *'"method":"listIdentities"'*) echo "{{\"jsonrpc\":\"2.0\",\"result\":[{{\"uuid\":\"owner\",\"fingerprint\":\"fp-owner\",\"trustLevel\":\"TRUSTED_VERIFIED\"}},{{\"uuid\":\"stranger\",\"fingerprint\":\"fp-s\",\"trustLevel\":\"TRUSTED_UNVERIFIED\"}}],\"id\":$id}}" ;;
     *) echo "{{\"jsonrpc\":\"2.0\",\"result\":{{\"timestamp\":$id}},\"id\":$id}}" ;;
   esac
 done
 "#,
         log = log.display(),
-        incoming = incoming.display()
+        incoming = incoming.display(),
+        refuse = refuse
     );
     std::fs::write(&path, script).unwrap();
     #[cfg(unix)]
@@ -313,11 +321,22 @@ async fn linked_to_the_owners_account_only_note_to_self_is_read_and_answered_the
     tokio::time::sleep(Duration::from_secs(5)).await;
     let sent = requests(&log);
     let sends: Vec<&Value> = sent.iter().filter(|r| r["method"] == "send").collect();
-    assert_eq!(sends.len(), 1, "one answer and nothing else: {sends:?}");
-    assert_eq!(sends[0]["params"]["noteToSelf"], true);
-    assert!(sends[0]["params"].get("recipient").is_none(), "never to anyone else");
+    // The status line at once, then the answer in its place (§19.8), and nothing else: every later
+    // send is an edit of the first (the stand-in signal-cli gives each message its request id as
+    // its timestamp).
+    assert!(sends.len() >= 2, "a status line and the answer: {sends:?}");
+    assert_eq!(sends[0]["params"]["message"], "🐦 Working on it…");
+    assert!(sends[0]["params"].get("editTimestamp").is_none());
+    for edit in &sends[1..] {
+        assert_eq!(edit["params"]["editTimestamp"], sends[0]["id"], "the answer replaces the status line: {sends:?}");
+    }
+    let sends = vec![sends[0], sends[sends.len() - 1]];
+    for send in &sends {
+        assert_eq!(send["params"]["noteToSelf"], true);
+        assert!(send["params"].get("recipient").is_none(), "never to anyone else");
+    }
     // The bold "4" moved by the marker's three UTF-16 units.
-    assert_eq!(sends[0]["params"]["textStyle"], json!(["17:1:BOLD"]));
+    assert_eq!(sends[1]["params"]["textStyle"], json!(["17:1:BOLD"]));
     for method in ["sendReceipt", "sendTyping", "listIdentities", "getAttachment"] {
         assert!(!sent.iter().any(|r| r["method"] == method), "{method} was called: {sent:?}");
     }
@@ -338,6 +357,51 @@ async fn linked_to_the_owners_account_only_note_to_self_is_read_and_answered_the
     assert!(status.contains(r#""strangersIgnored":null"#) && status.contains(r#""mode":"linked""#), "{status}");
     for private in ["dinner", "sure", "hi all", "friend"] {
         assert!(!status.contains(private) && !conversation.to_string().contains(private), "{private} leaked");
+    }
+    daemon.abort();
+}
+
+#[tokio::test]
+async fn when_signal_cli_cannot_edit_the_answer_comes_whole() {
+    let dir = Scratch(std::env::temp_dir().join(format!("ling-signal-no-edits-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    let state = dir.0.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log = dir.0.join("signal-cli.log");
+    let now = now_ms();
+    let messages = vec![json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"me","sourceDevice":1,"timestamp":now,"serverReceivedTimestamp":now + 100,"serverDeliveredTimestamp":now + 200,"syncMessage":{"sentMessage":{"destinationNumber":"+15559999","destinationUuid":"me","message":"what is 2+2?","timestamp":now}}}}})];
+    let (seen_tx, _seen) = tokio::sync::mpsc::unbounded_channel();
+    let port = fake_ling_web(seen_tx, "off").await;
+    Config {
+        mode: Mode::Linked { own_device: 4 },
+        account: "+15559999".to_string(),
+        own_uuid: Some("me".to_string()),
+        owner: Some(Owner { aci: "me".to_string(), fingerprint: String::new() }),
+        binding: None,
+        port,
+        node: "test-node".to_string(),
+        signal_cli: fake_signal_cli_editing(&dir.0, &log, &messages, false),
+        signal_cli_env: vec![],
+        signal_cli_version: "0.14.9".to_string(),
+        vision: false,
+        instance: None,
+        user: None,
+    }
+    .save(&state)
+    .unwrap();
+    ling_signal::state::save_cookie(&state, "mightling_device=test").unwrap();
+    let daemon = {
+        let state = state.clone();
+        tokio::spawn(async move { ling_signal::serve::serve(&state, None).await })
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let whole = requests(&log).iter().any(|r| r["method"] == "send" && r["params"]["message"] == "🐦 The answer is 4." && r["params"].get("editTimestamp").is_none());
+        if whole {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "the answer never came whole; signal-cli saw: {:?}", requests(&log));
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
     daemon.abort();
 }

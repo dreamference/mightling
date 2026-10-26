@@ -453,3 +453,7 @@ As SIGNAL §19.6: after a completed answer the hub lists the files the agent cha
 
 As SIGNAL §19.7, in the hub: `/night add <task>` (the last exchange read back with `thread/turns/list`) is the bridge's own approval: "Queue it" / "Cancel" for one repository, the repositories' names and "Cancel" for several (Telegram buttons, Matrix numbers or yes/no), and only the answer queues it through `ling web` (`AgentCommand::Web`). `/night status` reads the queue. Every five minutes the hub looks for new reports and sends each to every chat of the messengers `[chat] night_report_to` names (Signal and Matrix by default; Telegram only when named, because the report's repository and task names would then be on Telegram's servers), once (`~/.mightling/chat/night-report-seen`). `ling web`'s routes are `night_phone.rs`.
 
+
+### 16.9 Speed (2026-10-26)
+
+As SIGNAL §19.8, for every `chat` thread whatever the bridge: no `image_search` (`promptThreadConfig` in `ling web`'s policy, on start and resume), and the phone prompt searches only when the answer needs it and runs commands with `exec_command`, never through Code Mode's `exec`. The Telegram thread of 2026-10-25 (20.6 s) had spent three calls on a missing `ling_fetch` tool and a failed `exec` script. Telegram already streams answers in drafts; Signal now streams them by edits.

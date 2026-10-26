@@ -71,6 +71,12 @@ pub struct Policy {
     pub airgapped_refused_import_items: BTreeSet<String>,
     /// The `config` overrides a thread opener gets at `on`: no plugins.
     pub airgapped_thread_config: Map<String, Value>,
+    /// The `config` overrides a thread of a named prompt gets, started or resumed (an existing one
+    /// is known by its folder, `<prompt>-<hex>`): a phone's thread (`chat`) runs without
+    /// `image_search`, whose pictures no phone bridge shows and which took 14 s of a 40 s answer on
+    /// 2026-10-25 (Signal spec §19.8). Its `command` only keeps the entry a valid server where image search is not set
+    /// up (Codex refuses a server with neither a command nor a url); a disabled server never starts.
+    pub prompt_thread_config: BTreeMap<String, Map<String, Value>>,
     /// The field of `thread/start` in which the UI names the window's own tools it answers
     /// (`windowTools`: the terminal's output, the preview's console; DESKTOP_PARITY §4.5, the
     /// owner's decision 5). The policy, not the UI, writes their definitions as `dynamicTools`.
@@ -132,6 +138,19 @@ impl Policy {
                 .and_then(Value::as_object)
                 .cloned()
                 .ok_or_else(|| "policy.json: `airgappedThreadConfig` must be an object".to_string())?,
+            prompt_thread_config: match value.get("promptThreadConfig") {
+                None => BTreeMap::new(),
+                Some(Value::Object(prompts)) => prompts
+                    .iter()
+                    .map(|(name, config)| {
+                        config
+                            .as_object()
+                            .map(|config| (name.clone(), config.clone()))
+                            .ok_or_else(|| format!("policy.json: the config of the prompt `{name}` must be an object"))
+                    })
+                    .collect::<Result<_, _>>()?,
+                Some(_) => return Err("policy.json: `promptThreadConfig` must be an object".to_string()),
+            },
             window_tools_field: string(&value, "windowToolsField")?,
             window_tools: value
                 .get("windowTools")
@@ -243,7 +262,7 @@ impl Policy {
         }
         // A resumed or forked Ask thread stays where it was started.
         let existing = params.get("threadId").and_then(Value::as_str).and_then(|id| prompts.scratch_folder_of(id));
-        if let Some(folder) = existing {
+        if let Some(folder) = existing.clone() {
             self.confine(&mut params, folder);
         }
         if let Some(names) = params.remove(&self.window_tools_field) {
@@ -265,13 +284,26 @@ impl Policy {
             }
         }
         // At `on` the thread starts without plugins, whatever the UI asked (`config` is dropped).
-        if prompts.airgapped_on(None) && !self.airgapped_thread_config.is_empty() {
-            params.insert("config".to_string(), Value::Object(self.airgapped_thread_config.clone()));
+        let mut config = Map::new();
+        if prompts.airgapped_on(None) {
+            config.extend(self.airgapped_thread_config.clone());
         }
-        let Some(name) = params.remove(&self.prompt_field) else { return Ok(params) };
-        let Value::String(name) = name else {
-            return Err(format!("`{}` must name a prompt", self.prompt_field));
+        // A resumed thread of a prompt with a config of its own is known by its folder's name.
+        if let Some(prompt) = existing.as_deref().and_then(|folder| self.prompt_of_folder(folder)) {
+            config.extend(self.prompt_thread_config[prompt].clone());
+        }
+        let name = match params.remove(&self.prompt_field) {
+            None => None,
+            Some(Value::String(name)) => Some(name),
+            Some(_) => return Err(format!("`{}` must name a prompt", self.prompt_field)),
         };
+        if let Some(prompt_config) = name.as_ref().and_then(|name| self.prompt_thread_config.get(name)) {
+            config.extend(prompt_config.clone());
+        }
+        if !config.is_empty() {
+            params.insert("config".to_string(), Value::Object(config));
+        }
+        let Some(name) = name else { return Ok(params) };
         if !self.named_prompts.contains(&name) {
             return Err(format!(
                 "no prompt named \"{name}\" may be chosen here; named prompts: {}",
@@ -317,6 +349,12 @@ impl Policy {
         }
         params.insert("migrationItems".to_string(), Value::Array(kept));
         Ok(params)
+    }
+
+    /// The prompt with a config of its own whose threads live in `folder` (`<prompt>-<hex>`, ask.rs).
+    fn prompt_of_folder(&self, folder: &str) -> Option<&str> {
+        let base = folder.rsplit('/').next().unwrap_or(folder);
+        self.prompt_thread_config.keys().map(String::as_str).find(|prompt| base.starts_with(&format!("{prompt}-")))
     }
 
     /// Puts a thread in its scratch folder: whatever the UI said about where it works and what it
@@ -426,7 +464,7 @@ mod tests {
             Ok(format!("SCRATCH/{made}"))
         }
         fn scratch_folder_of(&self, thread_id: &str) -> Option<String> {
-            thread_id.starts_with("ask-").then(|| format!("ASK/{thread_id}"))
+            (thread_id.starts_with("ask-") || thread_id.starts_with("chat-")).then(|| format!("ASK/{thread_id}"))
         }
         fn airgapped_on(&self, _thread_id: Option<&str>) -> bool {
             self.airgapped.load(std::sync::atomic::Ordering::Relaxed)
@@ -444,6 +482,9 @@ mod tests {
             assert!(policy.allowed_requests.contains(fetches) && policy.airgapped_refused_requests.contains(fetches), "{fetches}");
         }
         assert_eq!(policy.airgapped_thread_config.get("features.plugins"), Some(&Value::Bool(false)));
+        let chat = &policy.prompt_thread_config["chat"];
+        assert_eq!(chat.get("mcp_servers.mightling_images.enabled"), Some(&Value::Bool(false)), "a phone shows no pictures");
+        assert!(policy.prompt_thread_config.keys().all(|name| policy.named_prompts.contains(name)));
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {
             assert!(!policy.allowed_requests.contains(refused), "{refused}");
         }

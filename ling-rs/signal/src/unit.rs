@@ -183,7 +183,7 @@ StateDirectoryMode=0700\n\
 RuntimeDirectory={runtime_name}\n\
 RuntimeDirectoryMode=0755\n\
 ExecStart={BRIDGE_PATH} serve --state {state_dir} --runtime {runtime_dir}\n\
-Environment=JAVA_TOOL_OPTIONS=-Xmx{heap} -XX:+UseSerialGC\n\
+Environment=\"JAVA_TOOL_OPTIONS=-Xmx{heap} -XX:+UseSerialGC\"\n\
 MemoryMax={memory_max}\n\
 NoNewPrivileges=yes\n\
 ProtectSystem=strict\n\
@@ -212,7 +212,9 @@ mod tests {
     use super::*;
 
     /// The unit a single bridge had before §18, byte for byte: `setup --refresh` rewrites the live
-    /// unit from `unit_text`, so a node set up before several accounts existed must get it unchanged.
+    /// unit from `unit_text`, so a node set up before several accounts existed must get it unchanged
+    /// (but for the quotes around `JAVA_TOOL_OPTIONS`, 2026-10-26, without which systemd dropped the
+    /// collector option).
     const UNIT_BEFORE_SEVERAL_ACCOUNTS: &str = "# Mightling over Signal (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md). Written by `ling signal setup`;
 # `ling signal remove` deletes it. The bridge runs as mightling-signal, so the agent, which runs as you,
 # cannot read the Signal keys in /var/lib/mightling-signal, and ProtectHome keeps the bridge out of your files.
@@ -229,7 +231,7 @@ StateDirectoryMode=0700
 RuntimeDirectory=mightling-signal
 RuntimeDirectoryMode=0755
 ExecStart=/usr/local/lib/mightling/ling-signal serve --state /var/lib/mightling-signal --runtime /run/mightling-signal
-Environment=JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC
+Environment=\"JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC\"
 MemoryMax=768M
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -262,7 +264,9 @@ WantedBy=multi-user.target
             "StateDirectoryMode=0700",
             "NoNewPrivileges=yes",
             "RestartPreventExitStatus=78",
-            "Environment=JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC",
+            // Quoted, or systemd splits it at the space and drops `-XX:+UseSerialGC` (the journal said
+            // so on every start until 2026-10-26).
+            "Environment=\"JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC\"",
             "ExecStart=/usr/local/lib/mightling/ling-signal serve --state /var/lib/mightling-signal --runtime /run/mightling-signal",
         ] {
             assert!(text.lines().any(|l| l == line), "missing {line}");

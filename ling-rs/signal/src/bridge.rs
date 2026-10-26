@@ -93,6 +93,43 @@ pub const DOWN_NOTICE_MS: u64 = 10_000;
 /// A question after this long a silence starts a new thread, unless `[chat]
 /// new_thread_after_hours` says otherwise (§19.2).
 pub const NEW_THREAD_AFTER_MS: u64 = 4 * 3600 * 1000;
+/// The answer's message (§19.8): what the status line says at once (linked mode), how often the
+/// message may change, and how many times. Signal lets a message be edited ten times, and the
+/// answer that replaces it is one more: at most three of the changes say what the agent is doing,
+/// and the rest stream the answer in as it is written.
+pub const WORKING: &str = "Working on it…";
+pub const STATUS_EVERY_MS: u64 = 4_000;
+pub const STREAM_EVERY_MS: u64 = 3_000;
+pub const ACTIVITY_UPDATES: u32 = 3;
+pub const STATUS_UPDATES: u32 = 8;
+
+/// The one message an answer grows in (§19.8, the owner's decision of 2026-10-26: answers stream
+/// in by edits, as Telegram's do). In linked mode it opens at once as a status line, since Note to
+/// Self shows no typing; in dedicated mode typing shows the work and the message opens with the
+/// answer's first words. The driver sends `Open` and the first `Stream` (with nothing open) as a
+/// message and every later change as an edit of it; after `Close` it sends the next message (the
+/// whole answer, or why there is none) as an edit of it too. An edit that fails ends the edits, and
+/// the answer then comes whole, as a message of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StatusLine {
+    /// The status line, plain text.
+    Open(String),
+    /// What the agent is doing now, plain text.
+    Update(String),
+    /// The answer so far, Markdown.
+    Stream(String),
+    Close,
+}
+
+/// The open answer message, as the conversation knows it.
+#[derive(Clone, Debug)]
+struct Status {
+    last_ms: u64,
+    shown: String,
+    updates: u32,
+    /// How much of the answer the message shows.
+    streamed: usize,
+}
 
 /// What the agent side reports, read from `ling web`'s relay.
 #[derive(Clone, Debug, PartialEq)]
@@ -251,6 +288,8 @@ pub enum Action {
     /// `/cavemode <text>` for the current thread (None before the first question), through `ling
     /// web`; what it answers goes back as a notice.
     Cavemode { thread: Option<String>, text: String },
+    /// The status line (linked mode only, §19.8).
+    Status(StatusLine),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -326,6 +365,12 @@ pub struct Bridge {
     pub new_thread_after_ms: Option<u64>,
     /// An answer's bounds, from the user's `[chat]` settings (§19.3).
     pub limits: Limits,
+    /// Whether work is shown by a status line (linked mode: Note to Self has no typing indicator);
+    /// otherwise by typing (§19.8).
+    pub status_line: bool,
+    /// Whether the answer streams into its message by edits (§19.8).
+    pub stream: bool,
+    status: Option<Status>,
     loaded: HashSet<String>,
     connected: bool,
     phase: Phase,
@@ -402,6 +447,9 @@ impl Bridge {
             last_activity_ms: None,
             new_thread_after_ms: Some(NEW_THREAD_AFTER_MS),
             limits: Limits::default(),
+            status_line: false,
+            stream: true,
+            status: None,
             loaded: HashSet::new(),
             connected: false,
             phase: Phase::Idle,
@@ -528,17 +576,35 @@ impl Bridge {
     }
 
     /// Starts work on one question: opens its thread if needed, else starts the turn.
+    /// The owner sees at once that it is taken: the status line opens, or typing starts while the
+    /// thread opens (§19.8); before 2026-10-26 nothing showed until the thread was open.
     fn begin(&mut self, message: OwnerMessage, now: u64) -> Vec<Action> {
+        let mut actions = Vec::new();
+        if self.status_line && self.status.is_none() {
+            self.status = Some(Status { last_ms: now, shown: String::new(), updates: 0, streamed: 0 });
+            actions.push(Action::Status(StatusLine::Open(WORKING.to_string())));
+        }
+        let typing = if self.status_line { None } else { Some(Action::Typing(true)) };
         match self.current.clone() {
             None => {
                 self.phase = Phase::Opening { message, fresh: true };
-                vec![Action::StartThread]
+                actions.extend(typing);
+                actions.push(Action::StartThread);
             }
             Some(thread) if !self.loaded.contains(&thread) => {
                 self.phase = Phase::Opening { message, fresh: false };
-                vec![Action::ResumeThread(thread)]
+                actions.extend(typing);
+                actions.push(Action::ResumeThread(thread));
             }
-            Some(thread) => self.run(thread, message, now),
+            Some(thread) => actions.extend(self.run(thread, message, now)),
+        }
+        actions
+    }
+
+    /// The question in hand is done: its status line gives way to the next message.
+    fn close_status(&mut self, actions: &mut Vec<Action>) {
+        if self.status.take().is_some() {
+            actions.push(Action::Status(StatusLine::Close));
         }
     }
 
@@ -655,10 +721,12 @@ impl Bridge {
                     actions.push(Action::Interrupt { thread: thread.clone(), turn: turn.clone() });
                 }
                 actions.push(Action::Typing(false));
+                self.close_status(&mut actions);
                 actions.push(Action::Notice("Stopped.".to_string()));
             }
             Phase::Opening { .. } => {
                 self.phase = Phase::Idle;
+                self.close_status(&mut actions);
                 actions.push(Action::Notice("Stopped.".to_string()));
             }
             Phase::Idle if dropped > 0 => actions.push(Action::Notice("Stopped; the queue is empty.".to_string())),
@@ -698,7 +766,11 @@ impl Bridge {
                 match std::mem::replace(&mut self.phase, Phase::Idle) {
                     // Not started yet: ask again once the server is back.
                     Phase::Opening { message, .. } => self.queue.push_front(message),
-                    Phase::Running { stopping: false, .. } => self.lost_answer = true,
+                    Phase::Running { stopping: false, .. } => {
+                        self.lost_answer = true;
+                        // The notice that the server is down says so in the status line's place.
+                        self.close_status(&mut actions);
+                    }
                     _ => {}
                 }
             }
@@ -726,6 +798,7 @@ impl Bridge {
                         self.current = None;
                         actions.push(Action::Save);
                     }
+                    self.close_status(&mut actions);
                     actions.push(Action::Notice(format!("Couldn't open the thread: {error}")));
                     actions.extend(self.next(now));
                 }
@@ -790,6 +863,7 @@ impl Bridge {
                             return actions;
                         }
                         actions.push(Action::Typing(false));
+                        self.close_status(&mut actions);
                         if !answer.trim().is_empty() {
                             actions.push(Action::Reply(format::reply(answer.trim())));
                         }
@@ -803,6 +877,7 @@ impl Bridge {
                     }
                     if !self.airgapped() && !stopping {
                         actions.push(Action::Typing(false));
+                        self.close_status(&mut actions);
                         match error {
                             // A benchmark run holds the model: the question is refused, not let through
                             // the gate (the owner's decision, 2026-10-12), and the owner is told when to
@@ -913,6 +988,7 @@ impl Bridge {
                     if !recordings.is_empty() && uploads.is_empty() && text.trim().is_empty() {
                         self.phase = Phase::Idle;
                         actions.push(Action::Typing(false));
+                        self.close_status(&mut actions);
                         actions.extend(self.next(now));
                         return actions;
                     }
@@ -925,6 +1001,7 @@ impl Bridge {
                         Composed::Refused(reply) => {
                             self.phase = Phase::Idle;
                             actions.push(Action::Typing(false));
+                            self.close_status(&mut actions);
                             actions.push(Action::Notice(reply));
                             actions.extend(self.next(now));
                         }
@@ -966,6 +1043,8 @@ impl Bridge {
             (true, None) => {
                 self.airgapped_since = Some(now);
                 self.queue.clear();
+                // Nothing is sent at `on`, not even the line's last edit; the next question opens a new one.
+                self.status = None;
                 while let Some(approval) = self.approvals.pop_front() {
                     if approval.local.is_none() {
                         actions.push(Action::AnswerApproval { id: approval.id, result: json!({ "decision": "cancel" }) });
@@ -1015,18 +1094,56 @@ impl Bridge {
                 None => {}
             }
         }
-        if let Phase::Running { started_ms, last_typing_ms, next_progress_ms, activity, stopping: false, .. } = &mut self.phase {
-            if now >= *last_typing_ms + TYPING_EVERY_MS {
+        if let Phase::Running { started_ms, last_typing_ms, next_progress_ms, activity, answer, stopping: false, .. } = &mut self.phase {
+            // Typing until the answer's message is open (dedicated mode; Note to Self shows none).
+            if self.status.is_none() && now >= *last_typing_ms + TYPING_EVERY_MS {
                 *last_typing_ms = now;
                 actions.push(Action::Typing(true));
             }
-            if now >= *next_progress_ms {
+            let elapsed = duration(now - *started_ms);
+            let progress = now >= *next_progress_ms;
+            if progress {
                 *next_progress_ms = now + PROGRESS_EVERY_MS;
-                let mut text = format!("Still working ({})", duration(now - *started_ms));
-                if let Some(activity) = activity {
-                    text.push_str(&format!(": {activity}"));
+            }
+            let written = answer.trim();
+            match &mut self.status {
+                // The answer streams in: its first words open the message (dedicated mode), and it
+                // changes every few seconds while edits are left (§19.8).
+                None if self.stream && !written.is_empty() => {
+                    self.status = Some(Status { last_ms: now, shown: String::new(), updates: 0, streamed: written.len() });
+                    actions.push(Action::Typing(false));
+                    actions.push(Action::Status(StatusLine::Stream(written.to_string())));
                 }
-                actions.push(Action::Notice(text));
+                Some(status) if self.stream && !written.is_empty() => {
+                    if status.updates < STATUS_UPDATES && status.streamed != written.len() && now >= status.last_ms + STREAM_EVERY_MS {
+                        status.streamed = written.len();
+                        status.updates += 1;
+                        status.last_ms = now;
+                        actions.push(Action::Status(StatusLine::Stream(written.to_string())));
+                    }
+                }
+                // Before the answer, the status line says what the agent is doing, as it changes,
+                // and stands for the progress notes while it may (§19.8).
+                Some(status) if status.updates < ACTIVITY_UPDATES => {
+                    let doing = activity.clone();
+                    let changed = doing.as_ref().is_some_and(|doing| *doing != status.shown) && now >= status.last_ms + STATUS_EVERY_MS;
+                    if changed || progress {
+                        let doing = doing.unwrap_or_default();
+                        status.shown = doing.clone();
+                        status.updates += 1;
+                        status.last_ms = now;
+                        let text = if doing.is_empty() { format!("Working ({elapsed})") } else { format!("Working ({elapsed}): {doing}") };
+                        actions.push(Action::Status(StatusLine::Update(text)));
+                    }
+                }
+                _ if progress => {
+                    let mut text = format!("Still working ({elapsed})");
+                    if let Some(activity) = activity {
+                        text.push_str(&format!(": {activity}"));
+                    }
+                    actions.push(Action::Notice(text));
+                }
+                _ => {}
             }
         }
         while self.approvals.front().is_some_and(|a| now >= a.deadline_ms) {
@@ -1139,7 +1256,8 @@ mod tests {
     fn a_question_opens_a_thread_runs_a_turn_and_is_answered() {
         let mut b = connected();
         let first = b.on_message(msg("What is **2+2**?", 7), 0);
-        assert_eq!(first, vec![Action::Receipt(7), Action::StartThread]);
+        // Typing starts at once, before the thread is open (§19.8).
+        assert_eq!(first, vec![Action::Receipt(7), Action::Typing(true), Action::StartThread]);
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
         assert!(ready.contains(&Action::Save));
         assert!(ready.contains(&Action::StartTurn { thread: "t1".to_string(), text: "What is **2+2**?".to_string(), images: vec![] }));
@@ -1252,7 +1370,7 @@ mod tests {
         let new = b.on_message(msg("/new", 2), 0);
         assert!(new.contains(&Action::Save));
         assert!(b.current.is_none());
-        assert_eq!(b.on_message(msg("second", 3), 0)[1], Action::StartThread);
+        assert_eq!(b.on_message(msg("second", 3), 0)[2], Action::StartThread);
         b.on_agent(AgentEvent::ThreadReady { thread: "t2".to_string() }, 0);
         b.on_agent(AgentEvent::TurnCompleted { thread: "t2".to_string(), error: None }, 0);
         let list = notices(&b.on_message(msg("/threads", 4), 0)).remove(0);
@@ -1304,7 +1422,7 @@ mod tests {
         let mut b = Bridge::new(Some("t9".to_string()), vec![ThreadRef { id: "t9".to_string(), title: "old".to_string() }], Info::default());
         b.last_activity_ms = Some(0);
         b.on_agent(AgentEvent::Connected, 0);
-        assert_eq!(b.on_message(msg("continue", 1), 0)[1], Action::ResumeThread("t9".to_string()));
+        assert_eq!(b.on_message(msg("continue", 1), 0)[2], Action::ResumeThread("t9".to_string()));
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t9".to_string() }, 0);
         assert!(!ready.contains(&Action::Save), "a resumed thread is already recorded");
         assert!(ready.iter().any(|a| matches!(a, Action::StartTurn { thread, .. } if thread == "t9")));
@@ -1319,7 +1437,7 @@ mod tests {
         let failed = b.on_agent(AgentEvent::ThreadFailed { error: "no such thread".to_string() }, 0);
         assert!(notices(&failed)[0].contains("no such thread"));
         assert!(b.current.is_none());
-        assert_eq!(b.on_message(msg("again", 2), 0)[1], Action::StartThread);
+        assert_eq!(b.on_message(msg("again", 2), 0)[2], Action::StartThread);
     }
 
     #[test]
@@ -1356,6 +1474,124 @@ mod tests {
         let event = AgentEvent::Approval { id: json!("p1"), thread: "t1".to_string(), kind: ApprovalKind::Permissions, command: None, cwd: None, reason: None };
         let actions = b.on_agent(event, 0);
         assert!(actions.contains(&Action::AnswerApproval { id: json!("p1"), result: json!({"decision": "decline"}) }));
+    }
+
+    fn statuses(actions: &[Action]) -> Vec<StatusLine> {
+        actions.iter().filter_map(|a| if let Action::Status(line) = a { Some(line.clone()) } else { None }).collect()
+    }
+
+    fn update(text: &str) -> Vec<StatusLine> {
+        vec![StatusLine::Update(text.to_string())]
+    }
+
+    #[test]
+    fn in_note_to_self_a_status_line_shows_the_work_and_becomes_the_answer() {
+        let mut b = connected();
+        b.status_line = true;
+        // On 2026-10-25 the owner saw nothing for the 40 s of an answer, and asked again elsewhere.
+        let first = b.on_message(msg("birthplace of portugal?", 7), 0);
+        assert_eq!(first, vec![Action::Receipt(7), Action::Status(StatusLine::Open(WORKING.to_string())), Action::StartThread]);
+        let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        assert!(statuses(&ready).is_empty(), "one line per question");
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 200);
+        b.on_agent(AgentEvent::Activity { thread: "t1".to_string(), text: "searching the web".to_string() }, 300);
+        assert!(statuses(&b.on_tick(1_000)).is_empty(), "no faster than one change in {STATUS_EVERY_MS} ms");
+        assert_eq!(statuses(&b.on_tick(4_000)), update("Working (4s): searching the web"));
+        assert!(statuses(&b.on_tick(9_000)).is_empty(), "nothing new, no edit");
+        b.on_agent(AgentEvent::Activity { thread: "t1".to_string(), text: "reading a page".to_string() }, 9_500);
+        assert_eq!(statuses(&b.on_tick(10_000)), update("Working (10s): reading a page"));
+        // The answer streams into the same message as it is written.
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "Guimarães.".to_string() }, 12_000);
+        assert_eq!(statuses(&b.on_tick(14_000)), vec![StatusLine::Stream("Guimarães.".to_string())]);
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 15_000);
+        let close = done.iter().position(|a| *a == Action::Status(StatusLine::Close)).expect("the line closes");
+        let reply = done.iter().position(|a| matches!(a, Action::Reply(_))).expect("an answer");
+        assert!(close < reply, "the answer takes the line's place: {done:?}");
+        assert!(statuses(&b.on_tick(20_000)).is_empty());
+        // The next question gets a line of its own.
+        let again = b.on_message(msg("and its castle?", 8), 30_000);
+        assert_eq!(again[..2], [Action::Receipt(8), Action::Status(StatusLine::Open(WORKING.to_string()))]);
+    }
+
+    #[test]
+    fn the_status_line_stands_for_progress_notes_until_it_may_change_no_more() {
+        let mut b = connected();
+        b.status_line = true;
+        b.on_message(msg("a long one", 1), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 0);
+        // A minute of one command: the line says so instead of a note.
+        b.on_agent(AgentEvent::Activity { thread: "t1".to_string(), text: "running `make`".to_string() }, 0);
+        assert_eq!(statuses(&b.on_tick(4_000)), update("Working (4s): running `make`"));
+        let minute = b.on_tick(FIRST_PROGRESS_MS);
+        assert!(notices(&minute).is_empty(), "{minute:?}");
+        assert_eq!(statuses(&minute), update("Working (1m00s): running `make`"));
+        let mut now = FIRST_PROGRESS_MS;
+        for n in 0..10 {
+            now += STATUS_EVERY_MS;
+            b.on_agent(AgentEvent::Activity { thread: "t1".to_string(), text: format!("step {n}") }, now);
+            b.on_tick(now);
+        }
+        let later = b.on_tick(FIRST_PROGRESS_MS + PROGRESS_EVERY_MS);
+        assert!(statuses(&later).is_empty(), "{ACTIVITY_UPDATES} changes at most before the answer");
+        assert_eq!(notices(&later).len(), 1, "then the notes come back");
+    }
+
+    #[test]
+    fn an_answer_streams_into_one_message_after_typing() {
+        let mut b = connected();
+        b.on_message(msg("birthplace of portugal?", 1), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u1".to_string() }, 0);
+        assert_eq!(b.on_tick(10_000), vec![Action::Typing(true)], "typing until the first words");
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "The birthplace".to_string() }, 11_000);
+        assert_eq!(b.on_tick(11_000), vec![Action::Typing(false), Action::Status(StatusLine::Stream("The birthplace".to_string()))]);
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: " is **Guimarães**".to_string() }, 12_000);
+        assert!(statuses(&b.on_tick(12_000)).is_empty(), "one edit in {STREAM_EVERY_MS} ms at most");
+        assert_eq!(statuses(&b.on_tick(14_000)), vec![StatusLine::Stream("The birthplace is **Guimarães**".to_string())]);
+        assert!(b.on_tick(20_000).is_empty(), "nothing new: no edit, and no typing over the words");
+        // Signal allows ten edits: the stream stops short of them, and the whole answer is the last.
+        let mut now = 20_000;
+        let mut edits = 0;
+        for n in 0..20 {
+            now += STREAM_EVERY_MS;
+            b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: format!(" {n}") }, now);
+            edits += statuses(&b.on_tick(now)).len();
+        }
+        assert_eq!(edits as u32, STATUS_UPDATES - 1, "{STATUS_UPDATES} edits in all");
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, now + 1);
+        let close = done.iter().position(|a| *a == Action::Status(StatusLine::Close)).expect("the message closes");
+        let reply = done.iter().position(|a| matches!(a, Action::Reply(_))).expect("the whole answer");
+        assert!(close < reply, "{done:?}");
+        // The next answer gets a message of its own.
+        b.on_message(msg("and its castle?", 2), now + 10);
+        b.on_agent(AgentEvent::TurnStarted { thread: "t1".to_string(), turn: "u2".to_string() }, now + 10);
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "Yes".to_string() }, now + 11);
+        assert_eq!(statuses(&b.on_tick(now + 12)), vec![StatusLine::Stream("Yes".to_string())]);
+    }
+
+    #[test]
+    fn without_streaming_the_answer_comes_whole() {
+        let mut b = connected();
+        b.stream = false;
+        b.on_message(msg("q", 1), 0);
+        b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
+        b.on_agent(AgentEvent::Delta { thread: "t1".to_string(), text: "partial".to_string() }, 1_000);
+        assert!(statuses(&b.on_tick(5_000)).is_empty());
+        let done = b.on_agent(AgentEvent::TurnCompleted { thread: "t1".to_string(), error: None }, 6_000);
+        assert!(statuses(&done).is_empty() && replies(&done) == vec!["partial"], "{done:?}");
+    }
+
+    #[test]
+    fn stop_closes_the_status_line_with_its_answer() {
+        let mut b = connected();
+        b.status_line = true;
+        b.on_message(msg("long", 1), 0);
+        let stopped = b.on_message(msg("/stop", 2), 10);
+        assert_eq!(stopped, vec![Action::Receipt(2), Action::Status(StatusLine::Close), Action::Notice("Stopped.".to_string())]);
+        // Linked mode never asks for typing it cannot show while a thread opens.
+        let next = b.on_message(msg("again", 3), 20);
+        assert!(!next.contains(&Action::Typing(true)), "{next:?}");
     }
 
     #[test]
@@ -1454,7 +1690,7 @@ mod tests {
         let mut b = connected();
         let image = Attachment { id: "a.jpg".to_string(), content_type: "image/jpeg".to_string(), filename: None, size: None };
         let actions = b.on_message(OwnerMessage { text: "/new".to_string(), attachments: vec![image.clone()], timestamp: 1 }, 0);
-        assert_eq!(actions[1], Action::StartThread);
+        assert_eq!(actions[2], Action::StartThread);
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);
         assert!(ready.iter().any(|a| matches!(a, Action::Upload { attachments, .. } if attachments == &vec![image.clone()])), "{ready:?}");
         assert!(!ready.iter().any(|a| matches!(a, Action::StartTurn { .. })), "the turn waits for the upload");
@@ -1600,7 +1836,7 @@ mod tests {
     #[test]
     fn a_ling_web_without_the_chat_prompt_gets_an_ask_thread() {
         let mut b = connected();
-        assert_eq!(b.on_message(msg("hi", 1), 0)[1], Action::StartThread);
+        assert_eq!(b.on_message(msg("hi", 1), 0)[2], Action::StartThread);
         let fallback = b.on_agent(AgentEvent::ThreadFailed { error: "no prompt named \"chat\" may be chosen here; named prompts: ask, default".to_string() }, 0);
         assert_eq!(fallback, vec![Action::StartAskThread]);
         let ready = b.on_agent(AgentEvent::ThreadReady { thread: "t1".to_string() }, 0);

@@ -66,8 +66,8 @@ YES
 
 With a dedicated number, the same exchange happens in a conversation with that contact, without the 🐦, and the owner also sees read receipts and the typing indicator.
 
-- **Each message from the owner is one turn.** While a turn runs, a dedicated-number bridge keeps the typing indicator alive; Note to Self has none.
-- **A long turn gets one progress note** after a minute, then at most one every five minutes. The note says what it is doing, e.g. "running `pytest -q`, 2m10s". The final answer arrives as one or more messages.
+- **Each message from the owner is one turn.** While a turn runs, a dedicated-number bridge keeps the typing indicator alive until the answer's first words show; Note to Self has none, so a linked bridge answers at once with a status line, "Working on it…", which says what the agent is doing as it changes (§19.8).
+- **The answer streams in** (§19.8): one message, edited as the answer grows, then replaced by the whole answer; parts past the first arrive as messages of their own. A long turn gets a progress note after a minute, then at most one every five minutes, unless the status line or the streaming answer already shows it.
 - **A message sent while a turn runs is queued.** The bridge says so ("Queued; I'll take it next. /stop to interrupt.") and starts it when the turn ends. At most five are queued.
 - **The thread is the conversation.** Everything since the last `/new` is one Ask thread with its own scratch folder, so "and what about the second one?" works.
 
@@ -135,7 +135,7 @@ User=mightling-signal
 StateDirectory=mightling-signal
 StateDirectoryMode=0700
 ExecStart=/usr/local/lib/mightling/ling-signal serve --state /var/lib/mightling-signal
-Environment=JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC
+Environment="JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC"
 MemoryMax=768M
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -899,3 +899,22 @@ After an answer, the bridge asks `ling web` for the files the agent changed in t
 - **`/night status`:** the queue (`/api/night/status`: tasks not finished, and those finished in the last 36 hours).
 - **The morning report:** every five minutes the bridge asks `/api/night/reports?after=<the last sent>` and sends each new report (cut at 3,500 characters) into the conversation; the last one sent is kept in `conversation.json` (`nightSeen`), and the first look after a fresh start only notes the newest, so nothing old is repeated. Signal gets reports unless `[chat] night_report_to` leaves it out (the default is `["signal", "matrix"]`); none at `/airgapped on`.
 
+
+### 19.8 Speed and feedback (branch `signal/latency`, 2026-10-26; streaming is the owner's decision of the same day)
+
+The owner found answers over Signal slow. What the rollouts, the journal and `ling signal status` on gx10-9428 showed:
+
+- **The model server was fast and idle** (a short completion through the gate: 0.35 s).
+- **The 2026-10-25 question took 40.1 s of agent time**, measured from the turn's user item to its answer: the first model call 3.2 s, `ling-search --read` 3.1 s, the second call 6.6 s (an 8,000-token prefill of what the search returned), **`image_search` 14.1 s**, and 12.8 s writing a 494-token answer that embedded `/images/…` links no phone bridge can show. In Note to Self nothing showed for all of it: no typing (Note to Self has none), no receipt, and the first progress note only after a minute. The owner asked the same question again on Telegram 57 s after the Signal answer had been written.
+- **The second thread (the Telegram one) showed the tool confusion**: a call to a `ling_fetch` tool that does not exist, then Code Mode's `exec` with a script calling an undefined `exec()`, then `exec_command`, which worked.
+- **The receive path is not the cause**: signal-cli runs `jsonRpc --receive-mode on-start`, one persistent connection, not polling, and the bridge has no wait before acting: a message opens its thread or starts its turn at once (§19.4's merging applies only while an answer is in hand). The journal's "Connection closed unexpectedly, reconnecting in 100 ms" lines cost 100 ms each.
+- **The unit lost an option**: `Environment=JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC` unquoted made systemd drop `-XX:+UseSerialGC` ("Invalid environment assignment") on every start. The unit now quotes it; `ling signal setup --refresh` rewrites it.
+
+What changed:
+
+- **The answer streams in, in one message** (`bridge::StatusLine`, carried out in `serve.rs`). Dedicated mode: typing from the moment a question is taken (before, only once its thread was open) until the answer's first words, which open a message; linked mode: a status line, "🐦 Working on it…", sent at once, saying what the agent does as it changes ("searching the web", "reading a page", or the command; at most three such changes, each at least 4 s apart), then the answer as it is written. The message is edited at most every 3 s and at most eight times, and the whole answer is the last edit, so a message has at most ten versions, as Signal allows; parts past the first, and `answer.md`, come as messages of their own. While the answer streams, no progress note is sent. An edit signal-cli refuses ends the edits for that answer, and the whole answer then comes as a message of its own (`send` with `editTimestamp`; signal-cli 0.14.9 edits Note to Self). Privacy is unchanged: edits are end-to-end encrypted messages like any other, and only the final version shows.
+- **Two timing lines per question in the journal** (`timing.rs`), ids and durations only, never text: at receipt, from Signal's own timestamps (the phone's, `serverReceivedTimestamp`, `serverDeliveredTimestamp`), phone to server, held at the server, server to the bridge; after the answer is acknowledged by signal-cli, from the bridge's receipt: first shown, turn started, first output, turn ended, answer acked, the time the send took, and end to end from the phone's timestamp (two clocks, so off by their difference).
+- **A phone's thread runs without `image_search`**: `promptThreadConfig` in `ling-rs/web/policy.json` gives a `chat` thread `mcp_servers.mightling_images.enabled = false` when it is started and when it is resumed (an existing thread is known by its folder, `chat-<hex>`); both `ling web` and the desktop app apply it, and the conformance cases hold it. The `command = "true"` beside it only keeps the entry a valid server on a node without image search. Switching Code Mode off per thread does not work (the catalog's `tool_mode`, not `features.code_mode`, gives `exec`), so the phone prompt says instead to run commands, `ling-search` and `ling-fetch` included, with `exec_command`, never through `exec`.
+- **The phone prompt searches only when the answer needs it**: "always first" became current facts, what should be checked and what the user asks to look up; a greeting, a question about the conversation, arithmetic, rewording and what the model knows well are answered at once, and one `ling-search --read` is usually enough. "The phone shows text, not pictures: never search for images."
+
+Measured with the same question through `ling exec` and the `chat` prompt in a scratch Ask folder against the node's model server (agent time, user item to answer): before, 19.4–36.8 s (mean 28.8 s over 4), every run through Code Mode's `exec`, two of them with 3–5 tool calls; after, 18.3–33.1 s (mean 23.6 s over 5), every run one `exec_command` (`ling-search`). "What are you doing?" takes about 2 s either way with a warm cache (the 8.2 s of 2026-10-23 was a cold prefix). What remains is the model writing: 300–600 output tokens at about 40 tokens/s. With streaming, the first words show seconds after the search returns instead of at the end.
