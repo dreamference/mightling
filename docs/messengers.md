@@ -81,6 +81,10 @@ is not a preview.
 
 The bridge is linked to **your own Signal account** as one more device, the way Signal Desktop is.
 You write to Mightling in **Note to Self**, and its replies appear there too, each starting with 🐦.
+Note to Self shows no typing indicator, so the bridge answers at once with "🐦 Working on it…",
+which says what Mightling is doing and then becomes the answer as it is written (one message,
+edited; the finished answer is its last version). Signal raises no notification for messages from
+your own linked devices, so keep the chat open while you wait.
 The bridge reads Note to Self only. It drops every other message it receives without storing or
 answering it.
 
