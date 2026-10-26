@@ -327,9 +327,14 @@ jobs:
     uses: ./.github/workflows/build-clients.yml
     with:
       version: ${{ inputs.version }}
+      # The macOS binaries signed and notarised with the Developer ID once the Apple secrets are in
+      # the release environment; unsigned as before while they are not (docs/dev/macos-signing.md).
+      sign: true
 
-  # The Mac desktop app, an unsigned preview (signed ad hoc only): the Electron app with the macOS
-  # ling of `ling-clients` inside, one dmg per architecture, named Mightling-<version>-<arch>-preview.dmg.
+  # The Mac desktop app: the Electron app with the macOS ling of `ling-clients` inside, one dmg per
+  # architecture, named Mightling-<version>-<arch>-preview.dmg. Signed with the Developer ID,
+  # notarised and stapled once the Apple secrets are in the release environment; until then an
+  # unsigned preview, signed ad hoc only (docs/dev/macos-signing.md).
   desktop-mac:
     needs: [validate, test, ling-clients]
     if: ${{ inputs.build_mac_preview && inputs.build_clients && !failure() && !cancelled() }}
@@ -342,6 +347,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       client_run_id: this
+      sign: true
 
   release:
     needs: [python-dist, desktop, ling, windows, ling-clients, desktop-mac]
@@ -426,6 +432,8 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          # true when mac-preview signed, notarised and stapled the dmgs (the Apple secrets were set).
+          MAC_SIGNED: ${{ needs.desktop-mac.outputs.signed }}
         run: |
           # GitHub's generated notes come last (the "Full Changelog" line); --notes-file is prepended.
           flags=(--generate-notes --target "$GITHUB_SHA" --title "Mightling $TAG")
@@ -436,9 +444,17 @@ jobs:
           mapfile -t files < <(find artifacts -type f | sort)
           files+=(SHA256SUMS SHA256SUMS.sig)
           : > notes.md
-          # The Mac app is a preview and is not notarized: say so first. One line, because GitHub
-          # renders every newline in a release body as a line break.
-          if printf '%s\n' "${files[@]}" | grep -q -- '-preview\.dmg$'; then
+          # The Mac app: signed and notarised once the Developer ID is set up, else a preview that is
+          # not; say which first. One line each, because GitHub renders every newline in a release
+          # body as a line break.
+          if [[ "$MAC_SIGNED" == "true" ]] && printf '%s\n' "${files[@]}" | grep -q -- '-preview\.dmg$'; then
+            {
+              echo "### Mac desktop app (preview)"
+              echo
+              echo "\`Mightling-${VERSION}-arm64-preview.dmg\` (Apple silicon) and \`Mightling-${VERSION}-x64-preview.dmg\` (Intel) are a preview of the desktop app for macOS 12 or later, a client of a Mightling node on your network. They are signed with an Apple Developer ID and notarised by Apple, so macOS opens the app normally: drag Mightling to Applications and open it. Check the dmg against SHA256SUMS first; steps in docs/desktop.md."
+              echo
+            } >> notes.md
+          elif printf '%s\n' "${files[@]}" | grep -q -- '-preview\.dmg$'; then
             {
               echo "### Mac desktop app (preview, unsigned)"
               echo

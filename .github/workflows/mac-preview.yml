@@ -5,7 +5,10 @@
 #
 # Not signed with a Developer ID and not notarized: the bundle is signed ad hoc only (Apple silicon
 # runs nothing without at least that), so Gatekeeper refuses it until the user allows it once
-# (docs/desktop.md says how).
+# (docs/desktop.md says how). Unless a release asks for signing (`sign`) and the Apple secrets are
+# in the `release` environment: then the app is signed with the Developer ID and the hardened
+# runtime, notarised and stapled, and so is the dmg (docs/dev/macos-signing.md). Without the
+# secrets the run is the unsigned preview, step for step.
 #
 # Runs on pushes to desktop/mac** branches (CI), by hand, and from release.yml
 # (`build_mac_preview`), which publishes the dmgs with the release. It builds no `ling`: it takes the
@@ -26,8 +29,16 @@ on:
         description: "Version stamped into the app and the dmg's name; empty: desktop/electron/package.json's"
         type: string
         default: ""
+      sign:
+        description: "Sign and notarise with the Developer ID (main and release/* only; unsigned while the Apple secrets are absent)"
+        type: boolean
+        default: false
   workflow_call:
     inputs:
+      sign:
+        description: "Sign and notarise with the Developer ID when the release environment has the Apple secrets"
+        type: boolean
+        default: false
       version:
         description: "Release version stamped into the app and the dmg's name"
         type: string
@@ -36,6 +47,10 @@ on:
         description: "this: the calling run's build-clients artifacts (the release)"
         type: string
         default: this
+    outputs:
+      signed:
+        description: "true when the dmgs are signed with the Developer ID, notarised and stapled"
+        value: ${{ jobs.build.outputs.signed }}
 
 # Reading another run's artifacts needs actions: read; a caller must grant it (release.yml does).
 permissions:
@@ -57,7 +72,14 @@ jobs:
             target: x86_64-apple-darwin
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    # Notarisation waits on Apple twice (the app, then the dmg): usually minutes each.
+    timeout-minutes: 120
+    # The Apple secrets live only in the release environment, which only main and release/* may
+    # use; a job asks for it only when signing is asked for, so a push to desktop/mac** (no
+    # environment) builds the unsigned preview as before.
+    environment: ${{ inputs.sign && 'release' || '' }}
+    outputs:
+      signed: ${{ steps.apple.outputs.sign }}
     env:
       CLIENT_RUN_ID: ${{ inputs.client_run_id }}
       INPUT_VERSION: ${{ inputs.version }}
@@ -71,6 +93,19 @@ jobs:
           echo "MIGHTLING_VERSION=$version" >> "$GITHUB_ENV"
           echo "DMG=Mightling-$version-${{ matrix.arch }}-preview.dmg" >> "$GITHUB_ENV"
           echo "version $version"
+      # Signed or not (scripts/macos/signing_gate.sh): signing asked for and all six Apple secrets
+      # set. None set: the unsigned preview, as before; some set: an error.
+      - name: Apple signing
+        id: apple
+        env:
+          SIGN: ${{ inputs.sign }}
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: scripts/macos/signing_gate.sh
 
       # The release: this run's own artifacts (a reusable workflow shares its caller's run).
       - name: Client binaries (this run)
@@ -140,8 +175,37 @@ jobs:
           npx vitest run src/credentials.test.ts
           echo "APP=$PWD/out/Mightling-darwin-${{ matrix.arch }}/Mightling.app" >> "$GITHUB_ENV"
 
+      # The Developer ID, after `package`: its postPackage hook flips the fuses, which leaves an
+      # ad-hoc signature. osx-sign signs everything inside out with the hardened runtime and the
+      # entitlements of mac/entitlements.mjs (the bundled ling and codex-code-mode-host included).
+      - name: Import the Developer ID
+        if: ${{ steps.apple.outputs.sign == 'true' }}
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/macos/import_identity.sh
+      - name: Sign the app with the Developer ID
+        if: ${{ steps.apple.outputs.sign == 'true' }}
+        working-directory: desktop/electron
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          node mac/sign.mjs "$APP"
+          requirement="anchor apple generic and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\""
+          codesign --verify --deep --strict --verbose=2 -R="$requirement" "$APP"
+          for binary in "$APP/Contents/Resources/ling" "$APP/Contents/Resources/codex-code-mode-host"; do
+            [[ -f "$binary" ]] || continue
+            codesign --verify --strict -R="$requirement" "$binary"
+            echo "$(basename "$binary"):"
+            codesign -d --entitlements - "$binary" 2>/dev/null || true
+          done
+          echo "Mightling.app:"
+          codesign -d --entitlements - "$APP" 2>/dev/null
+
       # What the bundle is, in the log: the layout, each binary's architecture, the signature
-      # (ad hoc, no Developer ID, so Gatekeeper's assessment is expected to refuse it) and the fuses.
+      # (ad hoc, no Developer ID, so Gatekeeper's assessment is expected to refuse it; signed, it is
+      # refused too until the notarisation below) and the fuses.
       - name: Inspect the bundle
         run: |
           cd "$APP/.."
@@ -202,6 +266,23 @@ jobs:
           fi
           exit "$status"
 
+      # Apple's notary, then the ticket stapled into the app, so Gatekeeper accepts it offline too (a
+      # Mightling machine may have no internet); the dmg below is made from the stapled app.
+      - name: Notarise and staple the app
+        if: ${{ steps.apple.outputs.sign == 'true' }}
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          zip="$RUNNER_TEMP/Mightling-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$zip"
+          scripts/macos/notarize.sh "$zip"
+          rm -f "$zip"
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl -a -t exec -vv "$APP"
+
       # HFS+ rather than APFS, so the image can be listed and unpacked off a Mac (7z) as well.
       - name: Make the dmg
         run: |
@@ -219,6 +300,31 @@ jobs:
           hdiutil detach "$mount"
           ls -l dist
           [[ "$BUNDLED" == "true" ]] || echo "::warning::$DMG has no ling inside"
+      # The dmg itself: signed, notarised and stapled, and checked as a user's Mac would, the
+      # image and the app on it. The upload below (and so the release's SHA256SUMS) is this file.
+      - name: Sign, notarise and staple the dmg
+        if: ${{ steps.apple.outputs.sign == 'true' }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          codesign --force --sign "$MAC_SIGN_IDENTITY" --keychain "$MAC_SIGN_KEYCHAIN" --timestamp "dist/$DMG"
+          codesign --verify --strict -R="anchor apple generic and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\"" "dist/$DMG"
+          scripts/macos/notarize.sh "dist/$DMG"
+          xcrun stapler staple "dist/$DMG"
+          xcrun stapler validate "dist/$DMG"
+          spctl -a -t open --context context:primary-signature -vv "dist/$DMG"
+          mount="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "dist/$DMG"
+          xcrun stapler validate "$mount/Mightling.app"
+          spctl -a -t exec -vv "$mount/Mightling.app"
+          hdiutil detach "$mount"
+          ls -l dist
+      - name: Remove the Developer ID
+        if: ${{ always() && steps.apple.outputs.sign == 'true' }}
+        run: scripts/macos/remove_identity.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-mac-${{ matrix.arch }}
