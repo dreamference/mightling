@@ -21,6 +21,7 @@ from dreamference.node.node_pairing import NodePairing
 from dreamference.node.node_prepare import NodePrepare
 from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_remote import NodeRemote
+from dreamference.node.node_role_provisioner import NodeRoleProvisioner
 from dreamference.node.node_serve import NodeServe
 from dreamference.node.node_service_file import PROTO, SERVICE_TYPE, NodeServiceFile
 from dreamference.node.node_settings import NodeSettings
@@ -43,6 +44,7 @@ __all__ = [
     "NodePrepare",
     "NodeProvisioner",
     "NodeRemote",
+    "NodeRoleProvisioner",
     "NodeServe",
     "NodeServiceFile",
     "NodeSettings",

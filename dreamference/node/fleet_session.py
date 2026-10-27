@@ -147,6 +147,47 @@ class FleetSession:
         self.last_error = result.stderr
         return code == 0
 
+    def key_login_works(self) -> bool:
+        """Return whether a fresh login gets in with the session's key alone.
+
+        A separate connection, never the master: no control socket, no password, no prompt. Key-only
+        SSH is turned on only after this has worked.
+
+        Returns:
+            bool: True when `ssh … true` with the identity alone succeeded.
+        """
+        if self.identity is None:
+            return False
+        command = [
+            "ssh",
+            "-i",
+            str(self.identity),
+            "-p",
+            str(self.ssh_port),
+            "-o",
+            "ControlPath=none",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "PreferredAuthentications=publickey",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            f"UserKnownHostsFile={self.known_hosts}",
+            "-o",
+            f"HostKeyAlias={self._known_host_name()}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"ConnectTimeout={CONNECT_TIMEOUT}",
+            "-T",
+            self.target(),
+            "true",
+        ]
+        result = self._spawn(command, capture=True, timeout=CONNECT_TIMEOUT * 2)
+        self._log(command, result)
+        return result.returncode == 0
+
     def is_open(self) -> bool:
         """Returns:
         bool: True if the master answers `ssh -O check`.

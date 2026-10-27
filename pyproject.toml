@@ -62,6 +62,8 @@ convention = "google"
 "dreamference/remote/remote_access.py" = ["T201"]
 # §3.9: `ling-admin forge`'s commands are console-facing, like the CLI that calls them.
 "dreamference/forge/**" = ["T201"]
+# §3.9: `ling-admin node provision --role`'s steps are console-facing, like the provisioner they extend.
+"dreamference/node/node_role_provisioner.py" = ["T201"]
 # Tests: a test's name is its documentation, asserts compare literal expected values, and a test
 # prints only when it is diagnosing itself. Decided in Phase 0 (spec §6) as the noisy rules there.
 "tests/**" = ["D100", "D101", "D102", "D103", "D104", "D105", "D107", "PLR2004", "T201", "ANN401"]
