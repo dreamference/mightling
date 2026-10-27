@@ -1,6 +1,9 @@
 """The live messenger suite: linking the harness's devices, and the run (see run.sh).
 
     run.py link-telegram --qr PNG     link TDLib to the owner's Telegram (QR, once)
+    run.py link-telegram --qr - --password-at-terminal
+                                      the same at the owner's terminal, for an account with a
+                                      cloud password (asked there, never kept)
     run.py link-signal --qr PNG       link signal-cli to the owner's Signal (QR, once)
     run.py run [--only telegram|signal] [--take-over] [--signal-night-queue] [--notify]
     run.py install-timer              the nightly user timer, 18:00 UTC
@@ -14,6 +17,7 @@ non-zero exit sends one line through `~/.local/bin/owner-notify`.
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import signal
 import subprocess
@@ -76,10 +80,20 @@ def install_timer() -> int:
     return 0
 
 
-def link_telegram(qr: Path, minutes: float) -> int:
-    """Links the harness's TDLib device to the owner's account through a QR code PNG."""
+def link_telegram(qr: Path, minutes: float, password_at_terminal: bool) -> int:
+    """Links the harness's TDLib device to the owner's account through a QR code PNG (or `-`)."""
+    ask = None
+    if password_at_terminal:
+        if not sys.stdin.isatty():
+            print("❌ --password-at-terminal asks at a terminal; run it in one")
+            return 2
+
+        def ask(hint: str) -> str:
+            shown = f" (hint: {hint})" if hint else ""
+            return getpass.getpass(f"Telegram cloud password{shown}; not shown, not kept: ")
+
     try:
-        client, _me = telegram_account.open_session(qr, minutes * 60)
+        client, _me = telegram_account.open_session(qr, minutes * 60, ask)
     except telegram_account.NeedsOwner as err:
         print(f"❌ {err}")
         return 2
@@ -202,6 +216,12 @@ def main() -> int:
         )
         link.add_argument("--qr", type=Path, required=True)
         link.add_argument("--minutes", type=float, default=30)
+        if name == "link-telegram":
+            link.add_argument(
+                "--password-at-terminal",
+                action="store_true",
+                help="ask for the account's cloud password here (never kept); `--qr -` draws the code here",
+            )
     go = sub.add_parser("run", help="run the suite and write the reports")
     go.add_argument("--only", choices=("telegram", "signal"))
     go.add_argument(
@@ -227,7 +247,7 @@ def main() -> int:
     if args.command == "install-timer":
         return install_timer()
     if args.command == "link-telegram":
-        return link_telegram(args.qr, args.minutes)
+        return link_telegram(args.qr, args.minutes, args.password_at_terminal)
     if args.command == "link-signal":
         return link_signal(args.qr, args.minutes)
     return run_suite(args.only, args.take_over, args.signal_night_queue, args.notify, args.debug)

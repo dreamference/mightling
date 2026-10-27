@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, Final
 
 from .paths import cache_dir, config_dir, private_dir, telegram_dir
@@ -89,8 +90,21 @@ def no_auto_download() -> list[dict[str, Any]]:
     ]
 
 
+TERMINAL: Final = Path("-")
+
+
 def write_qr(link: str, png: Path) -> None:
-    """Writes the login link as a QR code PNG (0600), replacing the previous one whole."""
+    """Writes the login link as a QR code PNG (0600), replacing the previous one whole.
+
+    `TERMINAL` (`-`) draws it in the terminal instead, for the owner at a shell on the node.
+    """
+    if png == TERMINAL:
+        print(
+            "\nScan this with Telegram → Settings → Devices → Link Desktop Device (renewed every 30 s):\n",
+            flush=True,
+        )
+        subprocess.run(["qrencode", "-t", "ANSIUTF8", "-m", "2", link], check=True)
+        return
     partial = png.with_name(png.stem + ".part.png")
     subprocess.run(["qrencode", "-o", str(partial), "-s", "8", "-m", "3", link], check=True)
     Path(partial).chmod(0o600)
@@ -98,7 +112,12 @@ def write_qr(link: str, png: Path) -> None:
 
 
 def sign_in(
-    client: TdClient, database: Path, api: dict[str, Any], qr_png: Path | None, timeout: float
+    client: TdClient,
+    database: Path,
+    api: dict[str, Any],
+    qr_png: Path | None,
+    timeout: float,
+    ask_password: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
     """Drives TDLib's authorization to Ready.
 
@@ -110,8 +129,11 @@ def sign_in(
         client: A fresh client.
         database: TDLib's database folder (0700).
         api: `{"api_id", "api_hash"}`.
-        qr_png: Where the login QR code goes, or None for "never ask the owner".
+        qr_png: Where the login QR code goes (`TERMINAL` draws it), or None for "never ask the owner".
         timeout: Seconds for the whole sign-in.
+        ask_password: Asks the owner for the account's cloud password at a terminal (its hint is
+            shown); the password goes to TDLib and is neither kept nor shown. None: a cloud
+            password stops the sign-in.
 
     Returns:
         The account's own user (`getMe`).
@@ -137,11 +159,19 @@ def sign_in(
                     raise NeedsOwner("owner re-link needed: the Telegram session is gone")
                 write_qr(state["link"], qr_png)
             elif kind == "authorizationStateWaitPassword":
-                raise NeedsOwner(
-                    "the account asks for its cloud password; the harness never takes it"
+                if ask_password is None:
+                    raise NeedsOwner(
+                        "the account asks for its cloud password: the owner links at a terminal"
+                        " (run.py link-telegram --qr - --password-at-terminal)"
+                    )
+                client.call(
+                    {
+                        "@type": "checkAuthenticationPassword",
+                        "password": ask_password(state.get("password_hint", "")),
+                    }
                 )
             elif kind == "authorizationStateReady":
-                if qr_png is not None and qr_png.exists():
+                if qr_png is not None and qr_png != TERMINAL and qr_png.exists():
                     qr_png.unlink()
                 for request in no_auto_download():
                     client.call(request)
@@ -191,7 +221,9 @@ class BotChat:
         return update_chat_id(update) == self.chat_id
 
 
-def open_session(qr_png: Path | None, timeout: float) -> tuple[TdClient, dict[str, Any]]:
+def open_session(
+    qr_png: Path | None, timeout: float, ask_password: Callable[[str], str] | None = None
+) -> tuple[TdClient, dict[str, Any]]:
     """Starts TDLib on the stored session (or links a new one through `qr_png`).
 
     Returns:
@@ -204,7 +236,7 @@ def open_session(qr_png: Path | None, timeout: float) -> tuple[TdClient, dict[st
     api = json.loads((config_dir() / "telegram-api.json").read_text())
     client = TdClient(ensure_library(private_dir(cache_dir())), folder / "tdlib.log")
     try:
-        me = sign_in(client, private_dir(folder / "tdlib"), api, qr_png, timeout)
+        me = sign_in(client, private_dir(folder / "tdlib"), api, qr_png, timeout, ask_password)
     except BaseException:
         client.close()
         raise
