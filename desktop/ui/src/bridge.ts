@@ -367,7 +367,10 @@ export interface RepeatingTask {
 export const night = {
   list: () => send<{ tasks: NightTask[]; reports: { name: string; modified: number }[] }>({ type: "night/list" }),
   report: (name: string) => send<string>({ type: "night/report", name }),
-  add: (repo: string, task: string, test: string | null) => send<string>({ type: "night/add", repo, task, test }),
+  add: (repo: string, task: string, test: string | null, options: { on?: string | null; bestOf?: number | null } = {}) =>
+    send<string>({ type: "night/add", repo, task, test, on: options.on ?? null, bestOf: options.bestOf ?? null }),
+  /** Whether Night Shift runs by itself, and its window (DESKTOP §16 B5). */
+  status: () => send<{ timer: "on" | "off" | "unsupported"; window: string | null }>({ type: "night/status" }),
   drop: (repo: string, id: string) => send<string>({ type: "night/drop", repo, id }),
   runNow: () => send<null>({ type: "night/run" }),
   /** Repeating tasks: every night, or every week on one day (ling-admin night every). */

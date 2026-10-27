@@ -1024,3 +1024,7 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .work.pane-window .sidebar { display: none; }
 .pane-window .bottom-panel { flex: 1; height: auto; border-top: none; }
 .pane-window .review-pane { flex: 1; min-height: 0; border-left: none; }
+
+/* Scheduled: whether Night Shift runs by itself (DESKTOP §16 B5). */
+.night-timer { margin: 0 0 8px; font-size: 13px; }
+.night-timer.off { color: var(--danger); }

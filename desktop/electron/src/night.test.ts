@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { addTask, dropTask, readReport, readReports, readTasks } from "./night";
+import { addTask, dropTask, nightStatus, nodeName, readReport, readReports, readTasks } from "./night";
 import { taskDetails, transcriptOf } from "./night";
 
 describe("Night Shift for the Scheduled view", () => {
@@ -69,5 +69,35 @@ describe("a finished task's details (the owner's decision 7)", () => {
     await expect(taskDetails(night, "../x")).rejects.toThrow(/not a task/);
     fs.rmSync(night, { recursive: true, force: true });
   });
-});
 
+  it("queues on a node or with a number of attempts, never both, and a node only by its name (DESKTOP §16 B5)", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-on-")));
+    const log = path.join(home, "calls.txt");
+    const ling = nodeScript(home, "ling", `require("fs").appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(" ") + "\\n");
+console.log("Queued.");
+`);
+    await addTask(ling, home, "Bump the lock file", null, "second-node", null);
+    await addTask(ling, home, "Fix the flaky test", "npm test", null, 3);
+    expect(fs.readFileSync(log, "utf8").trim().split("\n")).toEqual(["night add --on second-node Bump the lock file", "night add --test npm test --best-of 3 Fix the flaky test"]);
+    await expect(addTask(ling, home, "x", null, "second-node", 3)).rejects.toThrow("not both");
+    await expect(addTask(ling, home, "x", null, "10.0.0.7", null)).rejects.toThrow("not an address");
+    await expect(addTask(ling, home, "x", null, "a node", null)).rejects.toThrow("not an address");
+    await expect(addTask(ling, home, "x", null, null, 0)).rejects.toThrow("best-of");
+    await expect(addTask(ling, home, "x", null, null, 2.5)).rejects.toThrow("best-of");
+    expect(nodeName(" spark-2 ")).toBe("spark-2");
+    expect(nodeName("-x")).toBeNull();
+    expect(nodeName("fe80::1")).toBeNull();
+  });
+
+  it("says whether the timer is on and its window, from the unit file only", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-timer-"));
+    expect(await nightStatus(home, "linux")).toEqual({ timer: "off", window: null });
+    expect(await nightStatus(home, "darwin")).toEqual({ timer: "unsupported", window: null });
+    const units = path.join(home, ".config", "systemd", "user");
+    fs.mkdirSync(units, { recursive: true });
+    fs.writeFileSync(path.join(units, "mightling-night.timer"), "[Unit]\nDescription=Night Shift\n# Night Shift window: 01:00-07:00\n[Timer]\nOnCalendar=*-*-* 01:00:00\n");
+    expect(await nightStatus(home, "linux")).toEqual({ timer: "on", window: "01:00-07:00" });
+    fs.writeFileSync(path.join(units, "mightling-night.timer"), "[Timer]\nOnCalendar=daily\n");
+    expect(await nightStatus(home, "linux")).toEqual({ timer: "on", window: null });
+  });
+});
