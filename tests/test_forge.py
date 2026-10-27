@@ -20,6 +20,7 @@ from dreamference.forge import (
     ForgeContainer,
     ForgeGithubMirror,
     ForgeMirrors,
+    ForgePhone,
     ForgeRepositories,
     ForgeService,
     ForgeSettings,
@@ -87,13 +88,14 @@ def test_app_ini_is_lan_only_private_and_never_push_mirrors(tmp_path):
         "DEFAULT_PRIVATE = private",
         "DB_TYPE = sqlite3",
         "DISABLE_NEW_PUSH = true",
-        "ROOT_URL = http://gx10-1a2b.local:3200/",
+        "ROOT_URL = http://gx10-1a2b.local:3100/forge/",
         "SSH_PORT = 2222",
         "INSTALL_LOCK = true",
     ):
         assert line in text
     assert "[cron.update_checker]\nENABLED = false" in text
-    assert "REVERSE_PROXY" not in text  # nothing sets the header yet (P1 brings `ling web`'s proxy)
+    # `ling web` signs in with a form and keeps the cookies; the header sign-in stays off (§2.2).
+    assert "REVERSE_PROXY" not in text
     secrets = ForgeAppIni.read_secrets(tmp_path)
     assert len(secrets) == 4
     ForgeAppIni.write(tmp_path, "node-b", "mirror")
@@ -570,6 +572,97 @@ def test_airgapped_on_stops_the_mirror(monkeypatch):
     )
     assert ForgeGithubMirror.run() == 2
     assert "airgapped" in ForgeGithubMirror.status()["stopped"]
+
+
+# -- the phone account (§2.7) ------------------------------------------------------------------------
+
+
+def test_the_phone_account_gets_a_token_for_ling_web_write_access_and_a_protected_main(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    ForgeSettings.write_secret("admin-token", "a" * 40)
+    ForgeSettings.config_path().parent.mkdir(parents=True, exist_ok=True)
+    ForgeSettings.config_path().write_text(
+        '[chat_repos]\nallow_main = ["dreamference/ling-engine"]\n'
+    )
+    created = []
+    monkeypatch.setattr(
+        ForgeAccounts,
+        "create_user",
+        classmethod(lambda cls, name, admin: created.append((name, admin)) or "pw"),
+    )
+    monkeypatch.setattr(
+        ForgeAccounts, "generate_token", classmethod(lambda cls, user, name, scopes: "p" * 40)
+    )
+    calls = []
+    rules = {
+        "dreamference/mightling": [],
+        "dreamference/ling-engine": [{"rule_name": "main", "push_whitelist_usernames": ["owner"]}],
+    }
+
+    def api(cls, method, path, token, body=None, timeout=30):
+        calls.append((method, path, body))
+        if path == "/users/mightling-phone":
+            return 404, None
+        if path.startswith("/repos/search"):
+            return 200, {
+                "data": [
+                    {
+                        "full_name": "dreamference/mightling",
+                        "default_branch": "main",
+                        "private": False,
+                    },
+                    {
+                        "full_name": "dreamference/ling-engine",
+                        "default_branch": "main",
+                        "private": False,
+                    },
+                    {
+                        "full_name": "dreamference/archive-pre-rewrite",
+                        "archived": True,
+                        "private": True,
+                    },
+                ]
+            }
+        if method == "GET" and path.endswith("/branch_protections"):
+            return 200, rules[path[len("/repos/") : -len("/branch_protections")]]
+        return (204, None) if method == "PUT" else (201, {})
+
+    monkeypatch.setattr(ForgeContainer, "api", classmethod(api))
+    assert ForgePhone.ensure() == []
+    assert created == [("mightling-phone", False)]
+    token = ForgePhone.token_path()
+    assert token == tmp_path / "codex-home" / "web" / "forge-phone-token"
+    assert token.read_text() == "p" * 40 + "\n"
+    assert (
+        oct(token.stat().st_mode & 0o777) == "0o600"
+        and oct(token.parent.stat().st_mode & 0o777) == "0o700"
+    )
+    access = {path: body["permission"] for method, path, body in calls if method == "PUT"}
+    assert access == {
+        "/repos/dreamference/mightling/collaborators/mightling-phone": "write",
+        "/repos/dreamference/ling-engine/collaborators/mightling-phone": "write",
+        "/repos/dreamference/archive-pre-rewrite/collaborators/mightling-phone": "read",
+    }
+    created_rule = next(body for method, path, body in calls if method == "POST")
+    assert created_rule["rule_name"] == "main" and created_rule["push_whitelist_usernames"] == [
+        "owner",
+        "forge-admin",
+    ]
+    changed = next((path, body) for method, path, body in calls if method == "PATCH")
+    assert changed[0] == "/repos/dreamference/ling-engine/branch_protections/main"
+    assert changed[1]["push_whitelist_usernames"] == ["owner", "forge-admin", "mightling-phone"]
+    assert not any("archive-pre-rewrite/branch_protections" in path for _m, path, _b in calls)
+    # A second run with everything in place changes nothing and keeps the token.
+    calls.clear()
+    rules["dreamference/mightling"] = [
+        created_rule | {"enable_push": True, "enable_push_whitelist": True}
+    ]
+    rules["dreamference/ling-engine"] = [changed[1] | {"rule_name": "main"}]
+    assert ForgePhone.ensure() == []
+    assert not [call for call in calls if call[0] in ("POST", "PATCH")]
+    assert token.read_text() == "p" * 40 + "\n"
 
 
 # -- mirror nodes ------------------------------------------------------------------------------------

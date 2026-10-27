@@ -79,6 +79,7 @@ fn config(dir: &Path, port: u16, lan_names: Vec<String>) -> Config {
         speech_addr: "127.0.0.1:9".to_string(),
         // Never the real ~/.config/dreamference/config.toml: a scratch one, absent unless a test writes it.
         user_config: Some(dir.join("user/.config/dreamference/config.toml")),
+        forge_url: None,
         state_dir,
         port,
         lan_names,
@@ -120,6 +121,9 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/assets/index.js"),
     ("GET", "/bridge.js"),
     ("GET", "/ws"),
+    ("GET", "/forge/"),
+    ("GET", "/forge"),
+    ("POST", "/forge/user/logout"),
     ("GET", "/healthz"),
     ("POST", "/api/upload?thread=t&kind=file"),
     ("POST", "/api/transcribe"),

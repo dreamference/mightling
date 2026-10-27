@@ -98,6 +98,7 @@ async fn hub(dir: &Path, enabled: bool) -> Hub {
         speech_addr: "127.0.0.1:9".to_string(),
         // Never the real ~/.config/dreamference/config.toml: a scratch one, absent unless a test writes it.
         user_config: Some(dir.join("user/.config/dreamference/config.toml")),
+        forge_url: None,
         state_dir,
         port,
         lan_names: Vec::new(),
