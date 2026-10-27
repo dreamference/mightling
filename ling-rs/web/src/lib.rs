@@ -33,6 +33,7 @@ pub mod policy;
 pub mod prompts;
 pub mod qr;
 pub mod relay;
+pub mod repo_limits;
 pub mod server;
 pub mod sidecars;
 pub mod sync_hub;

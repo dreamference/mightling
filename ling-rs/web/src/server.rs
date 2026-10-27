@@ -250,6 +250,7 @@ impl Server {
 
     fn sync_marker(&self, busy: &HashMap<u64, BusyTracker>) {
         let threads: BTreeSet<String> = busy.values().flat_map(|tracker| tracker.threads().cloned()).collect();
+        self.chat_repos.sync_running_threads(&threads);
         let path = self.marker_path();
         if threads.is_empty() {
             let _ = std::fs::remove_file(&path);

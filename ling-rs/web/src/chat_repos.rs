@@ -68,7 +68,7 @@ pub const KNOWN_BRIDGES: &[&str] = &["signal", "matrix", "telegram", "discord", 
 /// Lifetime of a single-use confirmation nonce issued by `GET /api/repos/state?intent=…` (10 minutes).
 pub const CONFIRM_TTL: Duration = Duration::from_secs(10 * 60);
 /// Valid `intent` values for confirmation nonces.
-pub const VALID_INTENTS: &[&str] = &["commit", "push", "update", "merge", "pr", "main"];
+pub const VALID_INTENTS: &[&str] = &["commit", "push", "update", "merge", "pr", "main", "budget"];
 /// Maximum length (in Unicode scalar values) of a commit message in `POST /api/repos/commit`.
 pub const MAX_COMMIT_MESSAGE_CHARS: usize = 5_000;
 
@@ -178,6 +178,21 @@ pub trait HostProbe: Send + Sync {
     fn free_bytes(&self, path: &Path) -> Result<u64, String>;
     /// Whether any `ling-swe-*` user unit is currently active.
     fn swe_night_running(&self) -> bool;
+    /// Current Unix timestamp in seconds (overridable by tests).
+    fn now_secs(&self) -> u64 {
+        now_secs()
+    }
+    /// Current clock in milliseconds for turn watches (overridable by tests).
+    fn now_ms(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+    /// Optional fixed UTC offset in seconds for local midnight calculation (`None` uses `libc::localtime_r`).
+    fn utc_offset_seconds(&self) -> Option<i64> {
+        None
+    }
 }
 
 /// Production host probe using `libc::statvfs` and `systemctl --user`.
@@ -318,6 +333,34 @@ impl CheckoutRecord {
             last_used: value.get("last_used")?.as_u64()?,
         })
     }
+
+    /// Canonical `<bridge>:<chat>` key for daily token budgets and pending notices.
+    pub fn chat_key(&self) -> String {
+        let prefix = format!("{}:", self.bridge);
+        if self.chat.starts_with(&prefix) {
+            self.chat.clone()
+        } else {
+            format!("{}:{}", self.bridge, self.chat)
+        }
+    }
+}
+
+/// A pending notice queued by `ChatRepos` for phone bridges to drain (`budget80` or `busy`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingNotice {
+    pub chat: String,
+    pub repo: String,
+    pub kind: String,
+}
+
+impl PendingNotice {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "chat": self.chat,
+            "repo": self.repo,
+            "kind": self.kind,
+        })
+    }
 }
 
 struct CachedListing {
@@ -335,7 +378,8 @@ struct ConfirmNonce {
 }
 
 /// Runtime state held by `Server` for `/api/repos`: the 60-second listing cache, per-repository
-/// git locks, `index.json` lock, single-use confirmation nonces, and host probe.
+/// git locks, `index.json` lock, single-use confirmation nonces, host probe, daily per-chat token
+/// budget, pending notices, and running-thread tracking for concurrency warnings.
 pub struct ChatRepos {
     listing: tokio::sync::Mutex<Option<CachedListing>>,
     repo_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -343,6 +387,11 @@ pub struct ChatRepos {
     nonces: Mutex<HashMap<String, ConfirmNonce>>,
     probe: Mutex<Arc<dyn HostProbe>>,
     allow_file_protocol: std::sync::atomic::AtomicBool,
+    budget: Mutex<crate::repo_limits::Budget>,
+    notices: Mutex<Vec<PendingNotice>>,
+    running_threads: Mutex<HashMap<String, bool>>,
+    thread_places: Mutex<HashMap<String, PathBuf>>,
+    turn_warnings: Mutex<HashMap<String, Vec<String>>>,
 }
 
 impl Default for ChatRepos {
@@ -361,10 +410,15 @@ impl ChatRepos {
             nonces: Mutex::new(HashMap::new()),
             probe: Mutex::new(Arc::new(SystemHostProbe)),
             allow_file_protocol: std::sync::atomic::AtomicBool::new(cfg!(test)),
+            budget: Mutex::new(crate::repo_limits::Budget::default()),
+            notices: Mutex::new(Vec::new()),
+            running_threads: Mutex::new(HashMap::new()),
+            thread_places: Mutex::new(HashMap::new()),
+            turn_warnings: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Replaces the host probe (used by tests to stub free disk space and SWE-bench activity).
+    /// Replaces the host probe (used by tests to stub free disk space, SWE-bench activity, and clock).
     pub fn set_probe(&self, probe: Arc<dyn HostProbe>) {
         *self.probe.lock().unwrap_or_else(|p| p.into_inner()) = probe;
     }
@@ -376,6 +430,16 @@ impl ChatRepos {
 
     fn probe(&self) -> Arc<dyn HostProbe> {
         self.probe.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// Current Unix timestamp in seconds from the configured host probe.
+    pub fn now_secs(&self) -> u64 {
+        self.probe().now_secs()
+    }
+
+    /// Current clock in milliseconds from the configured host probe.
+    pub fn now_ms(&self) -> u64 {
+        self.probe().now_ms()
     }
 
     fn repo_mutex(&self, repo: &str) -> Arc<tokio::sync::Mutex<()>> {
@@ -427,7 +491,246 @@ impl ChatRepos {
     /// Records the `app_thread` id on the checkout record matching `cwd` under `index_lock`.
     pub fn record_app_thread(&self, codex_home: &Path, cwd: &Path, thread_id: &str) -> std::io::Result<bool> {
         let _guard = self.index_lock.lock().unwrap_or_else(|p| p.into_inner());
-        record_app_thread(codex_home, cwd, thread_id)
+        let ok = record_app_thread(codex_home, cwd, thread_id)?;
+        if ok {
+            self.record_thread_place(thread_id, cwd.to_path_buf());
+        }
+        Ok(ok)
+    }
+
+    /// Looks up the checkout record in `$CODEX_HOME/chat-repos/index.json` whose `app_thread` is
+    /// `app_thread` and whose worktree directory is a valid checkout under `chat-repos/`.
+    pub fn find_by_app_thread(&self, codex_home: &Path, app_thread: &str) -> Option<CheckoutRecord> {
+        if app_thread.is_empty() {
+            return None;
+        }
+        load_index(codex_home).into_iter().find(|r| {
+            (r.app_thread.as_deref() == Some(app_thread) || r.thread == app_thread)
+                && is_repo_checkout(codex_home, Path::new(&r.dir))
+        })
+    }
+
+    /// Queues a pending bot notice (`{chat, repo, kind}`).
+    pub fn record_notice(&self, chat: &str, repo: &str, kind: &str) {
+        self.notices
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(PendingNotice {
+                chat: chat.to_string(),
+                repo: repo.to_string(),
+                kind: kind.to_string(),
+            });
+    }
+
+    /// Drains and returns all pending notices (`budget80`, `busy`).
+    pub fn take_notices(&self) -> Vec<PendingNotice> {
+        let mut notices = self.notices.lock().unwrap_or_else(|p| p.into_inner());
+        std::mem::take(&mut *notices)
+    }
+
+    /// Returns `(used, limit, resets_at)` for `record`'s chat at the current node time.
+    pub fn budget_snapshot(&self, record: &CheckoutRecord, tokens_per_day: u64) -> (u64, u64, u64) {
+        let probe = self.probe();
+        let now = probe.now_secs();
+        let chat = record.chat_key();
+        let mut budget = self.budget.lock().unwrap_or_else(|p| p.into_inner());
+        budget.set_tokens_per_day(tokens_per_day);
+        budget.set_utc_offset(probe.utc_offset_seconds());
+        (
+            budget.used(&chat, now),
+            budget.limit(&chat, now),
+            budget.resets_at(now),
+        )
+    }
+
+    /// Raises `record`'s chat budget by `add` tokens until local midnight; returns `(used, limit, resets_at)`.
+    pub fn raise_budget(&self, record: &CheckoutRecord, tokens_per_day: u64, add: u64) -> (u64, u64, u64) {
+        let probe = self.probe();
+        let now = probe.now_secs();
+        let chat = record.chat_key();
+        let mut budget = self.budget.lock().unwrap_or_else(|p| p.into_inner());
+        budget.set_tokens_per_day(tokens_per_day);
+        budget.set_utc_offset(probe.utc_offset_seconds());
+        let limit = budget.raise(&chat, add, now);
+        (budget.used(&chat, now), limit, budget.resets_at(now))
+    }
+
+    /// Checks whether `record`'s chat still has model budget before starting a new `turn/start`.
+    pub fn check_budget_before_turn(&self, record: &CheckoutRecord, tokens_per_day: u64) -> Result<(), String> {
+        let probe = self.probe();
+        let now = probe.now_secs();
+        let chat = record.chat_key();
+        let mut budget = self.budget.lock().unwrap_or_else(|p| p.into_inner());
+        budget.set_tokens_per_day(tokens_per_day);
+        budget.set_utc_offset(probe.utc_offset_seconds());
+        if budget.exhausted(&chat, now) {
+            Err(budget.refusal_message(now))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Feeds a cumulative thread token-usage total into `record`'s chat budget. Records a
+    /// `budget80` notice when 80% is crossed for the first time today, and returns `true` when the
+    /// chat's budget is now exhausted (100%).
+    pub fn add_token_usage(&self, record: &CheckoutRecord, tokens_per_day: u64, cumulative_total: u64) -> bool {
+        let probe = self.probe();
+        let now = probe.now_secs();
+        let chat = record.chat_key();
+        let thread = record.app_thread.as_deref().unwrap_or(&record.thread);
+        let (crossed_80, exhausted) = {
+            let mut budget = self.budget.lock().unwrap_or_else(|p| p.into_inner());
+            budget.set_tokens_per_day(tokens_per_day);
+            budget.set_utc_offset(probe.utc_offset_seconds());
+            budget.add(&chat, thread, cumulative_total, now);
+            (budget.crossed_80(&chat), budget.exhausted(&chat, now))
+        };
+        if crossed_80 {
+            self.record_notice(&chat, &record.repo, "budget80");
+        }
+        exhausted
+    }
+
+    /// Synchronises the shared `thread_id -> running` map from `Server`'s `BusyTracker` union across tabs.
+    pub fn sync_running_threads(&self, busy_threads: &std::collections::BTreeSet<String>) {
+        let mut map = self.running_threads.lock().unwrap_or_else(|p| p.into_inner());
+        for val in map.values_mut() {
+            *val = false;
+        }
+        for tid in busy_threads {
+            map.insert(tid.clone(), true);
+        }
+    }
+
+    /// Sets whether `thread_id` currently has a turn running.
+    pub fn set_thread_running(&self, thread_id: &str, running: bool) {
+        self.running_threads
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(thread_id.to_string(), running);
+    }
+
+    /// Whether `thread_id` currently has a turn running.
+    pub fn is_thread_running(&self, thread_id: &str) -> bool {
+        self.running_threads
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(thread_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Records the working directory `cwd` of an app-server thread `thread_id`.
+    pub fn record_thread_place(&self, thread_id: &str, cwd: PathBuf) {
+        if !thread_id.is_empty() {
+            self.thread_places
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(thread_id.to_string(), cwd);
+        }
+    }
+
+    /// Computes and stores the concurrency warnings (§8.1) when a turn starts on `record`.
+    pub fn note_turn_started(&self, codex_home: &Path, record: &CheckoutRecord) -> Vec<String> {
+        let warnings = self.compute_live_warnings(codex_home, record);
+        self.turn_warnings
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(record.thread.clone(), warnings.clone());
+        warnings
+    }
+
+    /// Returns the concurrency warnings for `record` (combining warnings recorded when the current
+    /// turn started with any live concurrent turns running now).
+    pub fn warnings_for(&self, codex_home: &Path, record: &CheckoutRecord) -> Vec<String> {
+        let mut warnings = self
+            .turn_warnings
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&record.thread)
+            .cloned()
+            .unwrap_or_default();
+        for w in self.compute_live_warnings(codex_home, record) {
+            if !warnings.contains(&w) {
+                warnings.push(w);
+            }
+        }
+        warnings
+    }
+
+    /// Computes live concurrency warnings (§8.1) for `record` against currently running threads.
+    pub fn compute_live_warnings(&self, codex_home: &Path, record: &CheckoutRecord) -> Vec<String> {
+        let running = self
+            .running_threads
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let places = self
+            .thread_places
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let record_dir = Path::new(&record.dir);
+
+        let same_checkout = running.iter().any(|(tid, &is_running)| {
+            if !is_running || Some(tid.as_str()) == record.app_thread.as_deref() || tid.as_str() == record.thread.as_str() {
+                return false;
+            }
+            if places.get(tid).is_some_and(|cwd| same_worktree_dir(cwd, record_dir)) {
+                return true;
+            }
+            load_index(codex_home).iter().any(|r| {
+                (r.app_thread.as_deref() == Some(tid) || r.thread == *tid)
+                    && same_worktree_dir(Path::new(&r.dir), record_dir)
+            })
+        });
+
+        let mut other_checkout_warnings = Vec::new();
+        let this_branch = record.branch.as_deref().unwrap_or(&record.base);
+        for other in load_index(codex_home) {
+            if other.repo == record.repo
+                && other.thread != record.thread
+                && !same_worktree_dir(Path::new(&other.dir), record_dir)
+            {
+                let is_other_running = other
+                    .app_thread
+                    .as_deref()
+                    .and_then(|id| running.get(id))
+                    .copied()
+                    .unwrap_or_else(|| running.get(&other.thread).copied().unwrap_or(false));
+                if is_other_running {
+                    let other_branch = other.branch.as_deref().unwrap_or(&other.base);
+                    let msg = format!(
+                        "{} is also being worked on in another checkout (branch {other_branch}, running). Phone edits stay on {this_branch}.",
+                        record.repo
+                    );
+                    if !other_checkout_warnings.contains(&msg) {
+                        other_checkout_warnings.push(msg);
+                    }
+                }
+            }
+        }
+
+        let mut warnings = Vec::new();
+        if same_checkout {
+            warnings.push("Another thread is running in this checkout.".to_string());
+        }
+        warnings.extend(other_checkout_warnings);
+        let on_main = record.branch.as_deref() == Some("main") || this_branch == "main";
+        if !warnings.is_empty() && on_main {
+            warnings.push("Both may push main; /push refuses a non-fast-forward.".to_string());
+        }
+        warnings
+    }
+}
+
+fn same_worktree_dir(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => false,
     }
 }
 
@@ -445,6 +748,7 @@ pub fn routes() -> Router<Arc<Server>> {
         .route("/api/repos/merge", post(repo_merge))
         .route("/api/repos/pr", post(repo_pr))
         .route("/api/repos/main", post(repo_main))
+        .route("/api/repos/budget", post(repo_budget))
 }
 
 fn json_response(status: StatusCode, value: Value) -> Response {
@@ -804,7 +1108,8 @@ async fn ensure_service_ready(server: &Server) -> Result<(ChatReposSettings, Str
 }
 
 /// Fetches all pages from `GET /api/v1/repos/search?limit=50&page=N`.
-pub async fn fetch_forge_repos(base_url: &str, token: &str) -> Result<Vec<ForgeRepo>, String> {
+/// `allow_file` lets a stand-in forge's `file://` clone URLs through (tests only, `set_allow_file_protocol`).
+pub async fn fetch_forge_repos(base_url: &str, token: &str, allow_file: bool) -> Result<Vec<ForgeRepo>, String> {
     let mut all = Vec::new();
     let mut page = 1usize;
     loop {
@@ -821,7 +1126,7 @@ pub async fn fetch_forge_repos(base_url: &str, token: &str) -> Result<Vec<ForgeR
             .ok_or_else(|| "forge search response missing data array".to_string())?;
         let count = items.len();
         for item in items {
-            if let Some(repo) = parse_forge_repo(base_url, item) {
+            if let Some(repo) = parse_forge_repo(base_url, item, allow_file) {
                 all.push(repo);
             }
         }
@@ -836,7 +1141,7 @@ pub async fn fetch_forge_repos(base_url: &str, token: &str) -> Result<Vec<ForgeR
     Ok(all)
 }
 
-fn parse_forge_repo(base_url: &str, item: &Value) -> Option<ForgeRepo> {
+fn parse_forge_repo(base_url: &str, item: &Value, allow_file: bool) -> Option<ForgeRepo> {
     let full_name = item
         .get("full_name")
         .and_then(Value::as_str)
@@ -869,12 +1174,14 @@ fn parse_forge_repo(base_url: &str, item: &Value) -> Option<ForgeRepo> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let read_only = archived || !can_push;
-    let clone_url = item
-        .get("clone_url")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(strip_url_credentials)
-        .unwrap_or_else(|| format!("{}/{full_name}.git", base_url.trim_end_matches('/')));
+    // The clone URL is always the forge's own address that this service talks to: the one the API
+    // reports follows the forge's ROOT_URL (the node's name, through `ling web`'s `/forge/`), and a
+    // listing must never send a clone anywhere else (§0 decision 2). A stand-in's `file://` URL is
+    // taken only when tests allowed the file protocol.
+    let clone_url = match item.get("clone_url").and_then(Value::as_str) {
+        Some(url) if allow_file && url.starts_with("file://") => url.to_string(),
+        _ => format!("{}/{full_name}.git", base_url.trim_end_matches('/')),
+    };
     Some(ForgeRepo {
         repo: full_name,
         default_branch,
@@ -911,7 +1218,8 @@ async fn get_or_fetch_listing(server: &Server, base_url: &str, token: &str) -> R
     {
         return Ok(cached.repos.clone());
     }
-    let repos = fetch_forge_repos(base_url, token).await?;
+    let allow_file = server.chat_repos.allow_file_protocol.load(std::sync::atomic::Ordering::Relaxed);
+    let repos = fetch_forge_repos(base_url, token, allow_file).await?;
     *guard = Some(CachedListing {
         at: Instant::now(),
         forge_url: base_url.to_string(),
@@ -1504,8 +1812,8 @@ fn find_checked_out_thread(server: &Server, thread: &str) -> Result<(CheckoutRec
 }
 
 /// `GET /api/repos/state?thread=&intent=`: branch, ahead/behind against `base.git`'s default branch
-/// tip, uncommitted file stat list, `read_only`, `private`, and (when `intent` is given) a
-/// single-use 32-hex confirmation nonce `confirm`.
+/// tip, uncommitted file stat list, `read_only`, `private`, `budget`, `warnings`, and (when `intent`
+/// is given) a single-use 32-hex confirmation nonce `confirm`.
 async fn repo_state(
     State(server): State<Arc<Server>>,
     headers: HeaderMap,
@@ -1515,7 +1823,7 @@ async fn repo_state(
         Ok(ids) => ids,
         Err(resp) => return resp,
     };
-    let (_settings, base_url, token) = match ensure_service_ready(&server).await {
+    let (settings, base_url, token) = match ensure_service_ready(&server).await {
         Ok(ready) => ready,
         Err(resp) => return resp,
     };
@@ -1531,7 +1839,7 @@ async fn repo_state(
     {
         return json_response(
             StatusCode::BAD_REQUEST,
-            json!({ "error": "intent must be commit, push, update, merge, pr, or main" }),
+            json!({ "error": "intent must be commit, push, update, merge, pr, main, or budget" }),
         );
     }
 
@@ -1547,6 +1855,9 @@ async fn repo_state(
         Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
     };
 
+    let (used, limit, resets_at) = server.chat_repos.budget_snapshot(&record, settings.tokens_per_day);
+    let warnings = server.chat_repos.warnings_for(&server.config.codex_home, &record);
+
     let mut payload = json!({
         "repo": record.repo,
         "branch": record.branch,
@@ -1556,6 +1867,12 @@ async fn repo_state(
         "uncommitted": uncommitted,
         "read_only": record.read_only,
         "private": private,
+        "budget": {
+            "used": used,
+            "limit": limit,
+            "resets_at": resets_at,
+        },
+        "warnings": warnings,
     });
     if let Some(intent) = intent_opt {
         let nonce = server.chat_repos.issue_nonce(&caller_nonce_id, &record.thread, intent);
@@ -2613,6 +2930,35 @@ async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: 
     )
 }
 
+/// `POST /api/repos/budget {thread, add, confirm}` (§7.2, §12.1): raises the chat's daily token
+/// budget by `add` (`1..=100,000,000`) until local midnight on the node.
+async fn repo_budget(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let (settings, _base_url, _token, request, record, _worktree_dir) =
+        match validate_mutation_request(&server, &headers, &body, "budget").await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+    let Some(add) = request
+        .get("add")
+        .and_then(Value::as_u64)
+        .filter(|&n| (1..=crate::repo_limits::MAX_BUDGET_RAISE).contains(&n))
+    else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "add must be between 1 and 100,000,000" }),
+        );
+    };
+    let (used, limit, resets_at) = server.chat_repos.raise_budget(&record, settings.tokens_per_day, add);
+    json_response(
+        StatusCode::OK,
+        json!({
+            "used": used,
+            "limit": limit,
+            "resets_at": resets_at,
+        }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicBool;
@@ -2652,6 +2998,9 @@ mod tests {
     struct StubProbe {
         free: AtomicU64,
         night: AtomicBool,
+        now_secs: AtomicU64,
+        now_ms: AtomicU64,
+        utc_offset: Mutex<Option<i64>>,
     }
 
     impl StubProbe {
@@ -2659,7 +3008,22 @@ mod tests {
             Arc::new(Self {
                 free: AtomicU64::new(free),
                 night: AtomicBool::new(night),
+                now_secs: AtomicU64::new(0),
+                now_ms: AtomicU64::new(0),
+                utc_offset: Mutex::new(None),
             })
+        }
+
+        fn set_now_secs(&self, secs: u64) {
+            self.now_secs.store(secs, Ordering::Relaxed);
+        }
+
+        fn set_now_ms(&self, ms: u64) {
+            self.now_ms.store(ms, Ordering::Relaxed);
+        }
+
+        fn set_utc_offset(&self, offset: Option<i64>) {
+            *self.utc_offset.lock().unwrap_or_else(|p| p.into_inner()) = offset;
         }
     }
 
@@ -2670,6 +3034,31 @@ mod tests {
 
         fn swe_night_running(&self) -> bool {
             self.night.load(Ordering::Relaxed)
+        }
+
+        fn now_secs(&self) -> u64 {
+            let s = self.now_secs.load(Ordering::Relaxed);
+            if s > 0 {
+                s
+            } else {
+                now_secs()
+            }
+        }
+
+        fn now_ms(&self) -> u64 {
+            let m = self.now_ms.load(Ordering::Relaxed);
+            if m > 0 {
+                m
+            } else {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0)
+            }
+        }
+
+        fn utc_offset_seconds(&self) -> Option<i64> {
+            *self.utc_offset.lock().unwrap_or_else(|p| p.into_inner())
         }
     }
 
@@ -3681,6 +4070,19 @@ mod tests {
         (status, parsed, body)
     }
 
+    async fn get_json(server: &Arc<Server>, cookie: &str, uri: &str) -> (StatusCode, Value, String) {
+        let req = Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header(header::HOST, HOST)
+            .header(header::COOKIE, cookie)
+            .body(Body::empty())
+            .unwrap();
+        let (status, body) = call(server, req).await;
+        let parsed = serde_json::from_str::<Value>(&body).unwrap_or(Value::Null);
+        (status, parsed, body)
+    }
+
     fn git_stdout(cwd: &Path, args: &[&str]) -> String {
         let out = std::process::Command::new("git")
             .env_clear()
@@ -4592,7 +4994,7 @@ mod tests {
 
     #[test]
     fn repo_checkout_refuses_outside_dirs_and_symlinks_and_records_app_thread() {
-        let s = Scratch::new("repo-checkout-policy");
+        let s = scratch("repo-checkout-policy");
         let home = s.dir.join("codex-home");
         let chat_repos = root_dir(&home);
         let checkout = chat_repos.join("org_widget").join("deadbeef");
@@ -4649,5 +5051,517 @@ mod tests {
         assert!(is_repo_thread(&home, "thr-99"));
         let loaded = load_index(&home);
         assert_eq!(loaded[0].app_thread.as_deref(), Some("thr-99"));
+    }
+
+    #[tokio::test]
+    async fn concurrency_warnings_for_same_checkout_and_other_checkout_block_nothing() {
+        let s = scratch("concurrency-warnings");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let repos_json = json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]);
+        let (forge_url, _forge_handle) = start_fake_forge(repos_json).await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        // Open checkout 1 for signal:chat1
+        let (_, open1, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "chat1" }),
+        )
+        .await;
+        let thread1 = open1["thread"].as_str().unwrap().to_string();
+        let wt1 = PathBuf::from(open1["cwd"].as_str().unwrap());
+
+        // Open checkout 2 for signal:chat2 (same repo org/widget, different checkout)
+        let (_, open2, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "chat2" }),
+        )
+        .await;
+        let thread2 = open2["thread"].as_str().unwrap().to_string();
+        let branch2 = format!("phone/{thread2}");
+
+        // Initially, no other turns running -> warnings empty.
+        let (_, state1, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread1}")).await;
+        assert_eq!(state1["warnings"].as_array().unwrap().len(), 0);
+
+        // Mark thread2 running in other checkout:
+        server.chat_repos.set_thread_running(&thread2, true);
+        let (_, state1, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread1}")).await;
+        let warnings = state1["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 1);
+        let expected_other = format!(
+            "org/widget is also being worked on in another checkout (branch {branch2}, running). Phone edits stay on phone/{thread1}."
+        );
+        assert_eq!(warnings[0].as_str().unwrap(), expected_other);
+
+        // Mark another thread running in the same checkout:
+        server.chat_repos.set_thread_running("desk-thread", true);
+        server.chat_repos.record_thread_place("desk-thread", wt1.clone());
+        let (_, state1, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread1}")).await;
+        let warnings = state1["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().any(|w| w.as_str() == Some("Another thread is running in this checkout.")));
+        assert!(warnings.iter().any(|w| w.as_str() == Some(&expected_other)));
+
+        // Enable allow_main and switch thread1 to main:
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nallow_main = [\"org/widget\"]\n",
+        )
+        .unwrap();
+        let nonce = get_nonce(&server, &cookie, &thread1, "main").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread1, "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // On main with concurrency warnings -> gains "Both may push main; /push refuses a non-fast-forward."
+        let (_, state1, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread1}")).await;
+        let warnings = state1["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 3);
+        assert!(warnings.iter().any(|w| w.as_str() == Some("Both may push main; /push refuses a non-fast-forward.")));
+    }
+
+    #[tokio::test]
+    async fn budget_80_notice_refusal_at_100_and_raise_until_midnight() {
+        let s = scratch("budget-lifecycle");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let repos_json = json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]);
+        let (forge_url, _forge_handle) = start_fake_forge(repos_json).await;
+        let (server, probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\ntokens_per_day = 1000000\n",
+        )
+        .unwrap();
+
+        // Fix clock to 2026-10-20 08:00 UTC with +02:00 offset (midnight at 22:00 UTC).
+        let morning = 1_792_483_200u64;
+        probe.set_now_secs(morning);
+        probe.set_utc_offset(Some(7200));
+
+        let cookie = owner_cookie(&server).await;
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let records = load_index(&server.config.codex_home);
+        let record = records.iter().find(|r| r.thread == thread).unwrap().clone();
+
+        // 1. Initially usage is 0, notices empty.
+        let (_, state, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(state["budget"]["used"], 0);
+        assert_eq!(state["budget"]["limit"], 1_000_000);
+        assert!(server.chat_repos.take_notices().is_empty());
+
+        // 2. Add tokens up to 790,000 (< 80%). No notice.
+        server.chat_repos.add_token_usage(&record, 1_000_000, 790_000);
+        assert!(server.chat_repos.take_notices().is_empty());
+        assert!(server.chat_repos.check_budget_before_turn(&record, 1_000_000).is_ok());
+
+        // 3. Reach 800,000 (80%). Notice recorded once.
+        server.chat_repos.add_token_usage(&record, 1_000_000, 800_000);
+        let notices = server.chat_repos.take_notices();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].chat, "signal:c1");
+        assert_eq!(notices[0].repo, "org/widget");
+        assert_eq!(notices[0].kind, "budget80");
+
+        // Further token usage does not re-fire 80% notice.
+        server.chat_repos.add_token_usage(&record, 1_000_000, 850_000);
+        assert!(server.chat_repos.take_notices().is_empty());
+
+        // 4. Reach 1,000,000 (100%). Check before turn refuses.
+        let exhausted = server.chat_repos.add_token_usage(&record, 1_000_000, 1_000_000);
+        assert!(exhausted);
+        let err = server.chat_repos.check_budget_before_turn(&record, 1_000_000).unwrap_err();
+        assert_eq!(err, "today's model budget for this chat is used up; it resets at 00:00");
+
+        // Git routes still work!
+        let (st, state, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(state["budget"]["used"], 1_000_000);
+
+        // 5. POST /api/repos/budget raises budget until midnight.
+        let b_nonce = get_nonce(&server, &cookie, &thread, "budget").await;
+        let (st, b_res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/budget",
+            json!({ "thread": thread, "add": 500_000, "confirm": b_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(b_res["used"], 1_000_000);
+        assert_eq!(b_res["limit"], 1_500_000);
+
+        // Refusal is lifted!
+        assert!(server.chat_repos.check_budget_before_turn(&record, 1_000_000).is_ok());
+
+        // 6. After midnight, usage resets, raise is gone, limit is base 1,000,000.
+        probe.set_now_secs(morning + 15 * 3600); // 23:00 UTC (01:00 next day)
+        let (used, limit, _) = server.chat_repos.budget_snapshot(&record, 1_000_000);
+        assert_eq!(used, 0);
+        assert_eq!(limit, 1_000_000);
+        assert!(server.chat_repos.check_budget_before_turn(&record, 1_000_000).is_ok());
+    }
+
+    #[tokio::test]
+    async fn nights_turn_failure_with_benchmark_refusal_records_busy_notice() {
+        let s = scratch("nights-busy");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let repos_json = json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]);
+        let (forge_url, _forge_handle) = start_fake_forge(repos_json).await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+        server.chat_repos.record_app_thread(&server.config.codex_home, &wt, "app-thr-busy").unwrap();
+
+        // Simulate a turn failing with the benchmark refusal marker.
+        let failed_turn = json!({
+            "threadId": "app-thr-busy",
+            "turn": {
+                "id": "turn-1",
+                "status": "failed",
+                "error": {
+                    "message": "unexpected status 503 Service Unavailable: The model is running a benchmark (night 4, 37/100 done, about 9 h left). Try later or run `ling-admin night pause`."
+                }
+            }
+        });
+
+        let (upstream_tx, _upstream_rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &Arc::default(),
+            "turn/completed",
+            Some(&failed_turn),
+            &upstream_tx,
+        );
+
+        let notices = server.chat_repos.take_notices();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].chat, "signal:c1");
+        assert_eq!(notices[0].repo, "org/widget");
+        assert_eq!(notices[0].kind, "busy");
+
+        // Git routes keep working (diff, state).
+        let (st, _, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(st, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn relay_chat_work_turn_tool_bound_steers_then_interrupts() {
+        let s = scratch("relay-bounds");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let repos_json = json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]);
+        let (forge_url, _forge_handle) = start_fake_forge(repos_json).await;
+        let (server, probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nwork_tool_calls = 3\nwork_answer_seconds = 1800\nwork_command_seconds = 600\n",
+        )
+        .unwrap();
+
+        probe.set_now_ms(1_000);
+        let cookie = owner_cookie(&server).await;
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+        server.chat_repos.record_app_thread(&server.config.codex_home, &wt, "app-thr-work").unwrap();
+
+        let shared = Arc::new(crate::relay::Shared::default());
+        let (upstream_tx, mut upstream_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // 1. Turn starts: RepoWatch is created.
+        let turn_start_ev = json!({
+            "threadId": "app-thr-work",
+            "turn": { "id": "turn-bound-1" }
+        });
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "turn/started",
+            Some(&turn_start_ev),
+            &upstream_tx,
+        );
+        assert!(upstream_rx.try_recv().is_err());
+
+        // 2. Feed 2 tool calls: below limit of 3, no steer sent.
+        for i in 1..=2 {
+            let item_ev = json!({
+                "threadId": "app-thr-work",
+                "item": { "id": format!("tool-{i}"), "type": "applyPatch" }
+            });
+            crate::relay::handle_notification_repo_limits(
+                &server,
+                &shared,
+                "item/started",
+                Some(&item_ev),
+                &upstream_tx,
+            );
+        }
+        assert!(upstream_rx.try_recv().is_err());
+
+        // 3. 3rd tool call: hits work_tool_calls = 3 -> immediately sends turn/steer!
+        let item3 = json!({
+            "threadId": "app-thr-work",
+            "item": { "id": "tool-3", "type": "applyPatch" }
+        });
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "item/started",
+            Some(&item3),
+            &upstream_tx,
+        );
+        let steer_msg = upstream_rx.try_recv().expect("expected turn/steer to upstream");
+        let text = match steer_msg {
+            tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+            _ => panic!("expected text message"),
+        };
+        let steer_val: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(steer_val["method"], "turn/steer");
+        assert_eq!(steer_val["params"]["threadId"], "app-thr-work");
+        assert_eq!(steer_val["params"]["expectedTurnId"], "turn-bound-1");
+        assert_eq!(steer_val["params"]["input"][0]["text"], "Stop here and summarise what changed so far.");
+        assert!(steer_val["id"].as_i64().unwrap() >= crate::relay::INTERNAL_REQUEST_ID_BASE);
+
+        // Repeated checks during grace window send nothing further.
+        crate::relay::check_repo_watches(&server, &shared, &upstream_tx);
+        assert!(upstream_rx.try_recv().is_err());
+
+        // 4. Advance clock by 60 s grace: check sends turn/interrupt!
+        probe.set_now_ms(1_000 + 60_000);
+        crate::relay::check_repo_watches(&server, &shared, &upstream_tx);
+        let interrupt_msg = upstream_rx.try_recv().expect("expected turn/interrupt to upstream");
+        let text = match interrupt_msg {
+            tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+            _ => panic!("expected text message"),
+        };
+        let interrupt_val: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(interrupt_val["method"], "turn/interrupt");
+        assert_eq!(interrupt_val["params"]["threadId"], "app-thr-work");
+        assert_eq!(interrupt_val["params"]["turnId"], "turn-bound-1");
+        assert!(interrupt_val["id"].as_i64().unwrap() >= crate::relay::INTERNAL_REQUEST_ID_BASE);
+
+        // After interrupt, watch is done and no final turn is initiated.
+        crate::relay::check_repo_watches(&server, &shared, &upstream_tx);
+        assert!(upstream_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn relay_chat_work_turn_command_and_answer_bounds_steer_then_interrupt() {
+        let s = scratch("relay-cmd-ans-bounds");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let repos_json = json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            }
+        ]);
+        let (forge_url, _forge_handle) = start_fake_forge(repos_json).await;
+        let (server, probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nwork_command_seconds = 10\nwork_answer_seconds = 30\n",
+        )
+        .unwrap();
+
+        probe.set_now_ms(0);
+        let cookie = owner_cookie(&server).await;
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+        server.chat_repos.record_app_thread(&server.config.codex_home, &wt, "app-thr-cmd").unwrap();
+
+        let shared = Arc::new(crate::relay::Shared::default());
+        let (upstream_tx, mut upstream_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // 1. Turn starts at t=0
+        let turn_start_ev = json!({
+            "threadId": "app-thr-cmd",
+            "turn": { "id": "turn-cmd-1" }
+        });
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "turn/started",
+            Some(&turn_start_ev),
+            &upstream_tx,
+        );
+
+        // Start a command at t=5,000 ms.
+        probe.set_now_ms(5_000);
+        let cmd_start = json!({
+            "threadId": "app-thr-cmd",
+            "item": { "id": "cmd-hung", "type": "commandExecution" }
+        });
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "item/started",
+            Some(&cmd_start),
+            &upstream_tx,
+        );
+        assert!(upstream_rx.try_recv().is_err());
+
+        // Advance to t=15,000 ms (10 s of command): triggers Steer.
+        probe.set_now_ms(15_000);
+        crate::relay::check_repo_watches(&server, &shared, &upstream_tx);
+        let steer_msg = upstream_rx.try_recv().expect("expected turn/steer on command bound");
+        let text = match steer_msg {
+            tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+            _ => panic!("expected text message"),
+        };
+        let steer_val: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(steer_val["method"], "turn/steer");
+
+        // Advance 60 s grace to t=75,000 ms: triggers Interrupt.
+        probe.set_now_ms(75_000);
+        crate::relay::check_repo_watches(&server, &shared, &upstream_tx);
+        let int_msg = upstream_rx.try_recv().expect("expected turn/interrupt on command bound");
+        let text = match int_msg {
+            tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+            _ => panic!("expected text message"),
+        };
+        let int_val: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(int_val["method"], "turn/interrupt");
+
+        // Complete the first turn.
+        let turn_end_ev = json!({
+            "threadId": "app-thr-cmd",
+            "turn": { "id": "turn-cmd-1", "status": "completed" }
+        });
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "turn/completed",
+            Some(&turn_end_ev),
+            &upstream_tx,
+        );
+
+        // 2. Answer-time bound test: start turn 2 at t=100,000 ms.
+        probe.set_now_ms(100_000);
+        let turn2_start_ev = json!({
+            "threadId": "app-thr-cmd",
+            "turn": { "id": "turn-ans-2" }
+        });
+        crate::relay::handle_notification_repo_limits(
+            &server,
+            &shared,
+            "turn/started",
+            Some(&turn2_start_ev),
+            &upstream_tx,
+        );
+
+        // Advance 30 s (work_answer_seconds = 30) to t=130,000 ms: triggers Steer.
+        probe.set_now_ms(130_000);
+        crate::relay::check_repo_watches(&server, &shared, &upstream_tx);
+        let steer_msg = upstream_rx.try_recv().expect("expected turn/steer on answer bound");
+        let text = match steer_msg {
+            tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+            _ => panic!("expected text message"),
+        };
+        let steer_val: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(steer_val["method"], "turn/steer");
+        assert_eq!(steer_val["params"]["expectedTurnId"], "turn-ans-2");
+
+        // Advance 60 s grace to t=190,000 ms: triggers Interrupt.
+        probe.set_now_ms(190_000);
+        crate::relay::check_repo_watches(&server, &shared, &upstream_tx);
+        let int_msg = upstream_rx.try_recv().expect("expected turn/interrupt on answer bound");
+        let text = match int_msg {
+            tokio_tungstenite::tungstenite::Message::Text(t) => t.to_string(),
+            _ => panic!("expected text message"),
+        };
+        let int_val: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(int_val["method"], "turn/interrupt");
+        assert_eq!(int_val["params"]["turnId"], "turn-ans-2");
     }
 }

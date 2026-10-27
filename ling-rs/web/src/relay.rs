@@ -19,45 +19,97 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use axum::extract::ws::Message;
 use axum::extract::ws::WebSocket;
 use futures::SinkExt;
 use futures::StreamExt;
-use futures::stream::SplitSink;
 use serde_json::Value;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 
-use crate::app_server::Upstream;
 use crate::ask;
+use crate::chat_repos::ChatReposSettings;
 use crate::policy::Incoming;
 use crate::policy::classify;
 use crate::policy::thread_place;
+use crate::repo_limits::RepoLimits;
+use crate::repo_limits::RepoVerdict;
+use crate::repo_limits::RepoWatch;
 use crate::server::Server;
+
+/// Base of request ID range reserved for ling web internal requests (steer, interrupt).
+pub const INTERNAL_REQUEST_ID_BASE: i64 = 9_000_000_000;
+
+static NEXT_INTERNAL_ID: AtomicI64 = AtomicI64::new(INTERNAL_REQUEST_ID_BASE);
+
+/// Generates a unique request ID in ling web's internal range.
+pub fn next_internal_id() -> i64 {
+    NEXT_INTERNAL_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Whether `value` is a response to one of ling web's own internal requests.
+pub fn is_internal_id(value: &Value) -> bool {
+    let id_val = value.get("id");
+    if let Some(n) = id_val.and_then(Value::as_i64) {
+        if n >= INTERNAL_REQUEST_ID_BASE {
+            return true;
+        }
+    }
+    if let Some(s) = id_val.and_then(Value::as_str) {
+        if let Ok(n) = s.parse::<i64>() {
+            if n >= INTERNAL_REQUEST_ID_BASE {
+                return true;
+            }
+        }
+        if s.starts_with("lw-internal-") {
+            return true;
+        }
+    }
+    false
+}
+
+/// An active turn watch on a `chat-work` thread.
+#[derive(Debug)]
+pub struct ActiveTurnWatch {
+    pub turn_id: String,
+    pub thread_id: String,
+    pub chat_key: String,
+    pub repo: String,
+    pub watch: RepoWatch,
+}
 
 /// What a tab's connection shares with the task reading the app-server.
 #[derive(Default)]
-struct Shared {
+pub struct Shared {
     /// Server requests waiting for this tab's answer.
-    pending: Mutex<HashSet<String>>,
+    pub pending: Mutex<HashSet<String>>,
     /// Thread openers whose new thread works in an Ask folder, by request id: answered, the folder
     /// is named after the thread.
-    openers: Mutex<HashMap<String, PathBuf>>,
+    pub openers: Mutex<HashMap<String, PathBuf>>,
     /// Thread openers for `chat-work` threads in a repository checkout, by request id: answered,
     /// the checkout's `app_thread` is recorded in `$CODEX_HOME/chat-repos/index.json`.
-    repo_openers: Mutex<HashMap<String, PathBuf>>,
+    pub repo_openers: Mutex<HashMap<String, PathBuf>>,
     /// The folder each thread works in, as the server named it (`thread_place`).
-    places: Mutex<HashMap<String, PathBuf>>,
+    pub places: Mutex<HashMap<String, PathBuf>>,
+    /// Active turn watches on chat-work threads for bounds and budget enforcement.
+    pub repo_watches: Mutex<HashMap<String, ActiveTurnWatch>>,
+    /// Turn starters by request id, so failed turn/start responses can record a busy notice.
+    pub turn_start_threads: Mutex<HashMap<String, String>>,
 }
 
 struct Tab {
     id: u64,
     server: Arc<Server>,
     out: mpsc::UnboundedSender<Value>,
-    upstream: Option<SplitSink<Upstream, UpstreamMessage>>,
+    upstream_tx: Option<mpsc::UnboundedSender<UpstreamMessage>>,
+    upstream_writer: Option<JoinHandle<()>>,
+    timer_task: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     shared: Arc<Shared>,
     bridge: bool,
@@ -100,7 +152,9 @@ pub async fn run_tab_for_device(socket: WebSocket, server: Arc<Server>, device_n
         id: server.new_tab_id(),
         server,
         out: out.clone(),
-        upstream: None,
+        upstream_tx: None,
+        upstream_writer: None,
+        timer_task: None,
         reader: None,
         shared: Arc::default(),
         bridge,
@@ -151,20 +205,46 @@ impl Tab {
     /// Forgets a connection the server closed, so the next `work/start` opens a new one.
     fn drop_finished(&mut self) {
         if self.reader.as_ref().is_some_and(JoinHandle::is_finished) {
-            self.upstream = None;
+            if let Some(task) = self.timer_task.take() {
+                task.abort();
+            }
+            if let Some(task) = self.upstream_writer.take() {
+                task.abort();
+            }
+            self.upstream_tx = None;
             self.reader = None;
         }
     }
 
     async fn start(&mut self) -> Result<Value, String> {
         self.drop_finished();
-        if self.upstream.is_some() {
+        if self.upstream_tx.is_some() {
             return Ok(json!({ "served_model": self.server.served_model(), "started": false, "ask_root": self.ask_root() }));
         }
         let (upstream, started) = self.server.app_server.connect().await?;
-        let (sink, mut stream) = upstream.split();
-        self.upstream = Some(sink);
-        let (server, shared, out, tab) = (self.server.clone(), self.shared.clone(), self.out.clone(), self.id);
+        let (mut sink, mut stream) = upstream.split();
+        let (upstream_tx, mut upstream_rx) = mpsc::unbounded_channel::<UpstreamMessage>();
+        let upstream_writer = tokio::spawn(async move {
+            while let Some(msg) = upstream_rx.recv().await {
+                if sink.send(msg).await.is_err() {
+                    break;
+                }
+            }
+        });
+        self.upstream_tx = Some(upstream_tx.clone());
+        self.upstream_writer = Some(upstream_writer);
+
+        let (server_timer, shared_timer, tx_timer) = (self.server.clone(), self.shared.clone(), upstream_tx.clone());
+        let timer_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                check_repo_watches(&server_timer, &shared_timer, &tx_timer);
+            }
+        });
+        self.timer_task = Some(timer_task);
+
+        let (server, shared, out, tab, tx_deliver) = (self.server.clone(), self.shared.clone(), self.out.clone(), self.id, upstream_tx);
         self.reader = Some(tokio::spawn(async move {
             while let Some(Ok(frame)) = stream.next().await {
                 let text = match frame {
@@ -172,9 +252,10 @@ impl Tab {
                     UpstreamMessage::Close(_) => break,
                     _ => continue,
                 };
-                deliver(&server, &shared, &out, tab, &text);
+                deliver(&server, &shared, &out, tab, &text, &tx_deliver);
             }
             shared.pending.lock().unwrap_or_else(|p| p.into_inner()).clear();
+            shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).clear();
             server.forget_tab(tab);
             let _ = out.send(event("work://exit", Value::Null));
         }));
@@ -191,9 +272,9 @@ impl Tab {
 
     async fn send(&mut self, message: Value) -> Result<(), String> {
         self.drop_finished();
-        if self.upstream.is_none() {
+        let Some(upstream_tx) = self.upstream_tx.as_ref() else {
             return Err("the agent's server is not running".to_string());
-        }
+        };
         let policy = &self.server.policy;
         // A named prompt's text is read before vetting: composing it may take a moment.
         let named = message
@@ -247,19 +328,40 @@ impl Tab {
                 self.shared.repo_openers.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), PathBuf::from(cwd));
             }
         }
-        let Some(upstream) = self.upstream.as_mut() else { return Err("the agent's server is not running".to_string()) };
-        upstream.send(UpstreamMessage::Text(vetted.to_string().into())).await.map_err(|err| format!("could not reach the agent's server: {err}"))
+        if vetted.get("method").and_then(Value::as_str) == Some("turn/start") {
+            if let Some(thread_id) = vetted.pointer("/params/threadId").and_then(Value::as_str) {
+                if let Some(record) = self.server.chat_repos.find_by_app_thread(&self.server.config.codex_home, thread_id) {
+                    let settings = ChatReposSettings::load_from(self.server.config.user_config.as_deref());
+                    if let Err(err) = self.server.chat_repos.check_budget_before_turn(&record, settings.tokens_per_day) {
+                        return Err(err);
+                    }
+                }
+                if let Some(id) = vetted.get("id") {
+                    self.shared.turn_start_threads.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), thread_id.to_string());
+                }
+            }
+        }
+        upstream_tx
+            .send(UpstreamMessage::Text(vetted.to_string().into()))
+            .map_err(|err| format!("could not reach the agent's server: {err}"))
     }
 
     /// Closes this tab's connection; the server itself goes on for other tabs and other clients.
     async fn close(&mut self, announce: bool) {
-        if let Some(mut upstream) = self.upstream.take() {
-            let _ = upstream.close().await;
+        if let Some(tx) = self.upstream_tx.take() {
+            let _ = tx.send(UpstreamMessage::Close(None));
+        }
+        if let Some(task) = self.timer_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.upstream_writer.take() {
+            task.abort();
         }
         if let Some(reader) = self.reader.take() {
             reader.abort();
             let _ = reader.await;
             self.shared.pending.lock().unwrap_or_else(|p| p.into_inner()).clear();
+            self.shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).clear();
             self.server.forget_tab(self.id);
             if announce {
                 let _ = self.out.send(event("work://exit", Value::Null));
@@ -268,8 +370,239 @@ impl Tab {
     }
 }
 
+fn send_steer(upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>, thread_id: &str, turn_id: &str, text: &str) {
+    let id = next_internal_id();
+    let msg = json!({
+        "id": id,
+        "method": "turn/steer",
+        "params": {
+            "threadId": thread_id,
+            "expectedTurnId": turn_id,
+            "input": [
+                {
+                    "type": "text",
+                    "text": text,
+                    "text_elements": []
+                }
+            ]
+        }
+    });
+    let _ = upstream_tx.send(UpstreamMessage::Text(msg.to_string().into()));
+}
+
+fn send_interrupt(upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>, thread_id: &str, turn_id: &str) {
+    let id = next_internal_id();
+    let msg = json!({
+        "id": id,
+        "method": "turn/interrupt",
+        "params": {
+            "threadId": thread_id,
+            "turnId": turn_id
+        }
+    });
+    let _ = upstream_tx.send(UpstreamMessage::Text(msg.to_string().into()));
+}
+
+/// Evaluates live turn watches and issues `turn/steer` or `turn/interrupt` to the app-server as needed.
+pub fn check_repo_watches(
+    server: &Server,
+    shared: &Shared,
+    upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>,
+) {
+    let now_ms = server.chat_repos.now_ms();
+    let mut actions = Vec::new();
+    {
+        let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
+        if watches.is_empty() {
+            return;
+        }
+        for entry in watches.values_mut() {
+            if let Some(verdict) = entry.watch.check(now_ms) {
+                actions.push((entry.thread_id.clone(), entry.turn_id.clone(), verdict));
+            }
+        }
+    }
+    for (thread_id, turn_id, verdict) in actions {
+        match verdict {
+            RepoVerdict::Steer(text) => {
+                send_steer(upstream_tx, &thread_id, &turn_id, &text);
+            }
+            RepoVerdict::Interrupt(_) => {
+                send_interrupt(upstream_tx, &thread_id, &turn_id);
+            }
+        }
+    }
+}
+
+/// Handles item, turn, and token-usage notifications for repository bounds and daily budgets.
+pub fn handle_notification_repo_limits(
+    server: &Server,
+    shared: &Shared,
+    method: &str,
+    params: Option<&Value>,
+    upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>,
+) {
+    let Some(params) = params else { return };
+    match method {
+        "turn/started" => {
+            if let (Some(thread_id), Some(turn_id)) = (
+                params.get("threadId").and_then(Value::as_str),
+                params.pointer("/turn/id").and_then(Value::as_str),
+            ) {
+                if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
+                    server.chat_repos.note_turn_started(&server.config.codex_home, &record);
+                    let settings = ChatReposSettings::load_from(server.config.user_config.as_deref());
+                    let limits = RepoLimits::from_settings(&settings);
+                    let now_ms = server.chat_repos.now_ms();
+                    let watch = RepoWatch::new(now_ms, limits);
+                    shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).insert(
+                        thread_id.to_string(),
+                        ActiveTurnWatch {
+                            turn_id: turn_id.to_string(),
+                            thread_id: thread_id.to_string(),
+                            chat_key: record.chat_key(),
+                            repo: record.repo.clone(),
+                            watch,
+                        },
+                    );
+                    check_repo_watches(server, shared, upstream_tx);
+                }
+            }
+        }
+        "item/started" => {
+            let thread_id = params
+                .get("threadId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    let watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
+                    if watches.len() == 1 {
+                        watches.keys().next().cloned().unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
+                });
+            let kind = params.pointer("/item/type").and_then(Value::as_str).unwrap_or_default();
+            let item_id = params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default();
+            let now_ms = server.chat_repos.now_ms();
+            let has_watch = {
+                let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(entry) = watches.get_mut(&thread_id) {
+                    if crate::repo_limits::is_tool(kind) {
+                        entry.watch.on_tool_started();
+                    }
+                    if kind == "commandExecution" {
+                        entry.watch.on_command_started_at(item_id, now_ms);
+                    }
+                    true
+                } else {
+                    false
+                }
+            };
+            if has_watch {
+                check_repo_watches(server, shared, upstream_tx);
+            }
+        }
+        "item/completed" => {
+            let thread_id = params
+                .get("threadId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    let watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
+                    if watches.len() == 1 {
+                        watches.keys().next().cloned().unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
+                });
+            let item_id = params.pointer("/item/id").and_then(Value::as_str).unwrap_or_default();
+            let has_watch = {
+                let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(entry) = watches.get_mut(&thread_id) {
+                    entry.watch.on_command_finished(item_id);
+                    true
+                } else {
+                    false
+                }
+            };
+            if has_watch {
+                check_repo_watches(server, shared, upstream_tx);
+            }
+        }
+        "thread/tokenUsage/updated" => {
+            let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
+            if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
+                let cumulative = params
+                    .pointer("/tokenUsage/total/totalTokens")
+                    .or_else(|| params.pointer("/total/totalTokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let settings = ChatReposSettings::load_from(server.config.user_config.as_deref());
+                let exhausted = server.chat_repos.add_token_usage(&record, settings.tokens_per_day, cumulative);
+                if exhausted {
+                    let now_ms = server.chat_repos.now_ms();
+                    let mut steer_action = None;
+                    {
+                        let mut watches = shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Some(entry) = watches.get_mut(thread_id) {
+                            if let Some(RepoVerdict::Steer(text)) = entry.watch.steer_for_budget(now_ms) {
+                                steer_action = Some((entry.thread_id.clone(), entry.turn_id.clone(), text));
+                            }
+                        }
+                    }
+                    if let Some((t_id, turn_id, text)) = steer_action {
+                        send_steer(upstream_tx, &t_id, &turn_id, &text);
+                    }
+                }
+                check_repo_watches(server, shared, upstream_tx);
+            }
+        }
+        "turn/completed" => {
+            let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
+            shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).remove(thread_id);
+            let err_msg = params.pointer("/turn/error/message").and_then(Value::as_str).unwrap_or("");
+            let details = params.pointer("/turn/error/additionalDetails").and_then(Value::as_str).unwrap_or("");
+            let err_str = params.pointer("/turn/error").and_then(Value::as_str).unwrap_or("");
+            if err_msg.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK)
+                || details.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK)
+                || err_str.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK)
+            {
+                if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
+                    server.chat_repos.record_notice(&record.chat_key(), &record.repo, "busy");
+                }
+            }
+        }
+        "error" => {
+            let err_msg = params
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .or_else(|| params.get("message").and_then(Value::as_str))
+                .unwrap_or("");
+            if err_msg.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK) {
+                let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
+                if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, thread_id) {
+                    server.chat_repos.record_notice(&record.chat_key(), &record.repo, "busy");
+                }
+            }
+        }
+        "thread/closed" => {
+            let thread_id = params.get("threadId").and_then(Value::as_str).unwrap_or_default();
+            shared.repo_watches.lock().unwrap_or_else(|p| p.into_inner()).remove(thread_id);
+        }
+        _ => {}
+    }
+}
+
 /// One message from the app-server, on its way to the page.
-fn deliver(server: &Server, shared: &Shared, out: &mpsc::UnboundedSender<Value>, tab: u64, text: &str) {
+pub fn deliver(
+    server: &Server,
+    shared: &Shared,
+    out: &mpsc::UnboundedSender<Value>,
+    tab: u64,
+    text: &str,
+    upstream_tx: &mpsc::UnboundedSender<UpstreamMessage>,
+) {
     if text.trim().is_empty() {
         return;
     }
@@ -278,14 +611,21 @@ fn deliver(server: &Server, shared: &Shared, out: &mpsc::UnboundedSender<Value>,
         let _ = out.send(event("work://protocol-error", Value::String(text.to_string())));
         return;
     };
+    if is_internal_id(&value) {
+        return;
+    }
     if let Some((thread, cwd)) = thread_place(&value) {
-        shared.places.lock().unwrap_or_else(|p| p.into_inner()).insert(thread, PathBuf::from(cwd));
+        shared.places.lock().unwrap_or_else(|p| p.into_inner()).insert(thread.clone(), PathBuf::from(&cwd));
+        server.chat_repos.record_thread_place(&thread, PathBuf::from(cwd));
     }
     match kind {
         Incoming::ServerRequest { key, .. } => {
             shared.pending.lock().unwrap_or_else(|p| p.into_inner()).insert(key);
         }
-        Incoming::Notification { method } => server.observe_busy(tab, &method, value.get("params")),
+        Incoming::Notification { method } => {
+            server.observe_busy(tab, &method, value.get("params"));
+            handle_notification_repo_limits(server, shared, &method, value.get("params"), upstream_tx);
+        }
         Incoming::Response => {
             let key = value.get("id").map(Value::to_string).unwrap_or_default();
             let folder = shared.openers.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
@@ -299,6 +639,16 @@ fn deliver(server: &Server, shared: &Shared, out: &mpsc::UnboundedSender<Value>,
                 && let Some(thread) = value.pointer("/result/thread/id").and_then(Value::as_str)
             {
                 let _ = server.chat_repos.record_app_thread(&server.config.codex_home, &folder, thread);
+            }
+            let turn_thread = shared.turn_start_threads.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+            if let Some(err_msg) = value.pointer("/error/message").and_then(Value::as_str) {
+                if err_msg.contains(crate::repo_limits::BENCHMARK_REFUSAL_MARK) {
+                    if let Some(thread_id) = turn_thread {
+                        if let Some(record) = server.chat_repos.find_by_app_thread(&server.config.codex_home, &thread_id) {
+                            server.chat_repos.record_notice(&record.chat_key(), &record.repo, "busy");
+                        }
+                    }
+                }
             }
         }
         Incoming::NotProtocol => {}
