@@ -84,7 +84,7 @@ export function mcpServerValue(kind: "command" | "url", target: string, args: st
   return { command: target.trim(), args: words };
 }
 
-export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: string | null; tab: ExtensionsTab; setTab: (tab: ExtensionsTab) => void; onClose: () => void; notice: (error: unknown) => void }) {
+export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: string | null; tab: ExtensionsTab; setTab: (tab: ExtensionsTab) => void; onClose: () => void; notice: (error: unknown) => void; focusPlugin?: string | null }) {
   const { client, cwd, notice } = props;
   const [skills, setSkills] = useState<SkillMetadata[] | null>(null);
   const [servers, setServers] = useState<McpServer[] | null>(null);
@@ -196,7 +196,8 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
                 <table className="shortcut-table">
                   <tbody>
                     {market.plugins.map((plugin) => (
-                      <tr key={plugin.id}>
+                      <tr key={plugin.id} className={props.focusPlugin === plugin.id ? "focused" : undefined} aria-current={props.focusPlugin === plugin.id ? "true" : undefined}
+                        ref={props.focusPlugin === plugin.id ? (row) => row?.scrollIntoView({ block: "center" }) : undefined}>
                         <td><strong>{plugin.name}</strong>{plugin.version ? <span className="planned-note"> {plugin.version}</span> : null}</td>
                         <td className="planned-note">{plugin.installed ? (plugin.enabled ? "installed" : "installed, off") : "not installed"}</td>
                         <td className="shortcut-actions">

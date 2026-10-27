@@ -1079,3 +1079,6 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .pet-needs button { width: 100%; text-align: left; font-size: 12px; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pet-need { font-weight: 600; margin-right: 4px; }
 .pet-need.blocked { color: var(--danger); }
+
+/* The plugin a link named (DESKTOP §16 B19). */
+.plugin-market tr.focused { outline: 2px solid var(--accent); outline-offset: -2px; }

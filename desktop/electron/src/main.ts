@@ -869,6 +869,14 @@ export async function main(options: MainOptions): Promise<void> {
         if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
         return message.type === "memories/files" ? listMemoryFiles(home) : writeMemoryFile(home, message.name, message.text);
       }
+      case "folder/check":
+        // A link's folder (DESKTOP §16 B19): taken only when it is an absolute folder that exists.
+        return folder(message.dir).then(() => true, () => false);
+      case "git/origin": {
+        // The open projects' remotes, compared with a link's `originUrl` (DESKTOP §16 B19); asked only when a link names one.
+        const root = await git.checkRoot(message.dir).catch(() => null);
+        return root ? git.originUrl(root) : null;
+      }
       case "open/folder": {
         const failed = await shell.openPath(await folder(message.dir));
         if (failed) throw new Error(failed);

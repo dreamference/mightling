@@ -33,7 +33,16 @@ export interface LinkTarget extends WorkTarget {
   plugin?: string;
   /** With `page: "ask"`: send the prompt as a new question at once (Quick Entry). */
   send?: boolean;
+  /** `ling://settings/<page>` (DESKTOP §16 B19). */
+  settingsPage?: string;
+  /** `ling://new?originUrl=…`: the remote whose project the new thread starts in. */
+  origin?: string;
 }
+
+/** Whether a link's folder is an absolute folder that exists (DESKTOP §16 B19); in a browser, not checked. */
+export const folderExists = (dir: string) => (host() === "electron" ? send<boolean>({ type: "folder/check", dir }) : Promise.resolve(true));
+/** A project folder's `origin` remote, or null. */
+export const originOf = (dir: string) => send<string | null>({ type: "git/origin", dir });
 
 export interface Airgapped {
   level: "off" | "on";
