@@ -7,6 +7,9 @@ A new session's system prompt is chosen by name (`ling-rs/src/prompt.rs`):
 - `default` is Codex's template plus the web, email and code blocks, byte for byte what the launcher sent before (a test composes both);
 - `offline` (since 2026-10-10) is the same template with the code block only, for a machine or a container with no network, where the web and email blocks would name commands that cannot work; SWE-bench's `run --prompt offline` arm (failures spec §9.3, rank 5);
 - `high-swe` (`ling-rs/prompts/high-swe.md`) is a 4.4 KB method for repository tasks with the code block only;
+- `ask` (`ling-rs/prompts/ask.md`) is for questions and research in a scratch folder, with sources and all launcher blocks (`specs/DREAMFERENCE_MIGHTLING_ASK.md` §3.2);
+- `chat` (`ling-rs/prompts/chat.md`) is `ask` plus the phone chat rules for the messenger bridges (`specs/DREAMFERENCE_MIGHTLING_CHAT.md` §16.3);
+- `chat-work` (`ling-rs/prompts/chat-work.md`) is `default` plus the phone preamble for repository Work threads started from a phone (`specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md` §5.1);
 - a file `$CODEX_HOME/system-prompts/<name>.md` is a custom one.
 
 The choice is `DREAMFERENCE_MIGHTLING_PROMPT`, then `mightling_prompt`, then `default` (`ling prompt list|show|use`, `[night] prompt`, `swe-bench run --prompt`).
