@@ -81,6 +81,10 @@ Python, Node and git work too, since they bring their own TLS (sessions set git 
 `git clone` and `git fetch` over https work in the sandbox). Full Access sessions run outside the
 sandbox and are not affected.
 
+**Windows: compatibility mode is not available yet (a known limit).** Compatibility mode
+(`ling --compat claude`) is not available on Windows yet; it refuses to start rather than run
+without its permission rules.
+
 {{TBD the rest of 1.7.2}}
 
 ---
