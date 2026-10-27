@@ -1,30 +1,71 @@
-# Mightling — a Claude Code plugin that hands work to the local Mightling, with no loss of quality
+# Mightling helping Claude Code: a delegation plugin and a session monitor
 
-**Status:** proposed on 2026-10-27. Nothing is built. The cost figures in §2 were measured from one night of a Claude Code coordinator session on the owner's machine (aggregates only; no content of those logs is quoted or stored here). Every figure about Mightling doing delegated work is an estimate until P0 (§9) measures it.
+**Status:** proposed on 2026-10-27; revised the same day into one design with the session monitor (Part B). **Nothing is built**; the owner asked for this spec before any building. The cost figures in §2 were measured from one night of a Claude Code coordinator session on the owner's machine (aggregates only; no content of those logs is quoted or stored here). Every figure about Mightling doing delegated work, and every figure about the monitor's effect, is an estimate until the phases of §10 measure it.
 
-**Target:** the owner first, then any Mightling user who also runs Claude Code: "use your local Mightling from Claude Code". The aim is fewer Claude tokens for the same results. The owner's requirement governs every section: *quality must not drop; Mightling takes only the tasks it can be shown to do well.*
+**Target:** the owner first, then any Mightling user who also runs Claude Code: "your local Mightling helps your Claude Code". Two parts serve one aim, fewer Claude tokens for the same results:
+
+- **Part A, the delegation plugin** (§4–§6): Claude Code hands whitelisted work to the local Mightling, and only work Mightling has been shown to do well.
+- **Part B, the session monitor** (§7): plain code, and the local model only where reading is needed, watches the agents' transcripts on the node and tells the coordinator and the owner what needs attention, so nobody re-reads long logs to find out. The same monitor watches Mightling's own `ling` sessions and Night Shift, which makes it a product feature ("is my agent stuck?").
+
+The owner's requirement governs every section: *quality must not drop; Mightling takes only the tasks it can be shown to do well, and the monitor's facts come from code, not from a model.*
 
 **Builds on:**
 - `ling exec` (Codex's non-interactive mode, unmodified): `--output-schema`, `-o`, `--ephemeral`, `-s`, `-C` (`codex-rs/exec/src/cli.rs`, `codex-rs/utils/cli/src/shared_options.rs`).
 - The launcher's node resolution, tiers 1–5 (`ling-rs/src/node.rs`, [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md)); `NodePairing.resolve` for a paired node, by id and never by address.
 - `ling-code` ([MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md)) and `rg` for model-free lookups.
-- Night Shift: `ling night add --test --best-of`, chooser v1, `night/<id>` branches, the runner lock, `ling sandbox` for the runner's own test run ([MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md)).
-- The SWE-bench model gate and runner lock ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md) §18), and the failure analysis ([MIGHTLING_SWE_BENCH_FAILURES](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md)), which supplies the verification rules of §5.2.
+- Night Shift: `ling night add --test --best-of`, chooser v1, `night/<id>` branches, the task files under `$CODEX_HOME/night/tasks/`, the runner lock, `ling sandbox` for the runner's own test run, the `mightling-night.timer` user unit ([MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md)).
+- The SWE-bench model gate and runner lock ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md) §18), and the failure analysis ([MIGHTLING_SWE_BENCH_FAILURES](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md)), which supplies the verification rules of §6.2.
 - The skills planner, which links `~/.claude/skills` into `ling` ([MIGHTLING_SKILLS](./DREAMFERENCE_MIGHTLING_SKILLS.md)).
-- An earlier proposal, *Claude delegates to ling*, written on 2026-10-08 and taken out of this directory the same day (it is in git history at `6aca2f2`). Its rules carry over: verified quotes against unverified prose, fail open, break-even by the number of calls, "not found" proves nothing, and no hook that diverts work automatically. Its Phase 0 was never run. **The `ling-delegate` skill it planned does not exist**: the line in the owner's global Claude Code instructions that names it applies "when it is installed", and it is not installed. This plugin replaces that skill (§3.3).
+- `ling web` and its bridge policy `ling-rs/web/policy.json` ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md)), for the monitor's status page.
+- The owner's alert command `~/.local/bin/owner-notify` (a local script outside the repository that sends one short message to the owner's paired Telegram chat through the Mightling bot), for the monitor's alerts on the owner's machine.
+- An earlier proposal, *Claude delegates to ling*, written on 2026-10-08 and taken out of this directory the same day (in git history at `6aca2f2`). Its rules carry over: verified quotes against unverified prose, fail open, break-even by the number of calls, "not found" proves nothing, and no hook that diverts work automatically. Its Phase 0 was never run, and the skill it planned was never built (D14).
 
 ---
 
-## 0. Decisions, stated first
+## 0. Decisions
 
-1. **Quality is protected by verification, never by trust in the model.** Claude never takes Mightling's prose as fact. What reaches Claude as fact is what the plugin checked itself: a quote equal to the file's text, an exit code, a list of failing test names, a line a watcher saw. Everything else is labelled a hint (§5.2).
-2. **Mightling takes a task class only after it is measured there.** A whitelist of task classes (§5.1), each starting on probation in shadow mode, where Mightling's result is compared with Claude's own and counts for nothing (§5.3). Design, security-sensitive code, exactness-critical engine kernels, releases and history operations, and anything without an objective check are excluded and never promoted.
-3. **A class is demoted automatically**: at once when a delegated change is reverted or a shadow audit finds a miss, and when its acceptance or its measured net saving falls below a threshold (§5.3).
-4. **A failed delegation costs Claude only the attempt.** Claude does the task itself, and the tokens the failed attempt spent are charged against the class, so the net saving is measured honestly (§5.4).
-5. **The largest saving does not need Mightling.** In the night measured, cache rewrites after idle gaps were 39% of the price-weighted cost; waiting turns 28%; calls made at contexts above 300K tokens 74%. Retiring long agents and waiting with watchers that wake an agent once are worth more than any delegation, and §6 states them as coordinator practice. The plugin's `watch` tool makes the second one easy.
-6. **`lookup` and `watch` use no model.** They work during a benchmark night, need no probation and cannot lower quality. They ship first (P1).
-7. **The plugin opens no port and stores no address.** It is a stdio MCP server that runs where Claude Code runs and calls the local `ling`, whose launcher finds the node by name or id. A second node is reached only through the existing SSH pairing (§4, §7).
-8. **Busy means refuse, fast.** During a SWE-bench run the plugin uses another node serving the same model, or answers `busy` within seconds. It never queues behind the benchmark and never disturbs its timing (§4.3).
+Decided by this spec; the owner's open choices are in §0.1.
+
+**Both parts**
+
+- **D1. Quality is protected by verification, never by trust in a model.** What reaches Claude or the owner as fact is what code checked itself: a quote equal to the file's text, an exit code, a list of failing test names, a line a watcher saw, a count from a transcript. Everything a model writes is labelled a hint and carries a verified quote (§6.2, §7.4).
+- **D2. The largest saving needs neither part.** In the night measured, cache rewrites after idle wakes were 39% of the price-weighted cost; waiting turns 28%; calls made at contexts above 300K tokens 74%. Coordinator practice (§3) is estimated at **40–50%** of the price-weighted cost; delegation through the plugin adds **about 5–7%** on top. The monitor exists mainly to make the practices happen: it says when an agent is due for a hand-off, when a wait has gone stale, and what each agent is doing, so the coordinator need not wake agents or re-read their logs to find out.
+- **D3. Nothing opens a port or stores an address.** The plugin is a stdio MCP server; the monitor is a timer that reads files. Both call the local `ling`, whose launcher finds the node by name or id. A second node is reached only through the existing SSH pairing (§5, §8).
+- **D4. A benchmark night is never disturbed.** Before any model call both parts run the same busy check (§5.3): during a SWE-bench run the plugin uses another node serving the same model or answers `busy` within seconds, and the monitor drops to its deterministic checks. Neither queues behind the benchmark. Model-free work (`lookup`, `watch`, the monitor's checks) runs at any time.
+- **D5. Everything is Rust in `ling-rs/`, as launcher subcommands** (`ling delegate …`, `ling monitor …`), with no Codex patch: a client install has no Python, and both parts share the transcript reader, the quote verifier and the busy check.
+- **D6. Transcripts never leave the machine they are on, and neither part writes into them** (§8).
+
+**Part A, the plugin**
+
+- **D7. Mightling takes a task class only after it is measured there.** A whitelist of task classes (§6.1), each starting on probation in shadow mode, where Mightling's result is compared side by side with Claude's own and counts for nothing; **promotion needs 20 shadow comparisons** with no severe miss, and the owner confirms it (§6.3). Design, security-sensitive code, exactness-critical engine kernels, releases and history operations, and anything without an objective check are excluded and never promoted.
+- **D8. A class is demoted automatically**: at once on **any revert** of a delegated change or any shadow miss, and when its **acceptance falls below 60%** or its measured net saving is not positive over the last 20 delegations (§6.3).
+- **D9. A failed delegation costs Claude only the attempt.** Claude does the task itself, with no retry, and the tokens the failed attempt spent are charged against the class, so the net saving is measured honestly (§6.4).
+- **D10. `lookup` and `watch` use no model.** They need no probation, cannot lower quality and ship first (P1).
+- **D11. No hook routes work.** The one hook records outcomes (§4.5); the decision to delegate stays with the model that knows whether the answer matters.
+
+**Part B, the monitor**
+
+- **D12. The monitor's facts are deterministic and authoritative.** Thresholds, stalls, usage limits, loops, rule violations and token counts come from plain code (§7.3). The local model writes only a short digest per agent and labels for unusual log lines (§7.4); where a digest and a fact disagree, the fact wins and the disagreement is counted.
+- **D13. What leaves the node is facts in fixed templates.** An owner alert goes out through `owner-notify` (Telegram), which is an external service, so its body is a fixed template of facts: the alert's kind, the agent's ordinal and type, counts, times, a reset time. No transcript text, no digest, and not the subagent's task description, which the coordinator wrote and which is content (§7.5). The summary file is read by the Claude Code coordinator, so its content reaches Anthropic: entries about Claude Code agents may carry digests and quotes (content Anthropic already holds), while entries about `ling` sessions and Night Shift carry facts only, unless the owner opts in (§7.5).
+
+**Carried in from the earlier analysis**
+
+- **D14. The `ling-delegate` skill does not exist, and this plugin replaces it.** The line in the owner's global Claude Code instructions that names it applies "when it is installed"; it is not installed. The install step proposes replacing that name with this plugin's `ask` (§4.3).
+
+### 0.1 Open questions for the owner
+
+Each has a default this spec uses until the owner decides.
+
+1. **Alert content.** May an alert name the subagent's task description (its `.meta.json` description, a few words the coordinator wrote)? It makes alerts readable on a phone; it is content leaving through Telegram. *Default: no; the alert names the agent's ordinal and type, and the summary on the node names the task.*
+2. **Alert hours.** Quiet hours, or every alert at once? Usage limits and stuck nights matter most at night. *Default: no quiet hours; the rate limit of §7.5 applies.*
+3. **Release alerts.** Detect releases from the transcripts only (a tag push and the release workflow's result seen in a tool result), or also poll the release workflow with `gh`, a network call to GitHub that sends no content? *Default: transcripts only.*
+4. **Expected wait durations** (§7.3, C2): CI run 30 min, Night Shift until the window's end, a GPU window until its stated end, a shell wait 15 min, a background subagent 60 min. *Default: these, in `[monitor.waits]` of the user's config.*
+5. **`ling` and Night Shift in the coordinator's summary.** Facts only by default (D13). Should digests of the owner's own `ling` sessions be included for the coordinator? *Default: no.*
+6. **The product alert channel.** The owner's `owner-notify` is a local script. For users, alerts should go through whichever messenger bridge they turned on (Signal, Telegram, Matrix), which needs a send entry point in the bridges that does not exist yet. *Default: `[monitor] notify_command` names any command that takes the message as its argument; empty means alerts go only to the summary and the status page.*
+7. **The summary as a plugin tool.** Should the plugin offer a sixth tool, `status`, returning the monitor's summary (and a `watch` condition "a monitor alert of kind K")? *Default: no; the coordinator reads the summary file with `Read`, which costs the same.*
+8. **The digest during a Night Shift run.** Night Shift gives way to outside requests, so an hourly digest would slow it slightly. *Default: allowed, one model call at a time.*
+9. **Digest retention.** *Default: 7 days, then deleted; facts kept 30 days for the weekly comparisons.*
+10. **The Claude-token spend of P0's replay**, which runs both Claude and Mightling on the replay set. *Default: P0 waits for the owner's approval of an estimate.*
 
 ---
 
@@ -32,15 +73,18 @@
 
 **Goals**
 - Fewer price-weighted Claude tokens per finished task, measured from Claude Code's own usage records.
-- No outcome worse than Claude alone: the same merge and acceptance outcome on the replay set (§5.5) and in shadow audits, and no reverted delegated change.
-- One install step; nothing changes for a person who does not install it.
-- A side effect worth stating: file contents that Mightling reads in a delegation stay on the owner's machines and are not sent to Anthropic.
+- No outcome worse than Claude alone: the same merge and acceptance outcome on the replay set (§6.5) and in shadow audits, and no reverted delegated change.
+- The coordinator and the owner learn of a stall, a usage limit, a loop or a broken rule within one check interval, without reading logs.
+- The same monitor answers a Mightling user's "is my agent stuck?" for `ling` sessions and Night Shift.
+- One install step for each part; nothing changes for a person who installs neither.
+- A side effect worth stating: file contents Mightling reads in a delegation, and every transcript the monitor reads, stay on the owner's machines.
 
 **Non-goals**
 - Running Claude Code itself on the local model, or routing Claude Code's small background model to it.
-- Mightling reviewing Claude's work. A weaker reviewer adds noise.
+- Mightling reviewing Claude's work. A weaker reviewer adds noise. (The monitor's digest describes what an agent is doing and whether it looks stuck; it does not judge the work.)
 - Writing that needs judgement: specs, designs, user-facing text, release notes.
 - A `PreToolUse` hook that diverts Claude's searches automatically. It would take the decision from the model that knows whether the answer matters, and it adds text to every call.
+- The monitor acting on what it sees: it never stops, restarts, steers or messages an agent. It reports; the coordinator and the owner act.
 
 ---
 
@@ -48,19 +92,20 @@
 
 **Source.** The subagent transcripts of one Claude Code coordinator session on the owner's machine, 2026-10-26 00:00 to 2026-10-27 12:00 UTC (the logs stay outside the repository, under `~/.claude/projects/<project>/<session>/subagents/`). Responses were deduplicated by `message.id`, because a transcript writes one line per content block.
 
-**Counting by line overstates.** The figures first quoted for this night (37 agents, 7,274 calls, about 2.1 B input tokens, 1.95 B of them cache reads, 3.3 M output) counted lines: counting lines over the same window gives 7,838 "calls" and 2.30 B input. Deduplicated, the night is:
+**The corrected baseline.** The figures first quoted for this night (37 agents, 7,274 calls, about 2.1 B input tokens, 1.95 B of them cache reads, 3.3 M output) counted lines; counting lines over the same window gives 7,838 "calls" and 2.30 B input. Deduplicated, the night is the baseline every later comparison in this spec uses:
 
 | | |
 |---|---|
-| Agents active | 38 |
+| Agents active | **38** |
 | Model responses | **4,392** |
 | Input tokens | **1.35 B**, of which 1.24 B (92%) cache reads |
 | Output tokens | 3.5 M |
 | Context per call | median 231K, p90 691K |
 | Three longest-lived agents | 425 M input (32%), peak contexts 770K–900K |
 | Most agents active in one 10-minute window | 16 |
+| Cache rewrites after idle wakes | **39%** of the price-weighted cost |
 
-**Weights.** List-price ratios: input 1, five-minute cache write 1.25, cache read 0.1, output 5. "Price-weighted" below means tokens times these weights. Whether a subscription's limits track these ratios is not published; the assumption is that they roughly do.
+**Weights.** List-price ratios: input 1, five-minute cache write 1.25, cache read 0.1, output 5. "Price-weighted" means tokens times these weights. Whether a subscription's limits track these ratios is not published; the assumption is that they roughly do.
 
 ### 2.1 The shape of the bill
 
@@ -89,7 +134,7 @@ Runs of three or more consecutive calls of one kind: 197 search-and-read runs (1
 
 ### 2.3 What the whitelist can reach
 
-The agents' briefs, classed by keyword rules (checked by eye) over the session's 158 agents since 2026-10-15, fall mostly in the excluded classes of §5.1; under a tenth of the calls (about 7%) belong to briefs that a whitelisted class could take whole. **Few whole briefs are delegable.** What is delegable lives *inside* the briefs: the search-and-read runs (`ask`, `lookup`), the waiting runs (`watch`), and the small mechanical steps of larger work (`task`). The whitelist therefore covers a minority of the workload, and §6's practices, which need no delegation, cover the rest.
+The agents' briefs, classed by keyword rules (checked by eye) over the session's 158 agents since 2026-10-15, fall mostly in the excluded classes of §6.1; under a tenth of the calls (about 7%) belong to briefs that a whitelisted class could take whole. **Few whole briefs are delegable.** What is delegable lives *inside* the briefs: the search-and-read runs (`ask`, `lookup`), the waiting runs (`watch`), and the small mechanical steps of larger work (`task`). The whitelist therefore covers a minority of the workload, and the practices of §3, which need no delegation, cover the rest.
 
 ### 2.4 The break-even rule (carried over, re-fitted to this night)
 
@@ -97,13 +142,38 @@ With context **C**, **k** calls Claude would make itself, **t** tokens those cal
 
 > delegation pays when (k − 1)·0.1·C + (t − r)·w > b·(5 + w)
 
-At this night's median C = 231K, a five-call exploration returning 6K tokens, replaced by a 300-token brief and an 800-token result, saves about 4 × 23K + 5.2K × 5.2 − 3K ≈ 116K token-equivalents. One small lookup never pays through `ask`; `lookup` (model-free, one call) is the tool for it. The skill encodes this as: **use `ask` when you expect three or more searches or more than ~5K tokens of output for one question; use `lookup` for a single symbol or string.**
+At this night's median C = 231K, a five-call exploration returning 6K tokens, replaced by a 300-token brief and an 800-token result, saves about 4 × 23K + 5.2K × 5.2 − 3K ≈ 116K token-equivalents. One small lookup never pays through `ask`; `lookup` (model-free, one call) is the tool for it. The skill encodes this as: **use `ask` when you expect three or more searches or more than ~5K tokens of output for one question; use `lookup` for a single symbol or string.** The same arithmetic prices the monitor's summary: one `Read` of a 1,500-token file replaces the several log reads and agent wake-ups a coordinator makes at a check-in (§7.7).
 
 ---
 
-## 3. The plugin
+## 3. Coordinator practices (the larger lever)
 
-### 3.1 Shape (Claude Code's plugin format)
+These need neither part (D2). They belong in the coordinator's own instructions; the plugin's skill repeats them, and the monitor's checks say when each one is due.
+
+1. **Retire an agent whose context passes ~300K.** It writes a one-page hand-off note (state, decisions, open items, paths), and a fresh agent continues from the note and a short brief. In the night measured, 38% of calls ran above 300K and carried 74% of the price-weighted cost. *The monitor warns at ~250K and marks the hand-off due at ~300K (§7.3, C1).*
+2. **Cap concurrent expensive agents at 8–10.** The night peaked at 16 in one 10-minute window. More agents than the owner can follow produce more waiting, more idle gaps past the cache's lifetime, and more contexts kept alive only to be rewritten. *The summary counts the agents active in the last 10 minutes.*
+3. **Wait with a watcher that wakes the agent once, on a real result.** A background shell command (or the plugin's `watch`) that ends when the condition holds, never a `sleep` loop of agent turns. Any turn after more than five idle minutes rewrites the whole context into the cache. *The monitor counts idle-wake rewrites per agent and their cost (C7).*
+4. **Prefer a fresh short brief to resuming a long history.** A status check or a follow-up question goes to a fresh agent with the facts it needs, not to the 800K agent that did the work.
+5. **Read the monitor's summary at a check-in** instead of re-reading agent outputs or waking agents to ask how they are doing (§7.5).
+
+**Estimated savings on the measured night** (replaying its 4,392 responses under each rule; the rules overlap, so they do not add):
+
+| Practice | Saving of price-weighted cost | Assumption |
+|---|---|---|
+| Waiting runs collapsed to one wake-up each (3) | **≈ 25%** | One call per waiting run (169 runs, 329 calls) instead of several |
+| Retirement at 300K, fresh agent at 60K (1, 4) | ≈ 30% (lower bound) | Only cache *reads* scale with the smaller context |
+| The same, if cache *rewrites* scale too | ≈ 69% (upper bound) | A wake-up after a gap rewrites 60K–300K instead of up to 900K |
+| Both together | 53–74% | The range between the two assumptions, before the recovery cost |
+
+The fresh agent's cost of recovering context (re-reading files it needs) is not modelled. It is paid once per retirement against rewrites paid on every late wake-up. A **planning figure of 40–50%**, after the recovery cost and imperfect adherence, is defensible; the replay of §6.5 and the monitor's weekly comparison (§7.7) measure it. Delegation through the plugin adds to this on a smaller base: the search-and-read runs it can take are 11.7% of the cost, so **at most about 5–7%** more once the practices are in place.
+
+---
+
+# Part A — the delegation plugin
+
+## 4. The plugin
+
+### 4.1 Shape (Claude Code's plugin format)
 
 Checked against Claude Code's public plugin documentation (plugins overview, manifest reference, components, sub-agents, MCP) on 2026-10-27. The standard layout, with every component in its default place:
 
@@ -111,47 +181,47 @@ Checked against Claude Code's public plugin documentation (plugins overview, man
 mightling/                      # the plugin root
 ├── .claude-plugin/plugin.json  # name "mightling", version, description, userConfig
 ├── .mcp.json                   # the stdio server "mightling"
-├── skills/delegate/SKILL.md    # the delegation rules (§3.3)
-├── agents/delegate.md          # a subagent restricted to the plugin's tools (§3.4)
-├── agents/diff-reviewer.md     # the diff review of §5.2, no tools
-├── hooks/hooks.json            # records outcomes only (§3.5)
+├── skills/delegate/SKILL.md    # the delegation rules (§4.3)
+├── agents/delegate.md          # a subagent restricted to the plugin's tools (§4.4)
+├── agents/diff-reviewer.md     # the diff review of §6.2, no tools
+├── hooks/hooks.json            # records outcomes only (§4.5)
 └── bin/                        # empty: the commands come from Mightling's own install
 ```
 
 - **Manifest.** `name: "mightling"`, a `version` stamped from `dreamference.__version__`, and `userConfig` for three values: `node` (a node *name* or id, optional; the launcher's tiers decide otherwise), `max_parallel` (default 2) and `allow_classes` (the classes the owner switches on; empty means "probation only").
 - **The MCP server** (`.mcp.json`): `{"mightling": {"command": "ling", "args": ["delegate", "mcp"]}}`. Its tools are named `mcp__plugin_mightling_mightling__<tool>`, the form subagent `tools` lists and permission rules use.
-- **Size of results.** Claude Code warns above 10,000 tokens of MCP output and cuts at 25,000 by default (`MAX_MCP_OUTPUT_TOKENS`). Every tool caps its result at 1,500 tokens, except `task` and `night fetch`, which cap at 8,000 and otherwise return paths (§3.2).
+- **Size of results.** Claude Code warns above 10,000 tokens of MCP output and cuts at 25,000 by default (`MAX_MCP_OUTPUT_TOKENS`). Every tool caps its result at 1,500 tokens, except `task` and `night fetch`, which cap at 8,000 and otherwise return paths (§4.2).
 - **Time.** A stdio MCP server has no per-request timer in Claude Code, so `watch` and `task` may block for as long as they need; each takes its own `timeout_s`.
-- **Not used:** plugin monitors (experimental, and they do not start under `claude -p`, which the evaluation and headless coordinators use); `bin/` executables (claude.ai and Cowork refuse a plugin that has them, and `ling` is already on `PATH`).
-- **Install, local:** `claude --plugin-dir <checkout>/claude-plugin` while developing; for daily use, `/plugin marketplace add <checkout>` (a `.claude-plugin/marketplace.json` at the repository root listing one plugin) and `/plugin install mightling@mightling`. The product path is §8.
+- **Not used:** plugin monitors (experimental, and they do not start under `claude -p`, which the evaluation and headless coordinators use; the session monitor of Part B is a timer for this reason); `bin/` executables (claude.ai and Cowork refuse a plugin that has them, and `ling` is already on `PATH`).
+- **Install, local:** `claude --plugin-dir <checkout>/claude-plugin` while developing; for daily use, `/plugin marketplace add <checkout>` (a `.claude-plugin/marketplace.json` at the repository root listing one plugin) and `/plugin install mightling@mightling`. The product path is §9.
 
-### 3.2 The MCP server `mightling` and its five tools
+### 4.2 The MCP server `mightling` and its five tools
 
-`ling delegate mcp` is a launcher subcommand in `ling-rs` (no Codex patch; a client install has no Python, so it is Rust). It prints nothing but MCP frames on stdout, and keeps a ledger (§5.3) under `$CODEX_HOME/claude-plugin/`.
+`ling delegate mcp` prints nothing but MCP frames on stdout, and keeps a ledger (§6.3) under `$CODEX_HOME/claude-plugin/`.
 
 | Tool | Model? | What it does | What Claude receives |
 |---|---|---|---|
 | `lookup` | **no** | `ling-code def/refs/callers/impl/search` and `rg` (literal or regex) over a stated scope | Hits as `{path, start, end, quote}`, every quote read back from the file by the server; for zero hits, "no literal match for `X` in scope `Y` (N files searched)", a fact about the string, not about the concept |
-| `ask` | yes | `ling exec --ephemeral -s read-only -C <repo> --output-schema ask.schema.json` on one question about code, files, logs or session rollouts | `{status, answer (≤120 words, a hint), evidence[{path, start, end, quote, why}], searched[], confidence, full_output}`; each quote verified (§5.2) |
-| `task` | yes | One whitelisted change by `ling exec -s workspace-write` in a fresh worktree, then the class's checks run by the server | The diff (≤8,000 tokens, else its path and a refusal for that class), the checks' facts (§5.2), the policy findings, Mightling's own summary marked unverified |
+| `ask` | yes | `ling exec --ephemeral -s read-only -C <repo> --output-schema ask.schema.json` on one question about code, files, logs or session rollouts | `{status, answer (≤120 words, a hint), evidence[{path, start, end, quote, why}], searched[], confidence, full_output}`; each quote verified (§6.2) |
+| `task` | yes | One whitelisted change by `ling exec -s workspace-write` in a fresh worktree, then the class's checks run by the server | The diff (≤8,000 tokens, else its path and a refusal for that class), the checks' facts (§6.2), the policy findings, Mightling's own summary marked unverified |
 | `night` | yes | `queue`: `ling night add --test <cmd> --best-of N <task>` in the repository; `fetch <id>`: the chosen `night/<id>` branch, re-checked by the server exactly as `task` | `queue`: the task id. `fetch`: the same shape as `task`, plus the chooser's `why` |
 | `watch` | **no** | Waits for one condition and returns once | `{met, observed, at}`: the exit code, the matching line verbatim, the status seen |
 
 **The brief** for `ask` and `task` is a template, never free prose, because Claude's output costs five times its input:
 
 ```
-CLASS: <one whitelisted class, §5.1>
+CLASS: <one whitelisted class, §6.1>
 GOAL: <one sentence>
 SCOPE: <paths>
 DONE WHEN: <the check: a command, or for ask what counts as an answer>
 LIMITS: <files that must not change; at most n evidence items>
 ```
 
-The server refuses a brief whose `CLASS` is not active (or on probation, which runs as shadow, §5.3), whose `DONE WHEN` names no command for a `task`, or whose scope includes an excluded path (§5.1).
+The server refuses a brief whose `CLASS` is not active (or on probation, which runs as shadow, §6.3), whose `DONE WHEN` names no command for a `task`, or whose scope includes an excluded path (§6.1).
 
 **`watch` conditions** (closed list; no free-form script): a process id exits; a file contains a line matching a pattern; a command from an allowlist (`git`, `gh run view`, `ling night show`, `ling-admin night status`, `systemctl --user is-active`, `curl` to loopback) reaches a given exit code or prints a pattern, polled at an interval of 15 s or more; a URL on loopback, or on a node by name, returns a status; a `task` or `night` id finishes; a git ref moves. The same code runs as `ling delegate watch …` from a shell, so an agent can also start it with Claude Code's background shell and be woken by its completion.
 
-### 3.3 The skill `delegate`
+### 4.3 The skill `delegate`
 
 `skills/delegate/SKILL.md`, one-sentence description: "Hand a whitelisted task to the local Mightling; quotes and checks are verified, prose is a hint." The body holds:
 
@@ -159,53 +229,54 @@ The server refuses a brief whose `CLASS` is not active (or on probation, which r
 - **When to use which tool:** the break-even rule of §2.4; `watch` for every wait longer than a minute.
 - **The active classes**, read at session start from `ling delegate classes --json` (the ledger's current state), not written into the skill, so a demotion takes effect at once.
 - **The brief template**, and the fallback rule: on `busy`, a refusal or a failed check, do the task yourself, with no retry.
-- **Precedence.** A user's own instructions about exploration tools win. On the owner's machine the global instructions already route single lookups to another code-navigation tool and multi-step lookups to "ling-delegate"; the install step suggests replacing that name with this plugin's `ask`. The user decides.
+- **The practices of §3**, in five lines.
+- **Precedence.** A user's own instructions about exploration tools win. On the owner's machine the global instructions route single lookups to another code-navigation tool and multi-step lookups to `ling-delegate`, which does not exist (D14); the install step suggests replacing that name with this plugin's `ask`. The user decides.
 
 **The loop-back problem.** Mightling's skills planner links `~/.claude/skills` into `ling`'s catalogue. A plugin skill lives under Claude Code's plugin cache, not there, so it is not linked; P1 still adds `delegate` to the planner's built-in exclusions, so `ling` is never told to delegate to itself.
 
-### 3.4 The subagent types
+### 4.4 The subagent types
 
 - **`mightling:delegate`** (`agents/delegate.md`): `tools` lists only the five `mcp__plugin_mightling_mightling__*` tools and `Read`. A coordinator gives it a brief; it calls the tools, checks the facts, and returns at most a page. Its point is the context it does not inherit: it starts fresh, so its waiting and its tool results never enter the coordinator's 500K context. (Plugin subagents may not set `mcpServers`, `hooks` or `permissionMode`, so the plugin's server must be enabled for the session, which installing the plugin does.)
-- **`mightling:diff-reviewer`** (`agents/diff-reviewer.md`): no tools. Its prompt is the brief, the diff and the checks' output, nothing else (§5.2).
+- **`mightling:diff-reviewer`** (`agents/diff-reviewer.md`): no tools. Its prompt is the brief, the diff and the checks' output, nothing else (§6.2).
 
-### 3.5 Hooks: outcomes only
+### 4.5 Hooks: outcomes only
 
-`hooks/hooks.json` has one `PostToolUse` hook on `Bash` that matches `git commit`, `git merge`, `git revert` and `git apply`, and runs `ling delegate record` to attribute commits to accepted delegations by patch id (§5.3). It never changes a tool call and adds no text to Claude's context. No hook routes work.
+`hooks/hooks.json` has one `PostToolUse` hook on `Bash` that matches `git commit`, `git merge`, `git revert` and `git apply`, and runs `ling delegate record` to attribute commits to accepted delegations by patch id (§6.3). It never changes a tool call and adds no text to Claude's context (D11).
 
 ---
 
-## 4. Where it runs
+## 5. Where it runs
 
-### 4.1 On a node, and on a client
+### 5.1 On a node, and on a client
 
 - **On a node** (a machine with `~/.config/dreamference/node-id`), `ling` uses loopback.
 - **On a client** (a laptop with Claude Code and a checkout), the MCP server runs on the client, and the local `ling` finds the model server through the launcher's tiers: `DREAMFERENCE_VLLM_HOST`, `MIGHTLING_NODE`, the node remembered in `$CODEX_HOME/node.json` (found again by id), then an mDNS browse. The plugin passes `userConfig.node` as `MIGHTLING_NODE` when set. It never stores or passes an address.
 - **`task` runs beside the code**, on the machine where Claude Code's checkout is: `ling exec` there, the model on the node. The alternative, a job on the node through `node run`, is rejected for P2: the code and the toolchain the checks need are on the client, and a node job has the home folder hidden and no GPU.
-- **`night` runs where the repository's Night Shift runs.** On a client, `/night add --on <node>` runs a task once (`--best-of` with `--on` is refused today, spec §18.8), so best-of-N from a client is a P3 change (§8). Until then, `night` from a client is refused for classes whose evidence is best-of-3.
+- **`night` runs where the repository's Night Shift runs.** On a client, `/night add --on <node>` runs a task once (`--best-of` with `--on` is refused today; `--on` is MIGHTLING_NODE §18.8), so best-of-N from a client is a P3 change (§9). Until then, `night` from a client is refused for classes whose evidence is best-of-3.
 
-### 4.2 Concurrency and latency
+### 5.2 Concurrency and latency
 
-- The model server serves 8 requests at once. The plugin holds at most `max_parallel` (default 2) delegations per machine, with a lock file under `$CODEX_HOME/claude-plugin/`.
+- The model server serves 8 requests at once. The plugin holds at most `max_parallel` (default 2) delegations per machine, with a lock file under `$CODEX_HOME/claude-plugin/`; the monitor's digest holds at most one more (§7.6).
 - Expected times: `lookup` under 2 s; `ask` 30–120 s; `task` 5–30 min. A `task` is best called from a `mightling:delegate` subagent running in the background, whose completion is the coordinator's next turn, so the wait costs the coordinator no calls.
 
-### 4.3 When the model is busy
+### 5.3 The busy check (shared with the monitor)
 
 Before any model call, in this order, all within about 3 s:
 
 1. **The runner lock** (`$CODEX_HOME/night/runner.lock`, on a node): held by a SWE-bench run → that node is busy. Held by Night Shift → go ahead; Night Shift gives way to outside requests.
-2. **The model gate:** a one-token completion with a 3 s timeout. A 503 from the gate (which answers 503 with `Retry-After: 0` to requests from outside a running benchmark's network) → busy. The plugin sends no retry; `ling` itself would retry about 30 times, so the plugin never starts `ling exec` against a gate that refused.
-3. **Another node:** `ling node list --json` names the nodes on the network; the plugin uses another one only if it serves the same model (by `/v1/models`, matched with `model_key_for_served_id`), is not advertising `state=stopped`, and is not one the owner reserved (`[claude_plugin] exclude_nodes`, by name; the node kept for engine development goes there). A paired node is reached through `NodePairing.resolve`, by id.
-4. **Otherwise** the tool answers `{"status": "busy", "reason": "benchmark running on <node>, until about <time>"}`, and the skill tells Claude to do the work itself.
+2. **The model gate:** a one-token completion with a 3 s timeout. A 503 from the gate (which answers 503 with `Retry-After: 0` to requests from outside a running benchmark's network) → busy. No retry is sent; `ling` itself would retry about 30 times, so neither part ever starts `ling exec` against a gate that refused.
+3. **Another node:** `ling node list --json` names the nodes on the network; another one is used only if it serves the same model (by `/v1/models`, matched with `model_key_for_served_id`), is not advertising `state=stopped`, and is not one the owner reserved (`[claude_plugin] exclude_nodes`, by name; the node kept for engine development goes there). A paired node is reached through `NodePairing.resolve`, by id. *The monitor skips this step: its digest is not worth another node's time.*
+4. **Otherwise** the plugin's tool answers `{"status": "busy", "reason": "benchmark running on <node>, until about <time>"}`, and the skill tells Claude to do the work itself; the monitor writes "digest skipped: model reserved" and runs its deterministic checks only.
 
-`lookup` and `watch` skip all of this: they use no model.
+`lookup`, `watch` and the monitor's checks skip all of this: they use no model.
 
 ---
 
-## 5. Quality guarantees
+## 6. Quality guarantees
 
-### 5.1 The capability map
+### 6.1 The capability map
 
-A class is on the whitelist only if (1) there is measured evidence that Mightling does work of this kind, (2) a machine can check the result, and (3) a wrong result is cheap to detect before it lands. **No class has a measured acceptance rate yet**; the evidence column says what supports trying it, and every model-backed class starts on probation (§5.3).
+A class is on the whitelist only if (1) there is measured evidence that Mightling does work of this kind, (2) a machine can check the result, and (3) a wrong result is cheap to detect before it lands. **No class has a measured acceptance rate yet**; the evidence column says what supports trying it, and every model-backed class starts on probation (§6.3).
 
 | Class | Tool | Evidence that supports it | Objective check | Starts |
 |---|---|---|---|---|
@@ -214,7 +285,7 @@ A class is on the whitelist only if (1) there is measured evidence that Mightlin
 | L3 Log and rollout summaries with quotes | `ask` | None measured; the reading half is L2's, and the deterministic extract carries the facts | Deterministic extract first (failing tests, errors with file:line, exit code); model excerpts verified | probation |
 | W1 Waiting and monitoring | `watch` | No model | The plugin observes the condition | **active** |
 | T1 Lint, typing and format fixes | `task` | Mechanical; the gates are the oracle | ruff/mypy counts per file only fall; tests pass; no other file changes | probation |
-| T2 Test-only CI fixes | `task` | The single-run SWE-bench resolve rate, 68/100 (round `im100-default`) and 22/50 to 26/50 on fresh tasks; 31/50 with best-of-3 (night 13, p = 0.022) | The failing CI test passes; the rest of the suite still passes by name; the assertion rules below | probation |
+| T2 Test-only CI fixes | `task` | The single-run SWE-bench resolve rate, 68/100 (round `im100-default`) and 22/50 to 26/50 on fresh tasks; 31/50 with best-of-3 (night 13, p = 0.022) | The failing CI test passes; the rest of the suite still passes by name; the assertion rules of §6.2 | probation |
 | T3 Mechanical refactors with tests | `task` | As T2; the change is defined by a rule, not by judgement | Existing tests pass unchanged; no test file touched; the diff is the stated rule (rename, move, signature) | probation |
 | T4 Docs updates checked against the code | `task` | As L2 for the reading half | Every changed docs line that names code cites a `lookup`-verifiable path or symbol; the docs build and docs tests pass | probation |
 | T5 Small UI items with e2e tests | `task` | The weakest evidence: none measured on UI | The named e2e test passes, and the rest of the UI suite by name | probation, last |
@@ -228,9 +299,9 @@ A class is on the whitelist only if (1) there is measured evidence that Mightlin
 - **Releases and history**: tags, version bumps, changelogs, publishing, rebases, history rewrites, force pushes, merges into the main branch.
 - **Anything without an objective check**: a task whose `DONE WHEN` cannot be a command (or, for `ask`, verifiable quotes).
 
-### 5.2 Verification per class
+### 6.2 Verification per class
 
-**Quotes (L1–L3, T4).** The server reads each cited file and checks that the quote equals its text at the cited lines (whitespace runs normalised, nothing else) and that the path is inside the scope. A failing item is removed and counted; with no item left the status becomes `unverified`. Claude builds only on quotes; the answer sentence is a hint. Claude also checks that the quotes answer *its* question: a verified quote can still answer a different one, and P0 counts those cases by hand.
+**Quotes (L1–L3, T4; and the monitor's digest, §7.4).** The verifier reads each cited file and checks that the quote equals its text at the cited lines (whitespace runs normalised, nothing else) and that the path is inside the scope. A failing item is removed and counted; with no item left the status becomes `unverified`. Claude builds only on quotes; the answer sentence is a hint. Claude also checks that the quotes answer *its* question: a verified quote can still answer a different one, and P0 counts those cases by hand.
 
 **Logs (L3).** The full output is saved and its path returned. A deterministic extract comes first, by rule: failing test names with their assertion lines (pytest, cargo test, ctest, npm), compiler errors with file:line, the exit code, the last 40 lines. The model adds at most 150 words and verified excerpts. Below 1,500 tokens of extract, no model is called.
 
@@ -247,33 +318,33 @@ Then **the diff review**: Claude starts `mightling:diff-reviewer` with the brief
 
 **Waiting (W1).** `watch` returns what the plugin observed: the exit code, the line that matched (verbatim, with its file and line number), the HTTP status, the time. No model is involved, so the result is a fact.
 
-### 5.3 Routing by measured success
+### 6.3 Routing by measured success: probation, promotion, demotion
 
-**The ledger.** Every delegation appends one record to `$CODEX_HOME/claude-plugin/ledger.jsonl`: class, tool, repository (a hash of its path), node, times, Mightling's token counts, the Claude tokens spent on the brief, the result and the review (from Claude Code's usage records for that turn, when the hook can see them; otherwise estimated from sizes), the verification outcome, the review verdict, and, for an applied diff, its `git patch-id --stable`. No content: no brief text, no code, no answer.
+**The ledger.** Every delegation appends one record to `$CODEX_HOME/claude-plugin/ledger.jsonl`: class, tool, repository (a hash of its path), node, times, Mightling's token counts, the Claude tokens spent on the brief, the result and the review (from Claude Code's usage records for that turn, read with the monitor's transcript reader; otherwise estimated from sizes), the verification outcome, the review verdict, and, for an applied diff, its `git patch-id --stable`. No content: no brief text, no code, no answer.
 
-**Outcomes per delegation:** *accepted* (verified, reviewed, applied or used); *rejected by verification* (a check, a policy rule or the quote check failed); *rejected by review*; *reverted later* (the hook of §3.5 sees a `git revert` of a commit carrying an accepted patch id, or a later commit whose patch id is its inverse, within 30 days); *shadow miss* (§ below).
+**Outcomes per delegation:** *accepted* (verified, reviewed, applied or used); *rejected by verification* (a check, a policy rule or the quote check failed); *rejected by review*; *reverted later* (the hook of §4.5 sees a `git revert` of a commit carrying an accepted patch id, or a later commit whose patch id is its inverse, within 30 days); *shadow miss* (below).
 
 **States of a class:** `probation` → `active` → `demoted` (→ `probation` again only by the owner's command).
 
-- **Probation is shadow mode.** Claude does the task itself as it would without the plugin; Mightling's result is produced in the background (a `mightling:delegate` subagent) and compared, and is never used. Comparison per class: L2/L3, Claude's own answer's file:line is among the verified evidence and the reviewer judges the answers equivalent; T-classes, both diffs pass the same checks and the reviewer, given both, judges them equivalent in effect. Probation costs tokens (both runs) and saves none; it is the price of the evidence.
-- **Promotion** needs at least 20 shadow comparisons with at most one non-severe disagreement and no *severe* one: a result that passed every check and the review but was wrong by Claude's own result. Promotion is proposed by `ling delegate classes`, and the owner confirms it (`ling delegate promote <class>`).
+- **Probation is shadow mode.** Claude does the task itself as it would without the plugin; Mightling's result is produced in the background (a `mightling:delegate` subagent) and compared side by side, and is never used. Comparison per class: L2/L3, Claude's own answer's file:line is among the verified evidence and the reviewer judges the answers equivalent; T-classes, both diffs pass the same checks and the reviewer, given both, judges them equivalent in effect. Probation costs tokens (both runs) and saves none; it is the price of the evidence.
+- **Promotion** needs **at least 20 shadow comparisons** in the class with at most one non-severe disagreement and no *severe* one: a result that passed every check and the review but was wrong by Claude's own result. Promotion is proposed by `ling delegate classes`, and the owner confirms it (`ling delegate promote <class>`).
 - **Active classes keep a 10% shadow sample**, so a drift is seen.
 - **Automatic demotion**, written by the server, effective at the next tool call:
-  - at once, on any *reverted later* or *shadow miss* in the class;
-  - when acceptance over the last 20 delegations falls below 60%: below that, the failed attempts' cost eats the saving (§5.4);
+  - at once, on **any** *reverted later* or *shadow miss* in the class;
+  - when **acceptance over the last 20 delegations falls below 60%**: below that, the failed attempts' cost eats the saving (§6.4);
   - when the class's measured net saving over the last 20 is not positive.
 - **A model change resets all model-backed classes to probation.** The evidence belongs to the model that produced it, so a different `model_key_for_served_id`, or a new `ling` minor version, starts the classes again.
-- `ling delegate classes` prints the table (state, n, acceptance, reverts, net saving); the skill reads its JSON form.
+- `ling delegate classes` prints the table (state, n, acceptance, reverts, net saving); the skill reads its JSON form. A demotion also raises a monitor alert (§7.5).
 
-### 5.4 Fallbacks and honest accounting
+### 6.4 Fallbacks and honest accounting
 
 - On `busy`, a refusal, a timeout, a failed check or a `REJECT`, Claude does the task itself, at once, with no retry and no second delegation of the same task.
 - The ledger charges the failed attempt to the class: the Claude tokens of the brief, of reading the result and of the review, plus the time. The **net saving** of a class is Σ(counterfactual − actual) over its delegations, where the counterfactual is the class's median Claude cost for doing the task alone, measured in its shadow runs, and the actual includes every failed attempt's cost and the fallback's own cost.
 - What Mightling spends is free in Claude tokens but not in time or power; the ledger records its wall time so the owner can see the trade.
 
-### 5.5 Evaluation before rollout (the replay set)
+### 6.5 Evaluation before rollout: the replay set
 
-**Units**, extracted by a P0 script that reads the transcripts where they are and writes the set to `~/.local/share/dreamference/claude-plugin/replay/` (outside every repository; nothing of it is committed, and the spec and reports carry aggregates only):
+**Units**, extracted by a P0 script (the monitor's transcript reader, run once over history) that reads the transcripts where they are and writes the set to `~/.local/share/dreamference/claude-plugin/replay/` (outside every repository; nothing of it is committed, and the spec and reports carry aggregates only):
 
 - **Exploration units** for L1/L2: the 197 search-and-read runs of three or more calls (§2.2), plus a stratified sample from earlier nights to reach 150. For each, a reader writes the question the run answered and the answer it reached; that conclusion, from the run itself, is the reference.
 - **Log units** for L3: the runs that read a large output (a test log, a rollout, a report) to answer a question; the same reference method.
@@ -292,72 +363,168 @@ Then **the diff review**: Claude starts `mightling:diff-reviewer` with the brief
 
 ---
 
-## 6. Coordinator practices that cut tokens without the plugin
+# Part B — the session monitor
 
-These are the larger lever (§0.5). They belong in the coordinator's own instructions, and the skill repeats them.
+## 7. The session monitor
 
-1. **Retire an agent whose context passes ~300K.** It writes a one-page hand-off note (state, decisions, open items, paths), and a fresh agent continues from the note and a short brief. In the night measured, 38% of calls ran above 300K and carried 74% of the price-weighted cost.
-2. **Cap concurrent expensive agents at 8–10.** The night peaked at 16 in one 10-minute window. More agents than the owner can follow produce more waiting, more idle gaps past the cache's lifetime, and more contexts kept alive only to be rewritten.
-3. **Wait with a watcher that wakes the agent once, on a real result.** A background shell command (or the plugin's `watch`) that ends when the condition holds, never a `sleep` loop of agent turns. Any turn after more than five idle minutes rewrites the whole context into the cache.
-4. **Prefer a fresh short brief to resuming a long history.** A status check or a follow-up question goes to a fresh agent with the facts it needs, not to the 800K agent that did the work.
+`ling monitor` watches every agent on the node and writes down, in a page the coordinator can read in one call, what needs attention. It answers the questions a coordinator now answers by re-reading logs and waking agents, which is where the idle-wake rewrites of §2.1 come from.
 
-**Estimated savings on the measured night** (replaying its 4,392 responses under each rule; the rules overlap, so they do not add):
+### 7.1 Inputs, read-only
 
-| Practice | Saving of price-weighted cost | Assumption |
+| Source | Where | What it gives |
 |---|---|---|
-| Waiting runs collapsed to one wake-up each (3) | **≈ 25%** | One call per waiting run (169 runs, 329 calls) instead of several |
-| Retirement at 300K, fresh agent at 60K (1, 4) | ≈ 30% (lower bound) | Only cache *reads* scale with the smaller context |
-| The same, if cache *rewrites* scale too | ≈ 69% (upper bound) | A wake-up after a gap rewrites 60K–300K instead of up to 900K |
-| Both together | 53–74% | The range between the two assumptions, before the recovery cost |
+| Claude Code sessions | `~/.claude/projects/<project>/<session>.jsonl` | The coordinator's own turns, its usage, its background tasks |
+| Claude Code subagents | `~/.claude/projects/<project>/<session>/subagents/agent-<id>.jsonl` and `.meta.json` | Each subagent's turns and usage; its type, task description and spawn depth |
+| Background task outputs | The output files a session's background shells and subagents write, as the session's transcript names them | The last lines of a running wait or build |
+| `ling` sessions | `$CODEX_HOME/sessions/**/rollout-*.jsonl` | Mightling's own interactive and `exec` sessions: turns, tool calls, token counts, compactions |
+| Night Shift | `$CODEX_HOME/night/tasks/*.json`, the per-attempt `logs/`, the runner lock, `systemctl --user` state of `mightling-night.timer` | Queue, the task running, its attempt and window, its rollout |
+| Git, read-only | `git log` in the repositories the transcripts' `cwd` names | Commits made since the last check, for the rule checks |
 
-The fresh agent's cost of recovering context (re-reading files it needs) is not modelled. It is paid once per retirement against rewrites paid on every late wake-up. A **planning figure of 40–50%**, after the recovery cost and imperfect adherence, is defensible; the replay of §5.5 and a week of the practices measure it. Delegation through the plugin adds to this, on a smaller base: the search-and-read runs it can take are 11.7% of the cost, so at most about 5–7% more once the practices are in place.
+Every file is opened read-only; the monitor never locks, rotates, renames or writes anything under these paths (D6). It keeps a byte offset per file in its own state and reads only what was appended since the last check; a file that shrank or was replaced is read again from the start.
+
+**The format is not a contract.** Claude Code's transcript format is undocumented and changes between versions. The reader uses a handful of fields (`type`, `timestamp`, `message.id`, `message.usage`, `message.content` blocks of `tool_use`, `tool_result` with `is_error`, `text`, and the `error` and `isApiErrorMessage` fields of an API error) and skips every line type it does not know. It counts the lines it could not class; when that share passes 5% in a check, it raises one `format-drift` alert naming the Claude Code `version` seen, and the checks that depend on the missing fields report "unknown" rather than a guess. Responses are deduplicated by `message.id` (§2).
+
+### 7.2 The agent table
+
+Each check rebuilds one row per agent seen in the last 24 hours: its kind (coordinator, subagent, `ling` session, Night Shift attempt), its ordinal in the session (`#7`), its type, its parent, the time of its last line, its current context, its state (`working`, `tool running`, `waiting`, `idle`, `finished`, `stopped by limit`), the pending tool call if any, and the counts of §7.3. The table is the input to every check and to the digest; it holds no message text.
+
+### 7.3 Deterministic checks (plain code, no model)
+
+Thresholds are defaults in `[monitor]` of the user's config (`~/.config/dreamference/config.toml`), never in a repository.
+
+| # | Check | How it is decided | Default thresholds | Goes to |
+|---|---|---|---|---|
+| C1 | **Context size** per agent | Context of the agent's last response = input + cache writes + cache reads | Claude Code agents: **warn at 250K**, **hand-off due at 300K** (§3, practice 1). `ling` sessions: warn at 80% of the served `max_model_len`, and note each compaction | Summary; an alert only when a hand-off has been due for an hour |
+| C2 | **Idle and stall** against the stated wait | The agent's *stated wait* is read from its pending `tool_use` (no `tool_result` yet) and its command pattern: a CI run (`gh run watch`, `gh run view` loops), a Night Shift window (`ling night`, the runner lock), a GPU window (a remote job with a stated end), a shell wait (`sleep`, `until`, `timeout`), a background subagent. Expected durations per kind (§0.1, question 4). A *stall* is no new transcript line for 1.5 × the expected duration while a wait is pending, or for 20 min with none pending and no live child process | CI 30 min, night until the window's end, GPU window until its end, shell wait 15 min, subagent 60 min | Summary; an alert for a stalled coordinator or a stuck night |
+| C3 | **Usage limits** (HTTP 429) | An API error line with `error: "rate_limit"`. The kind is parsed from the message (a session limit, a weekly limit, a monthly spend limit) and the reset time ("resets <time> (<zone>)") converted to UTC; a spend limit has no reset time and says so. Every agent stopped by the same limit is grouped under it | Any one | Alert at once (one per limit and reset); "lifted" note at the reset time; summary lists the agents stopped |
+| C4 | **Repeated failures and loops** | The same tool returning `is_error` 3 times in a row; the same normalised command (numbers, hashes and temporary paths masked) 5 times in 20 calls with no edit between; the same file read 4 times in 20 calls | As stated | Summary; an alert after 2 consecutive checks |
+| C5 | **Rule violations** | (a) a commit since the last check whose author is not `[monitor.rules] commit_author`, or that carries a trailer matching `[monitor.rules] forbidden_trailers`; (b) a pre-push refusal in a tool result (the repository's anonymity hook prints a fixed refusal line); (c) a test run that wrote into the real home: the suite's own guard messages from `tests/conftest.py` in a tool result, or a file under the real `~/.local/bin` or directly under the real `HOME` that changed during a test command and outside any build or install command in the same window | The owner's rules (author identity, trailers) live only in the user's config | Alert at once for (a) and (c); summary for (b), alert if the same push is refused twice |
+| C6 | **Reported and awaiting an answer** | The agent's last entry is a text turn with no pending tool call, and nothing followed for 10 min: a subagent whose result the coordinator has not acted on, or a coordinator whose last turn ends with a question to the owner | 10 min; 30 min for the coordinator's question | Summary; an alert for the coordinator's question after 30 min |
+| C7 | **Tokens per agent per hour** | From `message.usage`, deduplicated: input, cache reads, cache writes, output, and the price-weighted total (§2 weights). An **idle-wake rewrite** is a response that wrote more than half its context into the cache 5 min or more after the agent's previous response; its count and cost are called out per agent and in total | None; it is a measurement | Summary (top agents, the hour's idle-wake share); the weekly figures of §7.7 |
+
+For `ling` sessions and Night Shift the same checks apply where they mean something: C1 against the model's window, C2 (a night task past its window, an attempt with no rollout progress for 30 min, a runner lock held by no live process, a timer that did not start at the window), C4, and C7 in local tokens (no price). C3 does not apply; the model gate's refusals are counted under C4.
+
+### 7.4 The local model, only where reading is needed (M1)
+
+Two jobs need reading, and only these use Qwen through `ling`:
+
+- **A digest per agent** active in the last hour: what it is doing, in at most 25 words, and whether it looks `progressing`, `waiting`, `stuck`, `done` or `unclear`. Input: the agent's row from the table, its facts from §7.3, and its last entries cut to about 16K tokens. Run as `ling exec --ephemeral -s read-only --output-schema digest.schema.json`, with no tools needed beyond reading the excerpt file it is given.
+- **Labels for unusual log lines**: lines in tool results that no deterministic rule matched but that look like trouble (a non-zero exit, `error`, `Traceback`, `panicked`, `FAILED`), classed into a closed set: `benign`, `environment`, `test failure`, `build failure`, `network`, `permission or sandbox`, `limit`, `unknown`.
+
+**Every model statement carries a quote from the log** (`{file, line, quote}`), checked by the quote verifier of §6.2 against the transcript; a statement whose quote fails is dropped and counted, and a digest with no verified quote is shown as "no digest". **The deterministic facts stay authoritative** (D12): if the digest says `progressing` while C2 says stalled, or `stuck` while a tool is running inside its expected wait, the summary shows the fact, marks the digest as contradicted, and the disagreement count feeds M1's gate.
+
+**Budget.** At most 12 agents per hourly run, one call at a time, each about 16K tokens in and 300 out. The busy check of §5.3 runs first; when the node's model is reserved by a SWE-bench night the digest is skipped and the summary says so (D4).
+
+### 7.5 Outputs
+
+**The summary** (`$CODEX_HOME/monitor/summary.md`, and `summary.json` with the same content for programs), rewritten whole at every check (written to a temporary file and renamed), capped at 1,500 tokens:
+
+1. Open alerts, newest first.
+2. Waiting for an answer (C6).
+3. Stalled or looping (C2, C4).
+4. Over the context thresholds (C1), with the hand-offs due.
+5. Usage limits and their reset times (C3).
+6. The last hour: agents active, the top five by price-weighted tokens, the idle-wake rewrite share (C7).
+7. Digests (M1), each with its quote, for Claude Code agents; facts only for `ling` sessions and Night Shift (D13).
+
+The coordinator reads it at each check-in (practice 5), in place of re-reading agent outputs and transcripts.
+
+**Owner alerts** run `[monitor] notify_command` with the message as its argument; on the owner's machine that is `~/.local/bin/owner-notify`, the Telegram bot. Alert kinds: usage limit hit and lifted (C3); repeated failures and loops (C4); rule violations (C5); a stalled coordinator (C2); a stuck night (C2 for Night Shift); a release published or failed (seen in the transcripts, §0.1 question 3); a plugin class demoted (§6.3); a format drift (§7.1).
+
+- **Fixed templates of facts** (D13), for example `usage limit (session) hit; 6 agents stopped; resets 21:00 UTC` or `agent #12 (general-purpose) stalled 47 min in a CI wait`. No transcript text, no digest, no task description (§0.1, question 1).
+- **Deduplicated**: one alert per kind, subject and episode; an episode ends when its condition clears, and only then can the same alert fire again.
+- **Rate-limited**: at most one alert per kind and subject per hour, and at most 6 alerts per hour in all; beyond that, one message saying how many more are in the summary.
+- **Never an alert on missing input**: a transcript that cannot be read is reported in the summary.
+
+**A status page in `ling web`** (M2, optional): a read-only `/monitor` page that renders `summary.json`, on `ling web`'s loopback port, with the route added to `ling-rs/web/policy.json` so the desktop app and `ling web` enforce the same rule. It shows the same entries as the summary, facts-only for the user's own sessions unless they opt in to digests there.
+
+### 7.6 Runtime
+
+- **Two user units**, installed by `ling monitor enable` and removed by `ling monitor disable`; off until enabled. `mightling-monitor.timer` runs `ling monitor check` every 5 minutes (the deterministic checks, the summary, the alerts); `mightling-monitor-digest.timer` runs `ling monitor digest` hourly (M1).
+- **Bounded beside the model server** (host safety): both service units set `MemoryMax=512M`, `Nice=10` and idle I/O priority; a check is expected to finish in under 10 s by reading only appended bytes; the digest holds one model call at a time and sits inside the 8 requests the server serves.
+- **No model when the model is reserved** (D4): the digest's busy check skips it; `ling monitor check` never calls a model.
+- **State** under `$CODEX_HOME/monitor/`: offsets, the agent table, open alerts and their episodes, digests (kept 7 days) and hourly facts (kept 30 days), all written by the monitor alone.
+- `ling monitor status` prints the summary; `ling monitor check --once` runs one check by hand; `ling monitor doctor` reports the paths it reads, the Claude Code version seen and the share of unclassed lines.
+
+### 7.7 Measured value
+
+**The comparison.** One week with the monitor and practice 5 in the coordinator's instructions, against the corrected baseline (§2: on 2026-10-26, 38 agents, 4,392 calls, about 1.35 B input tokens, and 39% of the price-weighted cost in cache rewrites after idle wakes) and against the week before the monitor, measured by the monitor's own C7 over both weeks (its reader runs over history as well as live).
+
+**Metrics:**
+
+- The **coordinator's** price-weighted tokens per active hour and per finished task (a merged branch or a closed brief), the headline figure the owner asked for. The baseline's coordinator-only share is not yet separated from the 38 agents' total; M0's first run computes it from the same transcripts.
+- The coordinator's tokens spent on status reading: reads of agent outputs and transcripts, and agent wake-ups that only asked for status, classed as in §2.2.
+- The idle-wake rewrite share of the whole session (baseline 39%).
+- Detection: the share of usage limits, stalls and rule violations the owner learned of from an alert first, and the alert count per day.
+
+**Confounds.** Weeks differ in workload and in how many practices of §3 were followed; the comparison is per active hour and per finished task, not per week, and the report states the number of agents and tasks beside each figure.
 
 ---
 
-## 7. Privacy and safety
+## 8. Privacy and safety (both parts)
 
-- **Everything stays on the owner's machines.** The plugin calls the local `ling` and the owner's model server; no request leaves for a third party. The ledger holds no content.
-- **No new network exposure.** The MCP server is stdio. A node is found by the launcher's tiers (by name or id; an mDNS browse is the last tier), a paired node through `NodePairing.resolve` and the SSH forced command that already exists. No address is stored or configured, and nothing listens.
+- **Transcripts never leave the node** (D6). The monitor reads them where they are and writes only under `$CODEX_HOME/monitor/`; the plugin's ledger and replay set hold no content (§6.3, §6.5). Digests stay local and are deleted after 7 days.
+- **Nothing writes into a transcript or a session.** The monitor opens every input read-only and never steers, stops or messages an agent (§1). The plugin's hook only records.
+- **What goes out goes as facts.** An owner alert is a fixed template sent by the owner's own notify command (D13). The summary reaches Anthropic through the coordinator that reads it, so its `ling` and Night Shift entries are facts only unless the owner opts in. Neither part sends content to any other service.
+- **Everything else stays on the owner's machines.** The plugin calls the local `ling` and the owner's model server; no request leaves for a third party.
+- **No new network exposure.** The MCP server is stdio and the monitor a timer. A node is found by the launcher's tiers (by name or id; an mDNS browse is the last tier), a paired node through `NodePairing.resolve` and the SSH forced command that already exists. No address is stored or configured, and nothing listens except `ling web`, which already does.
 - **`task` never edits the owner's checkout.** It works in its own worktree under `$CODEX_HOME/claude-plugin/worktrees/`, `ling exec` runs with `-s workspace-write` in Codex's sandbox (bubblewrap, which needs the AppArmor profile from `ling-admin host setup` outside a permissive shell), and the server's checks run through `ling sandbox`. The task's `/airgapped` level is the strictest of the repository's and the user's. Worktrees are removed after the result is taken or after a day.
 - **Claude applies the change.** The plugin never commits to, merges into or pushes any branch of the caller's repository.
 - **`night` adds no new runner.** It queues through `ling night add`, the one writer of task files; the runner, its scope, its memory cap and its sandbox are unchanged.
-- **`watch` runs no free-form script**, only the closed list of §3.2.
-- **The egress audit.** `ling-admin audit egress` gains a `--claude-plugin` run: one `ask`, one `lookup` and one `watch` through `ling delegate mcp`, with the same verdict rules (every connection an allowlisted loopback port or the named node's model port; no DNS query). Its tests stub every model call.
-- **Host safety.** The plugin starts no model server and loads nothing; `max_parallel` bounds what it adds beside a resident model.
+- **`watch` runs no free-form script**, only the closed list of §4.2.
+- **The owner's rules stay out of the repository.** The commit identity and the forbidden trailers the monitor checks (C5) are in the user's config only.
+- **The egress audit.** `ling-admin audit egress` gains two runs: `--claude-plugin` (one `ask`, one `lookup` and one `watch` through `ling delegate mcp`) and `--monitor` (one `check` and one `digest`), with the same verdict rules: every connection an allowlisted loopback port or the named node's model port; no DNS query. The notify command is a separate program the owner configured and is left out of the run; with it unset, the monitor makes no connection beyond the model's. Their tests stub every model call.
+- **Host safety.** Neither part starts a model server or loads a model; `max_parallel`, the digest's single call and the monitor's memory cap bound what they add beside a resident model.
 
 ---
 
-## 8. Product angle: "use your local Mightling from Claude Code"
+## 9. Product angle: "your local Mightling helps your Claude Code"
 
-For a Mightling user who also uses Claude Code, the plugin is a saving in Claude tokens and a privacy gain (the delegated reading stays local). What has to change before it ships:
+For a Mightling user who also uses Claude Code, the plugin is a saving in Claude tokens and a privacy gain (the delegated reading stays local), and the monitor tells them, on their phone or in `ling web`, when an agent of either kind is stuck. What has to change before it ships:
 
-1. **Install.** `ling-admin claude-plugin install` (and an install-time offer, off by default) writes a local marketplace pointing at the plugin folder that the release ships beside the binaries (`~/.local/share/dreamference/mightling/claude-plugin/`), runs `claude plugin marketplace add` and `install` when the `claude` command exists, and prints the two commands otherwise. `ling update` updates the folder; the manifest's `version` follows the release.
+1. **Install.** `ling-admin claude-plugin install` (and an install-time offer, off by default) writes a local marketplace pointing at the plugin folder that the release ships beside the binaries (`~/.local/share/dreamference/mightling/claude-plugin/`), runs `claude plugin marketplace add` and `install` when the `claude` command exists, and prints the two commands otherwise. `ling update` updates the folder; the manifest's `version` follows the release. The monitor is `ling monitor enable`, offered by the same step.
 2. **Gates per repository.** The owner's `[claude_plugin] gates` is hand-written for this repository. Users need detection with confirmation: `ling delegate init` proposes gates from the project's own files (`pytest`, `cargo test`, `npm test`, ruff, mypy, eslint), and nothing runs until the user accepts them.
 3. **Ledgers are per user.** Every user's classes start on probation on their own machine; no class is shipped active except L1 and W1. Shared defaults would export one codebase's evidence to another.
 4. **Best-of-N from a client.** `--best-of` with `--on` must work (the node runs the attempts and the chooser), so `night` works for client installs.
-5. **Windows and macOS clients.** `ling delegate mcp` is Rust like the launcher; the Windows sandbox for `ling exec` and `ling sandbox` must pass the same checks before `task` is offered there.
-6. **Documentation** in the user site, including what is and is not delegated and why.
-7. **Wording.** The product page says what the plugin does for Claude Code users, with the quality mechanism stated; it names Claude Code as the integration target and makes no other claim about it.
+5. **Alerts through the user's messenger** (§0.1, question 6), and the monitor's rules (C5) left empty for users until they set them.
+6. **Windows and macOS clients.** `ling delegate mcp` and `ling monitor` are Rust like the launcher; the Windows sandbox for `ling exec` and `ling sandbox` must pass the same checks before `task` is offered there, and the monitor's timer needs each platform's scheduler.
+7. **Documentation** in the user site, including what is and is not delegated and why, and what the monitor reads and sends.
+8. **Wording.** The product page says what the plugin and the monitor do for Claude Code users, with the quality mechanism stated; it names Claude Code as the integration target and makes no other claim about it.
 
 ---
 
-## 9. Phases, each with a quality gate
+## 10. Phases, each with a gate
 
-**P0 — the replay evaluation.** No plugin yet: the extraction script, the replay set of §5.5 (outside the repository), a minimal `ling delegate ask|lookup` CLI, and one question answered first: whether `--output-schema` reaches SGLang through the local provider and constrains the answer (if not, the server validates the JSON itself, and a non-conformant answer fails open).
-*Gate:* L2 and L3 parity ≥ 95% with zero severe units; W1 replays wake on the same event in every unit; T-class units measured with the change-unit method, with results per class. The owner approves the Claude-token spend before the replay runs.
+Two tracks. **M0 comes first or beside P0**: it needs no model, and its transcript reader produces the §2-style analysis that P0's extraction and P1's gate both use.
 
-**P1 — `ask`, `lookup` and `watch`.** The plugin with the server's three read-only tools, the skill, `mightling:delegate`, the ledger, busy handling (§4.3), the planner exclusion, the egress-audit run, and §6's practices in the coordinator's instructions.
-*Gate:* two weeks of live use: no shadow miss in L2/L3; W1 results equal to the event in every audited case; a transcript analysis like §2 shows the waiting share and the share of calls above 300K both down, and the price-weighted cost per finished task down; no regression in the owner's own merge outcomes over the period.
+### Part A, the plugin
+
+**P0 — the replay evaluation.** No plugin yet: the extraction (the monitor's reader over history), the replay set of §6.5 (outside the repository), a minimal `ling delegate ask|lookup` CLI, and one question answered first: whether `--output-schema` reaches SGLang through the local provider and constrains the answer (if not, the server validates the JSON itself, and a non-conformant answer fails open).
+*Gate:* L2 and L3 parity ≥ 95% with zero severe units; W1 replays wake on the same event in every unit; T-class units measured with the change-unit method, with results per class. The owner approves the Claude-token spend before the replay runs (§0.1, question 10).
+
+**P1 — `ask`, `lookup` and `watch`.** The plugin with the server's three read-only tools, the skill, `mightling:delegate`, the ledger, the busy check (§5.3), the planner exclusion, the egress-audit run, and §3's practices in the coordinator's instructions.
+*Gate:* two weeks of live use: no shadow miss in L2/L3; W1 results equal to the event in every audited case; the monitor's C7 shows the waiting share and the share of calls above 300K both down, and the price-weighted cost per finished task down; no regression in the owner's own merge outcomes over the period.
 
 **P2 — `task` and `night` for the whitelist classes.** Worktrees, the server's checks, the policy rules, the reviewer agent, the revert hook, automatic demotion. T1 first, then T2, T3, T4, T5, then N1; each enters on probation.
-*Gate per class:* promotion as in §5.3 (20 shadow comparisons, no severe miss), positive net saving after failed attempts, and zero reverted delegated changes; any revert demotes the class until the owner reviews it.
+*Gate per class:* promotion as in §6.3 (20 shadow comparisons, no severe miss), positive net saving after failed attempts, and zero reverted delegated changes; any revert demotes the class until the owner reviews it.
 
-**P3 — the product.** §8's changes, the documentation, the release's plugin folder.
+**P3 — the product.** §9's changes for the plugin, the documentation, the release's plugin folder.
 *Gate:* a user who did not write the plugin installs it from a release on a client and on a node; the egress audit passes with it; L1 and W1 work out of the box, every other class starts on probation; the suite's tests cover refusal during a benchmark, the closed `watch` list, and quote verification.
+
+### Part B, the monitor
+
+**M0 — the deterministic monitor and alerts.** The reader, the agent table, checks C1–C7, the summary, the notify command with deduplication and rate limits, the two units (the digest unit installed but idle), `ling monitor status|check|doctor`, practice 5 in the coordinator's instructions.
+*Gate:* (1) a replay over the transcripts since 2026-10-15 finds every usage limit in them with the right kind and reset time, every pre-push refusal, and every agent that passed 300K, with no false usage-limit alert; (2) a week live with at most two false alerts a day, every check under 10 s and 512 MB, and no write under any input path (checked by the tests and by comparing the inputs' modification times around each check); (3) the week's comparison of §7.7 reported, with the coordinator's status-reading tokens down against the week before.
+
+**M1 — the Qwen digest.** The digest and the line labels of §7.4, the quote verification, the contradiction count, the skip on a reserved model.
+*Gate:* 50 digests read by hand: every shown statement's quote verified (by construction) and judged to support the statement in at least 90%; no digest shown as `progressing` for an agent later found stuck for more than an hour; the digest skipped in every hour of a SWE-bench night that week, and that night's timing unchanged; model time under 5 minutes per hour.
+
+**M2 — the product.** The `ling web` status page, `ling` sessions and Night Shift on by `ling monitor enable` for any user, the messenger alert channel, the documentation.
+*Gate:* a user who did not write the monitor enables it from a release; an induced stall of a `ling` session and of a Night Shift task each shows in the summary and the page within one check; the egress audit passes with `--monitor`; the suite's tests cover the reader's tolerance of unknown line types, the read-only inputs, deduplication and rate limits, and the facts-only rule for `ling` entries.
 
 ---
 
-## 10. Risks
+## 11. Risks
 
 | Risk | Effect | Answer |
 |---|---|---|
@@ -365,16 +532,20 @@ For a Mightling user who also uses Claude Code, the plugin is a saving in Claude
 | A diff passes the visible checks and the review but is wrong | A defect lands | Hidden-check units in P0; the shadow sample; demotion on revert; T-classes limited to work with strong checks |
 | Probation never ends for rare classes | No saving in that class | Accepted: a class without evidence is not used |
 | The skill over-delegates | Claude tokens rise | The break-even rule; the ledger's net saving demotes a class that loses |
-| A benchmark night is disturbed | Its timing is wrong | The lock and gate check before any model call; no retries; `lookup` and `watch` use no model |
+| A benchmark night is disturbed | Its timing is wrong | The lock and gate check before any model call, in both parts; no retries; the model-free tools and checks call nothing |
 | The model or `ling` changes | The evidence no longer applies | All model-backed classes return to probation |
-| Practices are not followed | §6's saving is not realised | The P1 gate measures them from the transcripts |
+| Claude Code changes its transcript format | Checks go blind | The reader keys on few fields, skips unknown lines, reports "unknown" and raises a `format-drift` alert (§7.1) |
+| Alerts become noise | The owner stops reading them | Deduplication by episode, rate limits, the M0 gate's false-alert bound |
+| A digest misleads the coordinator | A stuck agent is left alone | Facts are authoritative and shown first; every statement quoted; the M1 gate counts contradictions |
+| Content leaks through an alert or the summary | Transcript text leaves the node | Fixed alert templates of facts; facts-only `ling` entries in the summary; the egress audit's `--monitor` run |
+| Practices are not followed | §3's saving is not realised | The monitor measures them weekly (§7.7) |
 
 ---
 
-## 11. What was measured, and what was not
+## 12. What was measured, and what was not
 
-**Measured** (2026-10-27): the night's cost structure from 4,392 deduplicated responses; the line-count overstatement; cache rewrites after idle gaps; the waiting and search-and-read shares; the share above 300K; the savings replays of §6 under their stated assumptions; the rough distribution of brief classes.
+**Measured** (2026-10-27): the night's cost structure from 4,392 deduplicated responses; the line-count overstatement; cache rewrites after idle gaps; the waiting and search-and-read shares; the share above 300K; the savings replays of §3 under their stated assumptions; the rough distribution of brief classes. Read from the owner's transcripts in aggregate: usage-limit errors appear as API error lines with `error: "rate_limit"`, in three kinds (session, weekly, monthly spend), the first two with a reset time and zone in the text.
 
-**Read from source or documents:** the `ling exec` flags; Night Shift's `--test` and `--best-of` and the refusal of `--best-of` with `--on`; the model gate's 503 behaviour; the launcher's node tiers; Claude Code's plugin layout, tool naming, output limits, stdio timing, monitors and plugin-subagent limits, from its public documentation.
+**Read from source or documents:** the `ling exec` flags; Night Shift's `--test` and `--best-of`, the refusal of `--best-of` with `--on`, its task files and timer; the model gate's 503 behaviour; the launcher's node tiers; Claude Code's plugin layout, tool naming, output limits, stdio timing, monitors and plugin-subagent limits, from its public documentation.
 
-**Not measured:** any acceptance rate of Mightling on these classes; whether `--output-schema` constrains SGLang through the local provider; latency on real delegations; whether the reviewer at a cheaper model reaches the same verdicts; the recovery cost of retiring agents; whether a subscription's limits track the price ratios. The brief classes of §2.3 come from keyword rules checked by eye, and the run boundaries of §2.2 from command patterns; both are estimates.
+**Not measured:** any acceptance rate of Mightling on these classes; whether `--output-schema` constrains SGLang through the local provider; latency on real delegations; whether the reviewer at a cheaper model reaches the same verdicts; the recovery cost of retiring agents; whether a subscription's limits track the price ratios; the coordinator's own share of the baseline's tokens; the monitor's effect on them; the digest's accuracy; the check's run time on a week of transcripts. The brief classes of §2.3 come from keyword rules checked by eye, and the run boundaries of §2.2 from command patterns; both are estimates.
