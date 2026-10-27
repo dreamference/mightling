@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SUITE = ROOT / "scripts" / "messenger_live"
 sys.path.insert(0, str(SUITE))
 
-from mlive import (
+from mlive import (  # noqa: E402
     bridge,
     checks,
     report,
@@ -27,7 +27,7 @@ from mlive import (
     telegram_account,
     telegram_suite,
     voice,
-)  # noqa: E402
+)
 
 NUMBER = "+15550000000"
 
@@ -322,6 +322,8 @@ def test_a_clarifying_question_is_told_from_an_answer(answer, asks):
 def test_attachments_styles_markdown_and_commands():
     assert checks.mentions_attachment("I can't see an image or attachment in your message")
     assert not checks.mentions_attachment("Unix history")
+    assert checks.mentions_attachment("The attached file is empty")
+    assert not checks.mentions_attachment("Each brand attached the word to its products")
     assert checks.signal_styles([{"start": 0, "length": 3, "style": "BOLD"}, "4:2:MONOSPACE"]) == {
         "BOLD",
         "MONOSPACE",
@@ -542,6 +544,58 @@ def test_the_nightly_units_run_the_checkout_at_six_utc():
         in units["mightling-messenger-live.service"]
     )
     assert "OnCalendar=*-*-* 18:00:00 UTC" in units["mightling-messenger-live.timer"]
+    assert (
+        "ExecStart=/usr/bin/python3 -I /srv/checkout/scripts/messenger_live/run.py after-merge"
+        in (units["mightling-messenger-live-after-merge.service"])
+    )
+    assert "OnCalendar=*:0/15" in units["mightling-messenger-live-after-merge.timer"]
+
+
+def test_a_known_failure_is_reported_but_never_alerts(tmp_path):
+    run = report.Run(started=0)
+    known = run.add(
+        report.Result("telegram", "long answer streams", "bridge", "fail", 9.0, 2.0, "grew 0 times")
+    )
+    assert known.severity == "known" and "model server" in known.detail
+    assert run.exit_code() == 0 and not run.alerts() and run.known() == [known]
+    markdown = report.to_markdown(run)
+    assert "PASS" in markdown and "1 known failures" in markdown
+    assert "Known failing (telegram): **long answer streams**" in markdown
+    run.add(report.Result("signal", "long answer streams", "bridge", "pass", 9.0, 2.0))
+    assert "remove it from the list" in report.to_markdown(run)
+
+
+def test_the_release_marker_is_set_by_a_bridge_failure_and_cleared_by_a_green_run(
+    tmp_path, monkeypatch
+):
+    from mlive import gate
+
+    monkeypatch.setattr(gate, "state_dir", lambda: tmp_path / "state")
+    md = tmp_path / "r.md"
+    assert gate.update_marker(3, md, [], {}) == "kept" and not gate.marker_path().exists()
+    assert gate.update_marker(1, md, ["signal: /new"], {"build-key": "k"}) == "set"
+    text = gate.marker_path().read_text()
+    assert f"report: {md}" in text and "signal: /new" in text and "build-key: k" in text
+    assert gate.update_marker(3, md, [], {}) == "kept" and gate.marker_path().exists()
+    assert gate.update_marker(0, md, [], {}) == "cleared" and not gate.marker_path().exists()
+
+
+def test_the_after_merge_check_waits_for_the_installed_build():
+    from mlive import gate
+
+    history = {("c2", "h2"), ("c1", "h2"), ("c1", "h1")}
+
+    def ancestor(a: str, b: str) -> bool:
+        return (a, b) in history
+
+    assert gate.decide({}, [], "k", ancestor)[0] == "init"
+    assert gate.decide({"last_tested": "t"}, [], "k", ancestor)[0] == "idle"
+    state = {"last_tested": "t", "installed": {"key": "k", "commit": "h1"}}
+    assert gate.decide(state, ["c2", "c1"], "k", ancestor)[0] == "wait"
+    assert gate.decide(state, ["c2", "c1"], "other", ancestor)[0] == "wait"
+    state["installed"] = {"key": "k", "commit": "h2"}
+    assert gate.decide(state, ["c2", "c1"], "k", ancestor)[0] == "run"
+    assert gate.decide(state, ["c2", "c1"], None, ancestor)[0] == "wait"
 
 
 def test_the_scratch_bridge_is_paired_and_kept_apart(tmp_path):
@@ -584,3 +638,14 @@ def test_streaming_and_search_order_are_judged():
     )
     assert not checks.searched_first(["curl -s https://kernel.org", "ling-search x"])
     assert not checks.searched_first([])
+
+
+def test_stop_is_judged_by_what_the_answer_had_written():
+    assert checks.stop_kept(["partial\n\n(stopped)"], True)[0]
+    assert not checks.stop_kept(["\N{BIRD} Stopped."], True)[0]
+    assert checks.stop_kept(["\N{BIRD} Stopped."], False) == (
+        True,
+        "nothing written before Stop: the Stopped. notice",
+    )
+    assert checks.stop_kept(["Stopped."], False)[0]
+    assert not checks.stop_kept(["Working on it…"], False)[0]

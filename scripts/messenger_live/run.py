@@ -6,12 +6,15 @@
                                       cloud password (asked there, never kept)
     run.py link-signal --qr PNG       link signal-cli to the owner's Signal (QR, once)
     run.py run [--only telegram|signal] [--take-over] [--signal-night-queue] [--notify]
-    run.py install-timer              the nightly user timer, 18:00 UTC
+    run.py install-timer              the nightly user timer (18:00 UTC) and the after-merge one
+    run.py after-merge                run the suite when origin/main changed the bridges and the
+                                      installed `ling` has the change (the quarter-hourly timer)
 
 `run` writes `<stamp>.json` and `<stamp>.md` (and `latest.*`) under
 `~/.cache/dreamference/messenger-live/reports/` and exits 0 when every bridge check passed, 1 when
 one failed, 3 when a messenger needs the owner (a lost session: re-link). With `--notify`, a
-non-zero exit sends one line through `~/.local/bin/owner-notify`.
+non-zero exit sends one line through `~/.local/bin/owner-notify`. A bridge failure also writes the
+release marker `~/.local/share/dreamference/messenger-live/blocking`; the next green run removes it.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mlive import (
     bridge,
+    gate,
     paths,
     report,
     signal_device,
@@ -39,10 +43,12 @@ from mlive import (
 
 NOTIFY = Path.home() / ".local" / "bin" / "owner-notify"
 UNIT = "mightling-messenger-live"
+AFTER_MERGE = f"{UNIT}-after-merge"
 
 
 def unit_files(run_sh: Path, when: str = "18:00") -> dict[str, str]:
-    """The user units of the nightly run: a oneshot service and its timer (`when` is UTC)."""
+    """The user units: the suite's oneshot service and its nightly timer (`when` is UTC), and the
+    after-merge check's service and its quarter-hourly timer, which starts the suite's service."""
     service = f"""[Unit]
 Description=Mightling's live messenger test (Telegram and Signal; scripts/messenger_live)
 After=network-online.target
@@ -65,19 +71,69 @@ RandomizedDelaySec=120
 [Install]
 WantedBy=timers.target
 """
-    return {f"{UNIT}.service": service, f"{UNIT}.timer": timer}
+    check = f"""[Unit]
+Description=Mightling's live messenger test after a merge that touches the bridges
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I {run_sh.parent / "run.py"} after-merge
+TimeoutStartSec=100min
+Nice=10
+"""
+    check_timer = """[Unit]
+Description=Mightling's live messenger test after a merge, checked every quarter hour
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+"""
+    return {
+        f"{UNIT}.service": service,
+        f"{UNIT}.timer": timer,
+        f"{AFTER_MERGE}.service": check,
+        f"{AFTER_MERGE}.timer": check_timer,
+    }
 
 
 def install_timer() -> int:
-    """Writes and enables the user timer, pointing at this checkout's run.sh."""
+    """Writes and enables the user timers, pointing at this checkout's run.sh and run.py."""
     folder = Path.home() / ".config" / "systemd" / "user"
     folder.mkdir(parents=True, exist_ok=True)
     for name, text in unit_files(Path(__file__).resolve().parent / "run.sh").items():
         (folder / name).write_text(text)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], check=True)
-    print(f"✅ {UNIT}.timer: nightly at 18:00 UTC")
+    for unit in (UNIT, AFTER_MERGE):
+        subprocess.run(["systemctl", "--user", "enable", "--now", f"{unit}.timer"], check=True)
+    print(f"✅ {UNIT}.timer: nightly at 18:00 UTC; {AFTER_MERGE}.timer: every quarter hour")
     return 0
+
+
+def start_suite_unit() -> int:
+    """Starts the suite's service and waits for it (systemd never runs it twice at once)."""
+    done = subprocess.run(["systemctl", "--user", "start", f"{UNIT}.service"], check=False)
+    return done.returncode
+
+
+def after_merge() -> int:
+    """The after-merge check, against the checkout this script lives in."""
+    repo = Path(__file__).resolve().parents[2]
+    return gate.AfterMerge(repo).check(start_suite_unit)
+
+
+def installed_build() -> dict[str, str]:
+    """What the run tests: the installed `ling`'s version and build key."""
+    build = {"build-key": gate.installed_stamp() or "none"}
+    try:
+        version = subprocess.run(
+            [str(bridge.LING), "--version"], capture_output=True, text=True, timeout=30
+        )
+        build["ling"] = version.stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        build["ling"] = "not installed"
+    return build
 
 
 def link_telegram(qr: Path, minutes: float, password_at_terminal: bool) -> int:
@@ -184,7 +240,10 @@ def notify(run: report.Run, md: Path) -> None:
     alerts = run.alerts()
     if alerts:
         names = ", ".join(f"{r.messenger}: {r.check}" for r in alerts[:4])
-        text = f"Live messenger test: {len(alerts)} bridge check(s) failed ({names}). Report: {md}"
+        text = (
+            f"Live messenger test: {len(alerts)} bridge check(s) failed ({names}); "
+            f"1.7.x patch releases blocked ({gate.marker_path()}). Report: {md}"
+        )
     else:
         text = "Live messenger test: " + "; ".join(
             f"{m}: {why}" for m, why in sorted(run.blocked.items())
@@ -198,7 +257,7 @@ def run_suite(
     """Runs the chosen messengers' checks and writes the reports."""
     cache = paths.private_dir(paths.cache_dir())
     reports = paths.private_dir(cache / "reports")
-    run = report.Run()
+    run = report.Run(build=installed_build())
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(run.started))
     if only in (None, "telegram"):
         run_telegram(
@@ -214,6 +273,10 @@ def run_suite(
     print(md_path.read_text())
     print(f"Reports: {json_path} {md_path}")
     code = run.exit_code()
+    failed = [f"{r.messenger}: {r.check}" for r in run.alerts()]
+    marker = gate.update_marker(code, md_path, failed, run.build)
+    if marker != "kept":
+        print(f"Release marker {gate.marker_path()}: {marker}")
     if send_notice and code != 0:
         notify(run, md_path)
     return code
@@ -255,10 +318,17 @@ def main() -> int:
         action="store_true",
         help="keep the bridge's Note to Self messages the harness saw",
     )
-    sub.add_parser("install-timer", help="install the nightly user timer (18:00 UTC)")
+    sub.add_parser(
+        "install-timer", help="install the nightly user timer (18:00 UTC) and the after-merge one"
+    )
+    sub.add_parser(
+        "after-merge", help="run the suite if origin/main changed the bridges and it is installed"
+    )
     args = parser.parse_args()
     if args.command == "install-timer":
         return install_timer()
+    if args.command == "after-merge":
+        return after_merge()
     if args.command == "link-telegram":
         return link_telegram(args.qr, args.minutes, args.password_at_terminal)
     if args.command == "link-signal":

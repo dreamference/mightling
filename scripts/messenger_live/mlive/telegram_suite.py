@@ -544,16 +544,19 @@ class TelegramSuite:
             return
         stop_at = time.monotonic()
         self.driver.stop(topic, int(drafts()[-1][3]["draft"]))
-        kept = self.tracker.wait(
-            lambda: any(checks.stopped(m.text) for m in self.tracker.bot_messages(topic, stop_at)),
-            90,
-        )
+        wrote = bool(checks.growth([e[3]["length"] for e in drafts()]))
+
+        def texts() -> list[str]:
+            return [m.text for m in self.tracker.bot_messages(topic, stop_at)]
+
+        self.tracker.wait(lambda: checks.stop_kept(texts(), wrote)[0], 90)
         self.tracker.pump(QUIET)
+        kept, seen = checks.stop_kept(texts(), wrote)
         late = [e for e in drafts() if e[0] > stop_at + 10]
         session = self.session_for(LONG_PROMPT)
         problems = []
         if not kept:
-            problems.append("no message ending (stopped)")
+            problems.append(seen)
         if late:
             problems.append(f"{len(late)} drafts after Stop")
         if not (session and session.aborted):
@@ -567,7 +570,7 @@ class TelegramSuite:
             "bridge",
             not problems,
             stop_at,
-            "; ".join(problems) or "partial kept as (stopped), turn aborted",
+            "; ".join(problems) or f"{seen}, turn aborted",
         )
 
     def check_two_topics(self, first: int, second: int) -> None:

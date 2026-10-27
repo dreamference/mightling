@@ -380,11 +380,17 @@ class SignalSuite:
             )
             return
         stop_at = self.rpc.send("/stop")
-        kept = self.rpc.wait(lambda: any(checks.stopped(n.text) for n in self.rpc.since(at)), 90)
+        wrote = bool(answer_words)
+
+        def texts() -> list[str]:
+            return [n.text for n in self.rpc.since(at)]
+
+        self.rpc.wait(lambda: checks.stop_kept(texts(), wrote)[0], 90)
+        kept, seen = checks.stop_kept(texts(), wrote)
         session = self.session_for(LONG_PROMPT)
         problems = []
         if not kept:
-            problems.append("no message ending (stopped)")
+            problems.append(seen)
         if not (session and session.aborted):
             problems.append("the session shows no aborted turn" if session else "no session found")
         self.result(
@@ -392,7 +398,7 @@ class SignalSuite:
             "bridge",
             not problems,
             stop_at,
-            "; ".join(problems) or "partial kept as (stopped), turn aborted",
+            "; ".join(problems) or f"{seen}, turn aborted",
         )
 
     def check_hostile(self) -> None:

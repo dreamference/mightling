@@ -24,7 +24,11 @@ CLARIFYING: Final = (
 )
 ATTACHMENT: Final = (
     "attachment",
-    "attached",
+    "you attached",
+    "the attached",
+    "attached file",
+    "attached image",
+    "attached document",
     "can't see an image",
     "cannot see an image",
     "can't see the image",
@@ -154,6 +158,26 @@ def word_count(text: str) -> int:
 def stopped(text: str) -> bool:
     """Says whether a message is a stopped answer the bridge kept (it ends "(stopped)")."""
     return text.rstrip().endswith(STOPPED_MARK)
+
+
+def stop_kept(texts: list[str], wrote: bool) -> tuple[bool, str]:
+    """Judges what a bridge sent after Stop: the partial marked "(stopped)" when the answer had
+    words, else the "Stopped." notice (the bridges send no empty partial).
+
+    Args:
+        texts: The bridge's messages since the question.
+        wrote: Whether the answer's words had reached the messenger before Stop.
+
+    Returns:
+        tuple[bool, str]: Whether it is right, and what was seen or missing.
+    """
+    if any(stopped(text) for text in texts):
+        return True, "partial kept as (stopped)"
+    if wrote:
+        return False, "no message ending (stopped) although the answer had words"
+    if any(text.strip().lstrip("\N{BIRD}").strip() == "Stopped." for text in texts):
+        return True, "nothing written before Stop: the Stopped. notice"
+    return False, "no message ending (stopped) and no Stopped. notice"
 
 
 def signal_styles(styles: list[Any]) -> set[str]:

@@ -4,6 +4,11 @@ Every check has a severity. `bridge` checks test the bridge and the messenger (a
 owner); `model` checks test what the model says (a failure is a finding, never an alert); `info`
 checks only record what happened. A check is skipped when something outside the bridge stopped
 it (the model gate held by a SWE-bench run, a messenger that needs the owner to link it again).
+
+A bridge check in `KNOWN_FAILING` fails for a cause outside the bridge that is already being
+worked on: its failure becomes severity `known`, stays a row in the report and is counted there,
+but never alerts, never sets the release marker and never makes the exit code 1. When such a
+check passes, the report says so, so the entry can be removed.
 """
 
 from __future__ import annotations
@@ -14,7 +19,15 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-SEVERITIES: Final = ("bridge", "model", "info")
+SEVERITIES: Final = ("bridge", "model", "info", "known")
+
+# Check name -> why it fails today. Every messenger's check of that name is covered.
+KNOWN_FAILING: Final[dict[str, str]] = {
+    "long answer streams": (
+        "known failing, model server: SGLang's /v1/responses holds back every output_text delta "
+        "until the end when the request carries tools, so the bridge has nothing to stream"
+    ),
+}
 STATUSES: Final = ("pass", "fail", "skip", "observed")
 
 
@@ -44,11 +57,24 @@ class Run:
     started: float = field(default_factory=time.time)
     results: list[Result] = field(default_factory=list)
     blocked: dict[str, str] = field(default_factory=dict)
+    build: dict[str, str] = field(default_factory=dict)
 
     def add(self, result: Result) -> Result:
-        """Records a result and returns it."""
+        """Records a result and returns it; a known failure is recorded as severity `known`."""
+        why = KNOWN_FAILING.get(result.check)
+        if why and result.severity == "bridge" and result.status == "fail":
+            result.severity = "known"
+            result.detail = f"{result.detail} ({why})" if result.detail else why
         self.results.append(result)
         return result
+
+    def known(self) -> list[Result]:
+        """The known failures: reported, never alerting."""
+        return [r for r in self.results if r.status == "fail" and r.severity == "known"]
+
+    def recovered(self) -> list[Result]:
+        """Checks listed as known failing that passed this time."""
+        return [r for r in self.results if r.status == "pass" and r.check in KNOWN_FAILING]
 
     def alerts(self) -> list[Result]:
         """The failures worth waking the owner for: bridge checks that failed."""
@@ -70,6 +96,7 @@ def to_json(run: Run) -> str:
             "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(run.started)),
             "exit_code": run.exit_code(),
             "blocked": run.blocked,
+            "build": run.build,
             "results": [asdict(r) for r in run.results],
         },
         indent=1,
@@ -88,9 +115,21 @@ def to_markdown(run: Run) -> str:
     verdict = "FAIL" if alerts else ("NEEDS OWNER" if run.blocked else "PASS")
     lines = [f"# Live messenger test, {when}: {verdict}", ""]
     passed = sum(r.status == "pass" for r in run.results)
+    skipped = sum(r.status == "skip" for r in run.results)
     lines.append(
-        f"{passed} passed, {len(alerts)} bridge failures, {len(findings)} model findings, {sum(r.status == 'skip' for r in run.results)} skipped."
+        f"{passed} passed, {len(alerts)} bridge failures, {len(run.known())} known failures, "
+        f"{len(findings)} model findings, {skipped} skipped."
     )
+    if run.build:
+        lines.append("")
+        lines.append("Tested: " + ", ".join(f"{k} `{v}`" for k, v in sorted(run.build.items())))
+    for r in run.known():
+        lines.append(f"- Known failing ({r.messenger}): **{r.check}**, {KNOWN_FAILING[r.check]}")
+    for r in run.recovered():
+        lines.append(
+            f"- **{r.check}** ({r.messenger}) passed although listed in `KNOWN_FAILING`: "
+            "remove it from the list"
+        )
     for messenger, why in sorted(run.blocked.items()):
         lines.append(f"- **{messenger}** did not run: {why}")
     for messenger in sorted({r.messenger for r in run.results}):
