@@ -34,6 +34,7 @@ OPTIONAL_BINARIES: Final[Tuple[str, ...]] = (
     "ling-code",
     "ling-docs",
     "ling-signal",
+    "ling-delegate",
 )
 
 # The default `--from`: this machine's own build (or, on a release install, its release).

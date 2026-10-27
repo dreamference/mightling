@@ -419,9 +419,11 @@ fi
 # is built for Linux only (and from 1.6.0 on), as is ling-signal, Mightling over Signal's bridge
 # (from 1.6.0 on). The bridge is installed and nothing more: it is off until `ling signal setup`,
 # which fetches signal-cli and its Java runtime, pinned (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §3).
+# ling-delegate, the delegation plugin's server as a binary of its own, is Linux only too and
+# installed beside ling without a link (the plugin starts `ling delegate mcp`).
 REQUIRED="ling codex-code-mode-host"
 OPTIONAL="ling-search ling-fetch ling-code"
-[ "$(uname -s)" = Linux ] && OPTIONAL="$OPTIONAL ling-docs ling-signal"
+[ "$(uname -s)" = Linux ] && OPTIONAL="$OPTIONAL ling-docs ling-signal ling-delegate"
 INSTALLED=""
 for name in $REQUIRED $OPTIONAL; do
     asset="$name-$TARGET.gz"
@@ -493,7 +495,7 @@ for name in $INSTALLED; do
     mv -f "$INSTALL_DIR/bin/.$name.new" "$INSTALL_DIR/bin/$name"
     # Codex looks for its Code Mode host beside its own executable, so that one needs no link,
     # and `ling signal` finds its bridge there too: its commands are `ling signal …`.
-    case "$name" in codex-code-mode-host|ling-signal) ;; *) link "$INSTALL_DIR/bin/$name" "$name" ;; esac
+    case "$name" in codex-code-mode-host|ling-signal|ling-delegate) ;; *) link "$INSTALL_DIR/bin/$name" "$name" ;; esac
 done
 # What was installed, for `node provision`'s state probe and drift report.
 printf '%s\n' "$TAG" > "$INSTALL_DIR/VERSION"
