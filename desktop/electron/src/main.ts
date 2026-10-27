@@ -42,7 +42,7 @@ import { PANE_KINDS, WindowHub, paneAction, type PaneKind, type WindowKind } fro
 import { TerminalMirror } from "./terminal-mirror";
 import { WindowSession, cascade, follow } from "./window-state";
 import * as worktree from "./worktree";
-import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./shell";
+import { installMenu, installTray, keepAwake, notify, showContextMenu, updateTray } from "./shell";
 import { Notices } from "./notices";
 import { SyncHost } from "./sync-host";
 import { transcribe } from "./voice";
@@ -297,6 +297,21 @@ export async function main(options: MainOptions): Promise<void> {
       const target = from && appWindows.has(from.webContents.id) ? from : recent(["full", "popout", "pane"]);
       if (target) send(target, { channel: "command", payload: kind === "terminal" ? "detachTerminal" : "detachReview" });
     },
+    // File › New Thread, Open Folder…, Settings… (DESKTOP §16 B20): the window in front, or the most recent full one.
+    command: (command: "newChat" | "openFolder" | "settings", from: BrowserWindow | null) => {
+      const target = from && appWindows.has(from.webContents.id) ? from : recent(["full"]);
+      if (!target) return showView("work");
+      target.show();
+      target.focus();
+      send(target, { channel: "command", payload: command });
+    },
+    // Help › Show Logs: $CODEX_HOME/log, where `ling app` writes ling-app.log and ling writes its own.
+    showLogs: () => {
+      const home = codexHome();
+      if (!home) return;
+      const logs = path.join(home, "log");
+      void fs.promises.mkdir(logs, { recursive: true }).then(() => shell.openPath(logs)).catch(() => {});
+    },
   };
 
   /** Gives every window the theme shown now: its background, its title bar's symbols, the page's tokens. */
@@ -331,6 +346,8 @@ export async function main(options: MainOptions): Promise<void> {
   };
   function sendPet(): void {
     if (pet && !pet.isDestroyed()) send(pet, { channel: "pet://state", payload: petState() });
+    // The tray says how many threads work and wait, from the same state (DESKTOP §16 B20).
+    updateTray(petStatus.counts());
   }
   const syncPet = () => {
     const wanted = prefs.read().petShown === true;

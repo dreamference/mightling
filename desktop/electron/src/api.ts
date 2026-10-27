@@ -228,8 +228,8 @@ export type ForView =
   | { channel: "pane://docked"; payload: { pane: PaneKind; thread: string } }
   /** A pane detached from this window asks for something (windows.ts `paneAction`). */
   | { channel: "pane://action"; payload: PaneAction }
-  /** The Window menu's pane items, for the page in front: detach (or dock back) the terminal or the diff. */
-  | { channel: "command"; payload: "detachTerminal" | "detachReview" }
+  /** The Window menu's pane items, and File's New Thread, Open Folder… and Settings… (DESKTOP §16 B20), for the page in front. */
+  | { channel: "command"; payload: "detachTerminal" | "detachReview" | "newChat" | "openFolder" | "settings" }
   /** Another device acted on a thread here through the sync host (sync-host.ts): "Approved from the phone". */
   | { channel: "sync://notice"; payload: { text: string; thread: string | null } };
 

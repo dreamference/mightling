@@ -337,7 +337,7 @@ export function App() {
   /** This window's panes detached into windows of their own (`paneKey`), until they dock back. */
   const [detached, setDetached] = useState<Set<string>>(new Set());
   /** What the main process may ask of this page about windows and panes; set further down, where those handlers are. */
-  const windowEvents = useRef<{ docked: (pane: PaneKind, thread: string) => void; paneAction: (action: bridge.PaneAction) => void; command: (command: "detachTerminal" | "detachReview") => void }>({ docked: () => {}, paneAction: () => {}, command: () => {} });
+  const windowEvents = useRef<{ docked: (pane: PaneKind, thread: string) => void; paneAction: (action: bridge.PaneAction) => void; command: (command: bridge.WindowCommand) => void }>({ docked: () => {}, paneAction: () => {}, command: () => {} });
   const [front, setFront] = useState<{ id: string; tick: number } | null>(null);
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
@@ -1901,7 +1901,11 @@ export function App() {
     }).catch(notice);
   };
   windowEvents.current = {
-    command: (command) => detachPane(command === "detachTerminal" ? "terminal" : "review"),
+    command: (command) => {
+      if (command === "detachTerminal" || command === "detachReview") return detachPane(command === "detachTerminal" ? "terminal" : "review");
+      // File › New thread, Open folder…, Settings… (DESKTOP §16 B20): the same as their keys.
+      commands[command]?.();
+    },
     // A pane docked back: it shows here again, if its thread is in front.
     docked: (pane, thread) => {
       setDetached((keys) => {
