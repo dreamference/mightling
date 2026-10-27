@@ -577,6 +577,11 @@ jobs:
           $data = Join-Path $env:LOCALAPPDATA "dev.dreamference.mightling"
           if (-not (Test-Path $data)) { throw "the app wrote no data folder at $data" }
           if (Test-Path (Join-Path $scratch ".local\share\dev.dreamference.mightling")) { throw "the app wrote its data under .local\share" }
+          # The app wrote its Application User Model ID into the Start menu entry, without which
+          # Windows shows none of its notifications (app-identity.ts; installer.nsi cannot write it).
+          $entry = (New-Object -ComObject Shell.Application).NameSpace((Split-Path $shortcut)).ParseName((Split-Path -Leaf $shortcut))
+          $id = $entry.ExtendedProperty("System.AppUserModel.ID")
+          if ($id -ne "dev.dreamference.mightling") { throw "the Start menu entry's AppUserModelID is '$id', not the app's" }
           # The uninstaller with the runner's own profile: Windows finds the Start menu from USERPROFILE.
           $env:USERPROFILE = $ownProfile
           $env:LOCALAPPDATA = $ownLocal
