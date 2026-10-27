@@ -903,11 +903,8 @@ describe("G7: Full Access typed confirmation and sandbox chip", () => {
     const fullOut = await executeGitAction(api, "01234567", fullStep.pending);
     expect(fullOut.text).toBe("Full Access");
 
-    // 2. Return to Workspace (GET state?intent=access -> POST /api/repos/access with level="workspace").
-    const wsStep = await beginGitAction(api, "01234567", "workspace-access");
-    expect(wsStep.pending.intent).toBe("access");
-    expect(wsStep.pending.confirm).toBe("nonce-access-2");
-    const wsOut = await executeGitAction(api, "01234567", wsStep.pending);
+    // 2. Back to Workspace needs no nonce (it must work with the forge down): POST level="workspace" only.
+    const wsOut = await executeGitAction(api, "01234567", { action: "workspace-access", intent: "access", confirm: "", message: "" });
     expect(wsOut.text).toBe("Workspace");
 
     // 3. Server refusal surfaces only the server's error sentence inline.
@@ -930,14 +927,12 @@ describe("G7: Full Access typed confirmation and sandbox chip", () => {
           confirm: "nonce-access-1",
         },
       },
-      { method: "GET", url: "/api/repos/state?thread=01234567&intent=access", body: null },
       {
         method: "POST",
         url: "/api/repos/access",
         body: {
           thread: "01234567",
           level: "workspace",
-          confirm: "nonce-access-2",
         },
       },
       { method: "GET", url: "/api/repos/state?thread=01234567&intent=access", body: null },
@@ -948,7 +943,7 @@ describe("G7: Full Access typed confirmation and sandbox chip", () => {
           thread: "01234567",
           level: "full",
           typed: "FULL ACCESS org/alpha-service",
-          confirm: "nonce-access-3",
+          confirm: "nonce-access-2",
         },
       },
     ]);

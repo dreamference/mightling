@@ -128,25 +128,23 @@ impl<'a> MessagePrompts<'a> {
         self.root.parent().unwrap_or(self.root)
     }
 
+    /// Whether the repository thread `thread_id` runs with Full Access now: its checkout holds a
+    /// grant that still stands (`ChatRepos::effective_full_access`: the node's setting on, the
+    /// checkout writable, its air gap off) and the thread's own air gap is off. A grant that no
+    /// longer stands is dropped, so it never comes back without the phrase typed again.
     fn repo_thread_full_access_with(&self, server: &crate::server::Server, thread_id: &str) -> bool {
-        let codex_home = self.codex_home();
-        if !server.chat_repos.full_access_for_app_thread(codex_home, thread_id) {
+        let Some(record) = server.chat_repos.find_by_app_thread(self.codex_home(), thread_id) else {
             return false;
-        }
+        };
         let settings = crate::chat_repos::ChatReposSettings::load_from(server.config.user_config.as_deref());
-        if !settings.full_access {
+        if !server.chat_repos.effective_full_access(&settings, &record) {
             return false;
         }
-        if self.airgapped_on(Some(thread_id)) {
+        if self.airgapped_on(Some(thread_id))
+            || crate::server::thread_airgapped_on(Some(thread_id), Some(Path::new(&record.dir)))
+        {
+            server.chat_repos.revoke_full_access(&record.thread);
             return false;
-        }
-        if let Some(record) = server.chat_repos.find_by_app_thread(codex_home, thread_id) {
-            let dir = Path::new(&record.dir);
-            if crate::server::thread_airgapped_on(Some(thread_id), Some(dir))
-                || crate::server::thread_airgapped_on(Some(&record.thread), Some(dir))
-            {
-                return false;
-            }
         }
         true
     }
@@ -214,13 +212,6 @@ impl PromptSource for MessagePrompts<'_> {
         crate::chat_repos::repo_thread_cwd(self.codex_home(), thread_id)
     }
 
-    fn repo_thread_full_access(&self, thread_id: &str) -> bool {
-        let Some(server) = crate::server::server_for_home(self.codex_home()) else {
-            return false;
-        };
-        self.repo_thread_full_access_with(&server, thread_id)
-    }
-
     fn is_bridge(&self) -> bool {
         false
     }
@@ -251,11 +242,11 @@ impl PromptSource for TabPrompts<'_> {
         self.inner.repo_thread_cwd(thread_id)
     }
 
+    /// Only a tab that carries the running server can say a thread has Full Access; without one
+    /// the answer is no.
     fn repo_thread_full_access(&self, thread_id: &str) -> bool {
-        match self.server {
-            Some(server) => self.inner.repo_thread_full_access_with(server, thread_id),
-            None => self.inner.repo_thread_full_access(thread_id),
-        }
+        self.server
+            .is_some_and(|server| self.inner.repo_thread_full_access_with(server, thread_id))
     }
 
     fn is_bridge(&self) -> bool {
@@ -418,24 +409,41 @@ mod tests {
         })
         .unwrap();
 
+        // A tab without the running server never says Full Access.
         server.chat_repos.grant_full_access("deadbeef");
-        assert!(prompts.repo_thread_full_access("app-t1"));
+        assert!(!prompts.repo_thread_full_access("app-t1"));
+        let tab = MessagePrompts {
+            root: &root,
+            composed: None,
+            created: Mutex::new(None),
+            airgapped_on: false,
+            thread_folder: None,
+        }
+        .with_bridge(false)
+        .with_server(&server);
+        assert!(tab.repo_thread_full_access("app-t1") && tab.repo_thread_full_access("app-t2"));
+        assert!(!tab.repo_thread_full_access("app-t3"), "a thread of no checkout");
 
-        // Turning off [chat_repos] full_access revokes effective Full Access immediately.
+        // The node's setting turned off drops the grant: turned on again, it does not come back.
         std::fs::write(&user_config, "[chat_repos]\nfull_access = false\n").unwrap();
-        assert!(!prompts.repo_thread_full_access("app-t1"));
+        assert!(!tab.repo_thread_full_access("app-t1"));
         std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
-        assert!(prompts.repo_thread_full_access("app-t1"));
+        assert!(!tab.repo_thread_full_access("app-t1"));
+        assert!(!server.chat_repos.is_full_access_granted("deadbeef"));
 
-        // Turning on airgapped in the checkout's dreamference.toml revokes effective Full Access.
+        // The air gap turned on in the checkout drops it too.
+        server.chat_repos.grant_full_access("deadbeef");
+        assert!(tab.repo_thread_full_access("app-t1"));
         let wt_cfg = checkout.join("dreamference.toml");
-        std::fs::write(&wt_cfg, "airgapped = \"on\"\n").unwrap();
-        assert!(!prompts.repo_thread_full_access("app-t1"));
+        std::fs::write(&wt_cfg, "mightling_airgapped = \"on\"\n").unwrap();
+        assert!(!tab.repo_thread_full_access("app-t1"));
         std::fs::remove_file(&wt_cfg).unwrap();
-        assert!(prompts.repo_thread_full_access("app-t1"));
+        assert!(!tab.repo_thread_full_access("app-t1"));
 
+        server.chat_repos.grant_full_access("deadbeef");
+        assert!(tab.repo_thread_full_access("app-t1"));
         server.chat_repos.revoke_full_access("deadbeef");
-        assert!(!prompts.repo_thread_full_access("app-t1"));
+        assert!(!tab.repo_thread_full_access("app-t1"));
 
         let _ = std::fs::remove_dir_all(&home);
     }

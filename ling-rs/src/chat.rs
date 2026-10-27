@@ -11,17 +11,8 @@ pub const FULL_ACCESS_PROMPT: &str = "Phone threads may then run commands with n
 
 const REPOS_USAGE: &str = "Usage: ling chat repos full-access on | off";
 
-#[cfg(unix)]
-fn stdin_is_terminal() -> bool {
-    // SAFETY: `isatty(0)` only inspects file descriptor 0 (stdin).
-    unsafe { libc::isatty(0) == 1 }
-}
-
-#[cfg(not(unix))]
-fn stdin_is_terminal() -> bool {
-    false
-}
-
+/// One line from the terminal after `prompt`, without its line ending (only that: ` yes` is not
+/// `yes`), or None at the end of input.
 fn read_terminal_line(prompt: &str) -> Option<String> {
     print!("{prompt} ");
     let _ = std::io::stdout().flush();
@@ -30,27 +21,38 @@ fn read_terminal_line(prompt: &str) -> Option<String> {
         .read_line(&mut line)
         .ok()
         .filter(|&n| n > 0)
-        .map(|_| line.trim().to_string())
+        .map(|_| line.trim_end_matches(['\r', '\n']).to_string())
 }
 
-/// Writes `[chat_repos] full_access = <enabled>` into `path` using `toml_edit::DocumentMut`
-/// so every other table, key, and comment in the file is preserved, creating the parent
-/// folder, file, and `[chat_repos]` table when missing.
+/// Writes `[chat_repos] full_access = <enabled>` into `path` with `toml_edit`, so every other
+/// table, key and comment in the file is kept (an inline `chat_repos = { … }` is edited, not
+/// replaced), creating the folder, the file and the table when missing. A file that cannot be read
+/// for another reason than not existing is left alone, and the new text replaces the old in one
+/// rename, so the air-gap check never reads a half-written file.
 pub fn write_full_access(path: &Path, enabled: bool) -> Result<(), String> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(format!("could not read {}: {err}", path.display())),
+    };
     let mut document: toml_edit::DocumentMut = existing
         .parse()
         .map_err(|err| format!("{} is not valid TOML: {err}", path.display()))?;
-    if !document.get("chat_repos").is_some_and(toml_edit::Item::is_table) {
+    if !document.get("chat_repos").is_some_and(|item| item.is_table_like()) {
         document.insert("chat_repos", toml_edit::Item::Table(toml_edit::Table::new()));
     }
-    document["chat_repos"]["full_access"] = toml_edit::value(enabled);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
-    }
-    std::fs::write(path, document.to_string())
-        .map_err(|err| format!("could not write {}: {err}", path.display()))
+    let Some(table) = document.get_mut("chat_repos").and_then(toml_edit::Item::as_table_like_mut) else {
+        return Err(format!("{}: [chat_repos] is not a table", path.display()));
+    };
+    table.insert("full_access", toml_edit::value(enabled));
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|err| format!("could not create {}: {err}", parent.display()))?;
+    let staged = parent.join(format!(".config.toml.{}.tmp", std::process::id()));
+    std::fs::write(&staged, document.to_string()).map_err(|err| format!("could not write {}: {err}", staged.display()))?;
+    std::fs::rename(&staged, path).map_err(|err| {
+        let _ = std::fs::remove_file(&staged);
+        format!("could not write {}: {err}", path.display())
+    })
 }
 
 fn run_repos_cli(args: &[String]) -> i32 {
@@ -71,7 +73,7 @@ fn run_repos_cli(args: &[String]) -> i32 {
         return 1;
     };
     if enabled {
-        if !stdin_is_terminal() {
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
             eprintln!("`ling chat repos full-access on` asks for confirmation at a terminal; run it in one.");
             return 1;
         }
@@ -132,6 +134,19 @@ mod tests {
         assert!(created.contains("full_access = true"), "{created}");
 
         // 2. Preserves comments, other tables, and other keys in [chat_repos] when editing.
+        // An inline table is edited where it stands: `allow_main` stays.
+        std::fs::write(&config, "chat_repos = { allow_main = [\"org/widget\"] }\n").unwrap();
+        write_full_access(&config, true).unwrap();
+        let inline = std::fs::read_to_string(&config).unwrap();
+        let parsed: toml::Table = inline.parse().unwrap();
+        assert_eq!(parsed["chat_repos"]["full_access"].as_bool(), Some(true), "{inline}");
+        assert_eq!(parsed["chat_repos"]["allow_main"][0].as_str(), Some("org/widget"), "{inline}");
+
+        // A file that is not UTF-8 is left alone rather than replaced.
+        std::fs::write(&config, [0xff_u8, 0xfe, 0x00]).unwrap();
+        assert!(write_full_access(&config, true).is_err());
+        assert_eq!(std::fs::read(&config).unwrap(), vec![0xff_u8, 0xfe, 0x00]);
+
         let initial = "# Top comment\nmightling_airgapped = \"off\"\n\n[chat_repos]\n# Keep this comment\nallow_main = [\"org/widget\"]\nmax_checkouts = 15\n\n[chat]\napproval_timeout_s = 120\n";
         std::fs::write(&config, initial).unwrap();
 

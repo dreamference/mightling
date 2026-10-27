@@ -508,7 +508,9 @@ export function chatRepos(fetcher: Fetcher = activeFetcher): ChatReposApi {
     },
 
     access(thread, level, confirm, typed) {
-      const payload: Record<string, unknown> = { thread, level, confirm };
+      // Ending Full Access needs no nonce; a grant needs one and the typed phrase.
+      const payload: Record<string, unknown> = { thread, level };
+      if (confirm) payload.confirm = confirm;
       if (typed !== undefined) payload.typed = typed;
       return post<ChatRepoAccessResult>("/api/repos/access", payload, "Access change refused");
     },

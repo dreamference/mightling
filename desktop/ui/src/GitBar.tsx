@@ -84,6 +84,12 @@ export function GitBar(props: GitBarProps) {
 
   const startAction = async (action: GitBarAction) => {
     if ((readOnly && action !== "workspace-access") || busy) return;
+    // Ending Full Access asks only for a click: no nonce and no forge, so it works when they are down.
+    if (action === "workspace-access") {
+      setOutcome(null);
+      setPending({ action, intent: "access", confirm: "", message: "" });
+      return;
+    }
     setBusy(true);
     setOutcome(null);
     try {

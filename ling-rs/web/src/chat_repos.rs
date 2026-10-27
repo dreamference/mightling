@@ -603,11 +603,28 @@ impl ChatRepos {
             .contains(thread)
     }
 
-    /// Maps an app-server thread id to its checkout record (`find_by_app_thread`) and answers
-    /// whether that checkout is granted Full Access in memory.
-    pub fn full_access_for_app_thread(&self, codex_home: &Path, app_thread: &str) -> bool {
-        self.find_by_app_thread(codex_home, app_thread)
-            .is_some_and(|record| !record.read_only && self.is_full_access_granted(&record.thread))
+    /// Drops every Full Access grant: the node's `[chat_repos] full_access` was seen off.
+    pub fn clear_full_access(&self) {
+        self.full_access_grants.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    }
+
+    /// Whether `record`'s checkout has Full Access now: a grant made with the typed phrase, the
+    /// node's `[chat_repos] full_access` still on, the checkout writable and its air gap off. A
+    /// grant that no longer stands is dropped (every grant when the setting is off), so turning the
+    /// setting or the air gap back never brings one back without the phrase typed again.
+    pub fn effective_full_access(&self, settings: &ChatReposSettings, record: &CheckoutRecord) -> bool {
+        if !settings.full_access {
+            self.clear_full_access();
+            return false;
+        }
+        if !self.is_full_access_granted(&record.thread) {
+            return false;
+        }
+        if record.read_only || record_airgapped_on(record, Path::new(&record.dir)) {
+            self.revoke_full_access(&record.thread);
+            return false;
+        }
+        true
     }
 
     /// Queues a pending bot notice (`{chat, repo, kind}`).
@@ -2567,6 +2584,9 @@ async fn repo_state(
             json!({ "error": "intent must be commit, push, update, merge, pr, main, budget, or access" }),
         );
     }
+    if intent_opt == Some("access") && server.is_bridge_caller(&headers) {
+        return full_access_bridge_refusal();
+    }
 
     let private = get_or_fetch_listing(&server, &base_url, &token)
         .await
@@ -2583,7 +2603,7 @@ async fn repo_state(
     let (used, limit, resets_at) = server.chat_repos.budget_snapshot(&record, settings.tokens_per_day);
     let warnings = server.chat_repos.warnings_for(&server.config.codex_home, &record);
     let allow_main = settings.allow_main.iter().any(|r| r == &record.repo);
-    let full_access = server.chat_repos.is_full_access_granted(&record.thread);
+    let full_access = server.chat_repos.effective_full_access(&settings, &record);
     let merge_in_progress = run_git(&server, Some(&worktree_dir), &["rev-parse", "-q", "--verify", "MERGE_HEAD"], false)
         .await
         .is_ok_and(|output| output.status.success());
@@ -3986,25 +4006,53 @@ fn record_airgapped_on(record: &CheckoutRecord, worktree_dir: &Path) -> bool {
         .any(|tid| crate::server::thread_airgapped_on(Some(tid), Some(worktree_dir)))
 }
 
-/// `POST /api/repos/access {thread, level, typed?, confirm}` (§6.2, §6.3, §4.7): grants or revokes
-/// in-memory Full Access for a phone repository checkout after a single-use nonce and typed
-/// `FULL ACCESS <org>/<repo>` confirmation.
+/// The answer to a messenger bridge asking to change Full Access: only the page does (§6.3).
+fn full_access_bridge_refusal() -> Response {
+    json_response(
+        StatusCode::FORBIDDEN,
+        json!({ "error": "Full Access is changed only in the page, never through a messenger bridge" }),
+    )
+}
+
+/// `POST /api/repos/access {thread, level, typed?, confirm?}` (§6.3, §4.7): grants or ends in-memory
+/// Full Access for a phone repository checkout. Never from a messenger bridge (a `bridge=1`
+/// session or a Signal bridge device).
+/// - `level: "full"` needs the node's `[chat_repos] full_access` on, a writable checkout, its air
+///   gap off, `typed` exactly `FULL ACCESS <org>/<repo>` and a single-use `access` nonce, which is
+///   spent only once every other check passed.
+/// - `level: "workspace"` needs no nonce and no forge: ending Full Access must work when anything
+///   else is down. The checkout's threads are taken back to their sandbox at once
+///   (`reset_checkout_sandbox`), not only at their next turn.
 async fn repo_access(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
-    let mreq = match prepare_mutation_request(&server, &headers, &body, "access").await {
-        Ok(v) => v,
-        Err(resp) => return resp,
-    };
-    let level = mreq.request.get("level").and_then(Value::as_str).unwrap_or("");
-    match level {
+    if server.is_bridge_caller(&headers) {
+        return full_access_bridge_refusal();
+    }
+    let level = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .and_then(|request| request.get("level").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_default();
+    match level.as_str() {
         "workspace" => {
-            if let Err(resp) = consume_mutation_nonce(&server, &mreq, "access") {
+            if let Err(resp) = require_control_caller_with_session(&server, &headers) {
                 return resp;
             }
-            server.chat_repos.revoke_full_access(&mreq.record.thread);
+            let request: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            let thread = request.get("thread").and_then(Value::as_str).unwrap_or("").trim();
+            let (record, _) = match find_checked_out_thread(&server, thread) {
+                Ok(found) => found,
+                Err(resp) => return resp,
+            };
+            server.chat_repos.revoke_full_access(&record.thread);
+            reset_checkout_sandbox(&server, &record).await;
             json_response(StatusCode::OK, json!({ "level": "workspace" }))
         }
         "full" => {
+            let mreq = match prepare_mutation_request(&server, &headers, &body, "access").await {
+                Ok(v) => v,
+                Err(resp) => return resp,
+            };
             if !mreq.settings.full_access {
+                server.chat_repos.clear_full_access();
                 return json_response(
                     StatusCode::FORBIDDEN,
                     json!({
@@ -4041,6 +4089,94 @@ async fn repo_access(State(server): State<Arc<Server>>, headers: HeaderMap, body
             StatusCode::BAD_REQUEST,
             json!({ "error": "level must be workspace or full" }),
         ),
+    }
+}
+
+/// How long ending Full Access waits for each answer of the app-server.
+const RESET_ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Takes a checkout's app-server threads back to their sandbox now that its Full Access ended.
+/// A turn's `sandboxPolicy` holds for the turns after it, so without this a thread would keep
+/// running with no sandbox until its next `turn/start`, through a review, a queued message or a
+/// goal's own turns. Over a connection of its own: `thread/settings/update` with the sandbox the
+/// policy writes on a repository turn, and `turn/interrupt` for a turn still running. With no
+/// app-server listening no thread is loaded, and the next resume pins the sandbox anyway.
+async fn reset_checkout_sandbox(server: &Server, record: &CheckoutRecord) {
+    use futures::SinkExt;
+    use tokio_tungstenite::tungstenite::Message;
+
+    if record.app_threads.is_empty() {
+        return;
+    }
+    let Ok(mut upstream) = server.app_server.connect_once().await else {
+        return;
+    };
+    let sandbox = repo_turn_sandbox(server, record);
+    let mut next_id: u64 = 0;
+    let initialize = json!({
+        "clientInfo": { "name": "mightling-web-reset", "title": null, "version": env!("CARGO_PKG_VERSION") },
+        "capabilities": { "experimentalApi": true },
+    });
+    if reset_ask(&mut upstream, &mut next_id, "initialize", initialize).await.is_none() {
+        return;
+    }
+    let _ = upstream
+        .send(Message::Text(json!({ "method": "initialized" }).to_string().into()))
+        .await;
+    for thread in &record.app_threads {
+        reset_ask(&mut upstream, &mut next_id, "thread/settings/update", json!({ "threadId": thread, "sandboxPolicy": sandbox.clone() })).await;
+        let turns = reset_ask(&mut upstream, &mut next_id, "thread/turns/list", json!({ "threadId": thread, "limit": 1, "sortDirection": "desc" })).await;
+        let running = turns
+            .as_ref()
+            .and_then(|answer| answer.pointer("/result/data/0"))
+            .filter(|turn| turn.get("status").and_then(Value::as_str) == Some("inProgress"))
+            .and_then(|turn| turn.get("id").and_then(Value::as_str))
+            .map(str::to_string);
+        if let Some(turn) = running {
+            reset_ask(&mut upstream, &mut next_id, "turn/interrupt", json!({ "threadId": thread, "turnId": turn })).await;
+        }
+    }
+    let _ = upstream.close(None).await;
+}
+
+/// One request of `reset_checkout_sandbox` and its answer, skipping the notifications between.
+async fn reset_ask(upstream: &mut crate::app_server::Upstream, next_id: &mut u64, method: &str, params: Value) -> Option<Value> {
+    use futures::SinkExt;
+    use futures::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+
+    *next_id += 1;
+    let id = format!("ling-web-reset-{next_id}");
+    let message = json!({ "id": id, "method": method, "params": params });
+    upstream.send(Message::Text(message.to_string().into())).await.ok()?;
+    tokio::time::timeout(RESET_ANSWER_TIMEOUT, async {
+        while let Some(Ok(frame)) = upstream.next().await {
+            let Message::Text(text) = frame else { continue };
+            let Ok(value) = serde_json::from_str::<Value>(text.as_str()) else { continue };
+            if value.get("id").and_then(Value::as_str) == Some(id.as_str()) && value.get("method").is_none() {
+                return Some(value);
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// The sandbox the policy writes on a repository thread's turn without Full Access: read-only in a
+/// read-only checkout, else the user's workspace-write.
+fn repo_turn_sandbox(_server: &Server, record: &CheckoutRecord) -> Value {
+    if record.read_only {
+        json!({ "type": "readOnly", "networkAccess": false })
+    } else {
+        json!({
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": false,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+        })
     }
 }
 
@@ -7544,6 +7680,81 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{body}");
     }
 
+    /// Ending Full Access takes the checkout's loaded threads back to their sandbox at once and
+    /// interrupts a turn still running, over a connection of its own to the app-server.
+    #[tokio::test]
+    async fn ending_full_access_resets_the_threads_sandbox_and_interrupts_a_running_turn() {
+        use futures::SinkExt;
+        use futures::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let s = scratch("full-access-reset");
+        let (server, _probe) = test_server(&s.dir, None, true);
+        crate::app_server::prepare_socket_dir(&server.config.socket).unwrap();
+        let listener = tokio::net::UnixListener::bind(&server.config.socket).unwrap();
+        let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(Ok(Message::Text(text))) = ws.next().await {
+                let request: Value = serde_json::from_str(text.as_str()).unwrap();
+                let _ = seen_tx.send(request.clone());
+                let Some(id) = request.get("id").cloned() else { continue };
+                // A notification in between is skipped by the reader.
+                ws.send(Message::Text(json!({ "method": "thread/status/changed", "params": {} }).to_string().into()))
+                    .await
+                    .unwrap();
+                let result = match request["method"].as_str().unwrap() {
+                    "thread/turns/list" if request["params"]["threadId"] == "app-run" => {
+                        json!({ "data": [{ "id": "turn-9", "status": "inProgress" }] })
+                    }
+                    "thread/turns/list" => json!({ "data": [{ "id": "turn-1", "status": "completed" }] }),
+                    _ => json!({}),
+                };
+                ws.send(Message::Text(json!({ "id": id, "result": result }).to_string().into())).await.unwrap();
+            }
+        });
+
+        let record = CheckoutRecord {
+            thread: "deadbeef".to_string(),
+            repo: "org/widget".to_string(),
+            bridge: "telegram".to_string(),
+            chat: "c1".to_string(),
+            device: "telegram-app".to_string(),
+            dir: s.dir.join("checkout").to_string_lossy().into_owned(),
+            branch: Some("phone/deadbeef".to_string()),
+            base: "main".to_string(),
+            app_threads: vec!["app-idle".to_string(), "app-run".to_string()],
+            read_only: false,
+            created: 1,
+            last_used: 1,
+        };
+        reset_checkout_sandbox(&server, &record).await;
+
+        let mut methods = Vec::new();
+        while let Ok(request) = seen.try_recv() {
+            if request["method"] == "thread/settings/update" {
+                assert_eq!(request["params"]["sandboxPolicy"]["type"], "workspaceWrite", "{request}");
+            }
+            if request["method"] == "turn/interrupt" {
+                assert_eq!(request["params"], json!({ "threadId": "app-run", "turnId": "turn-9" }));
+            }
+            methods.push(format!("{} {}", request["method"].as_str().unwrap(), request["params"]["threadId"].as_str().unwrap_or("")));
+        }
+        assert_eq!(
+            methods,
+            vec![
+                "initialize ",
+                "initialized ",
+                "thread/settings/update app-idle",
+                "thread/turns/list app-idle",
+                "thread/settings/update app-run",
+                "thread/turns/list app-run",
+                "turn/interrupt app-run",
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn full_access_typed_confirmation_grant_refusals_and_workspace_reset() {
         let s = scratch("full-access-route");
@@ -7609,7 +7820,7 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(state_initial["full_access_allowed"], false);
         assert_eq!(state_initial["full_access"], false);
-        assert!(!server.chat_repos.full_access_for_app_thread(&server.config.codex_home, "app-t1"));
+        assert!(!server.chat_repos.is_full_access_granted(&thread));
 
         // 1. Refused while full_access is off in settings (and nonce is unconsumed).
         let nonce = get_nonce(&server, &cookie, &thread, "access").await;
@@ -7657,7 +7868,7 @@ mod tests {
 
         // 3. Refused when the air gap is on for this thread (via dreamference.toml in checkout folder).
         let wt_cfg = wt.join("dreamference.toml");
-        std::fs::write(&wt_cfg, "airgapped = \"on\"\n").unwrap();
+        std::fs::write(&wt_cfg, "mightling_airgapped = \"on\"\n").unwrap();
         let (st, res, _) = post_json(
             &server,
             &cookie,
@@ -7736,7 +7947,7 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(res["level"], "full");
-        assert!(server.chat_repos.full_access_for_app_thread(&server.config.codex_home, "app-t1"));
+        assert!(server.chat_repos.is_full_access_granted(&thread));
 
         let (st, state_granted, body) = get_json(
             &server,
@@ -7764,8 +7975,37 @@ mod tests {
         assert_eq!(st, StatusCode::CONFLICT);
         assert_eq!(res["error"], "confirmation missing or expired");
 
-        // 7. `workspace` removes the grant.
-        let ws_nonce = get_nonce(&server, &cookie, &thread, "access").await;
+        // 7. A messenger bridge never changes Full Access, as a `bridge=1` session or a Signal
+        // bridge device: no nonce for it, no grant and no revoke.
+        let code = auth::issue_login_code(&server.config.state_dir).unwrap();
+        let login = Request::builder()
+            .uri(format!("/login?code={code}&bridge=1"))
+            .header(header::HOST, HOST)
+            .body(Body::empty())
+            .unwrap();
+        let response = server::router(server.clone()).oneshot(login).await.unwrap();
+        let bridge_cookie = response.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+        let (_, signal_token) = auth::add_device(&server.config.state_dir, "signal-bridge").unwrap();
+        let signal_cookie = format!("{}={signal_token}", auth::DEVICE_COOKIE);
+        for bridge in [&bridge_cookie, &signal_cookie] {
+            let (st, res, _) = get_json(&server, bridge, &format!("/api/repos/state?thread={thread}&intent=access")).await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "{res}");
+            assert!(res.get("confirm").is_none());
+            for level in ["full", "workspace"] {
+                let (st, res, _) = post_json(
+                    &server,
+                    bridge,
+                    "/api/repos/access",
+                    json!({ "thread": thread, "level": level, "typed": "FULL ACCESS org/widget", "confirm": nonce }),
+                )
+                .await;
+                assert_eq!(st, StatusCode::FORBIDDEN, "{level}: {res}");
+                assert_eq!(res["error"], "Full Access is changed only in the page, never through a messenger bridge");
+            }
+        }
+        assert!(server.chat_repos.is_full_access_granted(&thread));
+
+        // 8. `workspace` removes the grant with no nonce: ending it must work with the forge down.
         let (st, res, body) = post_json(
             &server,
             &cookie,
@@ -7773,13 +8013,12 @@ mod tests {
             json!({
                 "thread": thread,
                 "level": "workspace",
-                "confirm": ws_nonce,
             }),
         )
         .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(res["level"], "workspace");
-        assert!(!server.chat_repos.full_access_for_app_thread(&server.config.codex_home, "app-t1"));
+        assert!(!server.chat_repos.is_full_access_granted(&thread));
 
         let (st, state_after, body) = get_json(
             &server,
@@ -7789,5 +8028,23 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK, "{body}");
         assert_eq!(state_after["full_access"], false);
+
+        // 9. The node's setting turned off drops the grant; turned on again, it stays dropped.
+        let nonce = get_nonce(&server, &cookie, &thread, "access").await;
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({ "thread": thread, "level": "full", "typed": "FULL ACCESS org/widget", "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let user_config = server.config.user_config.clone().unwrap();
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = false\n").unwrap();
+        let (_, state_off, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(state_off["full_access"], false);
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
+        let (_, state_on, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(state_on["full_access"], false, "an old grant does not come back");
     }
 }
