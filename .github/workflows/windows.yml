@@ -412,6 +412,8 @@ jobs:
           if ((Test-Path $record) -and (Get-Item $record).Length -gt 0) { $failures += "a request reached the model server" }
           if (Test-Path probe.txt) { $failures += "probe.txt exists: a command ran" }
           if ($failures.Count -gt 0) { throw ($failures -join "; ") }
+          # The refusals left a non-zero $LASTEXITCODE, which the runner would take as the step's result.
+          exit 0
       # `ling uninstall` (WINDOWS_ARM section 16.4) on what install.ps1 installed: the folder (the
       # running ling.exe by a detached step once it exits), the user's Path entry and the mDNS rule.
       # The runner is an administrator, so the firewall step runs without a prompt.
