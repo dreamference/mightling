@@ -144,6 +144,8 @@ export type FromView =
   /** Quit and start again, so the agent's server resolves the node chosen (Settings › Node). */
   | { type: "app/relaunch" }
   /** The Scheduled view over Night Shift (night.ts). */
+  /** A pasted image for a Work turn, written under $CODEX_HOME (attachments.ts, DESKTOP §16 B13). */
+  | { type: "work/attach"; name: string; kind: "image" | "file"; data: string }
   | { type: "night/list" }
   | { type: "night/report"; name: string }
   | { type: "night/add"; repo: string; task: string; test: string | null; on?: string | null; bestOf?: number | null }

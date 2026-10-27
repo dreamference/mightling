@@ -994,10 +994,22 @@ export function App() {
       return;
     }
     if (files.length === 0) return;
-    // Work sends images by their path, which only a dropped file has: a pasted one goes to Ask.
-    if (view !== "ask") return;
     event.preventDefault();
-    addFiles(files);
+    if (view === "ask") return addFiles(files);
+    // Work (DESKTOP §16 B13): images attach, by their own path when they are files on this machine,
+    // else written under $CODEX_HOME when sent; another file is named for the agent to read.
+    workFiles(files);
+  };
+
+  /** Files picked with Work's paperclip or pasted in Work: images attach, other files on this machine become `@` mentions. */
+  const workFiles = (files: File[]) => {
+    const paths = files.map((file) => bridge.pathForFile(file));
+    const images = files.map((file, index) => ({ file, path: paths[index] })).filter((entry) => IMAGE_TYPES.test(entry.file.type) || attachmentKind(entry.file.type, entry.file.name) === "image");
+    if (images.length) addFiles(images.map((entry) => entry.file), images.map((entry) => entry.path));
+    const others = files.map((file, index) => ({ file, path: paths[index] })).filter((entry) => !images.some((image) => image.file === entry.file));
+    const mentions = others.filter((entry) => entry.path).map((entry) => `@${composeRoot ? mentionPath(composeRoot, entry.path as string) : entry.path}`);
+    if (mentions.length) setDraft((text) => `${text}${text && !/\s$/.test(text) ? " " : ""}${mentions.join(" ")} `);
+    if (others.some((entry) => !entry.path)) notice("Work attaches images; another file is named by its path, which a file from the clipboard does not have. Save it in the project, or drop it from the file manager.");
   };
 
   /**
@@ -1065,7 +1077,14 @@ export function App() {
     const starting = !selected;
     const target = selected?.thread ?? (await startThread());
     if (!target) return;
-    const images = pending.filter((item) => item.kind === "image" && item.path).map((item) => item.path as string);
+    // A pasted image has no path of its own: the main process writes it under $CODEX_HOME first (B13).
+    let images: string[];
+    try {
+      images = await Promise.all(pending.filter((item) => item.kind === "image").map(async (item) => item.path ?? (await bridge.workAttach(item.file, "image", item.name))));
+    } catch (error) {
+      notice(error);
+      return;
+    }
     // Long pastes go into the message itself: Work writes nothing into a project for them.
     const pastes = pending.flatMap((item) => (item.text !== undefined ? [item.text] : []));
     const typed = composeInput(pastes.length ? withPastes(message, pastes) : message, rootSkills, images);
@@ -2358,7 +2377,13 @@ export function App() {
   const askOfProject = (projectId: string) => askThreads(allThreads, askRoot).filter((thread) => thread.projectId === projectId);
   const snippets = new Map((found ?? []).map((result) => [result.thread.id, result.snippet]));
   const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
-  const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.text !== undefined ? pasteLabel(item.text) : item.name, preview: item.preview, title: item.text?.slice(0, 600) }));
+  // The served model may read text only (`inputModalities`): an image chip says it will not be seen (B13).
+  const servedEntry = models.find((entry) => entry.id === (modelChoice ?? servedModel)) ?? models[0] ?? null;
+  const textOnly = servedEntry !== null && !(servedEntry.inputModalities ?? []).includes("image");
+  const attachments: ComposerAttachment[] = pending.map((item) => ({
+    id: item.id, name: item.text !== undefined ? pasteLabel(item.text) : item.name, preview: item.preview, title: item.text?.slice(0, 600),
+    warning: item.kind === "image" && textOnly ? "The served model reads text only: it will not see this image." : undefined,
+  }));
 
   const unread = new Set(prefs.unreadThreads);
   const waiting = new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id)));
@@ -2831,15 +2856,14 @@ export function App() {
             onFiles={onFiles} onPaste={onPaste}
             searchFiles={searchFiles} skills={rootSkills}
             leading={<>
-            {view === "ask" ? (
-              <>
-                <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
-                  addFiles(Array.from(event.target.files ?? []));
-                  event.target.value = "";
-                }} />
-                <button className="icon attach" onClick={() => fileInput.current?.click()} title="Attach images or files" aria-label="Attach"><Icon name="paperclip" size={18} /></button>
-              </>
-            ) : (
+            <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
+              const picked = Array.from(event.target.files ?? []);
+              if (view === "ask") addFiles(picked);
+              else workFiles(picked);
+              event.target.value = "";
+            }} />
+            <button className="icon attach" onClick={() => fileInput.current?.click()} title={view === "ask" ? "Attach images or files" : "Attach images, or name files for the agent to read"} aria-label="Attach"><Icon name="paperclip" size={18} /></button>
+            {view === "ask" ? null : (
               <select value={profile} onChange={(event) => setProfile(event.target.value)} aria-label="Permissions">
                 {choices.map((choice) => (
                   <option key={choice.id} value={choice.id} disabled={choice.disabled} title={choice.reason ?? undefined}>

@@ -31,6 +31,8 @@ export interface ComposerAttachment {
   preview: string | null;
   /** What hovering shows: the start of a long paste. */
   title?: string;
+  /** Said on the chip: an image the served model cannot see (DESKTOP §16 B13). */
+  warning?: string;
 }
 
 interface MenuEntry {
@@ -305,9 +307,10 @@ export function Composer(props: ComposerProps) {
         {props.attachments.length > 0 ? (
           <div className="attachments">
             {props.attachments.map((item) => (
-              <span key={item.id} className="attachment" title={item.title}>
+              <span key={item.id} className={`attachment${item.warning ? " unseen" : ""}`} title={item.warning ?? item.title}>
                 {item.preview ? <img src={item.preview} alt="" /> : null}
                 <span className="attachment-name">{item.name}</span>
+                {item.warning ? <span className="attachment-warning" role="note">Text-only model: not seen</span> : null}
                 <button className="icon" aria-label={`Remove ${item.name}`} onClick={() => props.onRemoveAttachment(item.id)}><Icon name="x" size={14} /></button>
               </span>
             ))}

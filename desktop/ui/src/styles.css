@@ -1057,3 +1057,6 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .review-finding .buttons { margin: 6px 0 0 20px; display: flex; gap: 6px; }
 .review-findings-elsewhere { margin: 8px 0; }
 .review-findings-elsewhere h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
+/* An image the served model cannot see (DESKTOP §16 B13). */
+.attachment.unseen { border-color: var(--danger); }
+.attachment-warning { color: var(--danger); font-size: 11px; white-space: nowrap; }

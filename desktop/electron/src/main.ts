@@ -33,6 +33,7 @@ import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, nightStatus, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
+import { writeWorkAttachment } from "./attachments";
 import { Nodes } from "./nodes";
 import { docsAdd, docsReindex, docsRemove, docsStatus, locate, syncKnowledge } from "./docs";
 import { Tasks } from "./tasks";
@@ -669,6 +670,12 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "ask/upload":
         return server.upload(message);
+      case "work/attach": {
+        // A pasted image for a Work turn (DESKTOP §16 B13): under $CODEX_HOME, never the project.
+        const home = codexHome();
+        if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
+        return writeWorkAttachment(home, message);
+      }
       case "ask/incognito":
         server.incognito("mark", String(message.thread));
         return null;
