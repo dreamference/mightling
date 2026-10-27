@@ -28,6 +28,8 @@ export interface TurnView {
   diff: string | null;
   /** The agent's plan as a checklist, from `turn/plan/updated` (DESKTOP §16 B3); the latest replaces the last. */
   checklist?: Checklist | null;
+  /** Each MCP tool call's progress messages, by item id (`item/mcpToolCall/progress`, DESKTOP §16 B11). */
+  progress?: Record<string, string[]>;
 }
 
 /** The agent's to-do list for a turn: its steps with their status, and why it changed, if it said. */
@@ -301,6 +303,13 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
     case "turn/plan/updated": {
       const { threadId, turnId, explanation, plan } = notification.params;
       return withThread(state, threadId, (view) => withTurn(view, turnId, (turn) => ({ ...turn, checklist: { explanation: explanation?.trim() || null, steps: plan } })));
+    }
+    case "item/mcpToolCall/progress": {
+      const { threadId, turnId, itemId, message } = notification.params;
+      return withThread(state, threadId, (view) => withTurn(view, turnId, (turn) => {
+        const kept = [...(turn.progress?.[itemId] ?? []), message].slice(-50);
+        return { ...turn, progress: { ...turn.progress, [itemId]: kept } };
+      }));
     }
     case "thread/goal/updated": {
       const { threadId, goal } = notification.params;

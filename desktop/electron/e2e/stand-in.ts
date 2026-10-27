@@ -351,6 +351,13 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
             say({ id: "approve-rule", method: "item/commandExecution/requestApproval", params: { threadId: p.threadId, turnId: id, itemId: "c" + id, command: "cargo test -p fetcher",
               proposedExecpolicyAmendment: ["cargo", "test"], proposedNetworkPolicyAmendments: [{ host: "crates.io", action: "allow" }] } });
           }
+          // An MCP tool call with its arguments, progress and result (DESKTOP §16 B11).
+          if (asked.includes("with a tool")) {
+            const call = { type: "mcpToolCall", id: "t" + id, server: "tickets", tool: "create_ticket", status: "inProgress", arguments: { title: "Retry swallows errors", team: "web" }, appContext: null, mcpAppUi: null, pluginId: null, readOnlyHint: null, result: null, error: null, durationMs: null };
+            say({ method: "item/started", params: { threadId: p.threadId, turnId: id, item: call } });
+            say({ method: "item/mcpToolCall/progress", params: { threadId: p.threadId, turnId: id, itemId: call.id, message: "Filing under web" } });
+            say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { ...call, status: "completed", durationMs: 1200, result: { content: [{ type: "text", text: "Created OPS-12" }], structuredContent: null, _meta: null } } } });
+          }
           if (asked.includes("with a report")) {
             // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
             const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];

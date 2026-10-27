@@ -65,7 +65,7 @@ import { ScheduledView, unseen } from "./ScheduledView";
 import { SyncedView, useSynced } from "./SyncedView";
 import { ActivityView } from "./ActivityView";
 import { attentionList } from "./attention";
-import { CONSOLE_TOOL, MAX_LINES, TERMINAL_TOOL, consoleAnswer, linesAsked, terminalAnswer, toolLabel, windowToolNames } from "./windowtools";
+import { CONSOLE_TOOL, MAX_LINES, TERMINAL_TOOL, consoleAnswer, linesAsked, terminalAnswer, windowToolNames } from "./windowtools";
 import { predict } from "./suggestions";
 import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
@@ -82,6 +82,7 @@ import { busyHere } from "./checkouts";
 import { ExportDialog } from "./ExportDialog";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
+import { toolView, type ToolView } from "./toolitems";
 import { threadContext, withThreadContext } from "./tonight";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectPage } from "./ProjectPage";
@@ -3086,7 +3087,7 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
   const { turn } = props;
   return (
     <section className={`turn turn-${turn.status}`}>
-      {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} />))}
+      {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} progress={turn.progress?.[item.id]} />))}
       {turn.checklist && turn.status !== "inProgress" ? <TurnChecklist checklist={turn.checklist} /> : null}
       {turn.error ? <div className="turn-error">{turn.error.message}</div> : null}
       {turn.status === "interrupted" ? <div className="turn-note">Stopped.</div> : null}
@@ -3130,7 +3131,24 @@ function MadeFile(props: { path: string; diff: string; onOpen: () => void }) {
   );
 }
 
-function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
+/** A tool's call in full (toolitems.ts): its label and state, what it was given and what came back, folded. */
+function ToolItem({ view, status }: { view: ToolView; status: string }) {
+  const head = <><Icon name="code" size={14} /><span className="tool-label">{view.label}</span>{view.state ? <span className={`tool-state${view.failed ? " failed" : ""}`}>{view.state}</span> : null}</>;
+  if (!view.parts.length) return <div className={`item tool status-${status}`}>{head}</div>;
+  return (
+    <details className={`item tool status-${status}${view.failed ? " failed" : ""}`}>
+      <summary>{head}</summary>
+      {view.parts.map((entry) => (
+        <div key={entry.title} className="tool-part">
+          <span className="tool-part-title">{entry.title}</span>
+          <pre>{entry.text}</pre>
+        </div>
+      ))}
+    </details>
+  );
+}
+
+function Item({ item, folded, progress }: { item: ThreadItem; folded: boolean; progress?: string[] }) {
   const files = useContext(OpenFileContext);
   switch (item.type) {
     case "userMessage":
@@ -3144,7 +3162,7 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
       );
     case "reasoning":
       return item.summary.length || item.content.length ? (
-        <details className="item reasoning"><summary>Thinking</summary><pre>{[...item.summary, ...item.content].join("\n")}</pre></details>
+        <details className="item reasoning"><summary>Thinking</summary><div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown([...item.summary, ...item.content].join("\n\n")) }} /></details>
       ) : null;
     case "plan":
       return <div className="item plan markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }} />;
@@ -3179,17 +3197,15 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
       );
     }
     case "mcpToolCall":
-      return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
-    case "dynamicToolCall": {
-      // The window's own tools (windowtools.ts) in words, what they returned folded under them.
-      const label = toolLabel(item.tool) ?? item.tool;
-      const text = (item.contentItems ?? []).map((content) => (content.type === "inputText" ? content.text : "")).join("\n").trim();
-      return (
-        <details className={`item tool status-${item.status}`}>
-          <summary>{label}{item.success === false ? " — not available" : ""}</summary>
-          {text ? <pre>{text}</pre> : null}
-        </details>
-      );
+    case "dynamicToolCall":
+    case "imageView":
+    case "hookPrompt":
+    case "sleep":
+    case "imageGeneration":
+    case "functionCallOutput":
+    case "webSearch": {
+      const view = toolView(item, progress);
+      return view ? <ToolItem view={view} status={"status" in item && typeof item.status === "string" ? item.status : "completed"} /> : null;
     }
     case "contextCompaction":
       return <div className="item note">Earlier turns were compacted.</div>;
@@ -3201,10 +3217,9 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
       return <div className="item note">Subagents: {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
     case "subAgentActivity":
       return <div className="item note">Subagent {item.agentPath}: {item.kind}</div>;
-    case "webSearch":
-      return <div className="item note">Searched the web.</div>;
     default:
-      return <div className="item note">{item.type}</div>;
+      // A kind of item a later server adds: its name, until the window knows it.
+      return <div className="item note">{(item as { type: string }).type}</div>;
   }
 }
 
