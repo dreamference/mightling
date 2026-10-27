@@ -674,3 +674,28 @@ def test_the_password_is_never_printed_off_the_nodes_terminal(monkeypatch, capsy
 
     assert ForgeCommand.dispatch(argparse.Namespace(forge_command="password", show=True)) == 1
     assert "q" * 24 not in capsys.readouterr().out
+
+
+def test_the_role_moves_only_through_its_own_operations(monkeypatch):
+    from dreamference.forge.forge_move import ForgeMove
+    from dreamference.forge.forge_serve import ForgeServe
+
+    assert ForgeServe.serve("forge-become-mirror", ["n-1"]) == 2
+    assert ForgeServe.serve("forge-become-mirror", ["n-1", "a;b"]) == 2
+    ForgeSettings.update_state(role="record")
+    assert ForgeServe.serve("forge-become-mirror", ["n-1", "gx10-1a2b"]) == 2, (
+        "only a frozen record"
+    )
+    assert ForgeServe.serve("forge-hand-over", ["x"]) == 2
+    ForgeMove.freeze(True)
+    assert ForgeServe.serve("forge-unfreeze", []) == 0 and not ForgeMove.frozen_flag().exists()
+    ForgeSettings.update_state(role="mirror")
+    assert ForgeMove.serve_hand_over() == 1, "a mirror hands nothing over"
+
+
+def test_a_moved_forge_keeps_the_denylist(tmp_path, repositories):
+    folder = tmp_path / "forge-20261027-063000"
+    make_set(folder, repositories)
+    (folder / "secrets.json").write_text(json.dumps({"anonymity-denylist": "node-q\n"}))
+    ForgeBackup.restore_secrets(folder)
+    assert ForgeAnonymity.read_denylist() == "node-q\n"

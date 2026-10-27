@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 from typing import IO, Any, Final
 
+from dreamference.forge.forge_anonymity import DENYLIST, ForgeAnonymity
 from dreamference.forge.forge_app_ini import APP_INI_RELATIVE, DATABASE_RELATIVE, ForgeAppIni
 from dreamference.forge.forge_container import ForgeContainer
 from dreamference.forge.forge_settings import (
@@ -48,6 +49,7 @@ SECRET_FILES: Final[tuple] = (
     "github-mirror.json",
 )
 STATUS_NAME: Final[str] = "backup-status.json"
+DENYLIST_KEY: Final[str] = "anonymity-denylist"
 BUNDLE_LIMIT_BYTES: Final[int] = 200 * 1000**2
 UNISTR_ESCAPE: Final[re.Pattern] = re.compile(
     r"\\\\|\\(?:u?([0-9A-Fa-f]{4})|\+([0-9A-Fa-f]{6})|U([0-9A-Fa-f]{8}))"
@@ -141,6 +143,8 @@ class ForgeBackup:
         manifest = {"set": name, "node": cls.node_id(), "taken": int(time.time()), "refs": refs}
         (folder / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True))
         secrets = {key: ForgeSettings.read_secret(key) for key in SECRET_FILES}
+        # The push hook's denylist goes with the role, so a moved forge checks what this one did.
+        secrets[DENYLIST_KEY] = ForgeAnonymity.read_denylist()
         descriptor = os.open(folder / "secrets.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as handle:
             json.dump({key: value for key, value in secrets.items() if value}, handle)
@@ -565,6 +569,12 @@ class ForgeBackup:
         for key in SECRET_FILES:
             if secrets.get(key):
                 ForgeSettings.write_secret(key, secrets[key])
+        denylist = Path(DENYLIST).expanduser()
+        if secrets.get(DENYLIST_KEY) and not denylist.exists():
+            denylist.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(denylist, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write(secrets[DENYLIST_KEY])
 
     @classmethod
     def install_data(cls, folder: Path) -> tuple[dict[str, Any] | None, Path | None]:
