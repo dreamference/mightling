@@ -40,6 +40,10 @@ on:
         description: "Build the Windows client and desktop installer (windows.yml)"
         type: boolean
         default: true
+      windows_x64_runner:
+        description: "Runner for the x86-64 Windows build: box (the WINDOWS_X64_RUNNER variable's self-hosted runner, if set) or github"
+        type: string
+        default: box
       build_clients:
         description: "Build the Intel/AMD Linux and macOS clients (build-clients.yml)"
         type: boolean
@@ -277,6 +281,7 @@ jobs:
     uses: ./.github/workflows/windows.yml
     with:
       version: ${{ inputs.version }}
+      windows_x64_runner: ${{ inputs.windows_x64_runner }}
 
   # The client for machines that are not a GB10 (x86-64 Linux, macOS), built by the same workflow
   # CI runs on clients/** branches; its artifacts are named mightling-client-<target>.

@@ -1,6 +1,21 @@
 # The Windows client (specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md, Phase 1): ling.exe and its
-# commands for Windows on Arm (the RTX Spark laptops) and x86-64 Windows, built and tested on
-# GitHub's hosted runners, then installed with install.ps1 under Windows PowerShell 5.1.
+# commands for Windows on Arm (the RTX Spark laptops) and x86-64 Windows, built and tested, then
+# installed with install.ps1 under Windows PowerShell 5.1.
+#
+# Where the x86-64 build runs: the self-hosted runner the repository variable WINDOWS_X64_RUNNER
+# names (a JSON runs-on value), else GitHub's windows-latest. The `windows_x64_runner` input
+# `github` forces GitHub's runner for one run; deleting the variable does it for every run (the
+# runner is offline: a job waiting for it would queue for a day). aarch64 stays on GitHub's Arm
+# runner, since every job runs what it builds. The self-hosted runner is a non-administrator, so
+# what needs an administrator (install.ps1's elevated step, the sandbox, the ETW audit) is the
+# `checks` job's, on GitHub's runners, from the uploaded build. The desktop job, which opens a
+# window, stays on GitHub's runners too.
+#
+# The self-hosted runner must never be reachable from a pull request: this repository is public,
+# and a fork's pull request runs the workflow as the fork wrote it. This workflow has no
+# pull_request trigger, its callers have none, the runner's own job-started hook refuses every
+# event but push, workflow_dispatch and schedule, and outside contributors' workflows wait for
+# approval. Never add pull_request or pull_request_target here or in release-build.yml.
 #
 # Runs on pushes to `windows/**` branches while the port is worked on, by hand, and from the
 # Release workflow (`build_windows`), which then publishes what this uploads. Windows builds are a
@@ -11,12 +26,24 @@ on:
   push:
     branches: ["windows/**"]
   workflow_dispatch:
+    inputs:
+      windows_x64_runner:
+        description: "Runner for the x86-64 build and tools: box (the WINDOWS_X64_RUNNER variable's, if set) or github"
+        type: choice
+        default: box
+        options:
+          - box
+          - github
   workflow_call:
     inputs:
       version:
         description: "Release version compiled into ling (empty: a source build)"
         type: string
         default: ""
+      windows_x64_runner:
+        description: "box (the WINDOWS_X64_RUNNER variable's runner, if set) or github (windows-latest)"
+        type: string
+        default: box
 
 permissions:
   contents: read
@@ -26,15 +53,16 @@ jobs:
   # Codex build finishes.
   tools:
     name: Tools - ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-11-arm
+          - runner: '"windows-11-arm"'
             target: aarch64-pc-windows-msvc
-          - runner: windows-latest
+          # JSON for runs-on: the self-hosted runner's labels from WINDOWS_X64_RUNNER, or windows-latest.
+          - runner: ${{ (inputs.windows_x64_runner != 'github' && !startsWith(github.event_name, 'pull_request') && vars.WINDOWS_X64_RUNNER) || '"windows-latest"' }}
             target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -62,16 +90,17 @@ jobs:
 
   ling:
     name: ling - ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
     # Upstream's own Windows release builds "can exceed an hour" on larger machines.
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-11-arm
+          - runner: '"windows-11-arm"'
             target: aarch64-pc-windows-msvc
-          - runner: windows-latest
+          # JSON for runs-on: the self-hosted runner's labels from WINDOWS_X64_RUNNER, or windows-latest.
+          - runner: ${{ (inputs.windows_x64_runner != 'github' && !startsWith(github.event_name, 'pull_request') && vars.WINDOWS_X64_RUNNER) || '"windows-latest"' }}
             target: x86_64-pc-windows-msvc
     env:
       # Compiled into the launcher, so `ling update` can tell whether a newer release exists.
@@ -123,6 +152,58 @@ jobs:
           "$bin/ling-code.exe" --help > /dev/null
       - name: Package
         run: python .github/scripts/package_mightling.py dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() }}
+        with:
+          name: mightling-windows-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+      # Last, so the smoke test and the packaging run whatever the tests say. The same
+      # export, V8 and target directory the build used, so the tests reuse its crates.
+      - name: Launcher test environment
+        if: ${{ !cancelled() }}
+        run: |
+          python -c "import os; from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR as C, CodexBrandedBuilder as B; src = os.path.join(C, 'src'); env = dict(B.fetch_rusty_v8(src), MIGHTLING_EXPORT=os.path.join(src, 'codex-rs'), CARGO_TARGET_DIR=os.path.join(C, 'target'), CARGO_PROFILE_RELEASE_DEBUG='none', CARGO_PROFILE_RELEASE_STRIP='debuginfo'); open(os.environ['GITHUB_ENV'], 'a').write(''.join(f'{k}={v}\n' for k, v in env.items()))"
+      - name: Launcher tests
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          Set-Location $env:MIGHTLING_EXPORT
+          cargo test --release -p ling-launcher
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # install.ps1, the air gap and the egress audit, from the build the ling job uploaded, on GitHub's
+  # runners: they need an administrator (the sandbox's accounts, the firewall rule, ETW), which the
+  # self-hosted runner is not, and install.ps1 changes the user's PATH, which a persistent runner
+  # would keep.
+  checks:
+    name: Install and air gap - ${{ matrix.target }}
+    needs: ling
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mightling-windows-${{ matrix.target }}
+          path: dist
+      - name: The build's checksums
+        shell: bash
+        run: (cd dist && sha256sum -c "ling-${{ matrix.target }}.sha256sums")
       # install.ps1 end to end, under Windows PowerShell 5.1 (what a standard Windows 11 laptop
       # has), against a stand-in for GitHub's release API serving the assets just packaged.
       - name: install.ps1 under Windows PowerShell 5.1
@@ -208,25 +289,6 @@ jobs:
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: ${{ !cancelled() }}
-        with:
-          name: mightling-windows-${{ matrix.target }}
-          path: dist/*
-          if-no-files-found: error
-      # Last, so the smoke test, the packaging and install.ps1 run whatever the tests say. The same
-      # export, V8 and target directory the build used, so the tests reuse its crates.
-      - name: Launcher test environment
-        if: ${{ !cancelled() }}
-        run: |
-          python -c "import os; from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR as C, CodexBrandedBuilder as B; src = os.path.join(C, 'src'); env = dict(B.fetch_rusty_v8(src), MIGHTLING_EXPORT=os.path.join(src, 'codex-rs'), CARGO_TARGET_DIR=os.path.join(C, 'target'), CARGO_PROFILE_RELEASE_DEBUG='none', CARGO_PROFILE_RELEASE_STRIP='debuginfo'); open(os.environ['GITHUB_ENV'], 'a').write(''.join(f'{k}={v}\n' for k, v in env.items()))"
-      - name: Launcher tests
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: |
-          Set-Location $env:MIGHTLING_EXPORT
-          cargo test --release -p ling-launcher
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # The desktop app for Windows (DESKTOP_PARITY Phase 3 item 12; WINDOWS_ARM §11, superseded by
   # Electron): desktop/electron packaged natively on each runner with this run's ling.exe and
