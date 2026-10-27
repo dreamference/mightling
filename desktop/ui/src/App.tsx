@@ -78,6 +78,7 @@ import { TerminalHub, decode, terminalMessage, type TerminalSession } from "./te
 import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsState } from "./windows";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { commandChoices, type ApprovalChoice } from "./approvals";
+import { busyHere } from "./checkouts";
 import { ExportDialog } from "./ExportDialog";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
@@ -2743,6 +2744,28 @@ export function App() {
         {(() => {
           const live = selected?.activeTurnId ? selected.turns.find((turn) => turn.id === selected.activeTurnId)?.checklist : null;
           return live ? <LiveChecklist checklist={live} /> : null;
+        })()}
+        {(() => {
+          // Another thread working in this checkout (DESKTOP §16 B9): said, with a way out; nothing is blocked.
+          if (view !== "work" || !bridge.git.available()) return null;
+          const others = busyHere(state, links, workFolder, selected?.thread.id ?? null);
+          if (!others.length) return null;
+          const inWorktree = selected ? selectedLink?.location === "worktree" : newChoice.mode === "worktree";
+          if (inWorktree) return null;
+          const first = state.threads[others[0]].thread;
+          return (
+            <div className="checkout-clash" role="status">
+              <Icon name="info" size={14} />
+              <span>{others.length === 1 ? <>Another thread is working in this checkout: <strong>{workLabel(first)}</strong>.</> : <>{others.length} other threads are working in this checkout, among them <strong>{workLabel(first)}</strong>.</>} Two threads changing the same files can undo each other's work.</span>
+              <span className="spacer" />
+              <button className="link-button" onClick={() => void openThread(first.id)}>Open it</button>
+              {selected ? (
+                <button disabled={Boolean(selected.activeTurnId)} title={selected.activeTurnId ? "Stop this thread's turn first" : "Move this thread's work to a worktree of its own"} onClick={() => void handOff("toWorktree")}>Hand off to a worktree</button>
+              ) : (
+                <button onClick={() => setNewChoice((choice) => ({ ...choice, mode: "worktree" }))}>Start it in a worktree</button>
+              )}
+            </div>
+          );
         })()}
         {selected ? (
           <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
