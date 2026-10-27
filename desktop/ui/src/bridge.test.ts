@@ -4,7 +4,8 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { base64, canRecord, host, listenBridge, transcribe, upload } from "./bridge";
+import { base64, canRecord, git, host, listenBridge, transcribe, upload } from "./bridge";
+import { recordCheckout, resetChatRepos, setActiveChatRepoCwd } from "./repos";
 
 type Listener = (event: { data: unknown }) => void;
 
@@ -27,6 +28,7 @@ function stubWindow(type: string | undefined) {
 }
 
 afterEach(() => {
+  resetChatRepos();
   delete (globalThis as { window?: unknown }).window;
 });
 
@@ -60,6 +62,27 @@ describe("the app's host", () => {
   it("is a browser everywhere else", () => {
     stubWindow(undefined);
     expect(host()).toBe("web");
+  });
+
+  it("keeps git.available() true in the desktop app and false in a browser outside chat-repos threads", () => {
+    stubWindow("electron");
+    expect(git.available()).toBe(true);
+    expect(git.available("/home/u/src/shop")).toBe(true);
+
+    stubWindow(undefined);
+    expect(git.available()).toBe(false);
+    expect(git.available(null)).toBe(false);
+    expect(git.available("/home/u/src/shop")).toBe(false);
+
+    const checkout = "/home/u/.mightling/chat-repos/org/shop/web-01234567";
+    recordCheckout({ thread: "01234567", cwd: checkout, repo: "org/shop", branch: "phone/01234567", read_only: false });
+    expect(git.available("/home/u/src/shop")).toBe(false);
+    expect(git.available(checkout)).toBe(true);
+
+    setActiveChatRepoCwd(checkout);
+    expect(git.available()).toBe(true);
+    setActiveChatRepoCwd("/home/u/src/shop");
+    expect(git.available()).toBe(false);
   });
 });
 

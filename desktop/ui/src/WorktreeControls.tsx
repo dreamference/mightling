@@ -5,10 +5,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type * as bridge from "./bridge";
+import * as bridge from "./bridge";
 import { actionIcon } from "./BottomPanel";
 import { Icon } from "./icons";
 import type { WorktreeLink } from "./prefs";
+import { formatBudgetLeft, type ChatRepoState } from "./repos";
 import { shortcutLabel } from "./keymap";
 
 export interface NewThreadChoice {
@@ -71,10 +72,12 @@ export function WorktreeHeader(props: {
   onHandOff: (direction: "toLocal" | "toWorktree") => void;
   onOpen: (where: "editor" | "terminal" | "folder") => void;
   onAction: (action: bridge.EnvironmentAction) => void;
+  /** `chat-repos` checkout state on `ling web` (CHAT_REPOS §10 G13). */
+  chatRepo?: ChatRepoState | null;
 }) {
   const [menu, setMenu] = useState<"handoff" | "open" | "branch" | null>(null);
   const [name, setName] = useState("");
-  const { link } = props;
+  const { link, chatRepo } = props;
   useEffect(() => setMenu(null), [link?.checkout, link?.location]);
   // An open menu closes on Escape and on a click anywhere outside these controls.
   const area = useRef<HTMLSpanElement>(null);
@@ -93,6 +96,27 @@ export function WorktreeHeader(props: {
       window.removeEventListener("mousedown", onDown);
     };
   }, [menu]);
+  if (chatRepo && bridge.host() === "web") {
+    const onMain = chatRepo.branch !== null && (chatRepo.branch === "main" || chatRepo.branch === chatRepo.base);
+    return (
+      <span className="worktree-header chat-repo-header" ref={area}>
+        <span className="chip repo-name">
+          {chatRepo.private ? <span className="repo-lock" aria-label="Private" title="Private repository">🔒 </span> : null}
+          {chatRepo.repo}
+        </span>
+        <span className={`chip location ${onMain ? "main" : "worktree"}`}>
+          <Icon name="gitFork" size={12} /> {chatRepo.branch ?? "read-only"}
+        </span>
+        {onMain ? <span className="chip main-badge" data-badge="main">main</span> : null}
+        <span className="chip repo-budget" title={`${chatRepo.budget.used.toLocaleString("en-US")} of ${chatRepo.budget.limit.toLocaleString("en-US")} tokens used`}>
+          {formatBudgetLeft(chatRepo.budget)}
+        </span>
+        {(chatRepo.warnings ?? []).map((warning, index) => (
+          <span key={index} className="repo-warning notice" role="status">{warning}</span>
+        ))}
+      </span>
+    );
+  }
   const inWorktree = link?.location === "worktree";
   return (
     <span className="worktree-header" ref={area}>

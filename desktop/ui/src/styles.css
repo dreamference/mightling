@@ -1202,3 +1202,30 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .side-chat-message.working { color: var(--muted); }
 .side-chat-composer { display: flex; gap: 6px; align-items: flex-end; padding: 8px 10px; border-top: 1px solid var(--line); }
 .side-chat-composer textarea { flex: 1; resize: none; min-height: 40px; max-height: 30vh; field-sizing: content; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--canvas); color: var(--text); font: inherit; font-size: 13px; }
+
+/* The repository service on `ling web` (CHAT_REPOS §10 G4, G9, G13): the repository picker, the git bar, and the Work header. */
+.repos-view { max-width: var(--column); margin: 0 auto 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.repos-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.repos-header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.repos-search { margin-bottom: 8px; background: var(--raised); border: 1px solid var(--line); }
+.repos-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.repo-row { border-radius: var(--radius-sm); }
+.repo-row.selected { background: var(--selected); }
+.repo-open { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; width: 100%; border: none; background: none; padding: 8px 10px; text-align: left; }
+.repo-open:hover:not(:disabled) { background: var(--hover); }
+.repo-title { font-weight: 500; font-family: var(--font-code); font-size: 13px; }
+.repo-marks { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.git-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--panel); font-size: 13px; }
+.git-bar-status { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-code); font-size: 12.5px; }
+.git-bar-branch { display: inline-flex; align-items: center; gap: 4px; color: var(--text); }
+.git-bar-ahead-behind { color: var(--muted); }
+.git-bar-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.git-bar-actions button { padding: 3px 10px; font-size: 12.5px; }
+.git-bar-readonly { color: var(--muted); font-size: 12.5px; }
+.git-confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--raised); }
+.git-commit-input { min-width: 200px; font-size: 13px; padding: 4px 8px; }
+.git-bar-outcome { color: var(--text); font-size: 12.5px; }
+.git-bar-outcome a { color: var(--accent-text); }
+.chat-repo-header { flex-wrap: wrap; gap: 6px; }
+.chip.main-badge { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.repo-warning.notice { margin: 0; width: auto; max-width: none; padding: 2px 10px; font-size: 12px; cursor: default; }
