@@ -113,7 +113,7 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 ### 2.4 What the owner sees
 
 - **`ling web` and the desktop app:**
-  - **A "Code" entry:** the forge's web UI inside the app's window, through the `/forge/` proxy, signed in. Navigation is locked to the forge's paths, the same lock-down as the app's other views.
+  - **A "Code" entry:** the forge's web UI inside the app's window, through the `/forge/` proxy, signed in. Navigation is locked to the forge's paths, the same lock-down as the app's other views. **Built in `ling web`** (2026-10-27): a Code entry beside Ask and Work opens `/forge/` in the same tab, offered only when the node has a forge and the device has `control` (`GET /api/forge`). **The app's window waits for the owner's choice:** the app signs in to nothing and no longer loads `ling web` (DESKTOP), so it needs either a credential of its own or the system browser.
   - **The node's status page** lists the forge: on or off, role (record or mirror), mirror freshness, runner health, last backup.
   - **Night Shift results** arrive as pull requests on the forge, alongside the existing branch and `ling night apply`. The morning report links to them.
 - **`ling node list`** shows each node's forge role.

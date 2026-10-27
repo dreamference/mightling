@@ -237,6 +237,23 @@ async fn a_control_device_sees_the_forge_signed_in_and_never_gets_its_cookies() 
 }
 
 #[tokio::test]
+async fn the_page_learns_whether_to_offer_the_code_view() {
+    let scratch = scratch("status");
+    let (url, _) = start_stand_in().await;
+    let server = Server::new(config(&scratch.dir, &url, Vec::new())).unwrap();
+    let (id, cookie) = device(&server);
+    let (status, _, body) = call(&server, get("/api/forge", &cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, r#"{"available":false,"control":true,"path":"/forge/"}"#);
+    write_password(&scratch.dir);
+    auth::set_scope(&server.config.state_dir, &id, auth::Scope::Watch).unwrap();
+    let (_, _, body) = call(&server, get("/api/forge", &cookie)).await;
+    assert_eq!(body, r#"{"available":true,"control":false,"path":"/forge/"}"#);
+    let (status, _, _) = call(&server, Request::builder().uri("/api/forge").header(header::HOST, HOST).body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn watch_devices_and_strangers_get_no_forge() {
     let scratch = scratch("refused");
     let (url, seen) = start_stand_in().await;
