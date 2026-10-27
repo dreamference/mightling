@@ -454,12 +454,21 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "config/read": return answer({ config, origins: {}, layers: null });
     case "plugin/list": return answer({ marketplaces: [{ name: "Team tools", path: "/srv/team/marketplace.json", interface: null, plugins: [
       { id: "lint@team", remotePluginId: null, version: "1.2.0", localVersion: null, name: "lint", shareContext: null, source: { type: "local", path: "/srv/team/lint" }, installed: false, installedAt: null, enabled: false,
-        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: [] }] }],
+        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: [] },
+      { id: "format@team", remotePluginId: null, version: "0.3.0", localVersion: null, name: "format", shareContext: null, source: { type: "local", path: "/srv/team/format" }, installed: true, installedAt: null, enabled: true,
+        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: ["style"] }] }],
       marketplaceLoadErrors: [], featuredPluginIds: [] });
+    case "plugin/read": return answer({ plugin: { marketplaceName: "Team tools", marketplacePath: p.marketplacePath, shareUrl: null, description: "Runs the team's checks before a commit.", onboardingSkill: null, appTemplates: [], scheduledTasks: null,
+      summary: { id: p.pluginName + "@team", name: p.pluginName, version: "1.2.0", localVersion: null, keywords: [] }, skills: [{ name: "lint-check", description: "Lints the changed files", shortDescription: null, interface: null, path: null, enabled: true }],
+      hooks: [{ key: "lint:postToolUse:0", eventName: "postToolUse" }], apps: [], mcpServers: ["lint-server"] } });
+    case "marketplace/remove": return answer({ marketplaceName: p.marketplaceName, installedRoot: null });
     case "plugin/install": return answer({ authPolicy: "ON_INSTALL", appsNeedingAuth: [] });
     case "plugin/uninstall": return answer({});
     case "skills/config/write": return answer({ effectiveEnabled: p.enabled });
-    case "config/mcpServer/reload": return answer({});
+    case "config/mcpServer/reload":
+      // A reload restarts the servers: one reports how its start went (DESKTOP §16 B34).
+      say({ method: "mcpServer/startupStatus/updated", params: { threadId: null, name: "ling-code", status: "failed", error: "exited with status 1", failureReason: null } });
+      return answer({});
     case "hooks/list": return answer({ data: [{ cwd: (p.cwds || ["/"])[0], warnings: [], errors: [], hooks: [
       { key: "ledger", eventName: "Stop", matcher: null, timeoutSec: 30, statusMessage: null, additionalContextLimit: null, sourcePath: "/home/u/.mightling/hooks.json", source: "user",
         pluginId: null, displayOrder: 0, isManaged: true, currentHash: "x", handlerType: "command", command: "ling ledger", async: false },
@@ -469,6 +478,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     ].map((hook) => hookOf(hook.key, hook)) }] });
     case "config/batchWrite": {
       for (const edit of p.edits || []) {
+        if (String(edit.keyPath).startsWith("mcp_servers.") && edit.value === null && config.mcp_servers) delete config.mcp_servers[edit.keyPath.slice(12)];
         if (edit.keyPath !== "hooks.state") continue;
         for (const [key, value] of Object.entries(edit.value || {})) hookState[key] = { ...(hookState[key] || {}), ...value };
       }
@@ -581,7 +591,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       if (watches[p.watchId]) watches[p.watchId].close();
       delete watches[p.watchId];
       return answer({});
-    case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
+    case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null },
+      ...Object.keys(config.mcp_servers || {}).map((name) => ({ name, tools: {}, toolsError: null, runtimeStatus: null, pluginId: null }))], nextCursor: null });
     default: return answer({ data: [] });
   }
 });

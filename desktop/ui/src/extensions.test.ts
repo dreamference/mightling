@@ -2,7 +2,8 @@
 // new MCP server.
 import { describe, expect, it } from "vitest";
 
-import { MCP_NAME, hookEnabledEdit, hookNeedsReview, hookTrustEdit, hookTrustLabel, mcpServerValue, skillSource, uniqueHooks } from "./ExtensionsView";
+import { MCP_NAME, hookEnabledEdit, hookNeedsReview, hookTrustEdit, hookTrustLabel, skillSource, uniqueHooks } from "./ExtensionsView";
+import { serverForm, serverValue } from "./mcpservers";
 
 describe("skills and tools", () => {
   it("say where a skill comes from, another agent's linked in included", () => {
@@ -12,8 +13,8 @@ describe("skills and tools", () => {
   });
 
   it("write a new MCP server as a command with arguments or a URL, under a plain name", () => {
-    expect(mcpServerValue("command", " npx ", "-y  @acme/mcp  --stdio ")).toEqual({ command: "npx", args: ["-y", "@acme/mcp", "--stdio"] });
-    expect(mcpServerValue("url", " http://127.0.0.1:8765/mcp ", "")).toEqual({ url: "http://127.0.0.1:8765/mcp" });
+    expect(serverValue(serverForm({ target: " npx ", args: "-y  @acme/mcp  --stdio " }))).toEqual({ command: "npx", args: ["-y", "@acme/mcp", "--stdio"] });
+    expect(serverValue(serverForm({ kind: "url", target: " http://127.0.0.1:8765/mcp " }))).toEqual({ url: "http://127.0.0.1:8765/mcp" });
     expect(MCP_NAME.test("ling-code")).toBe(true);
     expect(MCP_NAME.test("bad name")).toBe(false);
     expect(MCP_NAME.test("a.b")).toBe(false);
