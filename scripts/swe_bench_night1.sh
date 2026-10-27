@@ -176,7 +176,8 @@ pin_build() {
 # `--exec-tool FORM`, spec §23), `drop-outputs` (drop-first compaction: `--drop-old-outputs`,
 # compaction spec §13), `test-guard` and `finish-check` (the launcher's guards: `--test-guard`,
 # `--finish-check`, spec §29), `sampling-nonthinking` (the model card's non-thinking sampling, filled in by the
-# model gate: `--sampling nonthinking`, docs/dev/loop-guard.md), or several of these joined with `+`
+# model gate: `--sampling nonthinking`, docs/dev/loop-guard.md), `compat-claude` (the launcher's compatibility
+# mode in every session: `--compat claude`, MIGHTLING_LING_CLAUDE §11), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -198,6 +199,8 @@ arm_flags() {
             on-sglang|on-engine) ;;  # the model server, not an option of the run (arm_server)
             on-*) echo "❌ Arm $1: write the model server as on-sglang or on-engine." >&2; return 2 ;;
             sampling-nonthinking) flags="$flags --sampling nonthinking" ;;
+            compat-claude) flags="$flags --compat claude" ;;
+            compat*) echo "❌ Arm $1: write the compatibility arm as compat-claude." >&2; return 2 ;;
             sampling*) echo "❌ Arm $1: write the sampling arm as sampling-nonthinking." >&2; return 2 ;;
             test-guard) flags="$flags --test-guard" ;;
             finish-check) flags="$flags --finish-check" ;;
