@@ -412,7 +412,9 @@ jobs:
       # `ling uninstall` (WINDOWS_ARM section 16.4) on what install.ps1 installed: the folder (the
       # running ling.exe by a detached step once it exits), the user's Path entry and the mDNS rule.
       # The runner is an administrator, so the firewall step runs without a prompt.
+      # Runs even when an earlier test step failed, so the uninstall is always checked.
       - name: ling uninstall
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           $dir = Join-Path $env:RUNNER_TEMP "mightling-install\bin"
@@ -420,8 +422,16 @@ jobs:
           & $program uninstall --yes
           if ($LASTEXITCODE -ne 0) { throw "ling uninstall failed (exit $LASTEXITCODE)" }
           $ErrorActionPreference = "Stop"
-          Start-Sleep -Seconds 15
-          if (Test-Path $dir) { Get-ChildItem -Force $dir | Format-Table Name; throw "$dir is still there" }
+          # The detached removal waits for ling.exe to exit, then starts a PowerShell, which can take
+          # a while on a fresh runner ("Preparing modules for first use").
+          for ($i = 0; $i -lt 90 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $dir) {
+            Get-ChildItem -Force $dir | Format-Table Name
+            $left = Join-Path $env:TEMP "mightling-uninstall-left.txt"
+            if (Test-Path $left) { Write-Host "left: $(Get-Content -Raw $left)" } else { Write-Host "no left file: the removal has not finished" }
+            Get-Process | Where-Object { $_.Path -like "$dir*" } | Format-Table Id, Name, Path
+            throw "$dir is still there"
+          }
           $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
           if (($userPath -split ";") -contains $dir) { throw "the install folder is still on the user's PATH" }
           $rules = @(Get-NetFirewallRule | Where-Object { $_.Name -like "Mightling-mDNS-*" } | Where-Object { ($_ | Get-NetFirewallApplicationFilter).Program -eq $program })
