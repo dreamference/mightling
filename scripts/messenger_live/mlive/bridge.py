@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -133,6 +134,15 @@ class ScratchBridge:
         with os.fdopen(fd, "w") as out:
             out.write(telegram_config(self.token, user_id, time.time()))
         target.with_suffix(".part").rename(target)
+        # `ling night add` queues only where a runner exists (night.rs `runner_present`): a stub
+        # `ling-admin` makes the scratch home one. Nothing ever runs its queue, which starts empty.
+        stub = self.home / ".local" / "bin" / "ling-admin"
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        stub.write_text(
+            "#!/bin/sh\necho 'the live messenger test home runs no Night Shift' >&2\nexit 1\n"
+        )
+        stub.chmod(0o755)
+        shutil.rmtree(self.codex_home / "night", ignore_errors=True)
         repo = self.home / "night-repo"
         if not (repo / ".git").exists():
             repo.mkdir(exist_ok=True)

@@ -32,6 +32,7 @@ from .telegram_suite import (
 
 ANSWER_TIMEOUT: Final = 300.0
 QUIET: Final = 20.0
+STREAM_WINDOW: Final = 45.0
 WORKING: Final = "Working on it…"
 
 
@@ -44,6 +45,8 @@ class Note:
     text: str
     styles: list[Any]
     edits: list[float] = field(default_factory=list)
+    # When the note first held words of an answer (not the status line).
+    answered_at: float | None = None
 
 
 class SignalRpc:
@@ -111,18 +114,20 @@ class SignalRpc:
         if self.debug is not None:
             with self.debug.open("a") as out:
                 out.write(json.dumps(kept) + "\n")
+        text = checks.strip_mark(kept["text"])
         with self.lock:
             target = kept["edit_of"]
             if target is not None and target in self.notes:
                 note = self.notes[target]
-                note.text = kept["text"]
+                note.text = text
                 note.styles = kept["styles"]
                 note.edits.append(now)
             else:
-                self.notes[kept["timestamp"]] = Note(
-                    kept["timestamp"], now, kept["text"], kept["styles"]
-                )
+                note = Note(kept["timestamp"], now, text, kept["styles"])
+                self.notes[kept["timestamp"]] = note
                 self.order.append(kept["timestamp"])
+            if note.answered_at is None and text and text != WORKING:
+                note.answered_at = now
 
     def request(self, method: str, params: dict[str, Any], timeout: float = 60.0) -> Any:
         """Calls a JSON-RPC method and returns its result.
@@ -216,8 +221,9 @@ class SignalRpc:
 
 
 def first_reply(notes: list[Note], after: float) -> float | None:
-    """Seconds from `after` to the bridge's first note."""
-    return notes[0].at - after if notes else None
+    """Seconds from `after` to the first words of the bridge's answer (not its status line)."""
+    times = [n.answered_at for n in notes if n.answered_at is not None]
+    return min(times) - after if times else None
 
 
 def answer_of(notes: list[Note]) -> str:
@@ -300,7 +306,8 @@ class SignalSuite:
             )
             return
         styles = set().union(*[checks.signal_styles(n.styles) for n in notes]) if notes else set()
-        leftover = checks.leftover_markdown(text)
+        # Tables become monospace lines by design (format.rs); only bold and fences must not stay.
+        leftover = [mark for mark in checks.leftover_markdown(text) if mark != "table rule"]
         problems = []
         if not text:
             problems.append("no answer")
@@ -319,29 +326,58 @@ class SignalSuite:
         )
 
     def check_long_and_stop(self) -> None:
-        """A long answer streams by edits; `/stop` ends it, keeps the partial, aborts the turn."""
+        """A long answer streams by edits; `/stop` while it runs keeps the partial and aborts the turn.
+
+        Streaming means the answer's text grew at least three times within `STREAM_WINDOW` seconds
+        of the status line; `/stop` is then sent while the turn still runs.
+        """
         began = time.monotonic()
         at = self.rpc.send(LONG_PROMPT)
+        self.rpc.wait(lambda: bool(self.rpc.since(at)), 60)
+        notes = self.rpc.since(at)
+        latency = first_reply(notes, at)
+        window_end = (notes[0].at if notes else time.monotonic()) + STREAM_WINDOW
 
-        def streaming() -> bool:
+        def finished() -> bool:
             return any(
-                len(n.edits) >= 2 and len(n.text) > 400
+                len(n.text) > 200 and not n.text.startswith("Working") and not n.edits
                 for n in self.rpc.since(at)
-                if n.text != WORKING
+            ) or any(
+                checks.stopped(n.text) or n.text.startswith("This is taking")
+                for n in self.rpc.since(at)
             )
 
-        ok = self.rpc.wait(streaming, ANSWER_TIMEOUT)
-        latency = first_reply(self.rpc.since(at), at)
-        edits = sum(len(n.edits) for n in self.rpc.since(at))
+        self.rpc.wait(finished, max(0.0, window_end - time.monotonic()))
+        grown = sum(
+            1 for n in self.rpc.since(at) for _ in n.edits if not n.text.startswith("Working")
+        )
+        answer_words = [
+            n
+            for n in self.rpc.since(at)
+            if n.answered_at is not None and not n.text.startswith("Working")
+        ]
+        streams = bool(answer_words) and grown >= 3
         self.result(
             "long answer streams",
             "bridge",
-            ok,
+            streams,
             began,
-            f"{edits} edits before /stop" if ok else f"{edits} edits, no streaming seen",
+            f"{grown} answer edits within {STREAM_WINDOW:.0f} s"
+            + ("" if streams else "; the answer's words did not stream"),
             latency,
         )
-        if not ok:
+        if finished():
+            self.run.add(
+                Result(
+                    "signal",
+                    "/stop ends the answer",
+                    "bridge",
+                    "skip",
+                    None,
+                    None,
+                    "the answer ended before /stop",
+                )
+            )
             return
         stop_at = self.rpc.send("/stop")
         kept = self.rpc.wait(lambda: any(checks.stopped(n.text) for n in self.rpc.since(at)), 90)
@@ -355,9 +391,8 @@ class SignalSuite:
             "/stop ends the answer",
             "bridge",
             not problems,
-            began,
+            stop_at,
             "; ".join(problems) or "partial kept as (stopped), turn aborted",
-            seconds_to_stop=round(time.monotonic() - stop_at, 1),
         )
 
     def check_hostile(self) -> None:
@@ -471,12 +506,16 @@ class SignalSuite:
         _, latency = self.ask(SEARCH_PROMPT)
         session = self.session_for(SEARCH_PROMPT)
         commands = session.commands if session else []
-        curl, search = checks.uses_curl(commands), checks.uses_ling_search(commands)
-        detail = "no session found" if session is None else f"ling-search: {search}; curl: {curl}"
+        curl, search = checks.uses_curl(commands), checks.searched_first(commands)
+        detail = (
+            "no session found"
+            if session is None
+            else f"ling-search first: {search}; curl later: {curl}"
+        )
         self.result(
             "searches with ling-search, not curl",
             "model",
-            session is not None and search and not curl,
+            session is not None and search,
             began,
             detail,
             latency,

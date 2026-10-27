@@ -144,7 +144,7 @@ def test_the_signal_reader_drops_notes_from_other_devices(tmp_path):
             "method": "receive",
             "params": {
                 "envelope": _envelope(
-                    {"destinationNumber": NUMBER, "timestamp": 2, "message": "Working on it…"},
+                    {"destinationNumber": NUMBER, "timestamp": 2, "message": "🐦 Working on it…"},
                     device=4,
                 )
             },
@@ -175,6 +175,7 @@ def test_the_signal_reader_drops_notes_from_other_devices(tmp_path):
     rpc._read()
     assert [note.text for note in rpc.notes.values()] == ["Paris"]
     assert len(rpc.notes[2].edits) == 1
+    assert rpc.notes[2].answered_at is not None
 
 
 # Checks -------------------------------------------------------------------------------------------
@@ -337,6 +338,10 @@ def test_attachments_styles_markdown_and_commands():
     assert not checks.uses_curl(["ling-search 'kernel curling'"])
     assert checks.uses_ling_search(["ling-search --read 'linux kernel'"])
     assert checks.stopped("partial\n\n(stopped)") and not checks.stopped("done")
+    assert (
+        checks.strip_mark("🐦 Working on it…") == "Working on it…"
+        and checks.strip_mark("Paris") == "Paris"
+    )
     assert checks.median([3.0, 1.0, 2.0]) == 2.0 and checks.median([]) is None
 
 
@@ -569,3 +574,13 @@ def test_tdlib_is_pinned_and_signed_in_without_databases():
     )
     assert signal_device.associated_number("Associated with: +15550000000") == NUMBER
     assert signal_device.associated_number("sgnl://linkdevice?uuid=x") is None
+
+
+def test_streaming_and_search_order_are_judged():
+    assert checks.growth([9, 9, 9, 8657]) == [8657]
+    assert checks.growth([9, 120, 480, 900, 900]) == [120, 480, 900]
+    assert checks.searched_first(
+        ["ling-search 'kernel'", "curl -s https://kernel.org/releases.json"]
+    )
+    assert not checks.searched_first(["curl -s https://kernel.org", "ling-search x"])
+    assert not checks.searched_first([])

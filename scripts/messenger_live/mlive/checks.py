@@ -33,6 +33,11 @@ ATTACHMENT: Final = (
 STOPPED_MARK: Final = "(stopped)"
 
 
+def strip_mark(text: str) -> str:
+    """A bridge message without the bird the Signal bridge puts before each one."""
+    return text.removeprefix("🐦").lstrip()
+
+
 def walk(value: Any) -> Iterator[dict[str, Any]]:
     """Every TDLib object inside `value`, depth first."""
     if isinstance(value, dict):
@@ -183,6 +188,25 @@ def uses_curl(commands: list[str]) -> bool:
 def uses_ling_search(commands: list[str]) -> bool:
     """Says whether any of the agent's commands ran `ling-search` or `ling-fetch`."""
     return any("ling-search" in command or "ling-fetch" in command for command in commands)
+
+
+def growth(lengths: list[int]) -> list[int]:
+    """The successive draft lengths at which a draft's text grew (placeholders of 20 characters or fewer left out)."""
+    grown: list[int] = []
+    for length in lengths:
+        if length > 20 and (not grown or length > grown[-1]):
+            grown.append(length)
+    return grown
+
+
+def searched_first(commands: list[str]) -> bool:
+    """Says whether the agent went to `ling-search`/`ling-fetch` before any `curl` or `wget`."""
+    for command in commands:
+        if uses_ling_search([command]):
+            return True
+        if uses_curl([command]):
+            return False
+    return False
 
 
 def median(values: list[float]) -> float | None:

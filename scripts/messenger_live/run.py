@@ -117,7 +117,9 @@ def link_signal(qr: Path, minutes: float) -> int:
     return 0
 
 
-def run_telegram(run: report.Run, cache: Path, take_over: bool, log: Path) -> None:
+def run_telegram(
+    run: report.Run, cache: Path, take_over: bool, log: Path, debug: Path | None
+) -> None:
     """The Telegram half: the owner's device, the scratch bridge, the checks."""
     try:
         client, me = telegram_account.open_session(None, 120)
@@ -134,9 +136,14 @@ def run_telegram(run: report.Run, cache: Path, take_over: bool, log: Path) -> No
         scratch.prepare(int(me["id"]))
         username = scratch.start()
         chat = telegram_account.BotChat(client, username)
-        telegram_suite.TelegramSuite(
+        suite = telegram_suite.TelegramSuite(
             client, chat.chat_id, chat.bot_user_id, scratch.sessions(), cache, run
-        ).run_all()
+        )
+        try:
+            suite.run_all()
+        finally:
+            if debug is not None:
+                suite.dump(debug)
     except Exception as err:  # noqa: BLE001 (reported as the run's failure)
         run.add(
             report.Result(
@@ -194,7 +201,13 @@ def run_suite(
     run = report.Run()
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(run.started))
     if only in (None, "telegram"):
-        run_telegram(run, cache, take_over, reports / f"{stamp}-bridge.log")
+        run_telegram(
+            run,
+            cache,
+            take_over,
+            reports / f"{stamp}-bridge.log",
+            (reports / f"{stamp}-telegram.json") if debug else None,
+        )
     if only in (None, "signal"):
         run_signal(run, cache, queue_night, (reports / f"{stamp}-signal.jsonl") if debug else None)
     json_path, md_path = report.write(run, reports)
