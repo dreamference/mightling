@@ -2206,6 +2206,12 @@ export function App() {
       setFileSearch(":");
       return;
     }
+    // Dictation (Ctrl+Shift+V, DESKTOP §16 B7), except in a terminal, where the same keys paste.
+    if (matches(event, keyAction("voice")) && canDictate && !(document.activeElement as HTMLElement | null)?.closest(".terminal-host, .xterm")) {
+      event.preventDefault();
+      void toggleDictation();
+      return;
+    }
     if (matches(event, keyAction("modelPicker"))) {
       event.preventDefault();
       setPicker((open) => (open === "closed" ? "open" : "closed"));

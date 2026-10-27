@@ -17,7 +17,7 @@ import type { Project } from "./protocol/v2/Project";
 import type { Thread } from "./protocol/v2/Thread";
 import type { WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "documents" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node";
+export type SettingsPage = "general" | "documents" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node" | "voice";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -57,6 +57,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
   { id: "browser", label: "Browser", desktopOnly: true },
   { id: "pets", label: "Pets", desktopOnly: true },
+  { id: "voice", label: "Voice", desktopOnly: true },
   { id: "suggestions", label: "Suggested prompts" },
   { id: "agents", label: "Agents" },
   { id: "node", label: "Node", desktopOnly: true },
@@ -89,6 +90,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "worktrees" && bridge.git.available() ? <Worktrees {...props} /> : null}
             {props.page === "browser" && bridge.preview.available() ? <Browser {...props} /> : null}
             {props.page === "pets" && bridge.git.available() ? <Pets {...props} /> : null}
+            {props.page === "voice" && bridge.git.available() ? <Voice {...props} /> : null}
             {props.page === "suggestions" ? <Suggestions {...props} /> : null}
             {props.page === "agents" ? <Agents {...props} /> : null}
             {props.page === "node" && bridge.git.available() ? <NodePage notice={props.notice} /> : null}
@@ -820,6 +822,29 @@ function Browser({ prefs, onChange, notice }: SettingsProps) {
 }
 
 /** Settings › Pets (DESKTOP_PARITY §2.15, Phase 3 item 6): the pet on or off, its size, Mightling's mark or a picture of your own. */
+/** The word list as the text area shows it (one per line), and back. */
+export function wordsFromText(text: string): string[] {
+  return [...new Set(text.split("\n").map((line) => line.trim()).filter(Boolean))].slice(0, 200);
+}
+
+function Voice({ prefs, onChange }: SettingsProps) {
+  // Kept as typed until the field is left, so a half-typed line is not tidied away under the caret.
+  const [text, setText] = useState(prefs.dictationWords.join("\n"));
+  return (
+    <>
+      <h3>Voice</h3>
+      <p className="dialog-note">Dictation turns speech into text on this machine (<code>ling-admin voice start</code>); nothing is sent anywhere, so it works with airgapped on. {shortcutLabel("voice")} starts and stops it, as the microphone button does; the text goes into the composer for you to read before sending.</p>
+      <label className="field">
+        Words to spell as written: names, paths, symbols, one per line
+        <textarea rows={8} aria-label="Words to spell as written" value={text} placeholder={"Mightling\nfetcher/client.py\nConnectionError"}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={() => onChange({ dictationWords: wordsFromText(text) })} />
+      </label>
+      <p className="dialog-note">They are given to the speech-to-text service with each recording, so it prefers these spellings. The first few hundred characters are used.</p>
+    </>
+  );
+}
+
 function Pets({ prefs, onChange, notice }: SettingsProps) {
   return (
     <>
