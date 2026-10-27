@@ -1107,3 +1107,8 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 /* Subagent marks (DESKTOP §16 B21): the hue from the id, a lightness that reads on both themes. */
 .agent-mark { display: inline-block; font-size: 11px; line-height: 1; margin: 0 2px; vertical-align: middle; }
 
+/* Recommended MCP servers under the Add server form (mcprecommended.ts, DESKTOP §16 B26). */
+.mcp-recommended { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.mcp-recommended-entry { display: flex; gap: 8px; align-items: baseline; }
+.mcp-recommended-entry .link-button { flex: none; }
+.mcp-recommended .needs-network { color: var(--faint); }

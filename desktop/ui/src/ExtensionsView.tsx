@@ -18,6 +18,7 @@ import type { RpcClient } from "./rpc";
 import type { AppInfo } from "./protocol/v2/AppInfo";
 import type { ConfigBatchWriteParams } from "./protocol/v2/ConfigBatchWriteParams";
 import type { HookMetadata } from "./protocol/v2/HookMetadata";
+import { offeredServers } from "./mcprecommended";
 import { RULE_LABELS, ruleEdits, toolRules, type ToolRule } from "./mcptools";
 import type { HooksListEntry } from "./protocol/v2/HooksListEntry";
 import type { PluginMarketplaceEntry } from "./protocol/v2/PluginMarketplaceEntry";
@@ -84,7 +85,7 @@ export function mcpServerValue(kind: "command" | "url", target: string, args: st
   return { command: target.trim(), args: words };
 }
 
-export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: string | null; tab: ExtensionsTab; setTab: (tab: ExtensionsTab) => void; onClose: () => void; notice: (error: unknown) => void; focusPlugin?: string | null }) {
+export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: string | null; tab: ExtensionsTab; setTab: (tab: ExtensionsTab) => void; onClose: () => void; notice: (error: unknown) => void; focusPlugin?: string | null; airgapped?: boolean }) {
   const { client, cwd, notice } = props;
   const [skills, setSkills] = useState<SkillMetadata[] | null>(null);
   const [servers, setServers] = useState<McpServer[] | null>(null);
@@ -293,6 +294,7 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
               </table>
             )}
             {adding ? (
+              <>
               <div className="mcp-add">
                 <input value={adding.name} placeholder="name" aria-label="Server name" onChange={(event) => setAdding({ ...adding, name: event.target.value })} />
                 <select value={adding.kind} aria-label="Server kind" onChange={(event) => setAdding({ ...adding, kind: event.target.value as "command" | "url" })}>
@@ -305,6 +307,20 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
                   onClick={() => { void write(`mcp_servers.${adding.name}`, mcpServerValue(adding.kind, adding.target, adding.args)); setAdding(null); }}>Add</button>
                 <button onClick={() => setAdding(null)}>Cancel</button>
               </div>
+              {/* Recommended servers (DESKTOP §16 B26): a click fills the form in; nothing installs until Add. */}
+              {props.airgapped ? (
+                <p className="dialog-note">Recommended servers are not offered while airgapped is on: a package runner fetches each of them from the network.</p>
+              ) : (
+                <div className="mcp-recommended" role="list" aria-label="Recommended MCP servers">
+                  {offeredServers(false, (servers ?? []).map((server) => server.name)).map((server) => (
+                    <div key={server.name} role="listitem" className="mcp-recommended-entry">
+                      <button className="link-button" onClick={() => setAdding({ name: server.name, kind: "command", target: server.command, args: server.args })}>{server.title}</button>
+                      <span className="small">{server.description} <span className="needs-network" title={server.network}>Needs the network: {server.network}.</span></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              </>
             ) : (
               <div className="buttons dialog-buttons">
                 <button className="link-button" onClick={() => setAdding({ name: "", kind: "command", target: "", args: "" })}>Add an MCP server</button>
