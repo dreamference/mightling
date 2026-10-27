@@ -169,9 +169,9 @@ pub fn prune_session_files() {
     }
 }
 
-/// Whether process `pid` is running, from the Windows process table.
+/// Whether process `pid` is running, from the Windows process table (also worktree.rs's check).
 #[cfg(windows)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Foundation::STILL_ACTIVE;
     use windows_sys::Win32::System::Threading::GetExitCodeProcess;
