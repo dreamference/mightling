@@ -175,7 +175,8 @@ pin_build() {
 # or off: `--apply-patch FORM`, spec §22; the pinned Codex has no function form, so ling refuses it), `exec-tool-FORM` (FORM function or freeform:
 # `--exec-tool FORM`, spec §23), `drop-outputs` (drop-first compaction: `--drop-old-outputs`,
 # compaction spec §13), `test-guard` and `finish-check` (the launcher's guards: `--test-guard`,
-# `--finish-check`, spec §29), or several of these joined with `+`
+# `--finish-check`, spec §29), `sampling-nonthinking` (the model card's non-thinking sampling, filled in by the
+# model gate: `--sampling nonthinking`, docs/dev/loop-guard.md), or several of these joined with `+`
 # (`issue-v1+restart-2`). Prints the arm's `swe-bench run` options; its run is named by turning
 # every `,` and `+` into `-` (`n4-restart-2`).
 arm_flags() {
@@ -196,6 +197,8 @@ arm_flags() {
             drop-*|drop_*) echo "❌ Arm $1: write the drop-first compaction arm as drop-outputs." >&2; return 2 ;;
             on-sglang|on-engine) ;;  # the model server, not an option of the run (arm_server)
             on-*) echo "❌ Arm $1: write the model server as on-sglang or on-engine." >&2; return 2 ;;
+            sampling-nonthinking) flags="$flags --sampling nonthinking" ;;
+            sampling*) echo "❌ Arm $1: write the sampling arm as sampling-nonthinking." >&2; return 2 ;;
             test-guard) flags="$flags --test-guard" ;;
             finish-check) flags="$flags --finish-check" ;;
             test-guard*|test_guard*|testguard*) echo "❌ Arm $1: write the test guard's arm as test-guard." >&2; return 2 ;;
