@@ -85,10 +85,17 @@ ling-sync = { path = "sync" }
 [target.'cfg(target_os = "linux")'.dependencies]
 ling-signal = { path = "signal" }
 
-# Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), the
-# same windows-sys release the Codex workspace already builds.
+# Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), and
+# the sandbox let into a service window station over SSH (src/winsta.rs); the same windows-sys
+# release the Codex workspace already builds.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Threading",
+] }
 # Whether the elevated sandbox is set up, asked exactly as Codex asks it (src/airgapped.rs).
 codex-windows-sandbox = { workspace = true }
 # `ling audit egress`: the ETW real-time trace (src/audit.rs; WINDOWS_ARM §14).
