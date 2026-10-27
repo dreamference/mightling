@@ -1,6 +1,6 @@
 # Mightling helping Claude Code: a delegation plugin and a session monitor
 
-**Status:** proposed on 2026-10-27; revised the same day into one design with the session monitor (Part B). **Nothing is built**; the owner asked for this spec before any building. The cost figures in §2 were measured from one night of a Claude Code coordinator session on the owner's machine (aggregates only; no content of those logs is quoted or stored here). Every figure about Mightling doing delegated work, and every figure about the monitor's effect, is an estimate until the phases of §10 measure it.
+**Status:** proposed on 2026-10-27; revised the same day into one design with the session monitor (Part B); the owner's answers to its open questions recorded the same day (§0.1). **Nothing is built**; the owner asked for this spec before any building. The cost figures in §2 were measured from one night of a Claude Code coordinator session on the owner's machine (aggregates only; no content of those logs is quoted or stored here). Every figure about Mightling doing delegated work, and every figure about the monitor's effect, is an estimate until the phases of §10 measure it.
 
 **Target:** the owner first, then any Mightling user who also runs Claude Code: "your local Mightling helps your Claude Code". Two parts serve one aim, fewer Claude tokens for the same results:
 
@@ -24,7 +24,7 @@ The owner's requirement governs every section: *quality must not drop; Mightling
 
 ## 0. Decisions
 
-Decided by this spec; the owner's open choices are in §0.1.
+Decided by this spec; the owner's answers of 2026-10-27 to its open questions are in §0.1.
 
 **Both parts**
 
@@ -46,26 +46,26 @@ Decided by this spec; the owner's open choices are in §0.1.
 **Part B, the monitor**
 
 - **D12. The monitor's facts are deterministic and authoritative.** Thresholds, stalls, usage limits, loops, rule violations and token counts come from plain code (§7.3). The local model writes only a short digest per agent and labels for unusual log lines (§7.4); where a digest and a fact disagree, the fact wins and the disagreement is counted.
-- **D13. What leaves the node is facts in fixed templates.** An owner alert goes out through `owner-notify` (Telegram), which is an external service, so its body is a fixed template of facts: the alert's kind, the agent's ordinal and type, counts, times, a reset time. No transcript text, no digest, and not the subagent's task description, which the coordinator wrote and which is content (§7.5). The summary file is read by the Claude Code coordinator, so its content reaches Anthropic: entries about Claude Code agents may carry digests and quotes (content Anthropic already holds), while entries about `ling` sessions and Night Shift carry facts only, unless the owner opts in (§7.5).
+- **D13. What leaves the node is facts in fixed templates.** An owner alert goes out through the user's messenger bridge (on the owner's machine `owner-notify`, Telegram), which is an external service, so its body is a fixed template of facts: the alert's kind, the agent's ordinal and type, counts, times, a reset time. No transcript text, no digest, and not the subagent's task description, which the coordinator wrote and which is content (§7.5). The summary file is read by the Claude Code coordinator, so its content reaches Anthropic: entries about Claude Code agents may carry digests and quotes (content Anthropic already holds), while entries about `ling` sessions and Night Shift carry facts only, unless the owner opts in (§7.5).
 
 **Carried in from the earlier analysis**
 
 - **D14. The `ling-delegate` skill does not exist, and this plugin replaces it.** The line in the owner's global Claude Code instructions that names it applies "when it is installed"; it is not installed. The install step proposes replacing that name with this plugin's `ask` (§4.3).
 
-### 0.1 Open questions for the owner
+### 0.1 The owner's answers (2026-10-27)
 
-Each has a default this spec uses until the owner decides.
+Every question is decided. Where the owner chose, the answer is theirs; where the owner left a question unselected, the default this spec proposed was recorded as the decision ("default kept"); two questions were not put to the owner, and their proposed defaults stand.
 
-1. **Alert content.** May an alert name the subagent's task description (its `.meta.json` description, a few words the coordinator wrote)? It makes alerts readable on a phone; it is content leaving through Telegram. *Default: no; the alert names the agent's ordinal and type, and the summary on the node names the task.*
-2. **Alert hours.** Quiet hours, or every alert at once? Usage limits and stuck nights matter most at night. *Default: no quiet hours; the rate limit of §7.5 applies.*
-3. **Release alerts.** Detect releases from the transcripts only (a tag push and the release workflow's result seen in a tool result), or also poll the release workflow with `gh`, a network call to GitHub that sends no content? *Default: transcripts only.*
-4. **Expected wait durations** (§7.3, C2): CI run 30 min, Night Shift until the window's end, a GPU window until its stated end, a shell wait 15 min, a background subagent 60 min. *Default: these, in `[monitor.waits]` of the user's config.*
-5. **`ling` and Night Shift in the coordinator's summary.** Facts only by default (D13). Should digests of the owner's own `ling` sessions be included for the coordinator? *Default: no.*
-6. **The product alert channel.** The owner's `owner-notify` is a local script. For users, alerts should go through whichever messenger bridge they turned on (Signal, Telegram, Matrix), which needs a send entry point in the bridges that does not exist yet. *Default: `[monitor] notify_command` names any command that takes the message as its argument; empty means alerts go only to the summary and the status page.*
-7. **The summary as a plugin tool.** Should the plugin offer a sixth tool, `status`, returning the monitor's summary (and a `watch` condition "a monitor alert of kind K")? *Default: no; the coordinator reads the summary file with `Read`, which costs the same.*
-8. **The digest during a Night Shift run.** Night Shift gives way to outside requests, so an hourly digest would slow it slightly. *Default: allowed, one model call at a time.*
-9. **Digest retention.** *Default: 7 days, then deleted; facts kept 30 days for the weekly comparisons.*
-10. **The Claude-token spend of P0's replay**, which runs both Claude and Mightling on the replay set. *Default: P0 waits for the owner's approval of an estimate.*
+1. **Alert content.** *Decided:* alerts are short and carry no task text: not the subagent's `.meta.json` description, no transcript text, no digest. An alert names the agent's ordinal and type; the summary on the node names the task (D13, §7.5).
+2. **Alert hours.** *Decided:* quiet hours **23:00–07:00 local time**. During them only urgent alerts go out: usage limits (C3), a failed release, a night blocked or failed. Other alerts are not sent then; they stay in the summary and on the status page. The rate limit of §7.5 applies at all hours.
+3. **Release alerts.** *Decided (default kept):* from the transcripts only; no polling of GitHub with `gh`.
+4. **Expected wait durations** (§7.3, C2). *Proposed default stands* (not put to the owner): CI run 30 min, Night Shift until the window's end, a GPU window until its stated end, a shell wait 15 min, a background subagent 60 min, in `[monitor.waits]` of the user's config.
+5. **`ling` and Night Shift in the coordinator's summary.** *Decided (default kept):* facts only; no digests of the owner's own `ling` sessions or of Night Shift (D13).
+6. **The product alert channel.** *Decided:* the messenger bridge the user turned on (Signal, Telegram or Matrix, if one is set up), plus the `ling web` status page (§7.5). This needs a send entry point in the bridges, which does not exist yet (M2). With no bridge set up, alerts reach only the summary and the status page. On the owner's machine `~/.local/bin/owner-notify` (Telegram) serves until the entry point exists.
+7. **The summary as a plugin tool.** *Proposed default stands* (not put to the owner): no sixth tool; the coordinator reads the summary file with `Read`, which costs the same.
+8. **The digest during SWE-bench and Night Shift runs.** *Decided (default kept):* no Qwen digest while a SWE-bench run holds the model; the monitor runs its deterministic checks only (D4, §7.4). A Night Shift run outside a benchmark was not asked separately; the proposed rule holds there: the digest is allowed, one model call at a time.
+9. **Digest retention.** *Decided (default kept):* digests are kept 7 days, then deleted; facts are kept 30 days for the weekly comparisons.
+10. **The Claude-token spend of P0's replay.** *Decided:* a small sample first, at most **about 50M Claude tokens**, enough to rank the task classes; the full replay set of §6.5 runs only if the sample is promising (§10, P0).
 
 ---
 
@@ -357,6 +357,8 @@ Then **the diff review**: Claude starts `mightling:diff-reviewer` with the brief
 - **Token saving**, per class: Claude tokens with the plugin (brief, result, review, fallback on failure) against the reference run's own tokens from its usage records.
 - **Coverage**: the share of the measured night's price-weighted cost the passing classes touch.
 
+**Budget** (§0.1, question 10): the first replay is a small sample drawn across the classes, at most about 50M Claude tokens, enough to rank them; the full set above runs only if the sample is promising.
+
 **The gate to enable a class** (beyond probation): parity ≥ 95%, zero severe units, and a positive median saving on the replay set. A class that fails stays off; a class without enough units waits for live shadow data.
 
 **Noise.** Thirty units per class cannot separate 95% from 90% with confidence; the zero-severe rule and the live shadow sample carry the quality claim, not the parity percentage alone.
@@ -429,14 +431,15 @@ Two jobs need reading, and only these use Qwen through `ling`:
 
 The coordinator reads it at each check-in (practice 5), in place of re-reading agent outputs and transcripts.
 
-**Owner alerts** run `[monitor] notify_command` with the message as its argument; on the owner's machine that is `~/.local/bin/owner-notify`, the Telegram bot. Alert kinds: usage limit hit and lifted (C3); repeated failures and loops (C4); rule violations (C5); a stalled coordinator (C2); a stuck night (C2 for Night Shift); a release published or failed (seen in the transcripts, §0.1 question 3); a plugin class demoted (§6.3); a format drift (§7.1).
+**Owner alerts** go through the messenger bridge the user turned on (Signal, Telegram or Matrix), through a send entry point the bridges gain in M2, and are always shown in the summary and on the status page; with no bridge set up, those two are the only outputs (§0.1, question 6). Until the entry point exists, `[monitor] notify_command` runs a command with the message as its argument; on the owner's machine that is `~/.local/bin/owner-notify`, the Telegram bot. Alert kinds: usage limit hit and lifted (C3); repeated failures and loops (C4); rule violations (C5); a stalled coordinator (C2); a stuck night (C2 for Night Shift); a release published or failed (seen in the transcripts, §0.1 question 3); a plugin class demoted (§6.3); a format drift (§7.1).
 
-- **Fixed templates of facts** (D13), for example `usage limit (session) hit; 6 agents stopped; resets 21:00 UTC` or `agent #12 (general-purpose) stalled 47 min in a CI wait`. No transcript text, no digest, no task description (§0.1, question 1).
+- **Fixed templates of facts** (D13), for example `usage limit (session) hit; 6 agents stopped; resets 21:00 UTC` or `agent #12 (general-purpose) stalled 47 min in a CI wait`. Short, with no transcript text, no digest and no task description (§0.1, question 1).
 - **Deduplicated**: one alert per kind, subject and episode; an episode ends when its condition clears, and only then can the same alert fire again.
 - **Rate-limited**: at most one alert per kind and subject per hour, and at most 6 alerts per hour in all; beyond that, one message saying how many more are in the summary.
+- **Quiet hours** 23:00–07:00 local time (§0.1, question 2): only urgent alerts are sent (usage limits, a failed release, a night blocked or failed); the rest stay in the summary and on the status page.
 - **Never an alert on missing input**: a transcript that cannot be read is reported in the summary.
 
-**A status page in `ling web`** (M2, optional): a read-only `/monitor` page that renders `summary.json`, on `ling web`'s loopback port, with the route added to `ling-rs/web/policy.json` so the desktop app and `ling web` enforce the same rule. It shows the same entries as the summary, facts-only for the user's own sessions unless they opt in to digests there.
+**A status page in `ling web`** (M2; with the messenger, the product's alert channel, §0.1 question 6): a read-only `/monitor` page that renders `summary.json`, on `ling web`'s loopback port, with the route added to `ling-rs/web/policy.json` so the desktop app and `ling web` enforce the same rule. It shows the same entries as the summary, facts-only for the user's own sessions unless they opt in to digests there.
 
 ### 7.6 Runtime
 
@@ -500,7 +503,7 @@ Two tracks. **M0 comes first or beside P0**: it needs no model, and its transcri
 ### Part A, the plugin
 
 **P0 — the replay evaluation.** No plugin yet: the extraction (the monitor's reader over history), the replay set of §6.5 (outside the repository), a minimal `ling delegate ask|lookup` CLI, and one question answered first: whether `--output-schema` reaches SGLang through the local provider and constrains the answer (if not, the server validates the JSON itself, and a non-conformant answer fails open).
-*Gate:* L2 and L3 parity ≥ 95% with zero severe units; W1 replays wake on the same event in every unit; T-class units measured with the change-unit method, with results per class. The owner approves the Claude-token spend before the replay runs (§0.1, question 10).
+*Gate:* L2 and L3 parity ≥ 95% with zero severe units; W1 replays wake on the same event in every unit; T-class units measured with the change-unit method, with results per class. The replay runs first on a small sample, at most about 50M Claude tokens, enough to rank the task classes; the full set runs only if the sample is promising (§0.1, question 10).
 
 **P1 — `ask`, `lookup` and `watch`.** The plugin with the server's three read-only tools, the skill, `mightling:delegate`, the ledger, the busy check (§5.3), the planner exclusion, the egress-audit run, and §3's practices in the coordinator's instructions.
 *Gate:* two weeks of live use: no shadow miss in L2/L3; W1 results equal to the event in every audited case; the monitor's C7 shows the waiting share and the share of calls above 300K both down, and the price-weighted cost per finished task down; no regression in the owner's own merge outcomes over the period.
