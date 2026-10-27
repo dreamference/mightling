@@ -41,6 +41,12 @@ export interface PromptSource {
   repoThreadCwd(threadId: string): string | null;
   /** Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app. */
   isBridge(): boolean;
+  /**
+   * Whether `cwd` is a folder a Work thread may work in: an existing directory, named by an absolute
+   * path, outside the Ask folders' root. A fork of an Ask thread may move there (a project's primary
+   * folder, DESKTOP §16 B33). Without it, or when it cannot tell, the answer is no.
+   */
+  workFolder?(cwd: string): boolean;
 }
 
 /** The rules of `policy.json`. */
@@ -59,6 +65,8 @@ export interface Policy {
   pinnedTurnFields: readonly string[];
   scratchFields: readonly string[];
   scratchSandbox: string;
+  /** The request that forks a thread: an Ask thread's fork may leave its folder for a Work folder. */
+  forkRequest: string;
   importRequest: string;
   refusedImportItems: ReadonlySet<string>;
   /** Requests refused at `on`: they fetch a plugin or a marketplace outside the sandbox, or run a `!` command with no sandbox. */
@@ -120,6 +128,7 @@ export function parsePolicy(value: unknown): Policy {
     pinnedTurnFields: strings(value, "pinnedTurnFields"),
     scratchFields: strings(value, "scratchFields"),
     scratchSandbox: string(value, "scratchSandbox"),
+    forkRequest: string(value, "forkRequest"),
     importRequest: string(value, "importRequest"),
     refusedImportItems: new Set(strings(value, "refusedImportItems")),
     airgappedRefusedRequests: new Set(strings(value, "airgappedRefusedRequests")),
@@ -226,9 +235,13 @@ function confine(policy: Policy, params: JsonObject, folder: string): void {
 function vetThreadParams(policy: Policy, method: string, original: JsonObject, prompts: PromptSource): JsonObject {
   const params: JsonObject = { ...original };
   for (const field of policy.droppedThreadFields) delete params[field];
-  // A resumed or forked Ask thread stays where it was started.
-  const existing = typeof params.threadId === "string" ? prompts.scratchFolderOf(params.threadId) : null;
-  if (existing !== null) confine(policy, params, existing);
+  // A resumed or forked Ask thread stays where it was started, unless a fork continues it in a Work
+  // folder (a project's, DESKTOP §16 B33): a Work thread there, with the sandbox an Ask folder gets
+  // and nothing broader, and without its prompt's config.
+  let existing = typeof params.threadId === "string" ? prompts.scratchFolderOf(params.threadId) : null;
+  const moved = existing !== null && method === policy.forkRequest && typeof params.cwd === "string" && prompts.workFolder?.(params.cwd) === true ? params.cwd : null;
+  if (moved !== null) existing = null;
+  if (moved !== null || existing !== null) confine(policy, params, moved ?? (existing as string));
   // A resumed or forked chat-work thread stays in its recorded checkout with its sandbox and on-request approvals.
   const existingRepoCwd = typeof params.threadId === "string" ? prompts.repoThreadCwd(params.threadId) : null;
   if (existingRepoCwd !== null) {

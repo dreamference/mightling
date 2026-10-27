@@ -389,6 +389,16 @@ export function pullRequestPage(remote: string, branch: string, base: string | n
   return `https://${host}/${repo}`;
 }
 
+/** The repository's `origin` remote, or null when it has none. */
+export async function originUrl(root: string): Promise<string | null> {
+  try {
+    const remote = (await git(root, ["remote", "get-url", "origin"])).trim();
+    return remote || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function pullRequestUrl(root: string): Promise<string> {
   const current = await status(root);
   if (!current.branch) throw new GitError("HEAD is detached: create a branch first");

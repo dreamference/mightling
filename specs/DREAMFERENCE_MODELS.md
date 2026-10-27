@@ -33,7 +33,8 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 
 **HF repos:**
 - `RadixArk/Qwen3.8-27B-NVFP4`: the main model, pinned to revision `52d1adc5…`;
-- `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`: its drafter, pinned to revision `bd7a9342…`;
+- `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch`: its drafter since 1.7.2, Dreamference's NVFP4 quantization of `incoai/Qwen3.8-27B-DFlash2` (Apache-2.0) with searched block scales, hosted as assets of the `models-2026-10-27` release of `dreamference/mightling` (a pre-release, never the latest) and pinned by SHA-256 in `RELEASE_HOSTED_MODELS`; the download writes it into the hub cache as a Hub download would (until 1.7.2 `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` at `bd7a9342…`);
+- `dreamference/qwen3.8-27b-sparse-head`: ling-engine's sparse drafter head (the target LM head's rank-256 factors and 32K list), from the same release, an engine asset fetched only for a ling-engine build that reads it (`engine_features: ["sparse-head"]`);
 - `minima-ai/mnma_qwen3.8_27b_nvfp4`: the night-2 candidate, pinned to revision `16e768e7…`;
 - `local-inference-lab/Qwen3.8-Flash-Next-NVFP4`: the Flash-Next trial, pinned to revision `6c01ac37…`;
 - `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1`: the diffusion model.

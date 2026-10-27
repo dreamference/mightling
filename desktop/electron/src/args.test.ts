@@ -27,7 +27,7 @@ describe("what ling app asks for", () => {
 
   it("reads the ling:// links of DESKTOP_PARITY §2.20", () => {
     expect(linkTarget("ling://threads/019a-thread")).toEqual({ cwd: null, thread: "019a-thread" });
-    expect(linkTarget("ling://threads/new")).toEqual({ cwd: null, thread: null, page: "new" });
+    expect(linkTarget("ling://threads/new")).toEqual({ cwd: null, thread: null, prompt: null, page: "new" });
     expect(linkTarget("ling://new?prompt=Fix%20the%20build&path=%2Fhome%2Fu%2Fapp")).toEqual({ cwd: "/home/u/app", thread: null, prompt: "Fix the build", page: "new" });
     expect(linkTarget("ling://settings")).toEqual({ cwd: null, thread: null, page: "settings" });
     expect(linkTarget("ling://night")).toEqual({ cwd: null, thread: null, page: "night" });
@@ -55,4 +55,14 @@ describe("Quick Entry's links (DESKTOP_PARITY_CLAUDE §2.9)", () => {
     expect(linkTarget(`ling://ask?prompt=${"x".repeat(5000)}`).prompt).toHaveLength(4000);
     expect(linkTarget("ling://quick")).toEqual({ cwd: null, thread: null, page: "quick" });
   });
+
+  it("reads the Codex app's other links (DESKTOP §16 B19)", () => {
+    expect(linkTarget("ling://threads/new?prompt=Fix%20it&path=%2Fw%2Fapp")).toEqual({ cwd: "/w/app", thread: null, prompt: "Fix it", page: "new" });
+    expect(linkTarget("ling://new?originUrl=git%40github.com%3Aacme%2Fapp.git&prompt=x")).toEqual({ cwd: null, thread: null, prompt: "x", page: "new", origin: "git@github.com:acme/app.git" });
+    expect(linkTarget("ling://settings/notifications")).toEqual({ cwd: null, thread: null, page: "settings", settingsPage: "notifications" });
+    expect(linkTarget("ling://settings/Bad_Page")).toEqual({ cwd: null, thread: null, page: "settings" });
+    expect(linkTarget("ling://automations")).toEqual({ cwd: null, thread: null, page: "night" });
+    expect(linkTarget("ling://plugins/lint@team")).toEqual({ cwd: null, thread: null, page: "plugins", plugin: "lint@team" });
+  });
 });
+

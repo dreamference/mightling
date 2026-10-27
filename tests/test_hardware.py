@@ -1,4 +1,8 @@
 import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 
 from dreamference.hardware import (
     detect_gb10_hardware,
@@ -63,7 +67,7 @@ def test_default_model_speculates_against_a_downloadable_drafter(vllm_recipes):
         ModelMatrixRegistry,
     )
     draft_repo = get_speculative_draft_repo(DEFAULT_MODEL_ALIAS)
-    assert draft_repo == "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal"
+    assert draft_repo == "dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch"
     draft_spec = ModelMatrixRegistry.get_spec(draft_repo)
     assert draft_spec is not None
     assert draft_spec.min_memory_gb > 0
@@ -251,3 +255,216 @@ def test_only_a_gb10_qualifies(monkeypatch, tmp_path):
     for name, expected in [("NVIDIA RTX PRO 6000 Blackwell Workstation Edition", False), ("NVIDIA GB10", True)]:
         monkeypatch.setattr(hardware_manager.subprocess, "run", lambda *a, _n=name, **k: subprocess.CompletedProcess(a, 0, f"{_n}, 580.95, 0\n", ""))
         assert HardwareManager.detect_gb10_hardware().is_gb10 is expected, name
+
+
+
+def test_the_drafter_and_the_sparse_head_are_pinned_by_sha256():
+    # Production serves the release-hosted drafter, and ling-engine's sparse head comes from the same release:
+    # every file is pinned by SHA-256 and fetched from one models-* release, never the Hub's moving main.
+    import re
+
+    import dreamference.hardware.model_matrix_registry as registry
+    for repo, revision in (
+        (registry.QWEN38_DRAFTER_REPO, registry.QWEN38_DRAFTER_REVISION),
+        (registry.QWEN38_SPARSE_HEAD_ASSET["repo"], registry.QWEN38_SPARSE_HEAD_ASSET["revision"]),
+    ):
+        source = registry.ModelMatrixRegistry.get_release_source(repo)
+        assert source is not None and source["revision"] == revision == registry.MODELS_RELEASE_TAG
+        assert re.fullmatch(r"models-\d{4}-\d{2}-\d{2}", revision)
+        assert "model.safetensors" in source["files"]
+        for pin in source["files"].values():
+            assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"])
+            assert pin["url"].startswith(
+                f"https://github.com/dreamference/mightling/releases/download/{revision}/"
+            )
+    drafter = registry.RELEASE_HOSTED_MODELS[registry.QWEN38_DRAFTER_REPO]["files"]
+    # What SGLang's DFLASH loader reads from the drafter's folder.
+    assert set(drafter) == {"model.safetensors", "config.json", "hf_quant_config.json"}
+    # The target stays on the Hub.
+    assert registry.ModelMatrixRegistry.get_release_source(registry.DEFAULT_MODEL_ALIAS) is None
+
+
+def _release_server(monkeypatch, payloads):
+    """Serves each URL of `payloads` from memory in place of the network; records the URLs asked."""
+    import io
+    import urllib.request
+
+    asked = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        url = request.full_url
+        asked.append(url)
+        if url not in payloads:
+            raise OSError(f"no such asset {url}")
+        return Response(payloads[url])
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    # These tests are of the downloader: put back what conftest stubs.
+    conftest = sys.modules["conftest"]
+    for name in ("ensure", "download", "_fetch"):
+        monkeypatch.setattr(
+            f"dreamference.hardware.ReleaseAssetDownloader.{name}",
+            getattr(conftest, "REAL_RELEASE_" + name.strip("_").upper()),
+        )
+    return asked
+
+
+def _hosted_model(monkeypatch, files):
+    """Registers a release-hosted model of `files` (name to bytes); returns its name and the URL payloads."""
+    import hashlib
+
+    import dreamference.hardware.model_matrix_registry as registry
+    repo = "dreamference/test-drafter"
+    payloads, pins = {}, {}
+    for name, data in files.items():
+        url = f"https://github.com/dreamference/mightling/releases/download/models-2026-01-01/{name}"
+        payloads[url] = data
+        pins[name] = {"url": url, "sha256": hashlib.sha256(data).hexdigest()}
+    monkeypatch.setitem(registry.RELEASE_HOSTED_MODELS, repo, {"revision": "models-2026-01-01", "files": pins})
+    return repo, payloads
+
+
+def test_a_release_hosted_model_lands_in_the_hub_cache_as_pinned_blobs(monkeypatch):
+    import hashlib
+
+    from dreamference.hardware import ModelDownloader, ReleaseAssetDownloader
+    repo, payloads = _hosted_model(monkeypatch, {"model.safetensors": b"weights" * 1000, "config.json": b"{}"})
+    asked = _release_server(monkeypatch, payloads)
+    monkeypatch.setattr("huggingface_hub.snapshot_download", lambda **kw: pytest.fail("the Hub was asked"))
+    assert not ModelDownloader.is_model_downloaded(repo)
+    assert ModelDownloader.download_model(repo)
+    assert sorted(asked) == sorted(payloads)
+    folder = ModelDownloader.get_hf_cache_dir() / "models--dreamference--test-drafter"
+    assert str(folder).startswith(str(Path.home()))
+    snapshot = folder / "snapshots" / "models-2026-01-01"
+    for name, data in (("model.safetensors", b"weights" * 1000), ("config.json", b"{}")):
+        link = snapshot / name
+        assert link.is_symlink() and link.read_bytes() == data
+        assert link.resolve() == folder / "blobs" / hashlib.sha256(data).hexdigest()
+    assert ModelDownloader.is_model_downloaded(repo) and ReleaseAssetDownloader.is_present(repo)
+    # Present files are not fetched again.
+    asked.clear()
+    assert ModelDownloader.download_model(repo)
+    assert asked == []
+
+
+def test_a_release_asset_that_does_not_match_its_pin_is_not_kept(monkeypatch):
+    from dreamference.hardware import ModelDownloader
+    repo, payloads = _hosted_model(monkeypatch, {"model.safetensors": b"the pinned weights"})
+    _release_server(monkeypatch, dict.fromkeys(payloads, b"other weights"))
+    assert not ModelDownloader.download_model(repo)
+    folder = ModelDownloader.get_hf_cache_dir() / "models--dreamference--test-drafter"
+    assert list((folder / "blobs").iterdir()) == []
+    assert not ModelDownloader.is_model_downloaded(repo)
+
+
+def test_a_failed_release_download_leaves_nothing_half_written(monkeypatch):
+    from dreamference.hardware import ModelDownloader
+    repo, _ = _hosted_model(monkeypatch, {"model.safetensors": b"weights"})
+    _release_server(monkeypatch, {})
+    assert not ModelDownloader.download_model(repo)
+    folder = ModelDownloader.get_hf_cache_dir() / "models--dreamference--test-drafter"
+    assert list((folder / "blobs").iterdir()) == []
+
+
+def test_node_sync_sends_a_release_hosted_drafter_as_a_hub_folder(monkeypatch):
+    # The receiving node checks every 64-hex blob against its name: a release-hosted drafter's blobs are named so.
+    from dreamference.hardware import ModelDownloader
+    from dreamference.node.node_model_sync import LFS_BLOB, NodeModelSync
+    repo, payloads = _hosted_model(monkeypatch, {"model.safetensors": b"weights"})
+    _release_server(monkeypatch, payloads)
+    assert ModelDownloader.download_model(repo)
+    folder = NodeModelSync.hub() / NodeModelSync.folder_name(repo)
+    assert (folder / "snapshots").is_dir()
+    assert all(LFS_BLOB.fullmatch(blob.name) for blob in (folder / "blobs").iterdir())
+    assert NodeModelSync._verify(NodeModelSync.hub()) is None
+    # The registry's drafter is sent as its tag's snapshot and the blobs it links to.
+    import hashlib
+
+    import dreamference.hardware.model_matrix_registry as registry
+    source = registry.ModelMatrixRegistry.get_release_source(registry.QWEN38_DRAFTER_REPO)
+    hub, drafter = NodeModelSync.hub(), NodeModelSync.folder_name(registry.QWEN38_DRAFTER_REPO)
+    snapshot = hub / drafter / "snapshots" / source["revision"]
+    snapshot.mkdir(parents=True)
+    for name, pin in source["files"].items():
+        (hub / drafter / "blobs").mkdir(exist_ok=True)
+        (hub / drafter / "blobs" / pin["sha256"]).write_bytes(hashlib.sha256(b"").digest())
+        (snapshot / name).symlink_to(Path("../..") / "blobs" / pin["sha256"])
+    members = NodeModelSync.members(hub, registry.QWEN38_DRAFTER_REPO)
+    assert members is not None and members[0] == snapshot
+    assert sorted(path.name for path in members[1:]) == sorted(pin["sha256"] for pin in source["files"].values())
+
+
+def test_an_engine_asset_applies_only_to_its_engine_and_feature(monkeypatch):
+    # The sparse head is ling-engine's, and only a build that reads it (its recipe lists the feature) fetches
+    # it: SGLang's recipe, or a ling-engine recipe without the feature (79c38c7, 1.7.2), gets nothing.
+    import dreamference.hardware.model_matrix_registry as registry
+    from dreamference.node.node_model_sync import NodeModelSync
+    key, head = registry.DEFAULT_MODEL_ALIAS, registry.QWEN38_SPARSE_HEAD_ASSET["repo"]
+    assert registry.ModelMatrixRegistry.get_engine_assets(key) == []
+    assert head not in NodeModelSync.repos(key)
+    recipe = dict(registry.ModelMatrixRegistry.get_launch_overrides(key))
+    cases = (("ling", [], False), ("ling", ["sparse-head"], True), ("sglang", ["sparse-head"], False))
+    for engine, features, applies in cases:
+        overrides = {**recipe, "engine": engine, "engine_features": features}
+        monkeypatch.setattr(
+            registry.ModelMatrixRegistry,
+            "get_launch_overrides",
+            classmethod(lambda cls, k, engine=None, o=overrides: o),
+        )
+        assets = registry.ModelMatrixRegistry.get_engine_assets(key)
+        assert [a["repo"] for a in assets] == ([head] if applies else [])
+        assert (head in NodeModelSync.repos(key)) == applies
+
+
+def test_model_download_fetches_the_recipe_drafter_at_its_pin(monkeypatch):
+    # `ling-admin model download` used to fetch the checkpoint alone; the drafter came only with `server start`.
+    import dreamference.hardware as hardware
+    import dreamference.hardware.model_matrix_registry as registry
+    fetched = []
+    monkeypatch.setattr(
+        hardware.ModelDownloader,
+        "download_model",
+        classmethod(lambda cls, repo, **k: fetched.append((repo, k.get("revision"))) or True),
+    )
+    assert hardware.download_recipe_companions(registry.DEFAULT_MODEL_ALIAS)
+    assert fetched == [(registry.QWEN38_DRAFTER_REPO, registry.QWEN38_DRAFTER_REVISION or None)]
+
+
+def test_a_ling_engine_recipe_lists_the_sparse_head_exactly_when_its_commit_reads_it():
+    # The asset's condition is a feature list, because an install cannot run git; this keeps the list honest: for
+    # every ling-engine recipe, "sparse-head" is listed if and only if its engine commit descends from the first
+    # commit that reads the file. Needs the ling-engine submodule with both commits (a checkout); skipped otherwise.
+    from pathlib import Path
+
+    import pytest
+
+    import dreamference.hardware.model_matrix_registry as registry
+    engine = Path(__file__).resolve().parent.parent / "ling-engine"
+    since = registry.LING_ENGINE_SPARSE_HEAD_SINCE
+    recipes = [
+        registry.ModelMatrixRegistry.get_launch_overrides(key)
+        for key in registry.ModelMatrixRegistry.MATRIX
+        if registry.ModelMatrixRegistry.get_launch_overrides(key).get("engine") == "ling"
+    ]
+    if not recipes:
+        pytest.skip("no ling-engine recipe in the registry")
+    for recipe in recipes:
+        commit = recipe.get("engine_commit", "")
+        known = [
+            subprocess.run(["git", "-C", str(engine), "cat-file", "-e", c + "^{commit}"], capture_output=True)
+            for c in (since, commit)
+        ]
+        if not commit or any(r.returncode != 0 for r in known):
+            pytest.skip("the ling-engine submodule lacks the commits (fetch it)")
+        descends = subprocess.run(
+            ["git", "-C", str(engine), "merge-base", "--is-ancestor", since, commit], capture_output=True
+        ).returncode == 0
+        assert ("sparse-head" in (recipe.get("engine_features") or [])) == descends, commit

@@ -2,7 +2,7 @@
 // document's references resolve, and what opens by itself when the agent creates it.
 import { describe, expect, it } from "vitest";
 
-import { artifactKind, createdArtifacts, hasSource, imageType, isRemote, localReference } from "./artifacts";
+import { artifactKind, createdArtifacts, hasSource, imageType, isRemote, localReference, parseTable, tableSeparator } from "./artifacts";
 import { renderDocument } from "./markdown";
 
 describe("the artifacts viewer", () => {
@@ -46,5 +46,33 @@ describe("the artifacts viewer", () => {
     ] };
     expect(createdArtifacts(item, "/w")).toEqual(["/w/report.pdf", "/w/notes.md"]);
     expect(createdArtifacts({ ...item, status: "inProgress" }, "/w")).toEqual([]);
+  });
+});
+
+describe("CSV and TSV tabs (DESKTOP §16 B27)", () => {
+  it("are tables, with a Source view", () => {
+    expect(artifactKind("/p/data.csv")).toBe("table");
+    expect(artifactKind("/p/data.TSV")).toBe("table");
+    expect(hasSource("/p/data.csv")).toBe(true);
+  });
+
+  it("read quoted cells, doubled quotes, line breaks in a cell and either line ending", () => {
+    const text = 'name,note\r\n"Smith, J.","said ""hi""\nthen left"\nLee,\n';
+    expect(parseTable(text, ",")).toEqual({ rows: [["name", "note"], ["Smith, J.", 'said "hi"\nthen left'], ["Lee", ""]], totalRows: 3, totalColumns: 2 });
+  });
+
+  it("pick the separator: a tab for .tsv, a semicolon when a .csv's first line has more of them", () => {
+    expect(tableSeparator("a.tsv", "a,b\tc")).toBe("\t");
+    expect(tableSeparator("a.csv", "a;b;c,d\n1;2;3")).toBe(";");
+    expect(tableSeparator("a.csv", "a,b\n")).toBe(",");
+  });
+
+  it("cap what is drawn and count the rest", () => {
+    const text = Array.from({ length: 30 }, (_, row) => Array.from({ length: 8 }, (_, column) => `${row}.${column}`).join(",")).join("\n");
+    const table = parseTable(text, ",", 10, 3);
+    expect(table.rows).toHaveLength(10);
+    expect(table.rows[0]).toEqual(["0.0", "0.1", "0.2"]);
+    expect(table.totalRows).toBe(30);
+    expect(table.totalColumns).toBe(8);
   });
 });

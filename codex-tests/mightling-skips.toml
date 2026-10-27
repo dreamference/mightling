@@ -269,6 +269,13 @@ filter = """
 | (binary_id(codex-core-plugins) & test(=manager::tests::featured_plugin_ids_for_config_uses_restriction_product_query_param))
 """
 
+# sandbox-read-only-network: 1 test
+[[test]]
+reason = """patch 0031: read-only sandbox has network unless /airgapped on. This case runs a networked command in Codex's read-only sandbox at the default level and expects it to fail. The air-gapped sandbox's lack of network stays covered: codex-tests/patches/0006 runs codex-linux-sandbox's network tests (sandbox_blocks_curl, _nc, _getent, _dev_tcp_redirection, ...) at /airgapped on."""
+filter = """
+  (binary_id(codex-core::all) & test(=suite::approvals::approval_matrix_covers_group::read_only))
+"""
+
 # env-tls: 6 tests
 [[test]]
 reason = """Fail identically on unmodified Codex at rust-v0.158.0 on this machine, so not Mightling's: the native-TLS attempt's error arrives as rustls' `AlertReceived(ProtocolVersion)`, not OpenSSL's `tlsv1 alert protocol version` that the fallback classifier matches, so no rustls retry happens. OpenSSL here is vendored (no libssl-dev). Root cause not established."""
@@ -289,6 +296,13 @@ filter = """
 | (binary_id(codex-exec-server::exec_process) & test(=shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_pipe_recovery))
 | (binary_id(codex-exec-server::exec_process) & test(=shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_tty_recovery))
 | (binary_id(codex-exec-server::exec_process) & test(=shell_snapshot_v2_filters_profile_exports_and_stays_in_memory::remote_sandbox))
+"""
+
+# env-tmp-markers: 1 test
+[[test]]
+reason = """Depends on the order of the run. Codex's bubblewrap sandbox keeps `.git`, `.agents` and `.codex` read-only in every writable root, and where one is missing it mounts an empty directory there, which leaves an empty `/tmp/.git`, `/tmp/.agents` and `/tmp/.codex` on the host whenever a sandboxed test has `/tmp` writable (seen 2026-10-27 at 10:00:24 in a full run, about 3 minutes in; not seen in a run of codex-linux-sandbox alone). This test builds its tree under the run's temporary directory in /tmp and expects no project marker above it, so it fails whenever it runs after such a test. The runner warns about the markers before and after a run."""
+filter = """
+  (binary_id(codex-skills-extension) & test(=host_roots::tests::repo_ancestry_without_project_marker_does_not_walk_parents))
 """
 
 # env-v8: 1 tests

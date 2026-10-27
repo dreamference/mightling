@@ -4,7 +4,11 @@
 // app window, which comes forward with the answer streaming; Esc or a click elsewhere puts the box
 // away. The box is the app's page at `#quick` on the same preload and channel as the pet, and may
 // ask for two things only (main.ts `handleQuick`). The shortcut is Electron's `globalShortcut`: X11,
-// macOS and Windows; on a Wayland session it registers nothing, which Settings says.
+// macOS and Windows; on a Wayland session it registers nothing, which Settings says. The box lists
+// the most recent Ask questions, each a click away (DESKTOP §16 B24), learnt from the app-server's
+// messages as the main process routes them (`RecentQuestions`).
+
+import path from "node:path";
 
 import { BrowserWindow, app, screen } from "electron";
 
@@ -16,6 +20,12 @@ export const QUICK_SIZE = { width: 640, height: 168 };
 
 /** The shortcut until Settings › General names another (Alt+Space is the window menu on most Linux desktops). */
 export const DEFAULT_SHORTCUT = "Ctrl+Alt+Space";
+
+/** The box's size with `recent` questions listed under it (DESKTOP §16 B24): 28 px a line, and the rule above them. */
+export function quickSize(recent: number): { width: number; height: number } {
+  const lines = Math.max(0, Math.min(recent, RECENT_SHOWN));
+  return { width: QUICK_SIZE.width, height: QUICK_SIZE.height + (lines ? 8 + lines * 28 : 0) };
+}
 
 /** The longest question the box passes on (the pet's limit). */
 export const QUICK_MAX = 4000;
@@ -102,4 +112,78 @@ export function openQuick(preload: string, theme: Theme): BrowserWindow {
 export function placeQuick(window: BrowserWindow): void {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   window.setPosition(Math.round(area.x + (area.width - QUICK_SIZE.width) / 2), Math.round(area.y + area.height / 4));
+}
+
+/** How many recent Ask questions the box lists (DESKTOP §16 B24). */
+export const RECENT_SHOWN = 5;
+
+/** One recent question, as the box shows it. */
+export interface RecentQuestion {
+  id: string;
+  title: string;
+}
+
+/**
+ * Ask's questions, most recent first (DESKTOP §16 B24): the threads whose folder is under Ask's root
+ * (`$CODEX_HOME/ask`), from `thread/list` and `thread/read` answers and `thread/started`, renamed by
+ * `thread/name/updated`, moved up by `turn/started`, dropped when archived or deleted. Ephemeral
+ * (incognito) threads are never listed.
+ */
+export class RecentQuestions {
+  private readonly questions = new Map<string, { title: string; at: number }>();
+
+  constructor(private readonly askRoot: () => string | null) {}
+
+  private inAsk(cwd: unknown): boolean {
+    const root = this.askRoot();
+    if (!root || typeof cwd !== "string" || !cwd) return false;
+    const folder = path.resolve(cwd);
+    return folder.startsWith(path.resolve(root) + path.sep);
+  }
+
+  private learn(thread: unknown): void {
+    if (typeof thread !== "object" || thread === null) return;
+    const { id, cwd, name, preview, updatedAt, ephemeral } = thread as Record<string, unknown>;
+    if (typeof id !== "string" || ephemeral === true || !this.inAsk(cwd)) return;
+    const label = typeof name === "string" && name.trim() ? name : typeof preview === "string" ? preview : "";
+    const title = label.replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!title) return;
+    const at = typeof updatedAt === "number" ? updatedAt : Date.now() / 1000;
+    const known = this.questions.get(id);
+    this.questions.set(id, { title, at: Math.max(at, known?.at ?? 0) });
+  }
+
+  /** Takes one message from the server. */
+  observe(message: unknown): void {
+    if (typeof message !== "object" || message === null) return;
+    const { method, params, result } = message as { method?: unknown; params?: Record<string, unknown>; result?: Record<string, unknown> };
+    if (result && typeof result === "object") {
+      this.learn(result.thread);
+      if (Array.isArray(result.data)) for (const thread of result.data) this.learn(thread);
+    }
+    const thread = typeof params?.threadId === "string" ? params.threadId : null;
+    if (method === "thread/started") this.learn(params?.thread);
+    else if (method === "thread/name/updated" && thread && typeof params?.threadName === "string") {
+      const known = this.questions.get(thread);
+      const title = params.threadName.replace(/\s+/g, " ").trim().slice(0, 120);
+      if (known && title) known.title = title;
+    } else if (method === "turn/started" && thread) {
+      const known = this.questions.get(thread);
+      if (known) known.at = Date.now() / 1000;
+    } else if ((method === "thread/archived" || method === "thread/deleted") && thread) this.questions.delete(thread);
+  }
+
+  /** The most recent questions, newest first. */
+  list(): RecentQuestion[] {
+    return [...this.questions.entries()].sort((a, b) => b[1].at - a[1].at).slice(0, RECENT_SHOWN).map(([id, { title }]) => ({ id, title }));
+  }
+
+  /** Whether the box may open this thread: only one it listed. */
+  listed(id: unknown): boolean {
+    return typeof id === "string" && this.list().some((question) => question.id === id);
+  }
+
+  reset(): void {
+    this.questions.clear();
+  }
 }

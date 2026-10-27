@@ -118,6 +118,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_RELEASE_1.7.0.md](./DREAMFERENCE_RELEASE_1.7.0.md) | *Prepared 2026-10-19 on `release/1.7.0`, not yet published:* the desktop app's Work at parity with the Codex app, the Windows desktop installer, the Mac preview's fixes, the Onyx web chat retired, Night Shift best-of-N, several Signal bridges |
 | [DREAMFERENCE_RELEASE_1.7.1.md](./DREAMFERENCE_RELEASE_1.7.1.md) | *Prepared 2026-10-22 on `release/1.7.1`:* the sandbox closed to the host's control sockets, the phone bridges (voice, images and files both ways, Night Shift, Telegram topics), dark mode, Settings › Node, `ling --compat claude`, no vendor names in `ling`, Night Shift's three attempts, the loop guard, LoRA adapters, the file index's OCR and office formats |
 | [DREAMFERENCE_RELEASE_1.6.4.md](./DREAMFERENCE_RELEASE_1.6.4.md) | *Published 2026-10-15, the current release:* the SGLang pin moved to v0.5.21 (`b1259f3e…`) and the Windows client built again; carries the unpublished 1.6.2 |
+| [DREAMFERENCE_2_0.md](./DREAMFERENCE_2_0.md) | *Proposed (2026-10-27):* Mightling 2.0: the postponed work — `ling-engine` as default model server (the gate of 2026-10-26, and `1.8.0` as the step before 2.0), several drafters and own-session tuning (a larger drafter: no-go), the Windows-only port of `ling-engine` for AMD Strix Halo, the Discord bridge, web search (paid API keys, reselling, `google cse`, and the pending local search index draft), Matrix on the remote-access overlay, and on-hold items |
 
 ---
 

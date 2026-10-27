@@ -30,6 +30,8 @@ On the node, `ling-admin node enable` installs an Avahi service file (root once;
 
 `ling-app` on a client runs Ask and Work in its windows on its own app-server, against the node's model server; the TCP forwarder to the node's port 3000 was removed on 2026-10-08 (ASK §17).
 
+`node enable` also sets up the node's forge (Forgejo; `--no-forge` skips it): the first node is the forge of record, the others mirrors ([forge.md](forge.md)).
+
 ## Pairing and jobs, over SSH
 
 **Managing and using a second node goes over SSH, never an open port** (`node/node_pairing.py`, `node_serve.py`, `node_remote.py`, `node_job.py`, `node_job_sender.py`). `node add` has the other node authorise a key for one forced command, `ling-admin node serve-job`, which refuses anything but its operations (info, status, start, stop, `set-model <matrix key>`, unpair, the two git services for `jobs/<name>.git`, and the job requests) and carries each out with that node's own `ling-admin`.
@@ -42,6 +44,23 @@ A job (`node run <node> -- <command>`) is a systemd user unit with a mandatory m
 - `node sync-model` copies a model's cache over the pairing.
 - `/night add --on <node>` hands a task to that node's own runner (`night_shift/night_shift_remote.py`), where it runs in the job sandbox with a `CODEX_HOME` of its own; spec §18.8.
 - `/node` in the TUI (patch `0025`) runs `ling-admin node …` in the terminal; see [codex-build.md](codex-build.md).
+
+## Provisioning a node with a role
+
+`ling-admin node provision <node> --user <user> --role night|engine [--dry-run]` (`node/node_role_provisioner.py`) is `node provision` (FLEET §7.1: install, `node prepare`, advertise, model copy, pairing, start and verify) plus what the last node needed by hand. It is the one run that adds persistent access, which FLEET's decisions 3 and 6 rule out for a plain `node provision` (no `NOPASSWD`, no full-access key, never `sshd`), so it happens only with `--role`:
+
+1. the main node's own key (the one `ssh -G <node>` names, else `~/.ssh/id_ed25519`) is appended to `~/.ssh/authorized_keys`; the run's sessions offer it with `IdentitiesOnly=yes -i`, so a re-run logs in once password SSH is off;
+2. install and `node prepare` as usual, headless: the password is asked once with getpass even for one machine and reaches root only as `sudo -S`'s standard input (the log says `<password>`);
+3. `/etc/docker/daemon.json`: `max-download-attempts: 100` and the `nvidia` runtime merged in, every other key kept; docker restarted only when the file changed and no `dreamference-vllm-*` container runs (otherwise reported);
+4. `/etc/sudoers.d/mightling-agents`, checked with `visudo -cf` before it is installed: `NOPASSWD` for `systemctl`, `apt-get`, `apt`, `docker` and `ling-admin host setup|node prepare` for each `ling-admin` that exists there (the release venv, and what `~/.local/bin/ling-admin` links to). A file granting `NOPASSWD: ALL` is reported, never removed;
+5. model folders this machine has no copy of: `ling-admin model download` there (the pinned revision);
+6. pairing as usual, then the node must be among the paired ones `node list` shows;
+7. `forge on` if its forge is not running, then `forge mirrors sync` from here;
+8. key-only SSH: a separate login with the key alone (no master, `BatchMode`, publickey only) must work first; then `/etc/ssh/sshd_config.d/00-mightling-key-only.conf` (`00-`: sshd keeps the first value, and `50-cloud-init.conf` may allow passwords), `sshd -t`, `systemctl reload ssh`, `sshd -T` must say `passwordauthentication no`, and the key must still work, else the drop-in is removed again;
+9. after the model server is started and verified: `night` makes `~/.local/share/dreamference/swe-bench/{chain,pins}`, `~/.ling-gpu.lock` and `~/.ling-gpu-holds.log` and runs `swe-bench setup` and `smoke`; `engine` installs `cmake` and `ninja-build` and reads the CUDA version from `nvcc` (drivers are never touched);
+10. a readiness table (host check, model server canary, egress audit, disk free, the role), with a non-zero exit when a check fails; `sudo -k` at the end.
+
+Root files travel base64-encoded on sudo's command line (they hold no secret) into a `mktemp` file, never a fixed name under `/tmp`. Every step reads first and changes nothing when it is done; `--dry-run` only reads (sudo included) and prints `would:` lines.
 
 ## Keep when touching this
 

@@ -287,11 +287,41 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     assert ("ling-signal" in bins) == builder_module.BUILDS_SIGNAL
     if builder_module.BUILDS_SIGNAL:
         assert command[command.index("ling-signal") - 1] == "-p"
+    # The delegation plugin's server rides the same run, and is installed beside `ling`.
+    assert ("ling-delegate" in bins) == builder_module.BUILDS_DELEGATE
+    if builder_module.BUILDS_DELEGATE:
+        assert command[command.index("ling-delegate") - 1] == "-p"
+
+
+def test_on_linux_a_build_without_the_delegate_binary_is_not_current(tmp_path, monkeypatch):
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(builder_module, "BUILDS_SIGNAL", False)
+    monkeypatch.setattr(builder_module, "BUILDS_DELEGATE", True)
+    monkeypatch.setattr(CodexBrandedBuilder, "build_key", classmethod(lambda cls: "k"))
+    (tmp_path / "build-key").write_text("k\n")
+    for name in ("ling", "codex-code-mode-host"):
+        path = tmp_path / "bin" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+    assert CodexBrandedBuilder.is_current() is False
+    delegate = tmp_path / "bin" / "ling-delegate"
+    delegate.write_text("#!/bin/sh\n")
+    delegate.chmod(0o755)
+    assert CodexBrandedBuilder.is_current() is True
+
+
+def test_the_delegate_binary_is_installed_beside_ling_and_never_linked_onto_path():
+    script = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
+    assert "ling-signal ling-delegate" in script
+    assert "codex-code-mode-host|ling-signal|ling-delegate) ;;" in script
+    assert not hasattr(builder_module, "DELEGATE_PATH_LINK")
 
 
 def test_on_linux_a_build_without_the_signal_bridge_is_not_current(tmp_path, monkeypatch):
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path))
     monkeypatch.setattr(builder_module, "BUILDS_SIGNAL", True)
+    monkeypatch.setattr(builder_module, "BUILDS_DELEGATE", False)
     monkeypatch.setattr(CodexBrandedBuilder, "build_key", classmethod(lambda cls: "k"))
     (tmp_path / "build-key").write_text("k\n")
     for name in ("ling", "codex-code-mode-host"):

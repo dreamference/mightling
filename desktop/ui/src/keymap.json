@@ -309,6 +309,14 @@
    "status": "built"
   },
   {
+   "id": "searchChats",
+   "group": "Chats",
+   "label": "Search threads",
+   "keys": [],
+   "context": "global",
+   "status": "built"
+  },
+  {
    "id": "findInChat",
    "group": "Chats",
    "label": "Find in thread",
@@ -640,7 +648,7 @@
     "Ctrl+Shift+V"
    ],
    "context": "global",
-   "status": "planned"
+   "status": "built"
   },
   {
    "id": "viewAsk",

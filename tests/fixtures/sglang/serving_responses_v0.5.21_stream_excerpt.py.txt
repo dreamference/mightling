@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+# Excerpt of SGLang v0.5.21, python/sglang/srt/entrypoints/openai/serving_responses.py, lines
+# 1880-1933 verbatim (OpenAIServingResponses.responses_stream_generator_non_harmony: the wrapper that
+# tags each streamed message's phase), from the image the registry pins (QWEN38_SGLANG_IMAGE); the
+# whole file's sha256 is ed490a69c960cafa7fc97129e585d176993fb63dbda66468ac9b86770813a00d.
+# Used by tests/test_sglang_stream_phase.py; Copyright the SGLang authors, Apache License 2.0.
+class OpenAIServingResponses:
+    async def responses_stream_generator_non_harmony(
+        self,
+        request: ResponsesRequest,
+        sampling_params: Any,
+        result_generator: AsyncIterator[Any],
+        model_name: str,
+        tokenizer: Any,
+        request_metadata: RequestResponseMetadata,
+        created_time: Optional[int] = None,
+        *,
+        require_reasoning: bool,
+    ) -> AsyncGenerator[str, None]:
+        pending: list[dict] = []
+        can_call_tools = (
+            bool(self._response_tools_to_chat_tools(request))
+            and request.effective_tool_choice() != "none"
+        )
+        async for event in self._responses_stream_generator_non_harmony(
+            request,
+            sampling_params,
+            result_generator,
+            model_name,
+            tokenizer,
+            request_metadata,
+            created_time,
+            require_reasoning=require_reasoning,
+        ):
+            if not can_call_tools:
+                yield event
+                continue
+            payload = orjson.loads(event.split("data: ", 1)[1])
+            event_type = payload["type"]
+            item_type = payload.get("item", {}).get("type")
+            opens_item = event_type == "response.output_item.added"
+            if pending or (opens_item and item_type == "message"):
+                pending.append(payload)
+                tool_follows = opens_item and item_type in (
+                    "function_call",
+                    "custom_tool_call",
+                )
+                terminal = event_type in (
+                    "response.completed",
+                    "response.incomplete",
+                    "response.failed",
+                )
+                if tool_follows or terminal:
+                    phase = "commentary" if tool_follows else "final_answer"
+                    for buffered in pending:
+                        if buffered.get("item", {}).get("type") == "message":
+                            buffered["item"]["phase"] = phase
+                        yield f"event: {buffered['type']}\ndata: {orjson.dumps(buffered).decode()}\n\n"
+                    pending.clear()
+            else:
+                yield event

@@ -59,6 +59,15 @@ on:
         description: "Also build the Windows client (Arm64 and x86-64; preview: the .exe files are unsigned, the signed SHA256SUMS covers them)"
         type: boolean
         default: true
+      windows_x64_runner:
+        # The x86-64 Windows build on the self-hosted runner WINDOWS_X64_RUNNER names (box), or on
+        # GitHub's windows-latest (github) when that runner is offline. Signing stays on GitHub's runner.
+        description: "Runner for the x86-64 Windows build: box (self-hosted, if the WINDOWS_X64_RUNNER variable is set) or github"
+        type: choice
+        default: box
+        options:
+          - box
+          - github
       build_clients:
         description: "Also build the client for Intel/AMD Linux and macOS (build-clients.yml)"
         type: boolean
@@ -133,6 +142,7 @@ jobs:
       build_mightling: ${{ inputs.build_mightling }}
       mightling_runner: ${{ inputs.mightling_runner }}
       build_windows: ${{ inputs.build_windows }}
+      windows_x64_runner: ${{ inputs.windows_x64_runner }}
       build_clients: ${{ inputs.build_clients }}
       build_mac_preview: ${{ inputs.build_mac_preview }}
       # The macOS binaries and the dmgs signed and notarised with the Developer ID once the Apple
@@ -172,6 +182,16 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      # Every build's own checksum file (ling-<target>.sha256sums and the like, written where the
+      # build ran, the self-hosted Windows runner among them) checked against the files downloaded
+      # here, before anything is signed.
+      - name: Check the builds' checksums
+        run: |
+          mapfile -t sums < <(find artifacts -type f -name '*.sha256sums' | sort)
+          for file in "${sums[@]}"; do
+            (cd "$(dirname "$file")" && sha256sum --strict -c "$(basename "$file")")
+          done
+          echo "checked ${#sums[@]} checksum files"
       - name: Write and sign SHA256SUMS
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}

@@ -11,13 +11,13 @@ import * as bridge from "./bridge";
 import { Icon } from "./icons";
 import { chordOf, conflicts, keyLabel, KEYMAP, shortcutLabel, type KeyAction } from "./keymap";
 import { boardOn } from "./board";
-import { cleanAppearance, type Appearance, type AppearanceColours, type Prefs } from "./prefs";
+import { cleanAppearance, READABLE_FONT, type Appearance, type AppearanceColours, type Prefs } from "./prefs";
 import { useShownTheme, type ThemeChoice } from "./theme";
 import type { Project } from "./protocol/v2/Project";
 import type { Thread } from "./protocol/v2/Thread";
-import type { WorktreeSettings } from "./worktrees";
+import { ACROSS_REPOS_KEY, type WorktreeSettings } from "./worktrees";
 
-export type SettingsPage = "general" | "documents" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node";
+export type SettingsPage = "general" | "documents" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node" | "voice";
 
 export interface SettingsProps {
   page: SettingsPage;
@@ -26,7 +26,7 @@ export interface SettingsProps {
   onChange: (values: Partial<Prefs>) => void;
   onClose: () => void;
   worktrees: WorktreeSettings;
-  onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => void;
+  onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled" | typeof ACROSS_REPOS_KEY, value: string | number | boolean | null) => void;
   /** Archived threads (`thread/list` with `archived`), and bringing one back (`thread/unarchive`). */
   listArchived: () => Promise<Thread[]>;
   /** Projects removed from the sidebar (projects.ts), and bringing one back. */
@@ -57,6 +57,7 @@ const PAGES: { id: SettingsPage; label: string; desktopOnly?: boolean }[] = [
   { id: "worktrees", label: "Worktrees", desktopOnly: true },
   { id: "browser", label: "Browser", desktopOnly: true },
   { id: "pets", label: "Pets", desktopOnly: true },
+  { id: "voice", label: "Voice", desktopOnly: true },
   { id: "suggestions", label: "Suggested prompts" },
   { id: "agents", label: "Agents" },
   { id: "node", label: "Node", desktopOnly: true },
@@ -89,6 +90,7 @@ export function SettingsDialog(props: SettingsProps) {
             {props.page === "worktrees" && bridge.git.available() ? <Worktrees {...props} /> : null}
             {props.page === "browser" && bridge.preview.available() ? <Browser {...props} /> : null}
             {props.page === "pets" && bridge.git.available() ? <Pets {...props} /> : null}
+            {props.page === "voice" && bridge.git.available() ? <Voice {...props} /> : null}
             {props.page === "suggestions" ? <Suggestions {...props} /> : null}
             {props.page === "agents" ? <Agents {...props} /> : null}
             {props.page === "node" && bridge.git.available() ? <NodePage notice={props.notice} /> : null}
@@ -107,6 +109,7 @@ function General({ prefs, onChange }: SettingsProps) {
         <legend>Enter in the composer</legend>
         <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "enter"} onChange={() => onChange({ enterBehaviour: "enter" })} /> Enter sends; Shift+Enter starts a new line</label>
         <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "ctrlEnter"} onChange={() => onChange({ enterBehaviour: "ctrlEnter" })} /> Enter starts a new line; {keyLabel("Ctrl+Enter", "composer")} sends</label>
+        <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "multiline"} onChange={() => onChange({ enterBehaviour: "multiline" })} /> Enter sends a one-line prompt; once it has several lines, Enter starts a new one and {keyLabel("Ctrl+Enter", "composer")} sends</label>
       </fieldset>
       <fieldset>
         <legend>A message sent while the agent is working</legend>
@@ -386,6 +389,7 @@ function Worktrees(props: SettingsProps) {
         <label className="field">Keep the most recent
           <input type="number" min={1} max={200} value={props.worktrees.keep} aria-label="Worktrees kept" onChange={(event) => Number(event.target.value) > 0 && props.onWorktree("worktree-keep-count", Math.floor(Number(event.target.value)))} />
         </label>
+        <label><input type="checkbox" checked={props.worktrees.acrossRepos} onChange={(event) => props.onWorktree(ACROSS_REPOS_KEY, event.target.checked)} /> Count them across all repositories, not per repository</label>
       </fieldset>
     </>
   );
@@ -489,7 +493,8 @@ function AppearancePage({ prefs, onChange, notice }: SettingsProps) {
       </fieldset>
       <fieldset>
         <legend>Fonts</legend>
-        <label className="field">Interface font <input defaultValue={prefs.appearance.fontUi ?? ""} placeholder="Inter, sans-serif" aria-label="Interface font" onBlur={(event) => set({ fontUi: event.target.value.trim() || undefined })} /></label>
+        <label><input type="checkbox" checked={prefs.appearance.fontUi === READABLE_FONT} onChange={(event) => set({ fontUi: event.target.checked ? READABLE_FONT : undefined })} /> A font made for reading: Atkinson Hyperlegible, its letters hard to mistake for each other</label>
+        <label className="field">Interface font <input key={prefs.appearance.fontUi ?? ""} defaultValue={prefs.appearance.fontUi ?? ""} placeholder="Inter, sans-serif" aria-label="Interface font" onBlur={(event) => set({ fontUi: event.target.value.trim() || undefined })} /></label>
         <label className="field">Code font <input defaultValue={prefs.appearance.fontCode ?? ""} placeholder='"JetBrains Mono", monospace' aria-label="Code font" onBlur={(event) => set({ fontCode: event.target.value.trim() || undefined })} /></label>
       </fieldset>
       <div className="buttons dialog-buttons">
@@ -668,11 +673,16 @@ function Git({ prefs, onChange }: SettingsProps) {
         <label><input type="radio" name="review" checked={prefs.reviewDelivery === "inline"} onChange={() => onChange({ reviewDelivery: "inline" })} /> Inline, in the thread</label>
         <label><input type="radio" name="review" checked={prefs.reviewDelivery === "detached"} onChange={() => onChange({ reviewDelivery: "detached" })} /> Detached, in a review thread of their own</label>
       </fieldset>
-      <p className="dialog-note">A pull request opens the forge's own page in your browser, which writes its description.</p>
+      <p className="dialog-note">The review pane's Pull request opens the forge's own page in your browser; Create pull request in the pull-request tab opens one through <code>gh</code>.</p>
       <fieldset>
         <legend>Pull requests</legend>
         <label><input type="checkbox" checked={prefs.pullRequests} onChange={(event) => onChange({ pullRequests: event.target.checked })} /> A pull-request tab, through your GitHub CLI (<code>gh</code>) and its sign-in</label>
         <span className="planned-note">Off by default: it talks to GitHub, so it is refused while airgapped is on. Review with Mightling and Fix put a request in the composer; a review is submitted as you only after you confirm.</span>
+      </fieldset>
+      <fieldset>
+        <legend>The instruction a written pull request description starts from</legend>
+        <textarea rows={4} defaultValue={prefs.pullRequestPrompt ?? ""} aria-label="Pull request description instruction" placeholder="Empty: Mightling's own (what changes and why, then how it was tested)"
+          onBlur={(event) => onChange({ pullRequestPrompt: event.target.value.trim() || null })} />
       </fieldset>
     </>
   );
@@ -697,7 +707,9 @@ function Project({ prefs, onChange }: SettingsProps) {
         <label className="field">Shell (empty for your login shell, $SHELL)
           <input defaultValue={prefs.terminalShell ?? ""} placeholder="/bin/bash" aria-label="Terminal shell" onBlur={(event) => onChange({ terminalShell: event.target.value.trim() || null })} />
         </label>
-        <p className="dialog-note">Terminal tabs open in the bottom panel ({shortcutLabel("terminal")}), in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
+        <label><input type="radio" name="terminal-place" checked={prefs.terminalPlace === "panel"} onChange={() => onChange({ terminalPlace: "panel" })} /> Open terminals in the bottom panel</label>
+        <label><input type="radio" name="terminal-place" checked={prefs.terminalPlace === "tabs"} onChange={() => onChange({ terminalPlace: "tabs" })} /> Open terminals as tabs beside the thread, with its files</label>
+        <p className="dialog-note">A terminal opens with {shortcutLabel("terminal")} or New tab › Terminal, in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
         <label><input type="checkbox" checked={prefs.agentReadsWindow} onChange={(event) => onChange({ agentReadsWindow: event.target.checked })} /> Let the agent read the thread's terminal tabs and the preview's console when it needs to (new threads)</label>
         <p className="dialog-note">It reads them on this machine, the latest lines only, with anything that looks like a password or token masked; nothing is sent anywhere else.</p>
       </fieldset>
@@ -756,11 +768,45 @@ function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories
           <p className="dialog-note">Off by default. When on, Mightling keeps a copy of each Ask question and its answers as a Markdown file under ~/.mightling/ask-history/ and gives the agent a skill, earlier-questions, to search and read them on this machine, read only. Incognito questions are never kept, archived ones are removed, and turning this off deletes the copies.</p>
         </fieldset>
       ) : null}
+      {bridge.memoryFiles.available() ? <MemoryFiles notice={notice} /> : null}
       <p className="dialog-note">{status ? `${status.v2ConsolidatedThreads} thread${status.v2ConsolidatedThreads === 1 ? "" : "s"} remembered${status.v2Ready ? "" : "; the memories are still being made"}.` : ""} /memories in a thread turns them off or on for that thread.</p>
       <div className="buttons dialog-buttons">
         <button className="danger-button" onClick={() => window.confirm("Delete everything the agent remembers? This cannot be undone.") && resetMemories().then(() => memoryStatus().then(setStatus)).catch(notice)}>Delete the memories</button>
       </div>
     </>
+  );
+}
+
+/** What the agent remembers, one file at a time (DESKTOP §16 B17): shown, edited, saved. */
+function MemoryFiles({ notice }: { notice: (error: unknown) => void }) {
+  const [files, setFiles] = useState<bridge.MemoryFile[] | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const load = useCallback(() => bridge.memoryFiles.list().then((list) => { setFiles(list); setDrafts({}); }).catch((error) => { setFiles([]); notice(error); }), [notice]);
+  useEffect(() => { void load(); }, [load]);
+  if (files === null) return null;
+  return (
+    <fieldset className="memory-files">
+      <legend>What the agent remembers</legend>
+      {files.length === 0 ? <p className="dialog-note">Nothing yet: the memories are made from finished threads, a while after they end.</p> : files.map((file) => {
+        const text = drafts[file.name] ?? file.text;
+        const changed = drafts[file.name] !== undefined && drafts[file.name] !== file.text;
+        return (
+          <div key={file.name} className="memory-file">
+            <label className="field">
+              <span><code>{file.name}</code>: {file.about}</span>
+              <textarea rows={8} aria-label={file.name} value={text} readOnly={file.cut} spellCheck={false} onChange={(event) => setDrafts({ ...drafts, [file.name]: event.target.value })} />
+            </label>
+            {file.cut ? <p className="dialog-note">Too long to edit here; open it from ~/.mightling/memories/.</p> : (
+              <div className="buttons">
+                <button className="primary" disabled={!changed} onClick={() => void bridge.memoryFiles.save(file.name, text).then(load).catch(notice)}>Save</button>
+                <button disabled={!changed} onClick={() => setDrafts(({ [file.name]: _gone, ...rest }) => rest)}>Undo</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <p className="dialog-note">Edit a line to correct it, or delete it so the agent forgets it. The memory pipeline reads your edits the next time it brings the memories up to date.</p>
+    </fieldset>
   );
 }
 
@@ -820,6 +866,29 @@ function Browser({ prefs, onChange, notice }: SettingsProps) {
 }
 
 /** Settings › Pets (DESKTOP_PARITY §2.15, Phase 3 item 6): the pet on or off, its size, Mightling's mark or a picture of your own. */
+/** The word list as the text area shows it (one per line), and back. */
+export function wordsFromText(text: string): string[] {
+  return [...new Set(text.split("\n").map((line) => line.trim()).filter(Boolean))].slice(0, 200);
+}
+
+function Voice({ prefs, onChange }: SettingsProps) {
+  // Kept as typed until the field is left, so a half-typed line is not tidied away under the caret.
+  const [text, setText] = useState(prefs.dictationWords.join("\n"));
+  return (
+    <>
+      <h3>Voice</h3>
+      <p className="dialog-note">Dictation turns speech into text on this machine (<code>ling-admin voice start</code>); nothing is sent anywhere, so it works with airgapped on. {shortcutLabel("voice")} starts and stops it, as the microphone button does; the text goes into the composer for you to read before sending.</p>
+      <label className="field">
+        Words to spell as written: names, paths, symbols, one per line
+        <textarea rows={8} aria-label="Words to spell as written" value={text} placeholder={"Mightling\nfetcher/client.py\nConnectionError"}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={() => onChange({ dictationWords: wordsFromText(text) })} />
+      </label>
+      <p className="dialog-note">They are given to the speech-to-text service with each recording, so it prefers these spellings. The first few hundred characters are used.</p>
+    </>
+  );
+}
+
 function Pets({ prefs, onChange, notice }: SettingsProps) {
   return (
     <>
@@ -854,6 +923,11 @@ function Suggestions({ prefs, onChange }: SettingsProps) {
       <fieldset>
         <legend>Next message</legend>
         <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Predict my next message when a turn ends</label>
+      </fieldset>
+      <fieldset>
+        <legend>Summaries of finished chats</legend>
+        <label><input type="checkbox" checked={prefs.summarizeThreads} onChange={(event) => onChange({ summarizeThreads: event.target.checked })} /> Summarize a chat left alone for a day</label>
+        <p className="dialog-note">Two lines from this machine's model, shown under the chat's title when you point at it and in Search threads, and found by a search. Made one at a time, only when nothing else is running, in a read-only thread that is not kept; a chat that changes is summarized again a day later.</p>
       </fieldset>
     </>
   );

@@ -82,6 +82,11 @@ describe("Enter, the history and the approval keys", () => {
     expect(enterSends(press("Enter", { shiftKey: true }), "enter")).toBe(false);
     expect(enterSends(press("Enter"), "ctrlEnter")).toBe(false);
     expect(enterSends(press("Enter", { ctrlKey: true }), "ctrlEnter")).toBe(true);
+    // Multiline (DESKTOP §16 B22): Enter sends one line; with several, Enter is a new line and Ctrl+Enter sends.
+    expect(enterSends(press("Enter"), "multiline", "one line")).toBe(true);
+    expect(enterSends(press("Enter"), "multiline", "first\nsecond")).toBe(false);
+    expect(enterSends(press("Enter", { ctrlKey: true }), "multiline", "first\nsecond")).toBe(true);
+    expect(enterSends(press("Enter", { shiftKey: true }), "multiline", "one line")).toBe(false);
     expect(DEFAULT_PREFS.enterBehaviour).toBe("enter");
     expect(sanitize({ enterBehaviour: "ctrlEnter", followUp: "sometimes", ghost: 1 })).toEqual({ ...DEFAULT_PREFS, enterBehaviour: "ctrlEnter" });
   });

@@ -21,7 +21,7 @@ import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
 import { ThreadLoader } from "./loader";
 import { inGitInternals } from "./files";
-import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
+import { effectiveKeymap, keyAction, keyLabel, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
 import { APPEARANCE_TOKENS, DEFAULT_PREFS, appearanceFor, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
 import { theme, useShownTheme } from "./theme";
@@ -53,39 +53,63 @@ import { FileTree } from "./FileTree";
 import { FileView } from "./FileView";
 import { ArtifactView } from "./ArtifactView";
 import { LinkDialog } from "./LinkDialog";
+import { ContinueDialog } from "./ContinueDialog";
+import { continueInProject, continueTargets, type ContinueTarget } from "./continueproject";
 import { artifactKind, createdArtifacts } from "./artifacts";
 import { keptQuestions, transcript } from "./recall";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
-import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type WorkspaceTab } from "./tabs";
+import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, tabbedTerminals, terminalTab, withTab, withoutTab, type WorkspaceTab } from "./tabs";
+import { TerminalView } from "./TerminalView";
 import { PreviewTab } from "./PreviewTab";
 import { PullRequestsTab } from "./PullRequestsTab";
+import { pullRequestDescription } from "./prtext";
 import { SubagentsPanel } from "./SubagentsPanel";
-import { ScheduledView, unseen } from "./ScheduledView";
+import { ScheduledView } from "./ScheduledView";
+import { markRead, prunedNight, unreadRuns } from "./nightinbox";
 import { SyncedView, useSynced } from "./SyncedView";
 import { ActivityView } from "./ActivityView";
 import { attentionList } from "./attention";
-import { CONSOLE_TOOL, MAX_LINES, TERMINAL_TOOL, consoleAnswer, linesAsked, terminalAnswer, toolLabel, windowToolNames } from "./windowtools";
+import { CONSOLE_TOOL, MAX_LINES, TERMINAL_TOOL, consoleAnswer, linesAsked, terminalAnswer, windowToolNames } from "./windowtools";
 import { predict } from "./suggestions";
 import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
+import { SideChat } from "./SideChat";
+import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages } from "./sidechat";
+import { agentsPath, initPrompt } from "./init";
+import { editedTurn, recordVersion, stepVersion, versionsAt, type MessageVersions } from "./versions";
+import { attemptKey, nextToSummarize, serverIdle, summarize, summaryMatches, summaryOf, withSummary } from "./summaries";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
 import { nearBottom } from "./follow";
-import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, stepThread, threadLink, toggled, type Section } from "./threads";
+import { chronological, moveToSection, nextAttention, pinnedFirst, readThreadPages, recentThreads, renameStart, stepThread, THREAD_PAGES, threadLink, toggled, type Section } from "./threads";
 import { TerminalHub, decode, terminalMessage, type TerminalSession } from "./terminal";
 import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsState } from "./windows";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
+import { commandChoices, type ApprovalChoice } from "./approvals";
+import { busyHere } from "./checkouts";
+import { drawDiagrams } from "./diagrams";
+import { AgentMark } from "./agentmarks";
 import { ExportDialog } from "./ExportDialog";
+import { LINKED_SETTINGS, sameRemote } from "./links2";
+import { PathMenu, pathOf, type PathAction, type PathMenuState } from "./PathMenu";
 import { QuestionCard } from "./QuestionCard";
+import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
+import { AskFiles } from "./AskFiles";
+import { toolView, type ToolView } from "./toolitems";
+import { latestFindings } from "./findings";
 import { threadContext, withThreadContext } from "./tonight";
+import { NightCards } from "./NightCards";
+import { tasksOf, tieTask } from "./nightthread";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectPage } from "./ProjectPage";
 import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollection, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
-import { carry, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
+import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
+import { clicked, deleteQuestion, forgetThreads, NO_CHOICE, present, type Choice } from "./selection";
+import { SelectionBar } from "./SelectionBar";
 import { commitMessage, dropQueued, forkAt, forkThread, listQueue, movedQueue, reorderQueued, sendMessage, steerQueued, takeBack, updateQueued, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
@@ -166,6 +190,8 @@ export function App() {
   const [airgap, setAirgap] = useState<bridge.Airgapped | null>(null);
   /** A web address clicked in an answer, waiting for the user's yes (LinkDialog.tsx). */
   const [linkAsked, setLinkAsked] = useState<{ url: string; thread: string | null; airgappedOn: boolean } | null>(null);
+  /** An Ask question being continued in a project (DESKTOP §16 B33, ContinueDialog.tsx); busy while it is forked. */
+  const [continuing, setContinuing] = useState<{ thread: Thread; label: string; busy: boolean } | null>(null);
   const [newCwd, setNewCwd] = useState("");
   // The folder named, the notice asking for it goes (it stayed until a restart).
   useEffect(() => {
@@ -203,6 +229,14 @@ export function App() {
   const [newProject, setNewProject] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   /** The thread being exported (exportthread.ts) and the home folder its paths are redacted against. */
+  /** The menu on a file's path (DESKTOP §16 B14). */
+  const [pathMenu, setPathMenu] = useState<PathMenuState | null>(null);
+  /** The first-run page (DESKTOP §16 B6), decided once the threads and preferences are read. */
+  const [welcome, setWelcome] = useState(false);
+  /** Files from answers (DESKTOP §16 B30): the list of what Ask's questions' folders hold. */
+  const [askFilesOpen, setAskFilesOpen] = useState(false);
+  /** The plugin a `ling://plugins/<id>` link named, shown first in Skills and tools › Plugins (DESKTOP §16 B19). */
+  const [pluginFocus, setPluginFocus] = useState<string | null>(null);
   const [exporting, setExporting] = useState<{ thread: Thread; title: string; home: string | null } | null>(null);
   const draggedHeader = useRef<string | null>(null);
   const loadProjects = useCallback(async () => {
@@ -223,9 +257,15 @@ export function App() {
   const [planAvailable, setPlanAvailable] = useState(false);
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
+  /** The finished run Scheduled opens on (a thread's Night Shift card, DESKTOP §16 B40). */
+  const [scheduledRun, setScheduledRun] = useState<string | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   // Threads from the user's other devices, on `ling web` with the node's sync hub on (SYNC Phase 1).
   const synced = useSynced(HOST === "web" && !POPOUT);
+  const [forge, setForge] = useState(false);
+  useEffect(() => {
+    if (HOST === "web" && !POPOUT) void bridge.forgeAvailable().then(setForge).catch(() => {});
+  }, []);
   const [syncedOpen, setSyncedOpen] = useState(false);
   /** The agent message board (Phase 3 item 10): whether config.toml has it on, and its view. */
   const [board, setBoard] = useState<{ on: boolean; sqliteHome: string | null }>({ on: false, sqliteHome: null });
@@ -254,6 +294,10 @@ export function App() {
   const [askTree, setAskTree] = useState(false);
   /** Search files (Ctrl+P) open, with what it starts with (":" for go to line). */
   const [fileSearch, setFileSearch] = useState<string | null>(null);
+  /** Threads chosen together in the sidebar (DESKTOP §16 B36, selection.ts), cleared when the view changes. */
+  const [choice, setChoice] = useState<Choice>(NO_CHOICE);
+  const [choiceBusy, setChoiceBusy] = useState(false);
+  useEffect(() => setChoice(NO_CHOICE), [view]);
   const reviewOpen = tabs.some((tab) => tab.kind === "review");
   /** Opens (to the front) or closes the Review tab, as Ctrl+Shift+G and the bar's button do. */
   const setReviewOpen = (open: boolean | ((was: boolean) => boolean)) => {
@@ -323,7 +367,7 @@ export function App() {
   /** This window's panes detached into windows of their own (`paneKey`), until they dock back. */
   const [detached, setDetached] = useState<Set<string>>(new Set());
   /** What the main process may ask of this page about windows and panes; set further down, where those handlers are. */
-  const windowEvents = useRef<{ docked: (pane: PaneKind, thread: string) => void; paneAction: (action: bridge.PaneAction) => void; command: (command: "detachTerminal" | "detachReview") => void }>({ docked: () => {}, paneAction: () => {}, command: () => {} });
+  const windowEvents = useRef<{ docked: (pane: PaneKind, thread: string) => void; paneAction: (action: bridge.PaneAction) => void; command: (command: bridge.WindowCommand) => void }>({ docked: () => {}, paneAction: () => {}, command: () => {} });
   const [front, setFront] = useState<{ id: string; tick: number } | null>(null);
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
@@ -414,6 +458,16 @@ export function App() {
         loadPrefs(),
       ]);
       dispatch({ type: "threads", list: list.data });
+      if (showsWelcome(stored.welcomed, list.data.length, !POPOUT && !PANE)) setWelcome(true);
+      // The rest of the list, page by page (DESKTOP §16 B10): an older project no longer vanishes.
+      if (list.nextCursor) {
+        const first = list.nextCursor;
+        void readThreadPages(
+          async (cursor) => (await client.request("thread/list", { limit: 200, cursor: cursor ?? first })) as { data: Thread[]; nextCursor: string | null },
+          (more) => dispatch({ type: "threads", list: more }),
+          THREAD_PAGES - 1,
+        ).catch(notice);
+      }
       void loadProjects();
       setProfiles(permissions.data);
       setAirgap(level);
@@ -427,8 +481,6 @@ export function App() {
         setNewChoice((choice) => ({ ...choice, mode: defaultCheckout(desktop) }));
         setBoard({ on: boardOn(config), sqliteHome: sqliteHome(config) });
       }).catch(() => {});
-      // Night Shift's inbox: finished tasks since Scheduled was last opened.
-      if (bridge.host() === "electron") bridge.night.list().then((answer) => setNightUnseen(unseen(answer.tasks, stored.nightSeen))).catch(() => {});
       // Plan mode, when the server offers it (`collaborationMode/list`).
       client.request("collaborationMode/list", {}).then((answer) => setPlanAvailable(((answer as { data?: { mode: string | null }[] }).data ?? []).some((mask) => mask.mode === "plan"))).catch(() => setPlanAvailable(false));
       // The catalog the launcher wrote: one served model, with the efforts it allows.
@@ -556,12 +608,55 @@ export function App() {
         if (paths.length && notification.params.threadId === selectedRef.current && prefsRef.current.openArtifacts) openFileRef.current(paths[0]);
         // Earlier questions (§4.4): the question's copy brought up to date.
         if (prefsRef.current.recallQuestions) setTimeout(() => void recallRef.current(threadId).catch(() => {}), 500);
-      } else if ((notification.method === "thread/archived" || notification.method === "thread/unarchived") && prefsRef.current.recallQuestions) {
+      } else if ((notification.method === "thread/archived" || notification.method === "thread/unarchived" || notification.method === "thread/deleted") && prefsRef.current.recallQuestions) {
         // An archived question's copy goes, an unarchived one's comes back.
         setTimeout(() => void recallRef.current().catch(() => {}), 500);
       }
     });
   }, [listen]);
+
+  // Summaries of finished chats (DESKTOP §16 B43, summaries.ts): a thread idle a day, one at a time, by
+  // the served model, only while no turn runs; at most one a minute, the first a few seconds after start.
+  const summarizing = useRef({ busy: false, tried: new Set<string>() });
+  useEffect(() => {
+    if (state.server !== "ready" || !prefs.summarizeThreads) return;
+    const tick = () => {
+      const threads = Object.values(stateRef.current.threads);
+      // Not before the stored preferences are in (they hold the summaries already made).
+      if (summarizing.current.busy || prefsRef.current === DEFAULT_PREFS || !prefsRef.current.summarizeThreads || !serverIdle(threads)) return;
+      const thread = nextToSummarize(threads, prefsRef.current.threadSummaries, Date.now() / 1000, summarizing.current.tried);
+      if (!thread) return;
+      summarizing.current.busy = true;
+      summarizing.current.tried.add(attemptKey(thread));
+      summarize(client, listen, thread, servedModelRef.current)
+        .then((text) => text && updatePrefsRef.current({ threadSummaries: withSummary(prefsRef.current.threadSummaries, thread.id, thread.updatedAt, text) }))
+        .catch(() => {})
+        .finally(() => { summarizing.current.busy = false; });
+    };
+    const first = setTimeout(tick, 3_000);
+    const every = setInterval(tick, 60_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(every);
+    };
+  }, [state.server, prefs.summarizeThreads, client, listen]);
+
+  // Night Shift's inbox (DESKTOP §16 B41, nightinbox.ts): the finished runs not opened since the last
+  // Mark all as read, counted on Scheduled when the marks change and every two minutes; the marks and
+  // thread ties of tasks archived (or otherwise gone) are dropped then.
+  const prefsIn = prefs !== DEFAULT_PREFS;
+  useEffect(() => {
+    if (state.server !== "ready" || !prefsIn || bridge.host() !== "electron" || POPOUT || PANE) return;
+    const look = () => bridge.night.list().then((answer) => {
+      const current = prefsRef.current;
+      setNightUnseen(unreadRuns(answer.tasks, current.nightSeen, current.nightRead ?? []));
+      const pruned = prunedNight(current, answer.tasks.map((task) => task.id), Date.now());
+      if (pruned) updatePrefsRef.current(pruned);
+    }).catch(() => {});
+    void look();
+    const every = setInterval(() => void look(), 120_000);
+    return () => clearInterval(every);
+  }, [state.server, prefsIn, prefs.nightSeen, prefs.nightRead]);
 
   // Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4): while Settings › Memories has it on,
   // each Ask question of the user's (never an incognito one) is kept as the Markdown the agent's
@@ -646,6 +741,10 @@ export function App() {
   // The conversation follows its latest message (follow.ts): a thread opens at the end, new output
   // keeps the view there only while the reader is there, and an info panel opens at the top.
   const turnsRef = useRef<HTMLDivElement>(null);
+  // Diagrams in answers (DESKTOP §16 B15): ```mermaid blocks drawn after each render of the stream.
+  useEffect(() => {
+    void drawDiagrams(turnsRef.current).catch(() => {});
+  });
   const followRef = useRef(true);
   const onTurnsScroll = () => {
     if (turnsRef.current) followRef.current = nearBottom(turnsRef.current);
@@ -687,7 +786,11 @@ export function App() {
     const timer = setTimeout(() => {
       client.request("thread/search", { searchTerm: term, limit: 50 })
         .then((answer) => {
-          if (current) setFound(answer.data.filter((result) => (view === "ask") === isAskThread(result.thread, askRoot)));
+          // Threads whose summary (DESKTOP §16 B43) holds the words are found too, after the server's.
+          const listed = new Set(answer.data.map((result) => result.thread.id));
+          const bySummary = summaryMatches(prefsRef.current.summarizeThreads ? prefsRef.current.threadSummaries : {}, Object.values(stateRef.current.threads).map((entry) => entry.thread), term)
+            .filter((thread) => !listed.has(thread.id)).map((thread) => ({ thread, snippet: "" }));
+          if (current) setFound([...answer.data, ...bySummary].filter((result) => (view === "ask") === isAskThread(result.thread, askRoot)));
         })
         .catch(notice);
     }, 250);
@@ -867,13 +970,21 @@ export function App() {
   const cleanUp = async (sourceCwd: string, spare: string | null) => {
     if (!wtSettings.autoCleanup) return;
     try {
-      const listed = await bridge.worktrees.list(sourceCwd, wtSettings.root);
+      // Counted across repositories (DESKTOP §16 B25): every repository a thread or project of this window works in.
+      const sources = wtSettings.acrossRepos
+        ? [sourceCwd, ...new Set(projects(state, askRoot, (thread) => projectFolder(thread, links)).map((group) => group.cwd).filter((folder) => folder && folder !== sourceCwd))]
+        : [sourceCwd];
+      const listed = cleanupPool(await Promise.all(sources.map((source, index) => bridge.worktrees.list(source, wtSettings.root).catch((error) => {
+        if (index === 0) throw error;
+        return [];
+      }))));
       const running = Object.values(state.threads).filter((entry) => entry.activeTurnId).map((entry) => entry.thread.id);
       const kept = protectedOwners(running, state.selected, prefsRef.current.pinnedThreads);
       const victims = cleanupVictims(listed.map((entry) => ({ root: entry.root, owner: entry.owner ?? null, modified: entry.modified ?? 0 })), wtSettings.keep, kept, prefsRef.current.permanentWorktrees, spare);
       for (const checkout of victims) {
         const owner = listed.find((entry) => entry.root === checkout)?.owner ?? null;
-        const kept = await bridge.worktrees.remove(sourceCwd, checkout, wtSettings.root, owner ?? `cleanup-${Date.now()}`);
+        const source = listed.find((entry) => entry.root === checkout)?.sourceRoot ?? sourceCwd;
+        const kept = await bridge.worktrees.remove(source, checkout, wtSettings.root, owner ?? `cleanup-${Date.now()}`);
         if (owner && prefsRef.current.worktreeThreads[owner]) setLink(owner, { ...prefsRef.current.worktreeThreads[owner], snapshot: kept });
       }
     } catch (error) {
@@ -1002,10 +1113,22 @@ export function App() {
       return;
     }
     if (files.length === 0) return;
-    // Work sends images by their path, which only a dropped file has: a pasted one goes to Ask.
-    if (view !== "ask") return;
     event.preventDefault();
-    addFiles(files);
+    if (view === "ask") return addFiles(files);
+    // Work (DESKTOP §16 B13): images attach, by their own path when they are files on this machine,
+    // else written under $CODEX_HOME when sent; another file is named for the agent to read.
+    workFiles(files);
+  };
+
+  /** Files picked with Work's paperclip or pasted in Work: images attach, other files on this machine become `@` mentions. */
+  const workFiles = (files: File[]) => {
+    const paths = files.map((file) => bridge.pathForFile(file));
+    const images = files.map((file, index) => ({ file, path: paths[index] })).filter((entry) => IMAGE_TYPES.test(entry.file.type) || attachmentKind(entry.file.type, entry.file.name) === "image");
+    if (images.length) addFiles(images.map((entry) => entry.file), images.map((entry) => entry.path));
+    const others = files.map((file, index) => ({ file, path: paths[index] })).filter((entry) => !images.some((image) => image.file === entry.file));
+    const mentions = others.filter((entry) => entry.path).map((entry) => `@${composeRoot ? mentionPath(composeRoot, entry.path as string) : entry.path}`);
+    if (mentions.length) setDraft((text) => `${text}${text && !/\s$/.test(text) ? " " : ""}${mentions.join(" ")} `);
+    if (others.some((entry) => !entry.path)) notice("Work attaches images; another file is named by its path, which a file from the clipboard does not have. Save it in the project, or drop it from the file manager.");
   };
 
   /**
@@ -1073,7 +1196,14 @@ export function App() {
     const starting = !selected;
     const target = selected?.thread ?? (await startThread());
     if (!target) return;
-    const images = pending.filter((item) => item.kind === "image" && item.path).map((item) => item.path as string);
+    // A pasted image has no path of its own: the main process writes it under $CODEX_HOME first (B13).
+    let images: string[];
+    try {
+      images = await Promise.all(pending.filter((item) => item.kind === "image").map(async (item) => item.path ?? (await bridge.workAttach(item.file, "image", item.name))));
+    } catch (error) {
+      notice(error);
+      return;
+    }
     // Long pastes go into the message itself: Work writes nothing into a project for them.
     const pastes = pending.flatMap((item) => (item.text !== undefined ? [item.text] : []));
     const typed = composeInput(pastes.length ? withPastes(message, pastes) : message, rootSkills, images);
@@ -1151,6 +1281,30 @@ export function App() {
       setDraftFor(from, `!${command}`);
       notice(error);
     }
+  };
+
+  /**
+   * `/init` (DESKTOP §16 B38, init.ts): a turn in the thread (one started first when none is open)
+   * asking for a short AGENTS.md at the repository's root, or changes proposed to the one there. It
+   * runs as any message does, under the thread's permissions, so the file is the turn's change.
+   */
+  const initRepo = async (words: string) => {
+    const target = selected?.thread ?? (await startThread());
+    if (!target) return;
+    const cwd = turnCwd(prefsRef.current.worktreeThreads[target.id]);
+    const present = await client.request("fs/readFile", { path: agentsPath(cwd ?? target.cwd) }).then(() => true, () => false);
+    await sendMessage(client, {
+      threadId: target.id,
+      activeTurnId: selected?.thread.id === target.id ? selected.activeTurnId : null,
+      input: turnInput(initPrompt(present ? "present" : "none", words), []),
+      followUp: prefs.followUp,
+      permissions: profile,
+      effort,
+      model: modelChoice,
+      cwd,
+      collaborationMode: planFor(target.id),
+    });
+    promptHistory.push(words ? `/init ${words}` : "/init");
   };
 
   const send = async (text: string, mode: "default" | "steer" | "queue") => {
@@ -1286,6 +1440,70 @@ export function App() {
     }
   };
 
+  /**
+   * Deletes threads for good (DESKTOP §16 B36), after a confirmation naming each: `thread/delete` one
+   * at a time (the server deletes the subagents' threads with it, saying `thread/deleted` for each), a
+   * managed worktree removed as Archive removes it, and what the window kept about them forgotten
+   * (selection.ts `forgetThreads`). No undo entry. Returns the threads deleted.
+   */
+  const deleteThreads = async (ids: string[]): Promise<string[]> => {
+    const chosen = ids.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread));
+    if (chosen.length === 0) return [];
+    const labels = chosen.map((thread) => (isAskThread(thread, askRoot) ? askTitle(thread) : thread.name || thread.preview || "(new thread)"));
+    if (!window.confirm(deleteQuestion(labels, chosen.some((thread) => isAskThread(thread, askRoot))))) return [];
+    const done: string[] = [];
+    try {
+      for (const thread of chosen) {
+        await client.request("thread/delete", { threadId: thread.id });
+        done.push(thread.id);
+        const link = links[thread.id];
+        if (link && bridge.git.available() && !prefs.permanentWorktrees.includes(link.checkout)) {
+          bridge.worktrees.remove(link.sourceCwd, link.checkout, wtSettings.root, thread.id).catch(notice);
+        }
+        dispatch({ type: "notification", notification: { method: "thread/deleted", params: { threadId: thread.id } } as ServerNotification });
+        setFound((list) => list?.filter((result) => result.thread.id !== thread.id) ?? null);
+      }
+    } catch (error) {
+      notice(error);
+    }
+    if (done.length) updatePrefs(forgetThreads(prefsRef.current, done));
+    return done;
+  };
+  /** The choice's Archive: every chosen thread archived, one undo entry bringing them all back. */
+  const archiveChosen = async (ids: string[]) => {
+    const done: string[] = [];
+    try {
+      for (const id of ids) {
+        await archiveOne(id);
+        done.push(id);
+      }
+    } catch (error) {
+      notice(error);
+    }
+    if (done.length) archiveUndo(done.length === 1 ? "Archive" : `Archive ${done.length} threads`, done);
+    return done;
+  };
+  /** Runs the choice's bar action on the chosen threads still known; the choice is cleared once something was done. */
+  const actOnChoice = (action: (ids: string[]) => Promise<unknown[]>) => {
+    setChoiceBusy(true);
+    void action(choice.ids.filter((id) => state.threads[id]))
+      .then((done) => done.length && setChoice(NO_CHOICE))
+      .catch(notice)
+      .finally(() => setChoiceBusy(false));
+  };
+  /** Ctrl/Cmd- or Shift-click on a sidebar row chooses it (selection.ts): true when the click did that rather than open the thread. */
+  const chooseRow = (event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; currentTarget: Element; preventDefault: () => void }): boolean => {
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) return false;
+    const rows = [...document.querySelectorAll<HTMLElement>(".sidebar .thread-row[data-thread-id]")];
+    const row = event.currentTarget.closest<HTMLElement>(".thread-row");
+    const order = rows.map((entry) => entry.dataset.threadId ?? "");
+    const next = clicked(present(choice, (id) => Boolean(state.threads[id])), order, row ? rows.indexOf(row) : -1, event, state.selected);
+    if (!next) return false;
+    event.preventDefault();
+    setChoice(next);
+    return true;
+  };
+
 
   /** The agent's settings, read and written through the server (Settings › Memories). */
   const readConfig = useCallback(async () => ((await client.request("config/read", {})) as { config: Record<string, unknown> }).config, [client]);
@@ -1387,6 +1605,37 @@ export function App() {
       if (!folder) return;
       showView("work");
       setNewCwd(folder);
+    } catch (error) {
+      notice(error);
+    }
+  };
+
+  const chooseWelcome = (choice: WelcomeChoice) => {
+    setWelcome(false);
+    updatePrefs({ welcomed: true });
+    if (choice === "folder") void openFolderDialog();
+    else if (choice === "chat") void standaloneThread();
+    else if (choice === "import") setExtensions("import");
+    else if (choice === "ask") {
+      showView("ask");
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus());
+    }
+  };
+
+  const closePathMenu = useCallback(() => setPathMenu(null), []);
+  const pathAction = async (action: PathAction, file: string) => {
+    try {
+      if (action === "copy") {
+        if (await copyText(file)) dispatch({ type: "notice", message: "Copied the path." });
+      } else if (action === "attach") {
+        const mention = `@${composeRoot ? mentionPath(composeRoot, file) : file}`;
+        setDraft((text) => `${text}${text && !/\s$/.test(text) ? " " : ""}${mention} `);
+      } else if (action === "editor") {
+        const slash = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+        await bridge.openInEditor(file.slice(0, slash) || "/", file.slice(slash + 1), null, prefs.editor);
+      } else {
+        await bridge.revealFile(file);
+      }
     } catch (error) {
       notice(error);
     }
@@ -1530,17 +1779,81 @@ export function App() {
   };
   const copyLink = (threadId: string) => void copyText(threadLink(threadId)).then((done) => done && dispatch({ type: "notice", message: "Copied a link to the thread." }));
 
-  /** Side chat (Ctrl+Alt+S): a copy of the thread asked for a short recap, beside the running one, never interrupting it. */
-  const sideChat = async () => {
-    if (!selected) return;
-    if (selected.thread.ephemeral) return notice("An incognito question has no side chat: it would be saved.");
+  /** A saved recap (the thread's menu; Ctrl+Alt+S's before DESKTOP §16 B37): a copy of the thread asked for a short recap, beside the running one, never interrupting it. */
+  const savedRecap = async (source: Thread) => {
     try {
-      const thread = await forkThread(client, selected.thread.id, servedModel);
-      await client.request("thread/name/set", { threadId: thread.id, name: `Side chat: ${selected.thread.name || selected.thread.preview || "thread"}`.slice(0, 120) });
+      const thread = await forkThread(client, source.id, servedModel);
+      await client.request("thread/name/set", { threadId: thread.id, name: `Recap: ${source.name || source.preview || "thread"}`.slice(0, 120) });
       await client.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "In a few lines: where does this work stand, what was done, and what is left? Do not change anything.", text_elements: [] }] });
       if (bridge.host() === "electron") await bridge.popOut(thread.id);
       else await openThread(thread.id);
     } catch (error) {
+      notice(error);
+    }
+  };
+
+  // The side chat beside the thread (Ctrl+Alt+S, `/side`; DESKTOP §16 B37, sidechat.ts): an unkept
+  // thread, its first message carrying the thread's recap. Closed (or the thread left), it is gone:
+  // its turn stopped and the server let go of it; it had no folder of its own to delete.
+  const [side, setSide] = useState<{ id: string; parent: Thread; title: string; recap: string[]; asked: boolean; keeping: boolean } | null>(null);
+  const sideRef = useRef(side);
+  sideRef.current = side;
+  const closeSide = async () => {
+    const open = sideRef.current;
+    if (!open) return;
+    sideRef.current = null;
+    setSide(null);
+    const active = stateRef.current.threads[open.id]?.activeTurnId;
+    if (active) await client.request("turn/interrupt", { threadId: open.id, turnId: active }).catch(() => {});
+    await client.request("thread/unsubscribe", { threadId: open.id }).catch(() => {});
+    dispatch({ type: "archived", threadId: open.id });
+  };
+  useEffect(() => {
+    if (sideRef.current && sideRef.current.parent.id !== state.selected) void closeSide();
+  }, [state.selected]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sideChat = async () => {
+    if (!selected) return;
+    if (sideRef.current) return document.querySelector<HTMLTextAreaElement>(".side-chat textarea")?.focus();
+    if (selected.thread.ephemeral) return notice("An incognito question has no side chat.");
+    const parent = selected.thread;
+    try {
+      const started = await client.request("thread/start", sideChatParams(parent, servedModel) as unknown as ParamsOf<"thread/start">);
+      // In the window's state, so its turns stream into the pane, but never the thread in front.
+      dispatch({ type: "notification", notification: { method: "thread/started", params: { thread: started.thread } } as ServerNotification });
+      setSide({ id: started.thread.id, parent, title: parent.name || parent.preview || "thread", recap: threadContext(selected), asked: false, keeping: false });
+    } catch (error) {
+      notice(error);
+    }
+  };
+  const sendSide = async (text: string) => {
+    const open = sideRef.current;
+    if (!open) return;
+    const words = open.asked ? text : firstMessage(text, open.title, open.recap);
+    setSide({ ...open, asked: true });
+    try {
+      await sendMessage(client, { threadId: open.id, activeTurnId: stateRef.current.threads[open.id]?.activeTurnId ?? null, input: turnInput(words, []), followUp: prefs.followUp });
+    } catch (error) {
+      notice(error);
+    }
+  };
+  /** Keep as a thread: a saved thread where the first one is (a new question for an Ask one), its first message what the side chat said. */
+  const keepSide = async () => {
+    const open = sideRef.current;
+    if (!open || open.keeping) return;
+    const messages = sideMessages(stateRef.current.threads[open.id] ?? null, false);
+    if (!messages.length) return notice("Nothing to keep yet: say something in the side chat first.");
+    setSide({ ...open, keeping: true });
+    try {
+      const params = isAskThread(open.parent, askRoot)
+        ? { model: servedModel, prompt: ASK_PROMPT }
+        : { cwd: open.parent.cwd, model: servedModel, permissions: profile, ...(open.parent.projectId ? { projectId: open.parent.projectId } : {}), ...windowToolFields() };
+      const started = await client.request("thread/start", params as unknown as ParamsOf<"thread/start">);
+      await client.request("thread/name/set", { threadId: started.thread.id, name: keptName(open.title) });
+      await client.request("turn/start", { threadId: started.thread.id, input: turnInput(keptMessage(open.title, messages), []) });
+      await closeSide();
+      dispatch({ type: "opened", thread: { ...started.thread, name: keptName(open.title) } });
+    } catch (error) {
+      setSide((current) => (current ? { ...current, keeping: false } : current));
       notice(error);
     }
   };
@@ -1578,15 +1891,33 @@ export function App() {
       return;
     }
     if (target.page === "settings") {
-      setSettingsPage("general");
+      const page = (LINKED_SETTINGS as readonly string[]).includes(target.settingsPage ?? "") ? (target.settingsPage as SettingsPage) : "general";
+      setSettingsPage(page);
       return setSettingsOpen(true);
     }
     if (target.page === "skills") return setExtensions("skills");
     if (target.page === "night") return setScheduledOpen(true);
-    if (target.page === "plugins") return setExtensions("skills");
+    if (target.page === "plugins") {
+      setPluginFocus(target.plugin ?? null);
+      return setExtensions("plugins");
+    }
     showView("work");
-    if (target.cwd) setNewCwd(target.cwd);
     if (target.prompt) setDraft(target.prompt);
+    // A link's folder only when it is an absolute folder that exists; a remote names the open project it belongs to.
+    if (target.cwd) {
+      const asked = target.cwd;
+      void bridge.folderExists(asked).then((exists) => exists && /^(\/|[A-Za-z]:[\\/])/.test(asked) && setNewCwd(asked)).catch(() => {});
+    } else if (target.origin && bridge.git.available()) {
+      const wanted = target.origin;
+      const folders = projects(state, askRoot, (thread) => projectFolder(thread, links)).map((group) => group.cwd);
+      void (async () => {
+        for (const folder of folders) {
+          const remote = await bridge.originOf(folder).catch(() => null);
+          if (remote && sameRemote(remote, wanted)) return setNewCwd(folder);
+        }
+        notice(`No open project has the remote ${wanted}.`);
+      })();
+    }
   };
   openTargetRef.current = (target) => {
     bridge.applyOpenTarget(target, {
@@ -1626,6 +1957,10 @@ export function App() {
     pinChat: () => { if (selected) pin(selected.thread.id); },
     renameChat: () => { if (selected) setRenaming({ id: selected.thread.id, name: renameStart(selected.thread) }); },
     sideChat: () => void sideChat(),
+    searchChats: () => {
+      setDrawer(true);
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
+    },
     findInChat: () => { setFindOpen(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".find-bar input")?.select()); },
     findNext: () => setFindAt((at) => (findCount ? (at + 1) % findCount : 0)),
     findPrevious: () => setFindAt((at) => (findCount ? (at - 1 + findCount) % findCount : 0)),
@@ -1789,7 +2124,7 @@ export function App() {
    * for), in the folder it works in, under the composer's permissions. In the app every window is
    * told of it, and of its exit, which the server answers to this window alone.
    */
-  const openTerminal = (title = "Terminal", script: string | null = null, forThread: string | null = null) => {
+  const openTerminal = (title = "Terminal", script: string | null = null, forThread: string | null = null, place: Prefs["terminalPlace"] = prefsRef.current.terminalPlace) => {
     const other = forThread !== null && forThread !== selected?.thread.id ? state.threads[forThread]?.thread ?? null : null;
     const cwd = other ? other.cwd : workFolder ?? (view === "work" ? newCwd.trim() || null : null);
     if (!cwd) return notice("Open a thread in a project, or name a project folder, to open a terminal there.");
@@ -1801,11 +2136,21 @@ export function App() {
     setTerminals((list) => [...list, session]);
     if (bridge.terminals.available()) bridge.terminals.publish(session).catch(notice);
     if (other) return;
+    // In the tab area when Settings say so (DESKTOP §16 B28); an environment's action stays in the panel.
+    if (place === "tabs" && script === null) {
+      const tab = terminalTab(session.processId, title);
+      setTabs((list) => withTab(list, tab));
+      setActiveTab(tab.key);
+      if (prefsRef.current.layout === "chat") updatePrefs({ layout: "split" });
+      setFront({ id: session.processId, tick: Date.now() });
+      return;
+    }
     updatePrefs({ bottomPanel: true });
     setFront({ id: session.processId, tick: Date.now() });
   };
 
   const closeTerminal = (processId: string) => {
+    setTabs((list) => list.filter((tab) => !(tab.kind === "terminal" && tab.processId === processId)));
     const session = terminals.find((entry) => entry.processId === processId);
     if (session && session.exitCode === null) hub.terminate(processId).catch(() => {});
     hub.forget(processId);
@@ -1836,7 +2181,11 @@ export function App() {
     }).catch(notice);
   };
   windowEvents.current = {
-    command: (command) => detachPane(command === "detachTerminal" ? "terminal" : "review"),
+    command: (command) => {
+      if (command === "detachTerminal" || command === "detachReview") return detachPane(command === "detachTerminal" ? "terminal" : "review");
+      // File › New thread, Open folder…, Settings… (DESKTOP §16 B20): the same as their keys.
+      commands[command]?.();
+    },
     // A pane docked back: it shows here again, if its thread is in front.
     docked: (pane, thread) => {
       setDetached((keys) => {
@@ -1877,7 +2226,7 @@ export function App() {
   };
 
   /** Writes a worktree setting into `[desktop]` of config.toml, where the codex-worktree crate reads it. */
-  const writeWorktreeSetting = async (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => {
+  const writeWorktreeSetting = async (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled" | typeof ACROSS_REPOS_KEY, value: string | number | boolean | null) => {
     try {
       await client.request("config/value/write", { keyPath: `desktop.${key}`, value, mergeStrategy: "upsert" });
       const answer = (await client.request("config/read", {})) as { config?: { desktop?: Record<string, unknown> | null } };
@@ -1912,8 +2261,11 @@ export function App() {
   const forkFrom = async (turn: TurnView, where: "through" | "before") => {
     if (!selected || selected.thread.ephemeral) return;
     try {
-      const words = turn.items.flatMap((item) => (item.type === "userMessage" ? item.content.flatMap((input) => (input.type === "text" ? [input.text] : [])) : [])).join("\n");
+      const words = turn.items.flatMap((item) => (item.type === "userMessage" ? item.content.flatMap((input) => (input.type === "text" && !isContextText(input.text) ? [input.text] : [])) : [])).join("\n");
       const thread = await forkAt(client, selected.thread.id, turn.id, where, modelChoice ?? servedModel);
+      // An edit keeps the message as it was sent: the fork is its next version (versions.ts, DESKTOP §16 B39).
+      const index = selected.turns.findIndex((entry) => entry.id === turn.id);
+      if (where === "before" && index >= 0) updatePrefs({ messageVersions: recordVersion(prefsRef.current.messageVersions, selected.thread.id, index, thread.id) });
       dispatch({ type: "opened", thread });
       refreshQueue(thread.id);
       if (where === "before" && words.trim()) setDraftFor(draftKeyOf(view, thread.id), words);
@@ -1924,6 +2276,10 @@ export function App() {
 
   const editPrevious = async () => {
     if (!selected) return;
+    // Edit keeps what came before (DESKTOP §16 B39): a new version in a fork, as Edit in a new thread;
+    // an incognito question cannot be forked, and keeps nothing anyway: its message is taken back.
+    const lastTurn = selected.thread.ephemeral ? null : editedTurn(selected);
+    if (lastTurn) return forkFrom(lastTurn, "before");
     try {
       const text = await takeBack(client, selected);
       if (text === null) return;
@@ -1941,6 +2297,23 @@ export function App() {
       const answer = (await client.request("review/start", { threadId: selected.thread.id, target, delivery: prefs.reviewDelivery })) as { reviewThreadId?: string };
       if (answer.reviewThreadId && answer.reviewThreadId !== selected.thread.id) await openThread(answer.reviewThreadId);
     } catch (error) {
+      notice(error);
+    }
+  };
+
+  /** Continues an Ask question in a project (DESKTOP §16 B33, continueproject.ts): a copy there as a Work thread, opened in Work. */
+  const continueQuestion = async (target: ContinueTarget) => {
+    if (!continuing || continuing.busy) return;
+    setContinuing({ ...continuing, busy: true });
+    try {
+      const thread = await continueInProject(client, continuing.thread, target, servedModel, askRoot);
+      setContinuing(null);
+      showView("work");
+      dispatch({ type: "opened", thread });
+      loader.markLoaded(thread.id);
+      refreshQueue(thread.id);
+    } catch (error) {
+      setContinuing(null);
       notice(error);
     }
   };
@@ -2060,12 +2433,17 @@ export function App() {
             // From a thread, the task carries what was said there (tonight.ts; the owner's decision 7).
             const task = selected ? withThreadContext(words[1], workLabel(selected.thread), threadContext(selected)) : words[1];
             const said = await bridge.night.add(folder, task, null);
+            // The task shows in the Work thread it was queued from, as a card (nightthread.ts, DESKTOP §16 B40).
+            if (selected && view === "work") updatePrefs({ nightThreads: tieTask(prefsRef.current.nightThreads, said, selected.thread.id) });
             return setInfo({ title: "Night Shift", body: <pre className="info-pre">{said}</pre> });
           }
           return setScheduledOpen(true);
         }
         case "side":
           return commands.sideChat();
+        case "init":
+          if (view !== "work") return notice("/init is Work's: open a thread in a project.");
+          return initRepo(args);
         case "pin":
           return commands.pinChat();
         case "pet":
@@ -2175,6 +2553,7 @@ export function App() {
       [keyAction("pinChat"), "pinChat"],
       [keyAction("renameChat"), "renameChat"],
       [keyAction("sideChat"), "sideChat"],
+      [keyAction("searchChats"), "searchChats"],
       [keyAction("findInChat"), "findInChat"],
       [keyAction("findNext"), "findNext"],
       [keyAction("findPrevious"), "findPrevious"],
@@ -2225,12 +2604,24 @@ export function App() {
       setFileSearch(":");
       return;
     }
+    // Dictation (Ctrl+Shift+V, DESKTOP §16 B7), except in a terminal, where the same keys paste.
+    if (matches(event, keyAction("voice")) && canDictate && !(document.activeElement as HTMLElement | null)?.closest(".terminal-host, .xterm")) {
+      event.preventDefault();
+      void toggleDictation();
+      return;
+    }
     if (matches(event, keyAction("modelPicker"))) {
       event.preventDefault();
       setPicker((open) => (open === "closed" ? "open" : "closed"));
     } else if (matches(event, keyAction("recentModels"))) {
       event.preventDefault();
       setPicker("recent");
+    } else if (matches(event, keyAction("terminal")) && view === "work" && prefsRef.current.terminalPlace === "tabs") {
+      // Terminals in the tab area (DESKTOP §16 B28): the latest one in front, or a new one.
+      event.preventDefault();
+      const tabbed = tabs.filter((tab) => tab.kind === "terminal");
+      if (tabbed.length) setActiveTab(tabbed[tabbed.length - 1].key);
+      else openTerminal();
     } else if (matches(event, keyAction("terminal")) && view === "work") {
       event.preventDefault();
       const mine = terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null) && entry.exitCode === null);
@@ -2264,6 +2655,8 @@ export function App() {
       setFindOpen(false);
       setRowMenu(null);
       setInfo(null);
+    } else if (event.key === "Escape" && choice.ids.length) {
+      setChoice(NO_CHOICE);
     } else if (!editableFocus() && threadRequests.length > 0) {
       if (matches(event, keyAction("approve")) && answerByKey("approve")) event.preventDefault();
       else if (matches(event, keyAction("decline")) && answerByKey("decline")) event.preventDefault();
@@ -2317,6 +2710,8 @@ export function App() {
     return <StartupScreen state={state.server} stderr={state.stderr} protocolErrors={state.protocolErrors} notices={state.notices} onRetry={connect} />;
   }
 
+  // The latest /review's findings, shown on their lines in the review pane (DESKTOP §16 B12).
+  const reviewFindings = latestFindings(selected?.turns ?? []);
   const usage = contextUse(selected?.usage ?? null);
   const otherRequests = state.requests.length - threadRequests.length;
   const allThreads = Object.values(state.threads).map((entry) => entry.thread);
@@ -2350,15 +2745,25 @@ export function App() {
   const asks = found ? found.map((result) => result.thread) : askThreads(allThreads, askRoot).filter((thread) => !inProject(thread));
   const askOfProject = (projectId: string) => askThreads(allThreads, askRoot).filter((thread) => thread.projectId === projectId);
   const snippets = new Map((found ?? []).map((result) => [result.thread.id, result.snippet]));
+  /** Summaries of finished chats (DESKTOP §16 B43): shown while Settings has them on. */
+  const summaryShown = (thread: Thread) => (prefs.summarizeThreads ? summaryOf(prefs.threadSummaries, thread) : null);
   const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
-  const attachments: ComposerAttachment[] = pending.map((item) => ({ id: item.id, name: item.text !== undefined ? pasteLabel(item.text) : item.name, preview: item.preview, title: item.text?.slice(0, 600) }));
+  // The served model may read text only (`inputModalities`): an image chip says it will not be seen (B13).
+  const servedEntry = models.find((entry) => entry.id === (modelChoice ?? servedModel)) ?? models[0] ?? null;
+  const textOnly = servedEntry !== null && !(servedEntry.inputModalities ?? []).includes("image");
+  const attachments: ComposerAttachment[] = pending.map((item) => ({
+    id: item.id, name: item.text !== undefined ? pasteLabel(item.text) : item.name, preview: item.preview, title: item.text?.slice(0, 600),
+    warning: item.kind === "image" && textOnly ? "The served model reads text only: it will not see this image." : undefined,
+  }));
 
   const unread = new Set(prefs.unreadThreads);
+  const chosen = new Set(present(choice, (id) => Boolean(state.threads[id])).ids);
   const waiting = new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id)));
   const workThreads = Object.values(state.threads).map((entry) => entry.thread).filter((thread) => !thread.ephemeral && !thread.parentThreadId && !isAskThread(thread, askRoot));
   const pinnedHere = prefs.pinnedThreads.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread) && !thread!.ephemeral && isAskThread(thread!, askRoot) === (view === "ask"));
   const sectioned = new Set(prefs.sections.flatMap((section) => section.threads));
   const workLabel = (thread: Thread) => thread.name || thread.preview || "(new thread)";
+  const folderName = (folder: string) => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder;
 
   /** A project in the sidebar: its name (a click makes it where the next thread or question starts), its menu, its threads. */
   const projectSection = (project: Project, threads: Thread[], where: "ask" | "work") => (
@@ -2397,13 +2802,15 @@ export function App() {
           if (event.key === "Escape") setRenaming(null);
         }} />
     ) : (
-      <div key={thread.id} className={`thread-row${thread.id === state.selected ? " selected" : ""}${unread.has(thread.id) ? " unread" : ""}`}>
-        <button className="thread" onClick={() => openThread(thread.id)} title={label}>
+      <div key={thread.id} data-thread-id={thread.id} className={`thread-row${thread.id === state.selected ? " selected" : ""}${unread.has(thread.id) ? " unread" : ""}${chosen.has(thread.id) ? " chosen" : ""}`}>
+        <button className="thread" onClick={(event) => { if (chooseRow(event)) return; if (chosen.size) setChoice(NO_CHOICE); void openThread(thread.id); }} title={summaryShown(thread) ? `${label}\n${summaryShown(thread)}` : label}>
           <span className="thread-label">{prefs.pinnedThreads.includes(thread.id) ? <Icon name="pin" size={12} /> : null}{label}</span>
           {snippets.get(thread.id) ? <span className="snippet">{snippets.get(thread.id)}</span> : null}
+          {found && summaryShown(thread) ? <span className="snippet thread-summary">{summaryShown(thread)}</span> : null}
         </button>
         {waiting.has(thread.id) ? <span className="attention" aria-label="waiting for you" title="An approval or a question is waiting">!</span> : null}
         {unread.has(thread.id) && !waiting.has(thread.id) ? <span className="unread-dot" aria-label="unread" /> : null}
+        {subagents(state, thread.id).filter((agent) => isWorking(state, agent.id)).slice(0, 3).map((agent) => <AgentMark key={agent.id} id={agent.id} label={`Subagent ${agent.agentNickname || agent.name || ""} working`.replace("  ", " ")} />)}
         {state.threads[thread.id]?.activeTurnId ? <span className="running" aria-label="running" /> : null}
         <span className="age" title={new Date(thread.updatedAt * 1000).toLocaleString()}>{age(thread.updatedAt)}</span>
         <span className="row-actions">
@@ -2417,7 +2824,9 @@ export function App() {
                 <button role="menuitem" onClick={() => markUnread(thread.id)}>Mark unread</button>
                 {HOST === "electron" ? <button role="menuitem" onClick={() => void bridge.popOut(thread.id).catch(notice)}>Open in a window of its own</button> : null}
                 <button role="menuitem" onClick={() => copyLink(thread.id)}>Copy link</button>
+                <button role="menuitem" onClick={() => void savedRecap(thread)} title="A saved copy of the thread, asked where the work stands">Recap in a saved copy</button>
                 <button role="menuitem" onClick={() => void bridge.homeFolder().catch(() => null).then((home) => setExporting({ thread, title: label, home }))}>Export…</button>
+                {view === "ask" && !thread.ephemeral ? <button role="menuitem" onClick={() => setContinuing({ thread, label, busy: false })}>Continue in a project…</button> : null}
                 {view === "work" ? (
                   <>
                     {prefs.sections.map((section) => <button key={section.id} role="menuitem" onClick={() => toSection(thread.id, section.id)}>Move to {section.name}</button>)}
@@ -2429,6 +2838,7 @@ export function App() {
                   <button key={project.id} role="menuitem" onClick={() => void moveToProject(thread.id, project.id)}>Move to project {project.name}</button>
                 ))}
                 {thread.projectId && knownProjects.has(thread.projectId) ? <button role="menuitem" onClick={() => void moveToProject(thread.id, null)}>Out of its project</button> : null}
+                <button role="menuitem" className="danger-item" onClick={() => void deleteThreads([thread.id])}>Delete for good…</button>
               </span>
             ) : null}
           </span>
@@ -2438,7 +2848,7 @@ export function App() {
   );
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
-  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null;
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null || continuing !== null;
   const title = incognitoShown ? "Incognito question" : selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? (incognitoNext ? "New incognito question" : "New question") : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
@@ -2478,7 +2888,7 @@ export function App() {
             <div className="review-pane">
               <ReviewPane
                 cwd={composeRoot} threadId={PANE.thread}
-                turnDiff={lastTurnDiff(selected)}
+                turnDiff={lastTurnDiff(selected)} findings={reviewFindings}
                 airgapOn={airgap?.level === "on"}
                 layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
                 editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
@@ -2502,6 +2912,13 @@ export function App() {
     <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${tabsShown ? (prefs.layout === "tabs" ? " review-open tabs-full" : " review-open") : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} data-selected-repo={selectedRepo ?? undefined} data-approval-requested={approvalRequested ? "1" : undefined} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
       // (desktop/electron/src/shell.ts); a browser keeps its own, which a phone needs to copy.
+      // A file's path (DESKTOP §16 B14): one menu wherever it appears, in the app and in a browser.
+      const named = pathOf(event.target);
+      if (named && !window.getSelection()?.toString()) {
+        event.preventDefault();
+        setPathMenu({ x: event.clientX, y: event.clientY, path: named });
+        return;
+      }
       if (HOST !== "electron") return;
       event.preventDefault();
       const target = event.target as HTMLElement;
@@ -2512,10 +2929,21 @@ export function App() {
         <nav className="views" aria-label="View">
           <button className={view === "ask" ? "selected" : ""} onClick={() => switchView("ask")}>Ask</button>
           <button className={view === "work" ? "selected" : ""} onClick={() => switchView("work")}>Work</button>
+          {forge ? <a className="view-link" href="/forge/" title="The node's forge: repositories and pull requests">Code</a> : null}
         </nav>
+        {chosen.size ? (
+          <SelectionBar count={chosen.size} projects={listedProjects} busy={choiceBusy}
+            inProject={[...chosen].some((id) => Boolean(state.threads[id]?.thread.projectId && knownProjects.has(state.threads[id].thread.projectId!)))}
+            onArchive={() => actOnChoice(archiveChosen)} onDelete={() => actOnChoice(deleteThreads)} onClear={() => setChoice(NO_CHOICE)}
+            onMove={(projectId) => actOnChoice(async (ids) => {
+              for (const id of ids) await moveToProject(id, projectId);
+              return ids;
+            })} />
+        ) : null}
         {view === "ask" ? (
           <>
             <button className="nav-row new-question" onClick={newQuestion}><Icon name="squarePen" />New question</button>
+            <button className="nav-row ask-files-button" onClick={() => setAskFilesOpen(true)}><Icon name="file" />Files from answers</button>
             <label className="search">
               <Icon name="search" size={14} />
               <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search questions" aria-label="Search questions" />
@@ -2543,6 +2971,9 @@ export function App() {
             <label className="search">
               <Icon name="search" size={14} />
               <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search threads" aria-label="Search threads" />
+              <button className={`icon order-toggle${prefs.threadOrder === "chronological" ? " on" : ""}`} aria-pressed={prefs.threadOrder === "chronological"}
+                title={prefs.threadOrder === "chronological" ? "List threads by project" : "List every thread by date, across projects"} aria-label="Chronological"
+                onClick={(event) => { event.preventDefault(); updatePrefs({ threadOrder: prefs.threadOrder === "chronological" ? "projects" : "chronological" }); }}><Icon name="clock" size={14} /></button>
             </label>
             {found ? (
               <section className="project">
@@ -2589,8 +3020,14 @@ export function App() {
                 ))}
               </>
             )}
-            {found ? null : listedProjects.map((project) => projectSection(project, workThreads.filter((thread) => thread.projectId === project.id && !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)), "work"))}
-            {found ? null : pinnedFirst(folderGroups.map((group) => ({ ...group, threads: group.threads.filter((thread) => !inProject(thread)) })), prefs.pinnedProjects, (project) => project.cwd)
+            {!found && prefs.threadOrder === "chronological" ? (
+              <section className="project chronological">
+                <h2>By date</h2>
+                {chronological(workThreads.filter((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id))).map((thread) => threadRow(thread, `${workLabel(thread)} · ${folderName(projectFolder(thread, links))}`))}
+              </section>
+            ) : null}
+            {found || prefs.threadOrder === "chronological" ? null : listedProjects.map((project) => projectSection(project, workThreads.filter((thread) => thread.projectId === project.id && !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)), "work"))}
+            {found || prefs.threadOrder === "chronological" ? null : pinnedFirst(folderGroups.map((group) => ({ ...group, threads: group.threads.filter((thread) => !inProject(thread)) })), prefs.pinnedProjects, (project) => project.cwd)
               .filter((project) => project.threads.some((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)) || prefs.pinnedProjects.includes(project.cwd)).map((project) => (
               <section key={project.cwd} className="project">
                 <h2 title={project.cwd} {...dragHeader(`folder:${project.cwd}`)} onClick={() => { setNewProject(null); setNewCwd(project.cwd); }}>
@@ -2648,6 +3085,7 @@ export function App() {
             </button>
           ) : null}
           {selected && !incognitoShown ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
+          {selected && !incognitoShown && view === "ask" ? <button className="icon bar-action continue-action" title="Continue in a project: a copy of this question as a Work thread in a project's folder" aria-label="Continue in a project" onClick={() => setContinuing({ thread: selected.thread, label: title, busy: false })}><Icon name="code" size={16} /></button> : null}
           {selected && !incognitoShown && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
           {POPOUT ? <button className={`icon bar-action${onTop ? " active" : ""}`} aria-pressed={onTop} title="Keep this window above the others" aria-label="Always on top" onClick={() => void bridge.alwaysOnTop(!onTop).then(setOnTop).catch(notice)}><Icon name="pin" size={16} /></button> : null}
           {askFolder ? (
@@ -2719,7 +3157,8 @@ export function App() {
             <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1} commandOutput={prefs.commandOutput}
               onFork={selected.thread.ephemeral ? null : (where) => void forkFrom(turn, where)}
               onRevert={() => void revertTurn(turn).catch(notice)}
-              onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
+              onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null}
+              versions={versionsAt(prefs.messageVersions, selected.thread.id, index)} onVersion={(threadId) => void openThread(threadId)} />
           )) : view === "ask" ? (
             startingProject ? (
               <ProjectPage key={startingProject.id} project={startingProject} title={askTitle} notice={notice}
@@ -2731,6 +3170,10 @@ export function App() {
               <p>A question with no project: Mightling answers in a folder of its own, searching the web when it needs to{airgap?.level === "on" ? ", except that airgapped is on, so web search is off" : ""}. Attach images or files with the paperclip, or paste a screenshot.</p>
             </div>
           ) : <p className="empty">{startingProject ? `A new thread in the project ${startingProject.name}${primaryFolder(startingProject) ? ` (${primaryFolder(startingProject)})` : ""}: write the first message below.` : newCwd.trim() ? `A new thread in ${newCwd.trim()}: write the first message below.` : "Open a thread, or name a project folder for a new one."}</p>}
+          {selected && view === "work" && bridge.host() === "electron" ? (
+            <NightCards key={selected.thread.id} ids={tasksOf(prefs.nightThreads, selected.thread.id)} cwd={workFolder} notice={notice}
+              onOpenResult={(id) => { setScheduledRun(id); setScheduledOpen(true); }} />
+          ) : null}
           {threadRequests.map((request) => (
             // Mirrored read-only while another window holds the thread's composer: that window answers.
             <div key={JSON.stringify(request.id)} className={composerHere ? "approval-host" : "approval-host mirrored"} inert={!composerHere}>
@@ -2755,6 +3198,28 @@ export function App() {
         {(() => {
           const live = selected?.activeTurnId ? selected.turns.find((turn) => turn.id === selected.activeTurnId)?.checklist : null;
           return live ? <LiveChecklist checklist={live} /> : null;
+        })()}
+        {(() => {
+          // Another thread working in this checkout (DESKTOP §16 B9): said, with a way out; nothing is blocked.
+          if (view !== "work" || !bridge.git.available()) return null;
+          const others = busyHere(state, links, workFolder, selected?.thread.id ?? null);
+          if (!others.length) return null;
+          const inWorktree = selected ? selectedLink?.location === "worktree" : newChoice.mode === "worktree";
+          if (inWorktree) return null;
+          const first = state.threads[others[0]].thread;
+          return (
+            <div className="checkout-clash" role="status">
+              <Icon name="info" size={14} />
+              <span>{others.length === 1 ? <>Another thread is working in this checkout: <strong>{workLabel(first)}</strong>.</> : <>{others.length} other threads are working in this checkout, among them <strong>{workLabel(first)}</strong>.</>} Two threads changing the same files can undo each other's work.</span>
+              <span className="spacer" />
+              <button className="link-button" onClick={() => void openThread(first.id)}>Open it</button>
+              {selected ? (
+                <button disabled={Boolean(selected.activeTurnId)} title={selected.activeTurnId ? "Stop this thread's turn first" : "Move this thread's work to a worktree of its own"} onClick={() => void handOff("toWorktree")}>Hand off to a worktree</button>
+              ) : (
+                <button onClick={() => setNewChoice((choice) => ({ ...choice, mode: "worktree" }))}>Start it in a worktree</button>
+              )}
+            </div>
+          );
         })()}
         {selected ? (
           <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
@@ -2792,15 +3257,14 @@ export function App() {
             onFiles={onFiles} onPaste={onPaste}
             searchFiles={searchFiles} skills={rootSkills}
             leading={<>
-            {view === "ask" ? (
-              <>
-                <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
-                  addFiles(Array.from(event.target.files ?? []));
-                  event.target.value = "";
-                }} />
-                <button className="icon attach" onClick={() => fileInput.current?.click()} title="Attach images or files" aria-label="Attach"><Icon name="paperclip" size={18} /></button>
-              </>
-            ) : (
+            <input ref={fileInput} type="file" multiple hidden onChange={(event) => {
+              const picked = Array.from(event.target.files ?? []);
+              if (view === "ask") addFiles(picked);
+              else workFiles(picked);
+              event.target.value = "";
+            }} />
+            <button className="icon attach" onClick={() => fileInput.current?.click()} title={view === "ask" ? "Attach images or files" : "Attach images, or name files for the agent to read"} aria-label="Attach"><Icon name="paperclip" size={18} /></button>
+            {view === "ask" ? null : (
               <select value={profile} onChange={(event) => setProfile(event.target.value)} aria-label="Permissions">
                 {choices.map((choice) => (
                   <option key={choice.id} value={choice.id} disabled={choice.disabled} title={choice.reason ?? undefined}>
@@ -2829,12 +3293,16 @@ export function App() {
           </div>
         ) : prefs.bottomPanel && view === "work" && bridge.git.available() ? (
           <BottomPanel tasks={tasks} environment={environment} problems={envs?.problems ?? []} project={envProject}
-            terminals={terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null))} hub={hub} front={front}
+            terminals={terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null) && !tabbedTerminals(tabs).has(entry.processId))} hub={hub} front={front}
             onNewTerminal={() => openTerminal()} onCloseTerminal={closeTerminal} onSendToThread={sendTerminal}
             onRun={runAction} onStop={(id) => void bridge.stopTask(id).catch(notice)}
             onClose={(id) => setTasks((list) => list.filter((task) => task.id !== id))}
             onEdit={() => setEditingEnv(true)} onHide={() => updatePrefs({ bottomPanel: false })}
             detach={bridge.windows.available() && selected ? { docks: false, run: () => detachPane("terminal") } : null} />
+        ) : null}
+        {side ? (
+          <SideChat title={side.title} recapped={side.recap.length} messages={sideMessages(state.threads[side.id] ?? null)} running={Boolean(state.threads[side.id]?.activeTurnId)}
+            keepDisabled={side.keeping} onSend={(text) => void sendSide(text)} onKeep={() => void keepSide()} onClose={() => void closeSide()} />
         ) : null}
       </main>
       {editingEnv && envProject ? (
@@ -2845,16 +3313,21 @@ export function App() {
         <TabArea tabs={paneTabs} active={paneActive?.key ?? null} onSelect={setActiveTab} onClose={(key) => {
           const tab = tabs.find((entry) => entry.key === key);
           if (tab) closedSurfaces.close(surfaceOf(tab));
+          if (tab?.kind === "terminal") closeTerminal(tab.processId);
           closeTabKey(key);
         }}
+          onNewTab={{ terminal: view === "work" ? () => openTerminal("Terminal", null, null, "tabs") : null, preview: bridge.preview.available() ? () => openPreview("") : null }}
           workspaceLayout={prefs.layout} setWorkspaceLayout={(layout) => updatePrefs({ layout })}
           treeShown={paneTree} onToggleTree={composeRoot ? () => (view === "ask" ? setAskTree : setTreeShown)((shown) => !shown) : null}
           tree={paneTree && composeRoot ? (
             <FileTree root={composeRoot} client={client} listen={listen} selected={paneActive?.kind === "file" ? paneActive.key.slice(5) : null}
               onOpen={(path) => openFile(path)} onClose={() => (view === "ask" ? setAskTree : setTreeShown)(false)} />
           ) : null}
-          render={(tab) => tab.kind === "prs" ? (
-            <PullRequestsTab root={composeRoot} thread={selected?.thread.id ?? null} notice={notice}
+          render={(tab) => tab.kind === "terminal" ? (
+            <TerminalView hub={hub} processId={tab.processId} visible={paneActive?.key === tab.key} focus={front?.id === tab.processId ? front.tick : 0} />
+          ) : tab.kind === "prs" ? (
+            <PullRequestsTab root={composeRoot} thread={selected?.thread.id ?? null} notice={notice} airgapOn={airgap?.level === "on"}
+              describe={(root, title, diff) => pullRequestDescription(client, listen, root, modelChoice ?? servedModel, diff, title, prefs.pullRequestPrompt ?? undefined)}
               onCompose={(text) => setDraft((draft) => (draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text))} />
           ) : tab.kind === "preview" ? (
             <PreviewTab id={tab.id} url={tab.url} thread={selected?.thread.id ?? null} devTools={prefs.previewDevTools}
@@ -2868,7 +3341,7 @@ export function App() {
           ) : tab.kind === "review" ? (
             <ReviewPane
               cwd={composeRoot} threadId={selected?.thread.id ?? null}
-              turnDiff={lastTurnDiff(selected)}
+              turnDiff={lastTurnDiff(selected)} findings={reviewFindings}
               airgapOn={airgap?.level === "on"}
               layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
               editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
@@ -2886,13 +3359,17 @@ export function App() {
           ) : (
             artifactKind(tab.path) && !tab.line ? (
               <ArtifactView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
-                onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} onOpenFile={(path) => openFile(path)} />
+                onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} onOpenFile={(path) => openFile(path)}
+                onPreview={bridge.preview.available() ? (path) => openPreview(path) : undefined} />
             ) : (
               <FileView path={tab.path} line={tab.line} root={composeRoot} client={client} listen={listen} editor={prefs.editor} notice={notice}
                 onMention={(path) => setDraft((text) => `${text}${text && !text.endsWith(" ") ? " " : ""}@${path} `)} />
             )
           )}
         />
+      ) : null}
+      {continuing ? (
+        <ContinueDialog question={continuing.label} targets={continueTargets(serverProjects)} busy={continuing.busy} onPick={(target) => void continueQuestion(target)} onClose={() => setContinuing(null)} />
       ) : null}
       {linkAsked ? (
         <LinkDialog url={linkAsked.url} airgappedOn={linkAsked.airgappedOn} notice={notice} onClose={() => setLinkAsked(null)}
@@ -2912,11 +3389,27 @@ export function App() {
         memoryStatus={memoryStatus} resetMemories={resetMemories} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
-          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice}
+          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at, nightRead: [] }); setNightUnseen(0); }}
+          read={prefs.nightRead} onRead={(id) => { if (!prefsRef.current.nightRead.includes(id)) updatePrefs({ nightRead: markRead(prefsRef.current.nightRead, id) }); }} onClose={() => { setScheduledOpen(false); setScheduledRun(null); }} notice={notice}
           fromThread={selected && view === "work" ? { title: workLabel(selected.thread), context: threadContext(selected) } : null}
-          onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }} />
+          onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }}
+          openRun={scheduledRun} onQueued={(said) => { if (selected && view === "work") updatePrefs({ nightThreads: tieTask(prefsRef.current.nightThreads, said, selected.thread.id) }); }} />
       ) : null}
       {syncedOpen && synced.status ? <SyncedView status={synced.status} onClose={() => setSyncedOpen(false)} onChanged={synced.refresh} notice={notice} /> : null}
+      {askFilesOpen ? (
+        <AskFiles client={client} questions={Object.values(state.threads).map((entry) => entry.thread).filter((thread) => isAskThread(thread, askRoot))} titleOf={askTitle}
+          onClose={() => setAskFilesOpen(false)}
+          onOpen={(thread, path) => {
+            setAskFilesOpen(false);
+            showView("ask");
+            void openThread(thread).then(() => openFile(path));
+          }} />
+      ) : null}
+      {welcome ? <WelcomeDialog quickShortcut={keyLabel(prefs.quickEntryShortcut)} onChoose={chooseWelcome} /> : null}
+      {pathMenu ? (
+        <PathMenu menu={pathMenu} canAttach={view === "work" && canCompose} canReveal={HOST === "electron"} onClose={closePathMenu}
+          onAction={(action) => void pathAction(action, pathMenu.path)} />
+      ) : null}
       {exporting ? <ExportDialog client={client} thread={exporting.thread} title={exporting.title} home={exporting.home} notice={notice} onClose={() => setExporting(null)} /> : null}
       {projectDialog ? (
         <ProjectDialog client={client} project={projectDialog.project} folder={projectDialog.folder} notice={notice} onClose={() => setProjectDialog(null)}
@@ -2932,7 +3425,7 @@ export function App() {
             }
           }} />
       ) : null}
-      {extensions ? <ExtensionsView client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => setExtensions(null)} notice={notice} /> : null}
+      {extensions ? <ExtensionsView airgapped={airgap?.level === "on"} client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => { setExtensions(null); setPluginFocus(null); }} notice={notice} focusPlugin={pluginFocus} /> : null}
       {fileSearch !== null && composeRoot ? (
         <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
           front={paneActive?.kind === "file" && tabsShown ? paneActive.path : null}
@@ -2957,7 +3450,7 @@ export function App() {
             label: (thread) => (isAskThread(thread, askRoot) ? askTitle(thread) : workLabel(thread)),
             onMarkAllRead: () => {
               // Every unread mark, and Night Shift's finished tasks counted as seen now.
-              updatePrefs({ unreadThreads: [], ...(nightUnseen ? { nightSeen: new Date().toISOString() } : {}) });
+              updatePrefs({ unreadThreads: [], ...(nightUnseen ? { nightSeen: new Date().toISOString(), nightRead: [] } : {}) });
               setNightUnseen(0);
             },
             onOpenScheduled: () => setScheduledOpen(true),
@@ -3046,11 +3539,15 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
   );
 }
 
-function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; commandOutput: Prefs["commandOutput"] }) {
+function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; commandOutput: Prefs["commandOutput"]; versions?: MessageVersions | null; onVersion?: (threadId: string) => void }) {
   const { turn } = props;
+  const firstMessage = turn.items.find((item) => item.type === "userMessage")?.id;
   return (
     <section className={`turn turn-${turn.status}`}>
-      {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} />))}
+      {turn.items.flatMap((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? [] : [
+        <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} progress={turn.progress?.[item.id]} />,
+        item.id === firstMessage && props.versions ? <VersionSwitch key={`${item.id}-versions`} versions={props.versions} onVersion={props.onVersion} /> : null,
+      ]))}
       {turn.checklist && turn.status !== "inProgress" ? <TurnChecklist checklist={turn.checklist} /> : null}
       {turn.error ? <div className="turn-error">{turn.error.message}</div> : null}
       {turn.status === "interrupted" ? <div className="turn-note">Stopped.</div> : null}
@@ -3063,12 +3560,28 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
       {turn.status !== "inProgress" && (props.last || props.onFork) ? (
         <span className={`turn-actions${props.last ? "" : " earlier"}`}>
           {props.last ? <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button> : null}
-          {props.last && props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Take this message back to edit it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
+          {props.last && props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Edit this message in a new version; the one sent stays, a click away under it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
           {props.onFork ? <button className="icon fork-here" onClick={() => props.onFork?.("through")} title="A new thread with this conversation up to here; this one stays as it is"><Icon name="gitFork" size={14} />Fork from here</button> : null}
           {props.onFork ? <button className="icon edit-in-new" onClick={() => props.onFork?.("before")} title="A new thread with the conversation before this message, the message in its composer to change; this one stays as it is"><Icon name="squarePen" size={14} />Edit in a new thread</button> : null}
         </span>
       ) : null}
     </section>
+  );
+}
+
+/** `‹ 2 / 3 ›` under an edited message: each version is the thread it was sent in (DESKTOP §16 B39). */
+function VersionSwitch(props: { versions: MessageVersions; onVersion?: (threadId: string) => void }) {
+  const { versions } = props;
+  const go = (step: number) => {
+    const threadId = stepVersion(versions, step);
+    if (threadId) props.onVersion?.(threadId);
+  };
+  return (
+    <nav className="message-versions" aria-label="Versions of this message">
+      <button className="icon" aria-label="Previous version" title="The version before this one, in the thread it was sent in" disabled={versions.at <= 1} onClick={() => go(-1)}><Icon name="chevronLeft" size={14} /></button>
+      <span aria-label={`Version ${versions.at} of ${versions.of}`}>{versions.at} / {versions.of}</span>
+      <button className="icon" aria-label="Next version" title="The version after this one, in the thread it was sent in" disabled={versions.at >= versions.of} onClick={() => go(1)}><Icon name="chevronRight" size={14} /></button>
+    </nav>
   );
 }
 
@@ -3094,7 +3607,24 @@ function MadeFile(props: { path: string; diff: string; onOpen: () => void }) {
   );
 }
 
-function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
+/** A tool's call in full (toolitems.ts): its label and state, what it was given and what came back, folded. */
+function ToolItem({ view, status }: { view: ToolView; status: string }) {
+  const head = <><Icon name="code" size={14} /><span className="tool-label">{view.label}</span>{view.state ? <span className={`tool-state${view.failed ? " failed" : ""}`}>{view.state}</span> : null}</>;
+  if (!view.parts.length) return <div className={`item tool status-${status}`}>{head}</div>;
+  return (
+    <details className={`item tool status-${status}${view.failed ? " failed" : ""}`}>
+      <summary>{head}</summary>
+      {view.parts.map((entry) => (
+        <div key={entry.title} className="tool-part">
+          <span className="tool-part-title">{entry.title}</span>
+          <pre>{entry.text}</pre>
+        </div>
+      ))}
+    </details>
+  );
+}
+
+function Item({ item, folded, progress }: { item: ThreadItem; folded: boolean; progress?: string[] }) {
   const files = useContext(OpenFileContext);
   switch (item.type) {
     case "userMessage":
@@ -3108,7 +3638,7 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
       );
     case "reasoning":
       return item.summary.length || item.content.length ? (
-        <details className="item reasoning"><summary>Thinking</summary><pre>{[...item.summary, ...item.content].join("\n")}</pre></details>
+        <details className="item reasoning"><summary>Thinking</summary><div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown([...item.summary, ...item.content].join("\n\n")) }} /></details>
       ) : null;
     case "plan":
       return <div className="item plan markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }} />;
@@ -3130,7 +3660,7 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
           {made.map((change) => <MadeFile key={change.path} path={change.path} diff={change.diff} onOpen={() => files?.open(at(change.path), null)} />)}
           {edited.map((change) => (
             <details key={change.path}>
-              <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code>{change.path}</code><DiffStat text={change.diff} />
+              <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code data-path={at(change.path)}>{change.path}</code><DiffStat text={change.diff} />
                 {files && change.kind.type !== "delete" ? (
                   <button className="icon open-file" title="Open in a tab" aria-label={`Open ${change.path} in a tab`}
                     onClick={(event) => { event.preventDefault(); files.open(at(change.path), null); }}><Icon name="file" size={13} /></button>
@@ -3143,17 +3673,15 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
       );
     }
     case "mcpToolCall":
-      return <div className={`item tool status-${item.status}`}><code>{item.server}.{item.tool}</code>{item.error ? ` — ${item.error.message}` : ""}</div>;
-    case "dynamicToolCall": {
-      // The window's own tools (windowtools.ts) in words, what they returned folded under them.
-      const label = toolLabel(item.tool) ?? item.tool;
-      const text = (item.contentItems ?? []).map((content) => (content.type === "inputText" ? content.text : "")).join("\n").trim();
-      return (
-        <details className={`item tool status-${item.status}`}>
-          <summary>{label}{item.success === false ? " — not available" : ""}</summary>
-          {text ? <pre>{text}</pre> : null}
-        </details>
-      );
+    case "dynamicToolCall":
+    case "imageView":
+    case "hookPrompt":
+    case "sleep":
+    case "imageGeneration":
+    case "functionCallOutput":
+    case "webSearch": {
+      const view = toolView(item, progress);
+      return view ? <ToolItem view={view} status={"status" in item && typeof item.status === "string" ? item.status : "completed"} /> : null;
     }
     case "contextCompaction":
       return <div className="item note">Earlier turns were compacted.</div>;
@@ -3162,13 +3690,12 @@ function Item({ item, folded }: { item: ThreadItem; folded: boolean }) {
     case "exitedReviewMode":
       return <div className="item agent review-result"><div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.review) }} /></div>;
     case "collabAgentToolCall":
-      return <div className="item note">Subagents: {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
+      return <div className="item note">Subagents: {item.receiverThreadIds.map((id) => <AgentMark key={id} id={id} />)} {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
     case "subAgentActivity":
-      return <div className="item note">Subagent {item.agentPath}: {item.kind}</div>;
-    case "webSearch":
-      return <div className="item note">Searched the web.</div>;
+      return <div className="item note"><AgentMark id={item.agentThreadId} /> Subagent {item.agentPath}: {item.kind}</div>;
     default:
-      return <div className="item note">{item.type}</div>;
+      // A kind of item a later server adds: its name, until the window knows it.
+      return <div className="item note">{(item as { type: string }).type}</div>;
   }
 }
 
@@ -3220,6 +3747,14 @@ function Diff({ text: diff }: { text: string }) {
   );
 }
 
+/** A file change's approval: the four plain choices (a rule for later is offered for commands only). */
+const FILE_CHOICES: ApprovalChoice[] = [
+  { label: "Allow", title: "Apply these changes", decision: "accept", primary: true },
+  { label: "Allow for this session", title: "Apply these, and later changes, without asking until this session ends", decision: "acceptForSession" },
+  { label: "Decline", title: "Do not apply them; the agent goes on", decision: "decline" },
+  { label: "Stop the turn", title: "Do not apply them, and stop the turn", decision: "cancel" },
+];
+
 function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnswer: (result: unknown) => void }) {
   const { request, onAnswer } = props;
   const params = request.params as Record<string, unknown>;
@@ -3234,10 +3769,9 @@ function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnsw
           {typeof params.reason === "string" ? <p>{params.reason}</p> : null}
           {network?.host ? <p className="warn">It asks for the network ({network.host}).{props.airgappedOn ? " Airgapped is on: approving lets it reach the network." : ""}</p> : null}
           <div className="buttons">
-            <button className="primary" onClick={() => onAnswer({ decision: "accept" })}>Allow</button>
-            <button onClick={() => onAnswer({ decision: "acceptForSession" })}>Allow for this session</button>
-            <button onClick={() => onAnswer({ decision: "decline" })}>Decline</button>
-            <button onClick={() => onAnswer({ decision: "cancel" })}>Stop the turn</button>
+            {(request.method === "item/commandExecution/requestApproval" ? commandChoices(params, props.airgappedOn) : FILE_CHOICES).map((choice) => (
+              <button key={choice.label} className={choice.primary ? "primary" : undefined} title={choice.title} onClick={() => onAnswer({ decision: choice.decision })}>{choice.label}</button>
+            ))}
           </div>
         </div>
       );

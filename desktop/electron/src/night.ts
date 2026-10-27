@@ -10,6 +10,7 @@ import { command } from "./platform";
 import fs from "node:fs";
 import path from "node:path";
 import * as userFs from "./userfs";
+import { CADENCES, type Cadence, cadenceArgs } from "./cadence";
 
 export interface NightTask {
   id: string;
@@ -22,6 +23,9 @@ export interface NightTask {
   /** When the status last changed (the history's last entry). */
   at: string | null;
   result: unknown;
+  /** How many times the runner started it (DESKTOP §16 B40), and when `ling night apply` brought it into a checkout. */
+  attempts: number | null;
+  applied: string | null;
 }
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
@@ -53,6 +57,8 @@ export function readTasks(nightDir: string): NightTask[] {
         on: text(value.on),
         at: text(history[history.length - 1]?.at) ?? null,
         result: value.result ?? null,
+        attempts: typeof value.attempts === "number" ? value.attempts : null,
+        applied: text((value.applied as { at?: unknown } | null)?.at),
       });
     } catch {
       // A task being replaced, or not a task: skipped.
@@ -90,13 +96,61 @@ function run(ling: string, args: string[], cwd: string): Promise<string> {
   });
 }
 
-/** Queues a task for tonight in `repo` (`ling night add [--test <cmd>] <task>`); resolves with what it printed. */
-export async function addTask(ling: string, repo: unknown, task: unknown, test: unknown): Promise<string> {
+/**
+ * A node's name as `ling node list` shows it (the launcher's own rule, ling-rs/src/night.rs
+ * `node_name`), and never an address: a node is found by its name when the task is handed over.
+ */
+export function nodeName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(name)) return null;
+  if (/^\d+(\.\d+){3}$/.test(name)) return null;
+  return name;
+}
+
+/** The most attempts the Queue form offers; the launcher takes any count of 1 or more. */
+export const MAX_BEST_OF = 9;
+
+/**
+ * Queues a task for tonight in `repo` (`ling night add [--test <cmd>] [--on <node>] [--best-of N] <task>`);
+ * resolves with what it printed. A node works a task sent to it once, so `on` and `bestOf` exclude
+ * each other, as the launcher says.
+ */
+export async function addTask(ling: string, repo: unknown, task: unknown, test: unknown, on: unknown = null, bestOf: unknown = null): Promise<string> {
   // Asynchronous (userfs.ts): the project may be a folder macOS guards behind a prompt.
   if (typeof repo !== "string" || !path.isAbsolute(repo) || !(await userFs.isDirectory(repo))) throw new Error("name the project folder");
   if (typeof task !== "string" || !task.trim() || task.length > 8000) throw new Error("describe the task");
   const testArgs = typeof test === "string" && test.trim() ? ["--test", test.trim()] : [];
-  return run(ling, ["night", "add", ...testArgs, task.trim()], repo);
+  const node = on === null || on === undefined || on === "" ? null : nodeName(on);
+  if (on !== null && on !== undefined && on !== "" && !node) throw new Error("name a node as ling node list shows it, not an address");
+  if (bestOf !== null && bestOf !== undefined && !(Number.isInteger(bestOf) && (bestOf as number) >= 1 && (bestOf as number) <= MAX_BEST_OF)) throw new Error(`best-of takes 1 to ${MAX_BEST_OF} attempts`);
+  if (node && bestOf !== null && bestOf !== undefined) throw new Error("a node works a task sent to it once: choose a node or a number of attempts, not both");
+  const nodeArgs = node ? ["--on", node] : [];
+  const bestArgs = typeof bestOf === "number" ? ["--best-of", String(bestOf)] : [];
+  // `--` is not needed: the launcher stops at the first word that is not one of its options, and the task is one argument.
+  return run(ling, ["night", "add", ...testArgs, ...nodeArgs, ...bestArgs, task.trim()], repo);
+}
+
+/** The timer's unit file `ling-admin night enable` writes, and the comment in it that names the window. */
+const TIMER = path.join(".config", "systemd", "user", "mightling-night.timer");
+const WINDOW_MARKER = "# Night Shift window: ";
+
+/**
+ * Whether Night Shift runs by itself, and in which window: the timer `ling-admin night enable`
+ * installs (dreamference/night_shift/night_shift_scheduler.py), read from its unit file as the
+ * launcher's `/night list` reads it. Nothing is run. Elsewhere than Linux there is no timer.
+ */
+export async function nightStatus(home: string, platform: NodeJS.Platform = process.platform): Promise<{ timer: "on" | "off" | "unsupported"; window: string | null }> {
+  if (platform !== "linux") return { timer: "unsupported", window: null };
+  let unit: string;
+  try {
+    unit = await fs.promises.readFile(path.join(home, TIMER), "utf8");
+  } catch {
+    return { timer: "off", window: null };
+  }
+  const line = unit.split("\n").find((entry) => entry.startsWith(WINDOW_MARKER));
+  const window = line ? line.slice(WINDOW_MARKER.length).trim() : "";
+  return { timer: "on", window: /^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(window) ? window : null };
 }
 
 /** Cancels a queued task (`ling night drop <id>`, run in its repository). */
@@ -104,6 +158,47 @@ export function dropTask(ling: string, repo: unknown, id: unknown): Promise<stri
   if (typeof id !== "string" || !ID.test(id)) return Promise.reject(new Error("not a task"));
   if (typeof repo !== "string" || !path.isAbsolute(repo)) return Promise.reject(new Error("not a repository"));
   return run(ling, ["night", "drop", id], repo);
+}
+
+/**
+ * Apply (DESKTOP §16 B40): `ling night apply <id>` in the checkout `cwd`, the thread's own folder,
+ * which brings the task's branch there as uncommitted changes, all or nothing (ling-rs/src/night.rs).
+ * Only git on this machine: nothing reaches the network.
+ */
+export async function applyTask(ling: string, cwd: unknown, id: unknown): Promise<string> {
+  if (typeof id !== "string" || !ID.test(id)) throw new Error("not a task");
+  if (typeof cwd !== "string" || !path.isAbsolute(cwd) || !(await userFs.isDirectory(cwd))) throw new Error("name the thread's folder");
+  return run(ling, ["night", "apply", id], cwd);
+}
+
+/**
+ * A task's block in a morning report (night_shift_report.py `_task_block`): from its `### <id> — `
+ * heading up to the next heading, or null when the report does not name it. Pure.
+ */
+export function reportBlock(report: string, id: string): string | null {
+  const lines = report.split("\n");
+  const start = lines.findIndex((line) => line.startsWith(`### ${id} `));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^#{1,3} /.test(line));
+  return lines.slice(start, end < 0 ? lines.length : end).join("\n").trim();
+}
+
+/** The reports `taskNote` looks through, newest first: a task finishes within a few nights of being queued. */
+const NOTE_REPORTS = 30;
+
+/** A task's note from the newest morning report that names it (DESKTOP §16 B40): the report's name and the block. */
+export function taskNote(nightDir: string, id: unknown): { report: string; text: string } | null {
+  if (typeof id !== "string" || !ID.test(id)) throw new Error("not a task");
+  for (const { name } of readReports(nightDir).slice(0, NOTE_REPORTS)) {
+    let block: string | null = null;
+    try {
+      block = reportBlock(readReport(nightDir, name), id);
+    } catch {
+      // A report being written: the next one, or the next look.
+    }
+    if (block) return { report: name, text: block };
+  }
+  return null;
 }
 
 /** Run now: the runner (`ling-admin night run`), detached; it refuses on its own when the machine is busy. */
@@ -193,26 +288,27 @@ export interface RepeatingTask {
   repo: string;
   task: string;
   test: string | null;
-  cadence: "daily" | "weekly";
+  cadence: Cadence;
   weekday: string | null;
+  days: string[] | null;
+  every: number | null;
+  day: number | null;
   lastQueued: string | null;
   lastError: string | null;
 }
 
-const WEEKDAY = /^(mon|tue|wed|thu|fri|sat|sun)$/;
 const TEMPLATE = /^r[0-9a-f]{12}$/;
 
-/** Repeats a task in `repo` every night or every week on one day (`ling-admin night every add`). */
-export async function addRepeating(admin: string, repo: unknown, task: unknown, test: unknown, cadence: unknown, weekday: unknown): Promise<string> {
+/** Repeats a task in `repo` every night, every week on one day, on chosen weekdays, every N nights or on a day of the month (`ling-admin night every add`); `cadence` and `options` are checked by cadence.ts. */
+export async function addRepeating(admin: string, repo: unknown, task: unknown, test: unknown, cadence: unknown, options: unknown): Promise<string> {
   if (typeof repo !== "string" || !path.isAbsolute(repo) || !(await userFs.isDirectory(repo))) throw new Error("name the project folder");
   if (typeof task !== "string" || !task.trim() || task.length > 8000) throw new Error("describe the task");
-  const when = cadence === "weekly" && typeof weekday === "string" && WEEKDAY.test(weekday) ? ["--weekly", weekday] : cadence === "daily" ? ["--daily"] : null;
-  if (!when) throw new Error("repeat every night, or every week on one day");
+  const when = cadenceArgs(cadence, options);
   const testArgs = typeof test === "string" && test.trim() ? ["--test", test.trim()] : [];
   return run(admin, ["night", "every", "add", ...when, ...testArgs, "--", task.trim()], repo);
 }
 
-/** The repeating tasks (`ling-admin night every list`, one JSON object a line). */
+/** The repeating tasks (`ling-admin night every list`, one JSON object a line); a cadence this window does not know is left out. */
 export async function listRepeating(admin: string): Promise<RepeatingTask[]> {
   const output = await run(admin, ["night", "every", "list"], process.env.HOME ?? "/");
   const found: RepeatingTask[] = [];
@@ -220,9 +316,14 @@ export async function listRepeating(admin: string): Promise<RepeatingTask[]> {
     try {
       const value = JSON.parse(line) as Record<string, unknown>;
       if (typeof value.id !== "string" || !TEMPLATE.test(value.id)) continue;
+      const cadence = CADENCES.find((known) => known === value.cadence);
+      if (!cadence) continue;
+      const whole = (number: unknown) => (Number.isInteger(number) ? (number as number) : null);
       found.push({
         id: value.id, repo: text(value.repo) ?? "", task: text(value.task) ?? "", test: text(value.test),
-        cadence: value.cadence === "weekly" ? "weekly" : "daily", weekday: text(value.weekday),
+        cadence, weekday: text(value.weekday),
+        days: Array.isArray(value.days) ? value.days.filter((day): day is string => typeof day === "string") : null,
+        every: whole(value.every), day: whole(value.day),
         lastQueued: text(value.last_queued), lastError: text(value.last_error),
       });
     } catch {

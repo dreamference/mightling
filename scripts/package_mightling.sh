@@ -4,7 +4,7 @@
 #   scripts/package_mightling.sh <target> <bin dir> <out dir>
 #
 # Writes <name>-<target>.gz for ling, codex-code-mode-host, ling-search, ling-fetch and
-# ling-code, and for ling-docs and ling-signal where they were built (Linux only), and
+# ling-code, and for ling-docs, ling-signal and ling-delegate where they were built (Linux only), and
 # ling-<target>.sha256sums
 # covering them: the names and the checksum file that
 # install.sh and `ling update` (ling-rs/src/update.rs) look for. Portable between Linux and
@@ -23,9 +23,9 @@ for name in "${names[@]}"; do
     gzip -9 -c "$bin/$name" > "$out/$name-$target.gz"
     files+=("$name-$target.gz")
 done
-# The local file index and the Signal bridge are built on Linux only; elsewhere the release
+# The local file index, the Signal bridge and the delegation plugin's server are built on Linux only; elsewhere the release
 # simply does not carry them.
-for name in ling-docs ling-signal; do
+for name in ling-docs ling-signal ling-delegate; do
     if [ -x "$bin/$name" ]; then
         gzip -9 -c "$bin/$name" > "$out/$name-$target.gz"
         files+=("$name-$target.gz")

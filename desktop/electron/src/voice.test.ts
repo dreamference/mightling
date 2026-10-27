@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SPEECH_MODEL, SPEECH_URL, transcribe } from "./voice";
+import { dictionaryPrompt, PROMPT_CAP, SPEECH_MODEL, SPEECH_URL, transcribe } from "./voice";
 
 const base64 = (text: string) => Buffer.from(text).toString("base64");
 
@@ -33,5 +33,22 @@ describe("dictation", () => {
     await expect(transcribe({ mime: "audio/webm", data: base64("x") }, refused)).rejects.toThrow("ling-admin voice start");
     const failing = (async () => new Response("no", { status: 500 })) as unknown as typeof fetch;
     await expect(transcribe({ mime: "audio/webm", data: base64("x") }, failing)).rejects.toThrow("HTTP 500");
+  });
+
+  it("gives the service the user's word list as its prompt, tidied and capped (DESKTOP §16 B7)", async () => {
+    expect(dictionaryPrompt(["Mightling", "  fetcher/client.py ", "mightling", "", 3, "ConnectionError"])).toBe("Mightling, fetcher/client.py, ConnectionError");
+    expect(dictionaryPrompt([])).toBeNull();
+    expect(dictionaryPrompt("Mightling")).toBeNull();
+    const many = Array.from({ length: 200 }, (_, index) => `symbol_number_${index}`);
+    expect(dictionaryPrompt(many)!.length).toBeLessThanOrEqual(PROMPT_CAP);
+    const forms: FormData[] = [];
+    const fetcher = (async (_url: string, init: RequestInit) => {
+      forms.push(init.body as FormData);
+      return new Response(JSON.stringify({ text: "ok" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await transcribe({ mime: "audio/webm", data: base64("OPUS") }, fetcher, ["GB10", "NVFP4"]);
+    await transcribe({ mime: "audio/webm", data: base64("OPUS") }, fetcher);
+    expect(forms[0].get("prompt")).toBe("GB10, NVFP4");
+    expect(forms[1].get("prompt")).toBeNull();
   });
 });

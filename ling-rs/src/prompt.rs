@@ -52,7 +52,7 @@ pub const HIGH_SWE: &str = include_str!("../prompts/high-swe.md");
 pub const ASK: &str = include_str!("../prompts/ask.md");
 
 /// What `chat` adds to `ask` for a phone chat (specs/DREAMFERENCE_MIGHTLING_CHAT.md §16.3): short,
-/// bounded, `ling-search` first, no sleep-and-retry, and a question back about what it cannot see.
+/// bounded, `ling-search` first, no sleep-and-retry, and no clarifying questions on the phone.
 pub const CHAT_BLOCK: &str = include_str!("../prompts/chat.md");
 
 /// What `chat-work` adds to `default` for a repository Work thread started from a phone
@@ -712,6 +712,29 @@ mod tests {
             let default = compose(&Prompt::default_prompt(), &current);
             let chat_work = compose(&Prompt::chat_work(), &current);
             assert_eq!(chat_work, format!("{default}{CHAT_WORK_BLOCK}"));
+        }
+    }
+
+    #[test]
+    fn phone_chat_takes_the_most_likely_reading_asks_only_before_costly_actions_and_never_guesses_an_attachment() {
+        let chat = compose(&Prompt::chat(), &parts("", ""));
+        let phone = &chat[chat.find("# On a phone").unwrap()..];
+        for present in [
+            "Never ask a clarifying question on the phone.",
+            "\"history of Uni\" means Unix",
+            "\"Taking this as Unix.\"",
+            "Ask only before something destructive or costly: push, merge, delete, sending outside the chat, long jobs.",
+            "go on only after the user says yes",
+            "Never mention attachments, images or files unless the message actually carries one.",
+            "[Screenshot text: …]",
+            "[Attached and saved in this thread's folder: …]",
+            "there is no attachment",
+            "never answer about an earlier topic in its place",
+        ] {
+            assert!(phone.contains(present), "{present}");
+        }
+        for absent in ["did not come through", "ask what it is in one short line"] {
+            assert!(!phone.contains(absent), "{absent}");
         }
     }
 

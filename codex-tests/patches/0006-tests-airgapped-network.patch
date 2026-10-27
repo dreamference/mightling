@@ -1,0 +1,19 @@
+diff --git a/codex-rs/linux-sandbox/tests/suite/landlock.rs b/codex-rs/linux-sandbox/tests/suite/landlock.rs
+--- a/codex-rs/linux-sandbox/tests/suite/landlock.rs
++++ b/codex-rs/linux-sandbox/tests/suite/landlock.rs
+@@ -814,2 +814,5 @@ async fn test_timeout() {
+ /// suite remains green on leaner CI images.
++///
++/// Mightling's read-only sandbox has the network unless `/airgapped` is on (patch 0031), so
++/// these tests run the command at `on`: what they assert is the air-gapped sandbox.
+ async fn assert_network_blocked(cmd: &[&str]) {
+@@ -817,2 +820,4 @@ async fn assert_network_blocked(cmd: &[&str]) {
+     let sandbox_cwd = cwd.clone();
++    let mut env = create_env_from_core_vars();
++    env.insert("DREAMFERENCE_MIGHTLING_AIRGAPPED".to_string(), "on".to_string());
+     let params = ExecParams {
+@@ -824,3 +829,3 @@ async fn assert_network_blocked(cmd: &[&str]) {
+         capture_policy: ExecCapturePolicy::ShellTool,
+-        env: create_env_from_core_vars(),
++        env,
+         network: None,

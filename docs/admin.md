@@ -279,12 +279,15 @@ Repeating tasks, queued by each night's run when due.
 
 #### `ling-admin night every add`
 
-Repeat a task in this repository every night or every week.
+Repeat a task in this repository every night, every week, on chosen weekdays, every N nights or on a day of the month (`night every --<cadence>` is short for it).
 
 | Option | Description |
 |---|---|
 | `--daily` | Every night. |
 | `--weekly` | Every week, that day's night. One of: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`. |
+| `--days` | Those weekdays' nights, comma-separated: mon,wed,fri. |
+| `--every` | Every N nights (1 to 365), counted from the night it is set. |
+| `--monthly` | That day of each month, 1 to 31; in a shorter month, the last. |
 | `--test` | The test command each run uses. |
 | `task` | What to do, in words. |
 
@@ -299,6 +302,14 @@ Stop repeating a task (what it already queued stays).
 | Option | Description |
 |---|---|
 | `id` | The repeating task's id (r...) |
+
+#### `ling-admin night archive`
+
+Move finished runs' records, transcripts and reports older than some weeks to night/archive/ (branches stay).
+
+| Option | Description |
+|---|---|
+| `--weeks` | How old a run must be, in weeks (default 4) |
 
 #### `ling-admin night pause`
 
@@ -463,6 +474,7 @@ Advertise the node and publish the web UI and web search to the local network.
 |---|---|
 | `--no-web` | Keep the web UI on this machine; clients get ling and web search only. |
 | `--yes` | Never wait for input: root through `sudo -n` only, with no terminal needed (what install.sh runs) |
+| `--no-forge` | Do not set up the node's forge (Forgejo); `forge on` does it later. |
 
 #### `ling-admin node disable`
 
@@ -600,12 +612,14 @@ Set up new GB10s from this one: install Mightling, the root half, the model, pai
 | `--mesh` | Also pair every node with every other (not built yet) |
 | `--web` | Also share the web UI (`ling web`) on the LAN there: `node enable` without `--no-web`. |
 | `--no-start` | Leave the model server stopped. |
+| `--no-forge` | Set the nodes up without their forge (Forgejo) |
 | `--restart` | Restart a running model server. |
 | `--os-update` | NVIDIA's OS and firmware update first, with a reboot. |
 | `--dry-run` | Connect and read only, then print what each machine would change. |
 | `--via` | With one host: copy and install over this address instead (a QSFP link's) |
 | `--match` | With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-. |
 | `--start-timeout` | Seconds to wait for a started model server (default 1200) |
+| `--role` | Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, the role's setup and a readiness report (docs/dev/node.md) One of: `night`, `engine`. |
 
 #### `ling-admin node prepare`
 
@@ -630,6 +644,118 @@ Set up new GB10s from this one: install Mightling, the root half, the model, pai
 | Option | Description |
 |---|---|
 | `--key` | The connecting key's tag. |
+
+### `ling-admin forge`
+
+The node's Forgejo forge: status, on/off, move, promote, backups, keys, the GitHub mirror.
+
+#### `ling-admin forge status`
+
+Role, repositories, mirror freshness, last backup, GitHub mirror, storage.
+
+#### `ling-admin forge on`
+
+Turn the forge on (and set it up).
+
+#### `ling-admin forge off`
+
+Stop the forge and its advertisement; the data is kept.
+
+#### `ling-admin forge move`
+
+Hand the forge of record to another (paired) node.
+
+| Option | Description |
+|---|---|
+| `node` | The paired node that becomes the record. |
+| `--back` | Move the role back to the node it came from. |
+
+#### `ling-admin forge promote`
+
+Make a node the forge of record from its newest backup (when the record is lost).
+
+| Option | Description |
+|---|---|
+| `node` | A paired node, or none for this one. |
+
+#### `ling-admin forge backup`
+
+Take a backup now and send it to two other nodes.
+
+#### `ling-admin forge restore`
+
+Check that the newest backup restores, every ref.
+
+| Option | Description |
+|---|---|
+| `--check` | Restore into a scratch folder and compare refs (nothing running is touched) |
+
+#### `ling-admin forge key`
+
+SSH keys of the owner account.
+
+#### `ling-admin forge key add`
+
+Add a public key to the owner account.
+
+| Option | Description |
+|---|---|
+| `file` | The public key file. |
+
+#### `ling-admin forge github-mirror`
+
+This fleet's mirror of every branch to GitHub.
+
+| Option | Description |
+|---|---|
+| `--all-branches` | Mirror every branch and tag, never deleting on GitHub. |
+| `--off` | Stop mirroring. |
+| `--account` | The `gh` account whose login pushes. |
+
+#### `ling-admin forge password`
+
+Print the owner's password again (this node's terminal only).
+
+| Option | Description |
+|---|---|
+| `--show` |  |
+
+#### `ling-admin forge import`
+
+Import a GitHub repository's branches and tags.
+
+| Option | Description |
+|---|---|
+| `source` | The GitHub repository's URL. |
+| `name` | owner/name on the forge (an organisation is created when missing) |
+| `--anonymity` | The push hook's check (default off) One of: `full`, `denylist`, `off`. |
+| `--exempt` | A path the check skips (repeatable) |
+| `--mirror` | Mirror the forge's branches back to the source. |
+
+#### `ling-admin forge archive`
+
+Import git bundles into a private, archived repository that is never mirrored.
+
+| Option | Description |
+|---|---|
+| `name` | owner/name on the forge. |
+| `bundles` | Bundle files. |
+
+#### `ling-admin forge mirrors`
+
+Mirror nodes.
+
+| Option | Description |
+|---|---|
+| `mirrors_command` | sync: hand the record's plan to every paired node. One of: `sync`. |
+
+#### `ling-admin forge run`
+
+(The forge's unit) run the container in the foreground.
+
+#### `ling-admin forge tick`
+
+(The forge's timer) storage budget, hooks, GitHub and node mirrors.
 
 ### `ling-admin benchmark_server`
 

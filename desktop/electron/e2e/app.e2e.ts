@@ -21,8 +21,12 @@ test.afterEach(closeLeftovers);
  * A stand-in `ling`: composes the `ask` prompt, reports the air-gap level, and as the app-server
  * answers `initialize`, lists no threads, starts a thread in the folder it is given, and records
  * every line it reads in `received.jsonl` and every command line it is run with in `runs.jsonl`.
+ * It lists no threads, so the first-run page (DESKTOP §16 B6, its own test) is marked seen.
  */
 function standIn(home: string): string {
+  const prefs = path.join(home, ".local", "share", "dev.dreamference.mightling");
+  fs.mkdirSync(prefs, { recursive: true });
+  fs.writeFileSync(path.join(prefs, "prefs.json"), JSON.stringify({ welcomed: true }));
   const ling = path.join(home, "ling");
   fs.writeFileSync(ling, `#!/usr/bin/env node
 const fs = require("fs");

@@ -182,6 +182,13 @@ document, PDF or image the agent creates** is on (the default). The question's h
 (Ctrl+Shift+E), its folder's tree beside the answer, and a button that opens the folder in your file
 manager. Work never shows a question's files, and a question shows only its own.
 
+**Continue in a project** (on a question's menu in the sidebar, and on its header) carries a
+question into Work: pick a project, and a copy of the question becomes a Work thread in that
+project's primary folder, opened in Work, where the agent may read and change the project's files.
+The question stays in Ask. The copy starts with the sandbox a question has (it may write in that
+folder only, nothing broader); change its permissions there as for any Work thread. A project with no
+folder is not offered, and a folder that is gone is refused with a note.
+
 **Quick Entry** asks a question from any app. Turn it on in **Settings › General › Quick Entry**: its
 shortcut (Ctrl+Alt+Space until you press another in the field) opens a small box above your windows;
 Enter asks the question in Ask and brings the app forward with the answer, Esc closes the box. The
@@ -202,6 +209,19 @@ searches. A dashed frame and a note stay on it as a reminder. When you leave it 
 a new one, Work, or closing the app), the question, its answers and its folder with every file in
 it are deleted for good. The desktop app only.
 
+**Side chat.** **Ctrl+Alt+S** (or `/side`) opens a side chat beside the thread you are in: a free
+chat that is not saved, with no folder of its own (it may read the thread's folder, and changes
+nothing). Your first message in it carries a recap of the thread, its latest messages. Closing it,
+or going to another thread, deletes it; **Keep as a thread** copies it into a saved thread first.
+The saved recap of a thread, a copy of it asked where the work stands, is **Recap in a saved copy**
+on the thread's menu.
+
+**An AGENTS.md for a repository.** `/init` in Work asks the agent to read the repository (its
+build, test and lint commands, its layout and conventions) and write a short `AGENTS.md` at its
+root. When it already has one, the agent keeps it and edits only what is wrong or missing. Either
+way the file is the turn's change, in the diff, under the thread's permissions: keep it or undo it
+there. Words after `/init` go to the agent as your note.
+
 **Earlier questions.** In **Settings › Memories**, **Let the agent search your earlier Ask
 questions** (off until you turn it on) keeps a copy of each Ask question and its answers under
 `~/.mightling/ask-history/` and gives the agent a skill to search and read them, on this machine and
@@ -215,6 +235,26 @@ grey in the empty composer; Tab takes it. Every finished turn offers **Fork from
 thread with the conversation up to there) and **Edit in a new thread** (the conversation before
 that message, the message in the composer to change), leaving the thread as it is. A queued
 message can be edited and moved up or down.
+
+**Summaries of finished chats.** A chat left alone for a day gets a two-line summary, what you
+wanted and what came of it, written by this machine's model in a read-only thread that is not kept,
+one chat at a time and only while nothing else is running. Point at the chat in the sidebar to see
+it under the title; Search threads shows it too and finds a chat by it. A chat that changes is
+summarized again a day later. **Settings › Suggested prompts** turns it off (it is on by default).
+
+**Several chats at once, and deleting for good.** Ctrl-click (Cmd-click on a Mac) chats in the
+sidebar to choose them, or Shift-click to choose every chat between the last one clicked and this
+one; a bar over the list then offers **Archive** (Ctrl+Z brings them back), **Move** to a project
+and **Delete…**; Escape clears the choice. **Delete for good…** is also on a chat's own menu. Deleting
+asks first, naming each chat and how many: a deleted chat cannot be restored, and the subagents'
+chats it started go with it. A worktree made for it is removed as Archive removes it; files the agent
+wrote in a question's folder stay on disk. Nothing is sent anywhere, so it works at `/airgapped on`.
+
+**Earlier versions of a message.** Editing a message, with **Edit** on the last one (or Esc Esc)
+or **Edit in a new thread** on any, keeps the message as you sent it: the new words go to a copy of
+the thread made before it, and the message then shows `‹ 2 / 3 ›`. Each version is the thread it was
+sent in; the arrows open that thread as you left it. Nothing is deleted. An incognito question is
+never copied, so its Edit still takes the message back.
 
 The app itself decides what an Ask thread is: the window only names the `ask` prompt, and the app
 composes its text, makes the folder and keeps the thread inside it, with the same rules `ling web`
@@ -285,6 +325,37 @@ accent, background and text colours of the theme in front; each theme keeps its 
   **Worktree** gives the thread its own checkout from the branch you pick; the thread's header says
   where its work is, and **Hand off** brings it to your local checkout. `/worktree on` in `ling`
   (or `ling worktree on`) makes Worktree the default here too.
+- **Night Shift inside a thread:** `/night add <task>` in a Work thread (or Queue in Scheduled
+  with "With what was said in …" ticked) queues the task for tonight and shows it in that thread
+  as a card: queued, running, then done with its attempts and the branch chosen. The next morning
+  the card carries the task's part of the night's report as a note, for you to read; it is never
+  sent to the model. **Apply** runs `ling night apply` in the thread's folder, bringing the branch
+  there as uncommitted changes, and **Open the result** opens the run in Scheduled.
+- **Night results in the inbox:** each finished run in Scheduled's inbox stays unread until you open
+  it, counted on Scheduled in the sidebar and in the tray's menu; **Mark all as read** clears them.
+  `ling-admin night archive` (runs older than four weeks, or `--weeks N`) moves old runs' records,
+  transcripts and reports to `~/.mightling/night/archive/`, keeping their branches, and Scheduled's
+  **Archive** searches them.
+- **More ways to repeat a task:** Scheduled's **Repeat** offers, beside Every night and Every week,
+  **On chosen days** (tick the weekdays), **Every N nights** (the first tonight) and **Every month**
+  on a day you name (on the month's last day when it is shorter, so the 31st runs on 30 April).
+  Repeating tasks still run in the night window. From a terminal: `ling-admin night every --days
+  mon,wed,fri -- <task>`, `--every 3` or `--monthly 15`.
+- **MCP servers and plugins:** Skills and tools › MCP servers › **Add an MCP server** takes a command
+  with its arguments, environment (`NAME=value` lines) and working folder, or a URL with its headers
+  and the name of the environment variable that holds its bearer token: the token itself is never
+  written to config.toml, and an `Authorization` header is refused. Each server shows how its start
+  went (starts, running, failed to start and why, off), and one you added has **Remove**, which asks
+  first. **Plugins** has a search, an **Installed** list where each plugin is turned off or on, and
+  **Remove marketplace**; **Install** first shows what the plugin adds (skills, MCP servers, hooks,
+  apps), and only the Install there installs it.
+- **MCP bundles from a file:** Skills and tools › MCP servers › **Install from a file…** takes an
+  MCP bundle (`.mcpb`). Its manifest is shown before anything is unpacked: the name, the author, the
+  command it runs, the settings it asks for, and whether a signature is attached (the app does not
+  check signatures). Install unpacks it into `~/.mightling/mcpb/<name>/` and adds it to your MCP
+  servers; nothing is downloaded, so it works with `/airgapped on` too, except a bundle whose command
+  is a package runner such as `npx`. **Remove** takes it out again. Settings you fill in, secrets
+  included, are kept in `~/.mightling/config.toml` with the server.
 - **Ask one click away**, in the same window's sidebar.
 
 Not there yet: review, settings pages and choosing a model (it is shown, not chosen).

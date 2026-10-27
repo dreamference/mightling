@@ -316,7 +316,7 @@ test("4 preview tab: a local page, comment mode to the composer, a site out on t
     await page.getByRole("button", { name: "Work", exact: true }).click();
     await page.locator(".thread", { hasText: "Compress the hero" }).click();
     await page.keyboard.press("Control+t");
-    const address = page.getByRole("textbox", { name: "Address" });
+    const address = page.getByRole("combobox", { name: "Address" });
     await expect(address).toBeFocused();
     await address.fill(site.url);
     await address.press("Enter");

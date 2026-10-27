@@ -10,6 +10,8 @@ import { describe, expect, it } from "vitest";
 import css from "./styles.css?raw";
 import interLicence from "./fonts/OFL-Inter.txt?raw";
 import monoLicence from "./fonts/OFL-JetBrainsMono.txt?raw";
+import readableLicence from "./fonts/OFL-AtkinsonHyperlegible.txt?raw";
+import { READABLE_FONT, cleanAppearance } from "./prefs";
 import iconsLicence from "./icons.LICENSE.txt?raw";
 
 const bundledFonts = Object.keys(import.meta.glob("./fonts/*.woff2"));
@@ -91,11 +93,17 @@ describe("the look", () => {
   it("ships the fonts' licences beside them, and the icons' beside the icons", () => {
     expect(interLicence).toContain("SIL Open Font License");
     expect(monoLicence).toContain("SIL Open Font License");
+    expect(readableLicence).toContain("SIL Open Font License");
     expect(iconsLicence).toContain("ISC License");
   });
 
   it("paints the page's own background over the window's", () => {
     expect(css).toContain("body { background: var(--canvas); }");
     expect(block(":root").get("--canvas")).toBe("#ffffff");
+  });
+  it("offers a bundled readable font, a font list Appearance accepts (DESKTOP §16 B23)", () => {
+    expect(css).toMatch(/font-family: "Atkinson Hyperlegible";[^}]*font-weight: 400;/);
+    expect(css).toMatch(/font-family: "Atkinson Hyperlegible";[^}]*font-weight: 700;/);
+    expect(cleanAppearance({ fontUi: READABLE_FONT }).fontUi).toBe(READABLE_FONT);
   });
 });

@@ -9,10 +9,12 @@ container. The image itself is never changed, and a file that is not the one the
 for is never patched: the recipe's own patches then stop the start, an adapter's patch serves the
 base alone.
 
-Two patches, both of `/v1/responses` on v0.5.21, mounted as one file:
+Three patches, all of `/v1/responses` on v0.5.21, mounted as one file:
 
-- The recipe's own, on every launch: the history merges an assistant message with the tool call
-  after it whatever its `phase` (models-and-engines.md, the SGLang traps).
+- The recipe's two, on every launch: the history merges an assistant message with the tool call
+  after it whatever its `phase`, and the stream sends a message's text as it comes instead of
+  holding it until the response ends when the request offers tools (models-and-engines.md, the
+  SGLang traps).
 - The adapters', only while adapters are served: the endpoint builds its `GenerateReqInput`
   without the adapter, so it accepted `<base>:<adapter>` and ran the base model (the probe of
   2026-10-19). Both places that build one pass `lora_path` as `/v1/chat/completions` does.

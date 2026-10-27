@@ -1,5 +1,6 @@
 //! The Telegram adapter against a stand-in Bot API (an axum server on loopback): never Telegram.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -391,9 +392,9 @@ async fn topics_are_conversations_of_their_own_and_new_makes_one() {
     poller.topics = true;
     poller.handle(&topic_message(111, 5, "about purifiers")).await;
     assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/5".into(), text: "about purifiers".into() });
-    // Outside any topic: the chat itself, as before.
+    // Outside any topic: continues the topic used last in that chat.
     poller.handle(&private_message(111, "hello")).await;
-    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111".into(), text: "hello".into() });
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/5".into(), text: "hello".into() });
     // /new: a topic, and a line in it; nothing for the hub until its first message.
     poller.handle(&topic_message(111, 5, "/new")).await;
     assert!(inbound.try_recv().is_err());
@@ -414,6 +415,89 @@ async fn topics_are_conversations_of_their_own_and_new_makes_one() {
     let mut plain = Poller::new(stand_in(default_answer()).await.1, scratch("notopics"), poller.hub.clone());
     plain.handle(&private_message(111, "/new")).await;
     assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111".into(), text: "/new".into() });
+}
+
+/// With topics on, a message in the main chat (outside any topic) continues the topic used last in
+/// that chat; the first message ever opens a topic; `/new` opens a fresh topic and makes it the
+/// last one; and if the last topic was deleted or closed (`TOPIC_DELETED`, "message thread not
+/// found", or `forum_topic_closed`), the bridge opens a new topic and remembers it.
+#[tokio::test]
+async fn main_chat_messages_continue_the_last_topic_and_open_a_new_one_when_missing_or_deleted() {
+    let gone: Arc<Mutex<HashMap<i64, &'static str>>> = Arc::default();
+    let gone_for_stand = gone.clone();
+    let answer: Answer = Arc::new(move |method, body, index| {
+        if method == "createForumTopic" {
+            return ok(json!({ "message_thread_id": 10 + index as i64, "name": "New thread", "icon_color": 7322096 }));
+        }
+        if let Some(topic) = body.get("message_thread_id").and_then(Value::as_i64)
+            && let Some(reason) = gone_for_stand.lock().unwrap().get(&topic).copied()
+        {
+            return (StatusCode::BAD_REQUEST, json!({ "ok": false, "error_code": 400, "description": reason }));
+        }
+        ok(json!({ "message_id": 1 }))
+    });
+    let (stand, api) = stand_in(answer).await;
+    let dir = scratch("last-topic");
+    let (hub, mut inbound) = mpsc::unbounded_channel();
+    let renderer = Renderer::new(api.clone()).with_dir(dir.clone());
+    let mut poller = Poller::new(api, dir.clone(), hub);
+    poller.topics = true;
+
+    // First message ever (no last topic yet): opens topic 10 and remembers it.
+    assert_eq!(store::last_topic(&dir, 111), None);
+    poller.handle(&private_message(111, "first question")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/10".into(), text: "first question".into() });
+    assert_eq!(store::last_topic(&dir, 111), Some(10));
+    assert_eq!(stand.bodies("createForumTopic").len(), 1);
+
+    // Next message outside any topic continues topic 10; the reply is sent with message_thread_id 10.
+    poller.handle(&private_message(111, "follow up outside")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/10".into(), text: "follow up outside".into() });
+    assert_eq!(stand.bodies("createForumTopic").len(), 1);
+    renderer.render(Outbound::Message { chat: "telegram:111/10".into(), markdown: "Answered in 10.".into() }).await;
+    assert_eq!(stand.bodies("sendMessage").last().unwrap()["message_thread_id"], 10);
+
+    // User sends in topic 25, then in the main chat: continues 25; then the bot answers in 10, so
+    // the next main-chat message goes back to 10.
+    poller.handle(&topic_message(111, 25, "inside 25")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/25".into(), text: "inside 25".into() });
+    poller.handle(&private_message(111, "continues 25")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/25".into(), text: "continues 25".into() });
+    renderer.render(Outbound::Message { chat: "telegram:111/10".into(), markdown: "Late answer in 10.".into() }).await;
+    poller.handle(&private_message(111, "after bot answered in 10")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/10".into(), text: "after bot answered in 10".into() });
+
+    // /new opens a fresh topic (11) and remembers it as the last topic.
+    poller.handle(&private_message(111, "/new")).await;
+    assert!(inbound.try_recv().is_err());
+    assert_eq!(store::last_topic(&dir, 111), Some(11));
+    poller.handle(&private_message(111, "in the new topic")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/11".into(), text: "in the new topic".into() });
+    assert_eq!(stand.bodies("createForumTopic").len(), 2);
+
+    // Topic 11 is deleted (TOPIC_DELETED): a main-chat message opens topic 12 and remembers it.
+    gone.lock().unwrap().insert(11, "Bad Request: TOPIC_DELETED");
+    poller.handle(&private_message(111, "after 11 deleted")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/12".into(), text: "after 11 deleted".into() });
+    assert_eq!(store::last_topic(&dir, 111), Some(12));
+    poller.handle(&private_message(111, "still in 12")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/12".into(), text: "still in 12".into() });
+    assert_eq!(stand.bodies("createForumTopic").len(), 3);
+
+    // Topic 12 is gone ("message thread not found"): falls back to opening topic 13.
+    gone.lock().unwrap().insert(12, "Bad Request: message thread not found");
+    poller.handle(&private_message(111, "after 12 not found")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/13".into(), text: "after 12 not found".into() });
+    assert_eq!(store::last_topic(&dir, 111), Some(13));
+
+    // Topic 13 is closed (`forum_topic_closed` service message): next main-chat message opens topic 14.
+    let closed = json!({ "update_id": 99, "message": { "message_id": 100, "from": { "id": 111 }, "chat": { "id": 111, "type": "private" },
+        "message_thread_id": 13, "is_topic_message": true, "forum_topic_closed": {} } });
+    poller.handle(&closed).await;
+    assert_eq!(store::last_topic(&dir, 111), None);
+    poller.handle(&private_message(111, "after 13 closed")).await;
+    assert_eq!(inbound.try_recv().unwrap(), Inbound::Text { chat: "telegram:111/14".into(), text: "after 13 closed".into() });
+    assert_eq!(store::last_topic(&dir, 111), Some(14));
 }
 
 #[tokio::test]

@@ -38,6 +38,8 @@
 /codex                                          @dreamference/agent
 /codex-patches/                                 @dreamference/agent
 /codex-tests/                                   @dreamference/agent
+/claude-plugin/                                 @dreamference/agent
+/.claude-plugin/                                @dreamference/agent
 /dreamference/runner/                           @dreamference/agent
 /dreamference/cli/                              @dreamference/agent
 /dreamference/config/                           @dreamference/agent
@@ -126,6 +128,7 @@
 /ling-rs/src/chat.rs                            @dreamference/messengers
 /ling-rs/src/signal.rs                          @dreamference/messengers
 /dreamference/chat/matrix_homeserver.py         @dreamference/messengers
+/scripts/messenger_live/                        @dreamference/messengers
 
 # Night Shift
 /dreamference/night_shift/                      @dreamference/night-shift
@@ -145,6 +148,7 @@
 
 # Nodes & Remote Access
 /dreamference/node/                             @dreamference/nodes
+/dreamference/forge/                            @dreamference/nodes @dreamference/security
 /ling-rs/node-locator/                          @dreamference/nodes
 /ling-web-rs/src/node_locator.rs                @dreamference/nodes
 /ling-rs/src/node.rs                            @dreamference/nodes

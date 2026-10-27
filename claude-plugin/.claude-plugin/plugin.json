@@ -1,0 +1,29 @@
+{
+  "name": "mightling",
+  "version": "1.7.1",
+  "description": "Mightling local delegation plugin for Claude Code (Phase P1: class W1 watch tool, no model).",
+  "author": {
+    "name": "Dreamference"
+  },
+  "license": "AGPL-3.0-or-later",
+  "userConfig": {
+    "node": {
+      "type": "string",
+      "title": "Mightling node",
+      "description": "Optional Mightling node name or id (unused while only W1 is built: watch is loopback-only).",
+      "default": ""
+    },
+    "max_parallel": {
+      "type": "number",
+      "title": "Maximum parallel tasks",
+      "description": "Maximum concurrent delegated tasks (default 2; unused while only W1 is built).",
+      "default": 2
+    },
+    "allow_classes": {
+      "type": "string",
+      "title": "Enabled delegation classes",
+      "description": "Comma-separated enabled delegation classes (Phase P1 supports W1 only).",
+      "default": "W1"
+    }
+  }
+}

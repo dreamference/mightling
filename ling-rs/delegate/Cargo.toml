@@ -1,0 +1,28 @@
+# `ling delegate`, the Mightling delegation server and CLI for Claude Code
+# (specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md Part A): Phase P1 ships class W1 (`watch`),
+# which waits on one local condition from a closed list and returns `{met, observed, at}` with
+# no model turn. A crate of its own so its tests run without compiling the Codex workspace
+# (`cargo test` in a copy of this folder); the launcher (`../src/delegate.rs`) routes
+# `ling delegate …` here, and the small `ling-delegate` binary runs the same commands standalone.
+# Versions match the Codex workspace so building inside it adds no second copy of any crate.
+[package]
+name = "ling-delegate"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_delegate"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ling-delegate"
+path = "src/main.rs"
+
+[dependencies]
+chrono = "0.4.43"
+regex-lite = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9.5"

@@ -8,7 +8,7 @@
 - LAN only.
 - The pre-rewrite history goes into a private repository that a server-side rule and a test keep off GitHub.
 
-**Building waits:** this is the spec only.
+**Built (2026-10-27):** the forge of record, mirrors, `move`, backups, the GitHub mirror and the private archive (P0–P2's core); `ling web`'s `/forge/` with sign-in for paired devices (§2.2) and the phone account (§2.7). Next, in this order: the Code view, Night Shift results as pull requests, the runners and CPU gates.
 
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`). Machines are written with the repository's placeholders: `gx10-1a2b` (this project's main node), `node-b`, `node-c`, `node-d` (the other GB10s). Real names and addresses are never written here; nodes are resolved by name at use time ([NODE](./DREAMFERENCE_MIGHTLING_NODE.md)).
 
@@ -89,8 +89,11 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 ### 2.2 The first account, with no default password
 
 - **The owner's account is created at install** as `owner`, with a generated 24-character password. It's shown **once**, in the terminal at the end of `node install`, and stored on the node at `~/.config/dreamference/forge/owner-password` (0600) so `ling web` can show it again to a paired device. It's never shown on the LAN without a paired session.
-- **Paired devices sign in without the password.** A device paired with the node through `ling web` (a one-time code) gets a forge session through `ling web`: the forge sits behind `ling web`'s reverse proxy at `/forge/`, using Forgejo's reverse-proxy authentication header, which only `ling web` can set. So the desktop app and the phone page open the forge already signed in as `owner`.
-- **Direct access:** the port is reachable on the LAN for git over HTTP and SSH. A browser reaching it directly still sees Forgejo's sign-in page, and needs the password or an SSH key.
+- **Paired devices sign in without the password** (built 2026-10-27). A device paired with the node through `ling web` (a one-time code) with the `control` scope, or the machine's own `ling web open` session, sees the forge at `ling web`'s `/forge/` already signed in as `owner`. A `watch` device is refused.
+  - **How:** `ling web` signs in to the forge itself, with Forgejo's sign-in form and the owner's password file, and keeps the forge's cookies in the server; the browser never gets one. Cookies aren't kept apart by port, so a forge cookie handed to the browser through `ling web` would also sign it in on the forge's own port, and revoking a device wouldn't end it.
+  - **Not the reverse-proxy header:** Forgejo checks no source address for it, and any process on the node reaches the forge's port, so `ENABLE_REVERSE_PROXY_AUTHENTICATION` stays off.
+  - **Same origin, stated plainly:** `/forge/` shares `ling web`'s origin, which the phone's HTTPS front needs (one name). A script injected into a forge page could therefore drive `ling web` as the device does. Forgejo sanitises what it renders and serves raw files under a sandboxing policy of its own; the proxy adds a policy that keeps every load on the origin (a README's badge from another site is blocked). A separate origin is the remedy if this is ever judged not enough.
+- **Direct access:** the port is reachable on the LAN for git over HTTP, the API and SSH, at its root (`http://<node>.local:3200/<owner>/<repo>.git`). The web UI is for browsers through `/forge/` only: on the direct port its links point under `/forge/` and don't load. Git over HTTP also passes through `/forge/` with the client's own credentials (so the clone URL the forge shows works), on the LAN and loopback names only, never on an overlay front.
 - **SSH keys:** `ling-admin forge key add <file>` adds a key to `owner`. A paired client's `ling` adds its own key at pairing time, so `git push forge` works from a laptop without setup.
 - **Admin account:** a separate `forge-admin` with its own generated password, stored like the owner's. It's used only by `ling-admin` for maintenance, never shown in the UI.
 - **The phone account:** `mightling-phone`, created with the others, used only by `ling web` for repo work from phone chats; write access to every repository, never on a protected branch's push allowlist unless the owner allows `main` for that repository (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §4.2).
@@ -98,10 +101,10 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 
 ### 2.3 Configuration (generated, not edited by hand)
 
-- **Database and server:** `DB_TYPE = sqlite3`; `ROOT_URL` is the node's `.local` name plus `/forge/` through `ling web`, with the direct port as a second clone URL; `HTTP_PORT = 3200`; `START_SSH_SERVER = true` on port 2222 (Forgejo's built-in SSH; the host's sshd is untouched).
+- **Database and server:** `DB_TYPE = sqlite3`; `ROOT_URL` is `http://<node>.local:3100/forge/`, `ling web`'s path. Forgejo still serves at its own root (measured on 15.0.11: the path only prefixes its links), so `ling web` takes `/forge` off on the way in, and git, the API and the mirrors keep the direct port's root; `HTTP_PORT = 3200`; `START_SSH_SERVER = true` on port 2222 (Forgejo's built-in SSH; the host's sshd is untouched).
 - **Bind address:** `HTTP_ADDR` and `SSH_LISTEN_HOST` are each advertised interface's address, resolved at start, never stored. They're regenerated when the advertisement changes, the same moment `ling web` re-binds.
 - **Access:** `DISABLE_REGISTRATION = true`, `REQUIRE_SIGNIN_VIEW = true`, `DEFAULT_PRIVATE = private`.
-- **Reverse-proxy sign-in:** `[service] ENABLE_REVERSE_PROXY_AUTHENTICATION = true`, trusting only loopback, which is where `ling web`'s proxy connects from.
+- **Reverse-proxy sign-in:** off; `ling web` signs in with the form and keeps the cookies (§2.2).
 - **Updates and mail off:** `[cron.update_checker] ENABLED = false`; mail off; no telemetry (Forgejo has none).
 - **Mirrors:** `[mirror] DEFAULT_INTERVAL = 10m`. Push mirrors are allowed only for repositories that aren't private (§5.3).
 - **Actions:** `[actions] ENABLED = true` on the forge of record.
@@ -110,7 +113,7 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 ### 2.4 What the owner sees
 
 - **`ling web` and the desktop app:**
-  - **A "Code" entry:** the forge's web UI inside the app's window, through the `/forge/` proxy, signed in. Navigation is locked to the forge's paths, the same lock-down as the app's other views.
+  - **A "Code" entry:** the forge's web UI inside the app's window, through the `/forge/` proxy, signed in. Navigation is locked to the forge's paths, the same lock-down as the app's other views. **Built in `ling web`** (2026-10-27): a Code entry beside Ask and Work opens `/forge/` in the same tab, offered only when the node has a forge and the device has `control` (`GET /api/forge`). **The app's window waits for the owner's choice:** the app signs in to nothing and no longer loads `ling web` (DESKTOP), so it needs either a credential of its own or the system browser.
   - **The node's status page** lists the forge: on or off, role (record or mirror), mirror freshness, runner health, last backup.
   - **Night Shift results** arrive as pull requests on the forge, alongside the existing branch and `ling night apply`. The morning report links to them.
 - **`ling node list`** shows each node's forge role.
@@ -128,6 +131,20 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 - The forge's container (1 GiB cap) and the runner's container (256 MiB, plus per-job caps, §4.1) are added to the side-service allowance `check_host_safety()` uses before a model load. The pre-load refusal names them when they're why a load doesn't fit.
 - The PSI watchdog's kill path is unchanged: the forge and runner are ordinary capped containers, and the model server keeps priority.
 - The forge idles at about 150–300 MB on SQLite; the cap is headroom for large pushes and repository indexing.
+
+### 2.7 What other services get from the forge (the interface)
+
+For `ling web`'s repository service (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §4) and anything else on the node:
+
+| What | Where |
+|---|---|
+| The forge's base URL for git and the API, on the node | `http://127.0.0.1:3200` (`server::Config::forge_url`, `None` meaning that; tests point it at a stand-in) |
+| Links a person opens | `/forge/<owner>/<repo>`, `/forge/<owner>/<repo>/pulls/<n>`, relative to `ling web`'s origin |
+| The phone account | `mightling-phone`: write access to every repository, read on an archived one, made and kept by the forge of record's setup and its ten-minute tick (`ForgePhone`) |
+| Its token | `$CODEX_HOME/web/forge-phone-token` (`~/.mightling/web/`, 0600 in a 0700 folder), scopes `write:repository`, `write:issue`, `read:user`, `read:organization`; written once, never elsewhere |
+| `main` | Each repository's default branch is protected: only `owner` and `forge-admin` push, plus `mightling-phone` where `[chat_repos] allow_main` in the user's own config names the repository; merging a pull request is open to anyone with write access |
+
+On a mirror node the phone account and its token aren't made yet: phone repository work runs on the forge of record's node for now.
 
 ## 3. Repositories
 

@@ -27,13 +27,26 @@ export interface WorkTarget {
 }
 
 /** What a link names (desktop/electron/src/args.ts). */
+/** What the main process asks of the window in front: the Window menu's panes, and File's New thread, Open folder and Settings (DESKTOP §16 B20). */
+export const WINDOW_COMMANDS = ["detachTerminal", "detachReview", "newChat", "openFolder", "settings"] as const;
+export type WindowCommand = (typeof WINDOW_COMMANDS)[number];
+
 export interface LinkTarget extends WorkTarget {
   prompt?: string | null;
   page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask" | "quick";
   plugin?: string;
   /** With `page: "ask"`: send the prompt as a new question at once (Quick Entry). */
   send?: boolean;
+  /** `ling://settings/<page>` (DESKTOP §16 B19). */
+  settingsPage?: string;
+  /** `ling://new?originUrl=…`: the remote whose project the new thread starts in. */
+  origin?: string;
 }
+
+/** Whether a link's folder is an absolute folder that exists (DESKTOP §16 B19); in a browser, not checked. */
+export const folderExists = (dir: string) => (host() === "electron" ? send<boolean>({ type: "folder/check", dir }) : Promise.resolve(true));
+/** A project folder's `origin` remote, or null. */
+export const originOf = (dir: string) => send<string | null>({ type: "git/origin", dir });
 
 export interface Airgapped {
   level: "off" | "on";
@@ -226,6 +239,8 @@ export const git = {
   status: (root: string) => send<GitStatus>({ type: "git/status", root }),
   diff: (root: string, scope: GitScope, commit: string | null = null) => send<{ scope: GitScope; diff: string; against: string | null }>({ type: "git/diff", root, scope, commit }),
   log: (root: string) => send<GitCommit[]>({ type: "git/log", root }),
+  /** The lines the repository's tracked files changed against HEAD (DESKTOP §16 B32). */
+  changes: (root: string) => send<{ added: number; removed: number }>({ type: "git/changes", root }),
   stage: (root: string, paths: string[]) => send<void>({ type: "git/stage", root, paths }),
   unstage: (root: string, paths: string[]) => send<void>({ type: "git/unstage", root, paths }),
   discard: (root: string, paths: string[]) => send<void>({ type: "git/discard", root, paths }),
@@ -323,6 +338,9 @@ export interface TaskEvent {
 
 export const listEditors = () => send<Editor[]>({ type: "editors/list" });
 /** Opens a file of `root` in `editor` (null: the system's choice), at `line` when given. */
+/** Shows a file in the system's file manager (DESKTOP §16 B14); the app only. */
+export const revealFile = (path: string) => send<null>({ type: "open/reveal", path });
+
 export const openInEditor = (root: string, path: string, line: number | null, editor: string | null) =>
   send<null>({ type: "editor/open", root, path, line, editor });
 
@@ -432,6 +450,9 @@ export interface NightTask {
   on: string | null;
   at: string | null;
   result: unknown;
+  /** DESKTOP §16 B40: how many times the runner started it, and when `ling night apply` brought it into a checkout. */
+  attempts?: number | null;
+  applied?: string | null;
 }
 
 /** A node as Settings › Node lists it (desktop/electron/src/nodes.ts): names, never an address. */
@@ -468,24 +489,35 @@ export interface RepeatingTask {
   repo: string;
   task: string;
   test: string | null;
-  cadence: "daily" | "weekly";
+  cadence: "daily" | "weekly" | "days" | "every" | "monthly";
   weekday: string | null;
+  days: string[] | null;
+  every: number | null;
+  day: number | null;
   lastQueued: string | null;
   lastError: string | null;
 }
 export const night = {
   list: () => send<{ tasks: NightTask[]; reports: { name: string; modified: number }[] }>({ type: "night/list" }),
-  report: (name: string) => send<string>({ type: "night/report", name }),
-  add: (repo: string, task: string, test: string | null) => send<string>({ type: "night/add", repo, task, test }),
+  report: (name: string, archived = false) => send<string>({ type: "night/report", name, ...(archived ? { archived } : {}) }),
+  add: (repo: string, task: string, test: string | null, options: { on?: string | null; bestOf?: number | null } = {}) =>
+    send<string>({ type: "night/add", repo, task, test, on: options.on ?? null, bestOf: options.bestOf ?? null }),
+  /** Whether Night Shift runs by itself, and its window (DESKTOP §16 B5). */
+  status: () => send<{ timer: "on" | "off" | "unsupported"; window: string | null }>({ type: "night/status" }),
   drop: (repo: string, id: string) => send<string>({ type: "night/drop", repo, id }),
   runNow: () => send<null>({ type: "night/run" }),
-  /** Repeating tasks: every night, or every week on one day (ling-admin night every). */
-  every: (repo: string, task: string, test: string | null, cadence: "daily" | "weekly", weekday: string | null) =>
-    send<string>({ type: "night/every-add", repo, task, test, cadence, weekday }),
+  /** Repeating tasks: every night, every week on one day, on chosen weekdays, every N nights or on a day of the month (ling-admin night every); the main process checks each (cadence.ts). */
+  every: (repo: string, task: string, test: string | null, cadence: RepeatingTask["cadence"], on: { weekday?: string; days?: string[]; every?: number; day?: number }) =>
+    send<string>({ type: "night/every-add", repo, task, test, cadence, weekday: on.weekday ?? null, days: on.days ?? null, every: on.every ?? null, day: on.day ?? null }),
   repeating: () => send<RepeatingTask[]>({ type: "night/every-list" }),
   dropRepeating: (id: string) => send<string>({ type: "night/every-drop", id }),
   /** A finished task's last message, diff and transcript, and the session it ran as. */
-  details: (id: string) => send<{ result: string | null; diff: string | null; transcript: string | null; session: string | null }>({ type: "night/details", id }),
+  details: (id: string, archived = false) => send<{ result: string | null; diff: string | null; transcript: string | null; session: string | null }>({ type: "night/details", id, ...(archived ? { archived } : {}) }),
+  /** DESKTOP §16 B40: `ling night apply <id>` in a thread's folder, and the task's block in the newest report naming it. */
+  apply: (cwd: string, id: string) => send<string>({ type: "night/apply", cwd, id }),
+  note: (id: string) => send<{ report: string; text: string } | null>({ type: "night/note", id }),
+  /** DESKTOP §16 B41: runs and reports in `night/archive/` holding every word (the newest with none). */
+  archive: (query: string) => send<{ tasks: NightTask[]; reports: { name: string; lines: string[] }[] }>({ type: "night/archive", query }),
 };
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });
@@ -520,6 +552,18 @@ export interface DocsCollection {
 export interface DocsStatus {
   collections: DocsCollection[];
   runtime_missing: string | null;
+}
+
+/**
+ * Whether the page offers the forge's Code view (FORGEJO §2.4): in a browser on `ling web`, when the
+ * node has a forge and this device may see it signed in (`control`). The app's window has none yet.
+ */
+export async function forgeAvailable(): Promise<boolean> {
+  if (host() === "electron") return false;
+  const response = await fetch("/api/forge", { credentials: "same-origin" });
+  if (!response.ok) return false;
+  const answer = (await response.json().catch(() => ({}))) as { available?: boolean; control?: boolean };
+  return answer.available === true && answer.control === true;
 }
 
 async function docsCall<T>(electron: object, method: "GET" | "POST", url: string, body?: object): Promise<T> {
@@ -574,6 +618,15 @@ export interface Uploaded {
 }
 
 /** A file's bytes as base64, built in pieces so a large file does not overflow the argument list. */
+/**
+ * A pasted image for a Work turn (DESKTOP §16 B13): the app's main process writes it under
+ * `$CODEX_HOME/attachments/` and answers its path; `ling web` has no such route, so in a browser it fails.
+ */
+export async function workAttach(file: Blob & { name?: string }, kind: "image" | "file", name: string): Promise<string> {
+  if (host() !== "electron") throw new Error("Pasted images reach Work in the desktop app; in a browser, drop the image's file or ask in Ask.");
+  return (await send<{ path: string }>({ type: "work/attach", name, kind, data: await base64(file) })).path;
+}
+
 export async function base64(file: Blob): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
@@ -597,6 +650,75 @@ export const incognito = {
  * Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4), the desktop app's only: the copies the
  * main process keeps while Settings › Memories has it on.
  */
+/** The memory files (DESKTOP §16 B17): the summary and the index the memory pipeline writes; the app only. */
+export interface MemoryFile {
+  name: string;
+  about: string;
+  text: string;
+  modified: number;
+  cut: boolean;
+}
+export const memoryFiles = {
+  available: () => host() === "electron",
+  list: () => send<MemoryFile[]>({ type: "memories/files" }),
+  save: (name: string, text: string) => send<null>({ type: "memories/save", name, text }),
+};
+
+/** A setting an MCP bundle asks for (desktop/electron/src/mcpb.ts `BundleSetting`). */
+export interface BundleSetting {
+  key: string;
+  type: "string" | "number" | "boolean" | "directory" | "file";
+  title: string;
+  description: string;
+  required: boolean;
+  sensitive: boolean;
+  multiple: boolean;
+  default: string | number | boolean | string[] | null;
+  min: number | null;
+  max: number | null;
+}
+/** An MCP bundle's manifest as the main process read it (mcpb.ts `BundleSummary`). */
+export interface BundleSummary {
+  name: string;
+  dir: string;
+  displayName: string;
+  version: string;
+  description: string;
+  author: string;
+  serverType: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  settings: BundleSetting[];
+  signed: boolean;
+  files: number;
+  unpackedBytes: number;
+  fetches: string | null;
+  refusal: string | null;
+  installed: boolean;
+}
+export interface BundleServer {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  cwd: string;
+}
+export interface InstalledBundle {
+  name: string;
+  displayName: string;
+  version: string;
+  author: string;
+  dir: string;
+}
+/** MCP bundles installed from a file (DESKTOP §16 B45): the desktop app unpacks them; a browser cannot. */
+export const mcpBundles = {
+  available: () => host() === "electron",
+  pick: () => send<{ token: string; file: string; summary: BundleSummary } | null>({ type: "mcpb/pick" }),
+  install: (token: string, values: Record<string, unknown>, replace: boolean) => send<{ name: string; dir: string; server: BundleServer }>({ type: "mcpb/install", token, values, replace }),
+  remove: (name: string) => send<null>({ type: "mcpb/remove", name }),
+  list: () => send<InstalledBundle[]>({ type: "mcpb/list" }),
+};
+
 export const recall = {
   available: () => host() === "electron",
   index: () => send<Record<string, number>>({ type: "recall/index" }),
@@ -663,12 +785,12 @@ export interface BridgeEvents {
   docked?: (pane: PaneKind, thread: string) => void;
   /** A pane detached from this window asks for something. */
   paneAction?: (action: PaneAction) => void;
-  /** The Window menu's pane items, for this window. */
-  command?: (command: "detachTerminal" | "detachReview") => void;
   /** Another device acted on a thread here (sync, specs/DREAMFERENCE_MIGHTLING_SYNC.md §18.2): "Approved from the phone". */
   syncNotice?: (notice: { text: string; thread: string | null }) => void;
   /** A query deep link (`?open=…`) parsed after the launch check passed (CHAT_REPOS §12.4 G3). */
   openTarget?: (target: OpenTarget) => void;
+  /** The Window menu's pane items and File's New Thread, Open Folder… and Settings…, for this window. */
+  command?: (command: WindowCommand) => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -708,7 +830,7 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
         if (data.payload && typeof data.payload === "object") events.openTarget?.(data.payload as OpenTarget);
         return;
       case "command":
-        if (data.payload === "detachTerminal" || data.payload === "detachReview") events.command?.(data.payload);
+        if (typeof data.payload === "string" && (WINDOW_COMMANDS as readonly string[]).includes(data.payload)) events.command?.(data.payload as WindowCommand);
         return;
     }
   };
@@ -738,7 +860,15 @@ export interface PickedElement {
   tag: string;
   text: string;
   url: string;
+  /** A dragged area instead of one element (DESKTOP §16 B29), in the page's CSS pixels. */
+  area?: { x: number; y: number; width: number; height: number };
 }
+
+/** An office file as a PDF (DESKTOP §16 B31): the desktop app converts it with LibreOffice, no network; a browser cannot. */
+export const office = {
+  available: () => host() === "electron",
+  preview: (path: string) => send<{ pdf: string } | { unavailable: string }>({ type: "office/preview", path }),
+};
 
 /** The preview tab (DESKTOP_PARITY §2.9): the desktop app's only; a browser on `ling web` has none. */
 export const preview = {
@@ -794,7 +924,16 @@ export const prs = {
   review: (root: string, number: number, verdict: "comment" | "approve" | "request-changes", body: string, thread: string | null) =>
     send<string>({ type: "pr/review", root, number, verdict, body, thread }),
   status: (root: string) => send<string>({ type: "pr/status", root }),
+  /** DESKTOP §16 B32: the comments and reviews (`gh pr view --json comments,reviews`), and Create pull request (`gh pr create`). */
+  activity: (root: string, number: number, thread: string | null) => send<PullRequestActivity>({ type: "pr/activity", root, number, thread }),
+  create: (root: string, draft: { title: string; body: string; base: string | null; draft: boolean }, thread: string | null) => send<string>({ type: "pr/create", root, draft, thread }),
 };
+
+/** A pull request's conversation as `gh pr view --json comments,reviews` answers (the fields the tab reads). */
+export interface PullRequestActivity {
+  comments?: { author: { login: string } | null; body: string; createdAt: string; url?: string }[];
+  reviews?: { author: { login: string } | null; body: string; state: string; submittedAt: string | null }[];
+}
 
 /** The agent message board as the app reads it (desktop/electron/src/board.ts). */
 export interface BoardPost {

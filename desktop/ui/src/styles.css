@@ -47,6 +47,23 @@
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* Atkinson Hyperlegible, regular and bold, Latin: the readable font Settings › Appearance offers (DESKTOP §16 B23). */
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("./fonts/atkinson-hyperlegible-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("./fonts/atkinson-hyperlegible-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 :root {
   /* The system's own UI face where it has a good one (macOS, Windows), Inter everywhere else:
      `system-ui` on Linux is whatever the desktop configured, so it is not in the list. */
@@ -242,6 +259,8 @@ html[data-host="electron"] .sidebar { padding-top: 8px; }
 .views { display: flex; gap: 2px; padding: 3px; margin: 0 2px 10px; border-radius: var(--radius-sm); background: var(--hover); }
 .views button { flex: 1; border: none; background: none; padding: 4px 10px; border-radius: 6px; color: var(--muted); font-size: 13px; }
 .views button:hover:not(:disabled) { background: none; color: var(--text); }
+.views a.view-link { flex: 1; padding: 4px 10px; border-radius: 6px; color: var(--muted); font-size: 13px; text-align: center; text-decoration: none; }
+.views a.view-link:hover { color: var(--text); }
 .views button.selected { background: var(--raised); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 .nav-row { display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: none; text-align: left; padding: 7px 10px; border-radius: var(--radius-sm); font-weight: 500; }
 .nav-row .icon-svg { color: var(--muted); }
@@ -263,6 +282,7 @@ html[data-host="electron"] .sidebar { padding-top: 8px; }
 .project .thread { padding-left: 32px; }
 .thread-label, .snippet { display: block; width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .snippet { color: var(--muted); font-size: 12px; }
+.snippet.thread-summary { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .age { flex: none; color: var(--faint); font-size: 12px; padding-right: 10px; font-variant-numeric: tabular-nums; }
 .row-actions { display: none; flex: none; padding-right: 4px; }
 .thread-row:hover .row-actions, .thread-row:focus-within .row-actions { display: flex; }
@@ -330,6 +350,7 @@ html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, h
 .item > summary:hover, .item details > summary:hover, .turn-diff > summary:hover { color: var(--text); }
 .item > summary code, .item details > summary code { font-size: 12.5px; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .item.reasoning pre { color: var(--muted); font-family: var(--font-ui); font-size: 13px; padding-left: 12px; border-left: 2px solid var(--line); }
+.item.reasoning .markdown { color: var(--muted); font-size: 13px; padding-left: 12px; border-left: 2px solid var(--line); }
 .item.command .shell-mark { flex: none; font-family: var(--font-code); font-weight: 600; color: var(--muted); }
 .item.command pre { background: var(--code-bg); border: 1px solid var(--line); padding: 10px 12px; border-radius: var(--radius-sm); max-height: 320px; overflow: auto; }
 .diffstat { flex: none; font-family: var(--font-code); font-size: 12px; }
@@ -340,6 +361,14 @@ html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, h
 .status-declined summary { text-decoration: line-through; }
 .item.note, .turn-note { color: var(--faint); font-size: 12px; }
 .item.tool code { font-size: 12.5px; }
+/* Tool calls in full (DESKTOP §16 B11). */
+div.item.tool { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.item.tool .tool-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.tool .tool-state { flex: none; color: var(--faint); font-size: 12px; }
+.item.tool .tool-state.failed { color: var(--danger); }
+.tool-part { margin: 6px 0 0 20px; }
+.tool-part-title { display: block; color: var(--faint); font-size: 12px; margin-bottom: 2px; }
+.tool-part pre { background: var(--code-bg); border: 1px solid var(--line); padding: 8px 10px; border-radius: var(--radius-sm); max-height: 280px; overflow: auto; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
 .diff { background: var(--code-bg); border: 1px solid var(--line); padding: 10px 0; border-radius: var(--radius-sm); overflow-x: auto; font-size: 12.5px; line-height: 1.55; white-space: pre; }
 .diff > span { display: block; padding: 0 12px; }
 .diff .add { background: var(--add); }
@@ -434,6 +463,8 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .efforts button.selected { border-color: var(--accent); background: var(--accent-soft); }
 .picker-note { margin: 6px 8px 2px; color: var(--faint); font-size: 11.5px; }
 .turn-actions { display: inline-flex; gap: 4px; font-size: 12px; margin-left: -4px; }
+.message-versions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; font-size: 12px; color: var(--muted); margin: -12px 0 12px; font-variant-numeric: tabular-nums; }
+.message-versions button:disabled { opacity: 0.35; cursor: default; }
 .bar-action { color: var(--muted); }
 .info-panel { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 14px 12px; margin: 0 auto 16px; background: var(--panel); }
 .info-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
@@ -449,11 +480,21 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .nav-row .count { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); font-size: 11px; text-align: center; }
 .night-add { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
 .night-add input { flex: 1; min-width: 160px; }
+/* Repeat's chosen days and its numbers (DESKTOP §16 B42). */
+.night-add .night-days { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; font-size: 13px; }
+.night-add .night-days label { display: inline-flex; align-items: center; gap: 3px; }
+.night-add .night-days input, .night-add input.night-number { flex: none; min-width: 0; }
+.night-add input.night-number { width: 72px; }
 .night-status { font-size: 12px; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--muted); }
 .night-status.done { background: var(--add); color: var(--add-text); }
 .night-status.failed, .night-status.stalled { background: var(--del); color: var(--del-text); }
 tr.unseen td:first-child { font-weight: 600; }
 .night-report { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 8px 14px; background: var(--panel); font-size: 13px; }
+/* Scheduled's unread count and Mark all as read, and its archive search (DESKTOP §16 B41). */
+.night-inbox-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.night-inbox-head .count { margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 500; }
+tr.unseen td:first-child .link-button::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.night-archive input[type="search"] { width: 100%; margin: 4px 0 8px; }
 .settings-button { margin-top: 8px; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 30; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 10vh; }
 .dialog { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; background: var(--raised); border-radius: var(--radius-lg); box-shadow: var(--shadow-focus); padding: 16px 20px 20px; }
@@ -611,6 +652,12 @@ button.recording { border-color: var(--accent); background: var(--accent-soft); 
 
 /* Threads (DESKTOP_PARITY §2.1): pins, unread and attention, Recent, sections, find, pop-outs. */
 .thread-row.unread .thread-label { font-weight: 600; color: var(--text); }
+/* Several threads chosen at once (DESKTOP §16 B36): the rows marked, a bar over the list. */
+.thread-row.chosen { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.selection-bar { display: flex; align-items: center; gap: 4px; margin: 6px 8px 2px; padding: 4px 4px 4px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--raised); font-size: 12.5px; }
+.selection-bar > button, .selection-bar .menu-anchor > button { padding: 3px 8px; }
+.selection-count { flex: 1; font-weight: 600; white-space: nowrap; }
+.menu > button.danger-item { color: var(--danger); }
 .thread-label .icon-svg { display: inline-block; margin-right: 4px; color: var(--faint); vertical-align: -1px; }
 .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text); flex: none; margin: 0 6px; }
 .attention { flex: none; min-width: 16px; height: 16px; border-radius: var(--radius-pill); background: var(--danger); color: var(--on-danger); font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; margin: 0 4px; }
@@ -770,6 +817,13 @@ html.pet-page body { margin: 0; }
 .import-panel .buttons { display: flex; gap: 8px; margin-bottom: 8px; }
 .plugin-market-add { display: flex; gap: 8px; margin-bottom: 8px; }
 .plugin-market-add input { flex: 1; min-width: 0; }
+.plugin-search { width: 100%; margin-bottom: 8px; }
+.plugin-market-header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.plugin-detail-card { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px 14px; margin: 10px 0; background: var(--panel); }
+.plugin-detail-section { margin: 4px 0; font-size: 13px; }
+.mcp-add { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.mcp-add .buttons { display: flex; gap: 8px; margin-top: 4px; }
+.mcp-add textarea { resize: vertical; min-height: 48px; }
 .import-history { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
 
 /* The pull-request tab (Phase 3 item 9). */
@@ -788,6 +842,10 @@ html.pet-page body { margin: 0; }
 .pr-detail .buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
 .pr-detail textarea { width: 100%; box-sizing: border-box; font: inherit; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; }
 .pr-checks { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.pr-activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.pr-activity li { border-left: 2px solid var(--line); padding-left: 8px; }
+.pr-create .field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-size: 13px; }
+.pr-create input[type="text"] { font: inherit; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 5px 8px; }
 .check-state { display: inline-block; min-width: 54px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
 .check-failed .check-state { color: var(--del-text); }
 .check-passed .check-state { color: var(--add-text); }
@@ -922,6 +980,10 @@ html.quick-page body { margin: 0; background: var(--canvas); }
   line-height: 1.45;
 }
 .quick-hint { margin: 0; color: var(--faint); font-size: 12px; }
+/* Its recent questions (DESKTOP §16 B24): one line each, the window grown by a line per question (quick.ts `quickSize`). */
+.quick-recent { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px solid var(--line); -webkit-app-region: no-drag; }
+.quick-recent button { height: 26px; padding: 0 6px; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: inherit; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quick-recent button:hover, .quick-recent button:focus-visible { background: var(--hover); color: var(--text); }
 .quick-entry .dialog-note.warning { color: var(--danger); }
 .quick-row textarea, .quick-row textarea:focus, .quick-row textarea:focus-visible { border: none; box-shadow: none; outline: none; padding: 0; border-radius: 0; }
 
@@ -934,6 +996,15 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .link-url { margin: 0 0 12px; }
 .link-url code { display: block; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-sm); overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12.5px; }
 .link-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Continue in a project (DESKTOP §16 B33): the projects with a folder, each by name and primary folder. */
+.continue-dialog { width: min(560px, calc(100vw - 32px)); }
+.continue-dialog h3 { margin: 0 0 10px; }
+.continue-targets { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.continue-target { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 10px; }
+.continue-name { font-weight: 600; }
+.continue-folder { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.continue-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* An incognito question (DESKTOP_PARITY_CLAUDE §4.3): a dashed frame round the thread and a note that leaving deletes it. */
 .thread-pane.incognito { outline: 2px dashed var(--muted); outline-offset: -6px; }
@@ -985,6 +1056,15 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .project-add-files { display: inline-flex; align-items: center; gap: 6px; justify-self: start; }
 /* Scheduled (item 18, the owner's decision 7): a finished run opened on its result, changes and transcript. */
 .night-details pre { max-height: 40vh; overflow: auto; }
+/* A Work thread's Night Shift tasks (NightCards.tsx, DESKTOP §16 B40): a card, never a message. */
+.night-card { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 14px 12px; margin: 12px auto; background: var(--panel); }
+.night-card > header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.night-card-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.night-card-state { margin: 6px 0 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.night-note { margin-top: 10px; padding: 8px 12px; border-left: 3px solid var(--line-strong); background: var(--canvas); border-radius: var(--radius-sm); font-size: 13px; }
+.night-note-head { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.night-card-said { margin: 8px 0 0; }
+.night-card .buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .night-transcript { white-space: pre-wrap; font-family: var(--font-code); font-size: 12.5px; background: var(--code-bg); border-radius: var(--radius-sm); padding: 8px 10px; }
 /* Other devices (SYNC Phase 1): a thread from another device, read only. */
 .synced-transcript td { padding-bottom: 12px; }
@@ -1024,3 +1104,101 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .work.pane-window .sidebar { display: none; }
 .pane-window .bottom-panel { flex: 1; height: auto; border-top: none; }
 .pane-window .review-pane { flex: 1; min-height: 0; border-left: none; }
+
+/* Scheduled: whether Night Shift runs by itself (DESKTOP §16 B5). */
+.night-timer { margin: 0 0 8px; font-size: 13px; }
+.night-timer.off { color: var(--danger); }
+/* First run (DESKTOP §16 B6). */
+.dialog.welcome { max-width: 560px; }
+.welcome-head { display: flex; align-items: center; gap: 12px; }
+.welcome-choices { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.welcome-choice { display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--raised); }
+.welcome-choice:hover, .welcome-choice:focus-visible { border-color: var(--accent); }
+.welcome-body { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+/* Another thread working in this checkout (DESKTOP §16 B9). */
+.checkout-clash { display: flex; align-items: center; gap: 8px; max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 0 auto 6px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--notice); font-size: 13px; flex-wrap: wrap; }
+/* Work's sidebar by date (DESKTOP §16 B10). */
+.search .order-toggle { flex: none; color: var(--muted); }
+.search .order-toggle.on { color: var(--accent); }
+/* Review findings on their lines (DESKTOP §16 B12). */
+.review-finding { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-sm); padding: 6px 10px; margin: 4px 0; font-size: 13px; }
+.review-finding-head { display: flex; align-items: center; gap: 6px; }
+.review-finding-where { color: var(--muted); font-family: var(--font-code); font-size: 12px; margin-left: auto; }
+.review-finding p { margin: 6px 0 0 20px; white-space: pre-wrap; }
+.review-finding .buttons { margin: 6px 0 0 20px; display: flex; gap: 6px; }
+.review-findings-elsewhere { margin: 8px 0; }
+.review-findings-elsewhere h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
+/* An image the served model cannot see (DESKTOP §16 B13). */
+.attachment.unseen { border-color: var(--danger); }
+.attachment-warning { color: var(--danger); font-size: 11px; white-space: nowrap; }
+
+/* The menu on a file's path (DESKTOP §16 B14): at the pointer, above everything. */
+.menu.path-menu { right: auto; z-index: 40; }
+
+/* Diagrams in answers (DESKTOP §16 B15). */
+.diagram { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--raised); overflow-x: auto; }
+.diagram-picture svg { max-width: 100%; height: auto; }
+.diagram-source summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+/* What the agent remembers (DESKTOP §16 B17). */
+.memory-files textarea { font-family: var(--font-code); font-size: 12.5px; }
+.memory-file .buttons { display: flex; gap: 6px; margin-bottom: 8px; }
+
+/* The pet's threads that need you, and its blocked state (DESKTOP §16 B18). */
+.pet-badge.blocked { background: var(--danger); }
+.pet-needs { list-style: none; margin: 4px 0 8px; padding: 0; max-height: 110px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.pet-needs button { width: 100%; text-align: left; font-size: 12px; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-need { font-weight: 600; margin-right: 4px; }
+.pet-need.blocked { color: var(--danger); }
+
+/* The plugin a link named (DESKTOP §16 B19). */
+.plugin-market tr.focused { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Subagent marks (DESKTOP §16 B21): the hue from the id, a lightness that reads on both themes. */
+.agent-mark { display: inline-block; font-size: 11px; line-height: 1; margin: 0 2px; vertical-align: middle; }
+
+/* Recommended MCP servers under the Add server form (mcprecommended.ts, DESKTOP §16 B26). */
+.mcp-recommended { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.mcp-recommended-entry { display: flex; gap: 8px; align-items: baseline; }
+.mcp-recommended-entry .link-button { flex: none; }
+.mcp-recommended .needs-network { color: var(--faint); }
+/* MCP bundles from a file (DESKTOP §16 B45). */
+.mcp-bundles { margin-top: 12px; }
+.mcp-bundle { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 8px 12px; margin-top: 8px; }
+.mcp-bundle-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0; font-size: 13px; }
+.mcp-bundle-facts dt { color: var(--muted); }
+.mcp-bundle-facts dd { margin: 0; overflow-wrap: anywhere; }
+.mcp-bundle-settings { display: flex; flex-direction: column; gap: 8px; border: none; padding: 0; margin: 8px 0; }
+.mcp-bundle-settings label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+/* A CSV or TSV tab as a table (ArtifactView.tsx `TableArtifact`, DESKTOP §16 B27). */
+.table-artifact { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.table-artifact .table-scroll { overflow: auto; flex: 1; padding: 0 12px 16px; }
+.table-artifact table { border-collapse: collapse; font: 13px var(--font-code); }
+.table-artifact th, .table-artifact td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; white-space: pre; max-width: 32em; overflow: hidden; text-overflow: ellipsis; }
+.table-artifact th { position: sticky; top: 0; background: var(--raised); font-weight: 600; }
+/* The tab area's New tab menu (TabArea.tsx, DESKTOP §16 B28). */
+.new-tab { position: relative; display: inline-flex; }
+.new-tab-menu { left: 0; right: auto; min-width: 140px; }
+.tab-body .terminal-host { height: 100%; }
+/* Files from answers (AskFiles.tsx, DESKTOP §16 B30). */
+.ask-files { width: min(640px, 92vw); max-height: 80vh; display: flex; flex-direction: column; }
+.ask-files-list { overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.ask-files-list h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.ask-file { display: flex; gap: 8px; align-items: center; width: 100%; padding: 4px 6px; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; text-align: left; }
+.ask-file:hover, .ask-file:focus-visible { background: var(--hover); }
+.ask-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-file-kind { color: var(--faint); font-size: 12px; }
+
+/* The side chat (DESKTOP §16 B37): a column at the thread's right edge, the thread narrowed beside it. */
+.thread-pane:has(> .side-chat) { position: relative; padding-right: min(380px, 45%); }
+.side-chat { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 45%); display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); z-index: 2; }
+.side-chat > header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.side-chat > header .spacer { flex: 1; }
+.side-chat-of { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); min-width: 0; }
+.side-chat-turns { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.side-chat-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.side-chat-message { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.side-chat-message.user { align-self: flex-end; max-width: 90%; padding: 6px 10px; border-radius: var(--radius-md); background: var(--hover); white-space: pre-wrap; }
+.side-chat-message.working { color: var(--muted); }
+.side-chat-composer { display: flex; gap: 6px; align-items: flex-end; padding: 8px 10px; border-top: 1px solid var(--line); }
+.side-chat-composer textarea { flex: 1; resize: none; min-height: 40px; max-height: 30vh; field-sizing: content; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--canvas); color: var(--text); font: inherit; font-size: 13px; }

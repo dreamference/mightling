@@ -39,6 +39,8 @@ on the whole of `test_mightling_slash_commands.py`, whose point is the built `li
 tests skip on their own while no server answers or the gate is closed. Mark nothing else with it
 without a reason of the same kind.
 
+Since 2026-10-27 no test reaches the network: conftest stubs `ReleaseAssetDownloader.ensure` (answers "complete", so `server start` proceeds) and makes `download` and `_fetch` fail the test, and the socket guard above refuses any connection to an address that is not loopback. Before that, `server start` tests downloaded the ScaleSearch drafter's release assets from GitHub for real and the suite hung. A test of the downloader restores the three from the `REAL_RELEASE_*` names (`_release_server` in `test_hardware.py`).
+
 The suite's time is process start-up and the sleeps the stand-ins play out, not the machine: the
 Night Shift and egress-audit tests run several stand-in processes each and take 1 to 4 s; the rest
 is about 0.1 s a test. It was measured at 2 minutes for about 1,080 tests on 2026-10-10 (the

@@ -7,8 +7,9 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { addTask, dropTask, readReport, readReports, readTasks } from "./night";
+import { addRepeating, addTask, dropTask, listRepeating, nightStatus, nodeName, readReport, readReports, readTasks } from "./night";
 import { taskDetails, transcriptOf } from "./night";
+import { applyTask, reportBlock, taskNote } from "./night";
 
 describe("Night Shift for the Scheduled view", () => {
   it("reads the tasks newest first and the reports, and refuses a report name that leaves the folder", () => {
@@ -69,5 +70,109 @@ describe("a finished task's details (the owner's decision 7)", () => {
     await expect(taskDetails(night, "../x")).rejects.toThrow(/not a task/);
     fs.rmSync(night, { recursive: true, force: true });
   });
+
+  it("queues on a node or with a number of attempts, never both, and a node only by its name (DESKTOP §16 B5)", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-on-")));
+    const log = path.join(home, "calls.txt");
+    const ling = nodeScript(home, "ling", `require("fs").appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(" ") + "\\n");
+console.log("Queued.");
+`);
+    await addTask(ling, home, "Bump the lock file", null, "second-node", null);
+    await addTask(ling, home, "Fix the flaky test", "npm test", null, 3);
+    expect(fs.readFileSync(log, "utf8").trim().split("\n")).toEqual(["night add --on second-node Bump the lock file", "night add --test npm test --best-of 3 Fix the flaky test"]);
+    await expect(addTask(ling, home, "x", null, "second-node", 3)).rejects.toThrow("not both");
+    await expect(addTask(ling, home, "x", null, "10.0.0.7", null)).rejects.toThrow("not an address");
+    await expect(addTask(ling, home, "x", null, "a node", null)).rejects.toThrow("not an address");
+    await expect(addTask(ling, home, "x", null, null, 0)).rejects.toThrow("best-of");
+    await expect(addTask(ling, home, "x", null, null, 2.5)).rejects.toThrow("best-of");
+    expect(nodeName(" spark-2 ")).toBe("spark-2");
+    expect(nodeName("-x")).toBeNull();
+    expect(nodeName("fe80::1")).toBeNull();
+  });
+
+  it("says whether the timer is on and its window, from the unit file only", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-timer-"));
+    expect(await nightStatus(home, "linux")).toEqual({ timer: "off", window: null });
+    expect(await nightStatus(home, "darwin")).toEqual({ timer: "unsupported", window: null });
+    const units = path.join(home, ".config", "systemd", "user");
+    fs.mkdirSync(units, { recursive: true });
+    fs.writeFileSync(path.join(units, "mightling-night.timer"), "[Unit]\nDescription=Night Shift\n# Night Shift window: 01:00-07:00\n[Timer]\nOnCalendar=*-*-* 01:00:00\n");
+    expect(await nightStatus(home, "linux")).toEqual({ timer: "on", window: "01:00-07:00" });
+    fs.writeFileSync(path.join(units, "mightling-night.timer"), "[Timer]\nOnCalendar=daily\n");
+    expect(await nightStatus(home, "linux")).toEqual({ timer: "on", window: null });
+  });
 });
 
+describe("Night Shift inside a thread (DESKTOP §16 B40)", () => {
+  it("reads a task's attempts and when it was applied", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-b40-"));
+    fs.mkdirSync(path.join(dir, "tasks"));
+    fs.writeFileSync(path.join(dir, "tasks", "a.json"), JSON.stringify({ id: "a", repo: "/w/app", task: "t", status: "done", attempts: 3, applied: { at: "2026-10-28T09:00:00+01:00", into: "/w/app" }, history: [] }));
+    fs.writeFileSync(path.join(dir, "tasks", "b.json"), JSON.stringify({ id: "b", repo: "/w/app", task: "t", status: "queued", history: [] }));
+    const tasks = readTasks(dir);
+    expect(tasks.find((task) => task.id === "a")).toMatchObject({ attempts: 3, applied: "2026-10-28T09:00:00+01:00" });
+    expect(tasks.find((task) => task.id === "b")).toMatchObject({ attempts: null, applied: null });
+  });
+
+  it("finds a task's block in the newest report that names it, and only that block", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-note-"));
+    fs.mkdirSync(path.join(dir, "reports"));
+    const report = "# Night Shift — 2026-10-28\n\n## /w/app\n\n### 20261027-2200-abc — done\n\n- Task: Make the retry test deterministic\n- Branch: `night/20261027-2200-abc`, not merged\n- Attempts: 1, nudges: 0, wall time: 4 min 2 s\n- Best of 3: 3 of 3 attempts ran; chose attempt 2 by judge\n  - Attempt 1: done\n\n### 20261027-2300-def — stalled\n\n- Task: other\n\n## Review\n\n- No branch to review.\n";
+    expect(reportBlock(report, "20261027-2200-abc")).toBe(report.split("\n").slice(4, 12).join("\n").trim());
+    expect(reportBlock(report, "20261027-2300-def")).toBe("### 20261027-2300-def — stalled\n\n- Task: other");
+    expect(reportBlock(report, "20261027-2200")).toBeNull();
+    fs.writeFileSync(path.join(dir, "reports", "2026-10-27.md"), "## /w/app\n\n### 20261027-2200-abc — interrupted\n\n- cut off\n");
+    fs.utimesSync(path.join(dir, "reports", "2026-10-27.md"), new Date("2026-10-27T07:00:00Z"), new Date("2026-10-27T07:00:00Z"));
+    fs.writeFileSync(path.join(dir, "reports", "2026-10-28.md"), report);
+    expect(taskNote(dir, "20261027-2200-abc")).toEqual({ report: "2026-10-28.md", text: expect.stringContaining("chose attempt 2") });
+    expect(taskNote(dir, "nothing-here")).toBeNull();
+    expect(() => taskNote(dir, "../x")).toThrow("not a task");
+  });
+
+  it("applies through ling night apply in the thread's folder, refusing a bad id or folder", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-apply-")));
+    const log = path.join(home, "calls.txt");
+    const ling = nodeScript(home, "ling", `require("fs").appendFileSync(${JSON.stringify(log)}, process.cwd() + "|" + process.argv.slice(2).join(" ") + "\\n");
+console.log("Applied night/20261027-2200-abc here as uncommitted changes.");
+`);
+    await expect(applyTask(ling, home, "20261027-2200-abc")).resolves.toContain("Applied");
+    expect(fs.readFileSync(log, "utf8").trim()).toBe(`${home}|night apply 20261027-2200-abc`);
+    await expect(applyTask(ling, home, "a b")).rejects.toThrow("not a task");
+    await expect(applyTask(ling, "relative", "x")).rejects.toThrow("folder");
+    await expect(applyTask(ling, path.join(home, "missing"), "x")).rejects.toThrow("folder");
+  });
+});
+
+describe("repeating tasks on chosen weekdays, every N nights or a day of the month (DESKTOP §16 B42)", () => {
+  it("passes each cadence's checked flags to ling-admin and reads its templates back", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-every-")));
+    const log = path.join(home, "calls.txt");
+    const admin = nodeScript(home, "ling-admin", `require("fs").appendFileSync(${JSON.stringify(log)}, process.cwd() + "|" + process.argv.slice(2).join(" ") + "\\n");
+if (process.argv[4] === "list") {
+  console.log(JSON.stringify({ id: "r000000000001", repo: "/w/app", task: "Audit", test: null, cadence: "days", weekday: null, days: ["mon", "wed"], every: null, day: null, last_queued: null, last_error: null }));
+  console.log(JSON.stringify({ id: "r000000000002", repo: "/w/app", task: "Backup", test: "pytest", cadence: "every", weekday: null, days: null, every: 3, day: null, last_queued: "2026-10-27", last_error: null }));
+  console.log(JSON.stringify({ id: "r000000000003", repo: "/w/app", task: "Clean", test: null, cadence: "monthly", weekday: null, days: null, every: null, day: 31, last_queued: null, last_error: null }));
+  console.log(JSON.stringify({ id: "r000000000004", repo: "/w/app", task: "Later", test: null, cadence: "hourly", last_queued: null, last_error: null }));
+} else {
+  console.log("OK");
+}
+`);
+    await addRepeating(admin, home, "Audit", null, "days", { days: ["mon", "wed"] });
+    await addRepeating(admin, home, "Backup", "pytest", "every", { every: 3 });
+    await addRepeating(admin, home, "Clean", null, "monthly", { day: 31 });
+    for (const [cadence, options] of [["every", { every: 0 }], ["every", { every: "3; rm" }], ["monthly", { day: 32 }], ["days", { days: "mon,--test" }], ["days", "mon"], ["hourly", {}]] as const) {
+      await expect(addRepeating(admin, home, "Bad", null, cadence, options)).rejects.toThrow();
+    }
+    expect(fs.readFileSync(log, "utf8").trim().split("\n")).toEqual([
+      `${home}|night every add --days mon,wed -- Audit`,
+      `${home}|night every add --every 3 --test pytest -- Backup`,
+      `${home}|night every add --monthly 31 -- Clean`,
+    ]);
+
+    const tasks = await listRepeating(admin);
+    expect(tasks.map((entry) => entry.id)).toEqual(["r000000000001", "r000000000002", "r000000000003"]);
+    expect(tasks[0]).toMatchObject({ cadence: "days", days: ["mon", "wed"], every: null, day: null });
+    expect(tasks[1]).toMatchObject({ cadence: "every", every: 3, test: "pytest", lastQueued: "2026-10-27" });
+    expect(tasks[2]).toMatchObject({ cadence: "monthly", day: 31, days: null });
+  });
+});

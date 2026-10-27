@@ -12,6 +12,7 @@ on:
     paths:
       - "docs/**"
       - "website/**"
+      - "paper/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
@@ -43,12 +44,28 @@ jobs:
       - name: Build (strict)
         run: mkdocs build --strict
 
-      # One Pages site per repository: the one-page website (website/, static) at the root and the
-      # MkDocs documentation under /docs/. website/CNAME carries the custom domain.
+      - name: Build the desktop architecture paper
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            latexmk \
+            lmodern \
+            texlive-bibtex-extra \
+            texlive-fonts-recommended \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-latex-recommended \
+            texlive-pictures
+          make -C paper RUN= desktop-architecture.pdf
+
+      # One Pages site per repository: the one-page website (website/, static) at the root, the
+      # desktop architecture paper at /paper/desktop-architecture.pdf, and the MkDocs documentation
+      # under /docs/. website/CNAME carries the custom domain.
       - name: Assemble the site
         run: |
-          mkdir -p _site
+          mkdir -p _site/paper
           cp -r website/. _site/
+          cp paper/desktop-architecture.pdf _site/paper/desktop-architecture.pdf
           cp -r site _site/docs
 
       - name: Is Pages enabled?

@@ -495,6 +495,12 @@ impl Hub {
         self.threads.chats.get(chat).and_then(|c| c.current.clone())
     }
 
+    /// Saves `threads.json`, keeping any `last_topic` the Telegram adapter wrote and making
+    /// `touched_chat` the last topic when it is a Telegram topic (`Threads::save_keeping_topics`).
+    fn save_threads(&mut self, touched_chat: Option<&str>) {
+        let _ = self.threads.save_keeping_topics(&self.config.dir, touched_chat);
+    }
+
     pub async fn on_inbound(&mut self, message: Inbound) {
         match message {
             Inbound::Text { chat, text } => {
@@ -543,7 +549,7 @@ impl Hub {
         match name.as_str() {
             "/new" => {
                 self.threads.chats.entry(chat.to_string()).or_default().current = None;
-                let _ = self.threads.save(&self.config.dir);
+                self.save_threads(Some(chat));
                 self.notice(chat, "The next message starts a new thread.");
             }
             "/stop" => self.stop(chat).await,
@@ -591,7 +597,7 @@ impl Hub {
                         let entry = self.threads.chats.entry(chat.to_string()).or_default();
                         entry.current = Some(thread.id.clone());
                         entry.last_ms = Some(now_ms());
-                        let _ = self.threads.save(&self.config.dir);
+                        self.save_threads(Some(chat));
                         self.notice(chat, format!("Continuing \"{}\".", thread.name));
                     }
                     None => self.notice(chat, "No such thread: /threads lists them."),
@@ -649,6 +655,7 @@ impl Hub {
         // A topic is the user saying which thread a message belongs to: no gap rule (MOONSHOT D2).
         if topic_of(chat).is_some() {
             self.threads.chats.entry(chat.to_string()).or_default().last_ms = Some(now);
+            self.save_threads(Some(chat));
             return;
         }
         let gap = self.config.settings.new_thread_after.map(|gap| gap.as_millis() as u64);
@@ -661,7 +668,7 @@ impl Hub {
             return;
         }
         entry.current = None;
-        let _ = self.threads.save(&self.config.dir);
+        self.save_threads(None);
         let since = silence.map(|ms| format!(" (the last message was {} ago)", duration(ms))).unwrap_or_default();
         self.notice(chat, format!("New thread{since}; /use 2 to go back."));
     }
@@ -687,7 +694,7 @@ impl Hub {
             self.send(Outbound::ThreadNamed { chat: chat.to_string(), name: name.clone() });
         }
         self.threads.started(chat, ThreadRef { id: thread.clone(), name }, self.config.max_threads);
-        let _ = self.threads.save(&self.config.dir);
+        self.save_threads(Some(chat));
         Ok(thread)
     }
 
@@ -882,7 +889,7 @@ impl Hub {
         }
         let chat = turn.chat.clone();
         self.threads.chats.entry(chat.clone()).or_default().last_ms = Some(now_ms());
-        let _ = self.threads.save(&self.config.dir);
+        self.save_threads(Some(&chat));
         let answer = turn.answer();
         let status = turn_value.get("status").and_then(Value::as_str).unwrap_or("completed");
         // Interrupted by its bounds (limits.rs): a final turn asks for the answer from what was found;

@@ -3,7 +3,9 @@ Night Shift: coding tasks queued with `/night add` run overnight, each in its ow
 leave a branch and a morning report (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md).
 """
 
+from dreamference.night_shift.archive_outcome import ArchiveOutcome
 from dreamference.night_shift.chooser_candidate import ChooserCandidate
+from dreamference.night_shift.night_shift_archive import NightShiftArchive
 from dreamference.night_shift.night_shift_best_of_n import NightShiftBestOfN
 from dreamference.night_shift.night_shift_chooser import NightShiftChooser
 from dreamference.night_shift.night_shift_compaction_audit import NightShiftCompactionAudit
@@ -19,7 +21,9 @@ from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
 
 __all__ = [
+    "ArchiveOutcome",
     "ChooserCandidate",
+    "NightShiftArchive",
     "NightShiftBestOfN",
     "NightShiftChooser",
     "NightShiftCompactionAudit",

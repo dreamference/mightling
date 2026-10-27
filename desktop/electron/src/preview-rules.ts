@@ -109,20 +109,48 @@ export const PICK_SCRIPT = `new Promise((resolve) => {
     }
     return parts.join(" > ");
   };
+  // A click picks an element; a drag over the page picks an area (DESKTOP §16 B29).
+  let start = null;
+  let dragged = false;
   const over = (event) => {
+    if (start) return;
     const rect = event.target.getBoundingClientRect();
     Object.assign(box.style, { left: rect.left + "px", top: rect.top + "px", width: rect.width + "px", height: rect.height + "px" });
+  };
+  const area = (event) => ({ x: Math.round(Math.min(start.x, event.clientX)), y: Math.round(Math.min(start.y, event.clientY)), width: Math.round(Math.abs(event.clientX - start.x)), height: Math.round(Math.abs(event.clientY - start.y)) });
+  const down = (event) => { if (event.button === 0) { start = { x: event.clientX, y: event.clientY }; dragged = false; event.preventDefault(); } };
+  const move = (event) => {
+    if (!start) return;
+    const a = area(event);
+    if (a.width + a.height < 12) return;
+    dragged = true;
+    Object.assign(box.style, { left: a.x + "px", top: a.y + "px", width: a.width + "px", height: a.height + "px" });
+  };
+  const up = (event) => {
+    if (!start) return;
+    if (dragged) {
+      event.preventDefault();
+      event.stopPropagation();
+      const a = area(event);
+      const inside = document.elementFromPoint(a.x + a.width / 2, a.y + a.height / 2);
+      done({ selector: inside && inside !== box ? selectorOf(inside) : "body", tag: "area", text: "", url: location.href, area: a });
+    }
+    start = null;
   };
   const done = (value) => {
     removeEventListener("mouseover", over, true);
     removeEventListener("click", click, true);
     removeEventListener("keydown", key, true);
+    removeEventListener("mousedown", down, true);
+    removeEventListener("mousemove", move, true);
+    removeEventListener("mouseup", up, true);
     box.remove();
     resolve(value);
   };
   const click = (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (dragged) return;
     const el = event.target;
     done({ selector: selectorOf(el), tag: el.localName, text: (el.innerText || el.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 160), url: location.href });
   };
@@ -130,6 +158,9 @@ export const PICK_SCRIPT = `new Promise((resolve) => {
   addEventListener("mouseover", over, true);
   addEventListener("click", click, true);
   addEventListener("keydown", key, true);
+  addEventListener("mousedown", down, true);
+  addEventListener("mousemove", move, true);
+  addEventListener("mouseup", up, true);
 })`;
 
 /** How long one console line of a preview may be (the agent's console tool). */

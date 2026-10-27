@@ -3,7 +3,9 @@
 // this tab's body (desktop/electron/src/preview.ts), so this component draws the toolbar and keeps
 // the view where the body is, hidden whenever something covers it. A site out on the internet
 // asks first (Allow once, Always allow, Block); `/airgapped on` keeps it to this machine. Comment
-// mode (Ctrl+Shift+.) picks an element in the page and sends a comment on it to the composer.
+// mode (Ctrl+Shift+.) picks an element in the page, or an area dragged over it, and sends a comment
+// on it to the composer; several can wait and go together (DESKTOP §16 B29). The address suggests
+// the tab's own history, nothing else (no search).
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -40,6 +42,10 @@ export function PreviewTab(props: PreviewTabProps) {
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<bridge.PickedElement | null>(null);
   const [comment, setComment] = useState("");
+  /** Comments written and waiting to go together (DESKTOP §16 B29). */
+  const [waiting, setWaiting] = useState<string[]>([]);
+  /** The addresses this tab has shown, newest first: the address box's suggestions. */
+  const [visited, setVisited] = useState<string[]>(props.url ? [props.url] : []);
   const opened = useRef(false);
   const available = bridge.preview.available();
   /** Puts the view over the tab's body (set by the layout effect below). */
@@ -78,6 +84,7 @@ export function PreviewTab(props: PreviewTabProps) {
     if (event.kind === "state") {
       setState(event);
       if (event.url && document.activeElement !== address.current) setTyped(event.url);
+      if (event.url) setVisited((list) => remembered(list, event.url as string));
       handlers.current.onTitle(event.title || null, event.url ?? "");
     } else if (event.kind === "ask" && event.site) {
       setAsk({ site: event.site, reason: event.reason ?? "" });
@@ -131,11 +138,18 @@ export function PreviewTab(props: PreviewTabProps) {
     }
   };
 
-  const sendComment = () => {
+  /** The comment on what was picked, as the composer gets it; then sent with those waiting, or kept to add another. */
+  const sendComment = (another = false) => {
     if (!picked || !comment.trim()) return;
-    const where = picked.text ? `\`${picked.selector}\` ("${picked.text}")` : `\`${picked.selector}\``;
-    props.onComment(`On the page ${picked.url}, the element ${where}: ${comment.trim()}`);
+    const line = commentLine(picked, comment);
     setPicked(null);
+    if (another) {
+      setWaiting((list) => [...list, line]);
+      void pick();
+      return;
+    }
+    props.onComment([...waiting, line].join("\n\n"));
+    setWaiting([]);
   };
 
   const runKeyRef = useRef<(action: string) => void>(() => {});
@@ -185,8 +199,9 @@ export function PreviewTab(props: PreviewTabProps) {
         <button className="icon" aria-label="Forward" title="Forward (Alt+→)" disabled={!state?.canGoForward} onClick={() => bridge.preview.go(id, "forward").catch(notice)}><Icon name="chevronRight" size={14} /></button>
         <button className="icon" aria-label="Reload" title={`Reload (${shortcutLabel("previewReload")})`} onClick={() => bridge.preview.reload(id).catch(notice)}><Icon name="refresh" size={14} /></button>
         <form className="address" onSubmit={(event) => { event.preventDefault(); go(typed); }}>
-          <input ref={address} value={typed} placeholder="localhost:5173, a LAN page, or a file" aria-label="Address"
+          <input ref={address} value={typed} placeholder="localhost:5173, a LAN page, or a file" aria-label="Address" list={`preview-history-${id}`}
             spellCheck={false} onChange={(event) => setTyped(event.target.value)} />
+          <datalist id={`preview-history-${id}`}>{visited.map((url) => <option key={url} value={url} />)}</datalist>
         </form>
         <button className={`icon${picking ? " active" : ""}`} aria-pressed={picking} aria-label="Comment on the page" title={`Comment on an element of the page (${shortcutLabel("commentMode")})`} onClick={() => void pick()}><Icon name="messageSquare" size={14} /></button>
         <button className="icon" aria-label="Copy the address" title={`Copy the address (${shortcutLabel("copyUrl")})`} onClick={() => void copyText(state?.url ?? typed)}><Icon name="copy" size={14} /></button>
@@ -203,9 +218,16 @@ export function PreviewTab(props: PreviewTabProps) {
       ) : null}
       {blocked ? <div className="preview-blocked" role="status">{blocked}<button className="icon" aria-label="Dismiss" onClick={() => setBlocked(null)}><Icon name="x" size={12} /></button></div> : null}
       {state?.error ? <div className="preview-blocked" role="status">The page did not load: {state.error}</div> : null}
+      {waiting.length && !picked && !picking ? (
+        <div className="preview-note" role="status">
+          {waiting.length} comment{waiting.length === 1 ? "" : "s"} waiting.{" "}
+          <button className="link-button" onClick={() => { props.onComment(waiting.join("\n\n")); setWaiting([]); }}>Send {waiting.length === 1 ? "it" : "them"} to the composer</button>{" "}
+          <button className="link-button" onClick={() => setWaiting([])}>Drop</button>
+        </div>
+      ) : null}
       {picked ? (
         <div className="preview-comment">
-          <div className="picked"><code>{picked.selector}</code>{picked.text ? <span> “{picked.text}”</span> : null}</div>
+          <div className="picked">{picked.area ? <span>An area of {picked.area.width} × {picked.area.height} px, around <code>{picked.selector}</code></span> : <><code>{picked.selector}</code>{picked.text ? <span> “{picked.text}”</span> : null}</>}</div>
           <textarea autoFocus rows={3} value={comment} placeholder="What should change here?" aria-label="Comment on the element"
             onChange={(event) => setComment(event.target.value)}
             onKeyDown={(event) => {
@@ -213,7 +235,8 @@ export function PreviewTab(props: PreviewTabProps) {
               if (event.key === "Escape") setPicked(null);
             }} />
           <div className="buttons">
-            <button className="primary" disabled={!comment.trim()} onClick={sendComment}>Send to the composer</button>
+            <button className="primary" disabled={!comment.trim()} onClick={() => sendComment()}>{waiting.length ? `Send all ${waiting.length + 1} to the composer` : "Send to the composer"}</button>
+            <button disabled={!comment.trim()} onClick={() => sendComment(true)}>Add another</button>
             <button onClick={() => setPicked(null)}>Cancel</button>
           </div>
         </div>
@@ -226,6 +249,24 @@ export function PreviewTab(props: PreviewTabProps) {
 }
 
 /** The address bar's text as a URL (preview-rules.ts `addressOf` is the app's copy of the rule). */
+/** How many addresses a tab's history keeps for its suggestions. */
+export const HISTORY_KEPT = 30;
+
+/** The tab's history with `url` first, once, capped. */
+export function remembered(list: string[], url: string): string[] {
+  return [url, ...list.filter((entry) => entry !== url)].slice(0, HISTORY_KEPT);
+}
+
+/** One comment as the composer gets it: the page, what was picked (an element or an area), and what to change. */
+export function commentLine(picked: { selector: string; text: string; url: string; area?: { x: number; y: number; width: number; height: number } }, comment: string): string {
+  if (picked.area) {
+    const { x, y, width, height } = picked.area;
+    return `On the page ${picked.url}, the area of ${width} × ${height} px at (${x}, ${y}), around \`${picked.selector}\`: ${comment.trim()}`;
+  }
+  const where = picked.text ? `\`${picked.selector}\` ("${picked.text}")` : `\`${picked.selector}\``;
+  return `On the page ${picked.url}, the element ${where}: ${comment.trim()}`;
+}
+
 export function addressOf(typed: string): string | null {
   const text = typed.trim();
   if (!text) return null;

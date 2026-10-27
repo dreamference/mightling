@@ -1,0 +1,137 @@
+diff --git a/codex-rs/core/tests/common/Cargo.toml b/codex-rs/core/tests/common/Cargo.toml
+--- a/codex-rs/core/tests/common/Cargo.toml
++++ b/codex-rs/core/tests/common/Cargo.toml
+@@ -36,2 +36,3 @@ codex-utils-cargo-bin = { workspace = true }
+ codex-utils-path-uri = { workspace = true }
++ling-tools = { path = "../../../ling/tools" }
+ ctor = { workspace = true }
+diff --git a/codex-rs/core/tests/common/responses.rs b/codex-rs/core/tests/common/responses.rs
+--- a/codex-rs/core/tests/common/responses.rs
++++ b/codex-rs/core/tests/common/responses.rs
+@@ -458,3 +458,28 @@ pub fn namespace_child_tool<'a>(
+ 
+-    None
++    flat_mcp_tool(tools, namespace, tool_name)
++}
++
++/// Mightling declares an MCP server's tools to the model as function tools (patch 0020,
++/// `ling_tools::flatten`): `<tool>`, or `<namespace>__<tool>` when that name is taken, with no
++/// namespace entry. The tool is found under that name; a plain name counts only if it is this
++/// namespace's (Codex flattened in this process), or, flattened in another process (the app
++/// server), by the name alone.
++fn flat_mcp_tool<'a>(tools: &'a [Value], namespace: &str, tool_name: &str) -> Option<&'a Value> {
++    if !namespace.starts_with("mcp__") {
++        return None;
++    }
++    let function = |name: &str| {
++        tools.iter().find(|tool| {
++            tool.get("type").and_then(Value::as_str) == Some("function")
++                && tool.get("name").and_then(Value::as_str) == Some(name)
++        })
++    };
++    if let Some(tool) = function(&format!("{namespace}__{tool_name}")) {
++        return Some(tool);
++    }
++    let tool = function(tool_name)?;
++    match ling_tools::resolve(None, tool_name.to_string()) {
++        (Some(owner), _) => (owner == namespace).then_some(tool),
++        (None, _) => Some(tool),
++    }
+ }
+diff --git a/codex-rs/core/tests/suite/code_mode.rs b/codex-rs/core/tests/suite/code_mode.rs
+--- a/codex-rs/core/tests/suite/code_mode.rs
++++ b/codex-rs/core/tests/suite/code_mode.rs
+@@ -8406,3 +8406,4 @@ text(JSON.stringify({
+     assert!(
+-        tool_names(&first_mock.single_request().body_json()).contains(&"mcp__rmcp".to_string()),
++        namespace_child_tool(&first_mock.single_request().body_json(), "mcp__rmcp", "echo")
++            .is_some(),
+         "omitted MCP server should remain directly exposed in mixed code mode"
+diff --git a/codex-rs/core/tests/suite/mcp_tool_cache.rs b/codex-rs/core/tests/suite/mcp_tool_cache.rs
+--- a/codex-rs/core/tests/suite/mcp_tool_cache.rs
++++ b/codex-rs/core/tests/suite/mcp_tool_cache.rs
+@@ -96,3 +96,12 @@ fn assert_definition(response: &ResponseMock, namespace_description: &str, tool_
+     let body = response.single_request().body_json();
+-    let namespace = body
++    // Mightling (patch 0020): the server's tools reach the model as functions, with no namespace
++    // entry; its description (the server's instructions) leads the server's first tool's.
++    let instructions = format!("{namespace_description}\n\n");
++    assert!(
++        body["tools"].as_array().is_some_and(|tools| tools.iter().any(|tool| {
++            tool["description"].as_str().is_some_and(|text| text.starts_with(&instructions))
++        })),
++        "the server's instructions should reach the model: {namespace_description}"
++    );
++    if let Some(namespace) = body
+         .get("tools")
+@@ -104,13 +113,10 @@ fn assert_definition(response: &ResponseMock, namespace_description: &str, tool_
+         })
+-        .expect("request should contain the MCP namespace");
+-    assert_eq!(
+-        namespace.get("description").and_then(Value::as_str),
+-        Some(namespace_description)
+-    );
+-    assert_eq!(
+-        responses::namespace_child_tool(&body, NAMESPACE, "echo")
+-            .and_then(|tool| tool.get("description"))
+-            .and_then(Value::as_str),
+-        Some(tool_description)
+-    );
++    {
++        panic!("a flattened request carries no MCP namespace: {namespace}");
++    }
++    let echo = responses::namespace_child_tool(&body, NAMESPACE, "echo")
++        .and_then(|tool| tool.get("description"))
++        .and_then(Value::as_str)
++        .map(|text| text.strip_prefix(&instructions).unwrap_or(text));
++    assert_eq!(echo, Some(tool_description));
+ }
+diff --git a/codex-rs/core/tests/suite/rmcp_client.rs b/codex-rs/core/tests/suite/rmcp_client.rs
+--- a/codex-rs/core/tests/suite/rmcp_client.rs
++++ b/codex-rs/core/tests/suite/rmcp_client.rs
+@@ -596,14 +596,10 @@ async fn mcp_namespace_instructions_are_preserved_without_hiding_tools() -> anyh
+     let body = response.single_request().body_json();
+-    let namespace = body
+-        .get("tools")
+-        .and_then(Value::as_array)
+-        .and_then(|tools| {
+-            tools
+-                .iter()
+-                .find(|tool| tool.get("name").and_then(Value::as_str) == Some("mcp__bounded"))
+-        })
+-        .expect("valid MCP server should remain exposed");
+-    assert_eq!(
+-        namespace.get("description").and_then(Value::as_str),
+-        Some(expected_description.as_str())
++    // Mightling (patch 0020): the server's tools reach the model as functions, and its
++    // instructions lead its first tool's description.
++    let instructions = format!("{expected_description}\n\n");
++    assert!(
++        body["tools"].as_array().is_some_and(|tools| tools.iter().any(|tool| {
++            tool["description"].as_str().is_some_and(|text| text.starts_with(&instructions))
++        })),
++        "valid MCP server's instructions should reach the model"
+     );
+diff --git a/codex-rs/app-server/tests/suite/v2/mcp_resource_origin.rs b/codex-rs/app-server/tests/suite/v2/mcp_resource_origin.rs
+--- a/codex-rs/app-server/tests/suite/v2/mcp_resource_origin.rs
++++ b/codex-rs/app-server/tests/suite/v2/mcp_resource_origin.rs
+@@ -264,6 +264,16 @@ async fn widget_reads_survive_history_modes_compaction_restarts_and_app_only_vis
+     let model_request = requests.last().expect("post-resume model request");
++    // Mightling (patch 0020): the app server sends the connectors' tools as functions, the first
++    // `_product_search` under that name and a second under `<namespace>___product_search`, and a
++    // flattened request does not say which connector a plain name belongs to. One of the two
++    // must be left, and it must not be Best Buy's under its own name.
++    let product_searches = model_request.body_json()["tools"]
++        .as_array()
++        .expect("tools")
++        .iter()
++        .filter_map(|tool| tool["name"].as_str().map(str::to_string))
++        .filter(|name| name == "_product_search" || name.ends_with("___product_search"))
++        .collect::<Vec<_>>();
++    assert_eq!(product_searches.len(), 1, "{product_searches:?}");
+     assert!(
+-        model_request
+-            .tool_by_name("mcp__codex_apps__best_buy", "_product_search")
+-            .is_none()
++        !product_searches.contains(&"mcp__codex_apps__best_buy___product_search".to_string())
+     );

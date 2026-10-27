@@ -1248,8 +1248,9 @@ def test_an_sglang_recipe_launches_sglang_inside_the_same_guarded_container():
     assert flag("--served-model-name") == "RadixArk/Qwen3.8-27B-NVFP4"
     assert "--revision" not in server
     assert flag("--speculative-algorithm") == "DFLASH"
+    import dreamference.hardware.model_matrix_registry as registry
     assert flag("--speculative-draft-model-path").endswith(
-        "models--maurienne-ai--Qwen3.8-27B-DFlash2-NVFP4-RTNcal/snapshots/bd7a934213c47a9e7ef69eef36bb3325f47fd1f1")
+        "models--" + registry.QWEN38_DRAFTER_REPO.replace("/", "--") + "/snapshots/" + registry.QWEN38_DRAFTER_REVISION)
     assert flag("--speculative-num-draft-tokens") == "12"
     assert flag("--tool-call-parser") == "qwen3_coder"
     assert "--speculative-config" not in server and "--max-model-len" not in server
@@ -1304,6 +1305,10 @@ def test_an_sglang_model_leaves_the_vllm_compile_cache_alone(monkeypatch):
     monkeypatch.setattr(mgr, "_reset_stale_compile_cache", lambda *a, **k: resets.append(a))
     monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: downloads.append((a[0], k.get("revision"))) or True)
     monkeypatch.setattr(
+        "dreamference.hardware.model_downloader.ModelDownloader.download_model",
+        classmethod(lambda cls, *a, **k: downloads.append((a[0], k.get("revision"))) or True),
+    )
+    monkeypatch.setattr(
         "dreamference.hardware.hardware_manager.HardwareManager.detect_gb10_hardware",
         classmethod(lambda cls: HardwareTelemetry(
             is_gb10=True, gpu_name="NVIDIA GB10", driver_version="0", arch="aarch64",
@@ -1327,7 +1332,10 @@ def test_an_sglang_model_leaves_the_vllm_compile_cache_alone(monkeypatch):
         pass  # the launch itself is stubbed out; what happened before it is the point
     assert resets == []
     assert ("qwen3.8-27b-nvfp4-dflash2", "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854") in downloads
-    assert ("maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal", "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1") in downloads
+    import dreamference.hardware.model_matrix_registry as registry
+    assert (registry.QWEN38_DRAFTER_REPO, registry.QWEN38_DRAFTER_REVISION) in downloads
+    # The sparse head is ling-engine's: SGLang's launch never fetches it.
+    assert not any(repo == "dreamference/qwen3.8-27b-sparse-head" for repo, _ in downloads)
 
 
 def test_both_engines_run_with_usage_statistics_off(monkeypatch):

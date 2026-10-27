@@ -18,10 +18,34 @@ export interface Recording {
   data: string;
 }
 
+/** The most of the word list the service is given: Whisper reads a prompt of about 224 tokens. */
+export const PROMPT_CAP = 600;
+
+/**
+ * The user's word list (Settings › Voice: names, paths, symbols; DESKTOP §16 B7) as the prompt the
+ * speech-to-text service conditions on, so it spells them as written; null with no words.
+ */
+export function dictionaryPrompt(words: unknown): string | null {
+  if (!Array.isArray(words)) return null;
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  let length = 0;
+  for (const word of words) {
+    if (typeof word !== "string") continue;
+    const clean = word.replace(/\s+/g, " ").trim().slice(0, 64);
+    if (!clean || seen.has(clean.toLowerCase())) continue;
+    if (length + clean.length + 2 > PROMPT_CAP) break;
+    seen.add(clean.toLowerCase());
+    kept.push(clean);
+    length += clean.length + 2;
+  }
+  return kept.length ? kept.join(", ") : null;
+}
+
 const EXTENSIONS: Record<string, string> = { "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/wav": "wav", "audio/mpeg": "mp3" };
 
-/** Sends a recording to the speech-to-text service and resolves with its text. */
-export async function transcribe(recording: Recording, fetcher: typeof fetch = fetch): Promise<{ text: string }> {
+/** Sends a recording to the speech-to-text service, with the user's word list as its prompt, and resolves with its text. */
+export async function transcribe(recording: Recording, fetcher: typeof fetch = fetch, words: unknown = null): Promise<{ text: string }> {
   const media = (recording.mime ?? "").split(";")[0].trim().toLowerCase();
   if (!media.startsWith("audio/") || media.length === "audio/".length) throw new Error("the recording is not audio");
   const audio = Buffer.from(recording.data ?? "", "base64");
@@ -30,6 +54,8 @@ export async function transcribe(recording: Recording, fetcher: typeof fetch = f
   const form = new FormData();
   form.append("model", SPEECH_MODEL);
   form.append("response_format", "json");
+  const prompt = dictionaryPrompt(words);
+  if (prompt) form.append("prompt", prompt);
   form.append("file", new Blob([audio], { type: media }), `speech.${EXTENSIONS[media] ?? "webm"}`);
   let response: Response;
   try {

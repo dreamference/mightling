@@ -3,6 +3,7 @@
 // Stop all. The server runs them (`ext/agent`); they share the one model server, which the header's
 // count of working threads makes visible.
 
+import { AgentMark } from "./agentmarks";
 import { Icon } from "./icons";
 import type { Thread } from "./protocol/v2/Thread";
 
@@ -21,6 +22,7 @@ export function SubagentsPanel(props: { agents: Thread[]; working: (id: string) 
       {props.agents.map((agent) => (
         <div key={agent.id} className="subagent">
           {props.working(agent.id) ? <span className="running" aria-label="working" /> : <Icon name="check" size={12} />}
+          <AgentMark id={agent.id} />
           <span className="subagent-name">{agent.agentNickname || agent.name || agent.preview || "subagent"}</span>
           {agent.agentRole ? <span className="planned-note">{agent.agentRole}</span> : null}
           <span className="spacer" />

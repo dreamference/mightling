@@ -11,6 +11,7 @@
 // window; until 2026-10-09 the menu's Ask opened a second one on `ling web`, whose own app-server
 // shared `~/.mightling` with this one (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import * as knowledge from "./knowledge";
@@ -24,15 +25,22 @@ import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
 import { codexHome, findLing } from "./bridge";
+import { officePreview } from "./office";
 import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
 import * as prs from "./prs";
+import { changedLines } from "./repolines";
 import { boardFile, readBoards } from "./board";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
-import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
+import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, nightStatus, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
+import { applyTask, taskNote } from "./night";
+import { ARCHIVE, nightUnread, searchArchive } from "./nightinbox";
+import { writeWorkAttachment } from "./attachments";
+import { listMemoryFiles, writeMemoryFile } from "./memoryfiles";
+import * as mcpb from "./mcpb";
 import { Nodes } from "./nodes";
 import { docsAdd, docsReindex, docsRemove, docsStatus, locate, syncKnowledge } from "./docs";
 import { Tasks } from "./tasks";
@@ -40,14 +48,14 @@ import { PANE_KINDS, WindowHub, paneAction, type PaneKind, type WindowKind } fro
 import { TerminalMirror } from "./terminal-mirror";
 import { WindowSession, cascade, follow } from "./window-state";
 import * as worktree from "./worktree";
-import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./shell";
+import { installMenu, installTray, keepAwake, notify, showContextMenu, updateTray } from "./shell";
 import { Notices } from "./notices";
 import { SyncHost } from "./sync-host";
 import { transcribe } from "./voice";
 import { Previews } from "./preview";
 import { disableRecall, enableRecall, pruneRecall, recallIndex, recallOn, writeRecall } from "./recall";
 import { PetStatus, fitPet, openPet, petImage, type PetSize, type PetState } from "./pet";
-import { DEFAULT_SHORTCUT, accelerator, openQuick, placeQuick, quickPrompt, shortcutsWork, type QuickStatus } from "./quick";
+import { DEFAULT_SHORTCUT, RecentQuestions, accelerator, openQuick, placeQuick, quickPrompt, quickSize, shortcutsWork, type QuickStatus } from "./quick";
 import type { SiteChoice } from "./preview-rules";
 import { openWork } from "./work";
 import { themeChoice, windowColours, type Theme } from "./theme";
@@ -139,6 +147,7 @@ export async function main(options: MainOptions): Promise<void> {
       const notice = notices.take(message.payload, () => prefs.read());
       if (notice) notify(windows(), notice, () => showThread(notice.threadId ?? null));
       if (petStatus.observe(message.payload)) sendPet();
+      recentQuestions.observe(message.payload);
       terminals.observe(message.payload);
       const routed = hub.incoming(message.payload);
       for (const target of windows()) {
@@ -152,6 +161,7 @@ export async function main(options: MainOptions): Promise<void> {
       terminals.clear();
       sendTerminals();
       petStatus.reset();
+      recentQuestions.reset();
       sendPet();
     }
     for (const target of windows()) send(target, message);
@@ -295,6 +305,21 @@ export async function main(options: MainOptions): Promise<void> {
       const target = from && appWindows.has(from.webContents.id) ? from : recent(["full", "popout", "pane"]);
       if (target) send(target, { channel: "command", payload: kind === "terminal" ? "detachTerminal" : "detachReview" });
     },
+    // File › New Thread, Open Folder…, Settings… (DESKTOP §16 B20): the window in front, or the most recent full one.
+    command: (command: "newChat" | "openFolder" | "settings", from: BrowserWindow | null) => {
+      const target = from && appWindows.has(from.webContents.id) ? from : recent(["full"]);
+      if (!target) return showView("work");
+      target.show();
+      target.focus();
+      send(target, { channel: "command", payload: command });
+    },
+    // Help › Show Logs: $CODEX_HOME/log, where `ling app` writes ling-app.log and ling writes its own.
+    showLogs: () => {
+      const home = codexHome();
+      if (!home) return;
+      const logs = path.join(home, "log");
+      void fs.promises.mkdir(logs, { recursive: true }).then(() => shell.openPath(logs)).catch(() => {});
+    },
   };
 
   /** Gives every window the theme shown now: its background, its title bar's symbols, the page's tokens. */
@@ -316,6 +341,13 @@ export async function main(options: MainOptions): Promise<void> {
 
   // The pet (pet.ts, Phase 3 item 6): a window of its own, shown while Settings › Pets says so.
   const petStatus = new PetStatus();
+  /** Night Shift's unread results, for the tray (DESKTOP §16 B41, `syncNight`). */
+  let nightCount = 0;
+  /** Ask's recent questions for Quick Entry's box (quick.ts, DESKTOP §16 B24). */
+  const recentQuestions = new RecentQuestions(() => {
+    const home = codexHome();
+    return home ? path.join(home, "ask") : null;
+  });
   let pet: BrowserWindow | null = null;
   let petPicture: { file: unknown; data: string | null } = { file: null, data: null };
   const petSize = (): PetSize => {
@@ -325,15 +357,28 @@ export async function main(options: MainOptions): Promise<void> {
   const petState = (): PetState => {
     const file = prefs.read().petImage;
     if (file !== petPicture.file) petPicture = { file, data: petImage(file) };
-    return { ...petStatus.counts(), size: petSize(), image: petPicture.data };
+    return { ...petStatus.counts(), size: petSize(), image: petPicture.data, needs: petStatus.needs() };
   };
   function sendPet(): void {
     if (pet && !pet.isDestroyed()) send(pet, { channel: "pet://state", payload: petState() });
+    // The tray says how many threads work and wait, from the same state (DESKTOP §16 B20).
+    updateTray({ ...petStatus.counts(), night: nightCount });
   }
+  // Night Shift's unread results in the tray (DESKTOP §16 B41, nightinbox.ts): counted from the files
+  // and the window's marks, every two minutes and whenever a window changes the marks.
+  const syncNight = () => {
+    const home = codexHome();
+    try {
+      nightCount = home ? nightUnread(path.join(home, "night"), prefs.read()) : 0;
+    } catch {
+      nightCount = 0;
+    }
+    updateTray({ ...petStatus.counts(), night: nightCount });
+  };
   const syncPet = () => {
     const wanted = prefs.read().petShown === true;
     if (wanted && (!pet || pet.isDestroyed())) {
-      pet = openPet(path.join(__dirname, "preload.cjs"), petSize(), show, shownTheme());
+      pet = openPet(path.join(__dirname, "preload.cjs"), petSize(), show, shownTheme(), prefs.read().petCorner);
       pet.on("closed", () => (pet = null));
     } else if (!wanted && pet && !pet.isDestroyed()) {
       pet.close();
@@ -344,7 +389,8 @@ export async function main(options: MainOptions): Promise<void> {
     }
   };
   /** What the pet's window may ask for; nothing else of the app's channel answers it. */
-  const handlePet = (message: { type?: string; open?: boolean; dx?: number; dy?: number; prompt?: string }): unknown => {
+  let petCornerTimer: ReturnType<typeof setTimeout> | null = null;
+  const handlePet = (message: { type?: string; open?: boolean; dx?: number; dy?: number; prompt?: string; thread?: unknown }): unknown => {
     switch (message.type) {
       case "pet/state":
         return petState();
@@ -359,6 +405,19 @@ export async function main(options: MainOptions): Promise<void> {
         if (!pet || pet.isDestroyed()) return null;
         const [x, y] = pet.getPosition();
         pet.setPosition(Math.round(x + Number(message.dx || 0)), Math.round(y + Number(message.dy || 0)));
+        // Its place is kept (DESKTOP §16 B18): the bottom right corner, a moment after the drag stops.
+        if (petCornerTimer) clearTimeout(petCornerTimer);
+        petCornerTimer = setTimeout(() => {
+          if (!pet || pet.isDestroyed()) return;
+          const bounds = pet.getBounds();
+          prefs.write({ petCorner: { right: bounds.x + bounds.width, bottom: bounds.y + bounds.height } });
+        }, 400);
+        return null;
+      }
+      case "pet/thread": {
+        // A thread the bubble listed as needing the user.
+        if (!petStatus.listed(message.thread)) return null;
+        showThread(message.thread);
         return null;
       }
       case "pet/open": {
@@ -393,6 +452,10 @@ export async function main(options: MainOptions): Promise<void> {
       quick.on("blur", hideQuick);
       quick.on("closed", () => (quick = null));
     }
+    const size = quickSize(recentQuestions.list().length);
+    quick.setResizable(true);
+    quick.setContentSize(size.width, size.height);
+    quick.setResizable(false);
     placeQuick(quick);
     if (show) {
       quick.show();
@@ -421,8 +484,17 @@ export async function main(options: MainOptions): Promise<void> {
     }
   };
   /** What the box may ask for; nothing else of the app's channel answers it. */
-  const handleQuick = (message: { type?: string; prompt?: unknown }): unknown => {
+  const handleQuick = (message: { type?: string; prompt?: unknown; thread?: unknown }): unknown => {
     switch (message.type) {
+      // The most recent Ask questions, and one of them opened (DESKTOP §16 B24): only a thread the box listed.
+      case "quick/recent":
+        return recentQuestions.list();
+      case "quick/open": {
+        if (!recentQuestions.listed(message.thread)) return null;
+        hideQuick();
+        showThread(message.thread as string);
+        return null;
+      }
       case "quick/ask": {
         const prompt = quickPrompt(message.prompt);
         hideQuick();
@@ -456,12 +528,14 @@ export async function main(options: MainOptions): Promise<void> {
   app.on("will-quit", () => session.flush());
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
   installTray(path.join(__dirname, "..", "..", "icons"), { ...actions, quickQuestion: toggleQuick });
+  syncNight();
+  setInterval(syncNight, 120_000).unref();
 
   // The one channel from the page.
   const fromView = new Reassembler();
   ipcMain.handle(CHANNEL_FROM_VIEW, async (event: IpcMainInvokeEvent, data: unknown) => {
     if (pet && !pet.isDestroyed() && event.sender.id === pet.webContents.id) return handlePet(data as { type?: string });
-    if (quick && !quick.isDestroyed() && event.sender.id === quick.webContents.id) return handleQuick(data as { type?: string });
+    if (quick && !quick.isDestroyed() && event.sender.id === quick.webContents.id) return handleQuick(data as { type?: string; prompt?: unknown; thread?: unknown });
     const own = windowFor(event.sender.id);
     if (!own) throw new Error("only the app's windows talk to the agent");
     let message = data;
@@ -514,6 +588,9 @@ export async function main(options: MainOptions): Promise<void> {
     if (typeof dir !== "string" || !path.isAbsolute(dir) || !(await userFs.isDirectory(dir))) throw new Error("not a folder");
     return dir;
   };
+
+  /** MCP bundles picked and shown, not installed yet (DESKTOP §16 B45): the token the page holds, to the file and the name it was shown. */
+  const pickedBundles = new Map<string, { file: string; name: string }>();
 
   async function handle(message: FromView, own: BrowserWindow): Promise<unknown> {
     switch (message.type) {
@@ -615,13 +692,15 @@ export async function main(options: MainOptions): Promise<void> {
       case "night/report": {
         const home = codexHome();
         if (!home) throw new Error("there is no CODEX_HOME");
-        return readReport(path.join(home, "night"), message.name);
+        return readReport(path.join(home, "night", message.archived === true ? ARCHIVE : ""), message.name);
       }
       case "night/add": {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
-        return addTask(ling, message.repo, message.task, message.test);
+        return addTask(ling, message.repo, message.task, message.test, message.on ?? null, message.bestOf ?? null);
       }
+      case "night/status":
+        return nightStatus(app.getPath("home"));
       case "night/drop": {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
@@ -635,12 +714,28 @@ export async function main(options: MainOptions): Promise<void> {
         if (!admin) throw new Error("ling-admin is not on PATH: repeating tasks live where Night Shift runs, on the node");
         if (message.type === "night/every-list") return listRepeating(admin);
         if (message.type === "night/every-drop") return dropRepeating(admin, message.id);
-        return addRepeating(admin, message.repo, message.task, message.test, message.cadence, message.weekday);
+        // Each cadence's parameter is checked in cadence.ts (cadenceArgs) before ling-admin runs.
+        return addRepeating(admin, message.repo, message.task, message.test, message.cadence, { weekday: message.weekday, days: message.days, every: message.every, day: message.day });
       }
       case "night/details": {
         const home = codexHome();
         if (!home) throw new Error("there is no CODEX_HOME");
-        return taskDetails(path.join(home, "night"), message.id);
+        return taskDetails(path.join(home, "night", message.archived === true ? ARCHIVE : ""), message.id);
+      }
+      case "night/apply": {
+        // A thread's task brought into the thread's checkout (DESKTOP §16 B40): git here, no network.
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return applyTask(ling, message.cwd, message.id);
+      }
+      case "night/note": {
+        const home = codexHome();
+        return home ? taskNote(path.join(home, "night"), message.id) : null;
+      }
+      case "night/archive": {
+        // Scheduled's search of the archive (DESKTOP §16 B41): files here, read only.
+        const home = codexHome();
+        return home ? searchArchive(path.join(home, "night"), message.query) : { tasks: [], reports: [] };
       }
       case "night/run": {
         const admin = whichOnPath("ling-admin");
@@ -667,6 +762,12 @@ export async function main(options: MainOptions): Promise<void> {
       }
       case "ask/upload":
         return server.upload(message);
+      case "work/attach": {
+        // A pasted image for a Work turn (DESKTOP §16 B13): under $CODEX_HOME, never the project.
+        const home = codexHome();
+        if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
+        return writeWorkAttachment(home, message);
+      }
       case "ask/incognito":
         server.incognito("mark", String(message.thread));
         return null;
@@ -687,7 +788,7 @@ export async function main(options: MainOptions): Promise<void> {
         return home ? pruneRecall(home, message.keep) : 0;
       }
       case "voice/transcribe":
-        return transcribe(message);
+        return transcribe(message, fetch, prefs.read().dictationWords);
       case "work/stop":
         server.stop();
         return null;
@@ -725,6 +826,8 @@ export async function main(options: MainOptions): Promise<void> {
         return git.diff(await git.checkRoot(message.root), message.scope, message.commit ?? null);
       case "git/log":
         return git.log(await git.checkRoot(message.root));
+      case "git/changes":
+        return changedLines(await git.checkRoot(message.root));
       case "git/stage":
         return git.stage(await git.checkRoot(message.root), message.paths);
       case "git/unstage":
@@ -773,6 +876,9 @@ export async function main(options: MainOptions): Promise<void> {
         return worktree.handOff(message.direction === "toLocal" ? "toLocal" : "toWorktree", message.worktree, message.local, worktreeRoot(message.root), message.thread);
       case "git/branches":
         return git.branches(await git.checkRoot(message.root));
+      case "office/preview":
+        // An office file shown as a PDF (office.ts, DESKTOP §16 B31): LibreOffice with no network, a time limit.
+        return officePreview(message.path);
       case "env/list":
         return environments(await folder(message.project));
       case "env/write":
@@ -830,6 +936,59 @@ export async function main(options: MainOptions): Promise<void> {
         if (message.type === "docs/add") return docsAdd(ling, message.folder);
         if (message.type === "docs/remove") return docsRemove(ling, message.name);
         return docsReindex(ling, message.name);
+      }
+      case "open/reveal": {
+        // A file's place in the file manager (DESKTOP §16 B14): an absolute path to a file that exists.
+        const file = typeof message.path === "string" && path.isAbsolute(message.path) ? path.normalize(message.path) : null;
+        if (!file || !(await fs.promises.stat(file).then((entry) => entry.isFile() || entry.isDirectory(), () => false))) throw new Error("that file is not there");
+        shell.showItemInFolder(file);
+        return null;
+      }
+      case "memories/files":
+      case "memories/save": {
+        // Memories one by one (DESKTOP §16 B17): the consolidated summary and index, nothing else.
+        const home = codexHome();
+        if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
+        return message.type === "memories/files" ? listMemoryFiles(home) : writeMemoryFile(home, message.name, message.text);
+      }
+      case "mcpb/pick":
+      case "mcpb/install":
+      case "mcpb/remove":
+      case "mcpb/list": {
+        // MCP bundles from a file (mcpb.ts, DESKTOP §16 B45): the page names a file only by the token its pick
+        // gave and a bundle only by its name; nothing is fetched, so this works at airgapped on, except a bundle
+        // whose command is a package runner.
+        const home = codexHome();
+        if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
+        const places = { home: app.getPath("home"), desktop: app.getPath("desktop"), documents: app.getPath("documents"), downloads: app.getPath("downloads") };
+        if (message.type === "mcpb/list") return mcpb.listBundles(home);
+        if (message.type === "mcpb/remove") return mcpb.removeBundle(home, String(message.name)).then(() => null);
+        if (message.type === "mcpb/pick") {
+          const chosen = await dialog.showOpenDialog(own, { title: "Install an MCP bundle", properties: ["openFile"], filters: [{ name: "MCP bundles", extensions: ["mcpb"] }] });
+          const file = chosen.canceled ? null : chosen.filePaths[0] ?? null;
+          if (!file) return null;
+          const { summary } = await mcpb.readBundle(file, home, places);
+          const token = crypto.randomUUID();
+          pickedBundles.set(token, { file, name: summary.name });
+          for (const old of [...pickedBundles.keys()].slice(0, -8)) pickedBundles.delete(old);
+          return { token, file: path.basename(file), summary };
+        }
+        const picked = pickedBundles.get(String(message.token));
+        if (!picked) throw new Error("choose the bundle's file again");
+        const { summary } = await mcpb.readBundle(picked.file, home, places);
+        if (summary.fetches) await offline(null, `this bundle's command, ${summary.fetches},`);
+        const values = typeof message.values === "object" && message.values !== null && !Array.isArray(message.values) ? message.values : {};
+        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true });
+        pickedBundles.delete(String(message.token));
+        return installed;
+      }
+      case "folder/check":
+        // A link's folder (DESKTOP §16 B19): taken only when it is an absolute folder that exists.
+        return folder(message.dir).then(() => true, () => false);
+      case "git/origin": {
+        // The open projects' remotes, compared with a link's `originUrl` (DESKTOP §16 B19); asked only when a link names one.
+        const root = await git.checkRoot(message.dir).catch(() => null);
+        return root ? git.originUrl(root) : null;
       }
       case "open/folder": {
         const failed = await shell.openPath(await folder(message.dir));
@@ -897,6 +1056,7 @@ export async function main(options: MainOptions): Promise<void> {
         const written = prefs.write(message.values);
         if (["petShown", "petSize", "petImage"].some((key) => key in (message.values ?? {}))) syncPet();
         if ("recallQuestions" in (message.values ?? {})) syncRecall();
+        if (["nightSeen", "nightRead"].some((key) => key in (message.values ?? {}))) syncNight();
         if (["quickEntry", "quickEntryShortcut"].some((key) => key in (message.values ?? {}))) syncQuick();
         if ("theme" in (message.values ?? {})) {
           nativeTheme.themeSource = themeChoice(prefs.read().theme);
@@ -929,16 +1089,11 @@ export async function main(options: MainOptions): Promise<void> {
       case "pr/list":
       case "pr/view":
       case "pr/diff":
-      case "pr/review": {
+      case "pr/review":
+      case "pr/activity":
+      case "pr/create":
         // Off unless Settings › Git turned it on; never at airgapped on (it is GitHub, over the network).
-        if (prefs.read().pullRequests !== true) throw new Error("the pull-request tab is off: turn it on in Settings › Git");
-        await offline(message.thread ?? null, "the pull-request tab");
-        const root = await git.checkRoot(message.root);
-        if (message.type === "pr/list") return prs.list(root, message.inbox);
-        if (message.type === "pr/view") return prs.view(root, message.number);
-        if (message.type === "pr/diff") return prs.diff(root, message.number);
-        return prs.review(root, message.number, message.verdict, message.body);
-      }
+        return prs.handle(message, { enabled: prefs.read().pullRequests === true, offline: (what) => offline(message.thread ?? null, what), checkRoot: git.checkRoot });
       case "board/read": {
         const home = codexHome();
         if (!home) return [];

@@ -18,6 +18,9 @@ path = "src/lib.rs"
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query", "form"] }
 futures = { version = "0.3", default-features = false, features = ["std"] }
+# The `/forge/` proxy's client to the node's forge on loopback (forge.rs); axum's own hyper.
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 ling-airgapped = { path = "../airgapped" }
 # The pairing QR code (src/qr.rs), drawn here: no dependencies of its own, no service asked.
 qrcodegen = "1.8"
