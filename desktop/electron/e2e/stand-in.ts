@@ -366,6 +366,15 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
               changes: [{ path: report, kind: { type: "add" }, diff: "+# Memory on the GB10\\n" }] } } });
           }
+          // /init (DESKTOP §16 B38): AGENTS.md at the folder's root, added, or edited when one is there.
+          if (asked.includes("AGENTS.md for this repository") || asked.startsWith("This repository already has an AGENTS.md")) {
+            const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
+            const agents = require("node:path").join((own && own.cwd) || "/tmp", "AGENTS.md");
+            const had = require("node:fs").existsSync(agents);
+            require("node:fs").appendFileSync(agents, "# fetcher\\n\\nTests: pytest -q\\n");
+            say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
+              changes: [{ path: agents, kind: had ? { type: "update", move_path: null } : { type: "add" }, diff: "+# fetcher\\n+\\n+Tests: pytest -q\\n" }] } } });
+          }
           // The window's own tools (the owner's decision 5): the agent reads the terminal and the preview's console.
           if (asked.includes("with the terminal")) {
             say({ id: "tool-1", method: "item/tool/call", params: { threadId: p.threadId, turnId: id, callId: "call-1", namespace: null, tool: "mightling_terminal_output", arguments: { lines: 5 } } });
