@@ -51,6 +51,10 @@ VIAddVersionKey "LegalCopyright" "Copyright (C) 2026 Dreamference contributors. 
 ; (a chosen folder could be one that holds other things).
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
+; The app's data (%LOCALAPPDATA%\dev.dreamference.mightling: the window state, the preferences,
+; Chromium's profile) and ling's (%USERPROFILE%\.mightling: threads, settings) are the user's, kept
+; for a reinstall; the confirmation page and the log say so, and where they are.
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "${PRODUCT} will be removed from your computer. Your data stays: the app's in %LOCALAPPDATA%\dev.dreamference.mightling, your threads and settings in %USERPROFILE%\.mightling. Delete those folders yourself to remove it too."
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
@@ -88,4 +92,5 @@ Section "Uninstall"
   ; The links the app registered for itself (ling://, mightling://) go with it; ~\.mightling stays.
   DeleteRegKey HKCU "Software\Classes\ling"
   DeleteRegKey HKCU "Software\Classes\mightling"
+  DetailPrint "Kept your data: $LOCALAPPDATA\dev.dreamference.mightling (the app) and $PROFILE\.mightling (threads, settings)."
 SectionEnd

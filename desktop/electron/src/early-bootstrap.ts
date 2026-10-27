@@ -7,12 +7,12 @@
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3).
 
 import fs from "node:fs";
-import path from "node:path";
 import { app } from "electron";
 
 import appConfig from "../app.json";
 import { registerScheme } from "./app-protocol";
 import { bootstrap } from "./bootstrap";
+import { dataFolder, legacyDataFolder, settleDataFolder } from "./data-folder";
 import { applySwitches } from "./egress";
 import { versionText, wantsVersion } from "./version";
 
@@ -20,11 +20,15 @@ function start(): void {
   applySwitches();
   registerScheme();
 
-  // The data folder is the one the Tauri app used (and the rename migration moves), so the cookies
-  // and the window state live where `ling app` and `ling-admin desktop` expect them.
+  // The data folder is `ling app`'s rule (data-folder.ts): `~/.local/share/<identifier>`, the one
+  // the Tauri app used (and the rename migration moves), or `%LOCALAPPDATA%\<identifier>` on
+  // Windows, where 1.7.1's `.local\share` folder is moved first, before Chromium opens either.
   app.setName(appConfig.productName);
-  const home = process.env.HOME || process.env.USERPROFILE;
-  if (home) app.setPath("userData", path.join(home, ".local", "share", appConfig.identifier));
+  const data = dataFolder(process.platform, process.env, appConfig.identifier);
+  if (data) {
+    const legacy = legacyDataFolder(process.platform, process.env, appConfig.identifier);
+    app.setPath("userData", settleDataFolder(legacy, data));
+  }
 
   app.whenReady().then(bootstrap).catch((error) => {
     console.error(`ling-app: ${error instanceof Error ? error.message : String(error)}`);
