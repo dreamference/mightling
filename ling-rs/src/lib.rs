@@ -88,6 +88,7 @@ pub mod userns;
 pub mod vision;
 #[cfg(unix)]
 pub mod web;
+pub mod windows_tls;
 pub mod winsta;
 pub mod worktree;
 
@@ -784,6 +785,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         loop_guard::Process::Tui
     };
     loop_guard::configure(process, &codex_home);
+    // Git over OpenSSL in a sandboxed Windows session: Schannel cannot reach https under the
+    // sandbox's restricted token (windows_tls.rs; WINDOWS_ARM §23.4 W3).
+    let args = windows_tls::with_git_openssl(args, &user_args, airgapped::full_access_selected(&user_args));
     Ok(if app_server { with_configured_model(args, &session_model) } else { args })
 }
 
@@ -1149,7 +1153,13 @@ async fn wait_for_model(host: &str) -> anyhow::Result<(ServedModel, Vec<adapter:
 /// `models.json`, whose templates are each one JSON line of ~20 KB, so a patch touching them was
 /// ~390 KB of diff.
 pub fn base_instructions() -> String {
-    rebrand(&codex_template()) + WEB_ACCESS_INSTRUCTIONS
+    rebrand(&codex_template()) + WEB_ACCESS_INSTRUCTIONS + windows_tls_note()
+}
+
+/// What the system prompt says on Windows after the web section: which tools cannot reach https
+/// from inside the sandbox (windows_tls.rs). Empty elsewhere.
+pub fn windows_tls_note() -> &'static str {
+    if cfg!(windows) { windows_tls::PROMPT_NOTE } else { "" }
 }
 
 /// Codex's longest bundled prompt template, as Codex ships it. The shorter ones are trimmed

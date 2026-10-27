@@ -360,6 +360,7 @@ pub fn compose(prompt: &Prompt, parts: &Parts) -> String {
     };
     if prompt.blocks.web {
         text.push_str(crate::WEB_ACCESS_INSTRUCTIONS);
+        text.push_str(crate::windows_tls_note());
     }
     // The rewritten sentence points at the Code navigation section, so it is only rewritten for a
     // prompt that carries that section.
