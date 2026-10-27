@@ -742,6 +742,39 @@ class ModelMatrixRegistry:
         return spec_config.get("model") or None
 
     @classmethod
+    def pinned_revision(cls, model_key: str | None) -> str | None:
+        """The commit a model's checkpoint is fetched at: the one its recipes were measured on.
+
+        A checkpoint's own recipe pins it (`revision`); a drafter is pinned by the recipes that
+        name it (`speculative_config['revision']`), since its matrix entry, if it has one, carries
+        no recipe. Every fetch (`model download`, `init`, the pre-download of `server start`,
+        tensorization) and `node sync-model` ask here, so none of them takes the Hub's default
+        branch, which moves under a pin (319f741 instead of the pinned 52d1adc on 2026-10-27).
+
+        Args:
+            model_key (str | None): Model alias, HF repo ID, or display name.
+
+        Returns:
+            str | None: The pinned commit; None for a model no recipe pins.
+        """
+        if not model_key:
+            return None
+        spec = cls.get_spec(model_key)
+        if spec is not None:
+            recipes = [spec.launch_overrides, *spec.engine_recipes.values()]
+            for recipe in recipes:
+                if recipe.get("revision"):
+                    return str(recipe["revision"])
+        repo = cls.resolve_hf_repo(model_key).lower()
+        for entry in cls.MATRIX.values():
+            for recipe in (entry.launch_overrides, *entry.engine_recipes.values()):
+                spec_config = recipe.get("speculative_config") or {}
+                drafter = str(spec_config.get("model") or "").lower()
+                if drafter == repo and spec_config.get("revision"):
+                    return str(spec_config["revision"])
+        return None
+
+    @classmethod
     def swe_bench_max_parallel(cls, model_key: str | None) -> int | None:
         """The most SWE-bench instances that may run at once beside a model, by the model's own entry.
 

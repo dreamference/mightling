@@ -8,6 +8,9 @@ setup(
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     ],
     packages=find_packages(),
+    # Data a release install needs at run time, which a wheel carries only when named here:
+    # the code index's pinned tools and npm lockfile (`ling-admin code setup`).
+    package_data={"dreamference.cli": ["code_index_pins/*"]},
     # Floors for requests, sentence-transformers, sqlite-vec and Pillow are the first
     # releases without a published advisory (specs/DREAMFERENCE_MIGHTLING_DEPENDENCY_AUDIT.md).
     install_requires=[

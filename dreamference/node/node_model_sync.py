@@ -2,14 +2,15 @@
 Copying a model's files to another node (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.2):
 `ling-admin node sync-model <node> <model>`.
 
-A second Spark that is to serve the model this one already has need not download tens of
-gigabytes again: the Hugging Face cache folders of the model and of its drafter are sent over the
-pairing as one tar stream, which over the QSFP link (`--address`) runs at the link's speed. The
-receiving node decides everything that lands on its disk: only the cache folders of a key of its
-own model matrix are accepted, nothing may point outside them, every content-addressed weight file
-is checked against its name, and files it already has are kept. It writes into a staging folder
-and moves files into place only once all of them checked out, so an interrupted copy leaves
-nothing half-written in the cache.
+A second Spark that is to serve the model this one already has need not download tens of gigabytes
+again: the Hugging Face cache folders of the model and of its drafter are sent over the pairing as
+one tar stream, each at the commit the model registry pins (its snapshot and the blobs that snapshot
+links to; another revision in the sender's cache stays behind), which over the QSFP link
+(`--address`) runs at the link's speed. The receiving node decides everything that lands on its
+disk: only the cache folders of a key of its own model matrix are accepted, nothing may point
+outside them, every content-addressed weight file is checked against its name, and files it already
+has are kept. It writes into a staging folder and moves files into place only once all of them
+checked out, so an interrupted copy leaves nothing half-written in the cache.
 """
 
 import hashlib
@@ -71,18 +72,49 @@ class NodeModelSync:
         return ModelDownloader.get_hf_cache_dir()
 
     @classmethod
-    def size(cls, folders: List[Path]) -> int:
+    def members(cls, hub: Path, repo: str) -> list[Path] | None:
+        """The paths of the hub cache that carry a repository at the commit the registry pins.
+
+        Args:
+            hub: The hub cache.
+            repo: A Hugging Face repository id.
+
+        Returns:
+            list[Path] | None: For a pinned repository, its snapshot of that commit and the
+            blobs the snapshot links to; for one no recipe pins, its whole cache folder. None when
+            what would be sent is not here (for a pinned one, a cache holding only another
+            revision, which is not the checkpoint the recipe was measured on).
+        """
+        from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+        folder = hub / cls.folder_name(repo)
+        pin = ModelMatrixRegistry.pinned_revision(repo)
+        if not pin:
+            return [folder] if (folder / "snapshots").is_dir() else None
+        snapshot = folder / "snapshots" / pin
+        if not snapshot.is_dir():
+            return None
+        blobs_dir = (folder / "blobs").resolve()
+        blobs = set()
+        for link in snapshot.rglob("*"):
+            if link.is_symlink():
+                target = link.resolve()
+                if target.parent == blobs_dir:
+                    blobs.add(folder / "blobs" / target.name)
+        return [snapshot, *sorted(blobs)]
+
+    @classmethod
+    def size(cls, paths: list[Path]) -> int:
         """
         Args:
-            folders: Cache folders.
+            paths: Cache folders, or files and folders in them.
 
         Returns:
             int: Bytes of the regular files in them that would be sent (links are free, and an
             unfinished download is not sent).
         """
         total = 0
-        for folder in folders:
-            for path in folder.rglob("*"):
+        for root in paths:
+            for path in [root, *root.rglob("*")] if root.is_dir() else [root]:
                 if path.is_file() and not path.is_symlink() and not path.name.endswith(".incomplete"):
                     total += path.stat().st_size
         return total
@@ -117,23 +149,25 @@ class NodeModelSync:
             # node on the network first (NodePairing.resolve).
             record = dict(record, address=address, address_fixed=True)
         hub = cls.hub()
-        folders = [hub / cls.folder_name(repo) for repo in cls.repos(model_key)]
-        missing = [folder.name for folder in folders if not (folder / "snapshots").is_dir()]
+        repos = cls.repos(model_key)
+        found = {repo: cls.members(hub, repo) for repo in repos}
+        missing = [cls._described(repo) for repo, paths in found.items() if paths is None]
         if missing:
             print(f"❌ This machine does not have {', '.join(missing)}: `ling-admin model download {model_key}` "
                   f"here first, or on {record['name']}.")
             return 1
-        size = cls.size(folders)
+        paths = [path for repo in repos for path in found[repo] or []]
+        size = cls.size(paths)
         try:
             command = NodePairing.ssh_command(record, f"model-receive {model_key} {size}")
         except LookupError as error:
             print(f"❌ {error}")
             return 1
-        print(f"📤 Copying {model_key} ({size / GIB:.1f} GiB, {len(folders)} folder(s)) to {record['name']} "
+        print(f"📤 Copying {model_key} ({size / GIB:.1f} GiB, {len(repos)} folder(s)) to {record['name']} "
               f"at {command[-2].partition('@')[2]}...", flush=True)
         started = time.time()
         tar = subprocess.Popen(["tar", "-C", str(hub), "-cf", "-", "--exclude=*.incomplete",
-                                *[folder.name for folder in folders]], stdout=subprocess.PIPE)
+                                *[str(path.relative_to(hub)) for path in paths]], stdout=subprocess.PIPE)
         ssh = subprocess.Popen(command, stdin=tar.stdout)
         tar.stdout.close()
         code = ssh.wait()
@@ -146,6 +180,13 @@ class NodeModelSync:
         print(f"✅ {record['name']} has {model_key} ({size / GIB / seconds * 8:.1f} Gbit/s over {seconds:.0f} s). "
               f"Serve it there with: ling-admin node set {record['name']} --model {model_key}")
         return 0
+
+    @classmethod
+    def _described(cls, repo: str) -> str:
+        """Names a repository's cache folder, at its pinned commit if it has one."""
+        from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+        pin = ModelMatrixRegistry.pinned_revision(repo)
+        return f"{cls.folder_name(repo)} at {pin[:12]}" if pin else cls.folder_name(repo)
 
     # -- the node --------------------------------------------------------------------------------
 

@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tarfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -95,6 +96,53 @@ def test_the_npm_lockfile_pins_both_npm_indexers_by_integrity():
         assert entry["version"] == version and entry["integrity"].startswith("sha512-")
     # `npm ci --ignore-scripts` runs no package script; none of these packages declares one.
     assert not [k for k, v in lock["packages"].items() if v.get("hasInstallScript")]
+
+
+CHECKOUT = Path(__file__).resolve().parent.parent
+PIN_FILES = ("code-index.sha256", "package.json", "package-lock.json")
+
+
+def test_the_pins_are_package_data_not_checkout_files():
+    # A release install has the package and nothing beside it (docs/dev/install-modes.md).
+    package = Path(code_setup.__file__).resolve().parent
+    for name in PIN_FILES:
+        path = Path(code_setup.PINS_DIR) / name
+        assert path.is_file() and path.is_relative_to(package)
+
+
+def test_a_release_wheel_carries_the_pins_and_code_setup_reads_them_from_it(tmp_path):
+    # As the release builds it (`python -m build`: the sdist, then the wheel from the sdist), from
+    # a copy of the package, so the checkout gets no build/ or egg-info. Then the wheel's own
+    # code_index_setup, imported with no checkout on the path, reads all five pins.
+    import shutil
+    import zipfile
+
+    # Building needs setuptools in this interpreter (torch brings it; Python 3.12 has none of its own).
+    pytest.importorskip("setuptools")
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("setup.py", "pyproject.toml"):
+        shutil.copy2(CHECKOUT / name, source / name)
+    shutil.copytree(CHECKOUT / "dreamference", source / "dreamference", ignore=shutil.ignore_patterns("__pycache__"))
+    quiet = {"check": True, "capture_output": True}
+    sdist_build = [sys.executable, "setup.py", "-q", "sdist", "--formats=gztar", "-d", tmp_path / "dist"]
+    subprocess.run(sdist_build, cwd=source, **quiet)
+    (sdist,) = (tmp_path / "dist").glob("*.tar.gz")
+    with tarfile.open(sdist) as archive:
+        archive.extractall(tmp_path / "unpacked", filter="data")
+    (unpacked,) = (tmp_path / "unpacked").iterdir()
+    build = [sys.executable, "setup.py", "-q", "bdist_wheel", "-d", tmp_path / "wheel"]
+    subprocess.run(build, cwd=unpacked, **quiet)
+    (wheel,) = (tmp_path / "wheel").glob("*.whl")
+    names = zipfile.ZipFile(wheel).namelist()
+    for name in PIN_FILES:
+        assert f"dreamference/cli/code_index_pins/{name}" in names
+    installed = tmp_path / "site-packages"
+    zipfile.ZipFile(wheel).extractall(installed)
+    probe = ("import sys; sys.path.insert(0, sys.argv[1]); from dreamference.cli import code_index_setup as s; "
+             "assert s.__file__.startswith(sys.argv[1]), s.__file__; print(len(s.CodeIndexSetup.pins()))")
+    result = subprocess.run([sys.executable, "-I", "-c", probe, str(installed)], cwd=tmp_path, **quiet, text=True)
+    assert result.stdout.strip() == str(len(CodeIndexSetup.pins())) == "5"
 
 
 def test_a_raw_download_installs_as_the_program_itself(tmp_path, monkeypatch):

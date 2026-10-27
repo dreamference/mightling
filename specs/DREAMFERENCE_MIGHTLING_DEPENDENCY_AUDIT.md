@@ -37,8 +37,8 @@ listed with the reason it was left. The `ling-engine` submodule is out of scope.
   development virtualenv `.venv/` as it stands.
 - `ling-docs-rs/eval/requirements.txt` (the Phase 0 measurement environment).
 
-**npm.** `desktop/electron/`, `desktop/ui/` and `ling-code-rs/indexers/`, the three folders with a
-`package-lock.json`.
+**npm.** `desktop/electron/`, `desktop/ui/` and `ling-code-rs/indexers/` (since 1.7.2
+`dreamference/cli/code_index_pins/`), the three folders with a `package-lock.json`.
 
 **GitHub Actions.** Every `uses:` in `.github/workflows/`.
 
