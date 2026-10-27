@@ -3,6 +3,7 @@
 import os
 import subprocess
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -272,7 +273,9 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     assert cwd == os.path.join(str(tmp_path), "src", "codex-rs")
     assert not cwd.startswith(CODEX_SUBMODULE_DIR)
     assert env["RUSTY_V8_ARCHIVE"] == "a"
-    assert env["CARGO_TARGET_DIR"] == os.path.join(str(tmp_path), "target")
+    # A flag, not CARGO_TARGET_DIR, which sccache would hash into every crate's key.
+    assert command[command.index("--target-dir") + 1] == os.path.join(str(tmp_path), "target")
+    assert "CARGO_TARGET_DIR" not in env
     # Debug info is dropped at compile time, not stripped after: upstream's profile keeps it.
     assert env["CARGO_PROFILE_RELEASE_DEBUG"] == "none"
     assert env["CARGO_PROFILE_RELEASE_STRIP"] == "debuginfo"
@@ -384,7 +387,8 @@ def test_the_web_commands_build_from_their_own_crate_with_its_lockfile(tmp_path,
     assert cwd == builder_module.WEB_CRATE_DIR
     assert command[:4] == ["cargo", "build", "--release", "--locked"]
     assert [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"] == ["ling-search", "ling-fetch"]
-    assert env["CARGO_TARGET_DIR"] == str(tmp_path / "cache" / "target")
+    assert command[command.index("--target-dir") + 1] == str(tmp_path / "cache" / "target")
+    assert "CARGO_TARGET_DIR" not in env
     for name in builder_module.WEB_BIN_NAMES:
         assert os.access(tmp_path / "install" / "bin" / name, os.X_OK)
 
@@ -445,8 +449,9 @@ def test_mightling_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_pa
     assert CodexBrandedBuilder.build_code_index() is True
     (command, cwd, env), = calls
     assert cwd == builder_module.CODE_CRATE_DIR
-    assert command == ["cargo", "build", "--release", "--locked", "--bin", "ling-code"]
-    assert env["CARGO_TARGET_DIR"] == str(tmp_path / "cache" / "target")
+    target = str(tmp_path / "cache" / "target")
+    assert command == ["cargo", "build", "--release", "--locked", "--target-dir", target, "--bin", "ling-code"]
+    assert "CARGO_TARGET_DIR" not in env
     installed = tmp_path / "install" / "bin" / "ling-code"
     assert os.access(installed, os.X_OK)
     assert os.readlink(builder_module.CODE_PATH_LINK) == str(installed)
@@ -477,7 +482,8 @@ def test_ling_docs_builds_from_its_own_crate_installs_its_runtime_and_is_linked(
     assert CodexBrandedBuilder.build_docs_index() is True
     (command, cwd, env), = calls
     assert cwd == builder_module.DOCS_CRATE_DIR
-    assert command == ["cargo", "build", "--release", "--locked", "--bin", "ling-docs"]
+    target = str(tmp_path / "cache" / "target")
+    assert command == ["cargo", "build", "--release", "--locked", "--target-dir", target, "--bin", "ling-docs"]
     installed = tmp_path / "install" / "bin" / "ling-docs"
     assert os.readlink(builder_module.DOCS_PATH_LINK) == str(installed)
     assert setups == [1], "the run-time files are installed after the build"
@@ -535,3 +541,103 @@ def test_the_remaining_codex_names_on_screen_say_mightling(tmp_path):
     # 0001 renames; found on 2026-10-01 by Codex's own PTY test, which waits for that placeholder.
     startup = (rs / "tui" / "src" / "startup_draft.rs").read_text()
     assert '"Ask Codex to do anything"' not in startup and '"Ask Mightling to do anything"' in startup
+
+
+def _sccache_on_path(tmp_path):
+    """A stand-in sccache in a folder of its own, and an environment whose PATH finds it."""
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    sccache = folder / "sccache"
+    sccache.write_text("#!/bin/sh\nexit 0\n")
+    sccache.chmod(0o755)
+    return str(sccache), {"PATH": str(folder)}
+
+
+@pytest.fixture
+def real_compiler_cache(monkeypatch):
+    from conftest import REAL_COMPILER_CACHE_ENVIRONMENT
+
+    monkeypatch.setattr(CodexBrandedBuilder, "compiler_cache_environment", REAL_COMPILER_CACHE_ENVIRONMENT)
+
+
+def test_builds_compile_through_sccache_when_it_is_installed(tmp_path, monkeypatch, real_compiler_cache):
+    sccache, environment = _sccache_on_path(tmp_path)
+    started = []
+    monkeypatch.setattr(
+        CodexBrandedBuilder,
+        "sccache_server_ready",
+        classmethod(lambda cls, program, env: started.append((program, env)) or True),
+    )
+    added = CodexBrandedBuilder.compiler_cache_environment(environment)
+    assert added["RUSTC_WRAPPER"] == sccache
+    assert added["SCCACHE_CACHE_SIZE"] == "40G"
+    assert added["SCCACHE_DIR"] == str(Path.home() / ".cache" / "sccache")
+    assert added["SCCACHE_IGNORE_SERVER_IO_ERROR"] == "1"
+    assert added["CARGO_INCREMENTAL"] == "0"
+    # The server starts with the cap and the folder, which it reads only then.
+    ((program, env),) = started
+    assert program == sccache and env["SCCACHE_CACHE_SIZE"] == "40G"
+    # A user's own folder and cap win.
+    mine = CodexBrandedBuilder.compiler_cache_environment(
+        {**environment, "SCCACHE_DIR": "/elsewhere", "SCCACHE_CACHE_SIZE": "5G"}
+    )
+    assert (mine["SCCACHE_DIR"], mine["SCCACHE_CACHE_SIZE"]) == ("/elsewhere", "5G")
+
+
+@pytest.mark.parametrize("value", ["0", "off", "false", "no", "OFF"])
+def test_sccache_is_switched_off_by_the_environment(tmp_path, monkeypatch, real_compiler_cache, value):
+    _sccache, environment = _sccache_on_path(tmp_path)
+    monkeypatch.setattr(CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: True))
+    assert CodexBrandedBuilder.compiler_cache_environment({**environment, "DREAMFERENCE_SCCACHE": value}) == {}
+
+
+def test_without_sccache_or_with_a_wrapper_already_set_nothing_changes(tmp_path, monkeypatch, real_compiler_cache):
+    monkeypatch.setattr(CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: True))
+    # A release install or a CI runner: no sccache on PATH, the build as it always was.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert CodexBrandedBuilder.compiler_cache_environment({"PATH": str(empty)}) == {}
+    # A wrapper the caller chose is theirs.
+    _sccache, environment = _sccache_on_path(tmp_path)
+    assert CodexBrandedBuilder.compiler_cache_environment({**environment, "RUSTC_WRAPPER": "mine"}) == {}
+
+
+def test_a_server_that_does_not_start_means_a_build_without_the_cache(tmp_path, monkeypatch, real_compiler_cache):
+    _sccache, environment = _sccache_on_path(tmp_path)
+    monkeypatch.setattr(CodexBrandedBuilder, "sccache_server_ready", classmethod(lambda cls, p, e: False))
+    assert CodexBrandedBuilder.compiler_cache_environment(environment) == {}
+
+
+def test_the_server_probe_answers_from_the_exit_status(tmp_path):
+    sccache, environment = _sccache_on_path(tmp_path)
+    assert CodexBrandedBuilder.sccache_server_ready(sccache, environment) is True
+    failing = tmp_path / "failing"
+    failing.write_text("#!/bin/sh\nexit 2\n")
+    failing.chmod(0o755)
+    assert CodexBrandedBuilder.sccache_server_ready(str(failing), environment) is False
+    assert CodexBrandedBuilder.sccache_server_ready(str(tmp_path / "missing"), environment) is False
+
+
+def test_the_codex_and_crate_builds_take_the_compile_cache(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_call(command, cwd=None, env=None):
+        calls.append(env)
+        return 1
+
+    monkeypatch.setattr(
+        CodexBrandedBuilder,
+        "compiler_cache_environment",
+        classmethod(lambda cls, environment: {"RUSTC_WRAPPER": "/x/sccache"}),
+    )
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    assert CodexBrandedBuilder.build_crate(str(tmp_path), str(tmp_path / "cache"), "stamp", ("x",)) is False
+    with patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path)), \
+            patch.object(CodexBrandedBuilder, "build_key", return_value="k"), \
+            patch.object(CodexBrandedBuilder, "prepare_source", return_value=True), \
+            patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={}), \
+            patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"):
+        assert CodexBrandedBuilder._build_locked() is False
+    assert [env["RUSTC_WRAPPER"] for env in calls] == ["/x/sccache", "/x/sccache"]

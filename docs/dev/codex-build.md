@@ -19,6 +19,48 @@ A stamp keyed on the commit, the patch bytes, the launcher source and the profil
 
 The agent's web commands, `ling-search` and `ling-fetch`, are Rust binaries from the standalone crate `ling-web-rs/` (own lockfile, own target directory, built `--locked` and stamped separately by `CodexBrandedBuilder.build_web_tools()`, so changing them never relinks Codex), installed beside `ling`; `WebTools` in `mcp_server/web_tools.py` is now only the MCP server's copy of the same behaviour.
 
+## The compile cache
+
+Several builds compile the same crates in separate target directories: `ling-admin codex build` (the export's `target/`), the launcher and bridge tests in that export, and `ling-web-rs/`, `ling-code-rs/` and `ling-docs-rs/` in every worktree. [sccache](https://github.com/mozilla/sccache) sits in front of `rustc` and keeps what it compiled in one local disk cache, so a crate compiled by one of them is fetched by the next.
+
+**Install it per user, no sudo.** The prebuilt musl binary from the project's GitHub release, checked against the `.sha256` published beside it, into `~/.cargo/bin` (already on cargo's PATH). On the GB10 (aarch64), 2026-10-26: v0.18.0 (v0.19.0 was two days old), tarball `sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz`, SHA-256 `2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a`:
+
+```bash
+gh release download v0.18.0 -R mozilla/sccache -p 'sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz*'
+echo "$(cat sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz.sha256)  sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz" | sha256sum -c
+tar xzf sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz
+install -m 755 sccache-v0.18.0-aarch64-unknown-linux-musl/sccache ~/.cargo/bin/sccache
+```
+
+The cap is in `~/.config/sccache/config`, so every server gets it however it was started:
+
+```toml
+[cache.disk]
+dir = "/home/<user>/.cache/sccache"
+size = 42949672960  # 40 GiB
+```
+
+**The builder uses it by itself.** `CodexBrandedBuilder.compiler_cache_environment()` adds `RUSTC_WRAPPER=sccache` to the Codex build and to each standalone crate's build when `sccache` is on the build's PATH, with `SCCACHE_DIR` (`~/.cache/sccache`) and `SCCACHE_CACHE_SIZE` (`40G`) unless already set, `SCCACHE_IGNORE_SERVER_IO_ERROR=1` (a server that dies mid-build costs a miss, not the build) and `CARGO_INCREMENTAL=0` (sccache cannot cache an incremental compile). It starts the server first (`sccache --show-stats`) and builds without it if the server does not answer. The build line says `through sccache` when it is on. `DREAMFERENCE_SCCACHE=0` turns it off; a `RUSTC_WRAPPER` already in the environment is left alone. Where sccache is absent (a release install, the CI runners) nothing changes. `ling-admin codex test` does not use it: its environment moves `HOME` and `TMPDIR` to folders it deletes, which a server started there would outlive.
+
+**The target directory is a flag, never `CARGO_TARGET_DIR`.** sccache hashes every `CARGO_*` variable `rustc` sees, so the variable keys every crate on the folder and no other target directory can reuse it. Measured on `ling-docs-rs` into a fresh folder with a warm cache: 1 hit in 203 with `CARGO_TARGET_DIR`, 177 with `--target-dir`. The builder passes `--target-dir`; do the same by hand. The same goes for the profile overrides: a test build reuses the Codex build's crates only with the same `CARGO_PROFILE_RELEASE_*` values.
+
+**By hand** (the test commands in `AGENTS.md`):
+
+```bash
+export RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
+# The launcher's tests, in the export, reusing the Codex build's crates:
+cd ~/.cache/dreamference/puffin-codex/src/codex-rs
+CARGO_PROFILE_RELEASE_DEBUG=none CARGO_PROFILE_RELEASE_STRIP=debuginfo \
+  cargo test --release -p ling-launcher --target-dir ~/.cache/dreamference/puffin-codex/target
+# A standalone crate:
+cd ling-docs-rs && cargo test --locked
+sccache --show-stats   # hits and misses since the server started
+```
+
+On the GB10, under `flock ~/.ling-build.lock nice -n 10` and `-j 12`, keep the disk above 150 GB free, and do not start a full Codex build while a SWE-bench night runs (`systemctl --user list-units 'ling-swe-*'`).
+
+**Measured** 2026-10-26, `cargo build --release --locked -j 12` of `ling-docs-rs/` (261 rustc calls, 52 of them not cacheable: build scripts, the final link) into a fresh target directory each time: no cache 36.8 s; sccache with an empty cache 39.3 s (the cost of filling it, +7 %); sccache warm 15.7 s (177 hits, 26 misses: crates whose build script's `OUT_DIR` names the folder). The cache held 165 MiB afterwards. A cold and a warm `codex build --force` were not measured that day: a SWE-bench night was running.
+
 ## Things found the hard way
 
 ### The patches are one-line hooks and nothing else

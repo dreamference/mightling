@@ -54,9 +54,22 @@ from dreamference.vllm_server.model_gate import ModelGate  # noqa: E402
 # Asks the model server's gate what it does: an HTTP request to the configured server, which in the
 # suite would be this machine's live one. The fixture below answers "no gate"; its tests restore it.
 REAL_GATE_PROBE = ModelGate.probe
+# A build through the machine's real sccache would start its server, a daemon outside the test, and
+# whether one is installed must not decide a test. The fixture below answers "no compile cache";
+# its tests restore it.
+from dreamference.runner.codex_branded_builder import CodexBrandedBuilder  # noqa: E402
+
+REAL_COMPILER_CACHE_ENVIRONMENT = CodexBrandedBuilder.compiler_cache_environment
 # The name MemoryPressureWatchdog gives its thread, and how long a stopped one may take to exit.
 PSI_THREAD_NAME = "psi-watchdog"
 LEAK_GRACE_S = 2.0
+
+
+@pytest.fixture(autouse=True)
+def _no_compiler_cache(monkeypatch):
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "compiler_cache_environment", classmethod(lambda cls, environment: {})
+    )
 
 
 @pytest.fixture(autouse=True)

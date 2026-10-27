@@ -138,6 +138,17 @@ RELEASE_PROFILE_OVERRIDES: Final[dict] = {
     "CARGO_PROFILE_RELEASE_STRIP": "debuginfo",
 }
 
+# A shared compile cache (docs/dev/codex-build.md#the-compile-cache): when `sccache` is on PATH,
+# every cargo build here runs rustc through it, so a crate compiled once -- by any of the target
+# directories on the machine, the Codex export's, a launcher test's, the standalone crates' -- is
+# fetched rather than compiled again. Optional: a release install or a CI runner has none, and the
+# build is then what it always was. `DREAMFERENCE_SCCACHE=0` turns it off; a `RUSTC_WRAPPER` the
+# caller set is left as it is. The cache lives under `~/.cache/sccache`, capped at 40 GiB.
+SCCACHE_SWITCH: Final[str] = "DREAMFERENCE_SCCACHE"
+SCCACHE_OFF_VALUES: Final[frozenset] = frozenset({"0", "off", "false", "no"})
+SCCACHE_CACHE_SIZE: Final[str] = "40G"
+RUSTC_WRAPPER_VARIABLE: Final[str] = "RUSTC_WRAPPER"
+
 # Records which source commit and patch set the installed binaries were built from.
 BUILD_STAMP_NAME: Final[str] = "build-key"
 
@@ -750,13 +761,18 @@ class CodexBrandedBuilder:
         environment = DesktopRunner._environment()
         environment.update(rusty_v8)
         environment["LING_WEB_UI_DIST"] = web_ui
-        environment["CARGO_TARGET_DIR"] = os.path.join(BUILD_CACHE_DIR, "target")
+        # The target directory as a flag, never as CARGO_TARGET_DIR: sccache hashes every CARGO_*
+        # variable rustc sees, so the variable would key the cache on the folder and no other
+        # target directory could reuse a crate (measured: 1 hit in 203 with it, 177 without).
+        environment.pop("CARGO_TARGET_DIR", None)
         environment.update(RELEASE_PROFILE_OVERRIDES)
+        cached = cls.compiler_cache_environment(environment)
+        environment.update(cached)
         # No --locked: upstream's Cargo.lock records the workspace crates at version 0.0.0, which
         # its release job bumps just before building, so Cargo rewrites those 158 entries. Every
         # third-party version stays exactly as the lockfile pins it.
         command = [
-            "cargo", "build", "--release",
+            "cargo", "build", "--release", "--target-dir", os.path.join(BUILD_CACHE_DIR, "target"),
             "-p", "codex-cli", "--bin", CARGO_BIN_NAME,
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
@@ -772,7 +788,7 @@ class CodexBrandedBuilder:
             if cls.host_target().startswith("x86_64"):
                 # As upstream's Windows release job does for this target.
                 environment["LIBSQLITE3_FLAGS"] = "SQLITE_DISABLE_INTRINSIC"
-        print(f"🔨 Building ling (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
+        print(f"🔨 Building ling (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches){cls._through(cached)}...")
         if subprocess.call(command, cwd=os.path.join(source_dir, "codex-rs"), env=environment) != 0:
             print("❌ The ling build failed; see the cargo output above.")
             return False
@@ -792,6 +808,73 @@ class CodexBrandedBuilder:
         cls.link_onto_path()
         print(f"✅ Installed {cls.executable_path()}")
         return True
+
+    @classmethod
+    def compiler_cache_environment(cls, environment: dict) -> dict:
+        """The variables that put sccache in front of rustc for a cargo build, or none.
+
+        Args:
+            environment (dict): The environment the build runs with (its PATH finds sccache).
+
+        Returns:
+            dict: `RUSTC_WRAPPER` and sccache's settings to add, or an empty dict when sccache is
+            absent, switched off with `DREAMFERENCE_SCCACHE=0`, its server cannot start, or the
+            caller set `RUSTC_WRAPPER` already.
+        """
+        if environment.get(SCCACHE_SWITCH, "").strip().lower() in SCCACHE_OFF_VALUES:
+            return {}
+        if RUSTC_WRAPPER_VARIABLE in environment:
+            return {}
+        sccache = shutil.which("sccache", path=environment.get("PATH"))
+        if sccache is None:
+            return {}
+        added = {
+            RUSTC_WRAPPER_VARIABLE: sccache,
+            # Read when the server starts: the first build of a session sets the cap for all.
+            "SCCACHE_DIR": environment.get("SCCACHE_DIR") or str(Path.home() / ".cache" / "sccache"),
+            "SCCACHE_CACHE_SIZE": environment.get("SCCACHE_CACHE_SIZE") or SCCACHE_CACHE_SIZE,
+            # A server that goes away mid-build costs a cache miss, not the build.
+            "SCCACHE_IGNORE_SERVER_IO_ERROR": "1",
+            # sccache cannot cache an incremental compile; release builds are not incremental
+            # anyway, test builds of the workspace crates are.
+            "CARGO_INCREMENTAL": "0",
+        }
+        # A server that cannot start (a sandbox with no loopback, say) means a build without it; the
+        # build's own line says which it is.
+        return added if cls.sccache_server_ready(sccache, {**environment, **added}) else {}
+
+    @classmethod
+    def _through(cls, cached: dict) -> str:
+        """What a build line adds about the compile cache.
+
+        Args:
+            cached (dict): What `compiler_cache_environment` returned.
+
+        Returns:
+            str: " through sccache" when it is on, else nothing.
+        """
+        return " through sccache" if cached else ""
+
+    @classmethod
+    def sccache_server_ready(cls, sccache: str, environment: dict) -> bool:
+        """Starts sccache's local server, or finds it running.
+
+        Args:
+            sccache (str): The sccache executable.
+            environment (dict): The environment the server starts with.
+
+        Returns:
+            bool: True if the server answers.
+        """
+        try:
+            # --show-stats connects to the server, starting it if none runs (--start-server fails
+            # when one already does).
+            result = subprocess.run(
+                [sccache, "--show-stats"], env=environment, capture_output=True, timeout=60, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return result.returncode == 0
 
     @classmethod
     def crate_key(cls, crate_dir: str) -> str:
@@ -864,11 +947,14 @@ class CodexBrandedBuilder:
         if not DesktopInstaller.install_rust():
             return False
         environment = DesktopRunner._environment()
-        environment["CARGO_TARGET_DIR"] = os.path.join(cache_dir, "target")
-        command = ["cargo", "build", "--release", "--locked"]
+        # A flag rather than CARGO_TARGET_DIR, which would key sccache's cache on the folder.
+        environment.pop("CARGO_TARGET_DIR", None)
+        cached = cls.compiler_cache_environment(environment)
+        environment.update(cached)
+        command = ["cargo", "build", "--release", "--locked", "--target-dir", os.path.join(cache_dir, "target")]
         for name in bin_names:
             command += ["--bin", name]
-        print(f"🔨 Building {', '.join(bin_names)}...")
+        print(f"🔨 Building {', '.join(bin_names)}{cls._through(cached)}...")
         if subprocess.call(command, cwd=crate_dir, env=environment) != 0:
             print(f"❌ The {os.path.basename(crate_dir)} build failed; see the cargo output above.")
             return False
