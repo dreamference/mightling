@@ -126,6 +126,7 @@
 /ling-rs/src/chat.rs                            @dreamference/messengers
 /ling-rs/src/signal.rs                          @dreamference/messengers
 /dreamference/chat/matrix_homeserver.py         @dreamference/messengers
+/scripts/messenger_live/                        @dreamference/messengers
 
 # Night Shift
 /dreamference/night_shift/                      @dreamference/night-shift
