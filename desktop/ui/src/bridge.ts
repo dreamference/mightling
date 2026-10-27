@@ -27,6 +27,10 @@ export interface WorkTarget {
 }
 
 /** What a link names (desktop/electron/src/args.ts). */
+/** What the main process asks of the window in front: the Window menu's panes, and File's New thread, Open folder and Settings (DESKTOP §16 B20). */
+export const WINDOW_COMMANDS = ["detachTerminal", "detachReview", "newChat", "openFolder", "settings"] as const;
+export type WindowCommand = (typeof WINDOW_COMMANDS)[number];
+
 export interface LinkTarget extends WorkTarget {
   prompt?: string | null;
   page?: "new" | "settings" | "skills" | "night" | "plugins" | "pets" | "ask" | "quick";
@@ -592,10 +596,10 @@ export interface BridgeEvents {
   docked?: (pane: PaneKind, thread: string) => void;
   /** A pane detached from this window asks for something. */
   paneAction?: (action: PaneAction) => void;
-  /** The Window menu's pane items, for this window. */
-  command?: (command: "detachTerminal" | "detachReview") => void;
   /** Another device acted on a thread here (sync, specs/DREAMFERENCE_MIGHTLING_SYNC.md §18.2): "Approved from the phone". */
   syncNotice?: (notice: { text: string; thread: string | null }) => void;
+  /** The Window menu's pane items and File's New Thread, Open Folder… and Settings…, for this window. */
+  command?: (command: WindowCommand) => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -632,7 +636,7 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
       case "sync://notice":
         return events.syncNotice?.(data.payload as { text: string; thread: string | null });
       case "command":
-        if (data.payload === "detachTerminal" || data.payload === "detachReview") events.command?.(data.payload);
+        if (typeof data.payload === "string" && (WINDOW_COMMANDS as readonly string[]).includes(data.payload)) events.command?.(data.payload as WindowCommand);
         return;
     }
   };

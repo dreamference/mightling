@@ -16,6 +16,10 @@ export interface ShellActions {
   pane?(kind: "terminal" | "review", from: BrowserWindow | null): void;
   /** Quick Entry's box (quick.ts). */
   quickQuestion?(): void;
+  /** File's New thread, Open folder… and Settings… in the window in front (DESKTOP §16 B20). */
+  command?(command: "newChat" | "openFolder" | "settings", from: BrowserWindow | null): void;
+  /** Help › Show logs: the folder the app's and its agent's logs are in. */
+  showLogs?(): void;
 }
 
 export function installMenu(actions: ShellActions): void {
@@ -31,8 +35,17 @@ export function installMenu(actions: ShellActions): void {
       label: "File",
       submenu: [
         ...(actions.newWindow ? [{ label: "New Window", ...shown("CmdOrCtrl+Shift+N"), click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => actions.newWindow?.(window instanceof BrowserWindow ? window : null) }, { type: "separator" } as const] : []),
+        ...(actions.command ? [
+          { label: "New Thread", ...shown("CmdOrCtrl+N"), click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => actions.command?.("newChat", window instanceof BrowserWindow ? window : null) },
+          { label: "Open Folder…", ...shown("CmdOrCtrl+O"), click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => actions.command?.("openFolder", window instanceof BrowserWindow ? window : null) },
+          { type: "separator" } as const,
+        ] : []),
         { label: "Ask", ...shown("Alt+1"), click: () => actions.openAsk() },
         { label: "Work", ...shown("Alt+2"), click: () => actions.openWork() },
+        ...(actions.command ? [
+          { type: "separator" } as const,
+          { label: "Settings…", ...shown("CmdOrCtrl+,"), click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => actions.command?.("settings", window instanceof BrowserWindow ? window : null) },
+        ] : []),
         { type: "separator" },
         { label: "Quit", ...shown("CmdOrCtrl+Q"), click: () => app.quit() },
       ],
@@ -51,6 +64,7 @@ export function installMenu(actions: ShellActions): void {
         ] : []),
       ],
     },
+    ...(actions.showLogs ? [{ label: "Help", submenu: [{ label: "Show Logs", click: () => actions.showLogs?.() }] }] : []),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -73,9 +87,30 @@ export function installTray(iconsDir: string, actions: ShellActions): void {
   // The macOS menu bar is 22 points tall; the 32-pixel image would be drawn 32 points high there.
   if (process.platform === "darwin") icon = icon.resize({ height: 18 });
   tray = new Tray(icon);
-  tray.setToolTip("Mightling");
+  trayActions = actions;
+  updateTray({ working: 0, waiting: 0 });
+}
+
+let trayActions: ShellActions | null = null;
+
+/** What the tray says about the threads: how many work and how many wait for the user (DESKTOP §16 B20). Pure. */
+export function trayStatus(counts: { working: number; waiting: number }): string | null {
+  const parts = [
+    counts.waiting ? `${counts.waiting} waiting for you` : "",
+    counts.working ? `${counts.working} working` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
+}
+
+/** The tray's tooltip and menu, with the threads' counts at their top. */
+export function updateTray(counts: { working: number; waiting: number }): void {
+  const actions = trayActions;
+  if (!tray || tray.isDestroyed() || !actions) return;
+  const status = trayStatus(counts);
+  tray.setToolTip(status ? `Mightling: ${status}` : "Mightling");
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      ...(status ? [{ label: status, enabled: false }, { type: "separator" } as const] : []),
       { label: "Ask", click: () => actions.openAsk() },
       { label: "Work", click: () => actions.openWork() },
       ...(actions.quickQuestion ? [{ label: "New question…", click: () => actions.quickQuestion?.() }] : []),
