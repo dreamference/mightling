@@ -83,7 +83,8 @@ sandbox and are not affected.
 
 **Windows: compatibility mode is not available yet (a known limit).** Compatibility mode
 (`ling --compat claude`) is not available on Windows yet; it refuses to start rather than run
-without its permission rules.
+without its permission rules, and says what turned it on and how to turn it off (`ling compat use off`
+for the setting in your config file).
 
 {{TBD the rest of 1.7.2}}
 
