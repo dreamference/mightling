@@ -1,11 +1,11 @@
-// The side chat's pane (DESKTOP §16 B37, sidechat.ts): beside the thread, its messages, a box to write
+// The side chat's pane (DESKTOP §16 B37, sidechatstate.ts): beside the thread, its messages, a box to write
 // in, **Keep as a thread** and Close. Nothing in it is saved until it is kept; closed, it is gone.
 
 import { useEffect, useRef, useState } from "react";
 
 import { Icon } from "./icons";
 import { renderMarkdown } from "./markdown";
-import type { SideMessage } from "./sidechat";
+import type { SideMessage } from "./sidechatstate";
 
 export interface SideChatProps {
   /** The thread it was opened beside. */
