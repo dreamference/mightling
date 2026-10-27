@@ -239,8 +239,15 @@ jobs:
             if ($rawPath -ne "$fresh;$($env:MIGHTLING_INSTALL_DIR)") { throw "the user's PATH is not its one entry and the install folder" }
             if ($envKey.GetValueKind("Path") -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { throw "the user's PATH is no longer REG_EXPAND_SZ" }
             # The runner is already an administrator, so install.ps1's one elevated step ran without
-            # a prompt: the sandbox's accounts and the mDNS rule must exist now.
-            Get-NetFirewallRule -Name "Mightling-mDNS-ling" | Format-List Name, DisplayName, Profile, Enabled
+            # a prompt: the sandbox's accounts and the mDNS rule must exist now. One rule for this
+            # ling.exe after two installs, named by WINDOWS_ARM section 16.4's scheme, computed here
+            # by Python as the check (tests/test_install_ps1.py runs this same line on Linux).
+            $program = Join-Path $env:MIGHTLING_INSTALL_DIR "ling.exe"
+            $expected = python -c "import hashlib, sys; print('Mightling-mDNS-' + hashlib.sha256(sys.argv[1].lower().encode('utf-8')).hexdigest()[:8])" $program
+            $rules = @(Get-NetFirewallRule | Where-Object { $_.Name -like "Mightling-mDNS-*" } | Where-Object { ($_ | Get-NetFirewallApplicationFilter).Program -eq $program })
+            $rules | Format-List Name, DisplayName, Profile, Enabled
+            if ($rules.Count -ne 1) { throw "expected one mDNS rule for $program, found $($rules.Count)" }
+            if ($rules[0].Name -ne $expected) { throw "the mDNS rule for $program is $($rules[0].Name), not $expected" }
             Get-LocalUser | Where-Object { $_.Name -like "CodexSandbox*" } | Format-Table Name, Enabled
             if (-not (Get-LocalUser | Where-Object { $_.Name -like "CodexSandboxOffline*" })) { throw "the sandbox's offline account was not created" }
           } finally {
