@@ -75,6 +75,8 @@ export interface Prefs {
   threadOrder: "projects" | "chronological";
   petSize: "small" | "medium" | "large";
   petImage: string | null;
+  /** Where the pet was left: its bottom right corner on the screen (DESKTOP §16 B18). */
+  petCorner: { right: number; bottom: number } | null;
   /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */
   suggestPrompts: boolean;
   /** The pull-request tab through the user's GitHub CLI (Settings › Git); off by default, refused at airgapped on. */

@@ -327,7 +327,7 @@ export async function main(options: MainOptions): Promise<void> {
   const petState = (): PetState => {
     const file = prefs.read().petImage;
     if (file !== petPicture.file) petPicture = { file, data: petImage(file) };
-    return { ...petStatus.counts(), size: petSize(), image: petPicture.data };
+    return { ...petStatus.counts(), size: petSize(), image: petPicture.data, needs: petStatus.needs() };
   };
   function sendPet(): void {
     if (pet && !pet.isDestroyed()) send(pet, { channel: "pet://state", payload: petState() });
@@ -335,7 +335,7 @@ export async function main(options: MainOptions): Promise<void> {
   const syncPet = () => {
     const wanted = prefs.read().petShown === true;
     if (wanted && (!pet || pet.isDestroyed())) {
-      pet = openPet(path.join(__dirname, "preload.cjs"), petSize(), show, shownTheme());
+      pet = openPet(path.join(__dirname, "preload.cjs"), petSize(), show, shownTheme(), prefs.read().petCorner);
       pet.on("closed", () => (pet = null));
     } else if (!wanted && pet && !pet.isDestroyed()) {
       pet.close();
@@ -346,7 +346,8 @@ export async function main(options: MainOptions): Promise<void> {
     }
   };
   /** What the pet's window may ask for; nothing else of the app's channel answers it. */
-  const handlePet = (message: { type?: string; open?: boolean; dx?: number; dy?: number; prompt?: string }): unknown => {
+  let petCornerTimer: ReturnType<typeof setTimeout> | null = null;
+  const handlePet = (message: { type?: string; open?: boolean; dx?: number; dy?: number; prompt?: string; thread?: unknown }): unknown => {
     switch (message.type) {
       case "pet/state":
         return petState();
@@ -361,6 +362,19 @@ export async function main(options: MainOptions): Promise<void> {
         if (!pet || pet.isDestroyed()) return null;
         const [x, y] = pet.getPosition();
         pet.setPosition(Math.round(x + Number(message.dx || 0)), Math.round(y + Number(message.dy || 0)));
+        // Its place is kept (DESKTOP §16 B18): the bottom right corner, a moment after the drag stops.
+        if (petCornerTimer) clearTimeout(petCornerTimer);
+        petCornerTimer = setTimeout(() => {
+          if (!pet || pet.isDestroyed()) return;
+          const bounds = pet.getBounds();
+          prefs.write({ petCorner: { right: bounds.x + bounds.width, bottom: bounds.y + bounds.height } });
+        }, 400);
+        return null;
+      }
+      case "pet/thread": {
+        // A thread the bubble listed as needing the user.
+        if (!petStatus.listed(message.thread)) return null;
+        showThread(message.thread);
         return null;
       }
       case "pet/open": {

@@ -1072,3 +1072,10 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 /* What the agent remembers (DESKTOP §16 B17). */
 .memory-files textarea { font-family: var(--font-code); font-size: 12.5px; }
 .memory-file .buttons { display: flex; gap: 6px; margin-bottom: 8px; }
+
+/* The pet's threads that need you, and its blocked state (DESKTOP §16 B18). */
+.pet-badge.blocked { background: var(--danger); }
+.pet-needs { list-style: none; margin: 4px 0 8px; padding: 0; max-height: 110px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.pet-needs button { width: 100%; text-align: left; font-size: 12px; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-need { font-weight: 600; margin-right: 4px; }
+.pet-need.blocked { color: var(--danger); }

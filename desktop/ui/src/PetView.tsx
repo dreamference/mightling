@@ -11,6 +11,8 @@ interface PetState {
   finished: number;
   size: "small" | "medium" | "large";
   image: string | null;
+  /** Threads that need the user: waiting for an answer, or blocked (DESKTOP §16 B18). */
+  needs?: { id: string; title: string; why: "waiting" | "blocked" }[];
 }
 
 function send<T>(message: object): Promise<T> {
@@ -20,9 +22,10 @@ function send<T>(message: object): Promise<T> {
 }
 
 /** What the pet is doing, from the agent's state: the first that applies. */
-export function mood(state: PetState | null): "waiting" | "working" | "done" | "resting" {
+export function mood(state: PetState | null): "waiting" | "blocked" | "working" | "done" | "resting" {
   if (!state) return "resting";
   if (state.waiting > 0) return "waiting";
+  if (state.needs?.some((need) => need.why === "blocked")) return "blocked";
   if (state.working > 0) return "working";
   if (state.finished > 0) return "done";
   return "resting";
@@ -33,6 +36,8 @@ export function moodText(state: PetState | null): string {
   if (!state) return "Resting.";
   const parts: string[] = [];
   if (state.waiting) parts.push(`${state.waiting === 1 ? "A thread is" : `${state.waiting} threads are`} waiting for you`);
+  const blocked = state.needs?.filter((need) => need.why === "blocked").length ?? 0;
+  if (blocked) parts.push(`${blocked === 1 ? "one thread is" : `${blocked} threads are`} blocked`);
   if (state.working) parts.push(`${state.working === 1 ? "one thread" : `${state.working} threads`} working`);
   if (!parts.length && state.finished) parts.push(`${state.finished === 1 ? "A turn" : `${state.finished} turns`} finished`);
   if (!parts.length) return "Resting: nothing is running.";
@@ -68,6 +73,18 @@ export function PetView() {
       {open ? (
         <section className="pet-bubble" role="dialog" aria-label="Mightling pet">
           <p className="pet-mood">{moodText(state)}</p>
+          {state?.needs?.length ? (
+            <ul className="pet-needs" aria-label="Threads that need you">
+              {state.needs.map((need) => (
+                <li key={need.id}>
+                  <button title={need.why === "blocked" ? "It waits for an answer this app cannot give, or the agent stopped with an error: open it to see" : "It waits for your answer"}
+                    onClick={() => { send({ type: "pet/thread", thread: need.id }).catch(() => {}); toggle(false); }}>
+                    <span className={`pet-need ${need.why}`}>{need.why === "blocked" ? "Blocked" : "Waiting"}</span> {need.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <form onSubmit={(event) => {
             event.preventDefault();
             if (!question.trim()) return;
@@ -105,7 +122,7 @@ export function PetView() {
           if (!moved) toggle(!open);
         }}>
         {state?.image ? <img src={state.image} alt="" draggable={false} /> : <PetMark />}
-        {current === "waiting" ? <span className="pet-badge" aria-hidden="true">!</span> : null}
+        {current === "waiting" ? <span className="pet-badge" aria-hidden="true">!</span> : current === "blocked" ? <span className="pet-badge blocked" aria-hidden="true">‖</span> : null}
       </button>
     </div>
   );

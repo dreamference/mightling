@@ -164,6 +164,11 @@
       "nullable": true,
       "type": "string"
     },
+    "petCorner": {
+      "default": null,
+      "nullable": true,
+      "type": "object"
+    },
     "suggestPrompts": {
       "default": false,
       "type": "boolean"
