@@ -187,8 +187,8 @@ jobs:
             Write-Host "refusal: exit $refusedExit, $refused"
             if ($refusedExit -eq 0 -or $refused -notmatch "non-admin sandbox") { throw "the non-admin sandbox was not refused at on" }
             # The elevated sandbox: a command reaches the network at `off` and not at `on`. Plain
-            # HTTP: Windows' curl.exe uses Schannel, which cannot acquire credentials as the
-            # sandbox's account (SEC_E_NO_CREDENTIALS), so an https probe fails at off after connecting.
+            # HTTP: Windows' curl.exe uses Schannel, which acquires no credentials for a restricted
+            # token (SEC_E_NO_CREDENTIALS; WINDOWS_ARM §23.4 W3), so an https probe fails at off.
             $probe = @("sandbox", "-c", "sandbox_mode=workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--", "curl.exe", "-sS", "-m", "20", "-o", "NUL", "-w", "%{http_code}", "http://example.com")
             $env:DREAMFERENCE_MIGHTLING_AIRGAPPED = "off"
             $off = & $ling @probe 2>&1 | Out-String
@@ -207,6 +207,117 @@ jobs:
             if ($auditExit -ne 0) { throw "the egress audit did not pass (exit $auditExit)" }
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+      # A second user's elevated setup (WINDOWS_ARM §23.4 W11): the sandbox accounts get new passwords,
+      # and every user set up before must get them too. A stand-in second profile holds a passwords
+      # file from before; after this user's setup it must hold the new one, and this user's sandbox runs.
+      - name: Sandbox setup on a PC with two users
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $mine = Join-Path $env:USERPROFILE ".mightling\.sandbox-secrets\sandbox_users.json"
+          $other = Join-Path (Split-Path $env:USERPROFILE) "mightling-ci-other\.mightling\.sandbox-secrets"
+          New-Item -ItemType Directory -Force $other | Out-Null
+          $otherFile = Join-Path $other "sandbox_users.json"
+          Copy-Item $mine $otherFile
+          $before = Get-Content -Raw $otherFile
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          $ErrorActionPreference = "Continue"
+          $out = & $ling sandbox setup --elevated --user $user --codex-home (Join-Path $env:USERPROFILE ".mightling") 2>&1 | Out-String
+          Write-Host "setup: exit $LASTEXITCODE, $out"
+          $ErrorActionPreference = "Stop"
+          $after = Get-Content -Raw $otherFile
+          if ($after -eq $before) { throw "the other user's passwords file was not updated" }
+          if ($after -ne (Get-Content -Raw $mine)) { throw "the other user's passwords file differs from this user's" }
+          $echo = & $ling sandbox -- cmd.exe /c echo shared 2>&1 | Out-String
+          if ($echo -notmatch "shared") { throw "this user's sandbox did not run after the setup: $echo" }
+          Remove-Item -Recurse -Force (Split-Path (Split-Path $other))
+      # `ling doctor` on Windows (WINDOWS_ARM §23.4 W9): no vendor app in its endpoint check, and no
+      # warning for the rg.exe the release does not ship.
+      - name: ling doctor
+        shell: powershell
+        run: |
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $out = & $ling doctor 2>&1 | Out-String
+          Write-Host $out
+          if ($out -match "Codex exclusions|Install ripgrep|signed Codex app") { throw "ling doctor still names Codex's exclusions or asks for ripgrep" }
+      # https inside the sandbox (WINDOWS_ARM §23.4 W3): Schannel cannot, so sessions set Git to
+      # OpenSSL; here the same setting, given to git directly, must reach GitHub from the sandbox.
+      - name: Git over https in the sandbox
+        shell: powershell
+        run: |
+          # Native commands write to stderr; that is output here, not a terminating error.
+          $ErrorActionPreference = "Continue"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $git = (Get-Command git.exe).Source
+          $out = & $ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- $git -c http.sslBackend=openssl ls-remote https://github.com/git/git HEAD 2>&1 | Out-String
+          Write-Host "openssl: exit $LASTEXITCODE, $out"
+          if ($LASTEXITCODE -ne 0 -or $out -notmatch "HEAD") { throw "git over OpenSSL did not reach https from the sandbox" }
+          $schannel = & $ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- $git -c http.sslBackend=schannel ls-remote https://github.com/git/git HEAD 2>&1 | Out-String
+          Write-Host "schannel (expected to fail while W3 stands): exit $LASTEXITCODE, $schannel"
+          # The session's own setting: a stand-in model asks for git ls-remote over https, which must
+          # answer from the sandbox with no -c of ours.
+          $ws = Join-Path $env:RUNNER_TEMP "git-tls"
+          New-Item -ItemType Directory -Force $ws | Out-Null
+          Set-Location $ws
+          git init -q
+          $record = Join-Path $env:RUNNER_TEMP "requests-git.jsonl"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8797", "--shell-call", '"git ls-remote https://github.com/git/git HEAD"', "--record", "`"$record`""
+          Start-Sleep -Seconds 3
+          try {
+            $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8797"
+            $session = & $ling -c windows.sandbox=elevated -s workspace-write -c sandbox_workspace_write.network_access=true exec --skip-git-repo-check "list the remote's HEAD" 2>&1 | Out-String
+            Write-Host "session: exit $LASTEXITCODE, $session"
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+          $outputs = @(Get-Content $record | ForEach-Object { $_ | ConvertFrom-Json } | ForEach-Object { $_.input } | Where-Object { $_.type -like "*call_output" } | ForEach-Object { "$($_.output)" })
+          Write-Host "tool output: $outputs"
+          if (-not ($outputs -match "HEAD")) { throw "git over https did not answer in a sandboxed session" }
+      # The compatibility mode's hooks run through cmd.exe (WINDOWS_ARM §23.4 W1): CLAUDE.md reaches
+      # the model through the memory hook, and a deny rule refuses a tool call through the guard.
+      # The stand-in model asks for one shell command that would write probe.txt; with the rule the
+      # call must come back refused and the file must not exist, without it the file must exist.
+      - name: Compatibility mode hooks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          Write-Host "interactive: $([Environment]::UserInteractive), session: $((Get-Process -Id $PID).SessionId)"
+          $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8798"
+          foreach ($case in @("deny", "control")) {
+            $ws = Join-Path $env:RUNNER_TEMP "compat-$case"
+            New-Item -ItemType Directory -Force $ws | Out-Null
+            Set-Location $ws
+            git init -q
+            Set-Content -Path CLAUDE.md -Value "The magic word for this project is BLUEBERRY."
+            $record = Join-Path $env:RUNNER_TEMP "requests-$case.jsonl"
+            $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8798", "--shell-call", '"echo probe > probe.txt"', "--record", "`"$record`""
+            Start-Sleep -Seconds 3
+            $ErrorActionPreference = "Continue"
+            try {
+              if ($case -eq "deny") {
+                $out = & $ling --compat claude --config windows.sandbox=elevated -p "What is the magic word?" --disallowedTools "Bash(echo *)" 2>&1 | Out-String
+              } else {
+                $out = & $ling --compat claude --config windows.sandbox=elevated -p "What is the magic word?" 2>&1 | Out-String
+              }
+              Write-Host "$case`: exit $LASTEXITCODE, $out"
+            } finally {
+              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+            }
+            $ErrorActionPreference = "Stop"
+            $requests = Get-Content $record | ForEach-Object { $_ | ConvertFrom-Json }
+            if (-not ((Get-Content -Raw $record) -match "BLUEBERRY")) { throw "${case}: CLAUDE.md did not reach the model (the memory hook did not run)" }
+            $outputs = @($requests | ForEach-Object { $_.input } | Where-Object { $_.type -like "*call_output" } | ForEach-Object { "$($_.output)" })
+            Write-Host "${case}: tool output: $outputs"
+            if ($case -eq "deny") {
+              if (-not ($outputs -match "denies this")) { throw "the deny rule did not refuse the call (the guard did not run)" }
+              if (Test-Path probe.txt) { throw "the denied command ran: probe.txt exists" }
+            } else {
+              if ($outputs -match "denies this") { throw "the control run was refused" }
+              if (-not (Test-Path probe.txt)) { throw "the control command did not run, so the deny case proves nothing" }
+            }
           }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
