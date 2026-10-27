@@ -54,16 +54,24 @@
     const params = new URLSearchParams(location.hash.slice(1));
     let initData = params.get("tgWebAppData");
     let themeParams = params.get("tgWebAppThemeParams");
-    try {
-      if (initData) {
-        window.sessionStorage.setItem("mightling.telegram", JSON.stringify({ initData, themeParams }));
+    if (initData) {
+      try {
         history.replaceState(null, "", location.pathname + location.search);
-      } else {
+      } catch (_) {
+        // Ignore if history is unavailable.
+      }
+      try {
+        window.sessionStorage.setItem("mightling.telegram", JSON.stringify({ initData, themeParams }));
+      } catch (_) {
+        // No storage: the current launch still proceeds with initData in memory.
+      }
+    } else {
+      try {
         const kept = JSON.parse(window.sessionStorage.getItem("mightling.telegram") || "null");
         if (kept) ({ initData, themeParams } = kept);
+      } catch (_) {
+        // No storage: a reload outside Telegram's launch is an ordinary browser tab.
       }
-    } catch (_) {
-      // No storage: a reload outside Telegram's launch is an ordinary browser tab.
     }
     return initData ? { initData, themeParams } : null;
   })();
@@ -216,6 +224,8 @@
       });
   }
 
+  let reloadingLockedPage = false;
+
   function pollLaunchPair(pendingId) {
     return fetch(`/api/telegram/launch-pair?pending=${encodeURIComponent(pendingId)}`, {
       method: "GET",
@@ -227,7 +237,10 @@
           const wasLockedPage = document.documentElement.dataset.unpaired === "1";
           delete document.documentElement.dataset.unpaired;
           return runCheck().then((ok) => {
-            if (ok && wasLockedPage && typeof location.reload === "function") location.reload();
+            if (ok && wasLockedPage && typeof location.reload === "function") {
+              reloadingLockedPage = true;
+              location.reload();
+            }
             return ok;
           });
         }
@@ -271,7 +284,7 @@
       : runCheck()
     : Promise.resolve(true)
   ).then((ok) => {
-    if (ok) consumeOpenTarget();
+    if (ok && !reloadingLockedPage) consumeOpenTarget();
     return ok;
   });
 

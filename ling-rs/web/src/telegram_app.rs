@@ -39,6 +39,7 @@ pub const MAX_PENDING_LAUNCH_PAIRS: usize = 3;
 pub const INIT_DATA_HEADER: &str = "x-telegram-init-data";
 
 const PENDING_PAIRS_FILE: &str = "telegram-pending-pairs.json";
+const USED_LAUNCHES_FILE: &str = "telegram-used-launches.json";
 
 /// HMAC-SHA-256 (RFC 2104), on the `sha2` crate this server already has.
 pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
@@ -282,8 +283,12 @@ pub struct PendingLaunchPair {
     pub init_data_sha256: String,
     #[serde(default)]
     pub approved: bool,
-    #[serde(default)]
-    pub approved_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct UsedLaunch {
+    init_data_sha256: String,
+    expires_at: u64,
 }
 
 /// What `GET /api/telegram/launch-pair?pending=<id>` answers.
@@ -303,9 +308,25 @@ fn pending_pairs_file(state: &Path) -> PathBuf {
     state.join(PENDING_PAIRS_FILE)
 }
 
+fn used_launches_file(state: &Path) -> PathBuf {
+    state.join(USED_LAUNCHES_FILE)
+}
+
 fn random_six_digit_code() -> String {
     let number = rand::rng().random_range(0..1_000_000u32);
     format!("{:03} {:03}", number / 1_000, number % 1_000)
+}
+
+fn init_data_stale_at(init_data: &str, now: u64) -> u64 {
+    let signed_at = init_data
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .find_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            (percent_decode(key)? == "auth_date").then(|| percent_decode(value)?.parse::<u64>().ok())?
+        })
+        .unwrap_or(now);
+    signed_at.saturating_add(MAX_LAUNCH_AGE_SECS)
 }
 
 fn load_pending_pairs_raw(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
@@ -323,10 +344,55 @@ fn save_pending_pairs_raw(state: &Path, entries: &[PendingLaunchPair]) -> std::i
     auth::write_private(&pending_pairs_file(state), &text)
 }
 
+fn load_used_launches_raw(state: &Path, now: u64) -> Vec<UsedLaunch> {
+    let Ok(text) = std::fs::read_to_string(used_launches_file(state)) else {
+        return Vec::new();
+    };
+    let Ok(entries) = serde_json::from_str::<Vec<UsedLaunch>>(&text) else {
+        return Vec::new();
+    };
+    entries.into_iter().filter(|entry| now <= entry.expires_at).collect()
+}
+
+fn save_used_launches_raw(state: &Path, entries: &[UsedLaunch]) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(entries).map_err(std::io::Error::other)?;
+    auth::write_private(&used_launches_file(state), &text)
+}
+
+fn record_used_init_data(state: &Path, digest: &str, expires_at: u64, now: u64) -> std::io::Result<()> {
+    let mut used = load_used_launches_raw(state, now);
+    if !used.iter().any(|entry| auth::same_secret(&entry.init_data_sha256, digest)) {
+        used.push(UsedLaunch {
+            init_data_sha256: digest.to_string(),
+            expires_at,
+        });
+    }
+    save_used_launches_raw(state, &used)
+}
+
 /// Creates a pending device request for `user_id` and `init_data`, expiring after 10 minutes,
-/// keeping at most [`MAX_PENDING_LAUNCH_PAIRS`] pending requests at once (oldest dropped).
+/// keeping at most one pending request per Telegram user (a new launch replaces the old) and at
+/// most [`MAX_PENDING_LAUNCH_PAIRS`] pending requests overall (oldest dropped). Used or claimed
+/// `initData` digests are remembered until they would be stale (`auth_date + MAX_LAUNCH_AGE_SECS`)
+/// so the same `initData` cannot pair twice.
 pub fn create_pending_pair(state: &Path, user_id: i64, init_data: &str, now: u64) -> std::io::Result<PendingLaunchPair> {
+    let digest = auth::sha256_hex(init_data);
+    let used = load_used_launches_raw(state, now);
+    if used.iter().any(|entry| auth::same_secret(&entry.init_data_sha256, &digest)) {
+        let _ = save_used_launches_raw(state, &used);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "This launch was already used to pair: close the app and open it again from the bot.",
+        ));
+    }
     let mut entries = load_pending_pairs_raw(state, now);
+    if entries.iter().any(|entry| auth::same_secret(&entry.init_data_sha256, &digest)) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "This launch was already used to pair: close the app and open it again from the bot.",
+        ));
+    }
+    entries.retain(|entry| entry.user_id != user_id);
     while entries.len() >= MAX_PENDING_LAUNCH_PAIRS {
         entries.remove(0);
     }
@@ -336,10 +402,10 @@ pub fn create_pending_pair(state: &Path, user_id: i64, init_data: &str, now: u64
         user_id,
         created_at: now,
         expires_at: now + LAUNCH_PAIR_TTL_SECS,
-        init_data_sha256: auth::sha256_hex(init_data),
+        init_data_sha256: digest.clone(),
         approved: false,
-        approved_token: None,
     };
+    record_used_init_data(state, &digest, init_data_stale_at(init_data, now), now)?;
     entries.push(entry.clone());
     save_pending_pairs_raw(state, &entries)?;
     Ok(entry)
@@ -352,19 +418,18 @@ pub fn list_pending_pairs(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
     entries.into_iter().filter(|entry| !entry.approved).collect()
 }
 
-/// Approves a pending request by `id`, issuing a Browser device with `control` scope labelled
-/// `telegram-app`, and keeping its token for one-time collection by the launching webview.
-pub fn approve_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<Option<String>> {
+/// Marks a pending request approved by `id`. The `telegram-app` device credential is minted only
+/// when the launching webview claims the request in [`claim_pending_pair`], so no plaintext token
+/// is written to disk and an unclaimed approval expires with the request.
+pub fn approve_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<bool> {
     let mut entries = load_pending_pairs_raw(state, now);
     let Some(entry) = entries.iter_mut().find(|entry| entry.id == id && !entry.approved) else {
         let _ = save_pending_pairs_raw(state, &entries);
-        return Ok(None);
+        return Ok(false);
     };
-    let (device_id, token) = auth::add_device(state, "telegram-app")?;
     entry.approved = true;
-    entry.approved_token = Some(token);
     save_pending_pairs_raw(state, &entries)?;
-    Ok(Some(device_id))
+    Ok(true)
 }
 
 /// Declines (deletes) a pending request by `id`.
@@ -378,7 +443,8 @@ pub fn decline_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result
 }
 
 /// Polls or collects a pending request for the launching webview. Once approved, removes the
-/// request and hands out the device token exactly once.
+/// request, mints a `Browser` device with `control` scope labelled `telegram-app`, and hands out
+/// the device token exactly once.
 pub fn claim_pending_pair(state: &Path, id: &str, user_id: i64, init_data: &str, now: u64) -> ClaimOutcome {
     let mut entries = load_pending_pairs_raw(state, now);
     let Some(index) = entries.iter().position(|entry| entry.id == id) else {
@@ -393,12 +459,10 @@ pub fn claim_pending_pair(state: &Path, id: &str, user_id: i64, init_data: &str,
         let _ = save_pending_pairs_raw(state, &entries);
         return ClaimOutcome::Pending;
     }
-    let removed = entries.remove(index);
+    entries.remove(index);
     let _ = save_pending_pairs_raw(state, &entries);
-    let Some(token) = removed.approved_token else {
-        return ClaimOutcome::NotFound;
-    };
-    if auth::device_for_token(state, &token).is_none() {
+    let _ = record_used_init_data(state, &digest, init_data_stale_at(init_data, now), now);
+    let Ok((_, token)) = auth::add_device(state, "telegram-app") else {
         return ClaimOutcome::NotFound;
     };
     ClaimOutcome::Approved(token)
@@ -513,10 +577,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&state);
         auth::private_dir(&state).unwrap();
 
-        let p1 = create_pending_pair(&state, 42, "init-1", 1000).unwrap();
+        let p1 = create_pending_pair(&state, 41, "init-1", 1000).unwrap();
         let p2 = create_pending_pair(&state, 42, "init-2", 1001).unwrap();
-        let p3 = create_pending_pair(&state, 42, "init-3", 1002).unwrap();
-        let p4 = create_pending_pair(&state, 42, "init-4", 1003).unwrap();
+        let p3 = create_pending_pair(&state, 43, "init-3", 1002).unwrap();
+        let p4 = create_pending_pair(&state, 44, "init-4", 1003).unwrap();
         assert_eq!(p1.code.len(), 7);
         assert_eq!(p1.code.as_bytes()[3], b' ');
         // Oldest dropped once more than 3 are pending.
@@ -530,26 +594,90 @@ mod tests {
 
         // Decline deletes the request.
         assert!(decline_pending_pair(&state, &p3.id, 1005).unwrap());
-        assert_eq!(claim_pending_pair(&state, &p3.id, 42, "init-3", 1005), ClaimOutcome::NotFound);
+        assert_eq!(claim_pending_pair(&state, &p3.id, 43, "init-3", 1005), ClaimOutcome::NotFound);
 
         // Expiry after 10 minutes drops the request.
         assert!(list_pending_pairs(&state, 1003 + LAUNCH_PAIR_TTL_SECS + 1).is_empty());
 
-        // Approve issues a Browser device with control scope labelled telegram-app; cookie token is claimed once.
+        // Approve sets the flag; claiming mints a Browser device with control scope labelled telegram-app once.
         let p5 = create_pending_pair(&state, 42, "init-5", 2000).unwrap();
-        let device_id = approve_pending_pair(&state, &p5.id, 2010).unwrap().expect("approved");
-        let device = auth::load_devices(&state).into_iter().find(|d| d.id == device_id).expect("device stored");
-        assert_eq!(device.name, "telegram-app");
-        assert_eq!(device.kind, auth::DeviceKind::Browser);
-        assert_eq!(device.scope, auth::Scope::Control);
+        assert!(approve_pending_pair(&state, &p5.id, 2010).unwrap());
+        assert!(auth::load_devices(&state).is_empty(), "no device minted before claim");
         assert!(list_pending_pairs(&state, 2010).is_empty(), "approved request is no longer pending");
         let ClaimOutcome::Approved(token) = claim_pending_pair(&state, &p5.id, 42, "init-5", 2011) else {
             panic!("expected Approved");
         };
+        let devices = auth::load_devices(&state);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].name, "telegram-app");
+        assert_eq!(devices[0].kind, auth::DeviceKind::Browser);
+        assert_eq!(devices[0].scope, auth::Scope::Control);
         assert!(auth::device_for_token(&state, &token).is_some());
         assert_eq!(claim_pending_pair(&state, &p5.id, 42, "init-5", 2012), ClaimOutcome::NotFound);
         assert!(!auth::revoke_device(&state, "telegram-app").unwrap().is_empty());
         assert!(auth::device_for_token(&state, &token).is_none());
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn approved_pair_stores_only_the_approved_flag_and_leaves_no_device_when_unclaimed() {
+        let state = std::env::temp_dir().join(format!("ling-web-tg-unclaimed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        auth::private_dir(&state).unwrap();
+
+        let pending = create_pending_pair(&state, 42, "init-unclaimed", 1000).unwrap();
+        assert!(approve_pending_pair(&state, &pending.id, 1005).unwrap());
+        let on_disk = std::fs::read_to_string(state.join(PENDING_PAIRS_FILE)).unwrap();
+        assert!(on_disk.contains("\"approved\": true"), "{on_disk}");
+        assert!(!on_disk.contains("approved_token"), "{on_disk}");
+        assert!(auth::load_devices(&state).is_empty(), "device must not exist before claim");
+
+        // Unclaimed approval expires with the request after 10 minutes, leaving no device.
+        let expired_now = 1000 + LAUNCH_PAIR_TTL_SECS + 1;
+        assert_eq!(
+            claim_pending_pair(&state, &pending.id, 42, "init-unclaimed", expired_now),
+            ClaimOutcome::NotFound
+        );
+        assert!(auth::load_devices(&state).is_empty(), "expired unclaimed approval must leave no device");
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn one_pending_pair_per_user_replaces_old_and_used_init_data_cannot_pair_twice_until_stale() {
+        let state = std::env::temp_dir().join(format!("ling-web-tg-dedup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        auth::private_dir(&state).unwrap();
+
+        let init1 = "auth_date=1000&user=%7B%22id%22%3A42%7D&hash=aa";
+        let init2 = "auth_date=1010&user=%7B%22id%22%3A42%7D&hash=bb";
+
+        let first = create_pending_pair(&state, 42, init1, 1005).unwrap();
+        // Same initData cannot be used a second time while pending.
+        assert!(create_pending_pair(&state, 42, init1, 1006).is_err());
+
+        // A new launch from the same user replaces the old pending request.
+        let second = create_pending_pair(&state, 42, init2, 1012).unwrap();
+        assert_ne!(first.id, second.id);
+        let open = list_pending_pairs(&state, 1012);
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].id, second.id);
+        assert_eq!(claim_pending_pair(&state, &first.id, 42, init1, 1012), ClaimOutcome::NotFound);
+
+        // Claiming the new request succeeds once, and neither init1 nor init2 can pair again.
+        assert!(approve_pending_pair(&state, &second.id, 1015).unwrap());
+        assert!(matches!(
+            claim_pending_pair(&state, &second.id, 42, init2, 1016),
+            ClaimOutcome::Approved(_)
+        ));
+        assert!(create_pending_pair(&state, 42, init1, 1020).is_err());
+        assert!(create_pending_pair(&state, 42, init2, 1020).is_err());
+
+        // Once past auth_date + MAX_LAUNCH_AGE_SECS (when check_launch refuses it as Stale anyway),
+        // the remembered digest is pruned.
+        let after_stale = 1000 + MAX_LAUNCH_AGE_SECS + 1;
+        assert!(create_pending_pair(&state, 42, init1, after_stale).is_ok());
 
         let _ = std::fs::remove_dir_all(&state);
     }

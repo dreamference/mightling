@@ -653,8 +653,8 @@ async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_
                     json!({ "pending": list })
                 } else if path == "/api/telegram/pending-pairs/approve" {
                     let id = body.as_ref().and_then(|b| b.get("id")).and_then(Value::as_str).unwrap_or_default();
-                    let dev = telegram_app::approve_pending_pair(&state_for_agent, id, 1_010).unwrap();
-                    json!({ "ok": dev.is_some(), "device": dev })
+                    let ok = telegram_app::approve_pending_pair(&state_for_agent, id, 1_010).unwrap();
+                    json!({ "ok": ok })
                 } else if path == "/api/telegram/pending-pairs/decline" {
                     let id = body.as_ref().and_then(|b| b.get("id")).and_then(Value::as_str).unwrap_or_default();
                     let ok = telegram_app::decline_pending_pair(&state_for_agent, id, 1_010).unwrap();
@@ -700,16 +700,29 @@ async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_
         ClaimOutcome::Pending
     );
 
-    // A forged callback nonce is ignored.
+    // A forged callback nonce is ignored, and plain text ("yes") never approves a LaunchPair.
     poller.handle(&callback(111, "a:0000000000000000:0")).await;
     while let Ok(msg) = inbound_rx.try_recv() {
         hub.on_inbound(msg).await;
     }
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-    assert!(auth::load_devices(&state).is_empty());
+    assert_eq!(
+        telegram_app::claim_pending_pair(&state, &created.id, 111, "init-data-1", 1_020),
+        ClaimOutcome::Pending
+    );
 
-    // Pressing Approve in Telegram approves the pending pair and issues `telegram-app` with Control scope.
-    poller.handle(&callback(111, &approve_cb)).await;
+    // Pressing Approve in Telegram (even when Telegram attaches a topic id) marks the pending pair
+    // approved; the device is minted only when the launching webview claims it.
+    let topic_cb = json!({
+        "update_id": 2,
+        "callback_query": {
+            "id": "cb-topic",
+            "from": { "id": 111 },
+            "message": { "message_id": 7, "message_thread_id": 10, "is_topic_message": true, "chat": { "id": 111, "type": "private" } },
+            "data": approve_cb,
+        }
+    });
+    poller.handle(&topic_cb).await;
     while let Ok(msg) = inbound_rx.try_recv() {
         hub.on_inbound(msg).await;
     }
@@ -717,29 +730,29 @@ async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_
         renderer.render(out).await;
     }
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    assert!(auth::load_devices(&state).is_empty(), "device is minted only on claim");
 
+    // The launching webview claims the device token once, minting `telegram-app` with Control scope.
+    match telegram_app::claim_pending_pair(&state, &created.id, 111, "init-data-1", 1_030) {
+        ClaimOutcome::Approved(token) => assert!(auth::device_for_token(&state, &token).is_some()),
+        other => panic!("expected Approved, got {other:?}"),
+    }
     let devices = auth::load_devices(&state);
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].name, "telegram-app");
     assert_eq!(devices[0].kind, DeviceKind::Browser);
     assert_eq!(devices[0].scope, Scope::Control);
 
-    // Reusing the same callback nonce does not issue another device.
+    // Reusing the same callback nonce or claiming a second time finds nothing and mints no second device.
     poller.handle(&callback(111, &approve_cb)).await;
     while let Ok(msg) = inbound_rx.try_recv() {
         hub.on_inbound(msg).await;
     }
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-    assert_eq!(auth::load_devices(&state).len(), 1);
-
-    // The launching webview claims the device token once, and a second claim finds nothing.
-    match telegram_app::claim_pending_pair(&state, &created.id, 111, "init-data-1", 1_030) {
-        ClaimOutcome::Approved(token) => assert!(auth::device_for_token(&state, &token).is_some()),
-        other => panic!("expected Approved, got {other:?}"),
-    }
     assert_eq!(
         telegram_app::claim_pending_pair(&state, &created.id, 111, "init-data-1", 1_031),
         ClaimOutcome::NotFound
     );
+    assert_eq!(auth::load_devices(&state).len(), 1);
 }
 

@@ -417,7 +417,7 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
     ) || (path == "/bridge.js" && server.front_host_ok(headers));
     if !public && !server.authenticated(path, headers) {
         let response = if path == "/" || path == "/index.html" {
-            html(StatusCode::UNAUTHORIZED, assets::LOCKED_HTML)
+            html(StatusCode::UNAUTHORIZED, &assets::locked_html(server.front_host_ok(headers)))
         } else {
             text(StatusCode::UNAUTHORIZED, "Sign in first: `ling web open` on this machine, or pair this device.\n")
         };
@@ -671,6 +671,10 @@ async fn telegram_launch_pair_post(
     };
     match crate::telegram_app::create_pending_pair(&server.config.state_dir, user, init_data, now) {
         Ok(pending) => json_response(StatusCode::OK, json!({ "pending": pending.id, "code": pending.code })),
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "ok": false, "reason": err.to_string() }),
+        ),
         Err(err) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({ "ok": false, "reason": format!("Could not record the pairing request: {err}") }),
@@ -739,12 +743,12 @@ async fn telegram_launch_pair_get(
 }
 
 /// Pending launch-pair requests waiting for the bot's prompt (`GET /api/telegram/pending-pairs`):
-/// owner session or phone bridge only.
+/// owner session or `ling chat` (`bridge=1`) session only.
 async fn telegram_pending_pairs(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
-    if !server.owner_session(&headers) && !server.is_bridge_caller(&headers) {
+    if !server.owner_session(&headers) && !server.bridge_session(&headers) {
         return json_response(
             StatusCode::FORBIDDEN,
-            json!({ "error": "only the owner session or a phone bridge may list pending Telegram pairs" }),
+            json!({ "error": "only the owner session or ling chat may list pending Telegram pairs" }),
         );
     }
     let pending = crate::telegram_app::list_pending_pairs(&server.config.state_dir, now_secs());
@@ -752,23 +756,23 @@ async fn telegram_pending_pairs(State(server): State<Arc<Server>>, headers: Head
 }
 
 /// Approves a pending launch-pair request (`POST /api/telegram/pending-pairs/approve {id}`):
-/// issues a `Browser` device with `control` scope labelled `telegram-app`.
+/// marks the request approved so the launching webview can claim a `telegram-app` device once.
 async fn telegram_pending_pairs_approve(
     State(server): State<Arc<Server>>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    if !server.owner_session(&headers) && !server.is_bridge_caller(&headers) {
+    if !server.owner_session(&headers) && !server.bridge_session(&headers) {
         return json_response(
             StatusCode::FORBIDDEN,
-            json!({ "error": "only the owner session or a phone bridge may approve a Telegram pair" }),
+            json!({ "error": "only the owner session or ling chat may approve a Telegram pair" }),
         );
     }
     let request: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
     let id = request.get("id").and_then(|value| value.as_str()).unwrap_or_default();
     match crate::telegram_app::approve_pending_pair(&server.config.state_dir, id, now_secs()) {
-        Ok(Some(device_id)) => json_response(StatusCode::OK, json!({ "ok": true, "device": device_id })),
-        Ok(None) => json_response(StatusCode::NOT_FOUND, json!({ "ok": false, "error": "no such pending pair" })),
+        Ok(true) => json_response(StatusCode::OK, json!({ "ok": true })),
+        Ok(false) => json_response(StatusCode::NOT_FOUND, json!({ "ok": false, "error": "no such pending pair" })),
         Err(err) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({ "ok": false, "error": format!("Could not approve the pairing request: {err}") }),
@@ -782,10 +786,10 @@ async fn telegram_pending_pairs_decline(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    if !server.owner_session(&headers) && !server.is_bridge_caller(&headers) {
+    if !server.owner_session(&headers) && !server.bridge_session(&headers) {
         return json_response(
             StatusCode::FORBIDDEN,
-            json!({ "error": "only the owner session or a phone bridge may decline a Telegram pair" }),
+            json!({ "error": "only the owner session or ling chat may decline a Telegram pair" }),
         );
     }
     let request: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();

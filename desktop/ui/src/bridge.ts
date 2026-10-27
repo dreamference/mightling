@@ -120,7 +120,8 @@ export function consumeOpenTarget(
   params.delete("open");
   params.delete("approval");
   const rest = params.toString();
-  const nextUrl = loc.pathname + (rest ? `?${rest}` : "") + (loc.hash || "");
+  const hash = loc.hash && !loc.hash.includes("tgWebApp") ? loc.hash : "";
+  const nextUrl = loc.pathname + (rest ? `?${rest}` : "") + hash;
   try {
     hist?.replaceState(null, "", nextUrl);
   } catch {

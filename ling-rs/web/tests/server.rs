@@ -1136,18 +1136,52 @@ async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_
         StatusCode::FORBIDDEN
     );
 
-    // Only the owner session or a bridge session may list or approve pending requests; a normal
-    // paired device may not.
-    let (_, normal_token) = auth::add_device(&server.config.state_dir, "laptop").unwrap();
-    let normal_cookie = format!("{}={normal_token}", auth::DEVICE_COOKIE);
+    // Unauthenticated `/` includes `/bridge.js` only on the configured front host, never on loopback or LAN.
+    let (status, _, locked_loopback) = call(&server, request("GET", "/").body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(!locked_loopback.contains("/bridge.js"), "{locked_loopback}");
+    let (status, _, locked_lan) = call(
+        &server,
+        Request::builder().uri("/").header(header::HOST, "192.168.50.105:3100").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(!locked_lan.contains("/bridge.js"), "{locked_lan}");
+    let (status, _, locked_front) = call(
+        &server,
+        Request::builder().uri("/").header(header::HOST, front_host).body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(locked_front.contains("/bridge.js"), "{locked_front}");
+
+    // Only the owner session or a `bridge=1` session (`ling chat`) may list, approve or decline
+    // pending requests; a normal paired device or a Signal bridge device (`signal-bridge`) may not.
+    for forbidden_name in ["laptop", "signal-bridge", "signal-1"] {
+        let (dev_id, dev_token) = auth::add_device(&server.config.state_dir, forbidden_name).unwrap();
+        let dev_cookie = format!("{}={dev_token}", auth::DEVICE_COOKIE);
+        let list_req = request("GET", "/api/telegram/pending-pairs")
+            .header(header::COOKIE, &dev_cookie)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(call(&server, list_req).await.0, StatusCode::FORBIDDEN, "{forbidden_name} list");
+        for uri in ["/api/telegram/pending-pairs/approve", "/api/telegram/pending-pairs/decline"] {
+            let post_req = request("POST", uri)
+                .header(header::ORIGIN, ORIGIN)
+                .header(header::COOKIE, &dev_cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "id": pending_id }).to_string()))
+                .unwrap();
+            assert_eq!(call(&server, post_req).await.0, StatusCode::FORBIDDEN, "{forbidden_name} {uri}");
+        }
+        auth::revoke_device(&server.config.state_dir, &dev_id).unwrap();
+    }
     let list_as = |cookie: &str| {
         request("GET", "/api/telegram/pending-pairs")
             .header(header::COOKIE, cookie)
             .body(Body::empty())
             .unwrap()
     };
-    assert_eq!(call(&server, list_as(&normal_cookie)).await.0, StatusCode::FORBIDDEN);
-    auth::revoke_device(&server.config.state_dir, &auth::load_devices(&server.config.state_dir)[0].id).unwrap();
 
     // Sign in as `ling chat`'s bridge session (`bridge=1`).
     let login_code = auth::issue_login_code(&server.config.state_dir).unwrap();
@@ -1166,7 +1200,7 @@ async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_
     assert_eq!(listed["pending"][0]["code"], code);
     assert_eq!(listed["pending"][0]["user"], 42);
 
-    // Approve via the bridge session.
+    // Approve via the bridge session: no device is minted on disk before the webview claims it.
     let approve_req = request("POST", "/api/telegram/pending-pairs/approve")
         .header(header::ORIGIN, ORIGIN)
         .header(header::COOKIE, &bridge_cookie)
@@ -1175,6 +1209,7 @@ async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_
         .unwrap();
     let (status, _, body) = call(&server, approve_req).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(auth::load_devices(&server.config.state_dir).is_empty(), "device minted only on claim");
 
     // The launching webview collects the device cookie exactly once.
     let (status, headers, body) = call(&server, poll_pair(&pending_id, &valid_init, front_host)).await;
@@ -1190,10 +1225,12 @@ async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_
     );
     let device_cookie = set_cookie.split(';').next().unwrap().to_string();
 
-    // A second poll gets 404 and no Set-Cookie.
+    // A second poll gets 404 and no Set-Cookie, and the same initData cannot pair a second device.
     let (status, headers, _) = call(&server, poll_pair(&pending_id, &valid_init, front_host)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(headers.get(header::SET_COOKIE).is_none());
+    let (status, _, _) = call(&server, post_pair(&valid_init, front_host, front_origin)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "claimed initData must not pair twice");
 
     // The approved device is listed as `telegram-app` with Browser kind and Control scope.
     let devices = auth::load_devices(&server.config.state_dir);

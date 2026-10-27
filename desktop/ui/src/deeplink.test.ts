@@ -70,6 +70,18 @@ describe("Mini App and web query deep links (CHAT_REPOS §12.4 G3)", () => {
     );
     expect(target).toEqual({ kind: "repo", repo: "acme/widgets", approval: true });
     expect(replaced).toEqual(["/"]);
+
+    consumeOpenTarget(
+      { pathname: "/", search: "?open=repos", hash: "#tgWebAppData=query_id%3D1" },
+      hist,
+    );
+    expect(replaced).toEqual(["/", "/"]);
+
+    consumeOpenTarget(
+      { pathname: "/", search: "?open=repos", hash: "#work" },
+      hist,
+    );
+    expect(replaced).toEqual(["/", "/", "/#work"]);
   });
 
   it("routes parsed targets to openRepos, openWorkThread, and the G7 approval flag", () => {

@@ -1183,6 +1183,19 @@ impl Hub {
             .filter_map(|entry| entry.get("id").and_then(Value::as_str).map(str::to_string))
             .collect();
         self.seen_pairs.retain(|id| active.contains(id));
+        let stale: Vec<String> = self
+            .approvals
+            .iter()
+            .filter_map(|(nonce, pending)| match &pending.local {
+                Some(Local::LaunchPair { id }) if !active.contains(id) => Some(nonce.clone()),
+                _ => None,
+            })
+            .collect();
+        for nonce in stale {
+            if let Some(pending) = self.approvals.remove(&nonce) {
+                self.close(pending.chat, nonce, "Declined.");
+            }
+        }
         for entry in list {
             let (Some(id), Some(code), Some(user)) = (
                 entry.get("id").and_then(Value::as_str),
@@ -1195,6 +1208,19 @@ impl Hub {
                 continue;
             }
             let chat = format!("telegram:{user}");
+            let prior: Vec<String> = self
+                .approvals
+                .iter()
+                .filter_map(|(nonce, pending)| match &pending.local {
+                    Some(Local::LaunchPair { .. }) if base_of(&pending.chat) == chat => Some(nonce.clone()),
+                    _ => None,
+                })
+                .collect();
+            for nonce in prior {
+                if let Some(pending) = self.approvals.remove(&nonce) {
+                    self.close(pending.chat, nonce, "Declined.");
+                }
+            }
             self.next_approval += 1;
             let nonce = ling_web_server::auth::random_hex(8);
             self.approvals.insert(
@@ -1490,7 +1516,11 @@ impl Hub {
             }
             return;
         };
-        if pending.chat != chat {
+        let same_chat = match pending.local {
+            Some(Local::LaunchPair { .. }) => base_of(&pending.chat) == base_of(chat),
+            _ => pending.chat == chat,
+        };
+        if !same_chat {
             return;
         }
         let Some(reply) = pending.replies.get(choice).cloned() else { return };
@@ -1498,9 +1528,15 @@ impl Hub {
     }
 
     /// `yes`/`no`/a number/free text, when the chat has an open approval. Returns true when the
-    /// message was taken as the answer.
+    /// message was taken as the answer. `Local::LaunchPair` is answered only by the inline button's
+    /// callback nonce, never by chat text (CHAT_REPOS §12.1 G2).
     fn answer_by_text(&mut self, chat: &str, text: &str) -> bool {
-        let Some((approval, pending)) = self.approvals.iter().filter(|(_, p)| p.chat == chat).max_by_key(|(_, p)| p.seq) else {
+        let Some((approval, pending)) = self
+            .approvals
+            .iter()
+            .filter(|(_, p)| p.chat == chat && !matches!(p.local, Some(Local::LaunchPair { .. })))
+            .max_by_key(|(_, p)| p.seq)
+        else {
             return false;
         };
         let approval = approval.clone();
