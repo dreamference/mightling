@@ -232,6 +232,7 @@ Exactly Telegram's (CHAT §3): at `/airgapped on` the adapter relays nothing and
 - **What Discord sees:** the address in a message of the bot's (the tailnet name, already public in certificate transparency logs, CHAT §5.3), and, possibly, that the button was pressed (Discord's client analytics: not documented, so assumed). Nothing typed into the page and none of its answers.
 - **No Discord launch check.** The Mini App checks Telegram's signed `initData` on top of the device credential (MOONSHOT §15). A link carries nothing signed, and none is needed: the device credential is what lets a page in, everywhere.
 - **Not built:** an Activity (§1.2), and loosening `ling web`'s `frame-ancestors 'none'` for Discord's origins.
+- **Repo work (2026-10-27):** on Discord it happens only behind this link; the bot sends fixed-template notices with no file content (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §5.3, G11).
 
 ### 3.12 Later, if wanted: a one-person private server for threads (D2, Phase 3)
 
