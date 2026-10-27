@@ -317,6 +317,7 @@ class ForgeService:
             from dreamference.forge.forge_repositories import ForgeRepositories
 
             ForgeRepositories.install_hooks(mirror_trigger=True)
+            cls.ensure_phone()
             print(
                 f"✅ The forge of record runs: in a browser at http://{cls.host_name()}.local:{WEB_PORT}{WEB_PATH} "
                 f"through `ling web`, signed in on paired devices; git and the API on {where}."
@@ -385,6 +386,17 @@ class ForgeService:
             print(f"🧹 Removed {name}, set aside by a move more than 30 days ago.")
 
     @classmethod
+    def ensure_phone(cls) -> None:
+        """Keep the phone account, its token and the default branches' protection in line (§2.7)."""
+        from dreamference.forge.forge_phone import ForgePhone
+
+        try:
+            for line in ForgePhone.ensure():
+                print(line)
+        except RuntimeError as error:
+            print(f"⚠️  The phone account was not checked: {error}")
+
+    @classmethod
     def tick(cls) -> int:
         """Do the ten-minute timer's work.
 
@@ -420,6 +432,7 @@ class ForgeService:
         except RuntimeError as error:
             print(f"⚠️  Hooks not refreshed: {error}")
         ForgeGithubMirror.run()
+        cls.ensure_phone()
         last = ForgeSettings.state().get("mirrors_synced_at", 0)
         if time.time() - float(last) > MIRROR_SYNC_INTERVAL_S:
             ForgeMirrors.sync(quiet=True)
