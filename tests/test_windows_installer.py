@@ -158,6 +158,47 @@ def test_ling_update_updates_the_app_install_ps1_recorded():
     assert "Mightling-win32" not in update
 
 
+def section(nsi: str, name: str) -> str:
+    """The body of an NSIS `Section "<name>"` or `Function <name>`, up to its end."""
+    start = re.search(
+        rf'^(?:Section "{re.escape(name)}"|Function \$\{{UN\}}{re.escape(name)})$', nsi, re.M
+    )
+    assert start, name
+    end = re.compile(r"^(?:SectionEnd|FunctionEnd)$", re.M).search(nsi, start.end())
+    return nsi[start.end() : end.start()]
+
+
+def test_a_running_app_is_closed_and_its_folder_replaced_whole_or_not_at_all():
+    nsi = INSTALLER_NSI.read_text()
+    free = section(nsi, "FreeAppFolder")
+    # Both the installer and the uninstaller free the folder first, and delete only what moved aside.
+    assert '!insertmacro FREE_APP_FOLDER ""' in nsi and '!insertmacro FREE_APP_FOLDER "un."' in nsi
+    install, uninstall = section(nsi, "Install"), section(nsi, "Uninstall")
+    assert install.index("Call FreeAppFolder") < install.index('SetOutPath "$INSTDIR"')
+    assert "Call un.FreeAppFolder" in uninstall
+    # No fixed wait and no delete over files in use: the folder is moved aside (which fails while
+    # anything in it is open) and retried; a folder without the app in it is never touched.
+    assert "Sleep 1000" not in nsi
+    assert 'IfFileExists "$INSTDIR\\${EXE}" 0 free_done' in free
+    assert 'Rename "$INSTDIR" "$INSTDIR.old"' in free
+    assert 'RMDir /r "$INSTDIR"\n  SetOutPath' not in install
+    # Asked to close first; then ended by path only, so the ling.exe install.ps1 put in ..\bin (a
+    # terminal may be running it) is never touched; then stopped, never installed over leftovers.
+    polite, force, failed = (
+        free.index("taskkill /im"),
+        free.index("free_force:"),
+        free.index("free_failed:"),
+    )
+    assert polite < force < failed
+    assert "/f" not in free.lower().split("free_force:")[0]
+    assert "ling.exe" not in free
+    assert "ExecutablePath.StartsWith($$folder" in free
+    assert 't "MIGHTLING_APP_FOLDER", t "$INSTDIR"' in free
+    assert 'Abort "' in free.split("free_failed:")[1].split("free_moved:")[0]
+    # CI runs both against a running app.
+    assert "Install over the running app, uninstall it running" in WINDOWS_YML.read_text()
+
+
 @pytest.mark.skipif(
     not os.environ.get("MIGHTLING_TEST_MAKENSIS"),
     reason="no makensis named in MIGHTLING_TEST_MAKENSIS",
