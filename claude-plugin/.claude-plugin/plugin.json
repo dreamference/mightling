@@ -9,18 +9,21 @@
   "userConfig": {
     "node": {
       "type": "string",
-      "default": "",
-      "description": "Optional Mightling node name or id (unused while only W1 is built: watch is loopback-only)."
+      "title": "Mightling node",
+      "description": "Optional Mightling node name or id (unused while only W1 is built: watch is loopback-only).",
+      "default": ""
     },
     "max_parallel": {
-      "type": "integer",
-      "default": 2,
-      "description": "Maximum concurrent delegated tasks (default 2; unused while only W1 is built)."
+      "type": "number",
+      "title": "Maximum parallel tasks",
+      "description": "Maximum concurrent delegated tasks (default 2; unused while only W1 is built).",
+      "default": 2
     },
     "allow_classes": {
       "type": "string",
-      "default": "W1",
-      "description": "Comma-separated enabled delegation classes (Phase P1 supports W1 only)."
+      "title": "Enabled delegation classes",
+      "description": "Comma-separated enabled delegation classes (Phase P1 supports W1 only).",
+      "default": "W1"
     }
   }
 }
