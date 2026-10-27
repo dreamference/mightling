@@ -154,6 +154,11 @@ export type FromView =
   /** The memory files, and an edit of one (memoryfiles.ts, DESKTOP §16 B17). */
   | { type: "memories/files" }
   | { type: "memories/save"; name: string; text: string }
+  /** MCP bundles from a file (mcpb.ts, DESKTOP §16 B45): a file dialog and the manifest read; the bundle unpacked by the token pick gave; one removed; those installed. */
+  | { type: "mcpb/pick" }
+  | { type: "mcpb/install"; token: string; values: Record<string, unknown>; replace: boolean }
+  | { type: "mcpb/remove"; name: string }
+  | { type: "mcpb/list" }
   /** A link's folder checked, and a project's origin remote (DESKTOP §16 B19). */
   | { type: "folder/check"; dir: string }
   | { type: "git/origin"; dir: string }

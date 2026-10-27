@@ -552,6 +552,61 @@ export const memoryFiles = {
   save: (name: string, text: string) => send<null>({ type: "memories/save", name, text }),
 };
 
+/** A setting an MCP bundle asks for (desktop/electron/src/mcpb.ts `BundleSetting`). */
+export interface BundleSetting {
+  key: string;
+  type: "string" | "number" | "boolean" | "directory" | "file";
+  title: string;
+  description: string;
+  required: boolean;
+  sensitive: boolean;
+  multiple: boolean;
+  default: string | number | boolean | string[] | null;
+  min: number | null;
+  max: number | null;
+}
+/** An MCP bundle's manifest as the main process read it (mcpb.ts `BundleSummary`). */
+export interface BundleSummary {
+  name: string;
+  dir: string;
+  displayName: string;
+  version: string;
+  description: string;
+  author: string;
+  serverType: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  settings: BundleSetting[];
+  signed: boolean;
+  files: number;
+  unpackedBytes: number;
+  fetches: string | null;
+  refusal: string | null;
+  installed: boolean;
+}
+export interface BundleServer {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  cwd: string;
+}
+export interface InstalledBundle {
+  name: string;
+  displayName: string;
+  version: string;
+  author: string;
+  dir: string;
+}
+/** MCP bundles installed from a file (DESKTOP §16 B45): the desktop app unpacks them; a browser cannot. */
+export const mcpBundles = {
+  available: () => host() === "electron",
+  pick: () => send<{ token: string; file: string; summary: BundleSummary } | null>({ type: "mcpb/pick" }),
+  install: (token: string, values: Record<string, unknown>, replace: boolean) => send<{ name: string; dir: string; server: BundleServer }>({ type: "mcpb/install", token, values, replace }),
+  remove: (name: string) => send<null>({ type: "mcpb/remove", name }),
+  list: () => send<InstalledBundle[]>({ type: "mcpb/list" }),
+};
+
 export const recall = {
   available: () => host() === "electron",
   index: () => send<Record<string, number>>({ type: "recall/index" }),

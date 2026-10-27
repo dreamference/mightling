@@ -321,6 +321,13 @@ accent, background and text colours of the theme in front; each theme keeps its 
   `ling-admin night archive` (runs older than four weeks, or `--weeks N`) moves old runs' records,
   transcripts and reports to `~/.mightling/night/archive/`, keeping their branches, and Scheduled's
   **Archive** searches them.
+- **MCP bundles from a file:** Skills and tools › MCP servers › **Install from a file…** takes an
+  MCP bundle (`.mcpb`). Its manifest is shown before anything is unpacked: the name, the author, the
+  command it runs, the settings it asks for, and whether a signature is attached (the app does not
+  check signatures). Install unpacks it into `~/.mightling/mcpb/<name>/` and adds it to your MCP
+  servers; nothing is downloaded, so it works with `/airgapped on` too, except a bundle whose command
+  is a package runner such as `npx`. **Remove** takes it out again. Settings you fill in, secrets
+  included, are kept in `~/.mightling/config.toml` with the server.
 - **Ask one click away**, in the same window's sidebar.
 
 Not there yet: review, settings pages and choosing a model (it is shown, not chosen).

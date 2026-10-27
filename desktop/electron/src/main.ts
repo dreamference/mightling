@@ -11,6 +11,7 @@
 // window; until 2026-10-09 the menu's Ask opened a second one on `ling web`, whose own app-server
 // shared `~/.mightling` with this one (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import * as knowledge from "./knowledge";
@@ -39,6 +40,7 @@ import { applyTask, taskNote } from "./night";
 import { ARCHIVE, nightUnread, searchArchive } from "./nightinbox";
 import { writeWorkAttachment } from "./attachments";
 import { listMemoryFiles, writeMemoryFile } from "./memoryfiles";
+import * as mcpb from "./mcpb";
 import { Nodes } from "./nodes";
 import { docsAdd, docsReindex, docsRemove, docsStatus, locate, syncKnowledge } from "./docs";
 import { Tasks } from "./tasks";
@@ -587,6 +589,9 @@ export async function main(options: MainOptions): Promise<void> {
     return dir;
   };
 
+  /** MCP bundles picked and shown, not installed yet (DESKTOP §16 B45): the token the page holds, to the file and the name it was shown. */
+  const pickedBundles = new Map<string, { file: string; name: string }>();
+
   async function handle(message: FromView, own: BrowserWindow): Promise<unknown> {
     switch (message.type) {
       case "work/start": {
@@ -944,6 +949,37 @@ export async function main(options: MainOptions): Promise<void> {
         const home = codexHome();
         if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
         return message.type === "memories/files" ? listMemoryFiles(home) : writeMemoryFile(home, message.name, message.text);
+      }
+      case "mcpb/pick":
+      case "mcpb/install":
+      case "mcpb/remove":
+      case "mcpb/list": {
+        // MCP bundles from a file (mcpb.ts, DESKTOP §16 B45): the page names a file only by the token its pick
+        // gave and a bundle only by its name; nothing is fetched, so this works at airgapped on, except a bundle
+        // whose command is a package runner.
+        const home = codexHome();
+        if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
+        const places = { home: app.getPath("home"), desktop: app.getPath("desktop"), documents: app.getPath("documents"), downloads: app.getPath("downloads") };
+        if (message.type === "mcpb/list") return mcpb.listBundles(home);
+        if (message.type === "mcpb/remove") return mcpb.removeBundle(home, String(message.name)).then(() => null);
+        if (message.type === "mcpb/pick") {
+          const chosen = await dialog.showOpenDialog(own, { title: "Install an MCP bundle", properties: ["openFile"], filters: [{ name: "MCP bundles", extensions: ["mcpb"] }] });
+          const file = chosen.canceled ? null : chosen.filePaths[0] ?? null;
+          if (!file) return null;
+          const { summary } = await mcpb.readBundle(file, home, places);
+          const token = crypto.randomUUID();
+          pickedBundles.set(token, { file, name: summary.name });
+          for (const old of [...pickedBundles.keys()].slice(0, -8)) pickedBundles.delete(old);
+          return { token, file: path.basename(file), summary };
+        }
+        const picked = pickedBundles.get(String(message.token));
+        if (!picked) throw new Error("choose the bundle's file again");
+        const { summary } = await mcpb.readBundle(picked.file, home, places);
+        if (summary.fetches) await offline(null, `this bundle's command, ${summary.fetches},`);
+        const values = typeof message.values === "object" && message.values !== null && !Array.isArray(message.values) ? message.values : {};
+        const installed = await mcpb.installBundle(picked.file, home, places, { expected: picked.name, values, replace: message.replace === true });
+        pickedBundles.delete(String(message.token));
+        return installed;
       }
       case "folder/check":
         // A link's folder (DESKTOP §16 B19): taken only when it is an absolute folder that exists.
