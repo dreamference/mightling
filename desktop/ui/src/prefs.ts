@@ -203,6 +203,9 @@ export const APPEARANCE_TOKENS: Record<"accent" | "canvas" | "text" | "fontUi" |
   fontCode: "--font-code",
 };
 
+/** The readable font (DESKTOP §16 B23): bundled (fonts/, OFL 1.1) and made for legibility, Inter behind it for what it lacks. */
+export const READABLE_FONT = '"Atkinson Hyperlegible", Inter, sans-serif';
+
 const COLOUR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 function cleanColours(entries: Record<string, unknown>): AppearanceColours {
