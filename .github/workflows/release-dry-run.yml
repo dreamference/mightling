@@ -18,6 +18,14 @@ on:
   schedule:
     - cron: "7 2 * * *"
   workflow_dispatch:
+    inputs:
+      windows_x64_runner:
+        description: "Runner for the x86-64 Windows build: box (the WINDOWS_X64_RUNNER variable's, if set) or github"
+        type: choice
+        default: box
+        options:
+          - box
+          - github
   push:
     branches: ["release-dry-run/**"]
 
@@ -82,6 +90,8 @@ jobs:
       # leaves build_clients off by default); the rest at the release's defaults.
       build_clients: true
       sign: false
+      # Scheduled and pushed runs have no inputs: the variable decides.
+      windows_x64_runner: ${{ inputs.windows_x64_runner || 'box' }}
 
   # One issue for a failing dry run, found by its exact title: opened on the first failure, its body
   # replaced (and a comment added, so watchers hear of it) on each failure after, closed by the
