@@ -430,7 +430,7 @@ A message after `new_thread_after_hours` (default 4) without the conversation mo
 ### 16.3 An answer's bounds, the phone prompt, and the answer the phone gets (branch `chat/bounds`)
 
 - **Bounds and the final turn:** as the Signal bridge (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §19.3), the hub watches each turn (`limits.rs`, from `item/started` and `item/completed`) every 250 ms: past a bound it steers "answer now", 30 s later it interrupts and starts a final turn without tools, and a final turn past 90 s ends with what it wrote and one line.
-- **The phone prompt:** threads start with `prompt: "chat"` (falling back to `ask` on a `ling web` that refuses it), in a scratch folder named `ask/chat-<hex>`.
+- **The phone prompt:** threads start with `prompt: "chat"` (falling back to `ask` on a `ling web` that refuses it), in a scratch folder named `ask/chat-<hex>`. Their config (`promptThreadConfig.chat` in `ling-rs/web/policy.json`) sets `approval_policy = "never"`: an approval would hold a phone answer until the owner replies, and the sandbox already has the network unless `/airgapped on` (2026-10-27: an escalated `curl` for the weather became a YES/NO on Signal). The prompt puts `ling-search --read` first for anything dated and forbids `require_escalated` for the network.
 - **The answer:** the turn's final message, or its last; a short last word after a longer earlier message ("The answer above stands.") brings that message with it, because the phone shows only the answer (2 of 56 Ask turns on 2026-10-20 ended so).
 
 ### 16.4 Quick follow-ups (branch `chat/merge-quick`)

@@ -136,7 +136,8 @@
   "promptThreadConfig": {
     "chat": {
       "mcp_servers.mightling_images.enabled": false,
-      "mcp_servers.mightling_images.command": "true"
+      "mcp_servers.mightling_images.command": "true",
+      "approval_policy": "never"
     }
   },
   "windowToolsField": "windowTools",
