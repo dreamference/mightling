@@ -15,7 +15,7 @@ import { cleanAppearance, READABLE_FONT, type Appearance, type AppearanceColours
 import { useShownTheme, type ThemeChoice } from "./theme";
 import type { Project } from "./protocol/v2/Project";
 import type { Thread } from "./protocol/v2/Thread";
-import type { WorktreeSettings } from "./worktrees";
+import { ACROSS_REPOS_KEY, type WorktreeSettings } from "./worktrees";
 
 export type SettingsPage = "general" | "documents" | "profile" | "shortcuts" | "notifications" | "appearance" | "personalization" | "memories" | "archived" | "git" | "project" | "worktrees" | "browser" | "pets" | "suggestions" | "agents" | "node" | "voice";
 
@@ -26,7 +26,7 @@ export interface SettingsProps {
   onChange: (values: Partial<Prefs>) => void;
   onClose: () => void;
   worktrees: WorktreeSettings;
-  onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => void;
+  onWorktree: (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled" | typeof ACROSS_REPOS_KEY, value: string | number | boolean | null) => void;
   /** Archived threads (`thread/list` with `archived`), and bringing one back (`thread/unarchive`). */
   listArchived: () => Promise<Thread[]>;
   /** Projects removed from the sidebar (projects.ts), and bringing one back. */
@@ -389,6 +389,7 @@ function Worktrees(props: SettingsProps) {
         <label className="field">Keep the most recent
           <input type="number" min={1} max={200} value={props.worktrees.keep} aria-label="Worktrees kept" onChange={(event) => Number(event.target.value) > 0 && props.onWorktree("worktree-keep-count", Math.floor(Number(event.target.value)))} />
         </label>
+        <label><input type="checkbox" checked={props.worktrees.acrossRepos} onChange={(event) => props.onWorktree(ACROSS_REPOS_KEY, event.target.checked)} /> Count them across all repositories, not per repository</label>
       </fieldset>
     </>
   );

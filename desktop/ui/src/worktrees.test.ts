@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { WorktreeLink } from "./prefs";
 import type { Thread } from "./protocol/v2/Thread";
 import { initialState, projects, reduce } from "./store";
-import { DEFAULT_KEEP, carry, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings } from "./worktrees";
+import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, DEFAULT_KEEP, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings } from "./worktrees";
 
 const link: WorktreeLink = {
   checkout: "/home/u/.mightling/worktrees/ab12/app", cwd: "/home/u/.mightling/worktrees/ab12/app/src",
@@ -51,9 +51,9 @@ describe("worktree threads", () => {
   });
 
   it("read the [desktop] settings the codex-worktree crate reads, with its defaults", () => {
-    expect(worktreeSettings(null)).toEqual({ root: null, autoCleanup: true, keep: DEFAULT_KEEP });
+    expect(worktreeSettings(null)).toEqual({ root: null, autoCleanup: true, keep: DEFAULT_KEEP, acrossRepos: false });
     expect(DEFAULT_KEEP).toBe(15);
-    expect(worktreeSettings({ "git-worktree-root": " /data/wt ", "worktree-auto-cleanup-enabled": false, "worktree-keep-count": 4 })).toEqual({ root: "/data/wt", autoCleanup: false, keep: 4 });
+    expect(worktreeSettings({ "git-worktree-root": " /data/wt ", "worktree-auto-cleanup-enabled": false, "worktree-keep-count": 4 })).toEqual({ root: "/data/wt", autoCleanup: false, keep: 4, acrossRepos: false });
     expect(worktreeSettings({ "worktree-keep-count": 0 }).keep).toBe(DEFAULT_KEEP);
   });
 
@@ -63,5 +63,21 @@ describe("worktree threads", () => {
     expect(defaultCheckout({ "mightling-worktree-mode": "local" })).toBe("local");
     expect(defaultCheckout({ "mightling-worktree-mode": "nonsense" })).toBe("local");
     expect(defaultCheckout({ "mightling-worktree-mode": "worktree" })).toBe("worktree");
+  });
+});
+
+describe("the keep-count across repositories (DESKTOP §16 B25)", () => {
+  it("is off unless config.toml says so, so the count stays per repository", () => {
+    expect(worktreeSettings(null).acrossRepos).toBe(false);
+    expect(worktreeSettings({ [ACROSS_REPOS_KEY]: true }).acrossRepos).toBe(true);
+    expect(worktreeSettings({ [ACROSS_REPOS_KEY]: "yes" }).acrossRepos).toBe(false);
+  });
+
+  it("weighs every repository's worktrees together, each once, and removes the oldest of all", () => {
+    const a = [{ root: "/w/a/1", owner: null, modified: 5 }, { root: "/w/a/2", owner: null, modified: 9 }];
+    const b = [{ root: "/w/b/1", owner: null, modified: 1 }, { root: "/w/a/2", owner: null, modified: 9 }];
+    const pool = cleanupPool([a, b]);
+    expect(pool.map((entry) => entry.root)).toEqual(["/w/a/1", "/w/a/2", "/w/b/1"]);
+    expect(cleanupVictims(pool, 2, new Set(), [], null)).toEqual(["/w/b/1"]);
   });
 });
