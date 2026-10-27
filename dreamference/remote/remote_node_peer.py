@@ -139,14 +139,30 @@ class RemoteNodePeer:
         Returns:
             str: The root script.
         """
+        ca, store = shlex.quote(str(ca_certificate)), shlex.quote(TRUST_STORE_FILE)
         lines: list[str] = ["set -eu"]
         if binary is not None:
             lines.append(f"install -m 0755 {shlex.quote(str(binary))} {CLIENT_PATH}")
         lines += [
-            f"install -m 0644 {shlex.quote(str(ca_certificate))} {TRUST_STORE_FILE}",
-            "update-ca-certificates >/dev/null",
+            # A daemon already running loaded the system roots once, when it started (Go caches
+            # them per process): after the CA changes it must restart, or it keeps trusting only
+            # the old CA and its login fails ("LoginFailed"; found migrating the node, 2026-10-27).
+            "ca_changed=0",
+            f"if ! cmp -s {ca} {store}; then",
+            f"  install -m 0644 {ca} {store}",
+            "  update-ca-certificates >/dev/null",
+            "  ca_changed=1",
+            "fi",
             "netbird service install >/dev/null 2>&1 || true",
+            'if [ "$ca_changed" = 1 ]; then',
+            "  netbird service stop >/dev/null 2>&1 || true",
+            "fi",
             "netbird service start >/dev/null 2>&1 || true",
+            "for _ in $(seq 20); do netbird status >/dev/null 2>&1 && break; sleep 0.5; done",
+            # This script runs only while the node is not yet a peer of this control plane, so a
+            # profile the client already has (another management URL, an old key) is stale; `up`
+            # alone would answer "Already connected" and keep it.
+            "netbird down >/dev/null 2>&1 || true",
             f"netbird up --management-url {shlex.quote(management_url)}"
             f" --setup-key-file {shlex.quote(str(setup_key_file))}"
             f" --hostname {shlex.quote(peer_name)}",
