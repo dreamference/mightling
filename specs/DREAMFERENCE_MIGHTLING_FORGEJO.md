@@ -93,6 +93,7 @@ On a mirror node, it finds the forge of record by that record, creates a `mirror
 - **Direct access:** the port is reachable on the LAN for git over HTTP and SSH. A browser reaching it directly still sees Forgejo's sign-in page, and needs the password or an SSH key.
 - **SSH keys:** `ling-admin forge key add <file>` adds a key to `owner`. A paired client's `ling` adds its own key at pairing time, so `git push forge` works from a laptop without setup.
 - **Admin account:** a separate `forge-admin` with its own generated password, stored like the owner's. It's used only by `ling-admin` for maintenance, never shown in the UI.
+- **The phone account:** `mightling-phone`, created with the others, used only by `ling web` for repo work from phone chats; write access to every repository, never on a protected branch's push allowlist unless the owner allows `main` for that repository (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §4.2).
 - **Team accounts:** this project's fleet adds the 15 ORGANISATION team users, so agents commit and push as the team that owns the change. The product adds none by default.
 
 ### 2.3 Configuration (generated, not edited by hand)
