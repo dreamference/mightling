@@ -1068,3 +1068,7 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .diagram { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--raised); overflow-x: auto; }
 .diagram-picture svg { max-width: 100%; height: auto; }
 .diagram-source summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+/* What the agent remembers (DESKTOP §16 B17). */
+.memory-files textarea { font-family: var(--font-code); font-size: 12.5px; }
+.memory-file .buttons { display: flex; gap: 6px; margin-bottom: 8px; }

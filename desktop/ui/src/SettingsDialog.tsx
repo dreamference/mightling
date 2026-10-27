@@ -758,11 +758,45 @@ function Memories({ readConfig, writeConfig, notice, memoryStatus, resetMemories
           <p className="dialog-note">Off by default. When on, Mightling keeps a copy of each Ask question and its answers as a Markdown file under ~/.mightling/ask-history/ and gives the agent a skill, earlier-questions, to search and read them on this machine, read only. Incognito questions are never kept, archived ones are removed, and turning this off deletes the copies.</p>
         </fieldset>
       ) : null}
+      {bridge.memoryFiles.available() ? <MemoryFiles notice={notice} /> : null}
       <p className="dialog-note">{status ? `${status.v2ConsolidatedThreads} thread${status.v2ConsolidatedThreads === 1 ? "" : "s"} remembered${status.v2Ready ? "" : "; the memories are still being made"}.` : ""} /memories in a thread turns them off or on for that thread.</p>
       <div className="buttons dialog-buttons">
         <button className="danger-button" onClick={() => window.confirm("Delete everything the agent remembers? This cannot be undone.") && resetMemories().then(() => memoryStatus().then(setStatus)).catch(notice)}>Delete the memories</button>
       </div>
     </>
+  );
+}
+
+/** What the agent remembers, one file at a time (DESKTOP §16 B17): shown, edited, saved. */
+function MemoryFiles({ notice }: { notice: (error: unknown) => void }) {
+  const [files, setFiles] = useState<bridge.MemoryFile[] | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const load = useCallback(() => bridge.memoryFiles.list().then((list) => { setFiles(list); setDrafts({}); }).catch((error) => { setFiles([]); notice(error); }), [notice]);
+  useEffect(() => { void load(); }, [load]);
+  if (files === null) return null;
+  return (
+    <fieldset className="memory-files">
+      <legend>What the agent remembers</legend>
+      {files.length === 0 ? <p className="dialog-note">Nothing yet: the memories are made from finished threads, a while after they end.</p> : files.map((file) => {
+        const text = drafts[file.name] ?? file.text;
+        const changed = drafts[file.name] !== undefined && drafts[file.name] !== file.text;
+        return (
+          <div key={file.name} className="memory-file">
+            <label className="field">
+              <span><code>{file.name}</code>: {file.about}</span>
+              <textarea rows={8} aria-label={file.name} value={text} readOnly={file.cut} spellCheck={false} onChange={(event) => setDrafts({ ...drafts, [file.name]: event.target.value })} />
+            </label>
+            {file.cut ? <p className="dialog-note">Too long to edit here; open it from ~/.mightling/memories/.</p> : (
+              <div className="buttons">
+                <button className="primary" disabled={!changed} onClick={() => void bridge.memoryFiles.save(file.name, text).then(load).catch(notice)}>Save</button>
+                <button disabled={!changed} onClick={() => setDrafts(({ [file.name]: _gone, ...rest }) => rest)}>Undo</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <p className="dialog-note">Edit a line to correct it, or delete it so the agent forgets it. The memory pipeline reads your edits the next time it brings the memories up to date.</p>
+    </fieldset>
   );
 }
 

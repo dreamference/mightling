@@ -503,6 +503,20 @@ export const incognito = {
  * Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4), the desktop app's only: the copies the
  * main process keeps while Settings › Memories has it on.
  */
+/** The memory files (DESKTOP §16 B17): the summary and the index the memory pipeline writes; the app only. */
+export interface MemoryFile {
+  name: string;
+  about: string;
+  text: string;
+  modified: number;
+  cut: boolean;
+}
+export const memoryFiles = {
+  available: () => host() === "electron",
+  list: () => send<MemoryFile[]>({ type: "memories/files" }),
+  save: (name: string, text: string) => send<null>({ type: "memories/save", name, text }),
+};
+
 export const recall = {
   available: () => host() === "electron",
   index: () => send<Record<string, number>>({ type: "recall/index" }),

@@ -148,6 +148,9 @@ export type FromView =
   | { type: "work/attach"; name: string; kind: "image" | "file"; data: string }
   /** A file shown in the system's file manager (DESKTOP §16 B14). */
   | { type: "open/reveal"; path: string }
+  /** The memory files, and an edit of one (memoryfiles.ts, DESKTOP §16 B17). */
+  | { type: "memories/files" }
+  | { type: "memories/save"; name: string; text: string }
   | { type: "night/list" }
   | { type: "night/report"; name: string }
   | { type: "night/add"; repo: string; task: string; test: string | null; on?: string | null; bestOf?: number | null }
