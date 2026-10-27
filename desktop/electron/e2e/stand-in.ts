@@ -387,6 +387,19 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
         }, planned ? 4000 : 300);
       }
+      // A side chat (DESKTOP §16 B37): unkept and read-only, known by the recap its first message carries; its turns stream.
+      const sideWords = String(((p.input || [])[0] || {}).text || "");
+      if (String(p.threadId).startsWith("e") && unlisted[p.threadId] && (unlisted[p.threadId].side || sideWords.includes("Context: this was asked in the conversation"))) {
+        unlisted[p.threadId].side = true;
+        answer({ turn: { id, items: [], status: "inProgress", error: null } });
+        say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
+        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "userMessage", id: "u" + id, content: p.input || [] } } });
+        return setTimeout(() => {
+          const sideAnswer = { type: "agentMessage", id: "m" + id, text: sideWords.includes("Context:") ? "Left: the docs. The retry fix is in." : "Yes, only the docs." };
+          say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: sideAnswer } });
+          say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [sideAnswer], status: "completed", error: null } } });
+        }, 300);
+      }
       if (String(p.threadId).startsWith("e")) {
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
         // A read-only, unkept thread: a commit message, or (Phase 3's suggested prompts) three follow-ups.

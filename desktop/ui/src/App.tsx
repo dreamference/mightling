@@ -72,6 +72,8 @@ import { predict } from "./suggestions";
 import { MessageBoardView } from "./MessageBoardView";
 import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
+import { SideChat } from "./SideChat";
+import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages } from "./sidechat";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
 import { nearBottom } from "./follow";
@@ -1601,17 +1603,81 @@ export function App() {
   };
   const copyLink = (threadId: string) => void copyText(threadLink(threadId)).then((done) => done && dispatch({ type: "notice", message: "Copied a link to the thread." }));
 
-  /** Side chat (Ctrl+Alt+S): a copy of the thread asked for a short recap, beside the running one, never interrupting it. */
-  const sideChat = async () => {
-    if (!selected) return;
-    if (selected.thread.ephemeral) return notice("An incognito question has no side chat: it would be saved.");
+  /** A saved recap (the thread's menu; Ctrl+Alt+S's before DESKTOP §16 B37): a copy of the thread asked for a short recap, beside the running one, never interrupting it. */
+  const savedRecap = async (source: Thread) => {
     try {
-      const thread = await forkThread(client, selected.thread.id, servedModel);
-      await client.request("thread/name/set", { threadId: thread.id, name: `Side chat: ${selected.thread.name || selected.thread.preview || "thread"}`.slice(0, 120) });
+      const thread = await forkThread(client, source.id, servedModel);
+      await client.request("thread/name/set", { threadId: thread.id, name: `Recap: ${source.name || source.preview || "thread"}`.slice(0, 120) });
       await client.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "In a few lines: where does this work stand, what was done, and what is left? Do not change anything.", text_elements: [] }] });
       if (bridge.host() === "electron") await bridge.popOut(thread.id);
       else await openThread(thread.id);
     } catch (error) {
+      notice(error);
+    }
+  };
+
+  // The side chat beside the thread (Ctrl+Alt+S, `/side`; DESKTOP §16 B37, sidechat.ts): an unkept
+  // thread, its first message carrying the thread's recap. Closed (or the thread left), it is gone:
+  // its turn stopped and the server let go of it; it had no folder of its own to delete.
+  const [side, setSide] = useState<{ id: string; parent: Thread; title: string; recap: string[]; asked: boolean; keeping: boolean } | null>(null);
+  const sideRef = useRef(side);
+  sideRef.current = side;
+  const closeSide = async () => {
+    const open = sideRef.current;
+    if (!open) return;
+    sideRef.current = null;
+    setSide(null);
+    const active = stateRef.current.threads[open.id]?.activeTurnId;
+    if (active) await client.request("turn/interrupt", { threadId: open.id, turnId: active }).catch(() => {});
+    await client.request("thread/unsubscribe", { threadId: open.id }).catch(() => {});
+    dispatch({ type: "archived", threadId: open.id });
+  };
+  useEffect(() => {
+    if (sideRef.current && sideRef.current.parent.id !== state.selected) void closeSide();
+  }, [state.selected]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sideChat = async () => {
+    if (!selected) return;
+    if (sideRef.current) return document.querySelector<HTMLTextAreaElement>(".side-chat textarea")?.focus();
+    if (selected.thread.ephemeral) return notice("An incognito question has no side chat.");
+    const parent = selected.thread;
+    try {
+      const started = await client.request("thread/start", sideChatParams(parent, servedModel) as unknown as ParamsOf<"thread/start">);
+      // In the window's state, so its turns stream into the pane, but never the thread in front.
+      dispatch({ type: "notification", notification: { method: "thread/started", params: { thread: started.thread } } as ServerNotification });
+      setSide({ id: started.thread.id, parent, title: parent.name || parent.preview || "thread", recap: threadContext(selected), asked: false, keeping: false });
+    } catch (error) {
+      notice(error);
+    }
+  };
+  const sendSide = async (text: string) => {
+    const open = sideRef.current;
+    if (!open) return;
+    const words = open.asked ? text : firstMessage(text, open.title, open.recap);
+    setSide({ ...open, asked: true });
+    try {
+      await sendMessage(client, { threadId: open.id, activeTurnId: stateRef.current.threads[open.id]?.activeTurnId ?? null, input: turnInput(words, []), followUp: prefs.followUp });
+    } catch (error) {
+      notice(error);
+    }
+  };
+  /** Keep as a thread: a saved thread where the first one is (a new question for an Ask one), its first message what the side chat said. */
+  const keepSide = async () => {
+    const open = sideRef.current;
+    if (!open || open.keeping) return;
+    const messages = sideMessages(stateRef.current.threads[open.id] ?? null, false);
+    if (!messages.length) return notice("Nothing to keep yet: say something in the side chat first.");
+    setSide({ ...open, keeping: true });
+    try {
+      const params = isAskThread(open.parent, askRoot)
+        ? { model: servedModel, prompt: ASK_PROMPT }
+        : { cwd: open.parent.cwd, model: servedModel, permissions: profile, ...(open.parent.projectId ? { projectId: open.parent.projectId } : {}), ...windowToolFields() };
+      const started = await client.request("thread/start", params as unknown as ParamsOf<"thread/start">);
+      await client.request("thread/name/set", { threadId: started.thread.id, name: keptName(open.title) });
+      await client.request("turn/start", { threadId: started.thread.id, input: turnInput(keptMessage(open.title, messages), []) });
+      await closeSide();
+      dispatch({ type: "opened", thread: { ...started.thread, name: keptName(open.title) } });
+    } catch (error) {
+      setSide((current) => (current ? { ...current, keeping: false } : current));
       notice(error);
     }
   };
@@ -2537,6 +2603,7 @@ export function App() {
                 <button role="menuitem" onClick={() => markUnread(thread.id)}>Mark unread</button>
                 {HOST === "electron" ? <button role="menuitem" onClick={() => void bridge.popOut(thread.id).catch(notice)}>Open in a window of its own</button> : null}
                 <button role="menuitem" onClick={() => copyLink(thread.id)}>Copy link</button>
+                <button role="menuitem" onClick={() => void savedRecap(thread)} title="A saved copy of the thread, asked where the work stands">Recap in a saved copy</button>
                 <button role="menuitem" onClick={() => void bridge.homeFolder().catch(() => null).then((home) => setExporting({ thread, title: label, home }))}>Export…</button>
                 {view === "work" ? (
                   <>
@@ -2994,6 +3061,10 @@ export function App() {
             onClose={(id) => setTasks((list) => list.filter((task) => task.id !== id))}
             onEdit={() => setEditingEnv(true)} onHide={() => updatePrefs({ bottomPanel: false })}
             detach={bridge.windows.available() && selected ? { docks: false, run: () => detachPane("terminal") } : null} />
+        ) : null}
+        {side ? (
+          <SideChat title={side.title} recapped={side.recap.length} messages={sideMessages(state.threads[side.id] ?? null)} running={Boolean(state.threads[side.id]?.activeTurnId)}
+            keepDisabled={side.keeping} onSend={(text) => void sendSide(text)} onKeep={() => void keepSide()} onClose={() => void closeSide()} />
         ) : null}
       </main>
       {editingEnv && envProject ? (
