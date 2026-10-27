@@ -255,15 +255,33 @@ pub fn export_flag() {
     }
 }
 
-/// Refuses a session whose setting names no mode, with the words the user typed. Returns the
-/// setting otherwise.
+/// Why the mode cannot run on Windows yet: Codex there dispatches none of the hooks the mode
+/// registers (and would run them through PowerShell, which the hook lines are not written for), so
+/// `CLAUDE.md`, the settings files' hooks and the permission rules would all be silently skipped.
+/// The mode refuses to start instead (WINDOWS_ARM §23.4 W1).
+pub const UNAVAILABLE_ON_WINDOWS: &str =
+    "compatibility mode isn't available on Windows yet: its hooks and permission rules can't be enforced there";
+
+/// Refuses `mode` where its hooks cannot be enforced: the mode on Windows. Never a session with the
+/// rules ignored.
+pub fn refuse_where_unenforced(mode: Mode, windows: bool) -> anyhow::Result<()> {
+    if mode == Mode::Claude && windows {
+        anyhow::bail!("{UNAVAILABLE_ON_WINDOWS}");
+    }
+    Ok(())
+}
+
+/// Refuses a session whose setting names no mode, with the words the user typed, and the mode
+/// where it cannot be enforced ([`refuse_where_unenforced`]). Returns the setting otherwise.
 pub fn check_at_start(original_args: &[OsString]) -> anyhow::Result<Resolved> {
     if let Some(value) = flag_value(original_args)
         && Mode::parse(&value).is_none()
     {
         anyhow::bail!("{}", unknown_value(&format!("`{FLAG} {value}`")));
     }
-    resolve().map_err(|err| anyhow::anyhow!(err))
+    let resolved = resolve().map_err(|err| anyhow::anyhow!(err))?;
+    refuse_where_unenforced(resolved.mode, cfg!(windows))?;
+    Ok(resolved)
 }
 
 /// The lines a session's start shows about the mode: what was ignored, and, for a session someone
@@ -291,6 +309,9 @@ fn use_mode(value: &str) -> (Vec<String>, i32) {
     let Some(mode) = Mode::parse(value) else {
         return (vec![unknown_value(&format!("`{value}`"))], 2);
     };
+    if let Err(err) = refuse_where_unenforced(mode, cfg!(windows)) {
+        return (vec![err.to_string()], 1);
+    }
     let Some(path) = user_config_file() else {
         return (vec!["Could not find the configuration file to write: HOME is not set.".to_string()], 1);
     };
@@ -528,6 +549,16 @@ pub fn run_cli(args: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mode_refuses_to_start_on_windows_and_only_there() {
+        let refused = refuse_where_unenforced(Mode::Claude, true).unwrap_err().to_string();
+        assert_eq!(refused, UNAVAILABLE_ON_WINDOWS);
+        assert!(refused.contains("isn't available on Windows yet"));
+        assert!(refuse_where_unenforced(Mode::Claude, false).is_ok());
+        assert!(refuse_where_unenforced(Mode::Off, true).is_ok());
+        assert!(refuse_where_unenforced(Mode::Off, false).is_ok());
+    }
 
     fn os(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()
