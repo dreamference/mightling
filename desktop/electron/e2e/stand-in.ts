@@ -129,12 +129,15 @@ if (process.argv[2] === "night" && process.argv[3] === "every") {
   if (process.argv[4] === "drop") { fs.writeFileSync(kept, JSON.stringify(list.filter((entry) => entry.id !== process.argv[5]))); console.log("Repeating task " + process.argv[5] + " dropped."); process.exit(0); }
   const args = process.argv.slice(5);
   const weekly = args[0] === "--weekly" ? args[1] : null;
+  // DESKTOP §16 B42: on chosen weekdays, every N nights, on a day of the month, kept as the real template keeps them.
+  const flag = ["--days", "--every", "--monthly"].find((name) => args[0] === name);
+  const more = flag === "--days" ? { cadence: "days", days: args[1].split(",") } : flag === "--every" ? { cadence: "every", every: Number(args[1]) } : flag === "--monthly" ? { cadence: "monthly", day: Number(args[1]) } : {};
   const test = args.includes("--test") ? args[args.indexOf("--test") + 1] : null;
   const task = args.slice(args.indexOf("--") + 1).join(" ");
   const id = "r" + String(list.length + 1).padStart(12, "0");
-  list.push({ id, repo: process.cwd(), task, test, cadence: weekly ? "weekly" : "daily", weekday: weekly, created: "2026-10-21T12:00:00+01:00", last_queued: null, last_error: null });
+  list.push({ id, repo: process.cwd(), task, test, cadence: weekly ? "weekly" : "daily", weekday: weekly, ...more, created: "2026-10-21T12:00:00+01:00", last_queued: null, last_error: null });
   fs.writeFileSync(kept, JSON.stringify(list));
-  console.log("Repeating task " + id + ", " + (weekly ? "every " + weekly : "every night") + ".");
+  console.log("Repeating task " + id + ", " + (weekly ? "every " + weekly : flag ? flag.slice(2) + " " + args[1] : "every night") + ".");
   process.exit(0);
 }
 // ling night apply <id> (DESKTOP §16 B40): says where it ran, as the real one names the checkout.

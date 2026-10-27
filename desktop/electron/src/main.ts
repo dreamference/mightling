@@ -714,7 +714,8 @@ export async function main(options: MainOptions): Promise<void> {
         if (!admin) throw new Error("ling-admin is not on PATH: repeating tasks live where Night Shift runs, on the node");
         if (message.type === "night/every-list") return listRepeating(admin);
         if (message.type === "night/every-drop") return dropRepeating(admin, message.id);
-        return addRepeating(admin, message.repo, message.task, message.test, message.cadence, message.weekday);
+        // Each cadence's parameter is checked in cadence.ts (cadenceArgs) before ling-admin runs.
+        return addRepeating(admin, message.repo, message.task, message.test, message.cadence, { weekday: message.weekday, days: message.days, every: message.every, day: message.day });
       }
       case "night/details": {
         const home = codexHome();

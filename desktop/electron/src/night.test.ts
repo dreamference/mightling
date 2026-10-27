@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { addTask, dropTask, nightStatus, nodeName, readReport, readReports, readTasks } from "./night";
+import { addRepeating, addTask, dropTask, listRepeating, nightStatus, nodeName, readReport, readReports, readTasks } from "./night";
 import { taskDetails, transcriptOf } from "./night";
 import { applyTask, reportBlock, taskNote } from "./night";
 
@@ -140,5 +140,39 @@ console.log("Applied night/20261027-2200-abc here as uncommitted changes.");
     await expect(applyTask(ling, home, "a b")).rejects.toThrow("not a task");
     await expect(applyTask(ling, "relative", "x")).rejects.toThrow("folder");
     await expect(applyTask(ling, path.join(home, "missing"), "x")).rejects.toThrow("folder");
+  });
+});
+
+describe("repeating tasks on chosen weekdays, every N nights or a day of the month (DESKTOP §16 B42)", () => {
+  it("passes each cadence's checked flags to ling-admin and reads its templates back", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-every-")));
+    const log = path.join(home, "calls.txt");
+    const admin = nodeScript(home, "ling-admin", `require("fs").appendFileSync(${JSON.stringify(log)}, process.cwd() + "|" + process.argv.slice(2).join(" ") + "\\n");
+if (process.argv[4] === "list") {
+  console.log(JSON.stringify({ id: "r000000000001", repo: "/w/app", task: "Audit", test: null, cadence: "days", weekday: null, days: ["mon", "wed"], every: null, day: null, last_queued: null, last_error: null }));
+  console.log(JSON.stringify({ id: "r000000000002", repo: "/w/app", task: "Backup", test: "pytest", cadence: "every", weekday: null, days: null, every: 3, day: null, last_queued: "2026-10-27", last_error: null }));
+  console.log(JSON.stringify({ id: "r000000000003", repo: "/w/app", task: "Clean", test: null, cadence: "monthly", weekday: null, days: null, every: null, day: 31, last_queued: null, last_error: null }));
+  console.log(JSON.stringify({ id: "r000000000004", repo: "/w/app", task: "Later", test: null, cadence: "hourly", last_queued: null, last_error: null }));
+} else {
+  console.log("OK");
+}
+`);
+    await addRepeating(admin, home, "Audit", null, "days", { days: ["mon", "wed"] });
+    await addRepeating(admin, home, "Backup", "pytest", "every", { every: 3 });
+    await addRepeating(admin, home, "Clean", null, "monthly", { day: 31 });
+    for (const [cadence, options] of [["every", { every: 0 }], ["every", { every: "3; rm" }], ["monthly", { day: 32 }], ["days", { days: "mon,--test" }], ["days", "mon"], ["hourly", {}]] as const) {
+      await expect(addRepeating(admin, home, "Bad", null, cadence, options)).rejects.toThrow();
+    }
+    expect(fs.readFileSync(log, "utf8").trim().split("\n")).toEqual([
+      `${home}|night every add --days mon,wed -- Audit`,
+      `${home}|night every add --every 3 --test pytest -- Backup`,
+      `${home}|night every add --monthly 31 -- Clean`,
+    ]);
+
+    const tasks = await listRepeating(admin);
+    expect(tasks.map((entry) => entry.id)).toEqual(["r000000000001", "r000000000002", "r000000000003"]);
+    expect(tasks[0]).toMatchObject({ cadence: "days", days: ["mon", "wed"], every: null, day: null });
+    expect(tasks[1]).toMatchObject({ cadence: "every", every: 3, test: "pytest", lastQueued: "2026-10-27" });
+    expect(tasks[2]).toMatchObject({ cadence: "monthly", day: 31, days: null });
   });
 });
