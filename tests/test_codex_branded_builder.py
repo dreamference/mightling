@@ -142,7 +142,9 @@ def test_the_patches_stay_small():
     # line in SandboxManager::transform giving the read-only sandbox the network below
     # /airgapped on): the series' 59 `index` lines, which `git apply` does not need, were dropped
     # to make room (1,770 bytes); 56,757 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 58_000
+    # Raised to 60,000 on 2026-10-26 with the owner's approval, for the Windows fixes W1/W2/W9
+    # (0032 guard fails closed, 0033 sandbox window station, 0034 doctor on Windows); 59,496 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 60_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
