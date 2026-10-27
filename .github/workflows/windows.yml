@@ -291,6 +291,50 @@ jobs:
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+      # The compatibility mode's hooks run through cmd.exe (WINDOWS_ARM §23.4 W1): CLAUDE.md reaches
+      # the model through the memory hook, and a deny rule refuses a tool call through the guard.
+      # The stand-in model asks for one shell command that would write probe.txt; with the rule the
+      # call must come back refused and the file must not exist, without it the file must exist.
+      - name: Compatibility mode hooks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          Write-Host "interactive: $([Environment]::UserInteractive), session: $((Get-Process -Id $PID).SessionId)"
+          $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8798"
+          foreach ($case in @("deny", "control")) {
+            $ws = Join-Path $env:RUNNER_TEMP "compat-$case"
+            New-Item -ItemType Directory -Force $ws | Out-Null
+            Set-Location $ws
+            git init -q
+            Set-Content -Path CLAUDE.md -Value "The magic word for this project is BLUEBERRY."
+            $record = Join-Path $env:RUNNER_TEMP "requests-$case.jsonl"
+            $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8798", "--shell-call", '"echo probe > probe.txt"', "--record", "`"$record`""
+            Start-Sleep -Seconds 3
+            $ErrorActionPreference = "Continue"
+            try {
+              if ($case -eq "deny") {
+                $out = & $ling --compat claude --config windows.sandbox=elevated -p "What is the magic word?" --disallowedTools "Bash(echo *)" 2>&1 | Out-String
+              } else {
+                $out = & $ling --compat claude --config windows.sandbox=elevated -p "What is the magic word?" 2>&1 | Out-String
+              }
+              Write-Host "$case`: exit $LASTEXITCODE, $out"
+            } finally {
+              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+            }
+            $ErrorActionPreference = "Stop"
+            $requests = Get-Content $record | ForEach-Object { $_ | ConvertFrom-Json }
+            if (-not ((Get-Content -Raw $record) -match "BLUEBERRY")) { throw "${case}: CLAUDE.md did not reach the model (the memory hook did not run)" }
+            $outputs = @($requests | ForEach-Object { $_.input } | Where-Object { $_.type -like "*call_output" } | ForEach-Object { "$($_.output)" })
+            Write-Host "${case}: tool output: $outputs"
+            if ($case -eq "deny") {
+              if (-not ($outputs -match "denies this")) { throw "the deny rule did not refuse the call (the guard did not run)" }
+              if (Test-Path probe.txt) { throw "the denied command ran: probe.txt exists" }
+            } else {
+              if ($outputs -match "denies this") { throw "the control run was refused" }
+              if (-not (Test-Path probe.txt)) { throw "the control command did not run, so the deny case proves nothing" }
+            }
+          }
 
   # The desktop app for Windows (DESKTOP_PARITY Phase 3 item 12; WINDOWS_ARM §11, superseded by
   # Electron): desktop/electron packaged natively on each runner with this run's ling.exe and

@@ -705,7 +705,7 @@ Mightling's own settings stay where they are (`dreamference.toml`, `~/.config/dr
 | `additionalDirectories` | writable roots |
 
 **Built (2026-10-21)** in `ling-rs/src/compat_permissions.rs`.
-- **The guard:** Claude Code's rules from the settings files (a repository's only in a trusted folder) and from `--allowedTools`/`--disallowedTools` go to one `PreToolUse` hook, `ling compat guard`. The launcher registers and trusts it with the session's other hooks; there are no exec-policy files.
+- **The guard:** Claude Code's rules from the settings files (a repository's only in a trusted folder) and from `--allowedTools`/`--disallowedTools` go to one `PreToolUse` hook, `ling compat guard`. The launcher registers and trusts it with the session's other hooks; there are no exec-policy files. The guard fails closed: a guard that cannot start, crashes or cannot read its input refuses the call (a `||` fallback on its hook line prints the refusal), since Codex lets a call through when a hook fails. On Windows its rules go on the line as hex words, for `cmd.exe` (WINDOWS_ARM §23.4 W1).
   - Deny is checked first, then ask, then allow.
   - A **deny** rule refuses the call and names the rule.
   - An **ask** rule refuses it too and says so: a hook cannot make Codex ask, so the mode takes the safe direction.
