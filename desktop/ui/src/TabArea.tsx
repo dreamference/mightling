@@ -3,7 +3,7 @@
 // hidden). Every open tab stays mounted, the ones not in front hidden, so a review comment being
 // written or a file's scroll survives a switch.
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "./icons";
 import { tabLabel, type WorkspaceTab } from "./tabs";
@@ -21,11 +21,17 @@ export interface TabAreaProps {
   workspaceLayout: "split" | "tabs" | "chat";
   setWorkspaceLayout: (layout: "split" | "tabs" | "chat") => void;
   render: (tab: WorkspaceTab) => ReactNode;
+  /** New tab's menu (DESKTOP §16 B28): a terminal in the tab area, a preview; null for one this window cannot open. */
+  onNewTab?: { terminal: (() => void) | null; preview: (() => void) | null };
 }
 
 export function TabArea(props: TabAreaProps) {
   const front = props.tabs.find((tab) => tab.key === props.active) ?? props.tabs[0] ?? null;
   const strip = useRef<HTMLSpanElement>(null);
+  const [newMenu, setNewMenu] = useState(false);
+  const newChoices: [string, () => void][] = [];
+  if (props.onNewTab?.terminal) newChoices.push(["Terminal", props.onNewTab.terminal]);
+  if (props.onNewTab?.preview) newChoices.push(["Preview", props.onNewTab.preview]);
   // The tab in front stays in sight when the strip scrolls.
   useEffect(() => {
     strip.current?.querySelector(".tab.selected")?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -43,12 +49,22 @@ export function TabArea(props: TabAreaProps) {
             return (
               <span key={tab.key} className={`tab${selected ? " selected" : ""}`} role="tab" aria-selected={selected} title={tab.kind === "file" ? tab.path : tab.kind === "preview" ? tab.url : label} data-path={tab.kind === "file" ? tab.path : undefined}
                 onClick={() => props.onSelect(tab.key)} onAuxClick={(event) => { if (event.button === 1) props.onClose(tab.key); }}>
-                <Icon name={tab.kind === "review" ? "fileDiff" : tab.kind === "preview" ? "globe" : tab.kind === "prs" ? "gitPullRequest" : "file"} size={13} /> <span className="tab-label">{label}</span>
+                <Icon name={tab.kind === "review" ? "fileDiff" : tab.kind === "preview" ? "globe" : tab.kind === "prs" ? "gitPullRequest" : tab.kind === "terminal" ? "terminal" : "file"} size={13} /> <span className="tab-label">{label}</span>
                 <button className="icon" aria-label={`Close the ${label} tab`} title={`Close (${shortcutLabel("closeTab")})`} onClick={(event) => { event.stopPropagation(); props.onClose(tab.key); }}><Icon name="x" size={12} /></button>
               </span>
             );
           })}
         </span>
+        {newChoices.length ? (
+          <span className="new-tab">
+            <button className="icon bar-action" aria-label="New tab" aria-haspopup="menu" aria-expanded={newMenu} title="New tab" onClick={() => setNewMenu((open) => !open)}><Icon name="plus" size={14} /></button>
+            {newMenu ? (
+              <span className="menu new-tab-menu" role="menu" onMouseLeave={() => setNewMenu(false)}>
+                {newChoices.map(([label, run]) => <button key={label} role="menuitem" onClick={() => { setNewMenu(false); run(); }}>{label}</button>)}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
         <span className="spacer" />
         <span className="segmented layout-switch" role="radiogroup" aria-label="Layout">
           <button role="radio" aria-checked={props.workspaceLayout === "split"} className={props.workspaceLayout === "split" ? "selected" : ""} title={`Beside the thread (${shortcutLabel("cycleLayout")} cycles)`} onClick={() => props.setWorkspaceLayout("split")}>Split</button>

@@ -98,6 +98,8 @@ export interface Prefs {
   reviewDelivery: "inline" | "detached";
   /** The shell terminal tabs run, as a login shell; null for the user's `$SHELL`. */
   terminalShell: string | null;
+  /** Where a new terminal opens (DESKTOP §16 B28): the bottom panel, or a tab in the tab area. */
+  terminalPlace: "panel" | "tabs";
   /** Commands in the thread: output open while running, always folded, or not shown. */
   commandOutput: "running" | "collapsed" | "hidden";
   /** Whether the bottom panel is open (Ctrl+J). */

@@ -57,7 +57,8 @@ import { artifactKind, createdArtifacts } from "./artifacts";
 import { keptQuestions, transcript } from "./recall";
 import { FileSearch } from "./FileSearch";
 import { TabArea } from "./TabArea";
-import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, withTab, withoutTab, type WorkspaceTab } from "./tabs";
+import { PR_TAB, REVIEW_TAB, fileTab, previewTab, surfaceOf, tabbedTerminals, terminalTab, withTab, withoutTab, type WorkspaceTab } from "./tabs";
+import { TerminalView } from "./TerminalView";
 import { PreviewTab } from "./PreviewTab";
 import { PullRequestsTab } from "./PullRequestsTab";
 import { SubagentsPanel } from "./SubagentsPanel";
@@ -1863,7 +1864,7 @@ export function App() {
    * for), in the folder it works in, under the composer's permissions. In the app every window is
    * told of it, and of its exit, which the server answers to this window alone.
    */
-  const openTerminal = (title = "Terminal", script: string | null = null, forThread: string | null = null) => {
+  const openTerminal = (title = "Terminal", script: string | null = null, forThread: string | null = null, place: Prefs["terminalPlace"] = prefsRef.current.terminalPlace) => {
     const other = forThread !== null && forThread !== selected?.thread.id ? state.threads[forThread]?.thread ?? null : null;
     const cwd = other ? other.cwd : workFolder ?? (view === "work" ? newCwd.trim() || null : null);
     if (!cwd) return notice("Open a thread in a project, or name a project folder, to open a terminal there.");
@@ -1875,11 +1876,21 @@ export function App() {
     setTerminals((list) => [...list, session]);
     if (bridge.terminals.available()) bridge.terminals.publish(session).catch(notice);
     if (other) return;
+    // In the tab area when Settings say so (DESKTOP §16 B28); an environment's action stays in the panel.
+    if (place === "tabs" && script === null) {
+      const tab = terminalTab(session.processId, title);
+      setTabs((list) => withTab(list, tab));
+      setActiveTab(tab.key);
+      if (prefsRef.current.layout === "chat") updatePrefs({ layout: "split" });
+      setFront({ id: session.processId, tick: Date.now() });
+      return;
+    }
     updatePrefs({ bottomPanel: true });
     setFront({ id: session.processId, tick: Date.now() });
   };
 
   const closeTerminal = (processId: string) => {
+    setTabs((list) => list.filter((tab) => !(tab.kind === "terminal" && tab.processId === processId)));
     const session = terminals.find((entry) => entry.processId === processId);
     if (session && session.exitCode === null) hub.terminate(processId).catch(() => {});
     hub.forget(processId);
@@ -2316,6 +2327,12 @@ export function App() {
     } else if (matches(event, keyAction("recentModels"))) {
       event.preventDefault();
       setPicker("recent");
+    } else if (matches(event, keyAction("terminal")) && view === "work" && prefsRef.current.terminalPlace === "tabs") {
+      // Terminals in the tab area (DESKTOP §16 B28): the latest one in front, or a new one.
+      event.preventDefault();
+      const tabbed = tabs.filter((tab) => tab.kind === "terminal");
+      if (tabbed.length) setActiveTab(tabbed[tabbed.length - 1].key);
+      else openTerminal();
     } else if (matches(event, keyAction("terminal")) && view === "work") {
       event.preventDefault();
       const mine = terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null) && entry.exitCode === null);
@@ -2961,7 +2978,7 @@ export function App() {
           </div>
         ) : prefs.bottomPanel && view === "work" && bridge.git.available() ? (
           <BottomPanel tasks={tasks} environment={environment} problems={envs?.problems ?? []} project={envProject}
-            terminals={terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null))} hub={hub} front={front}
+            terminals={terminals.filter((entry) => entry.threadId === (selected?.thread.id ?? null) && !tabbedTerminals(tabs).has(entry.processId))} hub={hub} front={front}
             onNewTerminal={() => openTerminal()} onCloseTerminal={closeTerminal} onSendToThread={sendTerminal}
             onRun={runAction} onStop={(id) => void bridge.stopTask(id).catch(notice)}
             onClose={(id) => setTasks((list) => list.filter((task) => task.id !== id))}
@@ -2977,15 +2994,19 @@ export function App() {
         <TabArea tabs={paneTabs} active={paneActive?.key ?? null} onSelect={setActiveTab} onClose={(key) => {
           const tab = tabs.find((entry) => entry.key === key);
           if (tab) closedSurfaces.close(surfaceOf(tab));
+          if (tab?.kind === "terminal") closeTerminal(tab.processId);
           closeTabKey(key);
         }}
+          onNewTab={{ terminal: view === "work" ? () => openTerminal("Terminal", null, null, "tabs") : null, preview: bridge.preview.available() ? () => openPreview("") : null }}
           workspaceLayout={prefs.layout} setWorkspaceLayout={(layout) => updatePrefs({ layout })}
           treeShown={paneTree} onToggleTree={composeRoot ? () => (view === "ask" ? setAskTree : setTreeShown)((shown) => !shown) : null}
           tree={paneTree && composeRoot ? (
             <FileTree root={composeRoot} client={client} listen={listen} selected={paneActive?.kind === "file" ? paneActive.key.slice(5) : null}
               onOpen={(path) => openFile(path)} onClose={() => (view === "ask" ? setAskTree : setTreeShown)(false)} />
           ) : null}
-          render={(tab) => tab.kind === "prs" ? (
+          render={(tab) => tab.kind === "terminal" ? (
+            <TerminalView hub={hub} processId={tab.processId} visible={paneActive?.key === tab.key} focus={front?.id === tab.processId ? front.tick : 0} />
+          ) : tab.kind === "prs" ? (
             <PullRequestsTab root={composeRoot} thread={selected?.thread.id ?? null} notice={notice}
               onCompose={(text) => setDraft((draft) => (draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text))} />
           ) : tab.kind === "preview" ? (
