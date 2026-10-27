@@ -831,6 +831,9 @@ def host(monkeypatch):
     monkeypatch.setattr(HostSafetySetup, "_mem_available_gb", classmethod(lambda cls: state["mem_available_gb"]))
     monkeypatch.setattr(host_safety_setup.os.path, "exists",
                         lambda path: state["swap_file_exists"] if path == "/swap.img" else os.path.lexists(path))
+    # The machine's own /etc/apparmor.d must not decide a test: a CI runner's image has a profile
+    # for bwrap where this machine has none, and the fix then loads that one instead of ours.
+    monkeypatch.setattr(SandboxPrerequisite, "profiles_attaching", classmethod(lambda cls, binary: []))
     return state
 
 

@@ -1,0 +1,136 @@
+# The release pipeline, every night, on main, with nothing published: release-build.yml, the very
+# jobs release.yml runs (the test suite, the wheel and sdist, ling and its tools for arm64 Linux,
+# the Linux desktop app, the Windows client and desktop installer with its install, start and
+# uninstall, the Intel/AMD Linux and macOS clients and the Mac dmgs), so a platform that broke
+# shows the next morning instead of one release attempt at a time (1.7.1 took seven runs).
+#
+# It never tags, never signs with the release key, never asks for the `release` environment (so
+# no Apple signing either) and never touches a release: those are release.yml's `release` job only.
+# What it uploads stays as this run's artifacts. On failure it opens, or updates, the one issue
+# titled "Release dry run failing" with the failed jobs; the next green run closes it.
+#
+# Scheduled runs are skipped when main has not moved since the last successful dry run. A hand
+# dispatch always runs, on any branch, and so does a push to release-dry-run/** (to try a change to
+# the pipeline before it reaches main).
+name: Release dry run
+
+on:
+  schedule:
+    - cron: "7 2 * * *"
+  workflow_dispatch:
+  push:
+    branches: ["release-dry-run/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dry-run-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Whether to run at all, and the version the builds carry: setup.py's, as a development
+  # pre-release (1.7.1-dev.42), which PEP 440, semver, the Windows installer's numeric version and
+  # the Electron package all accept, and which no release ever carries.
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: setup.py
+          sparse-checkout-cone-mode: false
+      - name: Check
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          base="$(sed -nE 's/^ *version="([0-9]+\.[0-9]+\.[0-9]+)[^"]*",.*/\1/p' setup.py | head -1)"
+          if [[ -z "$base" ]]; then
+            echo "::error::no version=\"X.Y.Z\" in setup.py"
+            exit 1
+          fi
+          echo "version=$base-dev.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "version $base-dev.$GITHUB_RUN_NUMBER"
+          if [[ "$EVENT" == "schedule" ]]; then
+            last="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release-dry-run.yml/runs?branch=main&status=success&per_page=1" \
+              --jq '.workflow_runs[0].head_sha // empty')"
+            if [[ "$last" == "$GITHUB_SHA" ]]; then
+              echo "::notice::main is still at ${GITHUB_SHA:0:12}, which the last successful dry run built; skipped."
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.gate.outputs.version }}
+      # Everything a release can build, the clients and the Mac dmgs included (a release dispatch
+      # leaves build_clients off by default); the rest at the release's defaults.
+      build_clients: true
+      sign: false
+
+  # One issue for a failing dry run, found by its exact title: opened on the first failure, its body
+  # replaced (and a comment added, so watchers hear of it) on each failure after, closed by the
+  # next success. A skipped or cancelled run leaves it as it is.
+  report:
+    needs: [gate, build]
+    if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.run == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PASSED: ${{ needs.gate.result == 'success' && needs.build.result == 'success' }}
+      TITLE: Release dry run failing
+    steps:
+      - name: Open, update or close the issue
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          number="$(gh issue list --state open --limit 200 --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")"
+          if [[ "$PASSED" == "true" ]]; then
+            # Only main's success closes it: a green branch says nothing about main.
+            if [[ -n "$number" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+              gh issue close "$number" --comment "The release dry run passes again at $GITHUB_SHA: $run_url"
+              echo "closed #$number"
+            fi
+            exit 0
+          fi
+          failed="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | "- [\(.name)](\(.html_url)) (\(.conclusion))"')"
+          [[ -n "$failed" ]] || failed="- (no job reported a failure; see the run)"
+          {
+            echo "The nightly release dry run (release-dry-run.yml, the jobs of release-build.yml) failed on \`$GITHUB_REF_NAME\` at $GITHUB_SHA."
+            echo
+            echo "Run: $run_url"
+            echo
+            echo "Failed jobs:"
+            echo
+            echo "$failed"
+            echo
+            echo "A release from this commit would fail the same way. The next successful dry run closes this issue."
+          } > body.md
+          cat body.md
+          if [[ -n "$number" ]]; then
+            gh issue edit "$number" --body-file body.md
+            gh issue comment "$number" --body "Still failing at $GITHUB_SHA: $run_url"
+            echo "updated #$number"
+          else
+            gh issue create --title "$TITLE" --body-file body.md
+          fi

@@ -289,6 +289,10 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
+          # Electron 42's package has no install step: the binary is fetched the first time anything
+          # requires `electron`, and vitest's parallel workers raced each other to fetch it. Once,
+          # here, with one retry, before any test; a no-op when it is already there.
+          node node_modules/electron/install.js || { sleep 15; node node_modules/electron/install.js; }
           npm run typecheck
           npm run package
       # The main process's unit tests, ported to Windows for 1.7.1 (paths compared as the file system

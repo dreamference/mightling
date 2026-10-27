@@ -165,3 +165,4 @@
 /codex-patches/0019-*                           @dreamference/security @dreamference/agent
 /dreamference/vllm_server/sandbox_prerequisite.py   @dreamference/security @dreamference/models
 /.github/workflows/release.yml                  @dreamference/release @dreamference/security
+/.github/workflows/release-build.yml            @dreamference/release @dreamference/security
