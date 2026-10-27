@@ -259,7 +259,7 @@ ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 | `command_seconds` | 60 | one command's time, the same |
 | `telegram_topics` | true | topics as threads when the bot has them (MOONSHOT §14) |
 | `telegram_rich` | false | rich messages built from blocks, until Phase 0 (MOONSHOT §14) |
-| `night_repos` | [] | repositories `/night add` may queue in, besides every one already queued in (§16.8) |
+| `night_repos` | [] | repositories `/night add` may queue in, besides every one already queued in (§16.8). **Being retired:** `/night add` now queues in the chat's current forge repository (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §11.2) |
 | `night_report_to` | ["signal", "matrix"] | which messengers get Night Shift's morning report; Telegram only when named (§16.8) |
 | `new_thread_after_hours` | 4 | a message after this long a silence starts a new thread; 0: never (§16.2; Signal reads it too, through `ling web`) |
 
@@ -327,7 +327,7 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
   - `/night add <repo> <task>`;
   - push opt-in verified on iOS.
 - **Phase 3:**
-  - Work threads on a repository chosen from the phone, with approvals;
+  - Work threads on a repository chosen from the phone, with approvals: superseded by specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md (2026-10-27: every forge repository, a worktree per thread on `phone/<thread>`, repo work on Telegram and Discord only inside the Mini App or the `ling web` link);
   - other messengers, if users ask (Signal through `signal-cli` is the obvious next, with the caveats its own project states).
 
 ## 14. What was built (Phase 1, branch `chat/messengers`, 2026-10-08; merged with §15)

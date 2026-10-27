@@ -221,7 +221,7 @@ What grows is everything around the repositories: job logs, artefacts, dumps, an
 ### 5.3 Private repositories can't leave (O6)
 
 - **Server-side rule:** a private repository can't get a push mirror. The forge's config lists the never-mirror repositories (`archive-pre-rewrite`, `memos`, and any repository marked private), and a `pre-receive` hook on them refuses any push whose target remote isn't the forge itself. The GitHub mirror job (§3.2) skips them by name and by visibility, and fails closed if it can't read a repository's visibility.
-- **The archive:** `archive-pre-rewrite` is imported once from the bundles in `~/backups/rewrite-2026-10-26/` and `-10-08/`, readable by `owner` and `forge-admin` only. It's never cloned by agents, and no runner can check it out: jobs for private repositories are refused.
+- **The archive:** `archive-pre-rewrite` is imported once from the bundles in `~/backups/rewrite-2026-10-26/` and `-10-08/`, readable by `owner` and `forge-admin` only. It's never cloned by agents, and no runner can check it out: jobs for private repositories are refused. **One exception (the owner, 2026-10-27):** a checkout `ling web` makes at the owner's request from a phone chat, read-only for an archived repository (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §5.4).
 - **The test:** `tests/test_forge_private.py`, part of the suite, runs against a throwaway Forgejo in Docker (marked like other container tests, never the real forge). It:
   - creates a private repository;
   - tries to add a push mirror through the API, and asserts refusal;

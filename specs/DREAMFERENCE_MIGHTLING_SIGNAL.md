@@ -488,7 +488,7 @@ All without Signal, without a network, without `ling web` running, and without s
 
 - **Voice notes:** Signal voice messages (AAC) go to `ling web`'s `/api/transcribe` (ASK §7), once it exists, and are answered as text. Answering in voice (text-to-speech) is not planned.
 - **Files out:** a `ling web` route that serves a file from an Ask folder to a paired device, so the bridge can send what the agent wrote ("here is the report: report.pdf").
-- **Work threads:** `/work <project>` starts a Work thread in a repository the owner listed in `[signal] projects`. It uses the default prompt and the workspace-write sandbox, with approvals as in §8. It never offers Full Access.
+- **Work threads:** `/work <project>` starts a Work thread in a repository the owner listed in `[signal] projects`. It uses the default prompt and the workspace-write sandbox, with approvals as in §8. It never offers Full Access. **Superseded (2026-10-27)** by specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md: `/repo` over every forge repository, a worktree per thread, code inline on Signal, Full Access only by the node's policy and a typed confirmation.
 - **Night Shift from the phone:** `/night <task>` queues a Night Shift task (`ling night add`), and the morning report comes back as a message.
 - **A native client:** evaluate presage (Rust, on Signal's libsignal; both AGPL-3.0, compatible with Mightling's licence) to replace the JVM. Ship it if it is maintained, passes the same tests and handles the same edge cases.
 - **Other messengers:** Matrix, through the same bridge shape. WhatsApp and Telegram are out of scope: their bot APIs pass messages through the company's servers in readable form.
