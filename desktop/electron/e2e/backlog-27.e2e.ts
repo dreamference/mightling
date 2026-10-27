@@ -31,7 +31,7 @@ test("B27: a CSV tab is a table, and an HTML file opens in the preview tab from 
     await expect(table.locator("tbody tr").nth(1)).toHaveText(['South "B"950']);
     await tree.getByRole("button", { name: "page.html" }).click();
     await page.getByRole("tabpanel", { name: "page.html" }).getByRole("button", { name: "Open in the preview tab" }).click();
-    await expect(page.getByRole("textbox", { name: "Address" })).toHaveValue(/page\.html$/);
+    await expect(page.getByRole("combobox", { name: "Address" })).toHaveValue(/page\.html$/);
   } finally {
     await close();
   }
