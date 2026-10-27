@@ -117,13 +117,16 @@ def test_a_release_wheel_carries_the_pins_and_code_setup_reads_them_from_it(tmp_
     import shutil
     import zipfile
 
+    # Building needs setuptools in this interpreter (torch brings it; Python 3.12 has none of its own).
+    pytest.importorskip("setuptools")
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml"):
         shutil.copy2(CHECKOUT / name, source / name)
     shutil.copytree(CHECKOUT / "dreamference", source / "dreamference", ignore=shutil.ignore_patterns("__pycache__"))
     quiet = {"check": True, "capture_output": True}
-    subprocess.run([sys.executable, "setup.py", "-q", "sdist", "-d", tmp_path / "dist"], cwd=source, **quiet)
+    sdist_build = [sys.executable, "setup.py", "-q", "sdist", "--formats=gztar", "-d", tmp_path / "dist"]
+    subprocess.run(sdist_build, cwd=source, **quiet)
     (sdist,) = (tmp_path / "dist").glob("*.tar.gz")
     with tarfile.open(sdist) as archive:
         archive.extractall(tmp_path / "unpacked", filter="data")
