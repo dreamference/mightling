@@ -19,11 +19,32 @@ BRIDGE = Path(__file__).resolve().parent.parent / "ling-rs" / "web" / "static" /
 HARNESS = Path(__file__).resolve().parent / "telegram_mini_app_harness.js"
 
 
-def run(hash_: str, answer: dict) -> dict:
+def run(
+    hash_: str,
+    answer: dict | list[dict],
+    *,
+    search: str = "",
+    unpaired: bool = False,
+    reloadable: bool = False,
+    throw_on_storage: bool = False,
+) -> dict:
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
+    options = {
+        "search": search,
+        "unpaired": unpaired,
+        "reloadable": reloadable,
+        "throwOnStorage": throw_on_storage,
+    }
     result = subprocess.run(
-        ["node", str(HARNESS), str(BRIDGE), hash_, json.dumps(answer)],
+        [
+            "node",
+            str(HARNESS),
+            str(BRIDGE),
+            hash_,
+            json.dumps(answer),
+            json.dumps(options),
+        ],
         capture_output=True,
         text=True,
         timeout=30,
@@ -36,6 +57,7 @@ LAUNCH = (
     "#tgWebAppData=query_id%3DAA%26user%3D%257B%2522id%2522%253A42%257D%26auth_date%3D1%26hash%3Dab"
     "&tgWebAppThemeParams=%7B%22bg_color%22%3A%22%23101010%22%7D"
 )
+INIT_DATA = "query_id=AA&user=%7B%22id%22%3A42%7D&auth_date=1&hash=ab"
 
 
 def test_a_telegram_launch_is_checked_before_anything_connects() -> None:
@@ -43,7 +65,7 @@ def test_a_telegram_launch_is_checked_before_anything_connects() -> None:
     assert record["fetches"] == [
         {
             "url": "/api/telegram/check",
-            "body": {"initData": "query_id=AA&user=%7B%22id%22%3A42%7D&auth_date=1&hash=ab"},
+            "body": {"initData": INIT_DATA},
         }
     ]
     assert record["sockets"] == 1
@@ -52,12 +74,19 @@ def test_a_telegram_launch_is_checked_before_anything_connects() -> None:
     assert record["host"] == "telegram"
     assert record["dataTheme"] == "dark"
     assert record["theme"] == "light"
+    assert record["openTarget"] is None
 
 
 def test_a_refused_launch_says_why_and_never_connects() -> None:
-    record = run(LAUNCH, {"ok": False, "reason": "Your Telegram account is not paired."})
+    record = run(
+        LAUNCH,
+        {"ok": False, "reason": "Your Telegram account is not paired."},
+        search="?open=repo:acme/widgets&approval=1",
+    )
     assert record["sockets"] == 0
     assert "Your Telegram account is not paired." in (record["body"] or "")
+    assert record["openTargetBeforeCheck"] is None
+    assert record["openTarget"] is None
 
 
 def test_an_ordinary_browser_tab_is_unchanged() -> None:
@@ -67,3 +96,94 @@ def test_an_ordinary_browser_tab_is_unchanged() -> None:
     assert record["events"] == []
     assert record["host"] is None
     assert record["hasReceiver"] is False
+    assert record["replaced"] is None
+    assert record["openTarget"] is None
+
+
+def test_unpaired_telegram_launch_pairs_shows_code_and_then_runs_launch_check() -> None:
+    record = run(
+        LAUNCH,
+        [
+            {"pending": "req-99", "code": "482 913"},
+            {"status": "pending", "ok": False},
+            {"status": "approved", "ok": True},
+            {"ok": True},
+        ],
+        search="?open=thread:0123abcd&approval=1",
+        unpaired=True,
+    )
+    assert record["openTargetBeforeCheck"] is None
+    assert record["body"] == "Approve this device in the bot | 482 913"
+    assert record["fetches"] == [
+        {"url": "/api/telegram/launch-pair", "body": {"initData": INIT_DATA}},
+        {
+            "url": "/api/telegram/launch-pair?pending=req-99",
+            "headers": {"X-Telegram-Init-Data": INIT_DATA},
+        },
+        {
+            "url": "/api/telegram/launch-pair?pending=req-99",
+            "headers": {"X-Telegram-Init-Data": INIT_DATA},
+        },
+        {"url": "/api/telegram/check", "body": {"initData": INIT_DATA}},
+    ]
+    assert record["sockets"] == 1
+    assert record["openTarget"] == {
+        "kind": "thread",
+        "threadId": "0123abcd",
+        "approval": True,
+    }
+    assert record["replaced"] == "/"
+
+
+def test_deep_links_are_read_and_stripped_only_after_launch_check_and_validated() -> None:
+    for search, expected in [
+        ("?open=repos", {"kind": "repos", "approval": False}),
+        (
+            "?open=repo:acme/widgets&approval=1",
+            {"kind": "repo", "repo": "acme/widgets", "approval": True},
+        ),
+        (
+            "?open=thread:01a0f1ae-2da4-7942-99ae-c3151dc137cc",
+            {
+                "kind": "thread",
+                "threadId": "01a0f1ae-2da4-7942-99ae-c3151dc137cc",
+                "approval": False,
+            },
+        ),
+        ("?open=repo:../etc/passwd", None),
+        ("?open=thread:NOT_HEX!", None),
+        ("?open=unknown:target", None),
+    ]:
+        record = run(LAUNCH, {"ok": True}, search=search)
+        assert record["openTargetBeforeCheck"] is None
+        assert record["openTarget"] == expected
+        assert record["replaced"] == "/"
+
+
+def test_locked_page_reload_preserves_deep_link_query_for_reloaded_app_page() -> None:
+    record = run(
+        LAUNCH,
+        [
+            {"pending": "req-99", "code": "482 913"},
+            {"status": "approved", "ok": True},
+            {"ok": True},
+        ],
+        search="?open=thread:0123abcd&approval=1",
+        unpaired=True,
+        reloadable=True,
+    )
+    assert record["reloads"] == 1
+    assert record["openTarget"] is None
+    assert record["finalSearch"] == "?open=thread:0123abcd&approval=1"
+    assert record["replacedHistory"] == ["/?open=thread:0123abcd&approval=1"]
+
+
+def test_tg_web_app_data_hash_is_stripped_even_when_session_storage_throws() -> None:
+    record = run(
+        LAUNCH,
+        {"ok": True},
+        search="?open=repos",
+        throw_on_storage=True,
+    )
+    assert record["replacedHistory"] == ["/?open=repos", "/"]
+    assert record["openTarget"] == {"kind": "repos", "approval": False}

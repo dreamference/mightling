@@ -129,6 +129,8 @@ pub struct HubConfig {
     pub settings_file: Option<PathBuf>,
     /// How often Night Shift's reports are looked for.
     pub report_interval: Duration,
+    /// How often pending Mini App launch-pair requests are looked for.
+    pub pair_interval: Duration,
     /// After "answer now", how long before the interrupt; the final turn's time (limits.rs).
     pub grace: Duration,
     pub final_budget: Duration,
@@ -146,6 +148,7 @@ impl HubConfig {
             settings: ChatSettings::default(),
             settings_file: None,
             report_interval: Duration::from_secs(300),
+            pair_interval: Duration::from_secs(300),
             grace: Duration::from_millis(limits::GRACE_MS),
             final_budget: Duration::from_millis(limits::FINAL_BUDGET_MS),
         }
@@ -325,6 +328,8 @@ enum Local {
     SendFile { thread: String, name: String },
     /// A Night Shift task to queue in the repository the user picks (MOONSHOT §3.5).
     NightAdd { task: String },
+    /// A Telegram Mini App first-launch device pairing request (CHAT_REPOS §12.1 G2).
+    LaunchPair { id: String },
 }
 
 pub struct Hub {
@@ -344,6 +349,8 @@ pub struct Hub {
     /// Nonces of approvals that were answered or closed, so a late press is told so; a nonce the
     /// hub never issued is ignored.
     closed: std::collections::VecDeque<String>,
+    /// Pending Mini App launch-pair request ids already prompted to Telegram.
+    seen_pairs: HashSet<String>,
     /// Threads this connection is subscribed to (started or resumed since it was made).
     subscribed: HashSet<String>,
     airgap: Box<dyn Fn() -> bool + Send>,
@@ -420,6 +427,7 @@ impl Hub {
             next_approval: 0,
             uploaded: HashMap::new(),
             closed: std::collections::VecDeque::new(),
+            seen_pairs: HashSet::new(),
             subscribed: HashSet::new(),
             airgap,
             airgapped,
@@ -457,6 +465,8 @@ impl Hub {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut reports = tokio::time::interval_at(tokio::time::Instant::now() + self.config.report_interval, self.config.report_interval);
         reports.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut pairs = tokio::time::interval_at(tokio::time::Instant::now() + self.config.pair_interval, self.config.pair_interval);
+        pairs.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 message = inbound.recv() => match message {
@@ -468,6 +478,7 @@ impl Hub {
                     None => break,
                 },
                 _ = tick.tick() => self.on_tick(),
+                _ = pairs.tick() => self.push_pending_pairs().await,
                 _ = reports.tick() => {
                     self.push_reports().await;
                     self.push_sync_notices().await;
@@ -1158,6 +1169,99 @@ impl Hub {
         }
     }
 
+    /// Pending Telegram Mini App first-launch device pairing requests (`GET /api/telegram/pending-pairs`,
+    /// specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §12.1 G2): prompts the paired Telegram user once per
+    /// request id with a fresh random approval nonce and `Approve` / `Decline` buttons.
+    pub async fn push_pending_pairs(&mut self) {
+        if self.airgapped || !self.adapters.contains_key("telegram") {
+            return;
+        }
+        let Ok(value) = self.agent.web("/api/telegram/pending-pairs", None).await else { return };
+        let list = value.get("pending").and_then(Value::as_array).cloned().unwrap_or_default();
+        let active: HashSet<String> = list
+            .iter()
+            .filter_map(|entry| entry.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        self.seen_pairs.retain(|id| active.contains(id));
+        let stale: Vec<String> = self
+            .approvals
+            .iter()
+            .filter_map(|(nonce, pending)| match &pending.local {
+                Some(Local::LaunchPair { id }) if !active.contains(id) => Some(nonce.clone()),
+                _ => None,
+            })
+            .collect();
+        for nonce in stale {
+            if let Some(pending) = self.approvals.remove(&nonce) {
+                self.close(pending.chat, nonce, "Declined.");
+            }
+        }
+        for entry in list {
+            let (Some(id), Some(code), Some(user)) = (
+                entry.get("id").and_then(Value::as_str),
+                entry.get("code").and_then(Value::as_str),
+                entry.get("user").and_then(Value::as_i64),
+            ) else {
+                continue;
+            };
+            if !self.seen_pairs.insert(id.to_string()) {
+                continue;
+            }
+            let chat = format!("telegram:{user}");
+            let prior: Vec<String> = self
+                .approvals
+                .iter()
+                .filter_map(|(nonce, pending)| match &pending.local {
+                    Some(Local::LaunchPair { .. }) if base_of(&pending.chat) == chat => Some(nonce.clone()),
+                    _ => None,
+                })
+                .collect();
+            for nonce in prior {
+                if let Some(pending) = self.approvals.remove(&nonce) {
+                    self.close(pending.chat, nonce, "Declined.");
+                }
+            }
+            self.next_approval += 1;
+            let nonce = ling_web_server::auth::random_hex(8);
+            self.approvals.insert(
+                nonce.clone(),
+                Pending {
+                    local: Some(Local::LaunchPair { id: id.to_string() }),
+                    chat: chat.clone(),
+                    thread: String::new(),
+                    request: Value::Null,
+                    method: "local/launchPair".to_string(),
+                    params: Value::Null,
+                    replies: vec![Reply::Approve, Reply::Decline],
+                    free_text: false,
+                    deadline: Instant::now() + self.config.approval_timeout,
+                    seq: self.next_approval,
+                },
+            );
+            self.send(Outbound::Approval {
+                chat,
+                id: nonce,
+                text: format!("A Mini App on a new device asks to pair (code {code})."),
+                options: vec!["Approve".to_string(), "Decline".to_string()],
+            });
+        }
+    }
+
+    /// Tells `ling web` whether the paired Telegram user approved or declined a pending Mini App
+    /// launch-pair request (`/api/telegram/pending-pairs/approve` or `/decline`).
+    fn launch_pair_decide(&self, id: &str, approve: bool) {
+        let agent = self.agent.clone();
+        let path = if approve {
+            "/api/telegram/pending-pairs/approve"
+        } else {
+            "/api/telegram/pending-pairs/decline"
+        };
+        let body = json!({ "id": id });
+        tokio::spawn(async move {
+            let _ = agent.web(path, Some(body)).await;
+        });
+    }
+
     /// Fetches a file from the thread's folder and hands it to the chat's adapter, off the hub's
     /// loop (a large file must not hold the conversation up).
     fn send_file(&self, chat: &str, thread: &str, name: &str) {
@@ -1383,6 +1487,14 @@ impl Hub {
                     "Queueing it."
                 }
                 (Local::NightAdd { .. }, _) => "Not queued.",
+                (Local::LaunchPair { id }, Reply::Approve) => {
+                    self.launch_pair_decide(id, true);
+                    "Approved."
+                }
+                (Local::LaunchPair { id }, _) => {
+                    self.launch_pair_decide(id, false);
+                    "Declined."
+                }
             };
             self.close(pending.chat, approval.to_string(), outcome);
             return;
@@ -1404,7 +1516,11 @@ impl Hub {
             }
             return;
         };
-        if pending.chat != chat {
+        let same_chat = match pending.local {
+            Some(Local::LaunchPair { .. }) => base_of(&pending.chat) == base_of(chat),
+            _ => pending.chat == chat,
+        };
+        if !same_chat {
             return;
         }
         let Some(reply) = pending.replies.get(choice).cloned() else { return };
@@ -1412,9 +1528,15 @@ impl Hub {
     }
 
     /// `yes`/`no`/a number/free text, when the chat has an open approval. Returns true when the
-    /// message was taken as the answer.
+    /// message was taken as the answer. `Local::LaunchPair` is answered only by the inline button's
+    /// callback nonce, never by chat text (CHAT_REPOS §12.1 G2).
     fn answer_by_text(&mut self, chat: &str, text: &str) -> bool {
-        let Some((approval, pending)) = self.approvals.iter().filter(|(_, p)| p.chat == chat).max_by_key(|(_, p)| p.seq) else {
+        let Some((approval, pending)) = self
+            .approvals
+            .iter()
+            .filter(|(_, p)| p.chat == chat && !matches!(p.local, Some(Local::LaunchPair { .. })))
+            .max_by_key(|(_, p)| p.seq)
+        else {
             return false;
         };
         let approval = approval.clone();
@@ -1469,6 +1591,10 @@ impl Hub {
                     let outcome = match local {
                         Local::SendFile { .. } => "No answer in time; the file stays in the thread's folder.",
                         Local::NightAdd { .. } => "No answer in time; not queued.",
+                        Local::LaunchPair { id } => {
+                            self.launch_pair_decide(id, false);
+                            "Declined: no answer in time."
+                        }
                     };
                     self.close(pending.chat, approval, outcome);
                     continue;

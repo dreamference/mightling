@@ -240,6 +240,32 @@ impl Server {
             || self.paired_device_name(headers).as_deref().is_some_and(ask::is_bridge_device)
     }
 
+    /// Whether `Host` names the configured HTTPS front (`telegram_mini_app_url` / `public_names`)
+    /// and not loopback, the LAN or another address (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §12.1 G2).
+    pub fn front_host_ok(&self, headers: &HeaderMap) -> bool {
+        let Some(host) = header_str(headers, header::HOST) else {
+            return false;
+        };
+        let host = host.trim().to_ascii_lowercase();
+        if host.is_empty() {
+            return false;
+        }
+        if let Some(configured) = self
+            .config
+            .user_config
+            .as_deref()
+            .and_then(crate::telegram_app::mini_app_host)
+        {
+            return host == configured;
+        }
+        !self.config.public_names.is_empty()
+            && self
+                .config
+                .public_names
+                .iter()
+                .any(|name| name.trim().eq_ignore_ascii_case(&host))
+    }
+
     /// Whether a `Host` header is one of the overlay front's names (`public_names`), not the LAN's.
     pub fn public_host(&self, host: Option<&str>) -> bool {
         host.is_some_and(|host| {
@@ -344,6 +370,10 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/ask/file", get(ask_file))
         .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/api/telegram/check", post(telegram_check))
+        .route("/api/telegram/launch-pair", get(telegram_launch_pair_get).post(telegram_launch_pair_post))
+        .route("/api/telegram/pending-pairs", get(telegram_pending_pairs))
+        .route("/api/telegram/pending-pairs/approve", post(telegram_pending_pairs_approve))
+        .route("/api/telegram/pending-pairs/decline", post(telegram_pending_pairs_decline))
         .route("/api/forge", get(forge_status))
         .route("/forge", any(forge_proxy))
         .route("/forge/", any(forge_proxy))
@@ -381,10 +411,13 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
     }
     let path = request.uri().path();
     // `/api/sync/pair` answers 404 while the hub is off, and pairs an agent only with a code.
-    let public = matches!(path, "/login" | "/pair" | "/pair.css" | "/api/sync/pair");
+    let public = matches!(
+        path,
+        "/login" | "/pair" | "/pair.css" | "/api/sync/pair" | "/api/telegram/launch-pair"
+    ) || (path == "/bridge.js" && server.front_host_ok(headers));
     if !public && !server.authenticated(path, headers) {
         let response = if path == "/" || path == "/index.html" {
-            html(StatusCode::UNAUTHORIZED, assets::LOCKED_HTML)
+            html(StatusCode::UNAUTHORIZED, &assets::locked_html(server.front_host_ok(headers)))
         } else {
             text(StatusCode::UNAUTHORIZED, "Sign in first: `ling web open` on this machine, or pair this device.\n")
         };
@@ -594,8 +627,180 @@ async fn telegram_check(State(server): State<Arc<Server>>, body: axum::body::Byt
         Some((token, users)) => crate::telegram_app::check_launch(init_data, &token, &users, now_secs()),
     };
     match verdict {
-        Ok(_) => json_response(StatusCode::OK, json!({ "ok": true })),
+        Ok(user) => json_response(StatusCode::OK, json!({ "ok": true, "user": { "id": user } })),
         Err(refusal) => json_response(StatusCode::OK, json!({ "ok": false, "reason": refusal.reason() })),
+    }
+}
+
+/// First launch of the Mini App with no device credential (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md
+/// §12.1 G2): requires the configured HTTPS front (`Host` and `Origin`), verifies `initData`
+/// against `ling chat`'s bot and paired users, and records a pending request that only the bot's
+/// `Approve` callback can turn into a `telegram-app` device credential.
+async fn telegram_launch_pair_post(
+    State(server): State<Arc<Server>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !server.front_host_ok(&headers) {
+        return text(
+            StatusCode::MISDIRECTED_REQUEST,
+            "Telegram launch pairing is only served on the configured HTTPS front.\n",
+        );
+    }
+    let host = header_str(&headers, header::HOST).unwrap_or_default().trim().to_ascii_lowercase();
+    let expected_origin = format!("https://{host}");
+    if header_str(&headers, header::ORIGIN).is_none_or(|origin| !origin.trim().eq_ignore_ascii_case(&expected_origin)) {
+        return text(StatusCode::FORBIDDEN, "Requests from other sites are refused.\n");
+    }
+    let request: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    let init_data = request.get("initData").and_then(|value| value.as_str()).unwrap_or_default();
+    let now = now_secs();
+    let user = match crate::telegram_app::bot(&server.config.codex_home) {
+        None => {
+            return json_response(
+                StatusCode::FORBIDDEN,
+                json!({ "ok": false, "reason": crate::telegram_app::Refusal::NoBot.reason() }),
+            );
+        }
+        Some((token, users)) => match crate::telegram_app::check_launch(init_data, &token, &users, now) {
+            Ok(user) => user,
+            Err(refusal) => {
+                return json_response(StatusCode::FORBIDDEN, json!({ "ok": false, "reason": refusal.reason() }));
+            }
+        },
+    };
+    match crate::telegram_app::create_pending_pair(&server.config.state_dir, user, init_data, now) {
+        Ok(pending) => json_response(StatusCode::OK, json!({ "pending": pending.id, "code": pending.code })),
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "ok": false, "reason": err.to_string() }),
+        ),
+        Err(err) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "ok": false, "reason": format!("Could not record the pairing request: {err}") }),
+        ),
+    }
+}
+
+/// Polled by the launching webview (`GET /api/telegram/launch-pair?pending=<id>`) with the same
+/// `initData` in `X-Telegram-Init-Data`: hands out the `telegram-app` device cookie once after
+/// the bot approves, and never before.
+async fn telegram_launch_pair_get(
+    State(server): State<Arc<Server>>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    if !server.front_host_ok(&headers) {
+        return text(
+            StatusCode::MISDIRECTED_REQUEST,
+            "Telegram launch pairing is only served on the configured HTTPS front.\n",
+        );
+    }
+    let id = query.get("pending").map(String::as_str).unwrap_or_default();
+    let init_data = headers
+        .get(crate::telegram_app::INIT_DATA_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let now = now_secs();
+    let user = match crate::telegram_app::bot(&server.config.codex_home) {
+        None => {
+            return json_response(
+                StatusCode::FORBIDDEN,
+                json!({ "ok": false, "reason": crate::telegram_app::Refusal::NoBot.reason() }),
+            );
+        }
+        Some((token, users)) => match crate::telegram_app::check_launch(init_data, &token, &users, now) {
+            Ok(user) => user,
+            Err(refusal) => {
+                return json_response(StatusCode::FORBIDDEN, json!({ "ok": false, "reason": refusal.reason() }));
+            }
+        },
+    };
+    match crate::telegram_app::claim_pending_pair(&server.config.state_dir, id, user, init_data, now) {
+        crate::telegram_app::ClaimOutcome::Pending => {
+            json_response(StatusCode::OK, json!({ "status": "pending", "ok": false }))
+        }
+        crate::telegram_app::ClaimOutcome::Approved(token) => {
+            let cookie = format!(
+                "{}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={DEVICE_COOKIE_MAX_AGE}",
+                auth::DEVICE_COOKIE
+            );
+            let mut response = json_response(StatusCode::OK, json!({ "status": "approved", "ok": true }));
+            if let Ok(value) = HeaderValue::from_str(&cookie) {
+                response.headers_mut().insert(header::SET_COOKIE, value);
+            }
+            response
+        }
+        crate::telegram_app::ClaimOutcome::Forbidden => json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "ok": false, "reason": "This pairing request belongs to another launch." }),
+        ),
+        crate::telegram_app::ClaimOutcome::NotFound => json_response(
+            StatusCode::NOT_FOUND,
+            json!({ "ok": false, "status": "expired", "reason": "That pairing request has expired or was declined." }),
+        ),
+    }
+}
+
+/// Pending launch-pair requests waiting for the bot's prompt (`GET /api/telegram/pending-pairs`):
+/// owner session or `ling chat` (`bridge=1`) session only.
+async fn telegram_pending_pairs(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    if !server.owner_session(&headers) && !server.bridge_session(&headers) {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "only the owner session or ling chat may list pending Telegram pairs" }),
+        );
+    }
+    let pending = crate::telegram_app::list_pending_pairs(&server.config.state_dir, now_secs());
+    json_response(StatusCode::OK, json!({ "pending": pending }))
+}
+
+/// Approves a pending launch-pair request (`POST /api/telegram/pending-pairs/approve {id}`):
+/// marks the request approved so the launching webview can claim a `telegram-app` device once.
+async fn telegram_pending_pairs_approve(
+    State(server): State<Arc<Server>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !server.owner_session(&headers) && !server.bridge_session(&headers) {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "only the owner session or ling chat may approve a Telegram pair" }),
+        );
+    }
+    let request: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    let id = request.get("id").and_then(|value| value.as_str()).unwrap_or_default();
+    match crate::telegram_app::approve_pending_pair(&server.config.state_dir, id, now_secs()) {
+        Ok(true) => json_response(StatusCode::OK, json!({ "ok": true })),
+        Ok(false) => json_response(StatusCode::NOT_FOUND, json!({ "ok": false, "error": "no such pending pair" })),
+        Err(err) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "ok": false, "error": format!("Could not approve the pairing request: {err}") }),
+        ),
+    }
+}
+
+/// Declines and removes a pending launch-pair request (`POST /api/telegram/pending-pairs/decline {id}`).
+async fn telegram_pending_pairs_decline(
+    State(server): State<Arc<Server>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !server.owner_session(&headers) && !server.bridge_session(&headers) {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "only the owner session or ling chat may decline a Telegram pair" }),
+        );
+    }
+    let request: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    let id = request.get("id").and_then(|value| value.as_str()).unwrap_or_default();
+    match crate::telegram_app::decline_pending_pair(&server.config.state_dir, id, now_secs()) {
+        Ok(true) => json_response(StatusCode::OK, json!({ "ok": true })),
+        Ok(false) => json_response(StatusCode::NOT_FOUND, json!({ "ok": false, "error": "no such pending pair" })),
+        Err(err) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "ok": false, "error": format!("Could not decline the pairing request: {err}") }),
+        ),
     }
 }
 

@@ -101,6 +101,10 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                         } else {
                             json!({ "notices": [], "latest": 5 })
                         }
+                    } else if path == "/api/telegram/pending-pairs" {
+                        json!({ "pending": [{ "id": "pair-req-1", "code": "482 913", "user": 7, "created_at": 100 }] })
+                    } else if path == "/api/telegram/pending-pairs/approve" || path == "/api/telegram/pending-pairs/decline" {
+                        json!({ "ok": true })
                     } else {
                         json!({})
                     };
@@ -943,4 +947,145 @@ async fn a_sync_notice_is_passed_on_once_to_the_messengers_named() {
         assert!(!matches!(&out, Outbound::Notice { text, .. } if text.contains("Approval needed") || text.contains("Turn finished")), "Telegram only when named");
     }
     assert_eq!(std::fs::read_to_string(rig.dir.join("sync-notice-seen")).unwrap(), "5");
+}
+
+/// Pending Mini App launch-pair requests (`GET /api/telegram/pending-pairs`, CHAT_REPOS §12.1 G2)
+/// prompt the paired Telegram user once with the 6-digit code and Approve/Decline options, ignore
+/// forged or reused nonces, and call `/api/telegram/pending-pairs/approve` only when approved.
+#[tokio::test]
+async fn a_pending_mini_app_launch_pair_is_prompted_once_and_approved_only_by_its_nonce() {
+    let mut rig = rig("launch-pair", default_script(), false, |config| config.pair_interval = Duration::from_millis(80));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let mut prompts = Vec::new();
+    while let Ok(out) = rig.telegram.try_recv() {
+        if let Outbound::Approval { chat, id, text, options } = out {
+            prompts.push((chat, id, text, options));
+        }
+    }
+    assert_eq!(prompts.len(), 1, "prompted once per request id: {prompts:?}");
+    let (chat, nonce, prompt_text, options) = &prompts[0];
+    assert_eq!(chat, CHAT);
+    assert_eq!(prompt_text, "A Mini App on a new device asks to pair (code 482 913).");
+    assert_eq!(options, &["Approve".to_string(), "Decline".to_string()]);
+
+    // Plain chat text ("yes", "approve", "1") never approves a LaunchPair; only the callback nonce does.
+    for word in ["yes", "approve", "1"] {
+        rig.inbound.send(text(CHAT, word)).unwrap();
+        settle().await;
+    }
+    while rig.telegram.try_recv().is_ok() {}
+
+    // A forged nonce is ignored and approves nothing.
+    rig.inbound
+        .send(Inbound::Answer { chat: CHAT.into(), approval: "deadbeef00000000".into(), choice: 0 })
+        .unwrap();
+    settle().await;
+    let approved_calls = || {
+        rig.log
+            .params("web")
+            .into_iter()
+            .filter(|p| p["path"] == "/api/telegram/pending-pairs/approve")
+            .collect::<Vec<_>>()
+    };
+    assert!(approved_calls().is_empty(), "plain text or forged nonce must not approve");
+
+    // Pressing Approve with the issued nonce (even from a topic chat key `telegram:7/10`) approves once.
+    rig.inbound
+        .send(Inbound::Answer { chat: "telegram:7/10".into(), approval: nonce.clone(), choice: 0 })
+        .unwrap();
+    let closed = next_settled(&mut rig.telegram).await;
+    assert_eq!(
+        closed,
+        Outbound::ApprovalClosed { chat: CHAT.into(), id: nonce.clone(), outcome: "Approved.".into() }
+    );
+    settle().await;
+    let calls = approved_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["body"]["id"], "pair-req-1");
+
+    // Reusing the same nonce after it closed does not approve again.
+    rig.inbound
+        .send(Inbound::Answer { chat: CHAT.into(), approval: nonce.clone(), choice: 0 })
+        .unwrap();
+    let notice = next_settled(&mut rig.telegram).await;
+    assert_eq!(notice, Outbound::Notice { chat: CHAT.into(), text: "That request is no longer open.".into() });
+    settle().await;
+    assert_eq!(approved_calls().len(), 1, "reused nonce must not approve again");
+}
+
+/// When a new launch from the same Telegram user replaces an earlier unapproved launch pair, the
+/// earlier prompt in the bot is closed as declined and only the new prompt's nonce can approve.
+#[tokio::test]
+async fn a_new_launch_pair_from_the_same_user_closes_the_old_prompt_as_declined() {
+    let dir = scratch("launch-pair-replace");
+    let (agent, mut commands) = AgentHandle::channel();
+    let polls = Arc::new(Mutex::new(0u32));
+    let approved_ids = Arc::new(Mutex::new(Vec::<String>::new()));
+    let polls_clone = polls.clone();
+    let approved_clone = approved_ids.clone();
+    tokio::spawn(async move {
+        while let Some(command) = commands.recv().await {
+            if let AgentCommand::Web { path, body, reply } = command {
+                let answer = if path == "/api/telegram/pending-pairs" {
+                    let mut n = polls_clone.lock().unwrap();
+                    *n += 1;
+                    if *n == 1 {
+                        json!({ "pending": [{ "id": "pair-req-1", "code": "111 222", "user": 7 }] })
+                    } else {
+                        json!({ "pending": [{ "id": "pair-req-2", "code": "333 444", "user": 7 }] })
+                    }
+                } else if path == "/api/telegram/pending-pairs/approve" {
+                    if let Some(id) = body.as_ref().and_then(|b| b.get("id")).and_then(Value::as_str) {
+                        approved_clone.lock().unwrap().push(id.to_string());
+                    }
+                    json!({ "ok": true })
+                } else {
+                    json!({})
+                };
+                let _ = reply.send(Ok(answer));
+            }
+        }
+    });
+
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+    let mut hub = Hub::new(HubConfig::new(dir), agent, Box::new(|| false));
+    hub.add_adapter("telegram", out_tx);
+
+    // First poll prompts pair-req-1.
+    hub.push_pending_pairs().await;
+    let Outbound::Approval { id: nonce1, text: text1, .. } = out_rx.try_recv().expect("first prompt") else {
+        panic!("expected first Approval");
+    };
+    assert_eq!(text1, "A Mini App on a new device asks to pair (code 111 222).");
+
+    // Second poll sees pair-req-2 has replaced pair-req-1: closes nonce1 as Declined and prompts nonce2.
+    hub.push_pending_pairs().await;
+    let closed1 = out_rx.try_recv().expect("old prompt closed");
+    assert_eq!(
+        closed1,
+        Outbound::ApprovalClosed { chat: CHAT.into(), id: nonce1.clone(), outcome: "Declined.".into() }
+    );
+    let Outbound::Approval { id: nonce2, text: text2, .. } = out_rx.try_recv().expect("second prompt") else {
+        panic!("expected second Approval");
+    };
+    assert_eq!(text2, "A Mini App on a new device asks to pair (code 333 444).");
+    assert_ne!(nonce1, nonce2);
+
+    // Pressing the old prompt's nonce does not approve anything.
+    hub.on_inbound(Inbound::Answer { chat: CHAT.into(), approval: nonce1, choice: 0 }).await;
+    assert_eq!(
+        out_rx.try_recv().expect("closed notice"),
+        Outbound::Notice { chat: CHAT.into(), text: "That request is no longer open.".into() }
+    );
+    settle().await;
+    assert!(approved_ids.lock().unwrap().is_empty());
+
+    // Pressing the new prompt's nonce approves pair-req-2.
+    hub.on_inbound(Inbound::Answer { chat: CHAT.into(), approval: nonce2.clone(), choice: 0 }).await;
+    assert_eq!(
+        out_rx.try_recv().expect("approved close"),
+        Outbound::ApprovalClosed { chat: CHAT.into(), id: nonce2, outcome: "Approved.".into() }
+    );
+    settle().await;
+    assert_eq!(*approved_ids.lock().unwrap(), vec!["pair-req-2".to_string()]);
 }

@@ -391,6 +391,16 @@ export function App() {
     dispatch({ type: "select", threadId: null });
     if (typeof window !== "undefined") window.history.replaceState(null, "", next === "work" ? "#work" : "#");
   }, []);
+  /** Preselected `<org>/<repo>` from `?open=repo:<org>/<repo>` (CHAT_REPOS §12.4 G3/G4). */
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  /** Flag set by `&approval=1` on a deep link, read by the G7 approval step. */
+  const [approvalRequested, setApprovalRequested] = useState(false);
+  /** Opens the Repos view (G4 builds it; today shows Work with `repo` preselected). */
+  const openRepos = useCallback((repo: string | null = null) => {
+    setSelectedRepo(repo);
+    showView("work");
+  }, [showView]);
+  const openTargetRef = useRef<(target: bridge.OpenTarget) => void>(() => {});
 
   // The window's own tools (windowtools.ts): the thread's terminal tabs and the previews' console,
   // read when the agent asks (`item/tool/call`), bounded and with secrets masked.
@@ -482,17 +492,31 @@ export function App() {
         bridge.windows.state().then(setWindowsState).catch(() => {});
         bridge.terminals.list().then(setTerminals).catch(() => {});
       }
-      const first = POPOUT ?? PANE?.thread ?? target?.thread ?? null;
+      // Deep links (`?open=repos|repo:<org>/<repo>|thread:<id>&approval=1`, CHAT_REPOS §12.4 G3),
+      // read only after the launch check has passed and the page has its session.
+      const deepLink = bridge.openTarget();
+      let deepLinkThread: string | null = null;
+      bridge.applyOpenTarget(deepLink, {
+        openRepos,
+        openWorkThread: (threadId) => {
+          deepLinkThread = threadId;
+          setView("work");
+          if (typeof window !== "undefined") window.history.replaceState(null, "", "#work");
+        },
+        setApprovalRequested,
+      });
+      const first = POPOUT ?? PANE?.thread ?? deepLinkThread ?? target?.thread ?? null;
       if (first) {
         const resumed = await client.request("thread/resume", { threadId: first, model: started.served_model });
         loader.markLoaded(first);
         dispatch({ type: "opened", thread: resumed.thread });
         if (POPOUT) setView(isAskThread(resumed.thread, started.ask_root ?? null) ? "ask" : "work");
+        else if (deepLinkThread) setView("work");
       }
     } catch (error) {
       notice(error);
     }
-  }, [client, notice]);
+  }, [client, notice, openRepos]);
 
   const loadProjectsRef = useRef(loadProjects);
   loadProjectsRef.current = loadProjects;
@@ -533,6 +557,7 @@ export function App() {
       paneAction: (action) => windowEvents.current.paneAction(action),
       command: (command) => windowEvents.current.command(command),
       syncNotice: (sync) => notice(sync.text),
+      openTarget: (target) => openTargetRef.current(target),
       task: (event) => setTasks((list) => {
         if (event.kind === "started") {
           setFront({ id: event.id, tick: Date.now() });
@@ -1894,6 +1919,16 @@ export function App() {
       })();
     }
   };
+  openTargetRef.current = (target) => {
+    bridge.applyOpenTarget(target, {
+      openRepos,
+      openWorkThread: (threadId) => {
+        showView("work");
+        void openThread(threadId);
+      },
+      setApprovalRequested,
+    });
+  };
 
   // The sidebar's order, which Ctrl+Tab and Ctrl+1–9 walk.
   const sidebarThreads = (): Thread[] => {
@@ -2874,7 +2909,7 @@ export function App() {
   }
 
   return (
-    <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${tabsShown ? (prefs.layout === "tabs" ? " review-open tabs-full" : " review-open") : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
+    <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${tabsShown ? (prefs.layout === "tabs" ? " review-open tabs-full" : " review-open") : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} data-selected-repo={selectedRepo ?? undefined} data-approval-requested={approvalRequested ? "1" : undefined} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
       // (desktop/electron/src/shell.ts); a browser keeps its own, which a phone needs to copy.
       // A file's path (DESKTOP §16 B14): one menu wherever it appears, in the app and in a browser.
