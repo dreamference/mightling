@@ -2017,6 +2017,7 @@ export function App() {
   setActiveChatRepoCwd(HOST === "web" && view === "work" ? workFolder : null);
   const selectedChatRepoThread = HOST === "web" && view === "work" ? checkoutThreadForCwd(workFolder) : null;
   const [chatRepoState, setChatRepoState] = useState<ChatRepoState | null>(null);
+  const chatRepoStateFor = useRef<string | null>(null);
   useEffect(() => {
     if (HOST !== "electron" || !bridge.git.available() || !envProject || state.server !== "ready") {
       setEnvs(null);
@@ -2109,9 +2110,13 @@ export function App() {
   useEffect(() => {
     if (!selectedChatRepoThread) {
       setChatRepoState(null);
+      chatRepoStateFor.current = null;
       return;
     }
     let current = true;
+    // Another checkout: nothing of the last one's state stays on screen while this one's answers.
+    if (chatRepoStateFor.current !== selectedChatRepoThread) setChatRepoState(null);
+    chatRepoStateFor.current = selectedChatRepoThread;
     chatRepos().state(selectedChatRepoThread)
       .then((next) => { if (current) setChatRepoState(next); })
       .catch(() => { if (current) setChatRepoState(null); });
@@ -3134,7 +3139,7 @@ export function App() {
             <button className="icon bar-action ask-folder" aria-label="Open the folder" title="Open this question's folder in the file manager"
               onClick={() => void bridge.openFolder(askFolder).catch(notice)}><Icon name="folder" size={16} /></button>
           ) : null}
-          {selected && view === "work" && bridge.git.available() ? (
+          {selected && view === "work" && bridge.git.available(workFolder) ? (
             <WorktreeHeader link={selectedLink} branch={headerGit?.branch ?? null} inGit={Boolean(headerGit?.root)}
               canHandOff={!selected.activeTurnId} environment={environment}
               onCreateBranch={createBranch} branchPrefix={prefs.branchPrefix} onHandOff={(direction) => void handOff(direction)} onOpen={openFolder} onAction={runAction}
@@ -3152,7 +3157,7 @@ export function App() {
           ) : null}
         </header>
         {HOST === "web" && view === "work" && selectedChatRepoThread && chatRepoState ? (
-          <GitBar thread={selectedChatRepoThread} cwd={workFolder} state={chatRepoState}
+          <GitBar key={selectedChatRepoThread} thread={selectedChatRepoThread} cwd={workFolder} state={chatRepoState}
             onStateChange={(next) => { setChatRepoState(next); setGitTick((tick) => tick + 1); }} />
         ) : null}
 

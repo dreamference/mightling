@@ -239,7 +239,9 @@ function webRepoThread(folder?: string | null): string | null {
  * browser thread shows only the review pane's Last turn scope from the server.
  */
 export const git = {
-  available: (cwd?: string | null) => host() === "electron" || isChatRepoCwd(cwd ?? getActiveChatRepoCwd()),
+  // Without a folder named this answers for the window: the desktop app only, as every caller that
+  // gates Electron-only pieces on it expects. A `chat-repos` folder is git in the web host too.
+  available: (cwd?: string | null) => host() === "electron" || isChatRepoCwd(cwd),
   repos: (cwd: string) => {
     if (host() === "electron") return send<string[]>({ type: "git/repos", cwd });
     return Promise.resolve(isChatRepoCwd(cwd) ? [cwd] : []);

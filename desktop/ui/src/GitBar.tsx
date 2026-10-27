@@ -5,7 +5,7 @@
 // `confirm` nonce via `GET /api/repos/state?thread=<id>&intent=<intent>`, asks for inline
 // confirmation, then POSTs with `confirm`.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import * as bridge from "./bridge";
 import { Icon } from "./icons";
@@ -14,6 +14,7 @@ import {
   chatRepos,
   executeGitAction,
   isChatRepoCwd,
+  safePrUrl,
   type ChatRepoState,
   type ChatReposApi,
   type GitActionOutcome,
@@ -51,6 +52,8 @@ export function GitBar(props: GitBarProps) {
   );
   const [mainRefused, setMainRefused] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
+  const threadRef = useRef(props.thread);
+  threadRef.current = props.thread;
 
   useEffect(() => {
     setPending(props.initialPending ?? null);
@@ -79,6 +82,7 @@ export function GitBar(props: GitBarProps) {
     setOutcome(null);
     try {
       const started = await beginGitAction(api, thread, action);
+      if (thread !== threadRef.current) return;
       props.onStateChange?.(started.state);
       setPending(started.pending);
     } catch (failure: unknown) {
@@ -91,9 +95,13 @@ export function GitBar(props: GitBarProps) {
   const confirmAction = async () => {
     if (!pending || busy) return;
     setBusy(true);
+    // The nonce is single-use: once sent it is spent whatever the answer, so the confirmation closes
+    // now and a retry starts again from a fresh nonce.
+    const sent = pending;
+    setPending(null);
     try {
-      const result = await executeGitAction(api, thread, pending, { openTab: props.openTab });
-      setPending(null);
+      const result = await executeGitAction(api, thread, sent, { openTab: props.openTab });
+      if (thread !== threadRef.current) return;
       setOutcome(result);
       if (result.mergeInProgress !== undefined) setMergeInProgress(result.mergeInProgress);
       if (result.mainRefused) setMainRefused(true);
@@ -166,7 +174,7 @@ export function GitBar(props: GitBarProps) {
       {outcome ? (
         <span className="git-bar-outcome" role="status">
           {outcome.text}
-          {outcome.prUrl ? (
+          {outcome.prUrl && safePrUrl(outcome.prUrl) ? (
             <> (<a href={outcome.prUrl} target="_blank" rel="noopener noreferrer">{outcome.prUrl}</a>)</>
           ) : null}
         </span>

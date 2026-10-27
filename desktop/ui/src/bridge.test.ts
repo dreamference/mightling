@@ -79,9 +79,8 @@ describe("the app's host", () => {
     expect(git.available("/home/u/src/shop")).toBe(false);
     expect(git.available(checkout)).toBe(true);
 
+    // Without a folder named it stays the desktop app's answer, whatever thread is shown.
     setActiveChatRepoCwd(checkout);
-    expect(git.available()).toBe(true);
-    setActiveChatRepoCwd("/home/u/src/shop");
     expect(git.available()).toBe(false);
   });
 });

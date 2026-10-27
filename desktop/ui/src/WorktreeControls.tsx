@@ -96,6 +96,8 @@ export function WorktreeHeader(props: {
       window.removeEventListener("mousedown", onDown);
     };
   }, [menu]);
+  // The web host has none of the desktop's hand-off or open controls: the repository's header or nothing.
+  if (bridge.host() === "web" && !chatRepo) return null;
   if (chatRepo && bridge.host() === "web") {
     const onMain = chatRepo.branch !== null && (chatRepo.branch === "main" || chatRepo.branch === chatRepo.base);
     return (

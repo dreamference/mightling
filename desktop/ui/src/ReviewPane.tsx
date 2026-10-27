@@ -145,6 +145,10 @@ export function ReviewPane(props: ReviewPaneProps) {
     if (!windowGit || !props.cwd) {
       setRepos([]);
       setRoot(null);
+      setDiff("");
+      setStatus(null);
+      setAgainst(null);
+      setShown(null);
       return;
     }
     let current = true;
@@ -172,6 +176,11 @@ export function ReviewPane(props: ReviewPaneProps) {
       current = false;
     };
   }, [props.cwd, windowGit, currentHost, notice]);
+
+  // A browser moving from an ordinary thread to a checkout opens on its uncommitted changes.
+  useEffect(() => {
+    if (currentHost === "web" && windowGit) setScope("uncommitted");
+  }, [currentHost, windowGit]);
 
   useEffect(() => {
     if (!shownScopes.some((entry) => entry.id === scope)) {
@@ -235,7 +244,7 @@ export function ReviewPane(props: ReviewPaneProps) {
   // What is on screen belongs to this thread's folder and the repository chosen in it, or nothing is
   // shown: no diff, no Stage or Revert, no commit box (decided during the render, so not even one
   // frame of the last thread's repository with live buttons). Last turn is the thread's own diff.
-  const ready = props.initialDiff !== undefined || !windowGit || (resolvedCwd === props.cwd && shown !== null && shown.cwd === props.cwd && shown.root === root);
+  const ready = props.initialDiff !== undefined || (!windowGit && scope === "turn") || (windowGit && resolvedCwd === props.cwd && shown !== null && shown.cwd === props.cwd && shown.root === root);
   const turnFiles = useMemo(() => parseDiff(props.turnDiff ?? ""), [props.turnDiff]);
   const turnCounts = useMemo(() => turnLines(turnFiles, props.cwd, repos), [turnFiles, props.cwd, repos]);
   const files = useMemo(() => (scope === "turn" ? filesIn(turnFiles, props.cwd, repos, repos.length > 1 && turnRepo && repos.includes(turnRepo) ? turnRepo : null) : ready ? parseDiff(diff) : []),

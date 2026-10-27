@@ -26,6 +26,7 @@ import {
   repoOf,
   repoOption,
   resetChatRepos,
+  safePrUrl,
   setChatReposFetcher,
   sortAndFilterRepos,
   turnBase,
@@ -659,6 +660,22 @@ describe("G9: Git bar, single-use confirm nonces, and refusals", () => {
     const step = await beginGitAction(api, "01234567", "push");
     const outcome = await executeGitAction(api, "01234567", step.pending);
     expect(outcome.text).toBe("Push refused: the anonymity check could not run");
+  });
+
+  it("opens a pull request's link only on the forge's path or http(s)", async () => {
+    expect(safePrUrl("/forge/org/widget/pulls/1")).toBe(true);
+    expect(safePrUrl("https://forge.example/org/widget/pulls/1")).toBe(true);
+    expect(safePrUrl("javascript:alert(1)")).toBe(false);
+    expect(safePrUrl("data:text/html,x")).toBe(false);
+    const opened: string[] = [];
+    const api = chatRepos(async (url) => {
+      if (url.startsWith("/api/repos/state?")) return jsonResponse(sampleState({ confirm: "nonce-pr-3" }));
+      return jsonResponse({ number: 3, url: "javascript:alert(1)" });
+    });
+    const step = await beginGitAction(api, "01234567", "pr");
+    const outcome = await executeGitAction(api, "01234567", step.pending, { openTab: (url) => opened.push(url) });
+    expect(opened).toEqual([]);
+    expect(outcome).toEqual({ text: "Pull request #3" });
   });
 
   it("shows a file whose diff could not be read by its header only, never invented lines", async () => {

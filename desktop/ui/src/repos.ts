@@ -211,7 +211,7 @@ const knownCheckoutIds = new Set<string>();
 let activeChatRepoCwd: string | null = null;
 
 /** A checkout path under `<codex_home>/chat-repos/<org>/<repo>/<bridge>-<8-hex>` (chat_repos.rs). */
-const CHAT_REPO_PATH = /(?:^|[\\/])chat-repos[\\/]([^\\/]+[\\/][^\\/]+)[\\/](?:web|telegram|matrix|signal)-([0-9a-f]{8})$/i;
+const CHAT_REPO_PATH = /(?:^|[\\/])chat-repos[\\/]([^\\/]+[\\/][^\\/]+)[\\/](?:web|telegram|matrix|signal|discord)-([0-9a-f]{8})$/i;
 
 /** Records a checkout returned by `/api/repos/open` or `/api/repos/state`. */
 export function recordCheckout(entry: { thread: string; cwd: string; repo?: string; branch?: string | null; read_only?: boolean }): void {
@@ -379,7 +379,7 @@ export interface ChatReposApi {
   merge(thread: string, confirm: string): Promise<ChatRepoMergeResult>;
   pr(thread: string, confirm: string): Promise<ChatRepoPrResult>;
   main(thread: string, confirm: string): Promise<ChatRepoMainResult>;
-  budget(thread: string, confirm: string): Promise<ChatRepoBudget>;
+  budget(thread: string, confirm: string, add: number): Promise<ChatRepoBudget>;
 }
 
 /** Client for `/api/repos*` on `ling web`. */
@@ -494,10 +494,21 @@ export function chatRepos(fetcher: Fetcher = activeFetcher): ChatReposApi {
       return post<ChatRepoMainResult>("/api/repos/main", { thread, confirm }, "Working on main refused");
     },
 
-    budget(thread, confirm) {
-      return post<ChatRepoBudget>("/api/repos/budget", { thread, confirm }, "Budget extension refused");
+    budget(thread, confirm, add) {
+      return post<ChatRepoBudget>("/api/repos/budget", { thread, add, confirm }, "Budget extension refused");
     },
   };
+}
+
+/** Whether a pull request's link may be opened: the forge's own `/forge/` path, or http(s). */
+export function safePrUrl(url: string): boolean {
+  if (url.startsWith("/forge/")) return true;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 export type GitBarAction = "commit" | "push" | "update" | "abort" | "merge" | "pr" | "main";
@@ -585,6 +596,7 @@ export async function executeGitAction(
       }
       case "pr": {
         const res = await api.pr(thread, pending.confirm);
+        if (!safePrUrl(res.url)) return { text: `Pull request #${res.number}` };
         const openTab = options.openTab ?? ((url: string) => {
           if (typeof window !== "undefined" && typeof window.open === "function") {
             window.open(url, "_blank", "noopener,noreferrer");
