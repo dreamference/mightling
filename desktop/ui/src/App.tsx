@@ -77,6 +77,7 @@ import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, 
 import { TerminalHub, decode, terminalMessage, type TerminalSession } from "./terminal";
 import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsState } from "./windows";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
+import { commandChoices, type ApprovalChoice } from "./approvals";
 import { ExportDialog } from "./ExportDialog";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
@@ -3208,6 +3209,14 @@ function Diff({ text: diff }: { text: string }) {
   );
 }
 
+/** A file change's approval: the four plain choices (a rule for later is offered for commands only). */
+const FILE_CHOICES: ApprovalChoice[] = [
+  { label: "Allow", title: "Apply these changes", decision: "accept", primary: true },
+  { label: "Allow for this session", title: "Apply these, and later changes, without asking until this session ends", decision: "acceptForSession" },
+  { label: "Decline", title: "Do not apply them; the agent goes on", decision: "decline" },
+  { label: "Stop the turn", title: "Do not apply them, and stop the turn", decision: "cancel" },
+];
+
 function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnswer: (result: unknown) => void }) {
   const { request, onAnswer } = props;
   const params = request.params as Record<string, unknown>;
@@ -3222,10 +3231,9 @@ function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnsw
           {typeof params.reason === "string" ? <p>{params.reason}</p> : null}
           {network?.host ? <p className="warn">It asks for the network ({network.host}).{props.airgappedOn ? " Airgapped is on: approving lets it reach the network." : ""}</p> : null}
           <div className="buttons">
-            <button className="primary" onClick={() => onAnswer({ decision: "accept" })}>Allow</button>
-            <button onClick={() => onAnswer({ decision: "acceptForSession" })}>Allow for this session</button>
-            <button onClick={() => onAnswer({ decision: "decline" })}>Decline</button>
-            <button onClick={() => onAnswer({ decision: "cancel" })}>Stop the turn</button>
+            {(request.method === "item/commandExecution/requestApproval" ? commandChoices(params, props.airgappedOn) : FILE_CHOICES).map((choice) => (
+              <button key={choice.label} className={choice.primary ? "primary" : undefined} title={choice.title} onClick={() => onAnswer({ decision: choice.decision })}>{choice.label}</button>
+            ))}
           </div>
         </div>
       );

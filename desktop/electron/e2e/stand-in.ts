@@ -341,6 +341,11 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
                 { label: "The tests", description: "tests/test_client.py" }] },
               { id: "token", header: "Token", question: "The staging token?", isOther: false, isSecret: true, options: null }] } });
           }
+          // A command to approve with a rule proposed for later (DESKTOP §16 B8).
+          if (asked.includes("with a rule")) {
+            say({ id: "approve-rule", method: "item/commandExecution/requestApproval", params: { threadId: p.threadId, turnId: id, itemId: "c" + id, command: "cargo test -p fetcher",
+              proposedExecpolicyAmendment: ["cargo", "test"], proposedNetworkPolicyAmendments: [{ host: "crates.io", action: "allow" }] } });
+          }
           if (asked.includes("with a report")) {
             // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
             const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
