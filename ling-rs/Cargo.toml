@@ -44,6 +44,8 @@ ling-node-locator = { path = "node-locator" }
 ling-tools = { path = "tools" }
 # Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
 ling-skills = { path = "skills" }
+# `ling monitor`: the session monitor, plain code over the agents' transcripts (src/monitor.rs).
+ling-monitor = { path = "monitor" }
 rand = { workspace = true }
 # The guards' rules on commands and last messages (src/guard.rs).
 regex-lite = { workspace = true }
