@@ -421,23 +421,26 @@ ENGINE_LING: Final[str] = "ling"
 #
 # The commit the image's ling-serve was built from (the full hash, never abbreviated), recorded in
 # the image's labels (`org.opencontainers.image.revision`, `ai.dreamference.ling-engine.commit`).
-# 1.7.2: bdda3a2, the night-tested b8e9451 plus a parse-only tool-call fix (branch
-# fix/toolcall-text), greedy output token for token night 15's binary on agentlong and
-# --spec-check passing; the image carries that very binary (sha256 598e5520…9ef41f1; builds embed
-# their paths, so a rebuild differs).
-QWEN38_LING_ENGINE_COMMIT: Final[str] = "bdda3a244a9cd24742346dce806561f7441405fd"
+# 1.7.2: 8d112d0 (branch release/1.7.2-engine), bdda3a2 plus the tokenizer's BPE cache under a
+# shared mutex (main's 15e82b6 alone: concurrent requests could crash ling-serve in Tokenizer::bpe;
+# token ids unchanged, ling-tokenizer-threads-tests). bdda3a2 is the night-tested b8e9451 plus a
+# parse-only tool-call fix (branch fix/toolcall-text), greedy output token for token night 15's
+# binary on agentlong and --spec-check passing. The image's binary is sha256 7c9098f1…a889975
+# (builds embed their paths, so a rebuild differs).
+QWEN38_LING_ENGINE_COMMIT: Final[str] = "8d112d0d25393bca95e3e5c9227d0135eba6f2eb"
 
 # What the engine at that commit has that an asset or a launch may depend on, so the runtime asks
 # a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
 # drafter) from ling-engine ec9dce8 on. A checkout-only test keeps the list true to the commit's
-# ancestry. Empty at bdda3a2.
+# ancestry. Empty at 8d112d0 (bdda3a2's features).
 QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
 
 # ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
 # aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push
-# (ghcr.io/dreamference/ling-serve:bdda3a244a9c, pushed 2026-10-26; linux/arm64, 682 MB).
+# (ghcr.io/dreamference/ling-serve:8d112d0d2539, pushed 2026-10-27; linux/arm64, 682 MB). Until
+# then bdda3a2's image, sha256:87807c50…3ec1e6f8c.
 QWEN38_LING_IMAGE: Final[str] = (
-    "ghcr.io/dreamference/ling-serve@sha256:87807c50350cdf2338b840d86c6a5ce0fc076ab88d1610eaf0459061ec1e6f8c"
+    "ghcr.io/dreamference/ling-serve@sha256:9428996ac21af34a816bca14ea0828ef0553576afd312e153bef4c0d3a28bc35"
 )
 
 # The DFlash2 drafters ling-serve can run, pinned. Speculation is exact, so the drafter moves

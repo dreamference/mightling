@@ -8,12 +8,12 @@
 # COMMIT is the full ling-engine commit. Without BINARY, the Release binary is built from a detached
 # worktree of ENGINE_REPO at COMMIT with night 15's recipe (cmake Release with Ninja, `ninja
 # ling-serve`); with BINARY, that already-built binary is used, and its build must have been that
-# recipe at that commit (night 15's binary is b8e9451's; 1.7.2's is bdda3a2's, verified by the engine's checks). The image is tagged
+# recipe at that commit (night 15's binary is b8e9451's; 1.7.2's is 8d112d0's, bdda3a2 plus the tokenizer fix). The image is tagged
 # IMAGE:<first 12 of COMMIT>; publish it with `docker push`, then pin the pushed digest in
 # QWEN38_LING_IMAGE (dreamference/hardware/model_matrix_registry.py) and the commit in
 # QWEN38_LING_ENGINE_COMMIT.
 #
-# Vision (for the next engine image, not bdda3a2's, which has none): a ling-serve built with vision
+# Vision (for the next engine image, not 8d112d0's, which has none): a ling-serve built with vision
 # starts with `--vision on` by default and then needs libpng16-16t64, libwebp7 and libjpeg-turbo8
 # in the image (libnvjpeg optional), or it does not start. Add them to docker/ling-serve/Dockerfile's
 # apt list with that engine, and check the image's ldd output again.
