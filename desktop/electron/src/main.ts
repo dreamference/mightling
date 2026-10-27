@@ -689,7 +689,7 @@ export async function main(options: MainOptions): Promise<void> {
         return home ? pruneRecall(home, message.keep) : 0;
       }
       case "voice/transcribe":
-        return transcribe(message);
+        return transcribe(message, fetch, prefs.read().dictationWords);
       case "work/stop":
         server.stop();
         return null;

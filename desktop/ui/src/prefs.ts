@@ -69,6 +69,8 @@ export interface Prefs {
   keepInTray: boolean;
   /** The first-run page was seen (DESKTOP §16 B6). */
   welcomed: boolean;
+  /** Names, paths and symbols dictation should spell as written (Settings › Voice), sent to the speech-to-text service as its prompt. */
+  dictationWords: string[];
   petSize: "small" | "medium" | "large";
   petImage: string | null;
   /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */
