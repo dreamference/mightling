@@ -163,6 +163,7 @@ pub enum Refused {
 #[derive(Debug)]
 struct Host {
     device: String,
+    kind: String,
     seen: SystemTime,
     holding: BTreeSet<String>,
     models: Vec<String>,
@@ -316,6 +317,7 @@ impl Live {
             host_id.clone(),
             Host {
                 device: caller.device.clone(),
+                kind: post.kind.chars().take(16).collect(),
                 seen: now,
                 holding: holding.clone(),
                 models: post.models.into_iter().take(50).collect(),
@@ -361,12 +363,20 @@ impl Live {
             .filter(|(id, _)| **id != host_id)
             .flat_map(|(_, host)| host.holding.iter().cloned())
             .collect();
+        // A thread no host holds is resumed by the desktop app when it is open, not by an agent
+        // attached to another server, where the owner would not see it.
+        let desktop_elsewhere = Self::online_hosts(&inner, &caller.device, now).any(|(id, host)| *id != host_id && host.kind == "desktop");
+        let this_is_agent = inner.hosts.get(&host_id).is_some_and(|host| host.kind != "desktop");
         let mut out = Vec::new();
         let mut requeue = false;
         for command in inner.commands.iter_mut() {
             let mine = command.device == caller.device
                 && (command.state == "queued" || command.state == "waiting")
-                && command.thread.as_ref().is_none_or(|thread| holding.contains(thread) || !held_elsewhere.contains(thread));
+                && match &command.thread {
+                    Some(thread) if holding.contains(thread) => true,
+                    Some(thread) if held_elsewhere.contains(thread) => false,
+                    _ => !(this_is_agent && desktop_elsewhere),
+                };
             if mine {
                 requeue |= command.state == "waiting";
                 command.state = "delivered".to_string();
@@ -648,6 +658,24 @@ mod tests {
         answered.acks = vec![Ack { id: sent.id, ok: true, ..Ack::default() }];
         live.host_post(&laptop, answered, &owners, &title);
         assert_eq!(live.command_state(sent.id).unwrap().state, "done");
+    }
+
+    #[test]
+    fn a_thread_nobody_holds_goes_to_the_desktop_app_rather_than_an_agent() {
+        let live = Live::new(scratch("prefer"));
+        let laptop = device("lap", auth::Scope::Control, true);
+        let mut desktop = post(vec![], &[]);
+        desktop.host = "app".to_string();
+        let mut agent = post(vec![], &[]);
+        agent.host = "agent".to_string();
+        agent.kind = "agent".to_string();
+        live.host_post(&laptop, desktop.clone(), &owners, &title);
+        live.host_post(&laptop, agent.clone(), &owners, &title);
+        let phone = device("ph", auth::Scope::Control, false);
+        let send = Ask { kind: "send".to_string(), thread: Some(T.to_string()), text: Some("go on".to_string()), ..Ask::default() };
+        live.command(&phone, send, "lap").unwrap();
+        assert!(live.host_post(&laptop, agent, &owners, &title).is_empty());
+        assert_eq!(live.host_post(&laptop, desktop, &owners, &title).len(), 1);
     }
 
     #[test]
