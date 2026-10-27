@@ -183,6 +183,13 @@ pub fn authority(url: &str) -> Option<String> {
     Some(authority.strip_suffix(":443").map(str::to_string).unwrap_or(authority))
 }
 
+/// The `Host` a browser sends for the configured `[chat] telegram_mini_app_url` in `user_config`.
+pub fn mini_app_host(user_config: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(user_config).ok()?;
+    let url = mini_app_url(&text)?;
+    authority(&url)
+}
+
 /// Whether `id` is a valid deep-link thread id (G3): 8 lowercase hex characters (a `chat-repos`
 /// thread) or an app-server thread id (uuid-like: lowercase hex and dashes, at most 64 characters).
 pub fn valid_open_thread_id(id: &str) -> bool {
@@ -268,6 +275,7 @@ pub fn open_thread_url(front_url: &str, thread_id: &str, approval: bool) -> Opti
 pub struct PendingLaunchPair {
     pub id: String,
     pub code: String,
+    #[serde(rename = "user", alias = "user_id")]
     pub user_id: i64,
     pub created_at: u64,
     pub expires_at: u64,
@@ -346,18 +354,17 @@ pub fn list_pending_pairs(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
 
 /// Approves a pending request by `id`, issuing a Browser device with `control` scope labelled
 /// `telegram-app`, and keeping its token for one-time collection by the launching webview.
-pub fn approve_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<Option<auth::Device>> {
+pub fn approve_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<Option<String>> {
     let mut entries = load_pending_pairs_raw(state, now);
     let Some(entry) = entries.iter_mut().find(|entry| entry.id == id && !entry.approved) else {
         let _ = save_pending_pairs_raw(state, &entries);
         return Ok(None);
     };
-    let (_device_id, token) = auth::add_device(state, "telegram-app")?;
-    let device = auth::device_for_token(state, &token);
+    let (device_id, token) = auth::add_device(state, "telegram-app")?;
     entry.approved = true;
     entry.approved_token = Some(token);
     save_pending_pairs_raw(state, &entries)?;
-    Ok(device)
+    Ok(Some(device_id))
 }
 
 /// Declines (deletes) a pending request by `id`.
@@ -372,29 +379,29 @@ pub fn decline_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result
 
 /// Polls or collects a pending request for the launching webview. Once approved, removes the
 /// request and hands out the device token exactly once.
-pub fn claim_pending_pair(state: &Path, id: &str, user_id: i64, init_data: &str, now: u64) -> std::io::Result<ClaimOutcome> {
+pub fn claim_pending_pair(state: &Path, id: &str, user_id: i64, init_data: &str, now: u64) -> ClaimOutcome {
     let mut entries = load_pending_pairs_raw(state, now);
     let Some(index) = entries.iter().position(|entry| entry.id == id) else {
         let _ = save_pending_pairs_raw(state, &entries);
-        return Ok(ClaimOutcome::NotFound);
+        return ClaimOutcome::NotFound;
     };
     let digest = auth::sha256_hex(init_data);
     if entries[index].user_id != user_id || !auth::same_secret(&digest, &entries[index].init_data_sha256) {
-        return Ok(ClaimOutcome::Forbidden);
+        return ClaimOutcome::Forbidden;
     }
     if !entries[index].approved {
-        save_pending_pairs_raw(state, &entries)?;
-        return Ok(ClaimOutcome::Pending);
+        let _ = save_pending_pairs_raw(state, &entries);
+        return ClaimOutcome::Pending;
     }
     let removed = entries.remove(index);
-    save_pending_pairs_raw(state, &entries)?;
+    let _ = save_pending_pairs_raw(state, &entries);
     let Some(token) = removed.approved_token else {
-        return Ok(ClaimOutcome::NotFound);
+        return ClaimOutcome::NotFound;
     };
     if auth::device_for_token(state, &token).is_none() {
-        return Ok(ClaimOutcome::NotFound);
-    }
-    Ok(ClaimOutcome::Approved(token))
+        return ClaimOutcome::NotFound;
+    };
+    ClaimOutcome::Approved(token)
 }
 
 #[cfg(test)]
@@ -517,29 +524,30 @@ mod tests {
         assert_eq!(ids, vec![p2.id.clone(), p3.id.clone(), p4.id.clone()]);
 
         // Not approved yet: polling answers Pending, and another webview's initData is Forbidden.
-        assert_eq!(claim_pending_pair(&state, &p2.id, 42, "init-2", 1005).unwrap(), ClaimOutcome::Pending);
-        assert_eq!(claim_pending_pair(&state, &p2.id, 42, "init-other", 1005).unwrap(), ClaimOutcome::Forbidden);
-        assert_eq!(claim_pending_pair(&state, &p2.id, 99, "init-2", 1005).unwrap(), ClaimOutcome::Forbidden);
+        assert_eq!(claim_pending_pair(&state, &p2.id, 42, "init-2", 1005), ClaimOutcome::Pending);
+        assert_eq!(claim_pending_pair(&state, &p2.id, 42, "init-other", 1005), ClaimOutcome::Forbidden);
+        assert_eq!(claim_pending_pair(&state, &p2.id, 99, "init-2", 1005), ClaimOutcome::Forbidden);
 
         // Decline deletes the request.
         assert!(decline_pending_pair(&state, &p3.id, 1005).unwrap());
-        assert_eq!(claim_pending_pair(&state, &p3.id, 42, "init-3", 1005).unwrap(), ClaimOutcome::NotFound);
+        assert_eq!(claim_pending_pair(&state, &p3.id, 42, "init-3", 1005), ClaimOutcome::NotFound);
 
         // Expiry after 10 minutes drops the request.
         assert!(list_pending_pairs(&state, 1003 + LAUNCH_PAIR_TTL_SECS + 1).is_empty());
 
         // Approve issues a Browser device with control scope labelled telegram-app; cookie token is claimed once.
         let p5 = create_pending_pair(&state, 42, "init-5", 2000).unwrap();
-        let device = approve_pending_pair(&state, &p5.id, 2010).unwrap().expect("approved");
+        let device_id = approve_pending_pair(&state, &p5.id, 2010).unwrap().expect("approved");
+        let device = auth::load_devices(&state).into_iter().find(|d| d.id == device_id).expect("device stored");
         assert_eq!(device.name, "telegram-app");
         assert_eq!(device.kind, auth::DeviceKind::Browser);
         assert_eq!(device.scope, auth::Scope::Control);
         assert!(list_pending_pairs(&state, 2010).is_empty(), "approved request is no longer pending");
-        let ClaimOutcome::Approved(token) = claim_pending_pair(&state, &p5.id, 42, "init-5", 2011).unwrap() else {
+        let ClaimOutcome::Approved(token) = claim_pending_pair(&state, &p5.id, 42, "init-5", 2011) else {
             panic!("expected Approved");
         };
         assert!(auth::device_for_token(&state, &token).is_some());
-        assert_eq!(claim_pending_pair(&state, &p5.id, 42, "init-5", 2012).unwrap(), ClaimOutcome::NotFound);
+        assert_eq!(claim_pending_pair(&state, &p5.id, 42, "init-5", 2012), ClaimOutcome::NotFound);
         assert!(!auth::revoke_device(&state, "telegram-app").unwrap().is_empty());
         assert!(auth::device_for_token(&state, &token).is_none());
 

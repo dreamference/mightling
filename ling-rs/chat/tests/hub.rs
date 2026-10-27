@@ -102,7 +102,7 @@ fn rig(tag: &str, script: Script, airgapped: bool, tweak: impl FnOnce(&mut HubCo
                             json!({ "notices": [], "latest": 5 })
                         }
                     } else if path == "/api/telegram/pending-pairs" {
-                        json!({ "pending": [{ "id": "pair-req-1", "code": "482 913", "user": 111, "created_at": 100 }] })
+                        json!({ "pending": [{ "id": "pair-req-1", "code": "482 913", "user": 7, "created_at": 100 }] })
                     } else if path == "/api/telegram/pending-pairs/approve" || path == "/api/telegram/pending-pairs/decline" {
                         json!({ "ok": true })
                     } else {

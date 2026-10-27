@@ -180,7 +180,9 @@
     params.delete("open");
     params.delete("approval");
     const rest = params.toString();
-    const nextUrl = location.pathname + (rest ? `?${rest}` : "") + (location.hash || "");
+    // Telegram's launch data never goes back into the address (it was cleared above).
+    const hash = location.hash && !location.hash.includes("tgWebApp") ? location.hash : "";
+    const nextUrl = location.pathname + (rest ? `?${rest}` : "") + hash;
     try {
       history.replaceState(null, "", nextUrl);
     } catch (_) {

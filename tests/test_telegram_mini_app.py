@@ -151,4 +151,3 @@ def test_deep_links_are_read_and_stripped_only_after_launch_check_and_validated(
         assert record["openTargetBeforeCheck"] is None
         assert record["openTarget"] == expected
         assert record["replaced"] == "/"
-

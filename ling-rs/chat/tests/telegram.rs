@@ -98,6 +98,12 @@ fn scratch(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+/// A press of an inline button by `user`, in their private chat with the bot.
+fn callback(user: i64, data: &str) -> Value {
+    json!({ "update_id": 90, "callback_query": { "id": "cbp", "from": { "id": user }, "data": data,
+        "message": { "message_id": 9, "chat": { "id": user, "type": "private" } } } })
+}
+
 fn private_message(user: i64, text: &str) -> Value {
     json!({ "update_id": 1, "message": { "message_id": 5, "from": { "id": user }, "chat": { "id": user, "type": "private" }, "text": text } })
 }
@@ -679,7 +685,9 @@ async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_
         sent["text"],
         format!("A Mini App on a new device asks to pair (code {}).", created.code)
     );
-    let buttons = sent["reply_markup"]["inline_keyboard"][0].as_array().unwrap();
+    // One button per row or several in one: the order is what counts.
+    let buttons: Vec<Value> =
+        sent["reply_markup"]["inline_keyboard"].as_array().unwrap().iter().flat_map(|row| row.as_array().unwrap().clone()).collect();
     assert_eq!(buttons[0]["text"], "Approve");
     assert_eq!(buttons[1]["text"], "Decline");
     let approve_cb = buttons[0]["callback_data"].as_str().unwrap().to_string();
