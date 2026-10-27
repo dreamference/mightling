@@ -11,18 +11,28 @@ const answers = Array.isArray(answerRaw) ? answerRaw.slice() : [answerRaw];
 const record = {
   fetches: [],
   events: [],
+  eventPayloads: [],
   sockets: 0,
   replaced: null,
   replacedHistory: [],
   body: null,
   theme: null,
+  telegramBack: 0,
+  cssVars: {},
   openTarget: null,
   openTargetBeforeCheck: null,
   reloads: 0,
   finalSearch: null,
 };
 const storage = new Map();
-const documentElement = { dataset: optionsRaw.unpaired ? { unpaired: "1" } : {} };
+const documentElement = {
+  dataset: optionsRaw.unpaired ? { unpaired: "1" } : {},
+  style: {
+    setProperty(name, value) {
+      record.cssVars[name] = value;
+    },
+  },
+};
 const body = {
   textContent: "x",
   append(...nodes) {
@@ -61,11 +71,17 @@ const window = {
   },
   localStorage: { getItem: () => null },
   matchMedia: () => ({ matches: false, addEventListener() {} }),
-  TelegramWebviewProxy: { postEvent(type, _data) { record.events.push(type); } },
+  TelegramWebviewProxy: {
+    postEvent(type, data) {
+      record.events.push(type);
+      record.eventPayloads.push({ type, data: data ? JSON.parse(data) : null });
+    },
+  },
   addEventListener() {},
   dispatchEvent(e) {
     if (e.data && e.data.channel === "theme") record.theme = e.data.payload;
     if (e.data && e.data.channel === "open-target") record.openTargetEvent = e.data.payload;
+    if (e.data && e.data.channel === "telegramBack") record.telegramBack++;
   },
   fetch(url, init) {
     const entry = { url };
@@ -98,6 +114,8 @@ const context = {
   setTimeout,
   encodeURIComponent,
   MessageEvent: class { constructor(_t, init) { Object.assign(this, init); } },
+  Number,
+  Boolean,
   parseInt,
 };
 context.window = context;
@@ -108,6 +126,11 @@ vm.runInContext(source, context);
 record.openTargetBeforeCheck =
   typeof context.electronBridge.openTarget === "function" ? context.electronBridge.openTarget() : null;
 context.electronBridge.sendMessageFromView({ hello: 1 });
+if (Array.isArray(optionsRaw.viewMessages)) {
+  for (const msg of optionsRaw.viewMessages) {
+    context.electronBridge.sendMessageFromView(msg);
+  }
+}
 setTimeout(() => {
   record.dataTheme = documentElement.dataset.theme;
   record.host = documentElement.dataset.host || null;
@@ -115,6 +138,27 @@ setTimeout(() => {
     typeof context.electronBridge.openTarget === "function" ? context.electronBridge.openTarget() : null;
   record.finalSearch = window.location.search;
   record.hasReceiver = !!(context.Telegram && context.Telegram.WebView);
-  if (record.hasReceiver) context.Telegram.WebView.receiveEvent("theme_changed", { theme_params: { bg_color: "#ffffff" } });
+  if (record.hasReceiver) {
+    context.Telegram.WebView.receiveEvent("theme_changed", { theme_params: { bg_color: "#ffffff" } });
+    if (Array.isArray(optionsRaw.receiveEvents)) {
+      for (const ev of optionsRaw.receiveEvents) {
+        context.Telegram.WebView.receiveEvent(ev.type, ev.data);
+      }
+    }
+    if (optionsRaw.receiveNonFiniteSafeArea) {
+      context.Telegram.WebView.receiveEvent("safe_area_changed", {
+        top: NaN,
+        right: Infinity,
+        bottom: -Infinity,
+        left: -1,
+      });
+      context.Telegram.WebView.receiveEvent("content_safe_area_changed", {
+        top: NaN,
+        right: Infinity,
+        bottom: -0.5,
+        left: "12",
+      });
+    }
+  }
   console.log(JSON.stringify(record));
 }, 50);
