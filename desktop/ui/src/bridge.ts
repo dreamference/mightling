@@ -670,6 +670,12 @@ export interface PickedElement {
   area?: { x: number; y: number; width: number; height: number };
 }
 
+/** An office file as a PDF (DESKTOP §16 B31): the desktop app converts it with LibreOffice, no network; a browser cannot. */
+export const office = {
+  available: () => host() === "electron",
+  preview: (path: string) => send<{ pdf: string } | { unavailable: string }>({ type: "office/preview", path }),
+};
+
 /** The preview tab (DESKTOP_PARITY §2.9): the desktop app's only; a browser on `ling web` has none. */
 export const preview = {
   /** The recent console of a thread's previews (or of every preview), for the agent's console tool. */

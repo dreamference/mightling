@@ -24,6 +24,7 @@ import { serve } from "./app-protocol";
 import { auditPreview, type WorkTarget } from "./args";
 import { webUrl } from "./links";
 import { codexHome, findLing } from "./bridge";
+import { officePreview } from "./office";
 import { findEditors, openCommand, terminalCommand, type Editor } from "./editors";
 import { environments, writeEnvironment } from "./environments";
 import * as git from "./git";
@@ -834,6 +835,9 @@ export async function main(options: MainOptions): Promise<void> {
         return worktree.handOff(message.direction === "toLocal" ? "toLocal" : "toWorktree", message.worktree, message.local, worktreeRoot(message.root), message.thread);
       case "git/branches":
         return git.branches(await git.checkRoot(message.root));
+      case "office/preview":
+        // An office file shown as a PDF (office.ts, DESKTOP §16 B31): LibreOffice with no network, a time limit.
+        return officePreview(message.path);
       case "env/list":
         return environments(await folder(message.project));
       case "env/write":

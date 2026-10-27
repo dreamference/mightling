@@ -6,7 +6,7 @@
 
 import { parentOf } from "./files";
 
-export type ArtifactKind = "markdown" | "image" | "pdf" | "html" | "latex" | "table";
+export type ArtifactKind = "markdown" | "image" | "pdf" | "html" | "latex" | "table" | "office";
 
 const KINDS: Record<string, ArtifactKind> = {
   md: "markdown", markdown: "markdown", mdx: "markdown",
@@ -15,6 +15,7 @@ const KINDS: Record<string, ArtifactKind> = {
   html: "html", htm: "html", xhtml: "html",
   tex: "latex",
   csv: "table", tsv: "table",
+  docx: "office", doc: "office", xlsx: "office", xls: "office", pptx: "office", ppt: "office", odt: "office", ods: "office", odp: "office", rtf: "office",
 };
 
 export const IMAGE_TYPES: Record<string, string> = {
