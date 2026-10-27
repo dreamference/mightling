@@ -13,6 +13,7 @@ import type { ThreadItem } from "./protocol/v2/ThreadItem";
 import type { ThreadTokenUsage } from "./protocol/v2/ThreadTokenUsage";
 import type { Turn } from "./protocol/v2/Turn";
 import type { TurnError } from "./protocol/v2/TurnError";
+import type { TurnPlanStep } from "./protocol/v2/TurnPlanStep";
 import type { TurnStatus } from "./protocol/v2/TurnStatus";
 
 import { isAskThread } from "./ask";
@@ -25,6 +26,14 @@ export interface TurnView {
   error: TurnError | null;
   /** The turn's whole diff, from `turn/diff/updated`. */
   diff: string | null;
+  /** The agent's plan as a checklist, from `turn/plan/updated` (DESKTOP §16 B3); the latest replaces the last. */
+  checklist?: Checklist | null;
+}
+
+/** The agent's to-do list for a turn: its steps with their status, and why it changed, if it said. */
+export interface Checklist {
+  explanation: string | null;
+  steps: TurnPlanStep[];
 }
 
 export interface ThreadView {
@@ -135,7 +144,7 @@ export function mergedTurns(snapshot: TurnView[], known: TurnView[]): TurnView[]
       const longer = streamed?.type === "agentMessage" && item.type === "agentMessage" && streamed.text.length > item.text.length;
       return longer ? streamed : item;
     });
-    return { ...turn, items: [...items, ...before.items.filter((item) => !listed.has(item.id))], diff: turn.diff ?? before.diff };
+    return { ...turn, items: [...items, ...before.items.filter((item) => !listed.has(item.id))], diff: turn.diff ?? before.diff, checklist: turn.checklist ?? before.checklist ?? null };
   });
   const inSnapshot = new Set(snapshot.map((turn) => turn.id));
   return [...merged, ...known.filter((turn) => turn.status === "inProgress" && !inSnapshot.has(turn.id))];
@@ -288,6 +297,10 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
     case "turn/diff/updated": {
       const { threadId, turnId, diff } = notification.params;
       return withThread(state, threadId, (view) => withTurn(view, turnId, (turn) => ({ ...turn, diff })));
+    }
+    case "turn/plan/updated": {
+      const { threadId, turnId, explanation, plan } = notification.params;
+      return withThread(state, threadId, (view) => withTurn(view, turnId, (turn) => ({ ...turn, checklist: { explanation: explanation?.trim() || null, steps: plan } })));
     }
     case "thread/goal/updated": {
       const { threadId, goal } = notification.params;

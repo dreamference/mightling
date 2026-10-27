@@ -399,6 +399,20 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .subagent { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 .subagent .running { margin: 0 2px; }
 .subagent-name { font-weight: 500; }
+.checklist { max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 0 auto 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--raised); font-size: 13px; }
+.checklist.live { max-height: 30vh; overflow: auto; }
+.checklist.live header { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.checklist.kept { width: auto; max-width: none; margin: 8px 0; background: transparent; }
+.checklist.kept summary { cursor: pointer; color: var(--muted); }
+.checklist-count { color: var(--muted); }
+.checklist-explanation { margin: 2px 0 6px; color: var(--muted); }
+.checklist-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.checklist-step { display: flex; gap: 8px; align-items: flex-start; }
+.checklist-mark { flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--line-strong); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+.checklist-step.status-inProgress .checklist-mark { border-color: var(--accent); background: var(--accent-soft); }
+.checklist-step.status-inProgress .checklist-text { font-weight: 600; }
+.checklist-step.status-completed .checklist-mark { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.checklist-step.status-completed .checklist-text { color: var(--muted); text-decoration: line-through; }
 .goal-row { display: flex; align-items: center; gap: 8px; max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 0 auto 6px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--accent-soft); font-size: 13px; }
 .goal-row.status-paused, .goal-row.status-blocked { background: var(--notice); }
 .goal-row.status-complete { background: var(--add); }

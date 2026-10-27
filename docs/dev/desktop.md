@@ -84,6 +84,7 @@ What is left of both parity studies, one branch each (`desktop/backlog-<n>-<name
 
 - **Notifications name the thread** (B1, `notices.ts`): the main process learns each thread's name from every answer and notification that carries threads (a list, a read, `thread/started`, `thread/name/updated`, and a new thread's first message until it has a name) and keeps the running turn's last answer, so a notice is titled with the thread and says what it ended with, or what waits (the command, the question, the MCP server's message). `notifyQuestions` (null: follows `notifyApprovals`) is the questions' own switch.
 - **Questions answered in full** (B2, `questions.ts`, `QuestionCard.tsx`): options with their descriptions, `None of the above` with a field for the user's words when `isOther`, a password field when `isSecret`; the answer is spelled as Codex's TUI spells it (the option's label, then `user_note: <words>`), so the agent reads both the same way.
+- **The plan checklist** (B3, `PlanChecklist.tsx`, `store.ts` `TurnView.checklist`): `turn/plan/updated` replaces the turn's checklist in place; it shows above the composer while its turn runs and folded in the finished turn, and a snapshot of the thread (which does not carry it) keeps it. The e2e sessions are `e2e/backlog-session.ts`; each item has its own `backlog-<n>.e2e.ts`.
 
 ## Tests
 
