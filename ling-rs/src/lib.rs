@@ -87,6 +87,7 @@ pub mod userns;
 pub mod vision;
 #[cfg(unix)]
 pub mod web;
+pub mod winsta;
 pub mod worktree;
 
 /// Where Dreamference serves its model unless configured otherwise.
@@ -507,6 +508,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         if let Some(reason) = plugins::install_refusal(&user_args[index + 1..], configured.level, &configured.source.label()) {
             bail!("{reason}");
         }
+    }
+    // Over SSH the process lives in a service window station the sandbox's processes cannot open;
+    // let them in, or say why commands will not run (winsta.rs; WINDOWS_ARM §23.4 W2).
+    if std::env::var_os(UPSTREAM_TESTS_ENV).is_none()
+        && let Some(line) = winsta::prepare_for_sandbox()
+    {
+        eprintln!("⚠️  {line}");
     }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
