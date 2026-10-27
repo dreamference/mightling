@@ -155,6 +155,9 @@ setInterval(() => {
 let threads = 0;
 let turns = 0;
 let buffer = "";
+// Loaded as a real app-server's are: the two it starts with, and every thread resumed or started
+// since, so a refresh between two messages does not make the host resume a thread again.
+const loaded = ["t-1", "t-3"];
 process.stdin.on("data", (chunk) => {
   buffer += chunk;
   let newline;
@@ -172,13 +175,17 @@ function handle(message) {
     case "thread/list":
       return out({ id: message.id, result: { data: ${JSON.stringify(threads)}, nextCursor: null, backwardsCursor: null } });
     case "thread/loaded/list":
-      return out({ id: message.id, result: { data: ["t-1", "t-3"], nextCursor: null } });
+      return out({ id: message.id, result: { data: loaded, nextCursor: null } });
     case "model/list":
       return out({ id: message.id, result: { data: [{ id: "m-1", model: "m-1", hidden: false }, { id: "m-hidden", model: "m-hidden", hidden: true }], nextCursor: null } });
     case "thread/resume":
+      if (!loaded.includes(params.threadId)) loaded.push(params.threadId);
       return out({ id: message.id, result: { thread: { id: params.threadId, cwd: "/home/user/proj" } } });
-    case "thread/start":
-      return out({ id: message.id, result: { thread: { id: "t-new-" + ++threads, cwd: params.cwd } } });
+    case "thread/start": {
+      const id = "t-new-" + ++threads;
+      loaded.push(id);
+      return out({ id: message.id, result: { thread: { id, cwd: params.cwd } } });
+    }
     case "turn/start": {
       const turn = "turn-" + ++turns;
       out({ id: message.id, result: { turn: { id: turn } } });
