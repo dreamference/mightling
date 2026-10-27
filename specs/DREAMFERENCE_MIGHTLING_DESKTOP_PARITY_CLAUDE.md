@@ -93,7 +93,7 @@ Columns: what the Claude desktop app does (with its source), what Mightling does
 | Memory: generate from chats, pause, reset, **Topics** listed and edited one by one, sensitive topics off by default ([MEMORY]) | Settings › Memories: on/off, tool-assisted chats, delete all, status (DESKTOP_PARITY §2.14) | Seeing and editing individual memories | M |
 | Capabilities: code execution and file creation, network egress ([FILES]) | `/airgapped off|on` (AIRGAPPED) | Mightling's is stronger (an empty network namespace) | — |
 | Privacy: **Export data** (an emailed link), Shared chats ([EXPORT], [SHARE]) | Sessions are files under `~/.mightling/sessions`; Copy the conversation's path (DESKTOP_PARITY §2.1) | Export a question as Markdown | L |
-| Language: 11 interface languages ([LANG]) | English only | Localisation | L |
+| Language: 11 interface languages ([LANG]) | English only | Localisation; **approved 2026-10-27 (the owner):** Portuguese first, on a bundled i18n layer (DESKTOP §16 B44) | L |
 | Reflect (a monthly recap), Time and focus (break reminders, quiet hours) ([REFLECT], [FOCUS]) | Settings › Profile: local activity insights (DESKTOP_PARITY §2.15) | Not proposed (the activity page covers the useful part) | — |
 
 ### 2.8 Keyboard shortcuts
@@ -167,7 +167,7 @@ Sign-in, plans and usage limits; cloud sessions, Cowork in a virtual machine and
 | 2 | **Projects for Ask:** instructions, knowledge files searched through `ling-docs`, questions gathered, a question moved in (§2.1) | H | The policy layer composes a project's instructions into the `ask` prompt and names its collection; the UI a project page | Decided 2026-10-21: Projects are the Codex-parity work's (DESKTOP_PARITY, branch `desktop/parity-projects`: one project for Ask and Work, instructions and knowledge files); Ask builds on them, no Ask-only projects |
 | 3 | **Quick Entry:** a system-wide shortcut, a floating box, the app kept in the tray (§2.9, §2.10) | H | Window only: `globalShortcut`, a small window, two settings off by default | **Built** (`desktop/quick-entry`), §4.2; recent questions in the box not built |
 | 4 | **Open a cited source** from an answer (§2.4) | H | The renderer keeps the address; a click opens it in the system browser after showing it; refused at `/airgapped on` like the forge's page | **Built** (decided 2026-10-21), §4.5 |
-| 5 | **Edit an earlier message**, the replaced version kept (§2.2) | M | `thread/fork` at that turn, then `turn/start`; a switch between the versions | Proposed; the version switcher is UI the owner should see first |
+| 5 | **Edit an earlier message**, the replaced version kept (§2.2) | M | `thread/fork` at that turn, then `turn/start`; a switch between the versions | Proposed; the version switcher is UI the owner should see first. **Approved 2026-10-27 (the owner):** DESKTOP §16 B39 |
 | 6 | **Incognito question** (§2.14) | M | `ephemeral` threads, the folder removed on close (a main-process removal confined to the Ask root) | **Built** (decided 2026-10-21), §4.3 |
 | 7 | **The agent recalls earlier questions** (§2.14) | M | A read-only MCP tool over the session files, off by default | **Built** (decided 2026-10-21) as a skill over kept copies rather than an MCP tool, §4.4 |
 | 8 | **Per-tool rules for MCP tools** (§2.6) | M | The pinned `ling`'s per-tool approval keys, if any, written through `config/value/write` | Proposed; to check against the pinned Codex's config first |
@@ -263,7 +263,7 @@ Answered on 2026-10-21:
 2. **Links in answers:** yes, after a confirmation showing the full address, never at `/airgapped on`: built, §4.5.
 3. **Incognito questions:** yes, the thread and its folder deleted when left, the irreversibility made clear: built, §4.3.
 4. **Recall of earlier questions:** yes, local and read only, off by default, a setting: built, §4.4.
-5. **One-file MCP extensions (`.mcpb`):** not now.
+5. **One-file MCP extensions (`.mcpb`):** not now. **Approved 2026-10-27 (the owner):** installs from a file, nothing fetched (DESKTOP §16 B45).
 6. **Projects for Ask:** the Codex-parity work owns Projects (instructions and knowledge files for Ask and Work); Ask builds on them, with no Ask-only projects.
 7. **This document on `main`:** yes, merged.
 
