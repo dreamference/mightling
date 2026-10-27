@@ -102,23 +102,176 @@
     else document.addEventListener("DOMContentLoaded", show);
   }
 
-  const checked = launch
-    ? fetch("/api/telegram/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData: launch.initData }),
+  function showPairingCode(code) {
+    const show = () => {
+      document.body.textContent = "";
+      const main = document.createElement("main");
+      main.style.cssText = "font: 16px system-ui, sans-serif; padding: 24px; line-height: 1.5; text-align: center;";
+      const title = document.createElement("h1");
+      title.textContent = "Approve this device in the bot";
+      const text = document.createElement("p");
+      text.style.cssText = "font: 600 28px ui-monospace, monospace; letter-spacing: 0.08em; margin: 16px 0;";
+      text.textContent = code;
+      main.append(title, text);
+      document.body.append(main);
+    };
+    if (document.body) show();
+    else document.addEventListener("DOMContentLoaded", show);
+  }
+
+  function validRepoPart(part) {
+    return (
+      typeof part === "string" &&
+      part.length >= 1 &&
+      part.length <= 64 &&
+      !part.startsWith(".") &&
+      !part.startsWith("-") &&
+      /^[A-Za-z0-9._-]+$/.test(part)
+    );
+  }
+
+  function validRepoName(name) {
+    if (typeof name !== "string") return false;
+    const slash = name.indexOf("/");
+    if (slash <= 0 || name.indexOf("/", slash + 1) !== -1) return false;
+    return validRepoPart(name.slice(0, slash)) && validRepoPart(name.slice(slash + 1));
+  }
+
+  function validOpenThreadId(id) {
+    if (typeof id !== "string" || id.length === 0) return false;
+    if (/^[0-9a-f]{8}$/.test(id)) return true;
+    return (
+      id.length >= 2 &&
+      id.length <= 64 &&
+      !id.startsWith("-") &&
+      !id.endsWith("-") &&
+      id.includes("-") &&
+      /^[0-9a-fA-F-]+$/.test(id)
+    );
+  }
+
+  function parseOpenTarget(search) {
+    const params = new URLSearchParams(search || "");
+    const raw = params.get("open");
+    if (!raw) return null;
+    const approval = params.get("approval") === "1";
+    if (raw === "repos") return { kind: "repos", approval };
+    if (raw.startsWith("repo:")) {
+      const repo = raw.slice(5);
+      return validRepoName(repo) ? { kind: "repo", repo, approval } : null;
+    }
+    if (raw.startsWith("thread:")) {
+      const threadId = raw.slice(7);
+      return validOpenThreadId(threadId) ? { kind: "thread", threadId, approval } : null;
+    }
+    return null;
+  }
+
+  let resolvedOpenTarget = null;
+  let openTargetConsumed = false;
+
+  function consumeOpenTarget() {
+    if (openTargetConsumed) return resolvedOpenTarget;
+    openTargetConsumed = true;
+    const search = location.search || "";
+    const params = new URLSearchParams(search);
+    if (!params.has("open") && !params.has("approval")) return null;
+    resolvedOpenTarget = parseOpenTarget(search);
+    params.delete("open");
+    params.delete("approval");
+    const rest = params.toString();
+    const nextUrl = location.pathname + (rest ? `?${rest}` : "") + (location.hash || "");
+    try {
+      history.replaceState(null, "", nextUrl);
+    } catch (_) {
+      // Ignore if history is unavailable.
+    }
+    if (resolvedOpenTarget) {
+      dispatch({ channel: "open-target", payload: resolvedOpenTarget });
+    }
+    return resolvedOpenTarget;
+  }
+
+  function runCheck() {
+    return fetch("/api/telegram/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData: launch.initData }),
+    })
+      .then((response) => {
+        if (response && response.status === 401) return { unpaired: true };
+        return response.json();
       })
-        .then((response) => response.json())
-        .then((answer) => {
-          if (answer && answer.ok) return true;
-          refuse((answer && answer.reason) || "This page could not be checked.");
+      .then((answer) => {
+        if (answer && answer.unpaired) return launchPair();
+        if (answer && answer.ok) return true;
+        refuse((answer && answer.reason) || "This page could not be checked.");
+        return false;
+      })
+      .catch(() => {
+        refuse("ling web did not answer the launch check.");
+        return false;
+      });
+  }
+
+  function pollLaunchPair(pendingId) {
+    return fetch(`/api/telegram/launch-pair?pending=${encodeURIComponent(pendingId)}`, {
+      method: "GET",
+      headers: { "X-Telegram-Init-Data": launch.initData },
+    })
+      .then((response) => response.json())
+      .then((answer) => {
+        if (answer && (answer.ok || answer.status === "approved")) {
+          const wasLockedPage = document.documentElement.dataset.unpaired === "1";
+          delete document.documentElement.dataset.unpaired;
+          return runCheck().then((ok) => {
+            if (ok && wasLockedPage && typeof location.reload === "function") location.reload();
+            return ok;
+          });
+        }
+        if (answer && answer.status === "pending") {
+          const delay = typeof window.__mightlingPollMs === "number" ? window.__mightlingPollMs : 1500;
+          return new Promise((resolve) => setTimeout(resolve, delay)).then(() => pollLaunchPair(pendingId));
+        }
+        refuse((answer && answer.reason) || "That pairing request has expired or was declined.");
+        return false;
+      })
+      .catch(() => {
+        refuse("ling web did not answer the pairing check.");
+        return false;
+      });
+  }
+
+  function launchPair() {
+    return fetch("/api/telegram/launch-pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData: launch.initData }),
+    })
+      .then((response) => response.json())
+      .then((answer) => {
+        if (!answer || !answer.pending || !answer.code) {
+          refuse((answer && answer.reason) || "This device could not ask to pair.");
           return false;
-        })
-        .catch(() => {
-          refuse("ling web did not answer the launch check.");
-          return false;
-        })
-    : Promise.resolve(true);
+        }
+        showPairingCode(answer.code);
+        return pollLaunchPair(answer.pending);
+      })
+      .catch(() => {
+        refuse("ling web did not answer the pairing request.");
+        return false;
+      });
+  }
+
+  const checked = (launch
+    ? document.documentElement.dataset.unpaired === "1"
+      ? launchPair()
+      : runCheck()
+    : Promise.resolve(true)
+  ).then((ok) => {
+    if (ok) consumeOpenTarget();
+    return ok;
+  });
 
   if (launch) {
     document.documentElement.dataset.host = "telegram";
@@ -150,6 +303,9 @@
         pending.set(call, { resolve, reject });
         send(JSON.stringify({ call, message }));
       });
+    },
+    openTarget() {
+      return resolvedOpenTarget;
     },
   };
   window.mightlingWindowType = "web";

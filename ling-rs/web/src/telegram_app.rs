@@ -14,15 +14,31 @@
 //! its own.
 
 use std::path::Path;
+use std::path::PathBuf;
 
+use rand::Rng;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
 
 use crate::auth;
+use crate::chat_repos;
 
 /// How old a launch may be: Telegram signs `auth_date` when the menu button is pressed.
 pub const MAX_LAUNCH_AGE_SECS: u64 = 24 * 60 * 60;
+
+/// How long a pending launch-pair request waits for the bot's Approve before expiring (G2).
+pub const LAUNCH_PAIR_TTL_SECS: u64 = 10 * 60;
+
+/// At most three pending launch-pair requests exist at once; a fourth drops the oldest (G2).
+pub const MAX_PENDING_LAUNCH_PAIRS: usize = 3;
+
+/// The header in which the launching webview re-sends its `initData` when polling `GET /api/telegram/launch-pair`.
+pub const INIT_DATA_HEADER: &str = "x-telegram-init-data";
+
+const PENDING_PAIRS_FILE: &str = "telegram-pending-pairs.json";
 
 /// HMAC-SHA-256 (RFC 2104), on the `sha2` crate this server already has.
 pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
@@ -145,13 +161,19 @@ pub fn bot(codex_home: &Path) -> Option<(String, Vec<i64>)> {
 pub fn mini_app_url(text: &str) -> Option<String> {
     let document = toml::from_str::<toml::Table>(text).ok()?;
     let url = document.get("chat")?.as_table()?.get("telegram_mini_app_url")?.as_str()?.trim().to_string();
-    let rest = url.strip_prefix("https://")?;
+    valid_front_url(&url).then_some(url)
+}
+
+/// Whether `url` is a plain `https://` front address with no userinfo or fragment.
+pub fn valid_front_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
     let authority = rest.split(['/', '?']).next().unwrap_or_default();
-    let valid = !authority.is_empty()
+    !authority.is_empty()
         && !authority.contains('@')
         && !url.contains('#')
-        && authority.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
-    valid.then_some(url)
+        && authority.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
 }
 
 /// The `Host` a browser sends for the Mini App's address (`name`, or `name:port` off 443).
@@ -159,6 +181,220 @@ pub fn authority(url: &str) -> Option<String> {
     let rest = url.strip_prefix("https://")?;
     let authority = rest.split(['/', '?']).next()?.to_ascii_lowercase();
     Some(authority.strip_suffix(":443").map(str::to_string).unwrap_or(authority))
+}
+
+/// Whether `id` is a valid deep-link thread id (G3): 8 lowercase hex characters (a `chat-repos`
+/// thread) or an app-server thread id (uuid-like: lowercase hex and dashes, at most 64 characters).
+pub fn valid_open_thread_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 64 || id.starts_with('-') || id.ends_with('-') || id.contains("--") {
+        return false;
+    }
+    if id.len() == 8 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        return true;
+    }
+    id.contains('-') && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'-'))
+}
+
+/// Where a Mini App deep link (`?open=…`) lands (CHAT_REPOS §10 G3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeepLink<'a> {
+    /// `?open=repos` — the repository picker.
+    Repos,
+    /// `?open=repo:<org>/<repo>` — the repository picker with `<org>/<repo>` preselected.
+    Repo(&'a str),
+    /// `?open=thread:<id>` (and `&approval=1` when `approval` is true) — a thread in Work.
+    Thread { id: &'a str, approval: bool },
+}
+
+/// Builds a deep-link URL from a configured front URL (`https://…`) and a [`DeepLink`] target.
+/// Returns `None` when the front URL, repository name, or thread id is invalid.
+pub fn deep_link_url(front_url: &str, target: DeepLink<'_>) -> Option<String> {
+    let front = front_url.trim();
+    if !valid_front_url(front) {
+        return None;
+    }
+    let query = match target {
+        DeepLink::Repos => "open=repos".to_string(),
+        DeepLink::Repo(repo) => {
+            if !chat_repos::valid_repo_name(repo) {
+                return None;
+            }
+            format!("open=repo:{repo}")
+        }
+        DeepLink::Thread { id, approval } => {
+            if !valid_open_thread_id(id) {
+                return None;
+            }
+            if approval {
+                format!("open=thread:{id}&approval=1")
+            } else {
+                format!("open=thread:{id}")
+            }
+        }
+    };
+    let without_query = front.split('?').next().unwrap_or(front);
+    let rest = without_query.strip_prefix("https://")?;
+    let base = if rest.contains('/') {
+        without_query.to_string()
+    } else {
+        format!("{without_query}/")
+    };
+    Some(format!("{base}?{query}"))
+}
+
+/// Builds a deep-link URL directly from a configuration file's text (`[chat] telegram_mini_app_url`).
+pub fn mini_app_deep_link(config_text: &str, target: DeepLink<'_>) -> Option<String> {
+    let front = mini_app_url(config_text)?;
+    deep_link_url(&front, target)
+}
+
+/// Convenience helper for `<front>/?open=repos`.
+pub fn open_repos_url(front_url: &str) -> Option<String> {
+    deep_link_url(front_url, DeepLink::Repos)
+}
+
+/// Convenience helper for `<front>/?open=repo:<org>/<repo>`.
+pub fn open_repo_url(front_url: &str, repo: &str) -> Option<String> {
+    deep_link_url(front_url, DeepLink::Repo(repo))
+}
+
+/// Convenience helper for `<front>/?open=thread:<id>` (with `&approval=1` when `approval` is true).
+pub fn open_thread_url(front_url: &str, thread_id: &str, approval: bool) -> Option<String> {
+    deep_link_url(front_url, DeepLink::Thread { id: thread_id, approval })
+}
+
+/// A pending first-launch device pairing request (CHAT_REPOS §10 G2).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingLaunchPair {
+    pub id: String,
+    pub code: String,
+    pub user_id: i64,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub init_data_sha256: String,
+    #[serde(default)]
+    pub approved: bool,
+    #[serde(default)]
+    pub approved_token: Option<String>,
+}
+
+/// What `GET /api/telegram/launch-pair?pending=<id>` answers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClaimOutcome {
+    /// Still waiting for the bot's Approve.
+    Pending,
+    /// Approved by the bot; hands out the device cookie token once.
+    Approved(String),
+    /// Unknown, expired, declined, or already collected.
+    NotFound,
+    /// The caller's `initData` does not match the webview that created this request.
+    Forbidden,
+}
+
+fn pending_pairs_file(state: &Path) -> PathBuf {
+    state.join(PENDING_PAIRS_FILE)
+}
+
+fn random_six_digit_code() -> String {
+    let number = rand::rng().random_range(0..1_000_000u32);
+    format!("{:03} {:03}", number / 1_000, number % 1_000)
+}
+
+fn load_pending_pairs_raw(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
+    let Ok(text) = std::fs::read_to_string(pending_pairs_file(state)) else {
+        return Vec::new();
+    };
+    let Ok(entries) = serde_json::from_str::<Vec<PendingLaunchPair>>(&text) else {
+        return Vec::new();
+    };
+    entries.into_iter().filter(|entry| now <= entry.expires_at).collect()
+}
+
+fn save_pending_pairs_raw(state: &Path, entries: &[PendingLaunchPair]) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(entries).map_err(std::io::Error::other)?;
+    auth::write_private(&pending_pairs_file(state), &text)
+}
+
+/// Creates a pending device request for `user_id` and `init_data`, expiring after 10 minutes,
+/// keeping at most [`MAX_PENDING_LAUNCH_PAIRS`] pending requests at once (oldest dropped).
+pub fn create_pending_pair(state: &Path, user_id: i64, init_data: &str, now: u64) -> std::io::Result<PendingLaunchPair> {
+    let mut entries = load_pending_pairs_raw(state, now);
+    while entries.len() >= MAX_PENDING_LAUNCH_PAIRS {
+        entries.remove(0);
+    }
+    let entry = PendingLaunchPair {
+        id: auth::random_hex(8),
+        code: random_six_digit_code(),
+        user_id,
+        created_at: now,
+        expires_at: now + LAUNCH_PAIR_TTL_SECS,
+        init_data_sha256: auth::sha256_hex(init_data),
+        approved: false,
+        approved_token: None,
+    };
+    entries.push(entry.clone());
+    save_pending_pairs_raw(state, &entries)?;
+    Ok(entry)
+}
+
+/// Lists unapproved, non-expired pending device requests for the bot to prompt the user on.
+pub fn list_pending_pairs(state: &Path, now: u64) -> Vec<PendingLaunchPair> {
+    let entries = load_pending_pairs_raw(state, now);
+    let _ = save_pending_pairs_raw(state, &entries);
+    entries.into_iter().filter(|entry| !entry.approved).collect()
+}
+
+/// Approves a pending request by `id`, issuing a Browser device with `control` scope labelled
+/// `telegram-app`, and keeping its token for one-time collection by the launching webview.
+pub fn approve_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<Option<auth::Device>> {
+    let mut entries = load_pending_pairs_raw(state, now);
+    let Some(entry) = entries.iter_mut().find(|entry| entry.id == id && !entry.approved) else {
+        let _ = save_pending_pairs_raw(state, &entries);
+        return Ok(None);
+    };
+    let (_device_id, token) = auth::add_device(state, "telegram-app")?;
+    let device = auth::device_for_token(state, &token);
+    entry.approved = true;
+    entry.approved_token = Some(token);
+    save_pending_pairs_raw(state, &entries)?;
+    Ok(device)
+}
+
+/// Declines (deletes) a pending request by `id`.
+pub fn decline_pending_pair(state: &Path, id: &str, now: u64) -> std::io::Result<bool> {
+    let mut entries = load_pending_pairs_raw(state, now);
+    let before = entries.len();
+    entries.retain(|entry| entry.id != id);
+    let removed = entries.len() < before;
+    save_pending_pairs_raw(state, &entries)?;
+    Ok(removed)
+}
+
+/// Polls or collects a pending request for the launching webview. Once approved, removes the
+/// request and hands out the device token exactly once.
+pub fn claim_pending_pair(state: &Path, id: &str, user_id: i64, init_data: &str, now: u64) -> std::io::Result<ClaimOutcome> {
+    let mut entries = load_pending_pairs_raw(state, now);
+    let Some(index) = entries.iter().position(|entry| entry.id == id) else {
+        let _ = save_pending_pairs_raw(state, &entries);
+        return Ok(ClaimOutcome::NotFound);
+    };
+    let digest = auth::sha256_hex(init_data);
+    if entries[index].user_id != user_id || !auth::same_secret(&digest, &entries[index].init_data_sha256) {
+        return Ok(ClaimOutcome::Forbidden);
+    }
+    if !entries[index].approved {
+        save_pending_pairs_raw(state, &entries)?;
+        return Ok(ClaimOutcome::Pending);
+    }
+    let removed = entries.remove(index);
+    save_pending_pairs_raw(state, &entries)?;
+    let Some(token) = removed.approved_token else {
+        return Ok(ClaimOutcome::NotFound);
+    };
+    if auth::device_for_token(state, &token).is_none() {
+        return Ok(ClaimOutcome::NotFound);
+    }
+    Ok(ClaimOutcome::Approved(token))
 }
 
 #[cfg(test)]
@@ -240,5 +476,73 @@ mod tests {
         std::fs::write(home.join("chat").join("telegram.json"), r#"{"token":"1:a","consented":1,"users":[42]}"#).unwrap_or_default();
         assert_eq!(bot(&home), Some(("1:a".to_string(), vec![42])));
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn deep_links_build_valid_query_addresses_and_refuse_bad_targets() {
+        let front = "https://node.example.ts.net/";
+        let config = "[chat]\ntelegram_mini_app_url = \"https://node.example.ts.net\"\n";
+        assert_eq!(open_repos_url(front).as_deref(), Some("https://node.example.ts.net/?open=repos"));
+        assert_eq!(mini_app_deep_link(config, DeepLink::Repos).as_deref(), Some("https://node.example.ts.net/?open=repos"));
+        assert_eq!(open_repo_url(front, "dreamference/mightling").as_deref(), Some("https://node.example.ts.net/?open=repo:dreamference/mightling"));
+        assert_eq!(open_thread_url(front, "3f2a9c1e", false).as_deref(), Some("https://node.example.ts.net/?open=thread:3f2a9c1e"));
+        assert_eq!(
+            open_thread_url(front, "01a0f1ae-2da4-7942-99ae-c3151dc137cc", true).as_deref(),
+            Some("https://node.example.ts.net/?open=thread:01a0f1ae-2da4-7942-99ae-c3151dc137cc&approval=1")
+        );
+        // Invalid front, repository names, and thread ids are refused.
+        assert_eq!(open_repos_url("http://node.example.ts.net/"), None);
+        for bad_repo in ["", "onlyone", "a/b/c", "../secret", "org/..", "https://a/b", "org/repo with space"] {
+            assert_eq!(open_repo_url(front, bad_repo), None, "{bad_repo}");
+        }
+        for bad_thread in ["", "3f2a9c1", "3f2a9c1ee", "3F2A9C1E", "../etc", "-abc-def", "abc-def-", "abc--def", "thr_1", &"a".repeat(65)] {
+            assert_eq!(open_thread_url(front, bad_thread, false), None, "{bad_thread}");
+        }
+    }
+
+    #[test]
+    fn launch_pairing_keeps_three_expires_in_ten_minutes_and_hands_the_cookie_out_once() {
+        let state = std::env::temp_dir().join(format!("ling-web-tg-pair-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        auth::private_dir(&state).unwrap();
+
+        let p1 = create_pending_pair(&state, 42, "init-1", 1000).unwrap();
+        let p2 = create_pending_pair(&state, 42, "init-2", 1001).unwrap();
+        let p3 = create_pending_pair(&state, 42, "init-3", 1002).unwrap();
+        let p4 = create_pending_pair(&state, 42, "init-4", 1003).unwrap();
+        assert_eq!(p1.code.len(), 7);
+        assert_eq!(p1.code.as_bytes()[3], b' ');
+        // Oldest dropped once more than 3 are pending.
+        let ids: Vec<String> = list_pending_pairs(&state, 1003).into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, vec![p2.id.clone(), p3.id.clone(), p4.id.clone()]);
+
+        // Not approved yet: polling answers Pending, and another webview's initData is Forbidden.
+        assert_eq!(claim_pending_pair(&state, &p2.id, 42, "init-2", 1005).unwrap(), ClaimOutcome::Pending);
+        assert_eq!(claim_pending_pair(&state, &p2.id, 42, "init-other", 1005).unwrap(), ClaimOutcome::Forbidden);
+        assert_eq!(claim_pending_pair(&state, &p2.id, 99, "init-2", 1005).unwrap(), ClaimOutcome::Forbidden);
+
+        // Decline deletes the request.
+        assert!(decline_pending_pair(&state, &p3.id, 1005).unwrap());
+        assert_eq!(claim_pending_pair(&state, &p3.id, 42, "init-3", 1005).unwrap(), ClaimOutcome::NotFound);
+
+        // Expiry after 10 minutes drops the request.
+        assert!(list_pending_pairs(&state, 1003 + LAUNCH_PAIR_TTL_SECS + 1).is_empty());
+
+        // Approve issues a Browser device with control scope labelled telegram-app; cookie token is claimed once.
+        let p5 = create_pending_pair(&state, 42, "init-5", 2000).unwrap();
+        let device = approve_pending_pair(&state, &p5.id, 2010).unwrap().expect("approved");
+        assert_eq!(device.name, "telegram-app");
+        assert_eq!(device.kind, auth::DeviceKind::Browser);
+        assert_eq!(device.scope, auth::Scope::Control);
+        assert!(list_pending_pairs(&state, 2010).is_empty(), "approved request is no longer pending");
+        let ClaimOutcome::Approved(token) = claim_pending_pair(&state, &p5.id, 42, "init-5", 2011).unwrap() else {
+            panic!("expected Approved");
+        };
+        assert!(auth::device_for_token(&state, &token).is_some());
+        assert_eq!(claim_pending_pair(&state, &p5.id, 42, "init-5", 2012).unwrap(), ClaimOutcome::NotFound);
+        assert!(!auth::revoke_device(&state, "telegram-app").unwrap().is_empty());
+        assert!(auth::device_for_token(&state, &token).is_none());
+
+        let _ = std::fs::remove_dir_all(&state);
     }
 }

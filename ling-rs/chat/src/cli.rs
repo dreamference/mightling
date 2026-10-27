@@ -126,6 +126,7 @@ pub fn chat_flag(text: &str, key: &str) -> Option<bool> {
 /// The hub's settings: the defaults, with the user's `[chat]` values over them.
 pub fn hub_config(environment: &Environment) -> HubConfig {
     let mut config = HubConfig::new(environment.dir());
+    config.pair_interval = Duration::from_secs(2);
     let text = std::fs::read_to_string(environment.user_config()).unwrap_or_default();
     if let Some(seconds) = chat_setting(&text, "approval_timeout_s") {
         config.approval_timeout = Duration::from_secs(seconds.max(30));

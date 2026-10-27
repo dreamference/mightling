@@ -138,6 +138,9 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/docs"),
     ("POST", "/api/docs/add"),
     ("POST", "/api/telegram/check"),
+    ("GET", "/api/telegram/pending-pairs"),
+    ("POST", "/api/telegram/pending-pairs/approve"),
+    ("POST", "/api/telegram/pending-pairs/decline"),
     ("GET", "/devices"),
     ("POST", "/devices/pair"),
     ("POST", "/devices/revoke"),
@@ -1035,4 +1038,191 @@ async fn a_mini_app_launch_is_checked_against_ling_chats_bot_behind_the_credenti
     assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
     let bare = Request::builder().uri("/healthz").header(header::HOST, front.0);
     assert_eq!(call(&server, bare.body(Body::empty()).unwrap()).await.0, StatusCode::UNAUTHORIZED);
+}
+
+/// First launch of the Mini App with no credential (CHAT_REPOS §12.1 G2): requires both Telegram's
+/// signed launch data for a paired user and the configured HTTPS front (`Host` and `Origin`), waits
+/// for the bot's approval, issues a `Browser` device labelled `telegram-app` with `control` scope,
+/// hands out the device cookie once, and can be revoked like any device.
+#[tokio::test]
+async fn a_mini_app_first_launch_pairs_only_on_the_front_and_only_after_the_bot_approves() {
+    let scratch = scratch("tgpair");
+    let mut config = config(&scratch.dir, 3100, vec!["192.168.50.105".to_string()]);
+    config.public_names = vec!["node.example.ts.net".to_string()];
+    let chat = config.codex_home.join("chat");
+    std::fs::create_dir_all(&chat).unwrap();
+    std::fs::write(chat.join("telegram.json"), r#"{"token":"7:tok","consented":1,"users":[42]}"#).unwrap();
+    let server = Server::new(config).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let front_host = "node.example.ts.net";
+    let front_origin = "https://node.example.ts.net";
+
+    let post_pair = |init_data: &str, host: &str, origin: &str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/telegram/launch-pair")
+            .header(header::HOST, host)
+            .header(header::ORIGIN, origin)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "initData": init_data }).to_string()))
+            .unwrap()
+    };
+    let poll_pair = |pending: &str, init_data: &str, host: &str| {
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/telegram/launch-pair?pending={pending}"))
+            .header(header::HOST, host)
+            .header(ling_web_server::telegram_app::INIT_DATA_HEADER, init_data)
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let valid_init = telegram_launch("7:tok", 42, now);
+
+    // A host other than the configured front (loopback, LAN, or an unknown name) is refused with 421.
+    for (host, origin) in [
+        ("127.0.0.1:3100", "http://127.0.0.1:3100"),
+        ("192.168.50.105:3100", "http://192.168.50.105:3100"),
+        ("evil.example", "https://evil.example"),
+    ] {
+        let (status, _, _) = call(&server, post_pair(&valid_init, host, origin)).await;
+        assert_eq!(status, StatusCode::MISDIRECTED_REQUEST, "host {host} must be refused");
+    }
+    // A mismatched Origin on the front host is refused with 403.
+    let (status, _, _) = call(&server, post_pair(&valid_init, front_host, "http://127.0.0.1:3100")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Refused for an unpaired Telegram user, a stale launch, or a forged signature.
+    for (bad_init, why) in [
+        (telegram_launch("7:tok", 43, now), "not paired"),
+        (telegram_launch("7:tok", 42, now - 2 * 24 * 3600), "too old"),
+        (telegram_launch("8:forged", 42, now), "this Mightling's bot"),
+        (String::new(), "this Mightling's bot"),
+    ] {
+        let (status, headers, body) = call(&server, post_pair(&bad_init, front_host, front_origin)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(headers.get(header::SET_COOKIE).is_none());
+        let answer: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(answer["ok"], false);
+        assert!(answer["reason"].as_str().unwrap().contains(why), "{answer}");
+    }
+
+    // Valid first launch on the front creates a pending request and sets no cookie yet.
+    let (status, headers, body) = call(&server, post_pair(&valid_init, front_host, front_origin)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(headers.get(header::SET_COOKIE).is_none());
+    let created: Value = serde_json::from_str(&body).unwrap();
+    let pending_id = created["pending"].as_str().unwrap().to_string();
+    let code = created["code"].as_str().unwrap().to_string();
+    assert_eq!(code.len(), 7);
+
+    // Without the bot's Approve, polling answers pending and hands out no cookie.
+    let (status, headers, body) = call(&server, poll_pair(&pending_id, &valid_init, front_host)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(headers.get(header::SET_COOKIE).is_none());
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["status"], "pending");
+
+    // Polling from loopback or with a different launch's initData is refused.
+    assert_eq!(
+        call(&server, poll_pair(&pending_id, &valid_init, "127.0.0.1:3100")).await.0,
+        StatusCode::MISDIRECTED_REQUEST
+    );
+    let other_init = telegram_launch("7:tok", 42, now.saturating_sub(5));
+    assert_eq!(
+        call(&server, poll_pair(&pending_id, &other_init, front_host)).await.0,
+        StatusCode::FORBIDDEN
+    );
+
+    // Only the owner session or a bridge session may list or approve pending requests; a normal
+    // paired device may not.
+    let (_, normal_token) = auth::add_device(&server.config.state_dir, "laptop").unwrap();
+    let normal_cookie = format!("{}={normal_token}", auth::DEVICE_COOKIE);
+    let list_as = |cookie: &str| {
+        request("GET", "/api/telegram/pending-pairs")
+            .header(header::COOKIE, cookie)
+            .body(Body::empty())
+            .unwrap()
+    };
+    assert_eq!(call(&server, list_as(&normal_cookie)).await.0, StatusCode::FORBIDDEN);
+    auth::revoke_device(&server.config.state_dir, &auth::load_devices(&server.config.state_dir)[0].id).unwrap();
+
+    // Sign in as `ling chat`'s bridge session (`bridge=1`).
+    let login_code = auth::issue_login_code(&server.config.state_dir).unwrap();
+    let (_, login_headers, _) = call(
+        &server,
+        request("GET", &format!("/login?code={login_code}&bridge=1")).body(Body::empty()).unwrap(),
+    )
+    .await;
+    let bridge_cookie = login_headers[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+
+    let (status, _, body) = call(&server, list_as(&bridge_cookie)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let listed: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(listed["pending"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["pending"][0]["id"], pending_id);
+    assert_eq!(listed["pending"][0]["code"], code);
+    assert_eq!(listed["pending"][0]["user"], 42);
+
+    // Approve via the bridge session.
+    let approve_req = request("POST", "/api/telegram/pending-pairs/approve")
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::COOKIE, &bridge_cookie)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "id": pending_id }).to_string()))
+        .unwrap();
+    let (status, _, body) = call(&server, approve_req).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The launching webview collects the device cookie exactly once.
+    let (status, headers, body) = call(&server, poll_pair(&pending_id, &valid_init, front_host)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], true);
+    let set_cookie = headers[header::SET_COOKIE].to_str().unwrap().to_string();
+    assert!(
+        set_cookie.starts_with("mightling_device=")
+            && set_cookie.contains("HttpOnly")
+            && set_cookie.contains("SameSite=Strict")
+            && set_cookie.contains("Max-Age="),
+        "{set_cookie}"
+    );
+    let device_cookie = set_cookie.split(';').next().unwrap().to_string();
+
+    // A second poll gets 404 and no Set-Cookie.
+    let (status, headers, _) = call(&server, poll_pair(&pending_id, &valid_init, front_host)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(headers.get(header::SET_COOKIE).is_none());
+
+    // The approved device is listed as `telegram-app` with Browser kind and Control scope.
+    let devices = auth::load_devices(&server.config.state_dir);
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].name, "telegram-app");
+    assert_eq!(devices[0].kind, auth::DeviceKind::Browser);
+    assert_eq!(devices[0].scope, auth::Scope::Control);
+
+    // With the device cookie, the normal launch check passes.
+    let check_req = Request::builder()
+        .method("POST")
+        .uri("/api/telegram/check")
+        .header(header::HOST, front_host)
+        .header(header::ORIGIN, front_origin)
+        .header(header::COOKIE, &device_cookie)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "initData": valid_init }).to_string()))
+        .unwrap();
+    let (status, _, body) = call(&server, check_req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], true);
+
+    // Revoking the device on `/devices` (or `ling web revoke`) immediately locks it out.
+    let owner = sign_in(&server).await;
+    let (status, _, _) = call(&server, devices_post("/devices/revoke", &owner, &format!("device={}", devices[0].id))).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(auth::load_devices(&server.config.state_dir).is_empty());
+    let after_revoke = Request::builder()
+        .uri("/healthz")
+        .header(header::HOST, front_host)
+        .header(header::COOKIE, &device_cookie)
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(call(&server, after_revoke).await.0, StatusCode::UNAUTHORIZED);
 }

@@ -536,3 +536,118 @@ async fn a_file_is_sent_as_a_document_in_its_topic() {
     assert!(raw.contains("filename=\"report _final_.md\"") && raw.contains("# Purifiers"), "{raw}");
 }
 
+/// End-to-end launch pairing through the Telegram adapter (`Poller` + `Renderer` + `Hub` +
+/// `telegram_app` state, CHAT_REPOS §12.1 G2): sends the pairing prompt with Approve/Decline inline
+/// buttons carrying a random nonce, ignores forged and reused callbacks, and issues the
+/// `telegram-app` device credential only when the paired user presses Approve.
+#[tokio::test]
+async fn launch_pairing_sends_buttons_to_telegram_and_pairs_only_on_the_approve_callback() {
+    use ling_chat::agent::{AgentCommand, AgentHandle};
+    use ling_chat::hub::{Hub, HubConfig};
+    use ling_web_server::auth::{self, DeviceKind, Scope};
+    use ling_web_server::telegram_app::{self, ClaimOutcome};
+
+    let (stand, api) = stand_in(default_answer()).await;
+    let dir = scratch("launch-pair-tg");
+    let state = dir.join("web-state");
+    auth::private_dir(&state).unwrap();
+
+    let created = telegram_app::create_pending_pair(&state, 111, "init-data-1", 1_000).unwrap();
+    let state_for_agent = state.clone();
+    let (agent, mut commands) = AgentHandle::channel();
+    tokio::spawn(async move {
+        while let Some(command) = commands.recv().await {
+            if let AgentCommand::Web { path, body, reply } = command {
+                let answer = if path == "/api/telegram/pending-pairs" {
+                    let list = telegram_app::list_pending_pairs(&state_for_agent, 1_010);
+                    json!({ "pending": list })
+                } else if path == "/api/telegram/pending-pairs/approve" {
+                    let id = body.as_ref().and_then(|b| b.get("id")).and_then(Value::as_str).unwrap_or_default();
+                    let dev = telegram_app::approve_pending_pair(&state_for_agent, id, 1_010).unwrap();
+                    json!({ "ok": dev.is_some(), "device": dev })
+                } else if path == "/api/telegram/pending-pairs/decline" {
+                    let id = body.as_ref().and_then(|b| b.get("id")).and_then(Value::as_str).unwrap_or_default();
+                    let ok = telegram_app::decline_pending_pair(&state_for_agent, id, 1_010).unwrap();
+                    json!({ "ok": ok })
+                } else {
+                    json!({})
+                };
+                let _ = reply.send(Ok(answer));
+            }
+        }
+    });
+
+    let (inbound_tx, mut inbound_rx) = mpsc::unbounded_channel();
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+    let mut hub = Hub::new(HubConfig::new(dir.clone()), agent, Box::new(|| false));
+    hub.add_adapter("telegram", out_tx);
+    let mut poller = Poller::new(api.clone(), dir.clone(), inbound_tx);
+    let mut renderer = Renderer::new(api);
+
+    // Hub polls `/api/telegram/pending-pairs` and emits the approval prompt to the Telegram adapter.
+    hub.push_pending_pairs().await;
+    let out = out_rx.try_recv().expect("approval prompt");
+    renderer.render(out).await;
+
+    let sent = stand.bodies("sendMessage").pop().expect("Telegram sendMessage");
+    assert_eq!(sent["chat_id"], 111);
+    assert_eq!(
+        sent["text"],
+        format!("A Mini App on a new device asks to pair (code {}).", created.code)
+    );
+    let buttons = sent["reply_markup"]["inline_keyboard"][0].as_array().unwrap();
+    assert_eq!(buttons[0]["text"], "Approve");
+    assert_eq!(buttons[1]["text"], "Decline");
+    let approve_cb = buttons[0]["callback_data"].as_str().unwrap().to_string();
+    assert!(approve_cb.starts_with("a:") && approve_cb.ends_with(":0"), "{approve_cb}");
+
+    // Before Approve is pressed, no device is paired and the cookie cannot be claimed.
+    assert!(auth::load_devices(&state).is_empty());
+    assert_eq!(
+        telegram_app::claim_pending_pair(&state, &created.id, 111, "init-data-1", 1_020),
+        ClaimOutcome::Pending
+    );
+
+    // A forged callback nonce is ignored.
+    poller.handle(&callback(111, "a:0000000000000000:0")).await;
+    while let Ok(msg) = inbound_rx.try_recv() {
+        hub.on_inbound(msg).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    assert!(auth::load_devices(&state).is_empty());
+
+    // Pressing Approve in Telegram approves the pending pair and issues `telegram-app` with Control scope.
+    poller.handle(&callback(111, &approve_cb)).await;
+    while let Ok(msg) = inbound_rx.try_recv() {
+        hub.on_inbound(msg).await;
+    }
+    while let Ok(out) = out_rx.try_recv() {
+        renderer.render(out).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    let devices = auth::load_devices(&state);
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].name, "telegram-app");
+    assert_eq!(devices[0].kind, DeviceKind::Browser);
+    assert_eq!(devices[0].scope, Scope::Control);
+
+    // Reusing the same callback nonce does not issue another device.
+    poller.handle(&callback(111, &approve_cb)).await;
+    while let Ok(msg) = inbound_rx.try_recv() {
+        hub.on_inbound(msg).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    assert_eq!(auth::load_devices(&state).len(), 1);
+
+    // The launching webview claims the device token once, and a second claim finds nothing.
+    match telegram_app::claim_pending_pair(&state, &created.id, 111, "init-data-1", 1_030) {
+        ClaimOutcome::Approved(token) => assert!(auth::device_for_token(&state, &token).is_some()),
+        other => panic!("expected Approved, got {other:?}"),
+    }
+    assert_eq!(
+        telegram_app::claim_pending_pair(&state, &created.id, 111, "init-data-1", 1_031),
+        ClaimOutcome::NotFound
+    );
+}
+

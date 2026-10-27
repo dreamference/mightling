@@ -40,11 +40,120 @@ export interface Airgapped {
   source: string;
 }
 
+/** A query deep link (`?open=repos`, `?open=repo:<org>/<repo>`, `?open=thread:<id>` with optional `&approval=1`, CHAT_REPOS §12.4 G3). */
+export type OpenTarget =
+  | { kind: "repos"; approval: boolean }
+  | { kind: "repo"; repo: string; approval: boolean }
+  | { kind: "thread"; threadId: string; approval: boolean };
+
+function validRepoPart(part: string): boolean {
+  return (
+    part.length >= 1 &&
+    part.length <= 64 &&
+    !part.startsWith(".") &&
+    !part.startsWith("-") &&
+    /^[A-Za-z0-9._-]+$/.test(part)
+  );
+}
+
+/** Matches `chat_repos.rs`'s `valid_repo_name`: `<org>/<repo>` with two safe components. */
+export function validRepoName(name: string): boolean {
+  const slash = name.indexOf("/");
+  if (slash <= 0 || name.indexOf("/", slash + 1) !== -1) return false;
+  return validRepoPart(name.slice(0, slash)) && validRepoPart(name.slice(slash + 1));
+}
+
+/** An 8-char lowercase hex chat-repos thread id or a uuid-like app-server thread id (<= 64 chars). */
+export function validOpenThreadId(id: string): boolean {
+  if (/^[0-9a-f]{8}$/.test(id)) return true;
+  return (
+    id.length >= 2 &&
+    id.length <= 64 &&
+    !id.startsWith("-") &&
+    !id.endsWith("-") &&
+    id.includes("-") &&
+    /^[0-9a-fA-F-]+$/.test(id)
+  );
+}
+
+/** Parses `?open=...` and optional `&approval=1` from a query string; returns `null` for anything else. */
+export function parseOpenTarget(search: string): OpenTarget | null {
+  const params = new URLSearchParams(search || "");
+  const raw = params.get("open");
+  if (!raw) return null;
+  const approval = params.get("approval") === "1";
+  if (raw === "repos") return { kind: "repos", approval };
+  if (raw.startsWith("repo:")) {
+    const repo = raw.slice(5);
+    return validRepoName(repo) ? { kind: "repo", repo, approval } : null;
+  }
+  if (raw.startsWith("thread:")) {
+    const threadId = raw.slice(7);
+    return validOpenThreadId(threadId) ? { kind: "thread", threadId, approval } : null;
+  }
+  return null;
+}
+
+/** Reads `?open=...` from `loc.search` and removes `open` and `approval` with `hist.replaceState`. */
+export function consumeOpenTarget(
+  loc: { pathname: string; search: string; hash?: string } | null = typeof window !== "undefined" ? window.location : null,
+  hist: { replaceState(data: unknown, unused: string, url?: string | URL | null): void } | null = typeof window !== "undefined" ? window.history : null,
+): OpenTarget | null {
+  if (!loc) return null;
+  const search = loc.search || "";
+  const params = new URLSearchParams(search);
+  if (!params.has("open") && !params.has("approval")) return null;
+  const parsed = parseOpenTarget(search);
+  params.delete("open");
+  params.delete("approval");
+  const rest = params.toString();
+  const nextUrl = loc.pathname + (rest ? `?${rest}` : "") + (loc.hash || "");
+  try {
+    hist?.replaceState(null, "", nextUrl);
+  } catch {
+    // Ignore when history is unavailable.
+  }
+  return parsed;
+}
+
+let cachedOpenTarget: OpenTarget | null | undefined;
+
+/** The deep-link target handed over by `bridge.js` after its launch check, or read from `location.search` once the session is ready. */
+export function openTarget(): OpenTarget | null {
+  if (cachedOpenTarget !== undefined) return cachedOpenTarget;
+  if (typeof window !== "undefined" && typeof window.electronBridge?.openTarget === "function") {
+    const fromBridge = window.electronBridge.openTarget();
+    if (fromBridge) {
+      cachedOpenTarget = fromBridge;
+      return fromBridge;
+    }
+  }
+  cachedOpenTarget = consumeOpenTarget();
+  return cachedOpenTarget;
+}
+
+export interface OpenTargetActions {
+  openRepos(repo: string | null): void;
+  openWorkThread(threadId: string): void;
+  setApprovalRequested(requested: boolean): void;
+}
+
+/** Routes a validated `OpenTarget` to the page's Repos hook, Work thread view, and G7 approval flag. */
+export function applyOpenTarget(target: OpenTarget | null, actions: OpenTargetActions): void {
+  if (!target) return;
+  if (target.approval) actions.setApprovalRequested(true);
+  if (target.kind === "repos") actions.openRepos(null);
+  else if (target.kind === "repo") actions.openRepos(target.repo);
+  else if (target.kind === "thread") actions.openWorkThread(target.threadId);
+}
+
 /** What the preload exposes (desktop/electron/src/preload.ts). */
 interface ElectronBridge {
   sendMessageFromView(message: unknown): Promise<unknown>;
   /** Where a dropped file lives on disk; "" when it has no path (older preloads lack it). */
   pathForFile?(file: File): string;
+  /** Deep-link target parsed by `bridge.js` after the launch check passed. */
+  openTarget?(): OpenTarget | null;
 }
 
 declare global {
@@ -558,6 +667,8 @@ export interface BridgeEvents {
   command?: (command: "detachTerminal" | "detachReview") => void;
   /** Another device acted on a thread here (sync, specs/DREAMFERENCE_MIGHTLING_SYNC.md §18.2): "Approved from the phone". */
   syncNotice?: (notice: { text: string; thread: string | null }) => void;
+  /** A query deep link (`?open=…`) parsed after the launch check passed (CHAT_REPOS §12.4 G3). */
+  openTarget?: (target: OpenTarget) => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -593,6 +704,9 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
         return events.paneAction?.(data.payload as PaneAction);
       case "sync://notice":
         return events.syncNotice?.(data.payload as { text: string; thread: string | null });
+      case "open-target":
+        if (data.payload && typeof data.payload === "object") events.openTarget?.(data.payload as OpenTarget);
+        return;
       case "command":
         if (data.payload === "detachTerminal" || data.payload === "detachReview") events.command?.(data.payload);
         return;
