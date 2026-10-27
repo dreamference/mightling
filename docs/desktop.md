@@ -202,6 +202,13 @@ searches. A dashed frame and a note stay on it as a reminder. When you leave it 
 a new one, Work, or closing the app), the question, its answers and its folder with every file in
 it are deleted for good. The desktop app only.
 
+**Side chat.** **Ctrl+Alt+S** (or `/side`) opens a side chat beside the thread you are in: a free
+chat that is not saved, with no folder of its own (it may read the thread's folder, and changes
+nothing). Your first message in it carries a recap of the thread, its latest messages. Closing it,
+or going to another thread, deletes it; **Keep as a thread** copies it into a saved thread first.
+The saved recap of a thread, a copy of it asked where the work stands, is **Recap in a saved copy**
+on the thread's menu.
+
 **Earlier questions.** In **Settings › Memories**, **Let the agent search your earlier Ask
 questions** (off until you turn it on) keeps a copy of each Ask question and its answers under
 `~/.mightling/ask-history/` and gives the agent a skill to search and read them, on this machine and
