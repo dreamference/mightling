@@ -21,7 +21,7 @@ import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
 import { ThreadLoader } from "./loader";
 import { inGitInternals } from "./files";
-import { effectiveKeymap, keyAction, matches, setOverrides, shortcutLabel } from "./keymap";
+import { effectiveKeymap, keyAction, keyLabel, matches, setOverrides, shortcutLabel } from "./keymap";
 import { renderMarkdown } from "./markdown";
 import { APPEARANCE_TOKENS, DEFAULT_PREFS, appearanceFor, loadPrefs, savePrefs, type Prefs, type WorktreeLink } from "./prefs";
 import { theme, useShownTheme } from "./theme";
@@ -79,6 +79,7 @@ import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsSta
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { ExportDialog } from "./ExportDialog";
 import { QuestionCard } from "./QuestionCard";
+import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
 import { threadContext, withThreadContext } from "./tonight";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectPage } from "./ProjectPage";
@@ -203,6 +204,8 @@ export function App() {
   const [newProject, setNewProject] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   /** The thread being exported (exportthread.ts) and the home folder its paths are redacted against. */
+  /** The first-run page (DESKTOP §16 B6), decided once the threads and preferences are read. */
+  const [welcome, setWelcome] = useState(false);
   const [exporting, setExporting] = useState<{ thread: Thread; title: string; home: string | null } | null>(null);
   const draggedHeader = useRef<string | null>(null);
   const loadProjects = useCallback(async () => {
@@ -404,6 +407,7 @@ export function App() {
         loadPrefs(),
       ]);
       dispatch({ type: "threads", list: list.data });
+      if (showsWelcome(stored.welcomed, list.data.length, !POPOUT && !PANE)) setWelcome(true);
       void loadProjects();
       setProfiles(permissions.data);
       setAirgap(level);
@@ -1364,6 +1368,18 @@ export function App() {
       setNewCwd(folder);
     } catch (error) {
       notice(error);
+    }
+  };
+
+  const chooseWelcome = (choice: WelcomeChoice) => {
+    setWelcome(false);
+    updatePrefs({ welcomed: true });
+    if (choice === "folder") void openFolderDialog();
+    else if (choice === "chat") void standaloneThread();
+    else if (choice === "import") setExtensions("import");
+    else if (choice === "ask") {
+      showView("ask");
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus());
     }
   };
 
@@ -2882,6 +2898,7 @@ export function App() {
           onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }} />
       ) : null}
       {syncedOpen && synced.status ? <SyncedView status={synced.status} onClose={() => setSyncedOpen(false)} onChanged={synced.refresh} notice={notice} /> : null}
+      {welcome ? <WelcomeDialog quickShortcut={keyLabel(prefs.quickEntryShortcut)} onChoose={chooseWelcome} /> : null}
       {exporting ? <ExportDialog client={client} thread={exporting.thread} title={exporting.title} home={exporting.home} notice={notice} onClose={() => setExporting(null)} /> : null}
       {projectDialog ? (
         <ProjectDialog client={client} project={projectDialog.project} folder={projectDialog.folder} notice={notice} onClose={() => setProjectDialog(null)}

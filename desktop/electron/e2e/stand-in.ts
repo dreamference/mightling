@@ -126,7 +126,8 @@ if (process.argv[2] === "night" && process.argv[3] === "every") {
   process.exit(0);
 }
 if (process.argv[2] === "night") { console.log(process.argv[3] === "add" ? "Queued 20261017-0930 on branch night/20261017-0930, from 1a2b3c4d5e." : "Dropped " + process.argv[4] + "."); process.exit(0); }
-const threads = ${JSON.stringify(threads(home, askRoot))};
+// MIGHTLING_STAND_IN_EMPTY=1: someone with no threads yet, as at the first start (DESKTOP §16 B6).
+const threads = process.env.MIGHTLING_STAND_IN_EMPTY === "1" ? [] : ${JSON.stringify(threads(home, askRoot))};
 const files = ${JSON.stringify(FILES)};
 const fetcher = ${JSON.stringify(fetcher)};
 const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
