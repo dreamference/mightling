@@ -48,6 +48,13 @@
       "default": [],
       "type": "strings"
     },
+    "threadOrder": {
+      "default": "projects",
+      "enum": [
+        "projects",
+        "chronological"
+      ]
+    },
     "projectOrder": {
       "default": [],
       "type": "strings"
