@@ -80,6 +80,15 @@ pub fn join_normalized(prefix: &str, doc: &str) -> String {
     parts.join("/")
 }
 
+/// How an unreadable store is fixed: rebuilt with `ling-code index`, which runs on Linux only (W8).
+fn rebuild_hint() -> String {
+    if crate::paths::indexing_here() {
+        "run `ling-code index` to rebuild it".to_string()
+    } else {
+        format!("{}, so rebuild it on the node", crate::paths::BUILT_ON_LINUX)
+    }
+}
+
 impl ScipStore {
     /// Opens a store read-only and checks its fingerprint.
     pub fn open(path: &Path, entry: RunEntry) -> Result<ScipStore> {
@@ -89,16 +98,17 @@ impl ScipStore {
         let fingerprint = schema_fingerprint(&conn)?;
         if fingerprint != SCHEMA_FINGERPRINT {
             bail!(
-                "{} was written by a scip CLI this ling-code does not know (schema {}); run `ling-code index` to rebuild it",
+                "{} was written by a scip CLI this ling-code does not know (schema {}); {}",
                 path.display(),
-                &fingerprint[..12]
+                &fingerprint[..12],
+                rebuild_hint()
             );
         }
         let has_names: bool = conn
             .query_row("SELECT count(*) FROM sqlite_master WHERE name = 'puffin_names'", [], |r| r.get::<_, i64>(0))
             .map(|n| n > 0)?;
         if !has_names {
-            bail!("{} has not been post-processed; run `ling-code index` to rebuild it", path.display());
+            bail!("{} has not been post-processed; {}", path.display(), rebuild_hint());
         }
         let docs = {
             let mut stmt = conn.prepare("SELECT relative_path FROM documents")?;
