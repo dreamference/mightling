@@ -57,9 +57,24 @@ function stampLingVersion(packagerConfig) {
 const darwin = process.platform === "darwin";
 
 // The Windows icon: an `.ico` holding the PNGs already in icons/ (Windows reads PNG entries since
-// Vista), written by hand rather than with an image tool, so the build needs nothing more.
+// Vista), written by hand rather than with an image tool, so the build needs nothing more. Every size
+// Windows asks for between 100 % and 300 % scaling (16 to 48 for small icons, 32 to 64 and 256 for the
+// taskbar, the Start menu and Explorer), so it never scales a 32- or 128-pixel image to fit; the small
+// ones are the tray's (shell.ts, trayIconFile).
+const ICO_IMAGES = [
+  ["tray.png", 16],
+  ["tray@1.25x.png", 20],
+  ["tray@1.5x.png", 24],
+  ["32x32.png", 32],
+  ["tray@2.5x.png", 40],
+  ["tray@3x.png", 48],
+  ["64x64.png", 64],
+  ["128x128.png", 128],
+  ["128x128@2x.png", 256],
+];
+
 function writeIco(target) {
-  const images = [["32x32.png", 32], ["128x128.png", 128], ["128x128@2x.png", 256]].map(([file, size]) => [fs.readFileSync(path.join(__dirname, "icons", file)), size]);
+  const images = ICO_IMAGES.map(([file, size]) => [fs.readFileSync(path.join(__dirname, "icons", file)), size]);
   const header = Buffer.alloc(6 + 16 * images.length);
   header.writeUInt16LE(0, 0);
   header.writeUInt16LE(1, 2);
