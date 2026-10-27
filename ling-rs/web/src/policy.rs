@@ -420,6 +420,11 @@ impl Policy {
             let Some(read_only) = params.get("cwd").and_then(Value::as_str).and_then(|cwd| prompts.repo_checkout(cwd)) else {
                 return Err("a chat-work thread starts only in a checkout ling web made for it".to_string());
             };
+            // Its checkout is its only place and the pinned sandbox its only one: no permissions
+            // profile or extra workspace roots asked beside them.
+            for field in self.scratch_fields.iter().filter(|field| field.as_str() != "cwd") {
+                params.remove(field);
+            }
             let pinned = if read_only { &self.repo_read_only_thread_params } else { &self.repo_thread_params };
             for (k, v) in pinned {
                 params.insert(k.clone(), v.clone());
@@ -629,7 +634,10 @@ mod tests {
         assert_eq!(policy.repo_thread_params.get("approvalPolicy"), Some(&Value::String("on-request".to_string())));
         assert_eq!(policy.repo_read_only_thread_params.get("sandbox"), Some(&Value::String("read-only".to_string())));
         assert_eq!(policy.repo_read_only_thread_params.get("approvalPolicy"), Some(&Value::String("on-request".to_string())));
-        assert_eq!(policy.pinned_turn_fields, vec!["cwd", "approvalPolicy", "sandboxPolicy", "approvalsReviewer"]);
+        assert_eq!(
+            policy.pinned_turn_fields,
+            vec!["cwd", "approvalPolicy", "sandboxPolicy", "permissions", "runtimeWorkspaceRoots", "approvalsReviewer"]
+        );
         assert_eq!(policy.repo_thread_params.get("approvalsReviewer"), Some(&Value::String("user".to_string())));
         assert!(policy.prompt_thread_config.keys().all(|name| policy.named_prompts.contains(name)));
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {

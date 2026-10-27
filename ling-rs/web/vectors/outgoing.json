@@ -697,6 +697,27 @@
       "message": {"id": 130, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "approvalsReviewer": "auto_review"}},
       "accept": true,
       "out": {"id": 130, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a page turn/start on a repo thread cannot pick a permissions profile or add workspace roots",
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 336, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"]}},
+      "accept": true,
+      "out": {"id": 336, "method": "turn/start", "params": {"threadId": "repo-t1", "input": []}}
+    },
+    {
+      "name": "a bridge turn/start cannot pick a permissions profile",
+      "bridge": true,
+      "message": {"id": 337, "method": "turn/start", "params": {"threadId": "chat-1", "input": [], "permissions": ":danger-full-access"}},
+      "accept": true,
+      "out": {"id": 337, "method": "turn/start", "params": {"threadId": "chat-1", "input": []}}
+    },
+    {
+      "name": "a page's chat-work thread/start drops a permissions profile and extra workspace roots",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "message": {"id": 338, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "danger-full-access", "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"]}},
+      "accept": true,
+      "out": {"id": 338, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
     }
   ]
 }
