@@ -1122,3 +1122,11 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .new-tab { position: relative; display: inline-flex; }
 .new-tab-menu { left: 0; right: auto; min-width: 140px; }
 .tab-body .terminal-host { height: 100%; }
+/* Files from answers (AskFiles.tsx, DESKTOP §16 B30). */
+.ask-files { width: min(640px, 92vw); max-height: 80vh; display: flex; flex-direction: column; }
+.ask-files-list { overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.ask-files-list h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.ask-file { display: flex; gap: 8px; align-items: center; width: 100%; padding: 4px 6px; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; text-align: left; }
+.ask-file:hover, .ask-file:focus-visible { background: var(--hover); }
+.ask-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-file-kind { color: var(--faint); font-size: 12px; }

@@ -87,6 +87,7 @@ import { LINKED_SETTINGS, sameRemote } from "./links2";
 import { PathMenu, pathOf, type PathAction, type PathMenuState } from "./PathMenu";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
+import { AskFiles } from "./AskFiles";
 import { toolView, type ToolView } from "./toolitems";
 import { latestFindings } from "./findings";
 import { threadContext, withThreadContext } from "./tonight";
@@ -217,6 +218,8 @@ export function App() {
   const [pathMenu, setPathMenu] = useState<PathMenuState | null>(null);
   /** The first-run page (DESKTOP §16 B6), decided once the threads and preferences are read. */
   const [welcome, setWelcome] = useState(false);
+  /** Files from answers (DESKTOP §16 B30): the list of what Ask's questions' folders hold. */
+  const [askFilesOpen, setAskFilesOpen] = useState(false);
   /** The plugin a `ling://plugins/<id>` link named, shown first in Skills and tools › Plugins (DESKTOP §16 B19). */
   const [pluginFocus, setPluginFocus] = useState<string | null>(null);
   const [exporting, setExporting] = useState<{ thread: Thread; title: string; home: string | null } | null>(null);
@@ -2635,6 +2638,7 @@ export function App() {
         {view === "ask" ? (
           <>
             <button className="nav-row new-question" onClick={newQuestion}><Icon name="squarePen" />New question</button>
+            <button className="nav-row ask-files-button" onClick={() => setAskFilesOpen(true)}><Icon name="file" />Files from answers</button>
             <label className="search">
               <Icon name="search" size={14} />
               <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search questions" aria-label="Search questions" />
@@ -3071,6 +3075,15 @@ export function App() {
           onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }} />
       ) : null}
       {syncedOpen && synced.status ? <SyncedView status={synced.status} onClose={() => setSyncedOpen(false)} onChanged={synced.refresh} notice={notice} /> : null}
+      {askFilesOpen ? (
+        <AskFiles client={client} questions={Object.values(state.threads).map((entry) => entry.thread).filter((thread) => isAskThread(thread, askRoot))} titleOf={askTitle}
+          onClose={() => setAskFilesOpen(false)}
+          onOpen={(thread, path) => {
+            setAskFilesOpen(false);
+            showView("ask");
+            void openThread(thread).then(() => openFile(path));
+          }} />
+      ) : null}
       {welcome ? <WelcomeDialog quickShortcut={keyLabel(prefs.quickEntryShortcut)} onChoose={chooseWelcome} /> : null}
       {pathMenu ? (
         <PathMenu menu={pathMenu} canAttach={view === "work" && canCompose} canReveal={HOST === "electron"} onClose={closePathMenu}
