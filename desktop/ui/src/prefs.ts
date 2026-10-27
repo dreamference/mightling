@@ -47,6 +47,10 @@ export interface Prefs {
   messageVersions: Record<string, string[]>;
   /** Night Shift tasks queued from a Work thread: task id to the thread's id (nightthread.ts, DESKTOP §16 B40). */
   nightThreads: Record<string, string>;
+  /** Summaries of threads idle a day, by thread id, each stamped with the thread's `updatedAt` (summaries.ts, DESKTOP §16 B43). */
+  threadSummaries: Record<string, { at: number; text: string }>;
+  /** Summarize a thread idle a day with the served model while it has nothing else to do (Settings › Suggested prompts); on by default. */
+  summarizeThreads: boolean;
   /** Whether the sidebar's Recent list is open. */
   recentsOpen: boolean;
   /** The workspace layout (§2.1): the thread beside its tabs, the tabs in full, or the thread alone with the tabs hidden. */

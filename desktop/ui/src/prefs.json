@@ -108,6 +108,14 @@
       "default": {},
       "type": "object"
     },
+    "threadSummaries": {
+      "default": {},
+      "type": "object"
+    },
+    "summarizeThreads": {
+      "default": true,
+      "type": "boolean"
+    },
     "recentsOpen": {
       "default": false,
       "type": "boolean"

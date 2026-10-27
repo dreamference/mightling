@@ -68,6 +68,18 @@ export function threads(home: string, askRoot: string) {
   ];
 }
 
+/** MIGHTLING_STAND_IN_IDLE=1 (DESKTOP §16 B43): nothing running, the question and a Work thread left two days ago. */
+export function idleThreads(home: string, askRoot: string) {
+  const { fetcher } = projectFolders(home);
+  const question = threads(home, askRoot).find((entry) => entry.id === "q1");
+  return [question, thread("w5", fetcher, "Speed up the CSV import", "Speed up the CSV import", Math.floor(Date.now() / 1000) - 2 * 24 * 3600, [{
+    id: "t5", status: "completed", error: null, items: [
+      { type: "userMessage", id: "u5", content: text("The CSV import takes a minute for 100k rows. Make it faster.") },
+      { type: "agentMessage", id: "a5", text: "Rows are now read in batches of 1000; the import takes 6 seconds." },
+    ],
+  }])];
+}
+
 const FILES = ["fetcher/client.py", "fetcher/__init__.py", "fetcher/backoff.py", "tests/test_fetch.py", "README.md", "pyproject.toml"];
 
 /** Writes the stand-in `ling` into `home` and returns its path. */
@@ -130,6 +142,7 @@ if (process.argv[2] === "night" && process.argv[3] === "apply") { console.log("A
 if (process.argv[2] === "night") { console.log(process.argv[3] === "add" ? "Queued 20261017-0930 on branch night/20261017-0930, from 1a2b3c4d5e." : "Dropped " + process.argv[4] + "."); process.exit(0); }
 // MIGHTLING_STAND_IN_EMPTY=1: someone with no threads yet, as at the first start (DESKTOP §16 B6).
 const threads = process.env.MIGHTLING_STAND_IN_EMPTY === "1" ? [] : ${JSON.stringify(threads(home, askRoot))};
+if (process.env.MIGHTLING_STAND_IN_IDLE === "1") threads.splice(0, threads.length, ...${JSON.stringify(idleThreads(home, askRoot))});
 const files = ${JSON.stringify(FILES)};
 const fetcher = ${JSON.stringify(fetcher)};
 const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
@@ -410,6 +423,13 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: sideAnswer } });
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [sideAnswer], status: "completed", error: null } } });
         }, 300);
+      }
+      // A finished chat's summary (DESKTOP §16 B43): two lines, in a read-only, unkept thread.
+      if (String(p.threadId).startsWith("e") && sideWords.startsWith("Below is a conversation between")) {
+        answer({ turn: { id, items: [], status: "inProgress", error: null } });
+        const summary = { type: "agentMessage", id: "m" + id, text: "- Wanted the CSV import made faster\\n- Done: rows read in batches of 1000" };
+        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: summary } });
+        return say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [summary], status: "completed", error: null } } });
       }
       if (String(p.threadId).startsWith("e")) {
         answer({ turn: { id, items: [], status: "inProgress", error: null } });

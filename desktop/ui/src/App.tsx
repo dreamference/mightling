@@ -76,6 +76,7 @@ import { SideChat } from "./SideChat";
 import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages } from "./sidechat";
 import { agentsPath, initPrompt } from "./init";
 import { editedTurn, recordVersion, stepVersion, versionsAt, type MessageVersions } from "./versions";
+import { attemptKey, nextToSummarize, serverIdle, summarize, summaryMatches, summaryOf, withSummary } from "./summaries";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
 import { nearBottom } from "./follow";
@@ -576,6 +577,32 @@ export function App() {
     });
   }, [listen]);
 
+  // Summaries of finished chats (DESKTOP §16 B43, summaries.ts): a thread idle a day, one at a time, by
+  // the served model, only while no turn runs; at most one a minute, the first a few seconds after start.
+  const summarizing = useRef({ busy: false, tried: new Set<string>() });
+  useEffect(() => {
+    if (state.server !== "ready" || !prefs.summarizeThreads) return;
+    const tick = () => {
+      const threads = Object.values(stateRef.current.threads);
+      // Not before the stored preferences are in (they hold the summaries already made).
+      if (summarizing.current.busy || prefsRef.current === DEFAULT_PREFS || !prefsRef.current.summarizeThreads || !serverIdle(threads)) return;
+      const thread = nextToSummarize(threads, prefsRef.current.threadSummaries, Date.now() / 1000, summarizing.current.tried);
+      if (!thread) return;
+      summarizing.current.busy = true;
+      summarizing.current.tried.add(attemptKey(thread));
+      summarize(client, listen, thread, servedModelRef.current)
+        .then((text) => text && updatePrefsRef.current({ threadSummaries: withSummary(prefsRef.current.threadSummaries, thread.id, thread.updatedAt, text) }))
+        .catch(() => {})
+        .finally(() => { summarizing.current.busy = false; });
+    };
+    const first = setTimeout(tick, 3_000);
+    const every = setInterval(tick, 60_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(every);
+    };
+  }, [state.server, prefs.summarizeThreads, client, listen]);
+
   // Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4): while Settings › Memories has it on,
   // each Ask question of the user's (never an incognito one) is kept as the Markdown the agent's
   // earlier-questions skill searches: all of them when the app starts or it is turned on, one after
@@ -704,7 +731,11 @@ export function App() {
     const timer = setTimeout(() => {
       client.request("thread/search", { searchTerm: term, limit: 50 })
         .then((answer) => {
-          if (current) setFound(answer.data.filter((result) => (view === "ask") === isAskThread(result.thread, askRoot)));
+          // Threads whose summary (DESKTOP §16 B43) holds the words are found too, after the server's.
+          const listed = new Set(answer.data.map((result) => result.thread.id));
+          const bySummary = summaryMatches(prefsRef.current.summarizeThreads ? prefsRef.current.threadSummaries : {}, Object.values(stateRef.current.threads).map((entry) => entry.thread), term)
+            .filter((thread) => !listed.has(thread.id)).map((thread) => ({ thread, snippet: "" }));
+          if (current) setFound([...answer.data, ...bySummary].filter((result) => (view === "ask") === isAskThread(result.thread, askRoot)));
         })
         .catch(notice);
     }, 250);
@@ -2566,6 +2597,8 @@ export function App() {
   const asks = found ? found.map((result) => result.thread) : askThreads(allThreads, askRoot).filter((thread) => !inProject(thread));
   const askOfProject = (projectId: string) => askThreads(allThreads, askRoot).filter((thread) => thread.projectId === projectId);
   const snippets = new Map((found ?? []).map((result) => [result.thread.id, result.snippet]));
+  /** Summaries of finished chats (DESKTOP §16 B43): shown while Settings has them on. */
+  const summaryShown = (thread: Thread) => (prefs.summarizeThreads ? summaryOf(prefs.threadSummaries, thread) : null);
   const queue: QueuedSubmission[] = selected ? state.queues[selected.thread.id] ?? [] : [];
   // The served model may read text only (`inputModalities`): an image chip says it will not be seen (B13).
   const servedEntry = models.find((entry) => entry.id === (modelChoice ?? servedModel)) ?? models[0] ?? null;
@@ -2621,9 +2654,10 @@ export function App() {
         }} />
     ) : (
       <div key={thread.id} className={`thread-row${thread.id === state.selected ? " selected" : ""}${unread.has(thread.id) ? " unread" : ""}`}>
-        <button className="thread" onClick={() => openThread(thread.id)} title={label}>
+        <button className="thread" onClick={() => openThread(thread.id)} title={summaryShown(thread) ? `${label}\n${summaryShown(thread)}` : label}>
           <span className="thread-label">{prefs.pinnedThreads.includes(thread.id) ? <Icon name="pin" size={12} /> : null}{label}</span>
           {snippets.get(thread.id) ? <span className="snippet">{snippets.get(thread.id)}</span> : null}
+          {found && summaryShown(thread) ? <span className="snippet thread-summary">{summaryShown(thread)}</span> : null}
         </button>
         {waiting.has(thread.id) ? <span className="attention" aria-label="waiting for you" title="An approval or a question is waiting">!</span> : null}
         {unread.has(thread.id) && !waiting.has(thread.id) ? <span className="unread-dot" aria-label="unread" /> : null}
