@@ -421,6 +421,11 @@ jobs:
           $null = $started.Handle  # kept, so ExitCode is there after the app has gone
           if (-not $started.WaitForExit(90000)) { Stop-Process -Id $started.Id -Force; throw "the app did not quit by itself" }
           if ($started.ExitCode -ne 0) { throw "the app exited with $($started.ExitCode)" }
+          # The app wrote its Application User Model ID into the Start menu entry, without which
+          # Windows shows none of its notifications (app-identity.ts; installer.nsi cannot write it).
+          $entry = (New-Object -ComObject Shell.Application).NameSpace((Split-Path $shortcut)).ParseName((Split-Path -Leaf $shortcut))
+          $id = $entry.ExtendedProperty("System.AppUserModel.ID")
+          if ($id -ne "dev.dreamference.mightling") { throw "the Start menu entry's AppUserModelID is '$id', not the app's" }
           # The uninstaller with the runner's own profile: Windows finds the Start menu from USERPROFILE.
           $env:USERPROFILE = $ownProfile
           # An NSIS uninstaller copies itself to the temporary folder and runs from there, so -Wait

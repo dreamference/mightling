@@ -8,6 +8,7 @@ The workflow files and the NSIS script are read as text: nothing here runs maken
 named in `MIGHTLING_TEST_MAKENSIS` (with `NSISDIR` for a bundle such as electron-builder's).
 """
 
+import json
 import os
 import re
 import subprocess
@@ -177,6 +178,18 @@ def test_a_running_app_is_closed_and_its_folder_replaced_whole_or_not_at_all():
     assert 'Abort "' in free.split("free_failed:")[1].split("free_moved:")[0]
     # CI runs both against a running app.
     assert "Install over the running app, uninstall it running" in WINDOWS_YML.read_text()
+
+
+def test_ci_checks_the_start_menu_entry_carries_the_apps_own_id():
+    # Windows shows a desktop app's notifications only for an AppUserModelID that a Start menu
+    # shortcut carries; the app writes its identifier there (app-identity.ts), and CI reads it back.
+    identifier = json.loads((ROOT / "desktop" / "electron" / "app.json").read_text())["identifier"]
+    windows = WINDOWS_YML.read_text()
+    assert f'if ($id -ne "{identifier}")' in windows
+    assert 'ExtendedProperty("System.AppUserModel.ID")' in windows
+    nsi = INSTALLER_NSI.read_text()
+    assert 'CreateShortCut "$SMPROGRAMS\\${PRODUCT}.lnk" "$INSTDIR\\${EXE}"' in nsi
+    assert '!define PRODUCT "Mightling"' in nsi
 
 
 @pytest.mark.skipif(
