@@ -784,3 +784,22 @@ def test_the_script_changes_nothing_when_nothing_is_needed(tmp_path):
         subprocess.run([script], env=env, capture_output=True, text=True, timeout=30).returncode
         == 1
     )
+
+
+def test_no_two_modules_differ_only_in_case():
+    # Windows and macOS file systems ignore case, so `./SideChat` there resolves to sidechat.ts
+    # before SideChat.tsx and the UI does not build (windows.yml, 2026-10-27).
+    suffixes = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+    stems: dict[tuple[Path, str], set[str]] = {}
+    for root in (Path(UI_DIR) / "src", ELECTRON / "src"):
+        for path in root.rglob("*"):
+            stem = path.name.split(".")[0]
+            # A test file is never imported, so only modules can be mistaken for one another.
+            if (
+                path.suffix in suffixes
+                and "node_modules" not in path.parts
+                and ".test." not in path.name
+            ):
+                stems.setdefault((path.parent, stem.lower()), set()).add(stem)
+    clashes = {str(folder / key): names for (folder, key), names in stems.items() if len(names) > 1}
+    assert not clashes
