@@ -200,6 +200,8 @@ jobs:
       - name: Git over https in the sandbox
         shell: powershell
         run: |
+          # Native commands write to stderr; that is output here, not a terminating error.
+          $ErrorActionPreference = "Continue"
           $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
           $git = (Get-Command git.exe).Source
           $out = & $ling sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- $git -c http.sslBackend=openssl ls-remote https://github.com/git/git HEAD 2>&1 | Out-String
