@@ -13,6 +13,8 @@ from dreamference.forge.forge_settings import (
     OWNER,
     ROLE_MIRROR,
     ROLE_RECORD,
+    WEB_PATH,
+    WEB_PORT,
     ForgeSettings,
 )
 
@@ -498,7 +500,9 @@ class ForgeCommand:
 
         lines = [
             f"Forge: {'on' if ForgeSettings.enabled() else 'off'}, {role}, "
-            f"{'running' if running else 'not running'} on http://{ForgeService.host_name()}.local:{HTTP_PORT}/"
+            f"{'running' if running else 'not running'} at "
+            f"http://{ForgeService.host_name()}.local:{WEB_PORT}{WEB_PATH} "
+            f"(through `ling web`; git and the API on port {HTTP_PORT})"
         ]
         if role == ROLE_MIRROR:
             lines.append(

@@ -630,7 +630,8 @@ class EgressAudit:
         where = ("its GitHub mirror pushes to " + ", ".join(destinations)
                  + (" (stopped: /airgapped is on)" if ForgeGithubMirror.airgapped() else "")
                  if destinations else "no outbound mirror is configured, so it reaches nothing outside the LAN")
-        return [f"Forge enabled ({FORGE_UNIT}, {role}): Forgejo serves the LAN only; {where}, outside this trace. "
+        return [f"Forge enabled ({FORGE_UNIT}, {role}): Forgejo serves the LAN only (browsers through `ling web`'s "
+                f"`/forge/`, which reaches it on loopback); {where}, outside this trace. "
                 "`ling-admin forge off` turns it off."]
 
     @classmethod

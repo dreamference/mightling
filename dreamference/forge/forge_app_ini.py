@@ -18,9 +18,10 @@ from dreamference.forge.forge_settings import (
     ARTEFACT_DAYS_RECORD,
     CONTAINER_HTTP_PORT,
     CONTAINER_SSH_PORT,
-    HTTP_PORT,
     ROLE_RECORD,
     SSH_PORT,
+    WEB_PATH,
+    WEB_PORT,
 )
 
 # Where the rootless image keeps everything (GITEA_WORK_DIR) and reads its config from.
@@ -124,7 +125,10 @@ class ForgeAppIni:
                 {
                     "PROTOCOL": "http",
                     "DOMAIN": domain,
-                    "ROOT_URL": f"http://{domain}:{HTTP_PORT}/",
+                    # The pages link under `ling web`'s `/forge/`, which takes the prefix off on
+                    # the way in: Forgejo serves at its own root, so git, the API and the mirrors
+                    # keep using `http://<node>:3200/<owner>/<repo>.git` (measured on 15.0.11).
+                    "ROOT_URL": f"http://{domain}:{WEB_PORT}{WEB_PATH}",
                     # Inside the container; where it is reachable from is decided by `docker run -p`,
                     # one address at a time (ForgeBind).
                     "HTTP_ADDR": "0.0.0.0",

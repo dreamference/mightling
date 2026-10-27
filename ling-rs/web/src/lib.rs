@@ -5,8 +5,9 @@
 //! (`policy.json`, shared with the desktop app and held to the cases in `vectors/`). Every request
 //! needs a credential, loopback included, and nothing a sandboxed command can read is one; the LAN
 //! is served only on an advertised node. It calls
-//! nothing on any network: its outbound connections are the app-server's socket and, for the
-//! microphone, the speech-to-text service on loopback (sidecars.rs); the only processes it starts
+//! nothing on any network: its outbound connections are the app-server's socket, for the
+//! microphone, the speech-to-text service on loopback (sidecars.rs), and for `/forge/`, the node's own forge on
+//! loopback (forge.rs); the only processes it starts
 //! are `ling app-server`, `ling prompt show --composed`, for a phone bridge's image, the offline
 //! text reader (ocr.rs), to open a cited document, `ling docs locate` (documents.rs), and, for the answers' length,
 //! `ling cavemode` (cave.rs), and for a phone's Night Shift task, `ling night add` (night_phone.rs). As a Telegram Mini App it is the same page, reached over the
@@ -23,6 +24,7 @@ pub mod chat_settings;
 pub mod cli;
 pub mod devices;
 pub mod documents;
+pub mod forge;
 pub mod night_phone;
 pub mod ocr;
 pub mod policy;

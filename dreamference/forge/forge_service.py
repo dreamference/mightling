@@ -39,6 +39,8 @@ from dreamference.forge.forge_settings import (
     ROLES,
     SERVICE_TYPE,
     UNIT,
+    WEB_PATH,
+    WEB_PORT,
     ForgeSettings,
 )
 
@@ -316,7 +318,8 @@ class ForgeService:
 
             ForgeRepositories.install_hooks(mirror_trigger=True)
             print(
-                f"✅ The forge of record runs on http://{cls.host_name()}.local:{HTTP_PORT}/ ({where})."
+                f"✅ The forge of record runs: in a browser at http://{cls.host_name()}.local:{WEB_PORT}{WEB_PATH} "
+                f"through `ling web`, signed in on paired devices; git and the API on {where}."
             )
         else:
             name = ForgeSettings.state().get("record_name") or "the forge of record"

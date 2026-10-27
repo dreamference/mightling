@@ -87,13 +87,14 @@ def test_app_ini_is_lan_only_private_and_never_push_mirrors(tmp_path):
         "DEFAULT_PRIVATE = private",
         "DB_TYPE = sqlite3",
         "DISABLE_NEW_PUSH = true",
-        "ROOT_URL = http://gx10-1a2b.local:3200/",
+        "ROOT_URL = http://gx10-1a2b.local:3100/forge/",
         "SSH_PORT = 2222",
         "INSTALL_LOCK = true",
     ):
         assert line in text
     assert "[cron.update_checker]\nENABLED = false" in text
-    assert "REVERSE_PROXY" not in text  # nothing sets the header yet (P1 brings `ling web`'s proxy)
+    # `ling web` signs in with a form and keeps the cookies; the header sign-in stays off (§2.2).
+    assert "REVERSE_PROXY" not in text
     secrets = ForgeAppIni.read_secrets(tmp_path)
     assert len(secrets) == 4
     ForgeAppIni.write(tmp_path, "node-b", "mirror")
