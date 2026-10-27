@@ -22,6 +22,8 @@ ling-airgapped = { path = "../airgapped" }
 # The pairing QR code (src/qr.rs), drawn here: no dependencies of its own, no service asked.
 qrcodegen = "1.8"
 rand = "0.9"
+# The pre-push anonymity denylist check (anonymity.rs); the Codex workspace's version.
+regex = "1"
 # The sync hub's records (sync_store.rs); the Codex workspace's version.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

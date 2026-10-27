@@ -65,6 +65,12 @@ pub const DISK_HEADROOM_BYTES: u64 = 5 * GB;
 pub const DEFAULT_BRIDGES: &[&str] = &["signal", "matrix", "telegram", "discord"];
 /// Bridges recognised by `POST /api/repos/open`.
 pub const KNOWN_BRIDGES: &[&str] = &["signal", "matrix", "telegram", "discord", "web"];
+/// Lifetime of a single-use confirmation nonce issued by `GET /api/repos/state?intent=…` (10 minutes).
+pub const CONFIRM_TTL: Duration = Duration::from_secs(10 * 60);
+/// Valid `intent` values for confirmation nonces.
+pub const VALID_INTENTS: &[&str] = &["commit", "push", "update", "merge", "pr", "main"];
+/// Maximum length (in Unicode scalar values) of a commit message in `POST /api/repos/commit`.
+pub const MAX_COMMIT_MESSAGE_CHARS: usize = 5_000;
 
 /// Settings from the `[chat_repos]` table of `~/.config/dreamference/config.toml`
 /// (`specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md` §14).
@@ -320,12 +326,21 @@ struct CachedListing {
     repos: Vec<ForgeRepo>,
 }
 
+#[derive(Clone, Debug)]
+struct ConfirmNonce {
+    caller: String,
+    thread: String,
+    intent: String,
+    issued_at: Instant,
+}
+
 /// Runtime state held by `Server` for `/api/repos`: the 60-second listing cache, per-repository
-/// git locks, `index.json` lock, and host probe.
+/// git locks, `index.json` lock, single-use confirmation nonces, and host probe.
 pub struct ChatRepos {
     listing: tokio::sync::Mutex<Option<CachedListing>>,
     repo_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     index_lock: Mutex<()>,
+    nonces: Mutex<HashMap<String, ConfirmNonce>>,
     probe: Mutex<Arc<dyn HostProbe>>,
     allow_file_protocol: std::sync::atomic::AtomicBool,
 }
@@ -343,6 +358,7 @@ impl ChatRepos {
             listing: tokio::sync::Mutex::new(None),
             repo_locks: Mutex::new(HashMap::new()),
             index_lock: Mutex::new(()),
+            nonces: Mutex::new(HashMap::new()),
             probe: Mutex::new(Arc::new(SystemHostProbe)),
             allow_file_protocol: std::sync::atomic::AtomicBool::new(cfg!(test)),
         }
@@ -371,6 +387,42 @@ impl ChatRepos {
     pub async fn invalidate_listing_cache(&self) {
         *self.listing.lock().await = None;
     }
+
+    /// Issues a 32-hex-character single-use confirmation nonce bound to `(caller, thread, intent)`.
+    pub fn issue_nonce(&self, caller: &str, thread: &str, intent: &str) -> String {
+        let mut nonces = self.nonces.lock().unwrap_or_else(|p| p.into_inner());
+        nonces.retain(|_, v| v.issued_at.elapsed() < CONFIRM_TTL);
+        let nonce = auth::random_hex(16);
+        nonces.insert(
+            nonce.clone(),
+            ConfirmNonce {
+                caller: caller.to_string(),
+                thread: thread.to_string(),
+                intent: intent.to_string(),
+                issued_at: Instant::now(),
+            },
+        );
+        nonce
+    }
+
+    /// Consumes a confirmation nonce if and only if it is unexpired and matches `(caller, thread, intent)`.
+    /// Removes the nonce before returning `true`.
+    pub fn consume_nonce(&self, caller: &str, thread: &str, intent: &str, nonce: &str) -> bool {
+        if nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return false;
+        }
+        let mut nonces = self.nonces.lock().unwrap_or_else(|p| p.into_inner());
+        nonces.retain(|_, v| v.issued_at.elapsed() < CONFIRM_TTL);
+        let matches = nonces
+            .get(nonce)
+            .is_some_and(|entry| entry.caller == caller && entry.thread == thread && entry.intent == intent);
+        if matches {
+            nonces.remove(nonce);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Router for `/api/repos*`, merged into `server::router`.
@@ -381,6 +433,12 @@ pub fn routes() -> Router<Arc<Server>> {
         .route("/api/repos/state", get(repo_state))
         .route("/api/repos/diff", get(repo_diff))
         .route("/api/repos/log", get(repo_log))
+        .route("/api/repos/commit", post(repo_commit))
+        .route("/api/repos/push", post(repo_push))
+        .route("/api/repos/update", post(repo_update))
+        .route("/api/repos/merge", post(repo_merge))
+        .route("/api/repos/pr", post(repo_pr))
+        .route("/api/repos/main", post(repo_main))
 }
 
 fn json_response(status: StatusCode, value: Value) -> Response {
@@ -476,10 +534,12 @@ pub fn valid_worktree_rel_path(rel: &str) -> bool {
     true
 }
 
-/// Resolves the caller's device identifier and refuses any `watch`-scoped device with 403.
-fn require_control_caller(server: &Server, headers: &HeaderMap) -> Result<String, Response> {
+/// Resolves `(device_label, nonce_caller_id)` and refuses any `watch`-scoped device with 403.
+fn require_control_caller_with_session(server: &Server, headers: &HeaderMap) -> Result<(String, String), Response> {
     if server.owner_session(headers) {
-        return Ok("owner".to_string());
+        let session_tok = auth::cookie(header_str(headers, header::COOKIE), auth::SESSION_COOKIE).unwrap_or("");
+        let session_id = format!("session:{}", auth::sha256_hex(session_tok));
+        return Ok(("owner".to_string(), session_id));
     }
     let Some(cookie) = auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE) else {
         return Err(json_response(StatusCode::UNAUTHORIZED, json!({ "error": "not signed in" })));
@@ -493,7 +553,13 @@ fn require_control_caller(server: &Server, headers: &HeaderMap) -> Result<String
             json!({ "error": "This device has watch scope only; repository access requires control scope." }),
         ));
     }
-    Ok(device.id)
+    let nonce_id = format!("device:{}", device.id);
+    Ok((device.id, nonce_id))
+}
+
+/// Resolves the caller's device identifier and refuses any `watch`-scoped device with 403.
+fn require_control_caller(server: &Server, headers: &HeaderMap) -> Result<String, Response> {
+    require_control_caller_with_session(server, headers).map(|(device, _)| device)
 }
 
 fn forge_base_url(server: &Server) -> String {
@@ -556,6 +622,45 @@ pub async fn forge_get(base_url: &str, path_and_query: &str, token: &str, timeou
             .map_err(|_| format!("could not connect to forge at {connect_addr}"))?;
         let request = format!(
             "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nAuthorization: token {token}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+        );
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .map_err(|_| "failed to send request to forge".to_string())?;
+        let mut raw = Vec::new();
+        stream
+            .read_to_end(&mut raw)
+            .await
+            .map_err(|_| "failed to read response from forge".to_string())?;
+        parse_http_response(&raw)
+    })
+    .await
+    .map_err(|_| "forge request timed out".to_string())?
+}
+
+/// Performs an HTTP/1.1 `POST` with a JSON body to the forge with `Authorization: token <token>`
+/// and `Connection: close`. Never includes `token` in any error message.
+pub async fn forge_post(
+    base_url: &str,
+    path_and_query: &str,
+    token: &str,
+    body_json: &Value,
+    timeout: Duration,
+) -> Result<(u16, Vec<u8>), String> {
+    let (connect_addr, host_header) = parse_http_base_url(base_url)?;
+    let path = if path_and_query.starts_with('/') {
+        path_and_query.to_string()
+    } else {
+        format!("/{path_and_query}")
+    };
+    let payload = body_json.to_string();
+    tokio::time::timeout(timeout, async move {
+        let mut stream = TcpStream::connect(&connect_addr)
+            .await
+            .map_err(|_| format!("could not connect to forge at {connect_addr}"))?;
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: {host_header}\r\nAuthorization: token {token}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            payload.len()
         );
         stream
             .write_all(request.as_bytes())
@@ -1118,14 +1223,26 @@ async fn sync_base_clone(server: &Server, base_git: &Path, forge_repo: &ForgeRep
         .await?;
     }
     run_git_checked(server, Some(base_git), &["config", "remote.origin.url", &plain_url], false).await?;
-    let refspec_heads = format!("+refs/heads/{0}:refs/heads/{0}", forge_repo.default_branch);
+    fetch_base_origin(server, base_git, &forge_repo.default_branch).await?;
+    Ok(())
+}
+
+/// Fetches `origin`'s heads into `refs/remotes/origin/*` in `base.git` and detaches `base.git`'s
+/// `HEAD` at `refs/remotes/origin/<default>`'s tip so no `phone/*` or `main` worktree branch is ever
+/// overwritten or locked by `base.git`.
+async fn fetch_base_origin(server: &Server, base_git: &Path, default_branch: &str) -> Result<(), String> {
     let _ = run_git_checked(
         server,
         Some(base_git),
-        &["fetch", "--prune", "--update-head-ok", "origin", &refspec_heads, "+refs/heads/*:refs/remotes/origin/*"],
+        &["fetch", "--prune", "--update-head-ok", "origin", "+refs/heads/*:refs/remotes/origin/*"],
         true,
     )
     .await?;
+    // `HEAD` is detached at the default branch's tip: git refuses a symbolic `HEAD` outside
+    // `refs/heads/`, and a detached one locks no branch a worktree may want.
+    let remote_default = format!("refs/remotes/origin/{default_branch}");
+    let tip = run_git_checked(server, Some(base_git), &["rev-parse", "--verify", &format!("{remote_default}^{{commit}}")], false).await?;
+    run_git_checked(server, Some(base_git), &["update-ref", "--no-deref", "HEAD", tip.trim()], false).await?;
     Ok(())
 }
 
@@ -1146,7 +1263,7 @@ async fn ensure_worktree(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let dir_str = worktree_dir.to_string_lossy().into_owned();
-    let tip = format!("refs/heads/{}", forge_repo.default_branch);
+    let tip = format!("refs/remotes/origin/{}", forge_repo.default_branch);
     if forge_repo.read_only || branch.is_none() {
         run_git_checked(
             server,
@@ -1337,16 +1454,18 @@ fn find_checked_out_thread(server: &Server, thread: &str) -> Result<(CheckoutRec
     Ok((record, dir))
 }
 
-/// `GET /api/repos/state?thread=`: branch, ahead/behind against `base.git`'s default branch tip,
-/// uncommitted file stat list, `read_only`, and `private`.
+/// `GET /api/repos/state?thread=&intent=`: branch, ahead/behind against `base.git`'s default branch
+/// tip, uncommitted file stat list, `read_only`, `private`, and (when `intent` is given) a
+/// single-use 32-hex confirmation nonce `confirm`.
 async fn repo_state(
     State(server): State<Arc<Server>>,
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
-    if let Err(resp) = require_control_caller(&server, &headers) {
-        return resp;
-    }
+    let (_caller_device, caller_nonce_id) = match require_control_caller_with_session(&server, &headers) {
+        Ok(ids) => ids,
+        Err(resp) => return resp,
+    };
     let (_settings, base_url, token) = match ensure_service_ready(&server).await {
         Ok(ready) => ready,
         Err(resp) => return resp,
@@ -1356,6 +1475,16 @@ async fn repo_state(
         Ok(found) => found,
         Err(resp) => return resp,
     };
+
+    let intent_opt = query.get("intent").map(|s| s.trim()).filter(|s| !s.is_empty());
+    if let Some(intent) = intent_opt
+        && !VALID_INTENTS.contains(&intent)
+    {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "intent must be commit, push, update, merge, pr, or main" }),
+        );
+    }
 
     let private = get_or_fetch_listing(&server, &base_url, &token)
         .await
@@ -1369,23 +1498,26 @@ async fn repo_state(
         Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
     };
 
-    json_response(
-        StatusCode::OK,
-        json!({
-            "repo": record.repo,
-            "branch": record.branch,
-            "base": record.base,
-            "ahead": ahead,
-            "behind": behind,
-            "uncommitted": uncommitted,
-            "read_only": record.read_only,
-            "private": private,
-        }),
-    )
+    let mut payload = json!({
+        "repo": record.repo,
+        "branch": record.branch,
+        "base": record.base,
+        "ahead": ahead,
+        "behind": behind,
+        "uncommitted": uncommitted,
+        "read_only": record.read_only,
+        "private": private,
+    });
+    if let Some(intent) = intent_opt {
+        let nonce = server.chat_repos.issue_nonce(&caller_nonce_id, &record.thread, intent);
+        payload["confirm"] = json!(nonce);
+    }
+
+    json_response(StatusCode::OK, payload)
 }
 
 async fn ahead_behind(server: &Server, worktree_dir: &Path, base_branch: &str) -> (u64, u64) {
-    let range = format!("refs/heads/{base_branch}...HEAD");
+    let range = format!("refs/remotes/origin/{base_branch}...HEAD");
     let Ok(out) = run_git_checked(server, Some(worktree_dir), &["rev-list", "--left-right", "--count", &range], false).await else {
         return (0, 0);
     };
@@ -1461,7 +1593,7 @@ fn count_file_lines(path: &Path) -> u64 {
 }
 
 async fn merge_base(server: &Server, worktree_dir: &Path, base_branch: &str) -> Result<String, String> {
-    let base_ref = format!("refs/heads/{base_branch}");
+    let base_ref = format!("refs/remotes/origin/{base_branch}");
     let out = run_git_checked(server, Some(worktree_dir), &["merge-base", &base_ref, "HEAD"], false).await?;
     Ok(out.trim().to_string())
 }
@@ -1626,6 +1758,812 @@ async fn repo_log(
     json_response(StatusCode::OK, Value::Array(commits))
 }
 
+/// Derives the user's home directory as three levels above `server.config.user_config`
+/// (`<home>/.config/dreamference/config.toml`), matching `server.rs`'s `night_candidates`.
+fn user_home_dir(server: &Server) -> Option<PathBuf> {
+    let cfg = server.config.user_config.as_deref()?;
+    Some(cfg.parent()?.parent()?.parent()?.to_path_buf())
+}
+
+/// Reads `user.name` and `user.email` from the user's `.gitconfig` (or `.config/git/config`)
+/// without exposing the user's global git configuration to forge commands.
+async fn read_owner_git_identity(server: &Server) -> Result<(String, String), String> {
+    let mut candidates = Vec::new();
+    if let Some(home) = user_home_dir(server) {
+        candidates.push(home.join(".gitconfig"));
+        candidates.push(home.join(".config/git/config"));
+    }
+    if !candidates.iter().any(|p| p.exists()) {
+        candidates.push(server.config.codex_home.join(".gitconfig"));
+        candidates.push(server.config.codex_home.join(".config/git/config"));
+    }
+
+    let mut name: Option<String> = None;
+    let mut email: Option<String> = None;
+    for file in candidates {
+        if !file.exists() {
+            continue;
+        }
+        let file_str = file.to_string_lossy().into_owned();
+        if name.is_none()
+            && let Ok(out) = run_git(server, None, &["config", "--file", &file_str, "--get", "user.name"], false).await
+            && out.status.success()
+        {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty() {
+                name = Some(val);
+            }
+        }
+        if email.is_none()
+            && let Ok(out) = run_git(server, None, &["config", "--file", &file_str, "--get", "user.email"], false).await
+            && out.status.success()
+        {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty() {
+                email = Some(val);
+            }
+        }
+    }
+
+    let Some(user_name) = name else {
+        return Err("git user.name is not set in ~/.gitconfig".to_string());
+    };
+    let Some(user_email) = email else {
+        return Err("git user.email is not set in ~/.gitconfig".to_string());
+    };
+    Ok((user_name, user_email))
+}
+
+/// Common pre-flight for every mutating `/api/repos/*` POST route: checks caller control scope,
+/// forge readiness, JSON body, checked-out `thread`, and consumes the single-use `confirm` nonce
+/// before the action runs.
+async fn validate_mutation_request(
+    server: &Server,
+    headers: &HeaderMap,
+    body: &Bytes,
+    intent: &str,
+) -> Result<(ChatReposSettings, String, String, Value, CheckoutRecord, PathBuf), Response> {
+    let (_caller_device, caller_nonce_id) = require_control_caller_with_session(server, headers)?;
+    let (settings, base_url, token) = ensure_service_ready(server).await?;
+    let request: Value = serde_json::from_slice(body)
+        .map_err(|_| json_response(StatusCode::BAD_REQUEST, json!({ "error": "send JSON" })))?;
+    let thread = request.get("thread").and_then(Value::as_str).unwrap_or("").trim();
+    let confirm = request.get("confirm").and_then(Value::as_str).unwrap_or("").trim();
+    let (record, worktree_dir) = find_checked_out_thread(server, thread)?;
+    if !server.chat_repos.consume_nonce(&caller_nonce_id, &record.thread, intent, confirm) {
+        return Err(json_response(
+            StatusCode::CONFLICT,
+            json!({ "error": "confirmation missing or expired" }),
+        ));
+    }
+    Ok((settings, base_url, token, request, record, worktree_dir))
+}
+
+fn read_only_response() -> Response {
+    json_response(
+        StatusCode::FORBIDDEN,
+        json!({ "error": "this repository is read-only on the forge" }),
+    )
+}
+
+/// `POST /api/repos/commit {thread, message, confirm}` (§4.4): stages all changes and commits with
+/// the node owner's git identity, never adding a trailer or messenger name.
+async fn repo_commit(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let (_settings, _base_url, _token, request, record, worktree_dir) =
+        match validate_mutation_request(&server, &headers, &body, "commit").await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+    if record.read_only {
+        return read_only_response();
+    }
+    let message = request.get("message").and_then(Value::as_str).unwrap_or("").trim();
+    if message.is_empty() || message.chars().count() > MAX_COMMIT_MESSAGE_CHARS {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "commit message must be non-empty and at most 5,000 characters" }),
+        );
+    }
+    let (user_name, user_email) = match read_owner_git_identity(&server).await {
+        Ok(id) => id,
+        Err(reason) => return json_response(StatusCode::CONFLICT, json!({ "error": reason })),
+    };
+
+    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let _repo_guard = repo_lock.lock().await;
+
+    if let Err(err) = run_git_checked(&server, Some(&worktree_dir), &["add", "-A"], false).await {
+        return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
+    }
+
+    let staged_clean = run_git(&server, Some(&worktree_dir), &["diff", "--cached", "--quiet"], false)
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let merge_in_progress = run_git(&server, Some(&worktree_dir), &["rev-parse", "-q", "--verify", "MERGE_HEAD"], false)
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if staged_clean && !merge_in_progress {
+        return json_response(StatusCode::CONFLICT, json!({ "error": "nothing to commit" }));
+    }
+
+    let name_cfg = format!("user.name={user_name}");
+    let email_cfg = format!("user.email={user_email}");
+    let commit_out = match run_git(
+        &server,
+        Some(&worktree_dir),
+        &["-c", &name_cfg, "-c", &email_cfg, "commit", "-m", message],
+        false,
+    )
+    .await
+    {
+        Ok(out) => out,
+        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
+    };
+    if !commit_out.status.success() {
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&commit_out.stderr),
+            String::from_utf8_lossy(&commit_out.stdout)
+        );
+        let lower = combined.to_ascii_lowercase();
+        if lower.contains("nothing to commit") || lower.contains("nothing added to commit") {
+            return json_response(StatusCode::CONFLICT, json!({ "error": "nothing to commit" }));
+        }
+        return json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "error": sanitize_error(combined.trim(), &server.config.state_dir) }),
+        );
+    }
+
+    let commit_sha = match run_git_checked(&server, Some(&worktree_dir), &["rev-parse", "HEAD"], false).await {
+        Ok(s) => s.trim().to_string(),
+        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
+    };
+    let numstat = match run_git_checked(
+        &server,
+        Some(&worktree_dir),
+        &["show", "--first-parent", "--numstat", "--format=", "HEAD"],
+        false,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
+    };
+    let files = parse_numstat(&numstat);
+    let total_added: u64 = files.iter().filter_map(|f| f.get("added").and_then(Value::as_u64)).sum();
+    let total_removed: u64 = files.iter().filter_map(|f| f.get("removed").and_then(Value::as_u64)).sum();
+
+    json_response(
+        StatusCode::OK,
+        json!({
+            "commit": commit_sha,
+            "files": files,
+            "added": total_added,
+            "removed": total_removed,
+        }),
+    )
+}
+
+async fn lookup_forge_repo(server: &Server, base_url: &str, token: &str, repo_name: &str) -> Result<ForgeRepo, Response> {
+    let listing = get_or_fetch_listing(server, base_url, token).await.map_err(|err| {
+        json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
+        )
+    })?;
+    listing.into_iter().find(|r| r.repo == repo_name).ok_or_else(|| {
+        json_response(
+            StatusCode::NOT_FOUND,
+            json!({ "error": format!("Repository `{repo_name}` is not in the forge listing.") }),
+        )
+    })
+}
+
+/// Runs the pre-push anonymity check (when `!forge_repo.private`) and pushes `refs/heads/<branch>:refs/heads/<branch>`
+/// without `--force`. Caller must hold the repository's mutex.
+async fn push_worktree_branch(
+    server: &Server,
+    record: &CheckoutRecord,
+    worktree_dir: &Path,
+    forge_repo: &ForgeRepo,
+) -> Result<Value, Response> {
+    if record.read_only || forge_repo.read_only || forge_repo.archived {
+        return Err(read_only_response());
+    }
+    let Some(branch) = record.branch.as_deref() else {
+        return Err(read_only_response());
+    };
+    let expected_phone = format!("phone/{}", record.thread);
+    if branch != expected_phone && branch != "main" {
+        return Err(json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "refusing to push an unrecognized branch" }),
+        ));
+    }
+
+    let remote_branch_ref = format!("refs/remotes/origin/{branch}");
+    let remote_is_ancestor = run_git(
+        server,
+        Some(worktree_dir),
+        &["merge-base", "--is-ancestor", &remote_branch_ref, "HEAD"],
+        false,
+    )
+    .await
+    .map(|o| o.status.success())
+    .unwrap_or(false);
+
+    let scan_base = if remote_is_ancestor {
+        remote_branch_ref.clone()
+    } else {
+        merge_base(server, worktree_dir, &record.base)
+            .await
+            .map_err(|err| json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })))?
+    };
+
+    let range = format!("{scan_base}..HEAD");
+    let rev_list_out = run_git_checked(server, Some(worktree_dir), &["rev-list", "--reverse", &range], false)
+        .await
+        .map_err(|err| json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })))?;
+    let commits: Vec<&str> = rev_list_out.lines().map(str::trim).filter(|s| !s.is_empty()).collect();
+
+    let mut anonymity_note: Option<&'static str> = None;
+    if !forge_repo.private {
+        let denylist_text = user_home_dir(server)
+            .and_then(|h| crate::anonymity::read_denylist(&h))
+            .or_else(|| crate::anonymity::read_denylist(&server.config.codex_home));
+        match denylist_text {
+            None => {
+                anonymity_note = Some("no denylist on this node");
+            }
+            Some(text) => {
+                let patterns = crate::anonymity::denylist_patterns(&text);
+                if !patterns.is_empty() {
+                    let mut findings = Vec::new();
+                    for sha in &commits {
+                        if let Ok(meta) = run_git_checked(
+                            server,
+                            Some(worktree_dir),
+                            &["show", "-s", "--format=%an%x00%ae%x00%cn%x00%ce%x00%B", sha],
+                            false,
+                        )
+                        .await
+                        {
+                            let mut parts = meta.splitn(5, '\0');
+                            let an = parts.next().unwrap_or("");
+                            let ae = parts.next().unwrap_or("");
+                            let cn = parts.next().unwrap_or("");
+                            let ce = parts.next().unwrap_or("");
+                            let msg = parts.next().unwrap_or("");
+                            let author_blob = format!("{an}\n{ae}\n{cn}\n{ce}");
+                            crate::anonymity::scan_metadata(&patterns, "author", &author_blob, &mut findings);
+                            crate::anonymity::scan_metadata(&patterns, "commit message", msg, &mut findings);
+                        }
+                        if let Ok(names_out) = run_git_checked(
+                            server,
+                            Some(worktree_dir),
+                            &["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", sha],
+                            false,
+                        )
+                        .await
+                        {
+                            let paths: Vec<String> = names_out
+                                .lines()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string)
+                                .collect();
+                            crate::anonymity::scan_paths(&patterns, &paths, &mut findings);
+                        }
+                        if let Ok(patch) = run_git_checked(
+                            server,
+                            Some(worktree_dir),
+                            &["show", "--format=", "--unified=0", "--no-renames", sha],
+                            false,
+                        )
+                        .await
+                        {
+                            crate::anonymity::scan_unified_patch(&patterns, &patch, &mut findings);
+                        }
+                    }
+                    if !findings.is_empty() {
+                        let findings_json: Vec<Value> =
+                            findings.iter().map(crate::anonymity::Finding::to_json).collect();
+                        return Err(json_response(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            json!({
+                                "refused": "anonymity",
+                                "findings": findings_json,
+                            }),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let base_git = root_dir(&server.config.codex_home).join(&record.repo).join("base.git");
+    let plain_url = strip_url_credentials(&forge_repo.clone_url);
+    let _ = run_git(server, Some(&base_git), &["config", "remote.origin.url", &plain_url], false).await;
+
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    let push_out = run_git(server, Some(worktree_dir), &["push", "origin", &refspec], true)
+        .await
+        .map_err(|err| json_response(StatusCode::BAD_GATEWAY, json!({ "refused": "forge", "reason": err })))?;
+
+    if !push_out.status.success() {
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&push_out.stderr),
+            String::from_utf8_lossy(&push_out.stdout)
+        )
+        .to_ascii_lowercase();
+        let non_ff = combined.contains("non-fast-forward")
+            || combined.contains("fetch first")
+            || combined.contains("[rejected]");
+        let reason = if non_ff {
+            if branch == "main" {
+                "the forge refused the push: the forge's main moved; /update first (the forge's branch moved; /update first)"
+            } else {
+                "the forge refused the push: the forge's branch moved; /update first"
+            }
+        } else {
+            "the forge refused the push"
+        };
+        return Err(json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({
+                "refused": "forge",
+                "reason": reason,
+                "error": reason,
+            }),
+        ));
+    }
+
+    let _ = run_git(server, Some(worktree_dir), &["update-ref", &remote_branch_ref, "HEAD"], false).await;
+
+    let mut payload = json!({
+        "pushed": commits.len(),
+        "branch": branch,
+    });
+    if let Some(note) = anonymity_note {
+        payload["anonymity_check"] = json!(note);
+    }
+    Ok(payload)
+}
+
+async fn branch_is_ahead_of_remote(server: &Server, worktree_dir: &Path, branch: &str) -> bool {
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let Ok(remote_out) = run_git(server, Some(worktree_dir), &["rev-parse", "--verify", "--quiet", &remote_ref], false).await else {
+        return true;
+    };
+    if !remote_out.status.success() {
+        return true;
+    }
+    let range = format!("{remote_ref}..HEAD");
+    let Ok(count_str) = run_git_checked(server, Some(worktree_dir), &["rev-list", "--count", &range], false).await else {
+        return true;
+    };
+    count_str.trim().parse::<u64>().unwrap_or(1) > 0
+}
+
+/// `POST /api/repos/push {thread, confirm}` (§4.5): runs the anonymity check on non-private
+/// repositories and pushes `phone/<thread>` (or `main` when allowed) to the forge without force.
+async fn repo_push(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let (_settings, base_url, token, _request, record, worktree_dir) =
+        match validate_mutation_request(&server, &headers, &body, "push").await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+    if record.read_only {
+        return read_only_response();
+    }
+    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+
+    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let _repo_guard = repo_lock.lock().await;
+
+    match push_worktree_branch(&server, &record, &worktree_dir, &forge_repo).await {
+        Ok(payload) => json_response(StatusCode::OK, payload),
+        Err(resp) => resp,
+    }
+}
+
+/// `POST /api/repos/update {thread, confirm, abort?}` (§4.6): fetches `base.git` and merges
+/// `origin/<default>` into the worktree, or aborts an in-progress merge when `abort: true`.
+async fn repo_update(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let (_settings, base_url, token, request, record, worktree_dir) =
+        match validate_mutation_request(&server, &headers, &body, "update").await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+    if record.read_only {
+        return read_only_response();
+    }
+    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    if forge_repo.read_only || forge_repo.archived {
+        return read_only_response();
+    }
+
+    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let _repo_guard = repo_lock.lock().await;
+
+    let abort = request.get("abort").and_then(Value::as_bool).unwrap_or(false);
+    if abort {
+        return match run_git_checked(&server, Some(&worktree_dir), &["merge", "--abort"], false).await {
+            Ok(_) => json_response(StatusCode::OK, json!({ "aborted": true })),
+            Err(err) => json_response(StatusCode::CONFLICT, json!({ "error": err })),
+        };
+    }
+
+    let base_git = root_dir(&server.config.codex_home).join(&record.repo).join("base.git");
+    if let Err(err) = sync_base_clone(&server, &base_git, &forge_repo).await {
+        return json_response(StatusCode::BAD_GATEWAY, json!({ "error": err }));
+    }
+
+    // The merge commit is the owner's, as a commit is (§4.4).
+    let (user_name, user_email) = match read_owner_git_identity(&server).await {
+        Ok(identity) => identity,
+        Err(err) => return json_response(StatusCode::CONFLICT, json!({ "error": err })),
+    };
+    let name_cfg = format!("user.name={user_name}");
+    let email_cfg = format!("user.email={user_email}");
+    let target_ref = format!("refs/remotes/origin/{}", record.base);
+    let merge_args = ["-c", name_cfg.as_str(), "-c", email_cfg.as_str(), "merge", "--no-edit", target_ref.as_str()];
+    let merge_out = match run_git(&server, Some(&worktree_dir), &merge_args, false).await {
+        Ok(out) => out,
+        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
+    };
+
+    if merge_out.status.success() {
+        return json_response(StatusCode::OK, json!({ "updated": true, "conflicts": [] }));
+    }
+
+    let unmerged_out = run_git_checked(
+        &server,
+        Some(&worktree_dir),
+        &["diff", "--name-only", "--diff-filter=U"],
+        false,
+    )
+    .await
+    .unwrap_or_default();
+    let conflicts: Vec<String> = unmerged_out
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if !conflicts.is_empty() {
+        return json_response(StatusCode::CONFLICT, json!({ "conflicts": conflicts }));
+    }
+
+    let detail = String::from_utf8_lossy(&merge_out.stderr);
+    json_response(
+        StatusCode::CONFLICT,
+        json!({
+            "error": sanitize_error(detail.trim(), &server.config.state_dir),
+            "conflicts": [],
+        }),
+    )
+}
+
+/// Finds an open pull request on the forge whose `head.ref` is `branch`, or creates one titled
+/// `"phone/<thread> from <repo>"` (never using the thread's name or any message text).
+async fn find_or_create_open_pr(
+    base_url: &str,
+    token: &str,
+    repo_name: &str,
+    branch: &str,
+    base_branch: &str,
+    thread: &str,
+) -> Result<u64, String> {
+    let list_path = format!("/api/v1/repos/{repo_name}/pulls?state=open&limit=50");
+    let (status, body) = forge_get(base_url, &list_path, token, FORGE_TIMEOUT).await?;
+    if status != 200 {
+        return Err(format!("forge returned HTTP {status} when listing pull requests"));
+    }
+    let parsed: Value = serde_json::from_slice(&body).map_err(|_| "forge returned invalid JSON for pulls".to_string())?;
+    let items = parsed
+        .as_array()
+        .or_else(|| parsed.get("data").and_then(Value::as_array))
+        .ok_or_else(|| "forge pulls response was not a list".to_string())?;
+
+    for item in items {
+        let head_ref = item
+            .get("head")
+            .and_then(|h| h.get("ref").and_then(Value::as_str).or_else(|| h.as_str()))
+            .unwrap_or("");
+        if head_ref == branch
+            && let Some(num) = item.get("number").or_else(|| item.get("index")).and_then(Value::as_u64)
+        {
+            return Ok(num);
+        }
+    }
+
+    let create_path = format!("/api/v1/repos/{repo_name}/pulls");
+    let title = format!("phone/{thread} from {repo_name}");
+    let create_body = json!({
+        "head": branch,
+        "base": base_branch,
+        "title": title,
+    });
+    let (c_status, c_body) = forge_post(base_url, &create_path, token, &create_body, FORGE_TIMEOUT).await?;
+    if c_status != 200 && c_status != 201 {
+        return Err(format!("forge returned HTTP {c_status} when creating pull request"));
+    }
+    let created: Value = serde_json::from_slice(&c_body).map_err(|_| "forge returned invalid JSON for created pull request".to_string())?;
+    created
+        .get("number")
+        .or_else(|| created.get("index"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "forge pull request response missing number".to_string())
+}
+
+/// `POST /api/repos/pr {thread, confirm}` (§4.6): pushes if the local branch is ahead of the
+/// forge's, then finds or opens a pull request and answers `{number, url}` with the relative
+/// `/forge/<owner>/<repo>/pulls/<number>` proxy path.
+async fn repo_pr(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let (_settings, base_url, token, _request, record, worktree_dir) =
+        match validate_mutation_request(&server, &headers, &body, "pr").await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+    if record.read_only {
+        return read_only_response();
+    }
+    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    if forge_repo.read_only || forge_repo.archived {
+        return read_only_response();
+    }
+    let Some(branch) = record.branch.as_deref() else {
+        return read_only_response();
+    };
+
+    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let _repo_guard = repo_lock.lock().await;
+
+    if branch_is_ahead_of_remote(&server, &worktree_dir, branch).await
+        && let Err(resp) = push_worktree_branch(&server, &record, &worktree_dir, &forge_repo).await
+    {
+        return resp;
+    }
+
+    let number = match find_or_create_open_pr(&base_url, &token, &record.repo, branch, &record.base, &record.thread).await {
+        Ok(n) => n,
+        Err(err) => {
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
+            );
+        }
+    };
+    let url = format!("/forge/{}/pulls/{number}", record.repo);
+    json_response(StatusCode::OK, json!({ "number": number, "url": url }))
+}
+
+/// `POST /api/repos/merge {thread, confirm}` (§4.6): pushes if ahead, opens a pull request if none
+/// exists, checks combined commit status and PR mergeability, and merges via the forge API.
+async fn repo_merge(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let (_settings, base_url, token, _request, record, worktree_dir) =
+        match validate_mutation_request(&server, &headers, &body, "merge").await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+    if record.read_only {
+        return read_only_response();
+    }
+    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    if forge_repo.read_only || forge_repo.archived {
+        return read_only_response();
+    }
+    let Some(branch) = record.branch.as_deref() else {
+        return read_only_response();
+    };
+
+    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let _repo_guard = repo_lock.lock().await;
+
+    if branch_is_ahead_of_remote(&server, &worktree_dir, branch).await
+        && let Err(resp) = push_worktree_branch(&server, &record, &worktree_dir, &forge_repo).await
+    {
+        return resp;
+    }
+
+    let pr_number = match find_or_create_open_pr(&base_url, &token, &record.repo, branch, &record.base, &record.thread).await {
+        Ok(n) => n,
+        Err(err) => {
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
+            );
+        }
+    };
+
+    let head_sha = match run_git_checked(&server, Some(&worktree_dir), &["rev-parse", "HEAD"], false).await {
+        Ok(s) => s.trim().to_string(),
+        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
+    };
+
+    let status_path = format!("/api/v1/repos/{}/commits/{head_sha}/status", record.repo);
+    match forge_get(&base_url, &status_path, &token, FORGE_TIMEOUT).await {
+        Ok((200, s_body)) => {
+            if let Ok(status_json) = serde_json::from_slice::<Value>(&s_body) {
+                let state = status_json.get("state").and_then(Value::as_str).unwrap_or("");
+                let total_count = status_json
+                    .get("total_count")
+                    .and_then(Value::as_u64)
+                    .or_else(|| status_json.get("statuses").and_then(Value::as_array).map(|a| a.len() as u64))
+                    .unwrap_or(0);
+                if state == "failure" || state == "error" {
+                    return json_response(StatusCode::CONFLICT, json!({ "error": "a required check is red" }));
+                }
+                if state == "pending" && total_count > 0 {
+                    return json_response(StatusCode::CONFLICT, json!({ "error": "checks are still running" }));
+                }
+            }
+        }
+        Ok((code, _)) => {
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": format!("forge returned HTTP {code} for commit status") }),
+            );
+        }
+        Err(err) => {
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
+            );
+        }
+    }
+
+    let pr_path = format!("/api/v1/repos/{}/pulls/{pr_number}", record.repo);
+    match forge_get(&base_url, &pr_path, &token, FORGE_TIMEOUT).await {
+        Ok((200, p_body)) => {
+            if let Ok(pr_json) = serde_json::from_slice::<Value>(&p_body)
+                && pr_json.get("mergeable").and_then(Value::as_bool) == Some(false)
+            {
+                return json_response(
+                    StatusCode::CONFLICT,
+                    json!({ "error": format!("conflicts with {}: /update, then /merge", record.base) }),
+                );
+            }
+        }
+        Ok((code, _)) => {
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": format!("forge returned HTTP {code} for pull request details") }),
+            );
+        }
+        Err(err) => {
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
+            );
+        }
+    }
+
+    let merge_path = format!("/api/v1/repos/{}/pulls/{pr_number}/merge", record.repo);
+    match forge_post(&base_url, &merge_path, &token, &json!({ "Do": "merge" }), FORGE_TIMEOUT).await {
+        Ok((200 | 204, _)) => json_response(
+            StatusCode::OK,
+            json!({
+                "merged": true,
+                "branch": branch,
+                "into": record.base,
+            }),
+        ),
+        Ok((405 | 409, _)) => json_response(
+            StatusCode::CONFLICT,
+            json!({ "error": format!("conflicts with {}: /update, then /merge", record.base) }),
+        ),
+        Ok((code, _)) => json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({ "error": format!("forge returned HTTP {code} when merging pull request") }),
+        ),
+        Err(err) => json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({ "error": sanitize_error(&err, &server.config.state_dir) }),
+        ),
+    }
+}
+
+/// `POST /api/repos/main {thread, confirm}` (§3.3): switches the thread's checkout to `main` when
+/// the repository is listed in `[chat_repos] allow_main` and the worktree has no uncommitted changes.
+async fn repo_main(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let (settings, base_url, token, _request, record, worktree_dir) =
+        match validate_mutation_request(&server, &headers, &body, "main").await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+    if record.read_only {
+        return read_only_response();
+    }
+    if !settings.allow_main.iter().any(|r| r == &record.repo) {
+        return json_response(
+            StatusCode::FORBIDDEN,
+            json!({
+                "error": format!(
+                    "Working on main is not allowed for `{0}`: run `ling chat repos allow-main {0}` at the node.",
+                    record.repo
+                )
+            }),
+        );
+    }
+
+    let forge_repo = match lookup_forge_repo(&server, &base_url, &token, &record.repo).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    if forge_repo.read_only || forge_repo.archived {
+        return read_only_response();
+    }
+
+    let repo_lock = server.chat_repos.repo_mutex(&record.repo);
+    let _repo_guard = repo_lock.lock().await;
+
+    let uncommitted = match uncommitted_stats(&server, &worktree_dir).await {
+        Ok(u) => u,
+        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err })),
+    };
+    if !uncommitted.is_empty() {
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({ "error": "worktree has uncommitted changes; commit or discard them before switching to main" }),
+        );
+    }
+
+    let base_git = root_dir(&server.config.codex_home).join(&record.repo).join("base.git");
+    if let Err(err) = sync_base_clone(&server, &base_git, &forge_repo).await {
+        return json_response(StatusCode::BAD_GATEWAY, json!({ "error": err }));
+    }
+
+    let remote_default = format!("refs/remotes/origin/{}", record.base);
+    if let Err(err) = run_git_checked(
+        &server,
+        Some(&worktree_dir),
+        &["checkout", "--ignore-other-worktrees", "-B", "main", "--no-track", &remote_default],
+        false,
+    )
+    .await
+    {
+        return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err }));
+    }
+
+    {
+        let _idx_guard = server.chat_repos.index_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut records = load_index(&server.config.codex_home);
+        if let Some(item) = records.iter_mut().find(|r| r.thread == record.thread) {
+            item.branch = Some("main".to_string());
+            item.last_used = now_secs();
+        }
+        if let Err(err) = save_index(&server.config.codex_home, &records) {
+            return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": err.to_string() }));
+        }
+    }
+
+    json_response(
+        StatusCode::OK,
+        json!({
+            "repo": record.repo,
+            "branch": "main",
+        }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicBool;
@@ -1719,45 +2657,264 @@ mod tests {
         bare
     }
 
-    /// Starts an in-process Forgejo API stand-in on `127.0.0.1:0` serving `/api/v1/version`
-    /// and `/api/v1/repos/search`.
-    async fn start_fake_forge(repos_json: Value) -> (String, tokio::task::JoinHandle<()>) {
+    #[derive(Clone, Debug)]
+    struct FakePull {
+        number: u64,
+        repo: String,
+        head_ref: String,
+        base_ref: String,
+        title: String,
+        mergeable: bool,
+        merged: bool,
+    }
+
+    struct FakeForge {
+        repos: Value,
+        pulls: Mutex<Vec<FakePull>>,
+        statuses: Mutex<HashMap<String, (String, u64)>>,
+        default_mergeable: AtomicBool,
+        requests: Mutex<Vec<(String, String, Value)>>,
+    }
+
+    impl FakeForge {
+        fn new(repos: Value) -> Arc<Self> {
+            Arc::new(Self {
+                repos,
+                pulls: Mutex::new(Vec::new()),
+                statuses: Mutex::new(HashMap::new()),
+                default_mergeable: AtomicBool::new(true),
+                requests: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn record(&self, method: &str, path: &str, body: Value) {
+            self.requests
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push((method.to_string(), path.to_string(), body));
+        }
+
+        fn set_status(&self, sha: &str, state: &str, total_count: u64) {
+            self.statuses
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(sha.to_string(), (state.to_string(), total_count));
+        }
+
+        fn set_mergeable(&self, number: u64, mergeable: bool) {
+            let mut pulls = self.pulls.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(p) = pulls.iter_mut().find(|p| p.number == number) {
+                p.mergeable = mergeable;
+            }
+        }
+    }
+
+    fn check_fake_auth(headers: &HeaderMap) -> bool {
+        let auth_hdr = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).unwrap_or("");
+        auth_hdr == format!("token {TEST_TOKEN}")
+    }
+
+    /// Starts an in-process Forgejo API stand-in on `127.0.0.1:0` serving version, search, pulls,
+    /// commit status, and pull merge, while recording every request.
+    async fn start_fake_forge_with_state(repos_json: Value) -> (String, Arc<FakeForge>, tokio::task::JoinHandle<()>) {
+        let state = FakeForge::new(repos_json);
+        let s_ver = state.clone();
+        let s_search = state.clone();
+        let s_pulls_list = state.clone();
+        let s_pulls_create = state.clone();
+        let s_pull_get = state.clone();
+        let s_status_get = state.clone();
+        let s_pull_merge = state.clone();
+
         let app = Router::new()
             .route(
                 "/api/v1/version",
-                get(|headers: HeaderMap| async move {
-                    let auth_hdr = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).unwrap_or("");
-                    if auth_hdr != format!("token {TEST_TOKEN}") {
-                        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+                get(move |headers: HeaderMap| {
+                    let st = s_ver.clone();
+                    async move {
+                        if !check_fake_auth(&headers) {
+                            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+                        }
+                        st.record("GET", "/api/v1/version", Value::Null);
+                        (StatusCode::OK, [("content-type", "application/json")], "{\"version\":\"1.22.0\"}").into_response()
                     }
-                    (StatusCode::OK, [("content-type", "application/json")], "{\"version\":\"1.22.0\"}").into_response()
                 }),
             )
             .route(
                 "/api/v1/repos/search",
                 get(move |headers: HeaderMap, Query(q): Query<HashMap<String, String>>| {
-                    let data = repos_json.clone();
+                    let st = s_search.clone();
                     async move {
-                        let auth_hdr = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).unwrap_or("");
-                        if auth_hdr != format!("token {TEST_TOKEN}") {
+                        if !check_fake_auth(&headers) {
                             return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
                         }
                         let page = q.get("page").and_then(|p| p.parse::<usize>().ok()).unwrap_or(1);
+                        st.record("GET", &format!("/api/v1/repos/search?page={page}"), Value::Null);
                         let body = if page == 1 {
-                            json!({ "ok": true, "data": data })
+                            json!({ "ok": true, "data": st.repos })
                         } else {
                             json!({ "ok": true, "data": [] })
                         };
                         (StatusCode::OK, [("content-type", "application/json")], body.to_string()).into_response()
                     }
                 }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/pulls",
+                get(move |headers: HeaderMap, axum::extract::Path((owner, repo)): axum::extract::Path<(String, String)>| {
+                    let st = s_pulls_list.clone();
+                    async move {
+                        if !check_fake_auth(&headers) {
+                            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+                        }
+                        let full = format!("{owner}/{repo}");
+                        st.record("GET", &format!("/api/v1/repos/{full}/pulls"), Value::Null);
+                        let pulls = st.pulls.lock().unwrap_or_else(|p| p.into_inner());
+                        let list: Vec<Value> = pulls
+                            .iter()
+                            .filter(|p| p.repo == full && !p.merged)
+                            .map(|p| {
+                                json!({
+                                    "number": p.number,
+                                    "mergeable": p.mergeable,
+                                    "merged": p.merged,
+                                    "html_url": format!("http://127.0.0.1:3200/{full}/pulls/{}", p.number),
+                                    "title": p.title,
+                                    "head": { "ref": p.head_ref },
+                                    "base": { "ref": p.base_ref },
+                                })
+                            })
+                            .collect();
+                        (StatusCode::OK, [("content-type", "application/json")], Value::Array(list).to_string()).into_response()
+                    }
+                })
+                .post(move |headers: HeaderMap, axum::extract::Path((owner, repo)): axum::extract::Path<(String, String)>, body: Bytes| {
+                    let st = s_pulls_create.clone();
+                    async move {
+                        if !check_fake_auth(&headers) {
+                            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+                        }
+                        let full = format!("{owner}/{repo}");
+                        let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                        st.record("POST", &format!("/api/v1/repos/{full}/pulls"), payload.clone());
+                        let mut pulls = st.pulls.lock().unwrap_or_else(|p| p.into_inner());
+                        let number = (pulls.len() as u64) + 1;
+                        let head_ref = payload.get("head").and_then(Value::as_str).unwrap_or("").to_string();
+                        let base_ref = payload.get("base").and_then(Value::as_str).unwrap_or("main").to_string();
+                        let title = payload.get("title").and_then(Value::as_str).unwrap_or("").to_string();
+                        let mergeable = st.default_mergeable.load(Ordering::Relaxed);
+                        let pull = FakePull {
+                            number,
+                            repo: full.clone(),
+                            head_ref: head_ref.clone(),
+                            base_ref: base_ref.clone(),
+                            title: title.clone(),
+                            mergeable,
+                            merged: false,
+                        };
+                        pulls.push(pull);
+                        let resp = json!({
+                            "number": number,
+                            "mergeable": mergeable,
+                            "merged": false,
+                            "html_url": format!("http://127.0.0.1:3200/{full}/pulls/{number}"),
+                            "title": title,
+                            "head": { "ref": head_ref },
+                            "base": { "ref": base_ref },
+                        });
+                        (StatusCode::CREATED, [("content-type", "application/json")], resp.to_string()).into_response()
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/pulls/{index}",
+                get(move |headers: HeaderMap, axum::extract::Path((owner, repo, index)): axum::extract::Path<(String, String, u64)>| {
+                    let st = s_pull_get.clone();
+                    async move {
+                        if !check_fake_auth(&headers) {
+                            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+                        }
+                        let full = format!("{owner}/{repo}");
+                        st.record("GET", &format!("/api/v1/repos/{full}/pulls/{index}"), Value::Null);
+                        let pulls = st.pulls.lock().unwrap_or_else(|p| p.into_inner());
+                        let Some(p) = pulls.iter().find(|p| p.repo == full && p.number == index) else {
+                            return (StatusCode::NOT_FOUND, "not found").into_response();
+                        };
+                        let resp = json!({
+                            "number": p.number,
+                            "mergeable": p.mergeable,
+                            "merged": p.merged,
+                            "html_url": format!("http://127.0.0.1:3200/{full}/pulls/{}", p.number),
+                            "title": p.title,
+                            "head": { "ref": p.head_ref },
+                            "base": { "ref": p.base_ref },
+                        });
+                        (StatusCode::OK, [("content-type", "application/json")], resp.to_string()).into_response()
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/commits/{sha}/status",
+                get(move |headers: HeaderMap, axum::extract::Path((owner, repo, sha)): axum::extract::Path<(String, String, String)>| {
+                    let st = s_status_get.clone();
+                    async move {
+                        if !check_fake_auth(&headers) {
+                            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+                        }
+                        let full = format!("{owner}/{repo}");
+                        st.record("GET", &format!("/api/v1/repos/{full}/commits/{sha}/status"), Value::Null);
+                        let statuses = st.statuses.lock().unwrap_or_else(|p| p.into_inner());
+                        let (state_str, total_count) = statuses
+                            .get(&sha)
+                            .or_else(|| statuses.get("default"))
+                            .cloned()
+                            .unwrap_or_else(|| ("success".to_string(), 0));
+                        let resp = json!({
+                            "state": state_str,
+                            "total_count": total_count,
+                        });
+                        (StatusCode::OK, [("content-type", "application/json")], resp.to_string()).into_response()
+                    }
+                }),
+            )
+            .route(
+                "/api/v1/repos/{owner}/{repo}/pulls/{index}/merge",
+                post(move |headers: HeaderMap, axum::extract::Path((owner, repo, index)): axum::extract::Path<(String, String, u64)>, body: Bytes| {
+                    let st = s_pull_merge.clone();
+                    async move {
+                        if !check_fake_auth(&headers) {
+                            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+                        }
+                        let full = format!("{owner}/{repo}");
+                        let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                        st.record("POST", &format!("/api/v1/repos/{full}/pulls/{index}/merge"), payload.clone());
+                        if payload.get("Do").and_then(Value::as_str) != Some("merge") {
+                            return (StatusCode::BAD_REQUEST, "expected Do=merge").into_response();
+                        }
+                        let mut pulls = st.pulls.lock().unwrap_or_else(|p| p.into_inner());
+                        let Some(p) = pulls.iter_mut().find(|p| p.repo == full && p.number == index) else {
+                            return (StatusCode::NOT_FOUND, "not found").into_response();
+                        };
+                        if !p.mergeable {
+                            return (StatusCode::METHOD_NOT_ALLOWED, "not mergeable").into_response();
+                        }
+                        p.merged = true;
+                        (StatusCode::OK, [("content-type", "application/json")], "{\"sha\":\"merged\"}").into_response()
+                    }
+                }),
             );
+
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        (format!("http://127.0.0.1:{}", addr.port()), handle)
+        (format!("http://127.0.0.1:{}", addr.port()), state, handle)
+    }
+
+    async fn start_fake_forge(repos_json: Value) -> (String, tokio::task::JoinHandle<()>) {
+        let (url, _state, handle) = start_fake_forge_with_state(repos_json).await;
+        (url, handle)
     }
 
     fn test_server(dir: &Path, forge_url: Option<String>, write_token: bool) -> (Arc<Server>, Arc<StubProbe>) {
@@ -1959,7 +3116,23 @@ mod tests {
         let reopened: Value = serde_json::from_str(&body2).unwrap();
         assert_eq!(reopened["thread"], json!(thread1));
 
-        // 3. Opening for a second chat reuses base.git and creates a second worktree.
+        // Write executable hooks into the node's own `chat-repos/org/widget/base.git/hooks/`
+        // (the hooks directory git would consult without core.hooksPath) before opening a second
+        // thread and committing through `/api/repos/commit`.
+        let base_git = root_dir(&server.config.codex_home).join("org/widget/base.git");
+        let base_hooks_dir = base_git.join("hooks");
+        std::fs::create_dir_all(&base_hooks_dir).unwrap();
+        for hook_name in ["post-checkout", "pre-commit", "post-commit"] {
+            let hp = base_hooks_dir.join(hook_name);
+            std::fs::write(&hp, format!("#!/bin/sh\necho ran > {}\n", marker.display())).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&hp, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+
+        // 3. Opening for a second chat reuses base.git and creates a second worktree (`git worktree add`).
         let open2_req = Request::builder()
             .method("POST")
             .uri("/api/repos/open")
@@ -1976,8 +3149,41 @@ mod tests {
         let thread2 = opened2["thread"].as_str().unwrap().to_string();
         assert_ne!(thread1, thread2);
         assert_eq!(opened2["branch"], json!(format!("phone/{thread2}")));
+        assert!(!marker.exists(), "base.git post-checkout hook must not run on worktree add");
 
-        let base_git = root_dir(&server.config.codex_home).join("org/widget/base.git");
+        // Also run a commit through POST /api/repos/commit and verify hooks in base.git/hooks never run.
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let wt1_path = PathBuf::from(opened["cwd"].as_str().unwrap());
+        std::fs::write(wt1_path.join("hook-check.txt"), "hello\n").unwrap();
+        let state_nonce_req = Request::builder()
+            .method("GET")
+            .uri(format!("/api/repos/state?thread={thread1}&intent=commit"))
+            .header(header::HOST, HOST)
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let (st_code, st_body) = call(&server, state_nonce_req).await;
+        assert_eq!(st_code, StatusCode::OK, "{st_body}");
+        let st_json: Value = serde_json::from_str(&st_body).unwrap();
+        let commit_nonce = st_json["confirm"].as_str().unwrap();
+        let commit_req = Request::builder()
+            .method("POST")
+            .uri("/api/repos/commit")
+            .header(header::HOST, HOST)
+            .header(header::ORIGIN, ORIGIN)
+            .header(header::COOKIE, &cookie)
+            .body(Body::from(
+                json!({ "thread": thread1, "message": "hook test commit", "confirm": commit_nonce }).to_string(),
+            ))
+            .unwrap();
+        let (c_code, c_body) = call(&server, commit_req).await;
+        assert_eq!(c_code, StatusCode::OK, "{c_body}");
+        assert!(!marker.exists(), "base.git hooks must not run during commit");
+
         assert!(base_git.join("HEAD").exists());
         let git_config = std::fs::read_to_string(base_git.join("config")).unwrap();
         assert!(!git_config.contains(TEST_TOKEN));
@@ -2393,5 +3599,945 @@ mod tests {
             let (status, _) = call(&server, req).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "expected 404 for {uri}");
         }
+    }
+
+    async fn get_nonce(server: &Arc<Server>, cookie: &str, thread: &str, intent: &str) -> String {
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/api/repos/state?thread={thread}&intent={intent}"))
+            .header(header::HOST, HOST)
+            .header(header::COOKIE, cookie)
+            .body(Body::empty())
+            .unwrap();
+        let (status, body) = call(server, req).await;
+        assert_eq!(status, StatusCode::OK, "failed to get nonce for {intent}: {body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        let nonce = v["confirm"].as_str().unwrap().to_string();
+        assert_eq!(nonce.len(), 32);
+        assert!(nonce.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        nonce
+    }
+
+    async fn post_json(server: &Arc<Server>, cookie: &str, uri: &str, payload: Value) -> (StatusCode, Value, String) {
+        let req = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::HOST, HOST)
+            .header(header::ORIGIN, ORIGIN)
+            .header(header::COOKIE, cookie)
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+        let (status, body) = call(server, req).await;
+        let parsed = serde_json::from_str::<Value>(&body).unwrap_or(Value::Null);
+        (status, parsed, body)
+    }
+
+    fn git_stdout(cwd: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", cwd)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .args(["-c", "protocol.file.allow=always"])
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed in {}: {}",
+            cwd.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[tokio::test]
+    async fn confirmation_nonces_enforce_presence_thread_intent_caller_and_single_use() {
+        let s = scratch("nonces");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge, _forge_task) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", bare.display())
+            }
+        ]))
+        .await;
+
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let cookie1 = owner_cookie(&server).await;
+        let (_dev_id, dev_token) = auth::add_device(&server.config.state_dir, "phone").unwrap();
+        let cookie2 = format!("{}={dev_token}", auth::DEVICE_COOKIE);
+
+        let (_, open1, _) = post_json(
+            &server,
+            &cookie1,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread1 = open1["thread"].as_str().unwrap().to_string();
+        let wt1 = PathBuf::from(open1["cwd"].as_str().unwrap());
+
+        let (_, open2, _) = post_json(
+            &server,
+            &cookie1,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c2" }),
+        )
+        .await;
+        let thread2 = open2["thread"].as_str().unwrap().to_string();
+
+        // Unknown intent in GET /api/repos/state is refused with 400.
+        let bad_intent_req = Request::builder()
+            .method("GET")
+            .uri(format!("/api/repos/state?thread={thread1}&intent=bogus"))
+            .header(header::HOST, HOST)
+            .header(header::COOKIE, &cookie1)
+            .body(Body::empty())
+            .unwrap();
+        let (st, _) = call(&server, bad_intent_req).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        for (uri, intent, other_intent) in [
+            ("/api/repos/commit", "commit", "push"),
+            ("/api/repos/push", "push", "commit"),
+            ("/api/repos/update", "update", "push"),
+            ("/api/repos/merge", "merge", "pr"),
+            ("/api/repos/pr", "pr", "merge"),
+            ("/api/repos/main", "main", "push"),
+        ] {
+            // 1. Without a nonce
+            let (status, _, body) = post_json(
+                &server,
+                &cookie1,
+                uri,
+                json!({ "thread": thread1, "message": "msg" }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "missing nonce on {uri}: {body}");
+            assert!(body.contains("confirmation missing or expired"), "{body}");
+
+            // 2. With another thread's nonce
+            let nonce_other_thread = get_nonce(&server, &cookie1, &thread2, intent).await;
+            let (status, _, body) = post_json(
+                &server,
+                &cookie1,
+                uri,
+                json!({ "thread": thread1, "message": "msg", "confirm": nonce_other_thread }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "other thread nonce on {uri}: {body}");
+            assert!(body.contains("confirmation missing or expired"), "{body}");
+
+            // 3. With another intent's nonce
+            let nonce_other_intent = get_nonce(&server, &cookie1, &thread1, other_intent).await;
+            let (status, _, body) = post_json(
+                &server,
+                &cookie1,
+                uri,
+                json!({ "thread": thread1, "message": "msg", "confirm": nonce_other_intent }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "other intent nonce on {uri}: {body}");
+            assert!(body.contains("confirmation missing or expired"), "{body}");
+
+            // 4. With another caller's nonce
+            let nonce_other_caller = get_nonce(&server, &cookie2, &thread1, intent).await;
+            let (status, _, body) = post_json(
+                &server,
+                &cookie1,
+                uri,
+                json!({ "thread": thread1, "message": "msg", "confirm": nonce_other_caller }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "other caller nonce on {uri}: {body}");
+            assert!(body.contains("confirmation missing or expired"), "{body}");
+        }
+
+        // 5. A used nonce is single-use and refused on replay for every route.
+        std::fs::write(wt1.join("file.txt"), "hello\n").unwrap();
+        let commit_nonce = get_nonce(&server, &cookie1, &thread1, "commit").await;
+        let (status, _, body) = post_json(
+            &server,
+            &cookie1,
+            "/api/repos/commit",
+            json!({ "thread": thread1, "message": "first commit", "confirm": commit_nonce }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        // Replay the same commit_nonce: must be 409 "confirmation missing or expired".
+        std::fs::write(wt1.join("file.txt"), "hello again\n").unwrap();
+        let (status, _, body) = post_json(
+            &server,
+            &cookie1,
+            "/api/repos/commit",
+            json!({ "thread": thread1, "message": "replay commit", "confirm": commit_nonce }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(body.contains("confirmation missing or expired"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn commit_uses_owner_identity_without_trailers_and_refuses_missing_identity_or_empty() {
+        let s = scratch("commit");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge, _forge_task) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", bare.display())
+            }
+        ]))
+        .await;
+
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+
+        std::fs::write(wt.join("new.txt"), "alpha\nbeta\n").unwrap();
+
+        // 1. Refused when ~/.gitconfig has no user.name / user.email.
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (status, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "try commit", "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(body.contains("user.name"), "{body}");
+
+        // 2. Write owner identity to scratch home's .gitconfig.
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = dgxcoder\n\temail = dgxcoder@127.0.0.1\n",
+        )
+        .unwrap();
+
+        // Empty message and > 5000 char message are refused with 400.
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (status, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "   ", "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let long_msg = "x".repeat(5001);
+        let (status, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": long_msg, "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // 3. Valid commit stages tracked and untracked files, uses .gitconfig identity, and adds no trailer.
+        std::fs::write(wt.join("README.md"), "# Demo\nupdated line\n").unwrap();
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (status, res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "clean change", "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(res["commit"].as_str().unwrap().len(), 40);
+        assert_eq!(res["added"], 3);
+        assert_eq!(res["removed"], 1);
+        let files = res["files"].as_array().unwrap();
+        assert_eq!(files.len(), 2);
+
+        let log_body = git_stdout(&wt, &["log", "-1", "--format=%B"]);
+        assert_eq!(log_body.trim(), "clean change");
+        assert!(!log_body.to_ascii_lowercase().contains("co-authored"));
+        assert!(!log_body.to_ascii_lowercase().contains("signed-off"));
+        let log_id = git_stdout(&wt, &["log", "-1", "--format=%an <%ae>|%cn <%ce>"]);
+        assert_eq!(log_id.trim(), "dgxcoder <dgxcoder@127.0.0.1>|dgxcoder <dgxcoder@127.0.0.1>");
+
+        // 4. Nothing to commit -> 409 "nothing to commit".
+        let nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (status, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "empty commit", "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(body.contains("nothing to commit"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn push_sends_only_phone_branch_never_forces_and_checks_anonymity_and_readonly() {
+        let s = scratch("push-anon");
+        let pub_bare = make_bare_repo(&s.dir, "org/pubrepo");
+        let priv_bare = make_bare_repo(&s.dir, "org/privrepo");
+        let arch_bare = make_bare_repo(&s.dir, "org/archrepo");
+
+        // Create a second branch `keep-me` on pub_bare to verify push touches only phone/<thread>.
+        let seed_pub = s.dir.join("seed-work").join("org_pubrepo");
+        git_sync(&seed_pub, &["checkout", "-b", "keep-me"]);
+        std::fs::write(seed_pub.join("keep.txt"), "untouched\n").unwrap();
+        git_sync(&seed_pub, &["add", "keep.txt"]);
+        git_sync(&seed_pub, &["commit", "-m", "keep branch"]);
+        git_sync(&seed_pub, &["push", "origin", "keep-me"]);
+        git_sync(&seed_pub, &["checkout", "main"]);
+        let before_refs = git_stdout(&pub_bare, &["show-ref"]);
+
+        let (forge_url, _forge, _forge_task) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/pubrepo",
+                "default_branch": "main",
+                "private": false,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", pub_bare.display())
+            },
+            {
+                "full_name": "org/privrepo",
+                "default_branch": "main",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", priv_bare.display())
+            },
+            {
+                "full_name": "org/archrepo",
+                "default_branch": "main",
+                "private": false,
+                "archived": true,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": false },
+                "clone_url": format!("file://{}", arch_bare.display())
+            }
+        ]))
+        .await;
+
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        // 1. Open pubrepo and push with no denylist file on node -> passes with "no denylist on this node".
+        let (_, open_pub, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/pubrepo", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let pub_thread = open_pub["thread"].as_str().unwrap().to_string();
+        let pub_wt = PathBuf::from(open_pub["cwd"].as_str().unwrap());
+
+        std::fs::write(pub_wt.join("clean.txt"), "safe line\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &pub_thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": pub_thread, "message": "safe commit", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &pub_thread, "push").await;
+        let (st, push_res, push_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": pub_thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{push_body}");
+        assert_eq!(push_res["pushed"], 1);
+        assert_eq!(push_res["branch"], format!("phone/{pub_thread}"));
+        assert_eq!(push_res["anonymity_check"], "no denylist on this node");
+
+        // Inspect bare origin's refs: only refs/heads/phone/<pub_thread> was added; main and keep-me are unchanged.
+        let after_refs = git_stdout(&pub_bare, &["show-ref"]);
+        for line in before_refs.lines() {
+            assert!(after_refs.lines().any(|l| l == line), "existing ref changed: {line}");
+        }
+        let added_refs: Vec<&str> = after_refs
+            .lines()
+            .filter(|l| !before_refs.lines().any(|b| b == *l))
+            .collect();
+        assert_eq!(added_refs.len(), 1);
+        assert!(added_refs[0].ends_with(&format!("refs/heads/phone/{pub_thread}")));
+
+        // 2. Write denylist file; a denylisted string in a pushed file is refused with 422 {file, line, entry}
+        // and the response body does NOT contain the matched string or denylist entry text.
+        std::fs::write(
+            s.dir.join("user/.config/dreamference/anonymity-denylist.txt"),
+            "# denylist comment\n\nbox-sentinel-alpha\n\\w*leakedword\\w*\n",
+        )
+        .unwrap();
+
+        std::fs::write(pub_wt.join("src_file.txt"), "line one\nreach BOX-SENTINEL-ALPHA here\nline three\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &pub_thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": pub_thread, "message": "touch file", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &pub_thread, "push").await;
+        let (st, anon_res, anon_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": pub_thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{anon_body}");
+        assert_eq!(anon_res["refused"], "anonymity");
+        assert!(!anon_body.to_ascii_lowercase().contains("box-sentinel-alpha"), "{anon_body}");
+        assert!(!anon_body.to_ascii_lowercase().contains("leakedword"), "{anon_body}");
+        let findings = anon_res["findings"].as_array().unwrap();
+        assert!(
+            findings.iter().any(|f| f["file"] == "src_file.txt" && f["line"] == 2 && f["entry"] == 1),
+            "{anon_body}"
+        );
+
+        // 3. Reset that commit and test a denylisted string in a commit message.
+        git_sync(&pub_wt, &["reset", "--hard", "HEAD~1"]);
+        std::fs::write(pub_wt.join("clean2.txt"), "harmless text\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &pub_thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": pub_thread, "message": "fix my_leakedword_value in config", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &pub_thread, "push").await;
+        let (st, msg_res, msg_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": pub_thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{msg_body}");
+        assert_eq!(msg_res["refused"], "anonymity");
+        assert!(!msg_body.to_ascii_lowercase().contains("leakedword"), "{msg_body}");
+        let msg_findings = msg_res["findings"].as_array().unwrap();
+        assert!(
+            msg_findings.iter().any(|f| f["file"] == "commit message" && f["line"] == 0 && f["entry"] == 2),
+            "{msg_body}"
+        );
+
+        // 4. Private repository skips the anonymity check.
+        let (_, open_priv, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/privrepo", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let priv_thread = open_priv["thread"].as_str().unwrap().to_string();
+        let priv_wt = PathBuf::from(open_priv["cwd"].as_str().unwrap());
+        std::fs::write(priv_wt.join("private.txt"), "contains box-sentinel-alpha in private repo\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &priv_thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": priv_thread, "message": "private commit", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &priv_thread, "push").await;
+        let (st, priv_push_res, priv_push_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": priv_thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{priv_push_body}");
+        assert_eq!(priv_push_res["pushed"], 1);
+
+        // 5. Diverged remote branch on priv_bare refuses push rather than force-overwriting.
+        let seed_priv = s.dir.join("seed-work").join("org_privrepo");
+        git_sync(&seed_priv, &["fetch", "origin"]);
+        git_sync(&seed_priv, &["checkout", "-B", &format!("phone/{priv_thread}"), "origin/main"]);
+        std::fs::write(seed_priv.join("diverged.txt"), "remote diverged\n").unwrap();
+        git_sync(&seed_priv, &["add", "diverged.txt"]);
+        git_sync(&seed_priv, &["commit", "-m", "diverged remote commit"]);
+        git_sync(&seed_priv, &["push", "--force", "origin", &format!("phone/{priv_thread}")]);
+        let remote_sha_before = git_stdout(&priv_bare, &["rev-parse", &format!("refs/heads/phone/{priv_thread}")]);
+
+        std::fs::write(priv_wt.join("local2.txt"), "local commit\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &priv_thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": priv_thread, "message": "local after diverge", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &priv_thread, "push").await;
+        let (st, div_res, div_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": priv_thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_GATEWAY, "{div_body}");
+        assert_eq!(div_res["refused"], "forge");
+        assert!(
+            div_res["reason"].as_str().unwrap().contains("the forge's branch moved; /update first"),
+            "{div_body}"
+        );
+        let remote_sha_after = git_stdout(&priv_bare, &["rev-parse", &format!("refs/heads/phone/{priv_thread}")]);
+        assert_eq!(remote_sha_before, remote_sha_after, "push must never overwrite diverged remote branch");
+
+        // 6. Archived / read-only repository refuses push (and commit/update/pr/merge).
+        let (_, open_arch, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/archrepo", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let arch_thread = open_arch["thread"].as_str().unwrap().to_string();
+        for (uri, intent) in [
+            ("/api/repos/commit", "commit"),
+            ("/api/repos/push", "push"),
+            ("/api/repos/update", "update"),
+            ("/api/repos/pr", "pr"),
+            ("/api/repos/merge", "merge"),
+        ] {
+            let nonce = get_nonce(&server, &cookie, &arch_thread, intent).await;
+            let (st, _, body) = post_json(
+                &server,
+                &cookie,
+                uri,
+                json!({ "thread": arch_thread, "message": "nope", "confirm": nonce }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "expected 403 on {uri}: {body}");
+            assert!(body.contains("this repository is read-only on the forge"), "{body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn update_merges_default_reports_conflicts_and_aborts_cleanly() {
+        let s = scratch("update");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge, _forge_task) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", bare.display())
+            }
+        ]))
+        .await;
+
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+
+        // Advance `main` on the forge bare repo with a conflicting edit to README.md.
+        let seed_work = s.dir.join("seed-work").join("org_widget");
+        std::fs::write(seed_work.join("README.md"), "# Demo\nmain branch change\n").unwrap();
+        git_sync(&seed_work, &["add", "README.md"]);
+        git_sync(&seed_work, &["commit", "-m", "main edit"]);
+        git_sync(&seed_work, &["push", "origin", "main"]);
+
+        // Make a conflicting commit on phone/<thread>.
+        std::fs::write(wt.join("README.md"), "# Demo\nphone branch change\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "phone edit", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // 1. POST /api/repos/update leaves conflict markers in README.md and answers 409 {conflicts: ["README.md"]}.
+        let u_nonce = get_nonce(&server, &cookie, &thread, "update").await;
+        let (st, u_res, u_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/update",
+            json!({ "thread": thread, "confirm": u_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{u_body}");
+        assert_eq!(u_res["conflicts"], json!(["README.md"]));
+        let readme_conflict = std::fs::read_to_string(wt.join("README.md")).unwrap();
+        assert!(readme_conflict.contains("<<<<<<<"), "{readme_conflict}");
+
+        // 2. POST /api/repos/update with abort: true restores a clean working tree.
+        let a_nonce = get_nonce(&server, &cookie, &thread, "update").await;
+        let (st, a_res, a_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/update",
+            json!({ "thread": thread, "confirm": a_nonce, "abort": true }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{a_body}");
+        assert_eq!(a_res["aborted"], json!(true));
+        let readme_restored = std::fs::read_to_string(wt.join("README.md")).unwrap();
+        assert_eq!(readme_restored, "# Demo\nphone branch change\n");
+        let status_porcelain = git_stdout(&wt, &["status", "--porcelain"]);
+        assert!(status_porcelain.trim().is_empty(), "expected clean tree after abort: {status_porcelain}");
+    }
+
+    #[tokio::test]
+    async fn pr_and_merge_routes_drive_forge_api_and_respect_status_and_mergeable() {
+        let s = scratch("pr-merge");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, forge, _forge_task) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", bare.display())
+            }
+        ]))
+        .await;
+
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+
+        std::fs::write(wt.join("feature.txt"), "new feature\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, c_res, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "secret commit message", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let head_sha = c_res["commit"].as_str().unwrap().to_string();
+
+        // 1. POST /api/repos/pr pushes automatically and creates PR #1 with relative proxy URL.
+        let pr_nonce = get_nonce(&server, &cookie, &thread, "pr").await;
+        let (st, pr_res, pr_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/pr",
+            json!({ "thread": thread, "confirm": pr_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{pr_body}");
+        assert_eq!(pr_res["number"], 1);
+        assert_eq!(pr_res["url"], "/forge/org/widget/pulls/1");
+
+        // Verify PR title on the forge stand-in is "phone/<thread> from org/widget" and never commit text.
+        {
+            let pulls = forge.pulls.lock().unwrap();
+            assert_eq!(pulls.len(), 1);
+            assert_eq!(pulls[0].title, format!("phone/{thread} from org/widget"));
+            assert!(!pulls[0].title.contains("secret commit message"));
+        }
+
+        // Calling /api/repos/pr again reuses the existing open PR without creating a second one.
+        let pr_nonce2 = get_nonce(&server, &cookie, &thread, "pr").await;
+        let (st, pr_res2, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/pr",
+            json!({ "thread": thread, "confirm": pr_nonce2 }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(pr_res2["number"], 1);
+        assert_eq!(forge.pulls.lock().unwrap().len(), 1);
+
+        // 2. Red commit status ("failure") refuses merge with 409 "a required check is red".
+        forge.set_status(&head_sha, "failure", 1);
+        let m_nonce = get_nonce(&server, &cookie, &thread, "merge").await;
+        let (st, _, m_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/merge",
+            json!({ "thread": thread, "confirm": m_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{m_body}");
+        assert!(m_body.contains("a required check is red"), "{m_body}");
+
+        // 3. Pending commit status with total_count > 0 refuses merge with 409 "checks are still running".
+        forge.set_status(&head_sha, "pending", 2);
+        let m_nonce = get_nonce(&server, &cookie, &thread, "merge").await;
+        let (st, _, m_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/merge",
+            json!({ "thread": thread, "confirm": m_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{m_body}");
+        assert!(m_body.contains("checks are still running"), "{m_body}");
+
+        // 4. Green status but mergeable = false refuses merge with 409 "conflicts with main: /update, then /merge".
+        forge.set_status(&head_sha, "success", 1);
+        forge.set_mergeable(1, false);
+        let m_nonce = get_nonce(&server, &cookie, &thread, "merge").await;
+        let (st, _, m_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/merge",
+            json!({ "thread": thread, "confirm": m_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{m_body}");
+        assert!(m_body.contains("conflicts with main: /update, then /merge"), "{m_body}");
+
+        // 5. Green status and mergeable = true merges with {"Do": "merge"} and answers {merged: true, branch, into}.
+        forge.set_mergeable(1, true);
+        let m_nonce = get_nonce(&server, &cookie, &thread, "merge").await;
+        let (st, m_res, m_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/merge",
+            json!({ "thread": thread, "confirm": m_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{m_body}");
+        assert_eq!(m_res["merged"], true);
+        assert_eq!(m_res["branch"], format!("phone/{thread}"));
+        assert_eq!(m_res["into"], "main");
+
+        let recorded = forge.requests.lock().unwrap();
+        assert!(recorded.iter().any(|(method, path, body)| {
+            method == "POST" && path == "/api/v1/repos/org/widget/pulls/1/merge" && body["Do"] == "merge"
+        }));
+    }
+
+    #[tokio::test]
+    async fn main_route_requires_allow_main_clean_tree_and_refuses_non_fast_forward_push() {
+        let s = scratch("main-branch");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let (forge_url, _forge, _forge_task) = start_fake_forge_with_state(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "updated_at": "2026-10-20T12:00:00Z",
+                "permissions": { "push": true },
+                "clone_url": format!("file://{}", bare.display())
+            }
+        ]))
+        .await;
+
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        std::fs::write(
+            s.dir.join("user/.gitconfig"),
+            "[user]\n\tname = owner\n\temail = owner@127.0.0.1\n",
+        )
+        .unwrap();
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+
+        // 1. Refused 403 unless in [chat_repos] allow_main, naming `ling chat repos allow-main org/widget`.
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread, "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.contains("ling chat repos allow-main org/widget"), "{body}");
+
+        // 2. Enable allow_main for org/widget; refuse while worktree has uncommitted changes.
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nallow_main = [\"org/widget\"]\n",
+        )
+        .unwrap();
+        std::fs::write(wt.join("dirty.txt"), "uncommitted\n").unwrap();
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, _, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread, "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{body}");
+
+        // 3. Clean worktree switches to main and records "main" in index.json.
+        std::fs::remove_file(wt.join("dirty.txt")).unwrap();
+        let nonce = get_nonce(&server, &cookie, &thread, "main").await;
+        let (st, main_res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/main",
+            json!({ "thread": thread, "confirm": nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(main_res["branch"], "main");
+        let records = load_index(&server.config.codex_home);
+        assert_eq!(records[0].branch.as_deref(), Some("main"));
+
+        // 4. Commit and push on main succeeds when fast-forward.
+        std::fs::write(wt.join("on-main.txt"), "direct on main\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "commit on main", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &thread, "push").await;
+        let (st, p_res, p_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{p_body}");
+        assert_eq!(p_res["branch"], "main");
+        assert_eq!(p_res["pushed"], 1);
+
+        // 5. Advance main on bare origin from outside so a subsequent push on main is non-fast-forward.
+        let seed_work = s.dir.join("seed-work").join("org_widget");
+        git_sync(&seed_work, &["pull", "--rebase", "origin", "main"]);
+        std::fs::write(seed_work.join("other-main.txt"), "desk push\n").unwrap();
+        git_sync(&seed_work, &["add", "other-main.txt"]);
+        git_sync(&seed_work, &["commit", "-m", "desk commit on main"]);
+        git_sync(&seed_work, &["push", "origin", "main"]);
+
+        std::fs::write(wt.join("phone-main-2.txt"), "phone push behind\n").unwrap();
+        let c_nonce = get_nonce(&server, &cookie, &thread, "commit").await;
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/commit",
+            json!({ "thread": thread, "message": "second main commit", "confirm": c_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let p_nonce = get_nonce(&server, &cookie, &thread, "push").await;
+        let (st, nf_res, nf_body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/push",
+            json!({ "thread": thread, "confirm": p_nonce }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_GATEWAY, "{nf_body}");
+        assert!(
+            nf_res["reason"].as_str().unwrap().contains("the forge's main moved; /update first"),
+            "{nf_body}"
+        );
     }
 }

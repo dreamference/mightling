@@ -14,6 +14,7 @@
 //! for the phone's repository work (chat_repos.rs). As a Telegram Mini App it is the same page, reached over the
 //! user's own HTTPS front, never through Telegram (telegram_app.rs).
 
+pub mod anonymity;
 pub mod app_server;
 pub mod ask;
 pub mod ask_client;
