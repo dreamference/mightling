@@ -111,6 +111,87 @@ SGLANG_PHASE_MERGE_PATCH: Final[dict[str, Any]] = {
     ],
 }
 
+# The anchor of SGLANG_STREAM_PHASE_PATCH: the body of v0.5.21's `responses_stream_generator_non_harmony`
+# loop, which holds every event of a message, its text included, until a tool call opens or the
+# response ends, to tag the message's phase on the events it sends.
+_SGLANG_STREAM_PHASE_HOLD: Final[str] = (
+    '            payload = orjson.loads(event.split("data: ", 1)[1])\n'
+    '            event_type = payload["type"]\n'
+    '            item_type = payload.get("item", {}).get("type")\n'
+    '            opens_item = event_type == "response.output_item.added"\n'
+    '            if pending or (opens_item and item_type == "message"):\n'
+    "                pending.append(payload)\n"
+    "                tool_follows = opens_item and item_type in (\n"
+    '                    "function_call",\n'
+    '                    "custom_tool_call",\n'
+    "                )\n"
+    "                terminal = event_type in (\n"
+    '                    "response.completed",\n'
+    '                    "response.incomplete",\n'
+    '                    "response.failed",\n'
+    "                )\n"
+    "                if tool_follows or terminal:\n"
+    '                    phase = "commentary" if tool_follows else "final_answer"\n'
+    "                    for buffered in pending:\n"
+    '                        if buffered.get("item", {}).get("type") == "message":\n'
+    '                            buffered["item"]["phase"] = phase\n'
+    "                        yield f\"event: {buffered['type']}\\ndata: {orjson.dumps(buffered).decode()}\\n\\n\"\n"
+    "                    pending.clear()\n"
+    "            else:\n"
+    "                yield event\n"
+)
+
+# Its replacement: the message's added event and every text delta pass at once; only the three events
+# that close a message (output_text.done, content_part.done, output_item.done) wait, for the one event
+# after them, which the inner generator yields in the same step: a tool call's output_item.added
+# (phase commentary) or anything else (final_answer). Nothing the model wrote is held.
+_SGLANG_STREAM_PHASE_STREAM: Final[str] = (
+    "            # Mightling: hold only a message's closing events, for one event of lookahead.\n"
+    '            payload = orjson.loads(event.split("data: ", 1)[1])\n'
+    '            event_type = payload["type"]\n'
+    '            item_type = payload.get("item", {}).get("type")\n'
+    "            if event_type in (\n"
+    '                "response.output_text.done",\n'
+    '                "response.content_part.done",\n'
+    '            ) or (event_type == "response.output_item.done" and item_type == "message"):\n'
+    "                pending.append(payload)\n"
+    "                continue\n"
+    "            if pending:\n"
+    '                tool_follows = event_type == "response.output_item.added" and item_type in (\n'
+    '                    "function_call",\n'
+    '                    "custom_tool_call",\n'
+    "                )\n"
+    '                phase = "commentary" if tool_follows else "final_answer"\n'
+    "                for buffered in pending:\n"
+    '                    if buffered.get("item", {}).get("type") == "message":\n'
+    '                        buffered["item"]["phase"] = phase\n'
+    "                    yield f\"event: {buffered['type']}\\ndata: {orjson.dumps(buffered).decode()}\\n\\n\"\n"
+    "                pending.clear()\n"
+    "            yield event\n"
+    "        for buffered in pending:\n"
+    '            if buffered.get("item", {}).get("type") == "message":\n'
+    '                buffered["item"]["phase"] = "final_answer"\n'
+    "            yield f\"event: {buffered['type']}\\ndata: {orjson.dumps(buffered).decode()}\\n\\n\"\n"
+)
+
+# SGLang v0.5.21's /v1/responses sends no text of a request that offers tools until the turn ends
+# (found 2026-10-27 by the messenger live test: 188 text pieces, all at 27.4 s; reasoning streamed).
+# The stream wrapper tags each message `commentary` when a tool call follows it and `final_answer`
+# otherwise, and to put that tag on every event of the message it held them all, text deltas
+# included, until a tool call opened or the response ended. Every `ling` request offers tools, so
+# the TUI, `ling web`, the app and the phone bridges showed an answer only when it was complete.
+# The patch streams the text and holds only the message's closing events for the next event, which
+# decides the phase: Codex reads it from the completed item (output_item.done), so what it records
+# and sends back is unchanged. One difference from the image: a message followed by reasoning and
+# then a tool call is closed as `final_answer` (the image waited for the call); the history merge
+# ignores the phase (SGLANG_PHASE_MERGE_PATCH), so the history the model sees is the same.
+SGLANG_STREAM_PHASE_PATCH: Final[dict[str, Any]] = {
+    "path": SGLANG_SERVING_RESPONSES,
+    "sha256": SGLANG_SERVING_RESPONSES_SHA256,
+    "image": QWEN38_SGLANG_IMAGE,
+    "substitutions": [[_SGLANG_STREAM_PHASE_HOLD, _SGLANG_STREAM_PHASE_STREAM]],
+}
+
 # Model files Dreamference hosts itself, as assets of one release of github.com/dreamference/mightling (a
 # pre-release tagged `models-<date>`, never the latest: `releases/latest` stays the newest Mightling), each
 # pinned by SHA-256. The download (ReleaseAssetDownloader) writes them into the Hugging Face hub cache as a
@@ -183,7 +264,7 @@ QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     "engine": "sglang",
     "docker_image": QWEN38_SGLANG_IMAGE,
     # Patches of the image's own Python, mounted over it on every launch (SGLangRuntimePatcher).
-    "runtime_patches": [SGLANG_PHASE_MERGE_PATCH],
+    "runtime_patches": [SGLANG_PHASE_MERGE_PATCH, SGLANG_STREAM_PHASE_PATCH],
     "revision": "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854",
     "max_model_len": 262144,
     # SGLang's --mem-fraction-static: weights plus KV pool. What lies outside it (CUDA

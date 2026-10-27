@@ -25,6 +25,7 @@ from dreamference.hardware.model_matrix_registry import (
     QWEN38_SGLANG_RECIPE,
     SGLANG_PHASE_MERGE_PATCH,
     SGLANG_SERVING_RESPONSES,
+    SGLANG_STREAM_PHASE_PATCH,
     ModelMatrixRegistry,
 )
 from dreamference.vllm_server.chat_template_patcher import ChatTemplatePatcher
@@ -120,7 +121,8 @@ def test_the_patch_is_pinned_to_the_recipes_image_and_the_images_own_file():
     assert len(SGLANG_PHASE_MERGE_PATCH["sha256"]) == 64
     for model in (DEFAULT_MODEL_ALIAS, MINIMA):
         recipe = ModelMatrixRegistry.get_launch_overrides(model)
-        assert recipe["runtime_patches"] == [SGLANG_PHASE_MERGE_PATCH], model
+        patches = [SGLANG_PHASE_MERGE_PATCH, SGLANG_STREAM_PHASE_PATCH]
+        assert recipe["runtime_patches"] == patches, model
         assert recipe["docker_image"] == QWEN38_SGLANG_IMAGE, model
     # The adapters' patch of the same file pins the same original, so the two become one file.
     (lora,) = QWEN38_LORA_RECIPE["runtime_patches"]
@@ -168,6 +170,7 @@ def test_with_adapters_the_one_mounted_file_carries_both_patches(verified):  # n
     (both,) = SGLangRuntimePatcher.for_launch(recipe, lora=True)
     assert both["substitutions"] == [
         *SGLANG_PHASE_MERGE_PATCH["substitutions"],
+        *SGLANG_STREAM_PHASE_PATCH["substitutions"],
         *QWEN38_LORA_RECIPE["runtime_patches"][0]["substitutions"],
     ]
     cmd = VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, gate=True)
