@@ -9,9 +9,13 @@ Two leaf crates under `ling-rs/` back the two halves of the design:
 
 Both crates depend only on `chrono`, `serde`, `serde_json`, `toml` (and `regex-lite` in `ling-delegate`), so their unit tests run standalone in a copy of the crate folder (`cargo test`) without compiling the Codex workspace.
 
-## Installing the plugin locally for Claude Code
+## The `ling-delegate` binary
 
-The plugin lives in `claude-plugin/` with a repository-root marketplace manifest at `.claude-plugin/marketplace.json`:
+On Linux, `ling-admin codex build` builds `ling-delegate` in the same Cargo run as `ling` (`-p ling-delegate --bin ling-delegate`) and installs it beside `ling` in `~/.local/share/dreamference/mightling/bin/`. It is **not** linked into `~/.local/bin` (the plugin starts `ling delegate mcp`; the standalone binary exists for a machine whose installed `ling` predates the command). A build is not current without it (`is_current`). The release carries `ling-delegate-<target>.gz` (Linux only, optional in `install.sh`, which also installs it without a link; listed in `scripts/package_mightling.sh`, `release-build.yml` and the fleet bundle). A release install has no source and no build: it gets the asset.
+
+## Installing the plugin into Claude Code from a checkout
+
+Nothing installs or enables the plugin for you; the owner of the Claude Code does it. The plugin lives in `claude-plugin/`, with a repository-root marketplace manifest `.claude-plugin/marketplace.json` (marketplace `mightling`, plugin `mightling`, source `./claude-plugin`):
 
 ```
 .claude-plugin/marketplace.json
@@ -22,18 +26,18 @@ claude-plugin/
   skills/delegate/SKILL.md
 ```
 
-To load or install the plugin locally in Claude Code:
+Prerequisite: `ling` on `PATH` (`~/.local/bin/ling`), built from a tree that has `ling delegate` (`.mcp.json` runs `ling delegate mcp` over stdio).
+
+Persistent install (the marketplace path), from the checkout's root:
 
 ```bash
-# Option 1: load directly for a session from a local checkout
-claude --plugin-dir ./claude-plugin
-
-# Option 2: install from the local checkout's marketplace manifest inside Claude Code
-/plugin marketplace add ./
-/plugin install mightling@mightling
+claude plugin marketplace add /path/to/checkout     # or, inside Claude Code: /plugin marketplace add /path/to/checkout
+claude plugin install mightling@mightling           # or: /plugin install mightling@mightling
 ```
 
-`ling` must be on `PATH` (`~/.local/bin/ling`); `.mcp.json` starts `ling delegate mcp` over stdio.
+Claude Code asks for the plugin's settings (`node`, `max_parallel`, `allow_classes`) at enable time; the defaults are fine (`allow_classes` is `W1`). Restart Claude Code or run `/reload-plugins`, then check `/plugin` and `/mcp` (server `mightling`, tool `watch`). To update after a pull: `claude plugin marketplace update mightling`, then `claude plugin update mightling@mightling`. To remove: `claude plugin uninstall mightling@mightling` and `claude plugin marketplace remove mightling`.
+
+One session only, nothing persisted: `claude --plugin-dir /path/to/checkout/claude-plugin`.
 
 ## Using `watch` (Class W1)
 
