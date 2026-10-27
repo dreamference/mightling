@@ -15,7 +15,7 @@ import { ASK_PROMPT, askThreads, askTitle, attachmentKind, attachmentName, baseN
 import * as bridge from "./bridge";
 import { copyText } from "./clipboard";
 import { Composer, type ComposerAttachment } from "./ComposerView";
-import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortFor, isLongPaste, keyAnswer, mentionPath, parseShell, parseSlash, pasteLabel, rememberModel, userTexts, withPastes, type SlashCommand } from "./composer";
+import { PromptHistory, collaborationMode, reviewTarget, composeInput, effortChoices, effortFor, isLongPaste, keyAnswer, mentionPath, parseShell, parseSlash, pasteLabel, rememberModel, userTexts, withPastes, type SlashCommand } from "./composer";
 import { Icon, MightlingMark } from "./icons";
 import { revertQuestion, underDirectory } from "./diff";
 import { draftKeyOf, withDraft } from "./drafts";
@@ -2028,6 +2028,37 @@ export function App() {
           }
           return setScheduledOpen(true);
         }
+        case "side":
+          return commands.sideChat();
+        case "pin":
+          return commands.pinChat();
+        case "pet":
+          return commands.togglePet();
+        case "project":
+          return commands.projectPicker();
+        case "chat":
+          return commands.standaloneChat();
+        case "worktree":
+        case "local": {
+          if (!selected) return notice(`Open a thread to hand it off to ${command.name === "worktree" ? "a worktree" : "the local checkout"}.`);
+          const at = links[selected.thread.id]?.location ?? "local";
+          if (command.name === "local" && at === "local") return notice("This thread already works in the local checkout.");
+          if (command.name === "worktree" && at === "worktree") return notice("This thread already works in its worktree.");
+          return handOff(command.name === "worktree" ? "toWorktree" : "toLocal");
+        }
+        case "reasoning": {
+          const model = models.find((entry) => entry.id === (modelChoice ?? servedModel)) ?? models[0] ?? null;
+          const { efforts, preferred } = effortChoices(model);
+          const wanted = args.trim().toLowerCase();
+          if (!wanted) return setPicker("open");
+          if (!efforts.includes(wanted)) return notice(efforts.length ? `The model takes one of: ${efforts.join(", ")}.` : "The served model offers no choice of effort.");
+          updatePrefs({ effort: wanted === preferred ? null : wanted });
+          return setInfo({ title: "Reasoning", body: <p>The model thinks at <strong>{wanted}</strong> effort from the next message.</p> });
+        }
+        case "plugins":
+          return setExtensions("plugins");
+        case "hooks":
+          return setExtensions("hooks");
         case "airgapped": {
           const words = args.split(/\s+/).filter(Boolean);
           if (words[0] === "default" && (words[1] === "on" || words[1] === "off")) {
