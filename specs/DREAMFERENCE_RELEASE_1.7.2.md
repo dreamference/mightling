@@ -69,6 +69,14 @@ once.
 
 ling-engine (opt-in): fixed a crash under concurrent requests (tokenizer cache).
 
+**Windows: https from inside the sandbox (a known limit).** On Windows, `curl.exe` and PowerShell's
+`Invoke-WebRequest` cannot reach an https address from inside `ling`'s sandbox: Windows' own TLS
+(Schannel) refuses the sandbox's restricted token, whatever the sandbox grants it, and nothing in
+Mightling can change that. Use `ling-fetch` for pages and files; `ling` tells the model so, and
+Python, Node and git work too, since they bring their own TLS (sessions set git to OpenSSL, so
+`git clone` and `git fetch` over https work in the sandbox). Full Access sessions run outside the
+sandbox and are not affected.
+
 {{TBD the rest of 1.7.2}}
 
 ---
