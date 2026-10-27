@@ -288,7 +288,47 @@ fn no_index_says_so() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("run `ling-code index`"));
+    let said = String::from_utf8_lossy(&out.stdout);
+    // Where indexing runs, the command; elsewhere (a Windows client, W8) no command at all.
+    if ling_code::paths::indexing_here() {
+        assert!(said.contains("run `ling-code index`"), "{said}");
+    } else {
+        assert!(said.contains("built on Linux nodes only for now") && !said.contains('`'), "{said}");
+    }
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_ling-code"))
+        .args(["status"])
+        .current_dir(dir.path())
+        .env("HOME", dir.path())
+        .env("CBM_CACHE_DIR", dir.path().join("cache"))
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&status.stdout);
+    if ling_code::paths::indexing_here() {
+        assert!(said.contains("universal: not built yet (`ling-code index`)"), "{said}");
+    } else {
+        assert!(said.contains("universal: not built yet (the index is built on Linux nodes only for now)"), "{said}");
+        assert!(!said.contains("ling-admin") && !said.contains("ling-code index"), "{said}");
+    }
+}
+
+#[test]
+fn status_off_linux_names_no_command_that_is_not_there() {
+    // A repository whose Python and TypeScript no index covers: on Linux each line says how to build
+    // it, and on a system that only reads indexes (W8) none names `ling-code index` or
+    // `ling-admin code setup`.
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    std::fs::write(dir.path().join("main.py"), "def greet():\n    return 'hi'\n").unwrap();
+    std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+    std::fs::write(dir.path().join("index.ts"), "export const x = 1;\n").unwrap();
+    git(dir.path(), &["add", "-A"]);
+    let repo = ling_code::paths::Repo::discover(dir.path()).unwrap();
+    let context = ling_code::router::Context::load(repo, ling_code::config::Settings::default()).unwrap();
+    let elsewhere = context.status_on(false).join("\n");
+    assert!(elsewhere.contains("universal: not built yet (the index is built on Linux nodes only for now)"), "{elsewhere}");
+    assert!(!elsewhere.contains("ling-admin code setup") && !elsewhere.contains("`ling-code index"), "{elsewhere}");
+    let on_linux = context.status_on(true).join("\n");
+    assert!(on_linux.contains("universal: not built yet (`ling-code index`)"), "{on_linux}");
 }
 
 
