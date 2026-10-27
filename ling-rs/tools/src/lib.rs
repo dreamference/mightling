@@ -52,9 +52,15 @@ use serde_json::value::RawValue;
 /// they are.
 const MCP_PREFIX: &str = "mcp__";
 
-/// What Codex appends to an MCP tool's description for Code Mode; it describes a JavaScript
-/// binding the model does not have here.
+/// What Codex appends to an MCP tool's description for Code Mode: the tool's JavaScript binding
+/// inside `exec`. Kept when the model can see `exec`, left out when it cannot.
 const CODE_MODE_SUFFIX: &str = "\n\nexec tool declaration:";
+
+/// The longest server `instructions` carried to the model, in characters. An MCP server sends
+/// them in its `initialize` reply and Codex puts them in the namespace's description, which
+/// flattening drops; they are put back on the server's first tool, bounded so a server cannot
+/// fill the prompt.
+pub const INSTRUCTIONS_MAX_CHARS: usize = 4_000;
 
 /// Flattened name → (namespace, tool name), filled by [`flatten`] and read by [`resolve`].
 fn names() -> &'static Mutex<HashMap<String, (String, String)>> {
@@ -79,6 +85,7 @@ pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool, custom_tools_drop
         .filter(|tool| tool["type"] != "namespace")
         .filter_map(|tool| tool["name"].as_str().map(str::to_string))
         .collect();
+    let exec_visible = tools.iter().any(|tool| exec_offered(tool, exec_as_function, custom_tools_dropped));
     let mut flat = Vec::with_capacity(tools.len());
     let mut map = names().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     for (tool, orphaned) in tools.into_iter().zip(orphaned) {
@@ -97,16 +104,26 @@ pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool, custom_tools_drop
                 continue;
             }
         };
+        let mut instructions = server_instructions(&tool, &namespace);
         for mut function in inner {
             let Some(name) = function["name"].as_str().map(str::to_string) else { continue };
             if function["type"] != "function" {
                 continue;
             }
             let shown = if taken.contains(&name) { format!("{namespace}__{name}") } else { name.clone() };
-            if let Some(description) = function["description"].as_str()
+            if !exec_visible
+                && let Some(description) = function["description"].as_str()
                 && let Some(end) = description.find(CODE_MODE_SUFFIX)
             {
                 function["description"] = Value::String(description[..end].to_string());
+            }
+            if let Some(instructions) = instructions.take() {
+                let description = function["description"].as_str().unwrap_or_default();
+                function["description"] = Value::String(if description.is_empty() {
+                    instructions
+                } else {
+                    format!("{instructions}\n\n{description}")
+                });
             }
             function["name"] = Value::String(shown.clone());
             taken.insert(shown.clone());
@@ -115,6 +132,29 @@ pub fn flatten_with(tools: Vec<Value>, exec_as_function: bool, custom_tools_drop
         }
     }
     flat
+}
+
+/// Whether the model can call `exec` through `tool`: Codex's custom tool where the server keeps
+/// custom tools or this process offers it as a function ([`custom`]), or a function already.
+fn exec_offered(tool: &Value, exec_as_function: bool, custom_tools_dropped: bool) -> bool {
+    tool["name"] == "exec"
+        && (tool["type"] == "function" || (custom::is_translated(tool) && (exec_as_function || !custom_tools_dropped)))
+}
+
+/// The instructions an MCP namespace carries in its description, bounded to
+/// [`INSTRUCTIONS_MAX_CHARS`]; none when it holds only Codex's default text
+/// ("Tools in the <namespace> namespace.") or nothing.
+fn server_instructions(namespace_tool: &Value, namespace: &str) -> Option<String> {
+    let text = namespace_tool["description"].as_str()?.trim();
+    if text.is_empty() || text == format!("Tools in the {namespace} namespace.") {
+        return None;
+    }
+    if text.chars().count() <= INSTRUCTIONS_MAX_CHARS {
+        return Some(text.to_string());
+    }
+    let mut bounded: String = text.chars().take(INSTRUCTIONS_MAX_CHARS).collect();
+    bounded.push_str(" […]");
+    Some(bounded)
 }
 
 /// [`flatten`] on the raw JSON array Codex sends as a request's `tools`. A list with no MCP
@@ -176,7 +216,7 @@ mod tests {
             json!({"type": "function", "name": "exec_command", "description": "Runs a command"}),
             json!({"type": "function", "name": "code_show", "description": "Already taken"}),
             json!({"type": "namespace", "name": "multi_agent_v1", "tools": [{"type": "function", "name": "wait_agent"}]}),
-            json!({"type": "namespace", "name": "mcp__mightling_code", "description": "Tools in the namespace.", "tools": [
+            json!({"type": "namespace", "name": "mcp__mightling_code", "description": "Tools in the mcp__mightling_code namespace.", "tools": [
                 {"type": "function", "name": "code_def", "description": "Where a name is defined.\n\nexec tool declaration:\n```ts\n…```", "parameters": {"type": "object"}},
                 {"type": "function", "name": "code_show", "description": "One definition's source."},
             ]}),
@@ -218,6 +258,52 @@ mod tests {
         assert_eq!(flat, flatten(request()));
         let plain = raw(json!([{"type": "function", "name": "exec_command"}]));
         assert!(Arc::ptr_eq(&flatten_raw(plain.clone()), &plain));
+    }
+
+    fn server(description: &str) -> Vec<Value> {
+        vec![json!({"type": "namespace", "name": "mcp__docs", "description": description, "tools": [
+            {"type": "function", "name": "docs_search", "description": "Searches.\n\nexec tool declaration:\n```ts\n…```"},
+            {"type": "function", "name": "docs_read", "description": "Reads."},
+        ]})]
+    }
+
+    #[test]
+    fn the_servers_instructions_reach_the_model_on_its_first_tool_only() {
+        let flat = flatten_with(server("Search before you read."), false, false);
+        assert_eq!(flat[0]["description"], "Search before you read.\n\nSearches.");
+        assert_eq!(flat[1]["description"], "Reads.");
+        // Codex's default description is not instructions.
+        let flat = flatten_with(server("Tools in the mcp__docs namespace."), false, false);
+        assert_eq!(flat[0]["description"], "Searches.");
+    }
+
+    #[test]
+    fn long_instructions_are_bounded() {
+        let long = "é".repeat(INSTRUCTIONS_MAX_CHARS + 500);
+        let flat = flatten_with(server(&long), false, false);
+        let description = flat[0]["description"].as_str().unwrap_or_default();
+        assert!(description.starts_with(&"é".repeat(INSTRUCTIONS_MAX_CHARS)));
+        assert!(description.ends_with(" […]\n\nSearches."));
+        assert_eq!(description.chars().count(), INSTRUCTIONS_MAX_CHARS + " […]\n\nSearches.".chars().count());
+    }
+
+    #[test]
+    fn the_exec_declaration_stays_when_the_model_can_call_exec() {
+        let exec = json!({"type": "custom", "name": "exec", "description": "Runs JavaScript."});
+        let with_exec = |exec_as_function, custom_tools_dropped| {
+            let mut tools = vec![exec.clone()];
+            tools.extend(server(""));
+            flatten_with(tools, exec_as_function, custom_tools_dropped)
+                .into_iter()
+                .find(|tool| tool["name"] == "docs_search")
+                .map(|tool| tool["description"].as_str().unwrap_or_default().to_string())
+                .unwrap_or_default()
+        };
+        // The server keeps custom tools, or this process offers exec as a function: exec is there.
+        assert!(with_exec(false, false).contains("exec tool declaration:"));
+        assert!(with_exec(true, true).contains("exec tool declaration:"));
+        // The server drops custom tools and nothing translates exec: the binding is left out.
+        assert_eq!(with_exec(false, true), "Searches.");
     }
 
     #[test]

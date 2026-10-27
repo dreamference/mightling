@@ -269,13 +269,6 @@ filter = """
 | (binary_id(codex-core-plugins) & test(=manager::tests::featured_plugin_ids_for_config_uses_restriction_product_query_param))
 """
 
-# mcp-flat-namespace: 1 test
-[[test]]
-reason = """Patch 0020 declares an MCP server's tools to the model as function tools, so the namespace entry, whose description carries the server's `instructions`, is not sent; this test checks that description and nothing else. The other MCP exposure tests run with the flat names (codex-tests/patches/0005). Passes with flattening switched off (checked 2026-10-27)."""
-filter = """
-  (binary_id(codex-core::all) & test(=suite::rmcp_client::mcp_namespace_instructions_are_preserved_without_hiding_tools))
-"""
-
 # sandbox-read-only-network: 1 test
 [[test]]
 reason = """patch 0031: read-only sandbox has network unless /airgapped on. This case runs a networked command in Codex's read-only sandbox at the default level and expects it to fail. The air-gapped sandbox's lack of network stays covered: codex-tests/patches/0006 runs codex-linux-sandbox's network tests (sandbox_blocks_curl, _nc, _getent, _dev_tcp_redirection, ...) at /airgapped on."""
