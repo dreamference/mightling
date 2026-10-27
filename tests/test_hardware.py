@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -305,6 +306,13 @@ def _release_server(monkeypatch, payloads):
         return Response(payloads[url])
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    # These tests are of the downloader: put back what conftest stubs.
+    conftest = sys.modules["conftest"]
+    for name in ("ensure", "download", "_fetch"):
+        monkeypatch.setattr(
+            f"dreamference.hardware.ReleaseAssetDownloader.{name}",
+            getattr(conftest, "REAL_RELEASE_" + name.strip("_").upper()),
+        )
     return asked
 
 

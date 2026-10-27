@@ -64,6 +64,14 @@ REAL_GATE_PROBE = ModelGate.probe
 from dreamference.runner.codex_branded_builder import CodexBrandedBuilder  # noqa: E402
 
 REAL_COMPILER_CACHE_ENVIRONMENT = CodexBrandedBuilder.compiler_cache_environment
+# A release-hosted model (the ScaleSearch drafter) is downloaded from GitHub's release assets,
+# possibly gigabytes. `ensure` is stubbed to "complete" so `server start` proceeds, `download` and
+# `_fetch` fail the test; a test of the downloader restores all three from these names.
+from dreamference.hardware.release_asset_downloader import ReleaseAssetDownloader  # noqa: E402
+
+REAL_RELEASE_ENSURE = ReleaseAssetDownloader.ensure
+REAL_RELEASE_DOWNLOAD = ReleaseAssetDownloader.download
+REAL_RELEASE_FETCH = ReleaseAssetDownloader._fetch
 # The name MemoryPressureWatchdog gives its thread, and how long a stopped one may take to exit.
 PSI_THREAD_NAME = "psi-watchdog"
 LEAK_GRACE_S = 2.0
@@ -242,6 +250,17 @@ MODEL_SERVER_PORTS: tuple = (8000, 18000)
 
 
 @pytest.fixture(autouse=True)
+def _no_release_download(monkeypatch):
+    def refused(cls, *args, **kwargs):
+        raise AssertionError("a test tried to download release assets from the network; stub it "
+                             "or restore the REAL_RELEASE_* names for a test of the downloader")
+
+    monkeypatch.setattr(ReleaseAssetDownloader, "ensure", classmethod(lambda cls, model_key: True))
+    monkeypatch.setattr(ReleaseAssetDownloader, "download", classmethod(refused))
+    monkeypatch.setattr(ReleaseAssetDownloader, "_fetch", classmethod(refused))
+
+
+@pytest.fixture(autouse=True)
 def _no_model_server(monkeypatch, request):
     # Nothing in the suite may reach the model server: a test that did would hang behind the gate
     # while a benchmark holds it, or spend the model's time. Connections to its ports fail the
@@ -256,6 +275,16 @@ def _no_model_server(monkeypatch, request):
         if port in MODEL_SERVER_PORTS:
             raise AssertionError(f"a test tried to connect to the model server at {address!r}; "
                                  "stub the request or serve a stand-in on a free port")
+        # No outbound traffic either: only loopback (and the unspecified address) is reachable.
+        if isinstance(address, tuple) and address and isinstance(address[0], str):
+            import ipaddress
+            try:
+                ip = ipaddress.ip_address(address[0].split("%")[0])
+            except ValueError:
+                return  # a name: socket.connect gets resolved addresses, so this is not a connect
+            if not (ip.is_loopback or ip.is_unspecified):
+                raise AssertionError(f"a test tried to connect to {address!r}, off this machine; "
+                                     "stub the request or serve a stand-in on loopback")
 
     original_connect, original_connect_ex = socket.socket.connect, socket.socket.connect_ex
 
