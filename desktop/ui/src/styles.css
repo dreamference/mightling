@@ -1112,3 +1112,9 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .mcp-recommended-entry { display: flex; gap: 8px; align-items: baseline; }
 .mcp-recommended-entry .link-button { flex: none; }
 .mcp-recommended .needs-network { color: var(--faint); }
+/* A CSV or TSV tab as a table (ArtifactView.tsx `TableArtifact`, DESKTOP §16 B27). */
+.table-artifact { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.table-artifact .table-scroll { overflow: auto; flex: 1; padding: 0 12px 16px; }
+.table-artifact table { border-collapse: collapse; font: 13px var(--font-code); }
+.table-artifact th, .table-artifact td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; white-space: pre; max-width: 32em; overflow: hidden; text-overflow: ellipsis; }
+.table-artifact th { position: sticky; top: 0; background: var(--raised); font-weight: 600; }
