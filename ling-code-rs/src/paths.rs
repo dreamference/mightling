@@ -130,10 +130,77 @@ pub fn process_alive(_pid: i32) -> bool {
 /// Indexing needs bubblewrap, systemd scopes and cgroups: a Linux host (§9). Elsewhere `index`
 /// and `session` say so, and queries read an index built on Linux.
 pub fn indexing_supported() -> anyhow::Result<()> {
-    if cfg!(target_os = "linux") {
+    if indexing_here() {
         Ok(())
     } else {
         anyhow::bail!("indexing runs on Linux only for now; on this system ling-code answers queries from an existing index")
+    }
+}
+
+/// Whether this system builds indexes: the condition [`indexing_supported`] checks, which the
+/// messages below are given so they never name a command that cannot run here.
+pub fn indexing_here() -> bool {
+    cfg!(target_os = "linux")
+}
+
+/// What a message says in place of `ling-code index` or `ling-admin code setup` on a system that
+/// does not index (a Windows or macOS client, MIGHTLING_WINDOWS_ARM §23.4 W8): neither exists there.
+pub const BUILT_ON_LINUX: &str = "the index is built on Linux nodes only for now";
+
+/// `` `command` `` where indexing runs, for a hint in brackets; else [`BUILT_ON_LINUX`].
+pub fn index_command(indexing: bool, command: &str) -> String {
+    if indexing { format!("`{command}`") } else { BUILT_ON_LINUX.to_string() }
+}
+
+/// `` run `command` `` where indexing runs, for a hint after a semicolon; else [`BUILT_ON_LINUX`].
+pub fn run_index_command(indexing: bool, command: &str) -> String {
+    if indexing { format!("run `{command}`") } else { BUILT_ON_LINUX.to_string() }
+}
+
+/// What a query answers when the repository has no index yet; `search` adds where to look meanwhile.
+pub fn no_index_yet(indexing: bool, search: bool) -> String {
+    let meanwhile = match (search, indexing) {
+        (false, _) => "",
+        (true, true) => ", and use rg meanwhile",
+        (true, false) => "; search the files meanwhile",
+    };
+    format!("no code index for this repository yet; {}{meanwhile}", run_index_command(indexing, "ling-code index"))
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    #[test]
+    fn where_indexing_runs_the_hints_name_the_command() {
+        assert_eq!(index_command(true, "ling-code index --exact"), "`ling-code index --exact`");
+        assert_eq!(run_index_command(true, "ling-code index"), "run `ling-code index`");
+        assert_eq!(no_index_yet(true, true), "no code index for this repository yet; run `ling-code index`, and use rg meanwhile");
+        assert_eq!(no_index_yet(true, false), "no code index for this repository yet; run `ling-code index`");
+    }
+
+    #[test]
+    fn elsewhere_they_say_where_the_index_is_built_and_name_no_command() {
+        // A Windows client has neither `ling-code index` nor `ling-admin code setup`, nor rg.
+        for hint in [
+            index_command(false, "ling-code index --exact"),
+            run_index_command(false, "ling-code index"),
+            no_index_yet(false, true),
+            no_index_yet(false, false),
+        ] {
+            assert!(hint.contains("built on Linux nodes only for now"), "{hint}");
+            assert!(!hint.contains('`') && !hint.contains(" rg "), "{hint}");
+        }
+        assert_eq!(
+            no_index_yet(false, true),
+            "no code index for this repository yet; the index is built on Linux nodes only for now; search the files meanwhile"
+        );
+    }
+
+    #[test]
+    fn the_hints_follow_whether_this_system_indexes() {
+        assert_eq!(indexing_here(), indexing_supported().is_ok());
+        assert_eq!(indexing_here(), cfg!(target_os = "linux"));
     }
 }
 
