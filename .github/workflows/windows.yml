@@ -365,50 +365,55 @@ jobs:
           $outputs = @(Get-Content $record | ForEach-Object { $_ | ConvertFrom-Json } | ForEach-Object { $_.input } | Where-Object { $_.type -like "*call_output" } | ForEach-Object { "$($_.output)" })
           Write-Host "tool output: $outputs"
           if (-not ($outputs -match "HEAD")) { throw "git over https did not answer in a sandboxed session" }
-      # The compatibility mode's hooks run through cmd.exe (WINDOWS_ARM §23.4 W1): CLAUDE.md reaches
-      # the model through the memory hook, and a deny rule refuses a tool call through the guard.
-      # The stand-in model asks for one shell command that would write probe.txt; with the rule the
-      # call must come back refused and the file must not exist, without it the file must exist.
-      - name: Compatibility mode hooks
+      # The compatibility mode on Windows (WINDOWS_ARM §23.4 W1): Codex dispatches none of its
+      # hooks there yet, so CLAUDE.md, the settings files' hooks and the permission rules would be
+      # skipped. The mode must refuse to start, with its reason, in print mode, in a session and when
+      # switched on, and no request may reach the model server. On Linux and macOS the mode is
+      # unchanged; this step is Windows-only.
+      - name: Compatibility mode refuses on Windows
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
           $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
-          Write-Host "interactive: $([Environment]::UserInteractive), session: $((Get-Process -Id $PID).SessionId)"
+          $expected = "compatibility mode isn't available on Windows yet"
+          $ws = Join-Path $env:RUNNER_TEMP "compat-refuses"
+          New-Item -ItemType Directory -Force $ws | Out-Null
+          Set-Location $ws
+          git init -q
+          Set-Content -Path CLAUDE.md -Value "The magic word for this project is BLUEBERRY."
+          $record = Join-Path $env:RUNNER_TEMP "requests-compat.jsonl"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8798", "--shell-call", '"echo probe > probe.txt"', "--record", "`"$record`""
+          Start-Sleep -Seconds 3
           $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8798"
-          foreach ($case in @("deny", "control")) {
-            $ws = Join-Path $env:RUNNER_TEMP "compat-$case"
-            New-Item -ItemType Directory -Force $ws | Out-Null
-            Set-Location $ws
-            git init -q
-            Set-Content -Path CLAUDE.md -Value "The magic word for this project is BLUEBERRY."
-            $record = Join-Path $env:RUNNER_TEMP "requests-$case.jsonl"
-            $server = Start-Process -PassThru -NoNewWindow python -ArgumentList "$env:GITHUB_WORKSPACE\.github\scripts\stub_model_server.py", "8798", "--shell-call", '"echo probe > probe.txt"', "--record", "`"$record`""
-            Start-Sleep -Seconds 3
-            $ErrorActionPreference = "Continue"
-            try {
-              if ($case -eq "deny") {
-                $out = & $ling --compat claude --config windows.sandbox=elevated -p "What is the magic word?" --disallowedTools "Bash(echo *)" 2>&1 | Out-String
-              } else {
-                $out = & $ling --compat claude --config windows.sandbox=elevated -p "What is the magic word?" 2>&1 | Out-String
-              }
-              Write-Host "$case`: exit $LASTEXITCODE, $out"
-            } finally {
-              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          $failures = @()
+          try {
+            $cases = [ordered]@{
+              "print mode" = @("--compat", "claude", "-p", "What is the magic word?", "--disallowedTools", "Bash(echo *)")
+              "a session" = @("--compat", "claude", "exec", "--skip-git-repo-check", "What is the magic word?")
+              "switched on" = @("compat", "use", "claude")
             }
-            $ErrorActionPreference = "Stop"
-            $requests = Get-Content $record | ForEach-Object { $_ | ConvertFrom-Json }
-            if (-not ((Get-Content -Raw $record) -match "BLUEBERRY")) { throw "${case}: CLAUDE.md did not reach the model (the memory hook did not run)" }
-            $outputs = @($requests | ForEach-Object { $_.input } | Where-Object { $_.type -like "*call_output" } | ForEach-Object { "$($_.output)" })
-            Write-Host "${case}: tool output: $outputs"
-            if ($case -eq "deny") {
-              if (-not ($outputs -match "denies this")) { throw "the deny rule did not refuse the call (the guard did not run)" }
-              if (Test-Path probe.txt) { throw "the denied command ran: probe.txt exists" }
-            } else {
-              if ($outputs -match "denies this") { throw "the control run was refused" }
-              if (-not (Test-Path probe.txt)) { throw "the control command did not run, so the deny case proves nothing" }
+            foreach ($case in $cases.Keys) {
+              $out = $null | & $ling @($cases[$case]) 2>&1 | Out-String
+              $code = $LASTEXITCODE
+              Write-Host "${case}: exit $code, $out"
+              if ($code -eq 0) { $failures += "${case}: exit 0" }
+              if ($out -notmatch [regex]::Escape($expected)) { $failures += "${case}: no refusal message" }
             }
+            $env:DREAMFERENCE_MIGHTLING_COMPAT = "claude"
+            $out = $null | & $ling exec --skip-git-repo-check "What is the magic word?" 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Remove-Item Env:DREAMFERENCE_MIGHTLING_COMPAT
+            Write-Host "the variable: exit $code, $out"
+            if ($code -eq 0) { $failures += "the variable: exit 0" }
+            if ($out -notmatch [regex]::Escape($expected)) { $failures += "the variable: no refusal message" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+          if ((Test-Path $record) -and (Get-Item $record).Length -gt 0) { $failures += "a request reached the model server" }
+          if (Test-Path probe.txt) { $failures += "probe.txt exists: a command ran" }
+          if ($failures.Count -gt 0) { throw ($failures -join "; ") }
+          # The refusals left a non-zero $LASTEXITCODE, which the runner would take as the step's result.
+          exit 0
       # `ling uninstall` (WINDOWS_ARM section 16.4) on what install.ps1 installed: the folder (the
       # running ling.exe by a detached step once it exits), the user's Path entry and the mDNS rule.
       # The runner is an administrator, so the firewall step runs without a prompt.
