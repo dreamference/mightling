@@ -145,6 +145,7 @@
 
 # Nodes & Remote Access
 /dreamference/node/                             @dreamference/nodes
+/dreamference/forge/                            @dreamference/nodes @dreamference/security
 /ling-rs/node-locator/                          @dreamference/nodes
 /ling-web-rs/src/node_locator.rs                @dreamference/nodes
 /ling-rs/src/node.rs                            @dreamference/nodes
