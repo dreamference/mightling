@@ -45,6 +45,12 @@ pub trait PromptSource: Send + Sync {
     /// thread's act, and a thread being opened has no level of its own yet, so both ask with None;
     /// a `!` command asks for its thread. An implementation that cannot tell answers true.
     fn airgapped_on(&self, thread_id: Option<&str>) -> bool;
+    /// Whether `cwd` is a folder a Work thread may work in: an existing directory, named by an
+    /// absolute path, outside the Ask folders' root. A fork of an Ask thread may move there (a
+    /// project's primary folder, DESKTOP §16 B33). An implementation that cannot tell answers false.
+    fn work_folder(&self, _cwd: &str) -> bool {
+        false
+    }
 }
 
 /// The rules of `policy.json`.
@@ -60,6 +66,8 @@ pub struct Policy {
     pub scratch_prompts: BTreeSet<String>,
     pub scratch_fields: Vec<String>,
     pub scratch_sandbox: String,
+    /// The request that forks a thread: an Ask thread's fork may leave its folder for a Work folder.
+    pub fork_request: String,
     pub import_request: String,
     pub refused_import_items: BTreeSet<String>,
     /// Requests refused at `on`: they fetch a plugin or a marketplace outside the sandbox, or run a
@@ -117,6 +125,7 @@ impl Policy {
             scratch_prompts: strings(&value, "scratchPrompts")?.into_iter().collect(),
             scratch_fields: strings(&value, "scratchFields")?,
             scratch_sandbox: string(&value, "scratchSandbox")?,
+            fork_request: string(&value, "forkRequest")?,
             import_request: string(&value, "importRequest")?,
             refused_import_items: strings(&value, "refusedImportItems")?.into_iter().collect(),
             airgapped_refused_requests: strings(&value, "airgappedRefusedRequests")?.into_iter().collect(),
@@ -227,7 +236,7 @@ impl Policy {
                 }
                 if opener {
                     if let Some(Value::Object(params)) = object.get("params") {
-                        let params = self.vet_thread_params(params, prompts)?;
+                        let params = self.vet_thread_params(&method, params, prompts)?;
                         object.insert("params".to_string(), Value::Object(params));
                     }
                 }
@@ -255,14 +264,24 @@ impl Policy {
         }
     }
 
-    fn vet_thread_params(&self, params: &Map<String, Value>, prompts: &dyn PromptSource) -> Result<Map<String, Value>, String> {
+    fn vet_thread_params(&self, method: &str, params: &Map<String, Value>, prompts: &dyn PromptSource) -> Result<Map<String, Value>, String> {
         let mut params = params.clone();
         for field in &self.dropped_thread_fields {
             params.remove(field);
         }
-        // A resumed or forked Ask thread stays where it was started.
-        let existing = params.get("threadId").and_then(Value::as_str).and_then(|id| prompts.scratch_folder_of(id));
-        if let Some(folder) = existing.clone() {
+        // A resumed or forked Ask thread stays where it was started, unless a fork continues it in a
+        // Work folder (a project's, DESKTOP §16 B33): a Work thread there, with the sandbox an Ask
+        // folder gets and nothing broader, and without its prompt's config.
+        let mut existing = params.get("threadId").and_then(Value::as_str).and_then(|id| prompts.scratch_folder_of(id));
+        let moved = params
+            .get("cwd")
+            .and_then(Value::as_str)
+            .filter(|cwd| existing.is_some() && method == self.fork_request && prompts.work_folder(cwd))
+            .map(str::to_string);
+        if moved.is_some() {
+            existing = None;
+        }
+        if let Some(folder) = moved.or_else(|| existing.clone()) {
             self.confine(&mut params, folder);
         }
         if let Some(names) = params.remove(&self.window_tools_field) {
@@ -469,6 +488,9 @@ mod tests {
         fn airgapped_on(&self, _thread_id: Option<&str>) -> bool {
             self.airgapped.load(std::sync::atomic::Ordering::Relaxed)
         }
+        fn work_folder(&self, cwd: &str) -> bool {
+            cwd.starts_with("WORK/")
+        }
     }
 
     #[test]
@@ -484,6 +506,8 @@ mod tests {
         assert_eq!(policy.airgapped_thread_config.get("features.plugins"), Some(&Value::Bool(false)));
         // Deleting a thread for good is local: allowed at both levels (DESKTOP §16 B36).
         assert!(policy.allowed_requests.contains("thread/delete") && !policy.airgapped_refused_requests.contains("thread/delete"));
+        // An Ask thread's fork may leave its folder for a Work folder (DESKTOP §16 B33).
+        assert_eq!(policy.fork_request, "thread/fork");
         let chat = &policy.prompt_thread_config["chat"];
         assert_eq!(chat.get("mcp_servers.mightling_images.enabled"), Some(&Value::Bool(false)), "a phone shows no pictures");
         // An approval on a phone holds the answer until the user replies; the sandbox has the network.
@@ -558,6 +582,45 @@ mod tests {
         let shell = |thread: &str| serde_json::json!({"id": 1, "method": "thread/shellCommand", "params": {"threadId": thread, "command": "ls"}});
         assert!(policy.vet_outgoing(&shell("open"), &mut HashSet::new(), &Sealed).is_ok());
         assert!(policy.vet_outgoing(&shell("sealed"), &mut HashSet::new(), &Sealed).is_err());
+    }
+
+    /// Only a fork of an Ask thread leaves its folder, only for a Work folder, and only with the Ask
+    /// folder's sandbox (DESKTOP §16 B33); a resume, or a fork elsewhere, stays where it was.
+    #[test]
+    fn an_ask_thread_forks_into_a_work_folder_and_nowhere_else() {
+        let policy = Policy::embedded();
+        let stub = Stub { made: Mutex::new(0), airgapped: Default::default() };
+        let vet = |method: &str, thread: &str, cwd: &str| {
+            let message = serde_json::json!({"id": 1, "method": method, "params": {"threadId": thread, "cwd": cwd, "sandbox": "danger-full-access", "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"]}});
+            policy.vet_outgoing(&message, &mut HashSet::new(), &stub).unwrap()["params"].clone()
+        };
+        let forked = vet("thread/fork", "ask-7", "WORK/repo");
+        assert_eq!(forked, serde_json::json!({"threadId": "ask-7", "cwd": "WORK/repo", "sandbox": "workspace-write"}));
+        assert_eq!(vet("thread/fork", "ask-7", "/home/user")["cwd"], "ASK/ask-7");
+        assert_eq!(vet("thread/resume", "ask-7", "WORK/repo")["cwd"], "ASK/ask-7");
+        // A phone's thread continued in a project leaves its prompt's config behind.
+        assert_eq!(vet("thread/fork", "chat-3", "WORK/repo").get("config"), None);
+        assert_eq!(vet("thread/fork", "chat-3", "/home/user")["config"]["approval_policy"], "never");
+        // A Work thread's fork is not the policy's to place: as asked, as before.
+        assert_eq!(vet("thread/fork", "w1", "WORK/repo")["sandbox"], "danger-full-access");
+        // A source that cannot tell a Work folder keeps every Ask fork in its folder.
+        struct Unsure;
+        impl PromptSource for Unsure {
+            fn composed(&self, name: &str) -> Result<String, String> {
+                Ok(name.to_string())
+            }
+            fn new_scratch_folder(&self, _prompt: &str) -> Result<String, String> {
+                Err("none".to_string())
+            }
+            fn scratch_folder_of(&self, thread_id: &str) -> Option<String> {
+                Some(format!("ASK/{thread_id}"))
+            }
+            fn airgapped_on(&self, _thread_id: Option<&str>) -> bool {
+                false
+            }
+        }
+        let message = serde_json::json!({"id": 2, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "WORK/repo"}});
+        assert_eq!(policy.vet_outgoing(&message, &mut HashSet::new(), &Unsure).unwrap()["params"]["cwd"], "ASK/ask-7");
     }
 
     #[test]

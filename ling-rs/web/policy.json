@@ -117,6 +117,7 @@
     "runtimeWorkspaceRoots"
   ],
   "scratchSandbox": "workspace-write",
+  "forkRequest": "thread/fork",
   "importRequest": "externalAgentConfig/import",
   "refusedImportItems": [],
   "airgappedRefusedRequests": [

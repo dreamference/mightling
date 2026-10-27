@@ -995,6 +995,15 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .link-url code { display: block; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-sm); overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12.5px; }
 .link-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
+/* Continue in a project (DESKTOP §16 B33): the projects with a folder, each by name and primary folder. */
+.continue-dialog { width: min(560px, calc(100vw - 32px)); }
+.continue-dialog h3 { margin: 0 0 10px; }
+.continue-targets { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.continue-target { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 10px; }
+.continue-name { font-weight: 600; }
+.continue-folder { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.continue-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
 /* An incognito question (DESKTOP_PARITY_CLAUDE §4.3): a dashed frame round the thread and a note that leaving deletes it. */
 .thread-pane.incognito { outline: 2px dashed var(--muted); outline-offset: -6px; }
 .incognito-banner { display: flex; gap: 10px; align-items: flex-start; margin: 12px auto 4px; max-width: 760px; padding: 10px 14px; border: 1px dashed var(--muted); border-radius: var(--radius-md); background: var(--panel); color: var(--text); font-size: 13px; line-height: 1.45; }

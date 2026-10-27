@@ -131,7 +131,7 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 | Voice | the microphone button (§7) |
 | Images in answers | `image_search` results rendered as a gallery with a lightbox (§6) |
 | Apps | Settings → Apps: `app/list` with each app's state and its Connect link (the Google service's page) |
-| Continue as Work | "Open in a project": forks the thread into a Work thread on a chosen folder (`thread/fork` with a new `cwd`) |
+| Continue as Work | "Open in a project": forks the thread into a Work thread on a chosen folder (`thread/fork` with a new `cwd`); built as **Continue in a project** (DESKTOP §16 B33) |
 
 ---
 
@@ -343,7 +343,7 @@ Built: the bridge policy as data, Ask threads, and `ling web` with its credentia
 
 - **More fields are dropped from every thread opener.** Besides the five the desktop dropped, the policy removes `dynamicTools`, `environments`, `selectedCapabilityRoots`, `history` and `path`. Each loads tools, environments, plugins, a forged history or a rollout file.
 - **A prompt is chosen on `thread/start` only.** A resumed session keeps the prompt it recorded, so `prompt` on resume or fork is refused.
-- **An Ask folder is named after its thread once the thread exists.** The thread id does not exist when `thread/start` is vetted, and a running session's `cwd` cannot be renamed. So the folder is created as `~/.mightling/ask/q-<random>/`, and the server's answer makes `ask/<thread-id>` a link to it. The link is also how an Ask thread is recognised afterwards: a resume or fork of one keeps its folder and sandbox whatever the UI asks, and uploads land there.
+- **An Ask folder is named after its thread once the thread exists.** The thread id does not exist when `thread/start` is vetted, and a running session's `cwd` cannot be renamed. So the folder is created as `~/.mightling/ask/q-<random>/`, and the server's answer makes `ask/<thread-id>` a link to it. The link is also how an Ask thread is recognised afterwards: a resume or fork of one keeps its folder and sandbox whatever the UI asks, and uploads land there. The one exception is a fork naming a Work folder (an existing folder, named by an absolute path, outside the Ask root: a project's primary folder), which goes there as a Work thread with the same sandbox and none of the UI's sandbox, permissions or extra roots (DESKTOP §16 B33, `forkRequest` in `policy.json`).
 - **`runtimeWorkspaceRoots` is dropped, not set.** The field is experimental, so a client that has not opted in cannot send it. Without it the writable root is the `cwd`.
 - **The prompt text comes from a subprocess.** It is `ling prompt show <name> --composed`, run in the Ask root. `--composed` prints the text alone, exactly. The launcher's own composition is shared through `prompt::current_parts`.
 

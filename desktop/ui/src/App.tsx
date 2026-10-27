@@ -53,6 +53,8 @@ import { FileTree } from "./FileTree";
 import { FileView } from "./FileView";
 import { ArtifactView } from "./ArtifactView";
 import { LinkDialog } from "./LinkDialog";
+import { ContinueDialog } from "./ContinueDialog";
+import { continueInProject, continueTargets, type ContinueTarget } from "./continueproject";
 import { artifactKind, createdArtifacts } from "./artifacts";
 import { keptQuestions, transcript } from "./recall";
 import { FileSearch } from "./FileSearch";
@@ -188,6 +190,8 @@ export function App() {
   const [airgap, setAirgap] = useState<bridge.Airgapped | null>(null);
   /** A web address clicked in an answer, waiting for the user's yes (LinkDialog.tsx). */
   const [linkAsked, setLinkAsked] = useState<{ url: string; thread: string | null; airgappedOn: boolean } | null>(null);
+  /** An Ask question being continued in a project (DESKTOP §16 B33, ContinueDialog.tsx); busy while it is forked. */
+  const [continuing, setContinuing] = useState<{ thread: Thread; label: string; busy: boolean } | null>(null);
   const [newCwd, setNewCwd] = useState("");
   // The folder named, the notice asking for it goes (it stayed until a restart).
   useEffect(() => {
@@ -2258,6 +2262,23 @@ export function App() {
     }
   };
 
+  /** Continues an Ask question in a project (DESKTOP §16 B33, continueproject.ts): a copy there as a Work thread, opened in Work. */
+  const continueQuestion = async (target: ContinueTarget) => {
+    if (!continuing || continuing.busy) return;
+    setContinuing({ ...continuing, busy: true });
+    try {
+      const thread = await continueInProject(client, continuing.thread, target, servedModel, askRoot);
+      setContinuing(null);
+      showView("work");
+      dispatch({ type: "opened", thread });
+      loader.markLoaded(thread.id);
+      refreshQueue(thread.id);
+    } catch (error) {
+      setContinuing(null);
+      notice(error);
+    }
+  };
+
   const fork = async () => {
     if (!selected) return;
     if (selected.thread.ephemeral) return notice("An incognito question is not copied: a fork would be saved.");
@@ -2766,6 +2787,7 @@ export function App() {
                 <button role="menuitem" onClick={() => copyLink(thread.id)}>Copy link</button>
                 <button role="menuitem" onClick={() => void savedRecap(thread)} title="A saved copy of the thread, asked where the work stands">Recap in a saved copy</button>
                 <button role="menuitem" onClick={() => void bridge.homeFolder().catch(() => null).then((home) => setExporting({ thread, title: label, home }))}>Export…</button>
+                {view === "ask" && !thread.ephemeral ? <button role="menuitem" onClick={() => setContinuing({ thread, label, busy: false })}>Continue in a project…</button> : null}
                 {view === "work" ? (
                   <>
                     {prefs.sections.map((section) => <button key={section.id} role="menuitem" onClick={() => toSection(thread.id, section.id)}>Move to {section.name}</button>)}
@@ -2787,7 +2809,7 @@ export function App() {
   );
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
-  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null;
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null || continuing !== null;
   const title = incognitoShown ? "Incognito question" : selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? (incognitoNext ? "New incognito question" : "New question") : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
@@ -3023,6 +3045,7 @@ export function App() {
             </button>
           ) : null}
           {selected && !incognitoShown ? <button className="icon bar-action" title="Fork: continue in a copy of this thread" aria-label="Fork" onClick={() => void fork()}><Icon name="gitFork" size={16} /></button> : null}
+          {selected && !incognitoShown && view === "ask" ? <button className="icon bar-action continue-action" title="Continue in a project: a copy of this question as a Work thread in a project's folder" aria-label="Continue in a project" onClick={() => setContinuing({ thread: selected.thread, label: title, busy: false })}><Icon name="code" size={16} /></button> : null}
           {selected && !incognitoShown && HOST === "electron" && !POPOUT ? <button className="icon bar-action" title="Open in a window of its own" aria-label="Pop out" onClick={() => void bridge.popOut(selected.thread.id).catch(notice)}><Icon name="externalLink" size={16} /></button> : null}
           {POPOUT ? <button className={`icon bar-action${onTop ? " active" : ""}`} aria-pressed={onTop} title="Keep this window above the others" aria-label="Always on top" onClick={() => void bridge.alwaysOnTop(!onTop).then(setOnTop).catch(notice)}><Icon name="pin" size={16} /></button> : null}
           {askFolder ? (
@@ -3304,6 +3327,9 @@ export function App() {
             )
           )}
         />
+      ) : null}
+      {continuing ? (
+        <ContinueDialog question={continuing.label} targets={continueTargets(serverProjects)} busy={continuing.busy} onPick={(target) => void continueQuestion(target)} onClose={() => setContinuing(null)} />
       ) : null}
       {linkAsked ? (
         <LinkDialog url={linkAsked.url} airgappedOn={linkAsked.airgappedOn} notice={notice} onClose={() => setLinkAsked(null)}

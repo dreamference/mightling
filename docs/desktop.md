@@ -182,6 +182,13 @@ document, PDF or image the agent creates** is on (the default). The question's h
 (Ctrl+Shift+E), its folder's tree beside the answer, and a button that opens the folder in your file
 manager. Work never shows a question's files, and a question shows only its own.
 
+**Continue in a project** (on a question's menu in the sidebar, and on its header) carries a
+question into Work: pick a project, and a copy of the question becomes a Work thread in that
+project's primary folder, opened in Work, where the agent may read and change the project's files.
+The question stays in Ask. The copy starts with the sandbox a question has (it may write in that
+folder only, nothing broader); change its permissions there as for any Work thread. A project with no
+folder is not offered, and a folder that is gone is refused with a note.
+
 **Quick Entry** asks a question from any app. Turn it on in **Settings › General › Quick Entry**: its
 shortcut (Ctrl+Alt+Space until you press another in the field) opens a small box above your windows;
 Enter asks the question in Ask and brings the app forward with the answer, Esc closes the box. The

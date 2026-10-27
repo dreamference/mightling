@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FILE_CAP, IMAGE_CAP, INCOGNITO_MARK, cleanFileName, composePrompt, folderOf, forgetIncognito, isFolder, linkThread, markIncognito, newFolder, sweepIncognito, writeUpload } from "./ask";
+import { FILE_CAP, IMAGE_CAP, INCOGNITO_MARK, cleanFileName, composePrompt, folderOf, forgetIncognito, isFolder, isWorkFolder, linkThread, MessagePrompts, markIncognito, newFolder, sweepIncognito, writeUpload } from "./ask";
 import type { ForView } from "./api";
 import { samePath } from "./platform";
 import { AppServer } from "./server";
@@ -93,6 +93,27 @@ describe("Ask folders", () => {
     fs.symlinkSync(home, path.join(root, "planted"), process.platform === "win32" ? "junction" : undefined);
     expect(folderOf(root, "planted")).toBeNull();
     expect(isFolder(root, home)).toBe(false);
+  });
+
+  it("take a Work folder as one outside the Ask root, existing and named in full (DESKTOP §16 B33)", () => {
+    const home = scratch("work");
+    const root = path.join(home, "ask");
+    const question = newFolder(root);
+    const repo = path.join(home, "repo");
+    fs.mkdirSync(repo);
+    expect(isWorkFolder(root, repo)).toBe(true);
+    expect(isWorkFolder(root, question)).toBe(false);
+    expect(isWorkFolder(root, root)).toBe(false);
+    expect(isWorkFolder(root, path.join(home, "missing"))).toBe(false);
+    expect(isWorkFolder(root, "repo")).toBe(false);
+    fs.writeFileSync(path.join(home, "file"), "x");
+    expect(isWorkFolder(root, path.join(home, "file"))).toBe(false);
+    fs.symlinkSync(question, path.join(home, "into-ask"), process.platform === "win32" ? "junction" : undefined);
+    expect(isWorkFolder(root, path.join(home, "into-ask"))).toBe(false);
+    // Inside the root, a folder whose name begins with two dots is still inside.
+    fs.mkdirSync(path.join(root, "..dots"));
+    expect(isWorkFolder(root, path.join(root, "..dots"))).toBe(false);
+    expect(new MessagePrompts(root, null).workFolder(repo)).toBe(true);
   });
 
   it("take attachments within the caps, under safe names, never over a file", () => {
