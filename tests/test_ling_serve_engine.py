@@ -383,10 +383,16 @@ def test_the_drafter_is_one_pinned_constant_away_from_the_scalesearch_one():
     drafter = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)["speculative_config"]
     assert drafter["model"] == QWEN38_LING_DRAFTER["model"]
     assert drafter["revision"] == QWEN38_LING_DRAFTER["revision"]
-    # Whatever ling-serve runs is pinned by commit and sized by a matrix entry.
-    assert re.fullmatch(r"[0-9a-f]{40}", drafter["revision"])
+    # Whatever ling-serve runs is pinned (by commit on the Hub, by SHA-256 as release assets) and
+    # sized by a matrix entry.
+    source = ModelMatrixRegistry.get_release_source(drafter["model"])
+    assert re.fullmatch(r"[0-9a-f]{40}", drafter["revision"]) or (
+        source is not None and source["revision"] == drafter["revision"]
+    )
     assert ModelMatrixRegistry.get_spec(drafter["model"]) is not None
     assert QWEN38_LING_DRAFTER in (QWEN38_RTN_DRAFTER, QWEN38_SCALESEARCH_DRAFTER)
+    # 1.7.2 serves the ScaleSearch drafter on both engines.
+    assert QWEN38_LING_DRAFTER == QWEN38_SCALESEARCH_DRAFTER
     _, server = split_at_image(
         VLLMServerManager().build_launch_command(model=DEFAULT_MODEL_ALIAS, engine=ENGINE_LING),
         QWEN38_LING_IMAGE,

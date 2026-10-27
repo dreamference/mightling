@@ -47,7 +47,7 @@ Server settings it runs with (from the registry):
 | Context length | 262,144 tokens |
 | Concurrent requests | 8 |
 | Memory fraction | 0.50 |
-| Speculative decoding | DFlash2, `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`, 12 tokens |
+| Speculative decoding | DFlash2, `dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch` (NVFP4 with searched scales, downloaded from Mightling's GitHub release assets and checked by SHA-256; the RTN-calibrated `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` until 1.7.2), 12 tokens |
 | Tool calls / reasoning parsers | `qwen3_coder` / `qwen3` |
 | Thinking | `ling` asks for none; chat thinks at medium effort unless told otherwise |
 

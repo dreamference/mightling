@@ -1816,14 +1816,12 @@ class VLLMServerManager:
         download_model(model, hf_token=hf_token, auto_tensorize=tensorize, revision=overrides.get("revision"))
         if draft_model:
             download_model(draft_model, hf_token=hf_token, auto_tensorize=tensorize)
-        if recipe_draft_model:
-            # Not tensorized, unlike a caller-named drafter: the format buys nothing on a 1-2 GiB
-            # checkpoint, and this one is named by HF repo ID rather than by the registry alias
-            # the tensorizer cache keys on.
-            download_model(
-                recipe_draft_model, hf_token=hf_token, auto_tensorize=False,
-                revision=(overrides.get("speculative_config") or {}).get("revision"),
-            )
+        if recipe_draft_model or ModelMatrixRegistry.get_engine_assets(model, engine):
+            # The recipe's drafter and its engine's assets, at their pins. Not tensorized, unlike a
+            # caller-named drafter: the format buys nothing on a 1-2 GiB checkpoint, and these are
+            # named by HF repo ID rather than by the registry alias the tensorizer cache keys on.
+            from dreamference.hardware import download_recipe_companions
+            download_recipe_companions(model, hf_token=hf_token, engine=engine)
 
         # The compile cache persists across container lifetimes now, which means it also outlives
         # the recipe that produced it. Reconcile the two before the graph is loaded rather than
