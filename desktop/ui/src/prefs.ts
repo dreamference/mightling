@@ -43,6 +43,8 @@ export interface Prefs {
   sections: Section[];
   /** Threads that finished a turn while not shown, or were marked unread. */
   unreadThreads: string[];
+  /** The versions of edited messages, `<thread>:<turn index>` to the threads they were sent in (versions.ts, DESKTOP §16 B39). */
+  messageVersions: Record<string, string[]>;
   /** Whether the sidebar's Recent list is open. */
   recentsOpen: boolean;
   /** The workspace layout (§2.1): the thread beside its tabs, the tabs in full, or the thread alone with the tabs hidden. */

@@ -229,6 +229,12 @@ thread with the conversation up to there) and **Edit in a new thread** (the conv
 that message, the message in the composer to change), leaving the thread as it is. A queued
 message can be edited and moved up or down.
 
+**Earlier versions of a message.** Editing a message, with **Edit** on the last one (or Esc Esc)
+or **Edit in a new thread** on any, keeps the message as you sent it: the new words go to a copy of
+the thread made before it, and the message then shows `‹ 2 / 3 ›`. Each version is the thread it was
+sent in; the arrows open that thread as you left it. Nothing is deleted. An incognito question is
+never copied, so its Edit still takes the message back.
+
 The app itself decides what an Ask thread is: the window only names the `ask` prompt, and the app
 composes its text, makes the folder and keeps the thread inside it, with the same rules `ling web`
 applies. So a question asked in the app and one asked in a browser live in the same place.
