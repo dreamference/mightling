@@ -1,5 +1,5 @@
 {
-  "comment": "What the Mightling UI may say to `ling app-server`, enforced by `ling web` (ling-rs/web/src/policy.rs) and by the desktop app's main process. Both run every case in ling-rs/web/vectors/, so the two cannot drift (specs/DREAMFERENCE_MIGHTLING_ASK.md \u00a72.3). It lives in this crate, not in desktop/bridge/, because the launcher's build copies ling-rs/ into the Codex export and nothing outside it. A request in `airgappedRefusedRequests` is allowed only while `/airgapped` is off for the thread it names (`threadId`; the configured level when it names none), as the launcher resolves it; at `on` it is refused, with its reason from `airgappedRefusalReasons` when it has one.",
+  "comment": "What the Mightling UI may say to `ling app-server`, enforced by `ling web` (ling-rs/web/src/policy.rs) and by the desktop app's main process. Both run every case in ling-rs/web/vectors/, so the two cannot drift (specs/DREAMFERENCE_MIGHTLING_ASK.md \u00a72.3). It lives in this crate, not in desktop/bridge/, because the launcher's build copies ling-rs/ into the Codex export and nothing outside it. A request in `airgappedRefusedRequests` is allowed only while `/airgapped` is off for the thread it names (`threadId`; the configured level when it names none), as the launcher resolves it; at `on` it is refused, with its reason from `airgappedRefusalReasons` when it has one. A prompt in `repoPrompts` starts a phone Work thread only in a checkout `ling web` made under `$CODEX_HOME/chat-repos/`, with `repoThreadParams` replacing the thread's sandbox and approval policy.",
   "allowedRequests": [
     "initialize",
     "account/read",
@@ -103,12 +103,20 @@
     "default",
     "ask",
     "high-swe",
-    "chat"
+    "chat",
+    "chat-work"
   ],
   "scratchPrompts": [
     "ask",
     "chat"
   ],
+  "repoPrompts": [
+    "chat-work"
+  ],
+  "repoThreadParams": {
+    "sandbox": "workspace-write",
+    "approvalPolicy": "on-request"
+  },
   "scratchFields": [
     "cwd",
     "sandbox",
@@ -138,6 +146,9 @@
       "mcp_servers.mightling_images.enabled": false,
       "mcp_servers.mightling_images.command": "true",
       "approval_policy": "never"
+    },
+    "chat-work": {
+      "approval_policy": "on-request"
     }
   },
   "windowToolsField": "windowTools",

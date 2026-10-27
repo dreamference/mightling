@@ -423,6 +423,12 @@ impl ChatRepos {
             false
         }
     }
+
+    /// Records the `app_thread` id on the checkout record matching `cwd` under `index_lock`.
+    pub fn record_app_thread(&self, codex_home: &Path, cwd: &Path, thread_id: &str) -> std::io::Result<bool> {
+        let _guard = self.index_lock.lock().unwrap_or_else(|p| p.into_inner());
+        record_app_thread(codex_home, cwd, thread_id)
+    }
 }
 
 /// Router for `/api/repos*`, merged into `server::router`.
@@ -480,6 +486,49 @@ pub fn save_index(codex_home: &Path, records: &[CheckoutRecord]) -> std::io::Res
     let array: Vec<Value> = records.iter().map(CheckoutRecord::to_json).collect();
     let text = serde_json::to_string_pretty(&array).map_err(std::io::Error::other)?;
     auth::write_private(&index_path(codex_home), &text)
+}
+
+/// Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json`: its
+/// canonical path must lie strictly under canonical `$CODEX_HOME/chat-repos/` and equal the
+/// canonical `dir` of a record in `index.json`.
+pub fn is_repo_checkout(codex_home: &Path, cwd: &Path) -> bool {
+    let (Ok(root), Ok(cwd)) = (root_dir(codex_home).canonicalize(), cwd.canonicalize()) else {
+        return false;
+    };
+    if !cwd.is_dir() || !cwd.starts_with(&root) || cwd == root {
+        return false;
+    }
+    load_index(codex_home)
+        .iter()
+        .any(|record| Path::new(&record.dir).canonicalize().ok().as_ref() == Some(&cwd))
+}
+
+/// Whether `thread_id` is recorded as `app_thread` on a checkout in `$CODEX_HOME/chat-repos/index.json`.
+pub fn is_repo_thread(codex_home: &Path, thread_id: &str) -> bool {
+    !thread_id.is_empty() && load_index(codex_home).iter().any(|record| record.app_thread.as_deref() == Some(thread_id))
+}
+
+/// Sets `app_thread` on the checkout record in `$CODEX_HOME/chat-repos/index.json` whose `dir`
+/// matches `cwd` (after canonicalisation when the folder exists on disk), writing the index whole.
+pub fn record_app_thread(codex_home: &Path, cwd: &Path, thread_id: &str) -> std::io::Result<bool> {
+    if !is_repo_checkout(codex_home, cwd) {
+        return Ok(false);
+    }
+    let canonical = cwd.canonicalize().ok();
+    let mut records = load_index(codex_home);
+    let mut updated = false;
+    for record in &mut records {
+        let matches = Path::new(&record.dir) == cwd
+            || (canonical.is_some() && Path::new(&record.dir).canonicalize().ok() == canonical);
+        if matches {
+            record.app_thread = Some(thread_id.to_string());
+            updated = true;
+        }
+    }
+    if updated {
+        save_index(codex_home, &records)?;
+    }
+    Ok(updated)
 }
 
 /// Checks whether `name` has the syntax `<org>/<repo>` and is not a URL or filesystem path.
@@ -4539,5 +4588,66 @@ mod tests {
             nf_res["reason"].as_str().unwrap().contains("the forge's main moved; /update first"),
             "{nf_body}"
         );
+    }
+
+    #[test]
+    fn repo_checkout_refuses_outside_dirs_and_symlinks_and_records_app_thread() {
+        let s = Scratch::new("repo-checkout-policy");
+        let home = s.dir.join("codex-home");
+        let chat_repos = root_dir(&home);
+        let checkout = chat_repos.join("org_widget").join("deadbeef");
+        let outside = s.dir.join("outside-repo");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let make_record = |thread: &str, dir: &Path| CheckoutRecord {
+            thread: thread.to_string(),
+            repo: "org/widget".to_string(),
+            bridge: "signal".to_string(),
+            chat: "note-to-self".to_string(),
+            device: "signal-bridge".to_string(),
+            dir: dir.to_string_lossy().into_owned(),
+            branch: Some(format!("phone/{thread}")),
+            base: "main".to_string(),
+            app_thread: None,
+            read_only: false,
+            created: 1_700_000_000,
+            last_used: 1_700_000_000,
+        };
+
+        let symlink_escape = chat_repos.join("org_widget").join("feedface");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &symlink_escape).unwrap();
+
+        save_index(
+            &home,
+            &[
+                make_record("deadbeef", &checkout),
+                make_record("bad00001", &outside),
+                make_record("feedface", &symlink_escape),
+            ],
+        )
+        .unwrap();
+
+        // Valid checkout inside chat-repos/ that is in index.json passes.
+        assert!(is_repo_checkout(&home, &checkout));
+        // Unlisted directory inside chat-repos/ is refused.
+        let unlisted = chat_repos.join("org_widget").join("cafebabe");
+        std::fs::create_dir_all(&unlisted).unwrap();
+        assert!(!is_repo_checkout(&home, &unlisted));
+        // Directory outside chat-repos/ that is present in index.json is still refused.
+        assert!(!is_repo_checkout(&home, &outside));
+        // Symlink inside chat-repos/ pointing outside chat-repos/ is refused after canonicalisation.
+        #[cfg(unix)]
+        assert!(!is_repo_checkout(&home, &symlink_escape));
+
+        // record_app_thread records app_thread on the matching checkout and refuses outside dirs.
+        assert!(!is_repo_thread(&home, "thr-99"));
+        assert!(!record_app_thread(&home, &outside, "thr-outside").unwrap());
+        assert!(!is_repo_thread(&home, "thr-outside"));
+        assert!(record_app_thread(&home, &checkout, "thr-99").unwrap());
+        assert!(is_repo_thread(&home, "thr-99"));
+        let loaded = load_index(&home);
+        assert_eq!(loaded[0].app_thread.as_deref(), Some("thr-99"));
     }
 }

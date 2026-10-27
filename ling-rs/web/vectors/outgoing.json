@@ -481,6 +481,82 @@
       "message": {"id": 108, "method": "thread/start", "params": {"cwd": "/work/repo"}},
       "accept": true,
       "out": {"id": 108, "method": "thread/start", "params": {"cwd": "/work/repo"}}
+    },
+    {
+      "name": "a bridge thread/start with prompt chat-work and a cwd in repoCheckouts passes with approval policy on-request and workspace-write sandbox",
+      "bridge": true,
+      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "message": {"id": 109, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "approvalPolicy": "never"}},
+      "accept": true,
+      "out": {"id": 109, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "approvalPolicy": "on-request", "sandbox": "workspace-write", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a bridge thread/start with prompt chat-work and a cwd not in repoCheckouts is refused",
+      "bridge": true,
+      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "message": {"id": 110, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/work/other"}},
+      "accept": false
+    },
+    {
+      "name": "a chat-work thread/start with no cwd is refused",
+      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "message": {"id": 111, "method": "thread/start", "params": {"prompt": "chat-work"}},
+      "accept": false
+    },
+    {
+      "name": "a bridge thread/start with prompt default is refused",
+      "bridge": true,
+      "message": {"id": 112, "method": "thread/start", "params": {"prompt": "default", "cwd": "/work/repo"}},
+      "accept": false
+    },
+    {
+      "name": "a bridge thread/start with no prompt is refused",
+      "bridge": true,
+      "message": {"id": 113, "method": "thread/start", "params": {"cwd": "/work/repo"}},
+      "accept": false
+    },
+    {
+      "name": "a bridge thread/start with prompt chat (Ask) still passes as today, still with approval_policy never",
+      "bridge": true,
+      "message": {"id": 114, "method": "thread/start", "params": {"prompt": "chat", "cwd": "/work/repo"}},
+      "accept": true,
+      "out": {"id": 114, "method": "thread/start", "params": {"baseInstructions": "PROMPT:chat", "cwd": "SCRATCH/5", "sandbox": "workspace-write", "config": {"mcp_servers.mightling_images.enabled": false, "mcp_servers.mightling_images.command": "true", "approval_policy": "never"}}}
+    },
+    {
+      "name": "a non-bridge chat-work thread/start in a checkout passes",
+      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "message": {"id": 115, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef"}},
+      "accept": true,
+      "out": {"id": 115, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a chat-work thread/start asking for danger-full-access ends up workspace-write",
+      "bridge": true,
+      "repoCheckouts": ["/codex/chat-repos/org_widget/deadbeef"],
+      "message": {"id": 116, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "danger-full-access", "approvalPolicy": "never"}},
+      "accept": true,
+      "out": {"id": 116, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "thread/resume of a thread in repoThreads gets on-request and workspace-write",
+      "repoThreads": ["repo-t1"],
+      "message": {"id": 117, "method": "thread/resume", "params": {"threadId": "repo-t1", "sandbox": "danger-full-access"}},
+      "accept": true,
+      "out": {"id": 117, "method": "thread/resume", "params": {"threadId": "repo-t1", "sandbox": "workspace-write", "approvalPolicy": "on-request", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "thread/resume of another thread not in repoThreads is unchanged",
+      "repoThreads": ["repo-t1"],
+      "message": {"id": 118, "method": "thread/resume", "params": {"threadId": "other-t2", "cwd": "/work/repo"}},
+      "accept": true,
+      "out": {"id": 118, "method": "thread/resume", "params": {"threadId": "other-t2", "cwd": "/work/repo"}}
+    },
+    {
+      "name": "thread/fork of a thread in repoThreads gets on-request and workspace-write",
+      "repoThreads": ["repo-t1"],
+      "message": {"id": 119, "method": "thread/fork", "params": {"threadId": "repo-t1"}},
+      "accept": true,
+      "out": {"id": 119, "method": "thread/fork", "params": {"threadId": "repo-t1", "sandbox": "workspace-write", "approvalPolicy": "on-request", "config": {"approval_policy": "on-request"}}}
     }
   ]
 }

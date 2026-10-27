@@ -45,6 +45,13 @@ pub trait PromptSource: Send + Sync {
     /// thread's act, and a thread being opened has no level of its own yet, so both ask with None;
     /// a `!` command asks for its thread. An implementation that cannot tell answers true.
     fn airgapped_on(&self, thread_id: Option<&str>) -> bool;
+    /// Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json` under
+    /// `$CODEX_HOME/chat-repos/`.
+    fn repo_checkout(&self, cwd: &str) -> bool;
+    /// Whether `thread_id` is the `app_thread` of a checkout in `$CODEX_HOME/chat-repos/index.json`.
+    fn repo_thread(&self, thread_id: &str) -> bool;
+    /// Whether the caller is a paired phone bridge device rather than the owner's browser session or desktop app.
+    fn is_bridge(&self) -> bool;
 }
 
 /// The rules of `policy.json`.
@@ -58,6 +65,8 @@ pub struct Policy {
     pub prompt_openers: BTreeSet<String>,
     pub named_prompts: BTreeSet<String>,
     pub scratch_prompts: BTreeSet<String>,
+    pub repo_prompts: BTreeSet<String>,
+    pub repo_thread_params: Map<String, Value>,
     pub scratch_fields: Vec<String>,
     pub scratch_sandbox: String,
     pub import_request: String,
@@ -115,6 +124,12 @@ impl Policy {
             prompt_openers: strings(&value, "promptOpeners")?.into_iter().collect(),
             named_prompts: strings(&value, "namedPrompts")?.into_iter().collect(),
             scratch_prompts: strings(&value, "scratchPrompts")?.into_iter().collect(),
+            repo_prompts: strings(&value, "repoPrompts")?.into_iter().collect(),
+            repo_thread_params: value
+                .get("repoThreadParams")
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or_else(|| "policy.json: `repoThreadParams` must be an object".to_string())?,
             scratch_fields: strings(&value, "scratchFields")?,
             scratch_sandbox: string(&value, "scratchSandbox")?,
             import_request: string(&value, "importRequest")?,
@@ -167,6 +182,12 @@ impl Policy {
         }
         if !policy.scratch_prompts.is_subset(&policy.named_prompts) {
             return Err("policy.json: every scratch prompt must also be a named prompt".to_string());
+        }
+        if !policy.repo_prompts.is_subset(&policy.named_prompts) {
+            return Err("policy.json: every repo prompt must also be a named prompt".to_string());
+        }
+        if !policy.repo_prompts.is_disjoint(&policy.scratch_prompts) {
+            return Err("policy.json: a repo prompt cannot also be a scratch prompt".to_string());
         }
         if !policy.airgapped_refused_requests.is_subset(&policy.allowed_requests) {
             return Err("policy.json: every request refused at airgapped on must be allowed at off".to_string());
@@ -227,7 +248,7 @@ impl Policy {
                 }
                 if opener {
                     if let Some(Value::Object(params)) = object.get("params") {
-                        let params = self.vet_thread_params(params, prompts)?;
+                        let params = self.vet_thread_params(&method, params, prompts)?;
                         object.insert("params".to_string(), Value::Object(params));
                     }
                 }
@@ -255,7 +276,12 @@ impl Policy {
         }
     }
 
-    fn vet_thread_params(&self, params: &Map<String, Value>, prompts: &dyn PromptSource) -> Result<Map<String, Value>, String> {
+    fn vet_thread_params(
+        &self,
+        method: &str,
+        params: &Map<String, Value>,
+        prompts: &dyn PromptSource,
+    ) -> Result<Map<String, Value>, String> {
         let mut params = params.clone();
         for field in &self.dropped_thread_fields {
             params.remove(field);
@@ -264,6 +290,13 @@ impl Policy {
         let existing = params.get("threadId").and_then(Value::as_str).and_then(|id| prompts.scratch_folder_of(id));
         if let Some(folder) = existing.clone() {
             self.confine(&mut params, folder);
+        }
+        // A resumed or forked chat-work thread keeps its workspace-write sandbox and on-request approvals.
+        let existing_repo = params.get("threadId").and_then(Value::as_str).is_some_and(|id| prompts.repo_thread(id));
+        if existing_repo {
+            for (k, v) in &self.repo_thread_params {
+                params.insert(k.clone(), v.clone());
+            }
         }
         if let Some(names) = params.remove(&self.window_tools_field) {
             let Value::Array(names) = names else {
@@ -292,11 +325,34 @@ impl Policy {
         if let Some(prompt) = existing.as_deref().and_then(|folder| self.prompt_of_folder(folder)) {
             config.extend(self.prompt_thread_config[prompt].clone());
         }
+        if existing_repo {
+            for prompt in &self.repo_prompts {
+                if let Some(prompt_config) = self.prompt_thread_config.get(prompt) {
+                    config.extend(prompt_config.clone());
+                }
+            }
+        }
         let name = match params.remove(&self.prompt_field) {
             None => None,
             Some(Value::String(name)) => Some(name),
             Some(_) => return Err(format!("`{}` must name a prompt", self.prompt_field)),
         };
+        if let Some(ref name) = name
+            && !self.named_prompts.contains(name)
+        {
+            return Err(format!(
+                "no prompt named \"{name}\" may be chosen here; named prompts: {}",
+                self.named_prompts.iter().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        if self.prompt_openers.contains(method)
+            && prompts.is_bridge()
+            && !name
+                .as_deref()
+                .is_some_and(|n| self.scratch_prompts.contains(n) || self.repo_prompts.contains(n))
+        {
+            return Err("a phone bridge starts only Ask threads or chat-work threads in a forge checkout".to_string());
+        }
         if let Some(prompt_config) = name.as_ref().and_then(|name| self.prompt_thread_config.get(name)) {
             config.extend(prompt_config.clone());
         }
@@ -304,11 +360,13 @@ impl Policy {
             params.insert("config".to_string(), Value::Object(config));
         }
         let Some(name) = name else { return Ok(params) };
-        if !self.named_prompts.contains(&name) {
-            return Err(format!(
-                "no prompt named \"{name}\" may be chosen here; named prompts: {}",
-                self.named_prompts.iter().cloned().collect::<Vec<_>>().join(", ")
-            ));
+        if self.repo_prompts.contains(&name) {
+            if !params.get("cwd").and_then(Value::as_str).is_some_and(|cwd| prompts.repo_checkout(cwd)) {
+                return Err("a chat-work thread starts only in a checkout ling web made for it".to_string());
+            }
+            for (k, v) in &self.repo_thread_params {
+                params.insert(k.clone(), v.clone());
+            }
         }
         // `default` is what the launcher's catalog already carries: setting it again would only
         // freeze today's text into the thread.
@@ -452,6 +510,9 @@ mod tests {
     struct Stub {
         made: Mutex<u32>,
         airgapped: std::sync::atomic::AtomicBool,
+        repo_checkouts: Mutex<HashSet<String>>,
+        repo_threads: Mutex<HashSet<String>>,
+        bridge: std::sync::atomic::AtomicBool,
     }
 
     impl PromptSource for Stub {
@@ -469,6 +530,15 @@ mod tests {
         fn airgapped_on(&self, _thread_id: Option<&str>) -> bool {
             self.airgapped.load(std::sync::atomic::Ordering::Relaxed)
         }
+        fn repo_checkout(&self, cwd: &str) -> bool {
+            self.repo_checkouts.lock().unwrap().contains(cwd)
+        }
+        fn repo_thread(&self, thread_id: &str) -> bool {
+            self.repo_threads.lock().unwrap().contains(thread_id)
+        }
+        fn is_bridge(&self) -> bool {
+            self.bridge.load(std::sync::atomic::Ordering::Relaxed)
+        }
     }
 
     #[test]
@@ -476,6 +546,9 @@ mod tests {
         let policy = Policy::embedded();
         assert!(policy.allowed_requests.contains("thread/start"));
         assert!(policy.named_prompts.contains("ask"));
+        assert!(policy.named_prompts.contains("chat-work"));
+        assert!(policy.repo_prompts.contains("chat-work"));
+        assert!(!policy.scratch_prompts.contains("chat-work"));
         assert!(!policy.refused_import_items.contains("PLUGINS"), "plugins import while airgapped is off");
         assert!(policy.airgapped_refused_import_items.contains("PLUGINS"), "an import fetches no plugin at on");
         for fetches in ["plugin/install", "marketplace/add", "marketplace/upgrade"] {
@@ -486,6 +559,10 @@ mod tests {
         assert_eq!(chat.get("mcp_servers.mightling_images.enabled"), Some(&Value::Bool(false)), "a phone shows no pictures");
         // An approval on a phone holds the answer until the user replies; the sandbox has the network.
         assert_eq!(chat.get("approval_policy"), Some(&Value::String("never".to_string())), "a phone thread asks no approvals");
+        let chat_work = &policy.prompt_thread_config["chat-work"];
+        assert_eq!(chat_work.get("approval_policy"), Some(&Value::String("on-request".to_string())));
+        assert_eq!(policy.repo_thread_params.get("sandbox"), Some(&Value::String("workspace-write".to_string())));
+        assert_eq!(policy.repo_thread_params.get("approvalPolicy"), Some(&Value::String("on-request".to_string())));
         assert!(policy.prompt_thread_config.keys().all(|name| policy.named_prompts.contains(name)));
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {
             assert!(!policy.allowed_requests.contains(refused), "{refused}");
@@ -496,7 +573,13 @@ mod tests {
     fn every_conformance_vector_holds() {
         let vectors: Value = serde_json::from_str(include_str!("../vectors/outgoing.json")).unwrap();
         let policy = Policy::embedded();
-        let stub = Stub { made: Mutex::new(0), airgapped: Default::default() };
+        let stub = Stub {
+            made: Mutex::new(0),
+            airgapped: Default::default(),
+            repo_checkouts: Mutex::new(HashSet::new()),
+            repo_threads: Mutex::new(HashSet::new()),
+            bridge: Default::default(),
+        };
         let cases = vectors["cases"].as_array().unwrap();
         assert!(cases.len() >= 25);
         for case in cases {
@@ -509,6 +592,17 @@ mod tests {
             let level = case.get("airgapped").and_then(Value::as_str).unwrap_or("off");
             assert!(matches!(level, "off" | "on"), "{name}: airgapped is off or on");
             stub.airgapped.store(level == "on", std::sync::atomic::Ordering::Relaxed);
+            *stub.repo_checkouts.lock().unwrap() = case
+                .get("repoCheckouts")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().map(|v| v.as_str().unwrap().to_string()).collect())
+                .unwrap_or_default();
+            *stub.repo_threads.lock().unwrap() = case
+                .get("repoThreads")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().map(|v| v.as_str().unwrap().to_string()).collect())
+                .unwrap_or_default();
+            stub.bridge.store(case.get("bridge").and_then(Value::as_bool).unwrap_or(false), std::sync::atomic::Ordering::Relaxed);
             let result = policy.vet_outgoing(&case["message"], &mut pending, &stub);
             if case["accept"].as_bool().unwrap() {
                 let out = result.unwrap_or_else(|err| panic!("{name}: refused: {err}"));
@@ -550,6 +644,15 @@ mod tests {
             }
             fn airgapped_on(&self, thread_id: Option<&str>) -> bool {
                 thread_id == Some("sealed")
+            }
+            fn repo_checkout(&self, _cwd: &str) -> bool {
+                false
+            }
+            fn repo_thread(&self, _thread_id: &str) -> bool {
+                false
+            }
+            fn is_bridge(&self) -> bool {
+                false
             }
         }
         let policy = Policy::embedded();

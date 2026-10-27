@@ -80,6 +80,22 @@ pub fn link_thread(root: &Path, thread_id: &str, folder: &Path) -> std::io::Resu
     return std::fs::write(link, target.to_string_lossy().as_bytes());
 }
 
+/// Whether a paired device's name is a phone bridge's device name (`signal-bridge`, or a named
+/// Signal bridge instance `signal-<instance>`).
+pub fn is_bridge_device(name: &str) -> bool {
+    if name == "signal-bridge" {
+        return true;
+    }
+    let Some(instance) = name.strip_prefix("signal-") else {
+        return false;
+    };
+    !instance.is_empty()
+        && instance.len() <= 12
+        && instance != "default"
+        && instance.as_bytes()[0].is_ascii_lowercase()
+        && instance.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 /// What the policy layer asks while vetting one message: the named prompt's text, fetched before
 /// the message is vetted, and the Ask folders.
 pub struct MessagePrompts<'a> {
@@ -93,6 +109,23 @@ pub struct MessagePrompts<'a> {
     /// The folder the thread the message names works in, when the server has said: a thread's
     /// air-gap level is read with that repository's configuration file too.
     pub thread_folder: Option<PathBuf>,
+}
+
+impl<'a> MessagePrompts<'a> {
+    fn codex_home(&self) -> &Path {
+        self.root.parent().unwrap_or(self.root)
+    }
+
+    /// Marks whether this message came from a paired phone bridge tab.
+    pub fn with_bridge(self, bridge: bool) -> TabPrompts<'a> {
+        TabPrompts { inner: self, bridge }
+    }
+}
+
+/// [`MessagePrompts`] with the tab's phone-bridge flag attached.
+pub struct TabPrompts<'a> {
+    pub inner: MessagePrompts<'a>,
+    pub bridge: bool,
 }
 
 impl PromptSource for MessagePrompts<'_> {
@@ -118,6 +151,48 @@ impl PromptSource for MessagePrompts<'_> {
             None => self.airgapped_on,
             Some(thread) => crate::server::thread_airgapped_on(Some(thread), self.thread_folder.as_deref()),
         }
+    }
+
+    fn repo_checkout(&self, cwd: &str) -> bool {
+        crate::chat_repos::is_repo_checkout(self.codex_home(), Path::new(cwd))
+    }
+
+    fn repo_thread(&self, thread_id: &str) -> bool {
+        crate::chat_repos::is_repo_thread(self.codex_home(), thread_id)
+    }
+
+    fn is_bridge(&self) -> bool {
+        false
+    }
+}
+
+impl PromptSource for TabPrompts<'_> {
+    fn composed(&self, name: &str) -> Result<String, String> {
+        self.inner.composed(name)
+    }
+
+    fn new_scratch_folder(&self, prompt: &str) -> Result<String, String> {
+        self.inner.new_scratch_folder(prompt)
+    }
+
+    fn scratch_folder_of(&self, thread_id: &str) -> Option<String> {
+        self.inner.scratch_folder_of(thread_id)
+    }
+
+    fn airgapped_on(&self, thread_id: Option<&str>) -> bool {
+        self.inner.airgapped_on(thread_id)
+    }
+
+    fn repo_checkout(&self, cwd: &str) -> bool {
+        self.inner.repo_checkout(cwd)
+    }
+
+    fn repo_thread(&self, thread_id: &str) -> bool {
+        self.inner.repo_thread(thread_id)
+    }
+
+    fn is_bridge(&self) -> bool {
+        self.bridge
     }
 }
 
@@ -171,6 +246,58 @@ mod tests {
             assert_eq!(folder_of(&root, "planted"), None);
             assert!(!is_folder(&root, &home));
         }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn bridge_device_names_and_message_prompts_repo_checks() {
+        assert!(is_bridge_device("signal-bridge"));
+        assert!(is_bridge_device("signal-work"));
+        assert!(!is_bridge_device("signal-default"));
+        assert!(!is_bridge_device("signal-"));
+        assert!(!is_bridge_device("owner"));
+        assert!(!is_bridge_device("My iPhone"));
+
+        let home = scratch("repo-prompts");
+        let root = root(&home);
+        std::fs::create_dir_all(&root).unwrap();
+        let checkout = crate::chat_repos::root_dir(&home).join("org_widget").join("deadbeef");
+        let outside = home.join("outside");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let record = crate::chat_repos::CheckoutRecord {
+            thread: "deadbeef".to_string(),
+            repo: "org/widget".to_string(),
+            bridge: "signal".to_string(),
+            chat: "note-to-self".to_string(),
+            device: "signal-bridge".to_string(),
+            dir: checkout.to_string_lossy().into_owned(),
+            branch: Some("phone/deadbeef".to_string()),
+            base: "main".to_string(),
+            app_thread: None,
+            read_only: false,
+            created: 1,
+            last_used: 1,
+        };
+        crate::chat_repos::save_index(&home, &[record]).unwrap();
+
+        let prompts = MessagePrompts {
+            root: &root,
+            composed: None,
+            created: Mutex::new(None),
+            airgapped_on: false,
+            thread_folder: None,
+        }
+        .with_bridge(true);
+
+        assert!(prompts.is_bridge());
+        assert!(prompts.repo_checkout(&checkout.to_string_lossy()));
+        assert!(!prompts.repo_checkout(&outside.to_string_lossy()));
+        assert!(!prompts.repo_thread("app-t1"));
+        assert!(crate::chat_repos::record_app_thread(&home, &checkout, "app-t1").unwrap());
+        assert!(prompts.repo_thread("app-t1"));
+
         let _ = std::fs::remove_dir_all(&home);
     }
 }

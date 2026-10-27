@@ -46,6 +46,9 @@ struct Shared {
     /// Thread openers whose new thread works in an Ask folder, by request id: answered, the folder
     /// is named after the thread.
     openers: Mutex<HashMap<String, PathBuf>>,
+    /// Thread openers for `chat-work` threads in a repository checkout, by request id: answered,
+    /// the checkout's `app_thread` is recorded in `$CODEX_HOME/chat-repos/index.json`.
+    repo_openers: Mutex<HashMap<String, PathBuf>>,
     /// The folder each thread works in, as the server named it (`thread_place`).
     places: Mutex<HashMap<String, PathBuf>>,
 }
@@ -57,6 +60,7 @@ struct Tab {
     upstream: Option<SplitSink<Upstream, UpstreamMessage>>,
     reader: Option<JoinHandle<()>>,
     shared: Arc<Shared>,
+    bridge: bool,
 }
 
 fn event(channel: &str, payload: Value) -> Value {
@@ -64,6 +68,10 @@ fn event(channel: &str, payload: Value) -> Value {
 }
 
 pub async fn run_tab(socket: WebSocket, server: Arc<Server>) {
+    run_tab_for_device(socket, server, None).await;
+}
+
+pub async fn run_tab_for_device(socket: WebSocket, server: Arc<Server>, device_name: Option<String>) {
     let (mut to_browser, mut from_browser) = socket.split();
     let (out, mut outgoing) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {
@@ -87,7 +95,16 @@ pub async fn run_tab(socket: WebSocket, server: Arc<Server>) {
             }
         }
     });
-    let mut tab = Tab { id: server.new_tab_id(), server, out: out.clone(), upstream: None, reader: None, shared: Arc::default() };
+    let bridge = device_name.as_deref().is_some_and(ask::is_bridge_device);
+    let mut tab = Tab {
+        id: server.new_tab_id(),
+        server,
+        out: out.clone(),
+        upstream: None,
+        reader: None,
+        shared: Arc::default(),
+        bridge,
+    };
     while let Some(Ok(frame)) = from_browser.next().await {
         let text = match frame {
             Message::Text(text) => text,
@@ -187,9 +204,16 @@ impl Tab {
             .filter(|name| *name != "default" && policy.named_prompts.contains(*name))
             .map(str::to_string);
         let ask_root = self.server.ask_root();
+        let compose_cwd = message
+            .pointer("/params/cwd")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .filter(|cwd| crate::chat_repos::is_repo_checkout(&self.server.config.codex_home, cwd))
+            .unwrap_or_else(|| ask_root.clone());
+        let is_repo_prompt = named.as_ref().is_some_and(|name| policy.repo_prompts.contains(name));
         let composed = match named {
             Some(name) => {
-                let text = crate::prompts::composed(&self.server.config.launch, &name, &ask_root).await?;
+                let text = crate::prompts::composed(&self.server.config.launch, &name, &compose_cwd).await?;
                 Some((name, text))
             }
             None => None,
@@ -200,7 +224,14 @@ impl Tab {
             .pointer("/params/threadId")
             .and_then(Value::as_str)
             .and_then(|thread| self.shared.places.lock().unwrap_or_else(|p| p.into_inner()).get(thread).cloned());
-        let prompts = ask::MessagePrompts { root: &ask_root, composed, created: Mutex::new(None), airgapped_on, thread_folder };
+        let prompts = ask::MessagePrompts {
+            root: &ask_root,
+            composed,
+            created: Mutex::new(None),
+            airgapped_on,
+            thread_folder,
+        }
+        .with_bridge(self.bridge);
         let vetted = {
             let mut pending = self.shared.pending.lock().unwrap_or_else(|p| p.into_inner());
             policy.vet_outgoing(&message, &mut pending, &prompts)?
@@ -209,9 +240,12 @@ impl Tab {
         let opener = vetted.get("method").and_then(Value::as_str).is_some_and(|method| policy.thread_openers.contains(method));
         if opener
             && let (Some(id), Some(cwd)) = (vetted.get("id"), vetted.get("params").and_then(|p| p.get("cwd")).and_then(Value::as_str))
-            && ask::is_folder(&ask_root, std::path::Path::new(cwd))
         {
-            self.shared.openers.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), PathBuf::from(cwd));
+            if ask::is_folder(&ask_root, std::path::Path::new(cwd)) {
+                self.shared.openers.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), PathBuf::from(cwd));
+            } else if is_repo_prompt {
+                self.shared.repo_openers.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), PathBuf::from(cwd));
+            }
         }
         let Some(upstream) = self.upstream.as_mut() else { return Err("the agent's server is not running".to_string()) };
         upstream.send(UpstreamMessage::Text(vetted.to_string().into())).await.map_err(|err| format!("could not reach the agent's server: {err}"))
@@ -259,6 +293,12 @@ fn deliver(server: &Server, shared: &Shared, out: &mpsc::UnboundedSender<Value>,
                 && let Some(thread) = value.pointer("/result/thread/id").and_then(Value::as_str)
             {
                 let _ = ask::link_thread(&server.ask_root(), thread, &folder);
+            }
+            let repo_folder = shared.repo_openers.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+            if let Some(folder) = repo_folder
+                && let Some(thread) = value.pointer("/result/thread/id").and_then(Value::as_str)
+            {
+                let _ = server.chat_repos.record_app_thread(&server.config.codex_home, &folder, thread);
             }
         }
         Incoming::NotProtocol => {}

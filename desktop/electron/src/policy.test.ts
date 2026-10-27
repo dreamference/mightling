@@ -19,6 +19,9 @@ interface Case {
   pending?: string[];
   pendingAfter?: string[];
   airgapped?: "off" | "on";
+  repoCheckouts?: string[];
+  repoThreads?: string[];
+  bridge?: boolean;
 }
 
 describe("the policy", () => {
@@ -44,15 +47,24 @@ describe("the policy", () => {
     expect(vectors.cases.length).toBeGreaterThanOrEqual(25);
     let made = 0;
     let on = false;
+    let repoCheckouts = new Set<string>();
+    let repoThreads = new Set<string>();
+    let bridge = false;
     const stub: PromptSource = {
       composed: (name) => `PROMPT:${name}`,
       newScratchFolder: () => `SCRATCH/${++made}`,
       scratchFolderOf: (thread) => (thread.startsWith("ask-") || thread.startsWith("chat-") ? `ASK/${thread}` : null),
       airgappedOn: () => on,
+      repoCheckout: (cwd) => repoCheckouts.has(cwd),
+      repoThread: (threadId) => repoThreads.has(threadId),
+      isBridge: () => bridge,
     };
     for (const testCase of vectors.cases) {
       expect(["off", "on"], testCase.name).toContain(testCase.airgapped ?? "off");
       on = testCase.airgapped === "on";
+      repoCheckouts = new Set(testCase.repoCheckouts ?? []);
+      repoThreads = new Set(testCase.repoThreads ?? []);
+      bridge = Boolean(testCase.bridge);
       const pending = new Set(testCase.pending ?? []);
       if (testCase.accept) {
         let out: unknown;
@@ -83,6 +95,9 @@ describe("the policy", () => {
       newScratchFolder: () => "SCRATCH",
       scratchFolderOf: () => null,
       airgappedOn: (thread) => (asked.push(thread), thread === "sealed"),
+      repoCheckout: () => false,
+      repoThread: () => false,
+      isBridge: () => false,
     };
     const shell = (thread: string) => ({ id: 1, method: "thread/shellCommand", params: { threadId: thread, command: "ls" } });
     expect(() => vetOutgoing(shell("open"), new Set(), sealed)).not.toThrow();

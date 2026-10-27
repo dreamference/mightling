@@ -212,6 +212,16 @@ impl Server {
             .is_some_and(|token| self.sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token)))
     }
 
+    /// The paired device name when the request is authenticated by a paired device cookie and not
+    /// by the owner's own session cookie.
+    pub fn paired_device_name(&self, headers: &HeaderMap) -> Option<String> {
+        if self.owner_session(headers) {
+            return None;
+        }
+        let token = auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE)?;
+        auth::device_for_token(&self.config.state_dir, token).map(|device| device.name)
+    }
+
     fn new_session(&self) -> String {
         let token = auth::random_hex(32);
         self.sessions.lock().unwrap_or_else(|p| p.into_inner()).insert(auth::sha256_hex(&token));
@@ -538,8 +548,11 @@ async fn healthz(State(server): State<Arc<Server>>) -> Response {
     )
 }
 
-async fn websocket(State(server): State<Arc<Server>>, upgrade: WebSocketUpgrade) -> Response {
-    upgrade.max_message_size(64 << 20).on_upgrade(move |socket| crate::relay::run_tab(socket, server))
+async fn websocket(State(server): State<Arc<Server>>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
+    let device_name = server.paired_device_name(&headers);
+    upgrade
+        .max_message_size(64 << 20)
+        .on_upgrade(move |socket| crate::relay::run_tab_for_device(socket, server, device_name))
 }
 
 /// The user-level air-gap level, for clients that cannot read the user's configuration: the Signal

@@ -35,6 +35,12 @@ export interface PromptSource {
    * thread. An implementation that cannot tell answers true.
    */
   airgappedOn(threadId: string | null): boolean;
+  /** Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json` under `$CODEX_HOME/chat-repos/`. */
+  repoCheckout(cwd: string): boolean;
+  /** Whether `threadId` is the `app_thread` of a checkout in `$CODEX_HOME/chat-repos/index.json`. */
+  repoThread(threadId: string): boolean;
+  /** Whether the caller is a paired phone bridge device rather than the owner's browser session or desktop app. */
+  isBridge(): boolean;
 }
 
 /** The rules of `policy.json`. */
@@ -47,6 +53,8 @@ export interface Policy {
   promptOpeners: ReadonlySet<string>;
   namedPrompts: ReadonlySet<string>;
   scratchPrompts: ReadonlySet<string>;
+  repoPrompts: ReadonlySet<string>;
+  repoThreadParams: Readonly<JsonObject>;
   scratchFields: readonly string[];
   scratchSandbox: string;
   importRequest: string;
@@ -104,6 +112,8 @@ export function parsePolicy(value: unknown): Policy {
     promptOpeners: new Set(strings(value, "promptOpeners")),
     namedPrompts: new Set(strings(value, "namedPrompts")),
     scratchPrompts: new Set(strings(value, "scratchPrompts")),
+    repoPrompts: new Set(strings(value, "repoPrompts")),
+    repoThreadParams: isObject(value.repoThreadParams) ? value.repoThreadParams : (() => { throw new Error("policy.json: `repoThreadParams` must be an object"); })(),
     scratchFields: strings(value, "scratchFields"),
     scratchSandbox: string(value, "scratchSandbox"),
     importRequest: string(value, "importRequest"),
@@ -126,6 +136,12 @@ export function parsePolicy(value: unknown): Policy {
   }
   if (![...policy.scratchPrompts].every((name) => policy.namedPrompts.has(name))) {
     throw new Error("policy.json: every scratch prompt must also be a named prompt");
+  }
+  if (![...policy.repoPrompts].every((name) => policy.namedPrompts.has(name))) {
+    throw new Error("policy.json: every repo prompt must also be a named prompt");
+  }
+  if ([...policy.repoPrompts].some((name) => policy.scratchPrompts.has(name))) {
+    throw new Error("policy.json: a repo prompt cannot also be a scratch prompt");
   }
   if (![...policy.airgappedRefusedRequests].every((method) => policy.allowedRequests.has(method))) {
     throw new Error("policy.json: every request refused at airgapped on must be allowed at off");
@@ -203,12 +219,15 @@ function confine(policy: Policy, params: JsonObject, folder: string): void {
   params.sandbox = policy.scratchSandbox;
 }
 
-function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSource): JsonObject {
+function vetThreadParams(policy: Policy, method: string, original: JsonObject, prompts: PromptSource): JsonObject {
   const params: JsonObject = { ...original };
   for (const field of policy.droppedThreadFields) delete params[field];
   // A resumed or forked Ask thread stays where it was started.
   const existing = typeof params.threadId === "string" ? prompts.scratchFolderOf(params.threadId) : null;
   if (existing !== null) confine(policy, params, existing);
+  // A resumed or forked chat-work thread keeps its workspace-write sandbox and on-request approvals.
+  const existingRepo = typeof params.threadId === "string" && prompts.repoThread(params.threadId);
+  if (existingRepo) Object.assign(params, policy.repoThreadParams);
   if (policy.windowToolsField in params) {
     const names = params[policy.windowToolsField];
     delete params[policy.windowToolsField];
@@ -225,15 +244,33 @@ function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSo
   // A resumed thread of a prompt with a config of its own is known by its folder's name.
   const resumedAs = existing === null ? undefined : promptOfFolder(policy, existing);
   if (resumedAs !== undefined) config = { ...config, ...policy.promptThreadConfig.get(resumedAs) };
+  if (existingRepo) {
+    for (const prompt of policy.repoPrompts) {
+      if (policy.promptThreadConfig.has(prompt)) config = { ...config, ...policy.promptThreadConfig.get(prompt) };
+    }
+  }
   const named = policy.promptField in params;
   const name = params[policy.promptField];
   delete params[policy.promptField];
   if (named && typeof name !== "string") throw new Error(`\`${policy.promptField}\` must name a prompt`);
+  if (typeof name === "string" && !policy.namedPrompts.has(name)) {
+    throw new Error(`no prompt named "${name}" may be chosen here; named prompts: ${[...policy.namedPrompts].sort().join(", ")}`);
+  }
+  if (
+    policy.promptOpeners.has(method) &&
+    prompts.isBridge() &&
+    !(typeof name === "string" && (policy.scratchPrompts.has(name) || policy.repoPrompts.has(name)))
+  ) {
+    throw new Error("a phone bridge starts only Ask threads or chat-work threads in a forge checkout");
+  }
   if (typeof name === "string" && policy.promptThreadConfig.has(name)) config = { ...config, ...policy.promptThreadConfig.get(name) };
   if (Object.keys(config).length) params.config = config;
   if (typeof name !== "string") return params;
-  if (!policy.namedPrompts.has(name)) {
-    throw new Error(`no prompt named "${name}" may be chosen here; named prompts: ${[...policy.namedPrompts].sort().join(", ")}`);
+  if (policy.repoPrompts.has(name)) {
+    if (typeof params.cwd !== "string" || !prompts.repoCheckout(params.cwd)) {
+      throw new Error("a chat-work thread starts only in a checkout ling web made for it");
+    }
+    Object.assign(params, policy.repoThreadParams);
   }
   // `default` is what the launcher's catalog already carries: setting it again would only freeze
   // today's text into the thread.
@@ -290,7 +327,7 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
       throw new Error(`window tools can only be named when a thread is started, not by ${method}`);
     }
     if (policy.threadOpeners.has(method) && isObject(object.params)) {
-      object.params = vetThreadParams(policy, object.params, prompts);
+      object.params = vetThreadParams(policy, method, object.params, prompts);
     }
     if (method === policy.importRequest) {
       object.params = vetImportParams(policy, isObject(object.params) ? object.params : {}, prompts.airgappedOn(null));
