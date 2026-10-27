@@ -30,6 +30,10 @@ REAL_GOOGLE_SERVICE_START = GoogleService.start
 # Every interactive `ling-admin` run may offer to remove the retired web chat's containers; the
 # fixture below never lets it, and its own tests restore this.
 REAL_RETIRED_OFFER = RetiredWebChat.offer
+# `node enable` sets up the node's forge (FORGEJO O1): docker, user units, accounts.
+from dreamference.forge.forge_service import ForgeService  # noqa: E402
+
+REAL_FORGE_SETUP = ForgeService.setup
 from dreamference.chat.image_search_sidecar import ImageSearchSidecar  # noqa: E402
 from dreamference.chat.speech_sidecar import SpeechSidecar  # noqa: E402
 
@@ -82,6 +86,7 @@ def _isolate_services(monkeypatch):
     monkeypatch.setattr(RetiredWebChat, "offer", classmethod(lambda cls, command: None))
     monkeypatch.setattr(ImageSearchSidecar, "start", classmethod(lambda cls, *a, **k: True))
     monkeypatch.setattr(SpeechSidecar, "start", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(ForgeService, "setup", classmethod(lambda cls, show_password=True: True))
 
 
 @pytest.fixture(autouse=True)
@@ -159,7 +164,8 @@ def _refuse_real_docker(monkeypatch, request):
         def run(*args, **kwargs):
             argv = args[0] if args else kwargs.get("args")
             program = argv[0] if isinstance(argv, (list, tuple)) and argv else str(argv).split(" ")[0]
-            if os.path.basename(str(program)) == "docker" and _changes_something(argv):
+            if os.path.basename(str(program)) == "docker" and _changes_something(argv) \
+                    and not _throwaway_forge(request, argv):
                 raise AssertionError(f"a test tried to run a real docker command: {argv!r}; mock it")
             # `server start` stops the code index's scopes before its host-safety pre-flight
             # (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §9.2): a test must never stop, freeze or
@@ -186,6 +192,22 @@ def _refuse_real_docker(monkeypatch, request):
 
     for name in ("run", "call", "check_call", "check_output", "Popen"):
         monkeypatch.setattr(subprocess, name, guarded(getattr(subprocess, name)))
+
+
+# The throwaway Forgejo of tests/test_forge_private.py (FORGEJO §5.3): a test marked
+# `forge_container`, run only when MIGHTLING_FORGE_CONTAINER_TESTS=1, may run docker commands that
+# name its own container, network or image pin, never the node's forge (`mightling-forge`).
+FORGE_CONTAINER_MARK: str = "forge_container"
+THROWAWAY_FORGE_PREFIX: str = "mightling-forge-test-"
+
+
+def _throwaway_forge(request, argv) -> bool:
+    if not request.node.get_closest_marker(FORGE_CONTAINER_MARK) or not isinstance(argv, (list, tuple)):
+        return False
+    words = [str(w) for w in argv]
+    if any(w == "mightling-forge" or w.startswith("mightling-forge:") for w in words):
+        return False
+    return any(THROWAWAY_FORGE_PREFIX in w for w in words) or words[1:2] == ["pull"]
 
 
 # The one opt-out of the offline rule: a test of the built `ling` itself (test_mightling_slash_commands.py)

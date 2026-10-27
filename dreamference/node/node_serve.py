@@ -32,7 +32,7 @@ MODEL_KEY: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9._-]{1,80}")
 
 REFUSAL: Final[str] = ("ling-admin node serve-job: this key may only ask for Mightling node operations "
                        "(info, status, start, stop, set-model <key>, model-receive <key>, adapter-receive, "
-                       "unpair, jobs and night tasks).")
+                       "unpair, jobs, night tasks and the forge's).")
 
 # The two git services a job's push and fetch ask for, and the only path shape they may name.
 GIT_SERVICES: Final[tuple] = ("git-receive-pack", "git-upload-pack")
@@ -176,11 +176,27 @@ class NodeServe:
             return cls.git_service(operation, arguments[0])
         if operation.startswith("job-"):
             return cls.job_operation(operation, arguments)
+        if operation.startswith(("night-", "forge-")):
+            return cls.subsystem_operation(operation, arguments)
+        print(REFUSAL, file=sys.stderr)
+        return 2
+
+    @classmethod
+    def subsystem_operation(cls, operation: str, arguments: list[str]) -> int:
+        """Hand a Night Shift (`night-*`) or forge (`forge-*`) operation to its subsystem.
+
+        Args:
+            operation: The operation's name.
+            arguments: Its arguments.
+
+        Returns:
+            int: The subsystem's exit code.
+        """
         if operation.startswith("night-"):
             from dreamference.night_shift.night_shift_remote import NightShiftRemote
             return NightShiftRemote.serve(operation, arguments)
-        print(REFUSAL, file=sys.stderr)
-        return 2
+        from dreamference.forge.forge_serve import ForgeServe
+        return ForgeServe.serve(operation, arguments)
 
     @classmethod
     def git_service(cls, service: str, path: str) -> int:

@@ -437,6 +437,8 @@ class NodeProvisioner:
         arguments = (
             ["node", "enable"] if self.options.get("web") else ["node", "enable", "--no-web"]
         )
+        if self.options.get("no_forge"):
+            arguments.append("--no-forge")
         enabled = session.run_admin(arguments, docker=True)
         if enabled.returncode != 0:
             return self._fail(
