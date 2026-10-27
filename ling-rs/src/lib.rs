@@ -62,6 +62,7 @@ pub mod images;
 pub mod ledger;
 pub mod loop_guard;
 pub mod mask;
+pub mod monitor;
 pub mod night;
 pub mod node;
 pub mod node_command;
@@ -120,13 +121,13 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync", "monitor",
 ];
 
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync",
+    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync", "monitor",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -474,6 +475,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "loop-guard"
     {
         std::process::exit(loop_guard::run_cli(&user_args[index + 1..]));
+    }
+    // `monitor` is the session monitor: one check, its summary, its timer (monitor.rs;
+    // specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md Part B).
+    if let Some(index) = subcommand
+        && user_args[index] == "monitor"
+    {
+        std::process::exit(monitor::run_cli(&user_args[index + 1..]));
     }
     // `refine` shows refine mode's setting, and `refine hook` is its hook in the TUI (refine.rs).
     if let Some(index) = subcommand

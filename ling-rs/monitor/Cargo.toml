@@ -1,0 +1,27 @@
+# `ling monitor`, the session monitor (specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md Part B): plain
+# code that reads the agents' transcripts on this machine, read-only, and writes one summary and a few
+# short alerts. No model, no network, no port. A crate of its own so its tests run without compiling
+# the Codex workspace (`cargo test` in a copy of this folder); the launcher (`../src/monitor.rs`) only
+# routes `ling monitor …` here. The small `ling-monitor` binary runs the same commands where the
+# installed `ling` predates the monitor. Versions are the Codex workspace's, so building inside it
+# adds no second copy of any crate.
+[package]
+name = "ling-monitor"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_monitor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ling-monitor"
+path = "src/main.rs"
+
+[dependencies]
+chrono = "0.4.43"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9.5"

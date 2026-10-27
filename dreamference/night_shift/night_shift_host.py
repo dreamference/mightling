@@ -44,6 +44,7 @@ NON_INTERACTIVE: Final[frozenset] = frozenset(
         "node",
         "airgapped",
         "skill",
+        "monitor",
         "prompt",
         "update",
         "app",
