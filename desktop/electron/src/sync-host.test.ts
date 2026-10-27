@@ -277,7 +277,7 @@ describe("what the host reads", () => {
 
   it("takes a hub only on the user's own network, over plain http", () => {
     expect(hubBase("http://192.168.50.105:3100")).toBe("http://192.168.50.105:3100");
-    expect(hubBase("http://127.0.0.1:3100/")).toBe("http://127.0.0.1:3100");
+    expect(hubBase("http://127.0.0.1:3101/")).toBe("http://127.0.0.1:3101");
     expect(hubBase("http://[fd12::1]:3100")).toBe("http://[fd12::1]:3100");
     expect(hubBase("http://node.local:3100")).toBe("http://node.local:3100");
     expect(hubBase("http://203.0.113.1:3100")).toBeNull();
