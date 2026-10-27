@@ -248,6 +248,27 @@ if (-not $NoPath) {
 # sets them up for this user, lets ling hear node announcements (mDNS, UDP 5353) on Private and
 # Domain networks, and runs the egress audit once (section 7.1, 10.2, 14 of the spec). Declining
 # leaves a working client whose commands run without a sandbox; ling says so at every start.
+#
+# The firewall rules are machine-wide, so there is one per program path, named after it:
+# "Mightling-mDNS-" and the first 8 hex digits of the SHA-256 of the full path, lowercased, in
+# UTF-8 (section 16.4; `ling uninstall` names and removes them the same way). An install removes
+# only the rules whose program is in its own folders, so another user's install keeps its rules.
+
+# Whether Codex's elevated sandbox is set up for a CODEX_HOME, read as Codex reads it
+# (sandbox_setup_is_complete in codex-rs/windows-sandbox-rs): its setup marker and its accounts
+# file, both at Codex's setup version (SETUP_VERSION in windows-sandbox-rs/src/setup.rs).
+$SandboxSetupVersion = 5
+function Test-SandboxSetUp([string]$CodexDir) {
+    foreach ($File in @(".sandbox\setup_marker.json", ".sandbox-secrets\sandbox_users.json")) {
+        try {
+            $Version = (Get-Content -Raw -Path (Join-Path $CodexDir $File) -ErrorAction Stop | ConvertFrom-Json).version
+        } catch {
+            return $false
+        }
+        if ($Version -ne $SandboxSetupVersion) { return $false }
+    }
+    return $true
+}
 
 $Mightling = Join-Path $InstallDir "ling.exe"
 if ($NoSandbox) {
@@ -258,42 +279,102 @@ if ($NoSandbox) {
     Say "Release $Tag carries no sandbox setup for ${Target}: commands will run without a sandbox."
 } else {
     # Named now, as the user who ran this: with an administrator's credentials typed over the
-    # shoulder of a standard user, the elevated process runs as that administrator instead.
+    # shoulder of a standard user, the elevated process runs as that administrator instead, with
+    # the administrator's environment and profile. So everything that is this user's is decided
+    # here and handed over: the account, CODEX_HOME, and what picks the node the audit judges (the
+    # remembered node in CODEX_HOME, the configuration under the home folder, and the variables).
     # The account's own name: $env:USERDOMAIN is the workgroup over OpenSSH, and the sandbox's
     # setup then fails with 1332 (no mapping between account names and security IDs).
     $User = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".mightling" }
+    $UserHome = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
     New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
+    # The desktop app's installer (desktop/electron/windows/installer.nsi) is per user, without
+    # administrator rights, so it cannot add firewall rules: the app's two programs get theirs here
+    # whenever it is present, the copy this run installed above included.
+    $AppDir = ""
+    try {
+        $AppDir = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Mightling" -Name InstallLocation -ErrorAction Stop).InstallLocation
+    } catch { }
+    if (-not $AppDir) { $AppDir = Join-Path $env:LOCALAPPDATA "Programs\Mightling\App" }
+    $Programs = @($Mightling)
+    if (Test-Path (Join-Path $AppDir "Mightling.exe")) {
+        $Programs += Join-Path $AppDir "Mightling.exe"
+        $Programs += Join-Path $AppDir "resources\ling.exe"
+    }
     $Step = Join-Path ([IO.Path]::GetTempPath()) ("mightling-elevated-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $Step | Out-Null
     $Script = Join-Path $Step "elevated.ps1"
     $Log = Join-Path $Step "elevated.log"
     Set-Content -Path $Script -Encoding ASCII -Value @'
-param([string]$Mightling, [string]$User, [string]$CodexHome, [string]$InstallDir, [string]$Log)
+param([string]$Mightling, [string]$User, [string]$CodexHome, [string]$UserHome, [string]$VllmHost, [string]$Node,
+      [string]$ConfigPath, [string]$InstallDir, [string]$AppDir, [string]$Programs, [string]$Log)
 $ErrorActionPreference = "Continue"
 function Note([string]$Text) { Add-Content -Path $Log -Value $Text -Encoding UTF8 }
+# The rule of one program (section 16.4): the first 8 hex digits of the SHA-256 of its full path,
+# lowercased, in UTF-8.
+function RuleName([string]$Program) {
+    $Sha = [Security.Cryptography.SHA256]::Create()
+    try { $Hash = $Sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Program.ToLowerInvariant())) } finally { $Sha.Dispose() }
+    return "Mightling-mDNS-" + (($Hash[0..3] | ForEach-Object { $_.ToString("x2") }) -join "")
+}
 & $Mightling sandbox setup --elevated --user $User --codex-home $CodexHome 2>&1 | ForEach-Object { Note "$_" }
 Note "sandbox-setup-exit=$LASTEXITCODE"
 try {
-    foreach ($Name in @("ling", "ling-app")) {
-        $Rule = "Mightling-mDNS-$Name"
-        Get-NetFirewallRule -Name $Rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-        New-NetFirewallRule -Name $Rule -DisplayName "Mightling node discovery (mDNS, $Name)" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 -Program (Join-Path $InstallDir "$Name.exe") -Profile Private, Domain | Out-Null
+    # Only this install's rules go: those whose program is in its folders, whatever their name. That
+    # also takes the fixed-name rules of 1.7.1 and earlier (Mightling-mDNS-ling, -ling-app) when
+    # they point here, and leaves them, and every rule, when they point at another user's install.
+    $Mine = @($InstallDir, $AppDir) | Where-Object { $_ } | ForEach-Object { $_.TrimEnd("\") + "\" }
+    Get-NetFirewallRule | Where-Object { $_.Name -like "Mightling-mDNS-*" } | ForEach-Object {
+        $Program = [string]($_ | Get-NetFirewallApplicationFilter).Program
+        $Ours = $false
+        foreach ($Dir in $Mine) { if ($Program.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase)) { $Ours = $true } }
+        if ($Ours) { $_ | Remove-NetFirewallRule -ErrorAction Stop }
+    }
+    foreach ($Program in ($Programs -split "\|" | Where-Object { $_ })) {
+        New-NetFirewallRule -Name (RuleName $Program) -DisplayName "Mightling node discovery (mDNS, $Program)" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 -Program $Program -Profile Private, Domain -ErrorAction Stop | Out-Null
     }
     Note "firewall=ok"
 } catch {
     Note "firewall=failed: $($_.Exception.Message)"
 }
+# The audit as the user would run it: their CODEX_HOME (the remembered node), their home folder
+# (the configuration file), and their variables, never the administrator's.
+$env:CODEX_HOME = $CodexHome
+if ($UserHome) { $env:HOME = $UserHome }
+foreach ($Pair in @(@("DREAMFERENCE_VLLM_HOST", $VllmHost), @("MIGHTLING_NODE", $Node), @("DREAMFERENCE_CONFIG_PATH", $ConfigPath))) {
+    if ($Pair[1]) { Set-Item -Path "Env:$($Pair[0])" -Value $Pair[1] } else { Remove-Item -Path "Env:$($Pair[0])" -ErrorAction SilentlyContinue }
+}
 & $Mightling audit egress 2>&1 | ForEach-Object { Note "$_" }
 Note "audit-exit=$LASTEXITCODE"
 '@
-    $Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$Script`" -Mightling `"$Mightling`" -User `"$User`" -CodexHome `"$CodexHome`" -InstallDir `"$InstallDir`" -Log `"$Log`""
+    # Each value quoted; an empty one is left out, since Windows PowerShell 5.1 can drop an empty
+    # quoted argument and take the next parameter's name for its value. A trailing backslash is
+    # doubled, so it does not escape the closing quote.
+    $Pass = [ordered]@{
+        Mightling = $Mightling; User = $User; CodexHome = $CodexHome; UserHome = $UserHome
+        VllmHost = $env:DREAMFERENCE_VLLM_HOST; Node = $env:MIGHTLING_NODE; ConfigPath = $env:DREAMFERENCE_CONFIG_PATH
+        InstallDir = $InstallDir; AppDir = $AppDir; Programs = ($Programs -join "|"); Log = $Log
+    }
+    $Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$Script`""
+    foreach ($Key in $Pass.Keys) {
+        $Value = [string]$Pass[$Key]
+        if ($Value.EndsWith("\")) { $Value += "\" }
+        if ($Value) { $Arguments += " -$Key `"$Value`"" }
+    }
     $Principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    $NoDesktop = $false
     Say ""
     try {
         if ($Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
             Say "Setting up the Windows sandbox and the firewall rule (already running as Administrator)..."
             Start-Process -FilePath "powershell.exe" -ArgumentList $Arguments -Wait -NoNewWindow
+        } elseif (-not [Environment]::UserInteractive) {
+            # Over SSH, or from a service, the session has no desktop (session 0, a window station
+            # that is not visible): Windows cannot show the Administrator prompt there, and the
+            # attempt fails with "requires an interactive window station", which reads as a decline.
+            $NoDesktop = $true
+            Say "Skipped the Administrator step: this session (SSH, or a service) has no desktop to show the prompt on."
         } else {
             Say "Windows will ask once for Administrator rights: to set up the sandbox that runs the agent's"
             Say "commands, to let ling find nodes on Private networks, and to run the egress audit."
@@ -307,14 +388,25 @@ Note "audit-exit=$LASTEXITCODE"
     Remove-Item -Recurse -Force -Path $Step -ErrorAction SilentlyContinue
     if ($Lines -contains "sandbox-setup-exit=0") {
         Say "Windows sandbox: set up for $User."
+    } elseif (Test-SandboxSetUp $CodexHome) {
+        # A reinstall: the setup of an earlier install is still in place, and still what Codex uses.
+        Say "Windows sandbox: set up for $User (by an earlier install; still in place)."
     } else {
         Say "Windows sandbox: NOT set up. Commands will run without one, and /airgapped on is refused."
         foreach ($Line in $Lines) { if ($Line -notmatch "^(firewall|audit-exit)=" -and $Line -notmatch "^sandbox-setup-exit=") { Say "  $Line" } }
+        if ($NoDesktop) {
+            Say "  The sandbox setup needs a desktop session. At this PC's screen, run install.ps1 again and accept"
+            Say "  the Administrator prompt; or ask an administrator to run, in an Administrator terminal:"
+            Say "    & `"$Mightling`" sandbox setup --elevated --user `"$User`" --codex-home `"$CodexHome`""
+        }
     }
     if ($Lines -contains "firewall=ok") {
         Say "Firewall: ling may hear node announcements (UDP 5353) on Private and Domain networks."
     } elseif ($Lines.Count -gt 0) {
         Say "Firewall: the mDNS rule was not added; discovery may find nothing (ling node use <address> still works)."
+    } elseif ($NoDesktop) {
+        Say "Firewall: the mDNS rule needs the same Administrator step; until then ling finds nodes by asking"
+        Say "  (ling node list), but does not hear their announcements."
     }
     $AuditExit = $Lines | Where-Object { $_ -match "^audit-exit=" } | Select-Object -First 1
     if ($AuditExit) {
@@ -326,7 +418,8 @@ Note "audit-exit=$LASTEXITCODE"
             if ($InAudit) { Say "  $Line" }
         }
         if ($AuditExit -ne "audit-exit=0") {
-            Say "  (Run it again once ling uses a node: ling audit egress, in an Administrator terminal.)"
+            Say "  (Run it again once ling uses a node: ling audit egress, in an Administrator terminal; as another"
+            Say "  administrator, set CODEX_HOME=$CodexHome in that terminal first, so it judges your node.)"
         }
     }
 }
