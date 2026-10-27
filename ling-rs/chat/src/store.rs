@@ -33,6 +33,15 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// One lock for `threads.json` in this process. The hub, the Telegram poller and its renderer each
+/// load, change and save it, and `write_private` stages every write of a file in the same temporary
+/// file: unlocked, two writers could lose each other's change or interleave their bytes.
+static THREADS_FILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn threads_file() -> std::sync::MutexGuard<'static, ()> {
+    THREADS_FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// `telegram.json`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TelegramConfig {
@@ -154,6 +163,9 @@ pub struct ChatThreads {
     /// When the conversation last moved, milliseconds since the epoch: the user's last message or
     /// the last answer (MIGHTLING_CHAT §16.2). None in a file from before, taken as long ago.
     pub last_ms: Option<u64>,
+    /// On a Telegram chat (`telegram:<chat id>`), the topic the user used last: the most recent
+    /// message the user sent or the bot answered in that chat.
+    pub last_topic: Option<i64>,
 }
 
 /// `threads.json`: chat key (`telegram:<chat id>`, `matrix:<room id>`) → its threads.
@@ -192,7 +204,8 @@ impl Threads {
                             .unwrap_or_default();
                         let current = chat.get("current").and_then(Value::as_str).map(str::to_string);
                         let last_ms = chat.get("last").and_then(Value::as_u64);
-                        (key.clone(), ChatThreads { current, recent, last_ms })
+                        let last_topic = chat.get("last_topic").and_then(Value::as_i64);
+                        (key.clone(), ChatThreads { current, recent, last_ms, last_topic })
                     })
                     .collect()
             })
@@ -201,12 +214,45 @@ impl Threads {
     }
 
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
+        let _file = threads_file();
+        self.write(dir)
+    }
+
+    /// Loads `threads.json`, changes it and saves it, under the file's lock.
+    pub fn update(dir: &Path, change: impl FnOnce(&mut Threads)) -> std::io::Result<()> {
+        let _file = threads_file();
+        let mut threads = Threads::load(dir);
+        change(&mut threads);
+        threads.write(dir)
+    }
+
+    /// The hub's save: its threads, keeping the `last_topic` the Telegram adapter wrote since
+    /// (the only field the adapter writes), and making `touched`, when it is a Telegram topic, the
+    /// chat's last topic. Under the file's lock.
+    pub fn save_keeping_topics(&mut self, dir: &Path, touched: Option<&str>) -> std::io::Result<()> {
+        let _file = threads_file();
+        for (key, disk) in Threads::load(dir).chats {
+            if disk.last_topic.is_some() || self.chats.contains_key(&key) {
+                self.chats.entry(key).or_default().last_topic = disk.last_topic;
+            }
+        }
+        if let Some((chat_id, Some(topic))) = touched.and_then(crate::telegram::target) {
+            self.set_last_topic(chat_id, Some(topic));
+        }
+        self.write(dir)
+    }
+
+    fn write(&self, dir: &Path) -> std::io::Result<()> {
         let chats: serde_json::Map<String, Value> = self
             .chats
             .iter()
             .map(|(key, chat)| {
                 let recent: Vec<Value> = chat.recent.iter().map(|t| json!({ "id": t.id, "name": t.name })).collect();
-                (key.clone(), json!({ "current": chat.current, "recent": recent, "last": chat.last_ms }))
+                let mut entry = json!({ "current": chat.current, "recent": recent, "last": chat.last_ms });
+                if let Some(topic) = chat.last_topic {
+                    entry["last_topic"] = json!(topic);
+                }
+                (key.clone(), entry)
             })
             .collect();
         write_private(&Self::path(dir), &serde_json::to_string_pretty(&json!({ "chats": chats })).unwrap_or_default())
@@ -219,12 +265,45 @@ impl Threads {
         entry.recent.retain(|t| t.id != thread.id);
         entry.recent.insert(0, thread);
         entry.recent.truncate(keep);
+        if let Some((chat_id, Some(topic))) = crate::telegram::target(chat) {
+            self.chats.entry(format!("telegram:{chat_id}")).or_default().last_topic = Some(topic);
+        }
+    }
+
+    /// The topic most recently used in a Telegram chat (`telegram:<chat id>`), or the topic entry
+    /// with the newest `last_ms` in a `threads.json` from before `last_topic`.
+    pub fn last_topic(&self, chat_id: i64) -> Option<i64> {
+        let base = format!("telegram:{chat_id}");
+        if let Some(chat) = self.chats.get(&base) {
+            return chat.last_topic;
+        }
+        let prefix = format!("{base}/");
+        self.chats
+            .iter()
+            .filter_map(|(key, chat)| Some((key.strip_prefix(&prefix)?.parse::<i64>().ok()?, chat.last_ms?)))
+            .max_by_key(|(_, ms)| *ms)
+            .map(|(topic, _)| topic)
+    }
+
+    /// Remembers the topic most recently used in a Telegram chat (`telegram:<chat id>`).
+    pub fn set_last_topic(&mut self, chat_id: i64, topic: Option<i64>) {
+        self.chats.entry(format!("telegram:{chat_id}")).or_default().last_topic = topic;
     }
 
     /// The chat that started `thread`, if any.
     pub fn chat_of(&self, thread: &str) -> Option<&str> {
         self.chats.iter().find(|(_, chat)| chat.recent.iter().any(|t| t.id == thread)).map(|(key, _)| key.as_str())
     }
+}
+
+/// The topic most recently used in a Telegram chat, read from `threads.json`.
+pub fn last_topic(dir: &Path, chat_id: i64) -> Option<i64> {
+    Threads::load(dir).last_topic(chat_id)
+}
+
+/// Remembers the topic most recently used in a Telegram chat in `threads.json`.
+pub fn set_last_topic(dir: &Path, chat_id: i64, topic: Option<i64>) {
+    let _ = Threads::update(dir, |threads| threads.set_last_topic(chat_id, topic));
 }
 
 /// Pending Telegram pairing codes live in `<chat dir>/pairing/`, under their hash, ten minutes, one
@@ -282,6 +361,45 @@ mod tests {
         assert_eq!(chat.recent[0].id, "t11");
         assert_eq!(threads.chat_of("t5"), Some("telegram:7"));
         assert_eq!(threads.chat_of("t0"), None);
+    }
+
+    #[test]
+    fn threads_remember_the_last_telegram_topic_in_threads_json() {
+        let dir = scratch("last-topic");
+        assert_eq!(last_topic(&dir, 111), None);
+        set_last_topic(&dir, 111, Some(5));
+        assert_eq!(last_topic(&dir, 111), Some(5));
+        let mut threads = Threads::load(&dir);
+        threads.started("telegram:111/9", ThreadRef { id: "t1".into(), name: "q1".into() }, 10);
+        threads.save(&dir).unwrap();
+        assert_eq!(last_topic(&dir, 111), Some(9));
+        set_last_topic(&dir, 111, None);
+        assert_eq!(last_topic(&dir, 111), None);
+    }
+
+    #[test]
+    fn concurrent_writers_of_threads_json_lose_no_change() {
+        let dir = scratch("threads-lock");
+        let writers: Vec<_> = (0..8)
+            .map(|writer| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    for topic in 0..25 {
+                        set_last_topic(&dir, writer, Some(topic));
+                        let mut hub = Threads::default();
+                        hub.started(&format!("matrix:{writer}"), ThreadRef { id: format!("t{writer}"), name: "q".into() }, 10);
+                        hub.save_keeping_topics(&dir, None).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        let threads = Threads::load(&dir);
+        for writer in 0..8 {
+            assert_eq!(threads.last_topic(writer), Some(24), "telegram:{writer}");
+        }
     }
 
     #[test]
