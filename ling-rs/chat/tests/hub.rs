@@ -722,15 +722,22 @@ async fn each_topic_is_its_own_thread_and_is_named_after_its_first_message() {
     });
     rig.inbound.send(text("telegram:7/5", "Which purifier is quieter?")).unwrap();
     settle().await;
+    assert_eq!(ling_chat::store::last_topic(&rig.dir, 7), Some(5));
     assert_eq!(next(&mut rig.telegram).await, Outbound::ThreadNamed { chat: "telegram:7/5".into(), name: "Which purifier is quieter?".into() });
-    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
     rig.inbound.send(text("telegram:7/6", "A song")).unwrap();
     settle().await;
+    assert_eq!(ling_chat::store::last_topic(&rig.dir, 7), Some(6));
+    // Topic 5's answer finishes after topic 6 was asked in: topic 5 is now the last used topic.
+    rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
+    settle().await;
+    assert_eq!(ling_chat::store::last_topic(&rig.dir, 7), Some(5));
     rig.events.send(event("turn/completed", json!({ "threadId": "th2", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();
     tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(ling_chat::store::last_topic(&rig.dir, 7), Some(6));
     // Long after, inside the first topic: the same thread, no "New thread" line.
     rig.inbound.send(text("telegram:7/5", "and the price?")).unwrap();
     settle().await;
+    assert_eq!(ling_chat::store::last_topic(&rig.dir, 7), Some(5));
     assert_eq!(rig.log.params("thread/start").len(), 2);
     assert_eq!(rig.log.params("turn/start")[2]["threadId"], "th1");
     rig.events.send(event("turn/completed", json!({ "threadId": "th1", "turn": { "id": "tu1", "status": "completed", "items": [] } }))).unwrap();

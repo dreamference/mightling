@@ -49,6 +49,19 @@ pub struct ApiError {
     pub missing_method: bool,
 }
 
+impl ApiError {
+    /// Whether Telegram refused the call because the topic was deleted, closed or does not exist.
+    pub fn is_topic_gone(&self) -> bool {
+        let lower = self.description.to_ascii_lowercase();
+        lower.contains("topic_deleted")
+            || lower.contains("topic_closed")
+            || lower.contains("message thread not found")
+            || lower.contains("topic not found")
+            || lower.contains("thread not found")
+            || lower.contains("message_thread_invalid")
+    }
+}
+
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.description)
@@ -318,14 +331,46 @@ impl Poller {
         Poller { api, dir, hub, topics: false, mini_app_url: None, wrong_codes: 0, unpaired_replied: HashMap::new() }
     }
 
+    /// Opens a fresh topic in `chat_id` and remembers it as the chat's last used topic.
+    async fn open_topic(&self, chat_id: i64) -> Option<i64> {
+        let topic = self.api.call("createForumTopic", json!({ "chat_id": chat_id, "name": NEW_TOPIC_NAME })).await.ok()?;
+        let thread = topic.get("message_thread_id").and_then(Value::as_i64)?;
+        store::set_last_topic(&self.dir, chat_id, Some(thread));
+        Some(thread)
+    }
+
     /// `/new` in a chat with topics: a topic, named when its first message arrives, and one line in
     /// it. False when Telegram refused, so the hub's `/new` happens instead.
     async fn new_topic(&self, chat_id: i64) -> bool {
-        let Ok(topic) = self.api.call("createForumTopic", json!({ "chat_id": chat_id, "name": NEW_TOPIC_NAME })).await else { return false };
-        let Some(thread) = topic.get("message_thread_id").and_then(Value::as_i64) else { return false };
+        let Some(thread) = self.open_topic(chat_id).await else { return false };
         let line = json!({ "chat_id": chat_id, "message_thread_id": thread, "text": "A new thread: ask here." });
         let _ = self.api.call("sendMessage", line).await;
         true
+    }
+
+    /// Which topic a message in `chat_id` belongs to: the message's own topic when sent inside
+    /// one, or, when `self.topics` is on, the topic most recently used in that chat when sent in
+    /// the main chat. Opens a fresh topic when the chat has no last topic yet or Telegram says the
+    /// last topic was deleted or closed.
+    async fn resolve_topic(&self, chat_id: i64, message_topic: Option<i64>) -> Option<i64> {
+        if let Some(topic) = message_topic {
+            store::set_last_topic(&self.dir, chat_id, Some(topic));
+            return Some(topic);
+        }
+        if !self.topics {
+            return None;
+        }
+        if let Some(last) = store::last_topic(&self.dir, chat_id) {
+            let probe = json!({ "chat_id": chat_id, "message_thread_id": last, "action": "typing" });
+            match self.api.call("sendChatAction", probe).await {
+                Err(err) if err.is_topic_gone() => return self.open_topic(chat_id).await,
+                _ => {
+                    store::set_last_topic(&self.dir, chat_id, Some(last));
+                    return Some(last);
+                }
+            }
+        }
+        self.open_topic(chat_id).await
     }
 
     async fn reply(&self, chat_id: i64, text: &str) {
@@ -375,7 +420,18 @@ impl Poller {
             }
             let Some(user) = message.pointer("/from/id").and_then(Value::as_i64) else { return };
             let text = message.get("text").and_then(Value::as_str).unwrap_or_default().trim().to_string();
-            let key = topic_key(chat_id, topic_of_message(message));
+            let message_topic = topic_of_message(message);
+            if message.get("forum_topic_closed").is_some()
+                && message_topic.is_some()
+                && store::last_topic(&self.dir, chat_id) == message_topic
+            {
+                store::set_last_topic(&self.dir, chat_id, None);
+            }
+            if message.get("forum_topic_reopened").is_some()
+                && let Some(topic) = message_topic
+            {
+                store::set_last_topic(&self.dir, chat_id, Some(topic));
+            }
             // A topic's service messages (created, renamed, closed) are not questions.
             if ["forum_topic_created", "forum_topic_edited", "forum_topic_closed", "forum_topic_reopened"].iter().any(|field| message.get(*field).is_some()) {
                 return;
@@ -406,9 +462,11 @@ impl Poller {
                     let _ = self.api.call("sendMessage", app_reply(chat_id, self.mini_app_url.as_deref())).await;
                     return;
                 }
+                let key = topic_key(chat_id, self.resolve_topic(chat_id, message_topic).await);
                 let _ = self.hub.send(Inbound::Text { chat: key, text });
                 return;
             }
+            let key = topic_key(chat_id, self.resolve_topic(chat_id, message_topic).await);
             let caption = message.get("caption").and_then(Value::as_str).unwrap_or_default().trim().to_string();
             let mut attachments = Vec::new();
             for file in files {
@@ -498,6 +556,7 @@ pub struct Style {
 pub struct Renderer {
     pub api: TelegramApi,
     pub style: Style,
+    pub dir: Option<PathBuf>,
     state: Arc<Mutex<RenderState>>,
 }
 
@@ -545,7 +604,12 @@ impl Renderer {
     }
 
     pub fn styled(api: TelegramApi, style: Style) -> Renderer {
-        Renderer { api, style, state: Arc::default() }
+        Renderer { api, style, dir: None, state: Arc::default() }
+    }
+
+    pub fn with_dir(mut self, dir: PathBuf) -> Renderer {
+        self.dir = Some(dir);
+        self
     }
 
     pub async fn run(self, mut outbound: mpsc::UnboundedReceiver<Outbound>) {
@@ -634,6 +698,9 @@ impl Renderer {
         match out {
             Outbound::Draft { text, .. } => self.draft(&key, chat_id, topic, &text).await,
             Outbound::Message { markdown, .. } => {
+                if let (Some(dir), Some(topic)) = (&self.dir, topic) {
+                    store::set_last_topic(dir, chat_id, Some(topic));
+                }
                 if self.send_rich(chat_id, topic, &markdown).await {
                     return;
                 }
@@ -723,7 +790,7 @@ pub async fn start(
         }
     }
     let has_topics = me.as_ref().is_ok_and(|me| me.get("has_topics_enabled") == Some(&Value::Bool(true)));
-    tokio::spawn(Renderer::styled(api.clone(), Style { rich: options.rich }).run(outbound));
+    tokio::spawn(Renderer::styled(api.clone(), Style { rich: options.rich }).with_dir(dir.clone()).run(outbound));
     let mut poller = Poller::new(api, dir, hub);
     poller.topics = has_topics && options.topics;
     poller.mini_app_url = options.mini_app_url.clone();
@@ -769,5 +836,15 @@ mod tests {
         let draft = tail(&text, DRAFT_LIMIT);
         assert_eq!(draft.chars().count(), DRAFT_LIMIT);
         assert!(draft.ends_with("END"));
+    }
+
+    #[test]
+    fn topic_gone_errors_are_recognised() {
+        let err = |description: &str| ApiError { description: description.to_string(), retry_after: None, missing_method: false };
+        assert!(err("Bad Request: TOPIC_DELETED").is_topic_gone());
+        assert!(err("Bad Request: TOPIC_CLOSED").is_topic_gone());
+        assert!(err("Bad Request: message thread not found").is_topic_gone());
+        assert!(!err("Bad Request: TOPIC_NOT_MODIFIED").is_topic_gone());
+        assert!(!err("Bad Request: can't parse entities").is_topic_gone());
     }
 }
