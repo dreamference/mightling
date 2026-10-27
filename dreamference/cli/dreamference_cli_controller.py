@@ -28,6 +28,7 @@ from dreamference.runner import (
 from dreamference.hardware import detect_gb10_hardware, download_model, download_model_with_drafter, download_all_models, clear_model_cache, clear_tensorizer_cache, model_key_for_served_id
 from dreamference.vllm_server import VLLMServerManager, DiffusionServerManager, DEFAULT_VLLM_IMAGE, DEFAULT_DIFFUSION_PORT
 from dreamference.vllm_server.model_loading_monitor import create_model_loading_monitor
+from dreamference.forge.forge_command import ForgeCommand
 from dreamference.mcp_server import main as run_mcp_server
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
@@ -1427,6 +1428,8 @@ class DreamferenceCLIController:
         node_enable_parser = node_subparsers.add_parser("enable", help="Advertise the node and publish the web UI and web search to the local network")
         node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get ling and web search only")
         node_enable_parser.add_argument("--yes", action="store_true", help="Never wait for input: root through `sudo -n` only, with no terminal needed (what install.sh runs)")
+        node_enable_parser.add_argument("--no-forge", action="store_true",
+                                        help="Do not set up the node's forge (Forgejo); `forge on` does it later")
         node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
         node_status_parser = node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status")
         node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `ling-admin status` instead")
@@ -1478,6 +1481,8 @@ class DreamferenceCLIController:
         node_provision_parser.add_argument("--mesh", action="store_true", help="Also pair every node with every other (not built yet)")
         node_provision_parser.add_argument("--web", action="store_true", help="Also share the web UI (`ling web`) on the LAN there: `node enable` without `--no-web`")
         node_provision_parser.add_argument("--no-start", action="store_true", help="Leave the model server stopped")
+        node_provision_parser.add_argument("--no-forge", action="store_true",
+                                           help="Set the nodes up without their forge (Forgejo)")
         node_provision_parser.add_argument("--restart", action="store_true", help="Restart a running model server")
         node_provision_parser.add_argument("--os-update", action="store_true", help="NVIDIA's OS and firmware update first, with a reboot")
         node_provision_parser.add_argument("--dry-run", action="store_true", help="Connect and read only, then print what each machine would change")
@@ -1491,6 +1496,9 @@ class DreamferenceCLIController:
         node_subparsers.add_parser("authorize", help="(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only")
         node_serve_parser = node_subparsers.add_parser("serve-job", help="(Run by sshd as a paired key's forced command) carry out one node operation")
         node_serve_parser.add_argument("--key", default=None, help="The connecting key's tag")
+
+        # Command: ling-admin forge (the node's Forgejo; specs/DREAMFERENCE_MIGHTLING_FORGEJO.md §7)
+        ForgeCommand.add_parser(subparsers)
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
@@ -2807,7 +2815,13 @@ class DreamferenceCLIController:
         elif args.command == "node":
             from dreamference.node import NodeAdvertiser
             if args.node_command == "enable":
-                sys.exit(0 if NodeAdvertiser.enable(no_web=args.no_web, yes=args.yes) else 1)
+                enabled = NodeAdvertiser.enable(no_web=args.no_web, yes=args.yes)
+                if enabled and not args.no_forge:
+                    # The forge is part of the node (FORGEJO O1); a node works without it, so its
+                    # failure is reported and does not fail the enable.
+                    from dreamference.forge.forge_service import ForgeService
+                    ForgeService.setup()
+                sys.exit(0 if enabled else 1)
             if args.node_command == "disable":
                 sys.exit(0 if NodeAdvertiser.disable() else 1)
             if args.node_command == "status" and not args.name:
@@ -2865,7 +2879,7 @@ class DreamferenceCLIController:
             if args.node_command == "provision":
                 from dreamference.node.node_provisioner import NodeProvisioner
                 options = {name: getattr(args, name) for name in (
-                    "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start",
+                    "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start", "no_forge",
                     "restart", "os_update", "dry_run", "via", "match", "start_timeout")}
                 sys.exit(NodeProvisioner(args.hosts, options).run())
             if args.node_command == "prepare":
@@ -2880,6 +2894,9 @@ class DreamferenceCLIController:
                 sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
             print("usage: ling-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
             sys.exit(2)
+
+        elif args.command in ForgeCommand.COMMANDS:
+            sys.exit(ForgeCommand.dispatch(args))
 
         elif args.command == "host":
             from dreamference.vllm_server import HostSafetySetup

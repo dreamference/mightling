@@ -68,7 +68,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 - **Byte-identical copies** are compared by tests: the air-gap resolver (`ling-rs/airgapped/` and `ling-web-rs/src/airgapped.rs`) and the node locator (`ling-rs/node-locator/` and `ling-web-rs/src/node_locator.rs`). Change both or neither.
 - **Never write the user's choices into the repository** where a clone or the agent could write them: submodule indexing choices live in `$CODEX_HOME/ling-code.toml`, a node's advertisement in `~/.config/dreamference/node-advertise.json`, and for `/airgapped` the strictest of the repository's and the user's config wins.
 - The specification is `specs/`, one document per area, indexed by `specs/README.md` (which also lists the code defects found when the specs were reconciled with the code on 2026-09-28). There is no single `DREAMFERENCE_SPEC.md` any more; read the one document you need.
-- `.gemini/`, `.antigravity/`, `.dreamference/` are gitignored leftovers of other tools (`.dreamference/` at a workspace root also holds the context engine's index).
+- `.gemini/`, `.antigravity/`, `.dreamference/` are gitignored leftovers of other tools.
 
 ## Where things live
 
@@ -87,6 +87,7 @@ Thirteen packages under `dreamference/` (twelve subsystems and `cli/`), each wit
 | `node/` | The node half of the client/server split: the advertised service file, the node id, what is published to the LAN, pairing, jobs and model sync over SSH |
 | `swe_bench/` | `ling-admin swe-bench`: `ling` inside each SWE-bench instance's container, A/B runs and reports |
 | `audit/` | `ling-admin audit egress`: the strace-based network audit of a real `ling` session |
+| `forge/` | Forgejo on every node ([forge.md](docs/dev/forge.md)) |
 | `remote/` | Remote access: the node's NetBird control plane, its CA, the relay box over SSH, LAN enrolment |
 | `cli/` | `ling-admin`'s parser and dispatch (`dreamference_cli_controller.py`) |
 

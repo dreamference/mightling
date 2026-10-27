@@ -30,6 +30,8 @@ On the node, `ling-admin node enable` installs an Avahi service file (root once;
 
 `ling-app` on a client runs Ask and Work in its windows on its own app-server, against the node's model server; the TCP forwarder to the node's port 3000 was removed on 2026-10-08 (ASK §17).
 
+`node enable` also sets up the node's forge (Forgejo; `--no-forge` skips it): the first node is the forge of record, the others mirrors ([forge.md](forge.md)).
+
 ## Pairing and jobs, over SSH
 
 **Managing and using a second node goes over SSH, never an open port** (`node/node_pairing.py`, `node_serve.py`, `node_remote.py`, `node_job.py`, `node_job_sender.py`). `node add` has the other node authorise a key for one forced command, `ling-admin node serve-job`, which refuses anything but its operations (info, status, start, stop, `set-model <matrix key>`, unpair, the two git services for `jobs/<name>.git`, and the job requests) and carries each out with that node's own `ling-admin`.

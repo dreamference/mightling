@@ -608,7 +608,30 @@ class EgressAudit:
             lines.append(f"Remote access enabled ({REMOTE_TUNNEL_UNIT}): the node keeps an SSH tunnel to {box}, "
                          "and NetBird's client reaches its relay and the overlay's peers, outside this trace. "
                          "`ling-admin remote remove` turns it off.")
+        lines += cls.forge_lines()
         return lines
+
+    @classmethod
+    def forge_lines(cls) -> list[str]:
+        """Name the node's forge (FORGEJO §5.4) and every destination its outbound mirror sends to.
+
+        Returns:
+            List[str]: One line when the forge's unit is enabled; empty otherwise.
+        """
+        from dreamference.forge.forge_settings import UNIT as FORGE_UNIT
+        if not cls._unit_enabled(FORGE_UNIT, user=True):
+            return []
+        from dreamference.forge.forge_github_mirror import ForgeGithubMirror
+        from dreamference.forge.forge_settings import ROLE_RECORD, ForgeSettings
+        role = ForgeSettings.role() or "not set up"
+        destinations = ForgeGithubMirror.destinations() if ForgeGithubMirror.settings()["enabled"] else []
+        if role != ROLE_RECORD:
+            destinations = []
+        where = ("its GitHub mirror pushes to " + ", ".join(destinations)
+                 + (" (stopped: /airgapped is on)" if ForgeGithubMirror.airgapped() else "")
+                 if destinations else "no outbound mirror is configured, so it reaches nothing outside the LAN")
+        return [f"Forge enabled ({FORGE_UNIT}, {role}): Forgejo serves the LAN only; {where}, outside this trace. "
+                "`ling-admin forge off` turns it off."]
 
     @classmethod
     def render(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: Dict[int, str]) -> List[str]:
