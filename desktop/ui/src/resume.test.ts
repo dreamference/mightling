@@ -51,7 +51,7 @@ function makeThread(id: string, turns: Turn[]): Thread {
     updatedAt: 2,
     status: { type: "idle" },
     path: null,
-    cwd: "/home/mightling/chat-repos/app",
+    cwd: "/home/u/chat-repos/app",
     cliVersion: "0.158.0",
     source: "appServer",
     agentNickname: null,
