@@ -18,6 +18,7 @@
 //! without an AppArmor profile) its zygote aborts before the app's own code runs, and with the
 //! output thrown away `ling app` returned as if the window had opened (1.7 Linux tests).
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Child;
@@ -31,9 +32,9 @@ use std::time::Instant;
 const EXECUTABLE: &str = "ling-app";
 const DESKTOP_ENTRY: &str = "ling-app.desktop";
 
-/// The app's data directory, named after its identifier (`desktop/electron/app.json`). Its HTTP
-/// cache is emptied when Ask is opened, so a window never shows a page from before an upgrade.
-/// Chromium's `Cookies` file beside it is left alone.
+/// The app's data directory's name, its identifier (`desktop/electron/app.json`); where it is, is
+/// [`data_dir_for`]. Its HTTP cache is emptied when Ask is opened, so a window never shows a page
+/// from before an upgrade. Chromium's `Cookies` file beside it is left alone.
 const WEBVIEW_DATA_DIR: &str = "dev.dreamference.mightling";
 const WEBVIEW_CACHE_DIR: &str = "Cache";
 
@@ -227,10 +228,8 @@ pub async fn open(args: &[String]) -> i32 {
     // Nothing to check first: the app starts its own app-server, and says in its window
     // what it is waiting for.
     if window == Window::Ask {
-        if let Some(home) = home_dir() {
-            let _ = std::fs::remove_dir_all(
-                home.join(".local/share").join(WEBVIEW_DATA_DIR).join(WEBVIEW_CACHE_DIR),
-            );
+        if let Some(data) = data_dir_for(cfg!(windows), &|name: &str| std::env::var_os(name)) {
+            let _ = std::fs::remove_dir_all(data.join(WEBVIEW_CACHE_DIR));
         }
     }
 
@@ -398,6 +397,41 @@ fn home_dir() -> Option<PathBuf> {
     ling_node_locator::home_dir()
 }
 
+/// The app's data folder (Electron's `userData`), by the rule the app itself follows
+/// (`desktop/electron/src/data-folder.ts`; both are tested against
+/// `ling-rs/vectors/app-data-folder.json`): `%LOCALAPPDATA%\<identifier>` on Windows, else
+/// `%USERPROFILE%\AppData\Local\<identifier>`; elsewhere `~/.local/share/<identifier>` (`HOME`,
+/// else `USERPROFILE`), the Tauri app's folder. `var` reads a variable, so the rule is tested for
+/// every platform on any machine: the path is built with the platform's separator, never with
+/// `Path::join`, whose separator is the host's.
+/// specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md §23.4 W4.
+pub fn data_dir_for(windows: bool, var: &dyn Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let set = |name: &str| var(name).filter(|value| !value.is_empty());
+    if windows {
+        if let Some(local) = set("LOCALAPPDATA") {
+            return Some(joined(local, true, &[WEBVIEW_DATA_DIR]));
+        }
+        return set("USERPROFILE").map(|profile| joined(profile, true, &["AppData", "Local", WEBVIEW_DATA_DIR]));
+    }
+    set("HOME")
+        .or_else(|| set("USERPROFILE"))
+        .map(|home| joined(home, false, &[".local", "share", WEBVIEW_DATA_DIR]))
+}
+
+/// `base` without separators at its end, then `parts`, joined with `\` on Windows and `/` elsewhere.
+fn joined(base: OsString, windows: bool, parts: &[&str]) -> PathBuf {
+    let separators: &[char] = if windows { &['\\', '/'] } else { &['/'] };
+    let mut path = match base.into_string() {
+        Ok(text) => OsString::from(text.trim_end_matches(separators)),
+        Err(raw) => raw,
+    };
+    for part in parts {
+        path.push(if windows { "\\" } else { "/" });
+        path.push(part);
+    }
+    PathBuf::from(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,6 +442,24 @@ mod tests {
         assert_eq!(exec_path(entry), Some(PathBuf::from("/opt/ling/ling-app")));
         assert_eq!(exec_path("Exec=\"/opt/ling-app\"\n"), Some(PathBuf::from("/opt/ling-app")));
         assert_eq!(exec_path("[Desktop Entry]\nName=x\n"), None);
+    }
+
+    #[test]
+    fn the_data_folder_is_the_one_the_app_uses() {
+        // The cases the app's own rule is tested against too (desktop/electron/src/data-folder.test.ts),
+        // each run here for its platform whatever this machine is.
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../vectors/app-data-folder.json")).expect("the cases parse");
+        assert_eq!(vectors["identifier"], WEBVIEW_DATA_DIR);
+        let cases = vectors["cases"].as_array().expect("cases");
+        assert!(cases.len() >= 10);
+        for case in cases {
+            let windows = case["platform"] == "win32";
+            let env = case["env"].as_object().expect("env");
+            let var = |name: &str| env.get(name).and_then(|value| value.as_str()).map(OsString::from);
+            let expected = case["expected"].as_str().map(PathBuf::from);
+            assert_eq!(data_dir_for(windows, &var), expected, "{}", case["name"]);
+        }
     }
 
     fn args(text: &str) -> Vec<String> {

@@ -165,6 +165,12 @@ On Windows, run the installer; SmartScreen warns the first time: **More info**, 
 anyway**. Smart App Control must be off (Windows Security → App & browser control → Smart App
 Control settings).
 
+The app keeps its own data (window positions, preferences, its browser profile) in
+`%LOCALAPPDATA%\dev.dreamference.mightling`, and your threads and settings are in
+`%USERPROFILE%\.mightling`. Removing the app leaves both, so a reinstall picks up where you were;
+delete the folders yourself to remove them too. Versions up to 1.7.1 kept the app's data in
+`%USERPROFILE%\.local\share\dev.dreamference.mightling`; 1.7.2 moves it on its first start.
+
 ## Ask and Work in the app window
 
 The app window talks to one `ling app-server` of its own, the `ling` bundled in the app. Its
