@@ -265,6 +265,14 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       answer({ cleared: true });
       return say({ method: "thread/goal/cleared", params: { threadId: p.threadId } });
     case "thread/archive": return answer({});
+    case "thread/delete": {
+      // Deleted for good (DESKTOP §16 B36): the thread and the subagents' threads it started, each said as deleted.
+      const gone = threads.filter((t) => t.id === p.threadId || t.parentThreadId === p.threadId).map((t) => t.id);
+      if (!gone.length) return say({ id: m.id, error: { code: -32600, message: "thread not found: " + p.threadId } });
+      for (const id of gone) threads.splice(threads.findIndex((t) => t.id === id), 1);
+      answer({});
+      return gone.forEach((id) => say({ method: "thread/deleted", params: { threadId: id } }));
+    }
     case "thread/unarchive": return answer({ thread: { ...(threads.find((t) => t.id === p.threadId) || { ...threads[0], id: p.threadId, name: "Try a smaller hero image" }), turns: [] } });
     case "thread/name/set": {
       const found = threads.find((t) => t.id === p.threadId);

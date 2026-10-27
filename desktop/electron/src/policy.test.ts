@@ -34,6 +34,8 @@ describe("the policy", () => {
       expect(POLICY.allowedRequests.has(fetches) && POLICY.airgappedRefusedRequests.has(fetches), fetches).toBe(true);
     }
     expect(POLICY.airgappedThreadConfig["features.plugins"]).toBe(false);
+    // Deleting a thread for good is local: allowed at both levels (DESKTOP §16 B36).
+    expect(POLICY.allowedRequests.has("thread/delete") && !POLICY.airgappedRefusedRequests.has("thread/delete")).toBe(true);
     for (const refused of ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"]) {
       expect(POLICY.allowedRequests.has(refused), refused).toBe(false);
     }
