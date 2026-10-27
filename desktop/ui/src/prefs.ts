@@ -73,9 +73,11 @@ export interface Prefs {
   suggestPrompts: boolean;
   /** The pull-request tab through the user's GitHub CLI (Settings › Git); off by default, refused at airgapped on. */
   pullRequests: boolean;
-  /** When a finished turn shows a desktop notification, and whether a waiting approval does (Settings › Notifications). */
+  /** When a finished turn shows a desktop notification, and whether a waiting approval or question does (Settings › Notifications). */
   notifyTurns: "unfocused" | "always" | "never";
   notifyApprovals: boolean;
+  /** Questions from the agent and MCP servers have their own switch; null follows `notifyApprovals`. */
+  notifyQuestions: boolean | null;
   /** Colour and font overrides of the §3.6 tokens (Settings › Appearance). */
   appearance: Appearance;
   /** Settings › Git: the prefix Create branch here offers, the instruction a commit message starts from, Force ticked by default. */

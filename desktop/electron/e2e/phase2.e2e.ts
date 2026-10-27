@@ -759,16 +759,18 @@ test("13 subagents and memories: the panel of a thread's subagents with Stop, th
   }
 });
 
-test("14 notifications and sleep: a finished turn notifies as Settings say, a click shows its thread; sleep is held while it runs", async () => {
+test("14 notifications and sleep: a finished turn notifies as Settings say, named by its thread, a click shows it; sleep is held while it runs", async () => {
   const { app, page, home, shoot, close } = await open();
   try {
     // Record notifications and sleep blocks in the main process instead of showing them.
     await app.evaluate(({ Notification, powerSaveBlocker }) => {
-      const g = globalThis as unknown as { shown: string[]; blocks: number; notes: Map<string, Electron.Notification> };
+      const g = globalThis as unknown as { shown: string[]; titles: string[]; blocks: number; notes: Map<string, Electron.Notification> };
       g.shown = [];
+      g.titles = [];
       g.blocks = 0;
       Notification.prototype.show = function show(this: Electron.Notification) {
         g.shown.push(this.body);
+        g.titles.push(this.title);
         (globalThis as unknown as { last: Electron.Notification }).last = this;
       };
       const start = powerSaveBlocker.start.bind(powerSaveBlocker);
@@ -782,6 +784,13 @@ test("14 notifications and sleep: a finished turn notifies as Settings say, a cl
     const settings = page.getByRole("dialog", { name: "Settings" });
     await settings.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: "Notifications" }).click();
     await settings.getByLabel("Always notify").check();
+    // Questions have their own switch, on while approvals are, until it is set.
+    const questions = settings.getByLabel("Notify when it asks a question and the window is not in front");
+    await expect(questions).toBeChecked();
+    await questions.uncheck();
+    const prefsFile = path.join(home, ".local", "share", "dev.dreamference.mightling", "prefs.json");
+    await expect.poll(() => JSON.parse(fs.readFileSync(prefsFile, "utf8")).notifyQuestions).toBe(false);
+    await expect(settings.getByLabel("Notify when it waits for an approval and the window is not in front")).toBeChecked();
     await settings.getByRole("button", { name: "Send a test notification" }).click();
     await expect.poll(shown).toContain("Notifications reach you like this.");
     await shoot("14-settings-notifications.png");
@@ -792,7 +801,9 @@ test("14 notifications and sleep: a finished turn notifies as Settings say, a cl
     const composer = page.getByRole("textbox", { name: "Message", exact: true });
     await composer.fill("Shrink the hero image.");
     await composer.press("Enter");
-    await expect.poll(shown).toContain("A turn finished.");
+    // It is titled with the thread (its first message, until it has a name) and says what the turn ended with.
+    await expect.poll(shown).toContain("Done: the retry counter is in fetcher/client.py.");
+    expect(await app.evaluate(() => (globalThis as unknown as { titles: string[] }).titles)).toContain("Shrink the hero image.");
     expect(await app.evaluate(() => (globalThis as unknown as { blocks: number }).blocks)).toBeGreaterThan(0);
     // A click on it shows the thread.
     await page.locator(".thread", { hasText: "debug level" }).click();
