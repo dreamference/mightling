@@ -146,6 +146,21 @@ export class MessagePrompts implements PromptSource {
   airgappedOn(_threadId: string | null = null): boolean {
     return this.airgapped;
   }
+
+  /** The desktop app has no phone repository checkouts. */
+  repoCheckout(_cwd: string): boolean | null {
+    return null;
+  }
+
+  /** The desktop app has no phone repository threads. */
+  repoThreadCwd(_threadId: string): string | null {
+    return null;
+  }
+
+  /** The desktop app is never a phone bridge. */
+  isBridge(): boolean {
+    return false;
+  }
 }
 
 /**

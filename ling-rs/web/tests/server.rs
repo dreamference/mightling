@@ -150,6 +150,11 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/sync/manifest"),
     ("PUT", "/api/sync/rollouts/01a0f1ae-2da4-7942-99ae-c3151dc137cc?offset=0"),
     ("POST", "/api/sync/threads/01a0f1ae-2da4-7942-99ae-c3151dc137cc/delete"),
+    ("GET", "/api/repos"),
+    ("POST", "/api/repos/open"),
+    ("GET", "/api/repos/state?thread=01234567"),
+    ("GET", "/api/repos/diff?thread=01234567&scope=uncommitted"),
+    ("GET", "/api/repos/log?thread=01234567"),
     ("GET", "/anything-else"),
 ];
 

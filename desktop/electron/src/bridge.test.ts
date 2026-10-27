@@ -18,6 +18,9 @@ const NO_PROMPTS: PromptSource = {
   },
   scratchFolderOf: () => null,
   airgappedOn: () => false,
+  repoCheckout: () => null,
+  repoThreadCwd: () => null,
+  isBridge: () => false,
 };
 const vetOutgoing = (message: unknown, pending: Set<string>) => vet(message, pending, NO_PROMPTS);
 

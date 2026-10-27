@@ -95,13 +95,19 @@ impl Client {
     }
 }
 
-/// Signs in as `ling web open` does, without a browser: returns the session cookie (`name=value`).
+/// Signs in as a phone bridge (`bridge=1`), without a browser: returns the session cookie (`name=value`).
 pub async fn sign_in(state: &Path, port: u16) -> Result<String, String> {
+    sign_in_with(state, port, true).await
+}
+
+/// Signs in with a one-time login code, optionally marking the session as a phone bridge (`bridge=1`).
+pub async fn sign_in_with(state: &Path, port: u16, bridge: bool) -> Result<String, String> {
     let code = crate::auth::issue_login_code(state).map_err(|err| format!("could not write a sign-in code: {err}"))?;
     let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;
-    let request = format!("GET /login?code={code} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let suffix = if bridge { "&bridge=1" } else { "" };
+    let request = format!("GET /login?code={code}{suffix} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).await.map_err(|err| err.to_string())?;
     let mut response = String::new();
     stream.read_to_string(&mut response).await.map_err(|err| err.to_string())?;

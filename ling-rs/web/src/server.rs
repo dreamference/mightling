@@ -98,8 +98,10 @@ pub struct Server {
     pub policy: Policy,
     pub addresses: Addresses,
     pub app_server: AppServer,
+    pub chat_repos: crate::chat_repos::ChatRepos,
     owner_token: String,
     sessions: Mutex<HashSet<String>>,
+    bridge_sessions: Mutex<HashSet<String>>,
     pairing_failures: AtomicU32,
     busy: Mutex<HashMap<u64, BusyTracker>>,
     next_tab: AtomicU64,
@@ -121,8 +123,10 @@ impl Server {
             policy: Policy::embedded(),
             addresses,
             app_server,
+            chat_repos: crate::chat_repos::ChatRepos::new(),
             owner_token,
             sessions: Mutex::new(HashSet::new()),
+            bridge_sessions: Mutex::new(HashSet::new()),
             pairing_failures: AtomicU32::new(0),
             busy: Mutex::new(HashMap::new()),
             next_tab: AtomicU64::new(1),
@@ -214,6 +218,28 @@ impl Server {
             .is_some_and(|token| self.sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token)))
     }
 
+    /// The paired device name when the request is authenticated by a paired device cookie and not
+    /// by the owner's own session cookie.
+    pub fn paired_device_name(&self, headers: &HeaderMap) -> Option<String> {
+        if self.owner_session(headers) {
+            return None;
+        }
+        let token = auth::cookie(header_str(headers, header::COOKIE), auth::DEVICE_COOKIE)?;
+        auth::device_for_token(&self.config.state_dir, token).map(|device| device.name)
+    }
+
+    /// Whether the request carries a session cookie issued with `bridge=1` (`ling chat`).
+    pub fn bridge_session(&self, headers: &HeaderMap) -> bool {
+        auth::cookie(header_str(headers, header::COOKIE), auth::SESSION_COOKIE)
+            .is_some_and(|token| self.bridge_sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token)))
+    }
+
+    /// Whether the caller is a phone bridge: a `bridge=1` session (`ling chat`) or a Signal bridge device.
+    pub fn is_bridge_caller(&self, headers: &HeaderMap) -> bool {
+        self.bridge_session(headers)
+            || self.paired_device_name(headers).as_deref().is_some_and(ask::is_bridge_device)
+    }
+
     /// Whether a `Host` header is one of the overlay front's names (`public_names`), not the LAN's.
     pub fn public_host(&self, host: Option<&str>) -> bool {
         host.is_some_and(|host| {
@@ -222,9 +248,13 @@ impl Server {
         })
     }
 
-    fn new_session(&self) -> String {
+    fn new_session_with(&self, bridge: bool) -> String {
         let token = auth::random_hex(32);
-        self.sessions.lock().unwrap_or_else(|p| p.into_inner()).insert(auth::sha256_hex(&token));
+        let hash = auth::sha256_hex(&token);
+        self.sessions.lock().unwrap_or_else(|p| p.into_inner()).insert(hash.clone());
+        if bridge {
+            self.bridge_sessions.lock().unwrap_or_else(|p| p.into_inner()).insert(hash);
+        }
         token
     }
 
@@ -238,6 +268,7 @@ impl Server {
 
     /// Forgets a tab that closed: its turns are no longer anyone's to wait for here.
     pub fn forget_tab(&self, tab: u64) {
+        self.chat_repos.forget_tab(tab);
         let mut busy = self.busy.lock().unwrap_or_else(|p| p.into_inner());
         if busy.remove(&tab).is_some() {
             self.sync_marker(&busy);
@@ -250,6 +281,7 @@ impl Server {
 
     fn sync_marker(&self, busy: &HashMap<u64, BusyTracker>) {
         let threads: BTreeSet<String> = busy.values().flat_map(|tracker| tracker.threads().cloned()).collect();
+        self.chat_repos.sync_running_threads(&threads);
         let path = self.marker_path();
         if threads.is_empty() {
             let _ = std::fs::remove_file(&path);
@@ -324,6 +356,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/devices/revoke", post(devices_revoke))
         .route("/devices/scope", post(devices_scope))
         .merge(crate::sync_hub::routes())
+        .merge(crate::chat_repos::routes())
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(server.clone(), guard))
         .with_state(server)
@@ -573,8 +606,12 @@ async fn healthz(State(server): State<Arc<Server>>) -> Response {
     )
 }
 
-async fn websocket(State(server): State<Arc<Server>>, upgrade: WebSocketUpgrade) -> Response {
-    upgrade.max_message_size(64 << 20).on_upgrade(move |socket| crate::relay::run_tab(socket, server))
+async fn websocket(State(server): State<Arc<Server>>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
+    let device_name = server.paired_device_name(&headers);
+    let bridge = server.is_bridge_caller(&headers);
+    upgrade
+        .max_message_size(64 << 20)
+        .on_upgrade(move |socket| crate::relay::run_tab_with_bridge(socket, server, device_name, bridge))
 }
 
 /// The user-level air-gap level, for clients that cannot read the user's configuration: the Signal
@@ -751,7 +788,8 @@ async fn login(State(server): State<Arc<Server>>, Query(query): Query<HashMap<St
     if !auth::take_login_code(&server.config.state_dir, code) {
         return html(StatusCode::UNAUTHORIZED, assets::LOGIN_FAILED_HTML);
     }
-    let token = server.new_session();
+    let bridge = query.get("bridge").map(String::as_str) == Some("1");
+    let token = server.new_session_with(bridge);
     redirect_with_cookie(format!("{}={token}; HttpOnly; SameSite=Strict; Path=/", auth::SESSION_COOKIE))
 }
 
@@ -989,5 +1027,96 @@ mod tests {
         assert_eq!(clean_file_name(".bashrc"), "bashrc");
         assert_eq!(clean_file_name(""), "attachment");
         assert_eq!(clean_file_name("a\u{0}b\nc.txt"), "abc.txt");
+    }
+
+    #[tokio::test]
+    async fn bridge_login_session_cannot_start_default_thread_while_owner_session_can() {
+        let dir = std::env::temp_dir().join(format!("ling-web-server-bridge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let codex_home = dir.join("codex");
+        let state_dir = codex_home.join("web");
+        std::fs::create_dir_all(&state_dir).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = Server::new(Config {
+            codex_home: codex_home.clone(),
+            state_dir: state_dir.clone(),
+            port,
+            lan_names: Vec::new(),
+            public_names: Vec::new(),
+            socket: dir.join("app.sock"),
+            launch: Launch {
+                ling: PathBuf::from("/bin/true"),
+                env: Vec::new(),
+                log: dir.join("app-server.log"),
+            },
+            images_dir: dir.join("images"),
+            speech_addr: "127.0.0.1:9".to_string(),
+            user_config: None,
+            forge_url: None,
+        })
+        .unwrap();
+
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                let _ = serve(server, vec![listener], async move {
+                    let _ = stop_rx.await;
+                })
+                .await;
+            })
+        };
+
+        let bridge_cookie = crate::ask_client::sign_in(&state_dir, port).await.unwrap();
+        let owner_cookie = crate::ask_client::sign_in_with(&state_dir, port, false).await.unwrap();
+
+        let mut bridge_headers = HeaderMap::new();
+        bridge_headers.insert(header::COOKIE, HeaderValue::from_str(&bridge_cookie).unwrap());
+        assert!(server.owner_session(&bridge_headers));
+        assert!(server.bridge_session(&bridge_headers));
+        assert!(server.is_bridge_caller(&bridge_headers));
+
+        let mut owner_headers = HeaderMap::new();
+        owner_headers.insert(header::COOKIE, HeaderValue::from_str(&owner_cookie).unwrap());
+        assert!(server.owner_session(&owner_headers));
+        assert!(!server.bridge_session(&owner_headers));
+        assert!(!server.is_bridge_caller(&owner_headers));
+
+        let ask_root = server.ask_root();
+        std::fs::create_dir_all(&ask_root).unwrap();
+        let start_default = json!({
+            "id": 1,
+            "method": "thread/start",
+            "params": { "prompt": "default", "cwd": "/work/repo" }
+        });
+
+        let bridge_prompts = ask::MessagePrompts {
+            root: &ask_root,
+            composed: None,
+            created: Mutex::new(None),
+            airgapped_on: false,
+            thread_folder: None,
+        }
+        .with_bridge(server.is_bridge_caller(&bridge_headers));
+        let bridge_res = server.policy.vet_outgoing(&start_default, &mut HashSet::new(), &bridge_prompts);
+        assert!(bridge_res.is_err(), "bridge=1 session must not start a default thread: {bridge_res:?}");
+
+        let owner_prompts = ask::MessagePrompts {
+            root: &ask_root,
+            composed: None,
+            created: Mutex::new(None),
+            airgapped_on: false,
+            thread_folder: None,
+        }
+        .with_bridge(server.is_bridge_caller(&owner_headers));
+        let owner_res = server.policy.vet_outgoing(&start_default, &mut HashSet::new(), &owner_prompts);
+        assert!(owner_res.is_ok(), "session without bridge=1 must be able to start a default thread: {owner_res:?}");
+
+        let _ = stop_tx.send(());
+        let _ = server_task.await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

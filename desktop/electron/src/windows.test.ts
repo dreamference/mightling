@@ -20,13 +20,19 @@ type Step = {
   owner?: string; is?: string | null; fallback?: string | null;
 };
 
-function stubs(airgappedOn: () => boolean = () => false): PromptSource {
+/** What a conformance case says about chat-repos checkouts and the caller (policy.test.ts reads the same fields). */
+type RepoContext = { repoCheckouts: Map<string, boolean>; repoThreads: Map<string, string>; bridge: boolean };
+
+function stubs(airgappedOn: () => boolean = () => false, repo: RepoContext = { repoCheckouts: new Map(), repoThreads: new Map(), bridge: false }): PromptSource {
   let made = 0;
   return {
     composed: (name) => `PROMPT:${name}`,
     newScratchFolder: () => `SCRATCH/${++made}`,
     scratchFolderOf: (thread) => (thread.startsWith("ask-") || thread.startsWith("chat-") ? `ASK/${thread}` : null),
     airgappedOn,
+    repoCheckout: (cwd) => repo.repoCheckouts.get(cwd) ?? null,
+    repoThreadCwd: (thread) => repo.repoThreads.get(thread) ?? null,
+    isBridge: () => repo.bridge,
     workFolder: (cwd) => cwd.startsWith("WORK/"),
   };
 }
@@ -86,16 +92,20 @@ describe("the window routing cases", () => {
 describe("ling web's conformance cases from any window", () => {
   it("hold for a second window, a pop-out and a pane as for the first, ids tagged", () => {
     const vectors = JSON.parse(fs.readFileSync(path.join(WEB, "vectors", "outgoing.json"), "utf8")) as {
-      cases: { name: string; message: unknown; accept: boolean; out?: Record<string, unknown>; pending?: string[]; pendingAfter?: string[]; airgapped?: "off" | "on" }[];
+      cases: { name: string; message: unknown; accept: boolean; out?: Record<string, unknown>; pending?: string[]; pendingAfter?: string[]; airgapped?: "off" | "on"; repoCheckouts?: Record<string, boolean>; repoThreads?: Record<string, string>; bridge?: boolean }[];
     };
     for (const kind of ["full", "popout", "pane"] as const) {
       const hub = new WindowHub();
       hub.open("1", "full");
       hub.open("2", kind);
       let on = false;
-      const prompts = stubs(() => on);
+      const repo: RepoContext = { repoCheckouts: new Map(), repoThreads: new Map(), bridge: false };
+      const prompts = stubs(() => on, repo);
       for (const testCase of vectors.cases) {
         on = testCase.airgapped === "on";
+        repo.repoCheckouts = new Map(Object.entries(testCase.repoCheckouts ?? {}));
+        repo.repoThreads = new Map(Object.entries(testCase.repoThreads ?? {}));
+        repo.bridge = Boolean(testCase.bridge);
         const pending = new Set(testCase.pending ?? []);
         const message = testCase.message as Record<string, unknown>;
         // A pane sends no composer method at all (refused before the policy is asked); the rest is the policy's call.

@@ -1,14 +1,17 @@
 //! Named system prompts (specs/DREAMFERENCE_MIGHTLING_PROMPT.md, Phase 1): which prompt a new
 //! `ling` session starts with, and `ling prompt list|show|use`.
 //!
-//! A prompt is a core text plus the launcher blocks appended to it (`web`, `email`, `code`). Four
+//! A prompt is a core text plus the launcher blocks appended to it (`web`, `email`, `code`). Six
 //! are built in: `default`, Codex's own template renamed, byte for byte what `ling` sent before
 //! this module existed; `offline`, the same template with the code block only, for a machine or a
 //! container with no network (the web and email blocks would describe commands that cannot work;
 //! SWE-bench's `--prompt offline` arm, FAILURES §9.3 rank 5); `high-swe`, a short method for
-//! resolving a defined task in a repository (`prompts/high-swe.md`); and `ask`, for research and
+//! resolving a defined task in a repository (`prompts/high-swe.md`); `ask`, for research and
 //! questions in a scratch folder (`prompts/ask.md`, specs/DREAMFERENCE_MIGHTLING_ASK.md §3.2),
-//! which the UI asks for by name and the bridge policy sets from `ling prompt show ask --composed`.
+//! which the UI asks for by name and the bridge policy sets from `ling prompt show ask --composed`;
+//! `chat`, `ask` with `prompts/chat.md` for the phone bridges; and `chat-work`, `default` with
+//! `prompts/chat-work.md` for a repository Work thread started from a phone
+//! (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §5.1).
 //! A file `$CODEX_HOME/system-prompts/<name>.md` is a custom prompt of that name; never one from
 //! the repository or the model, which cannot write there.
 //!
@@ -52,6 +55,11 @@ pub const ASK: &str = include_str!("../prompts/ask.md");
 /// bounded, `ling-search` first, no sleep-and-retry, and no clarifying questions on the phone.
 pub const CHAT_BLOCK: &str = include_str!("../prompts/chat.md");
 
+/// What `chat-work` adds to `default` for a repository Work thread started from a phone
+/// (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §5.1): brief answers ending with what changed,
+/// `exec_command`, no git writes, approvals only when needed, `timeout`, and no sleep-and-retry.
+pub const CHAT_WORK_BLOCK: &str = include_str!("../prompts/chat-work.md");
+
 const BLOCKS_PREFIX: &str = "<!-- ling: blocks=";
 const BLOCKS_SUFFIX: &str = "-->";
 const USAGE: &str =
@@ -82,6 +90,9 @@ impl Blocks {
 pub enum Core {
     /// Codex's longest bundled template, renamed (`crate::rebrand`).
     Codex,
+    /// [`Core::Codex`], with an extra block appended after `default`'s full composed text
+    /// (because `Core::Codex` is expanded and its search sentence rewritten inside [`compose`]).
+    CodexWith(&'static str),
     Text(String),
 }
 
@@ -149,6 +160,18 @@ impl Prompt {
         }
     }
 
+    /// `default` for a repository Work thread started from a phone, with [`CHAT_WORK_BLOCK`] after it.
+    pub fn chat_work() -> Prompt {
+        Prompt {
+            name: "chat-work".to_string(),
+            core: Core::CodexWith(CHAT_WORK_BLOCK),
+            blocks: Blocks::ALL,
+            origin: Origin::BuiltIn(
+                "default, for Work from a phone: a checkout of a forge repository, brief answers, no git writes",
+            ),
+        }
+    }
+
     pub fn is_default(&self) -> bool {
         self.name == DEFAULT_PROMPT
     }
@@ -180,7 +203,14 @@ pub struct Installed {
 impl Installed {
     pub fn built_in() -> Installed {
         Installed {
-            prompts: vec![Prompt::default_prompt(), Prompt::offline(), Prompt::high_swe(), Prompt::ask(), Prompt::chat()],
+            prompts: vec![
+                Prompt::default_prompt(),
+                Prompt::offline(),
+                Prompt::high_swe(),
+                Prompt::ask(),
+                Prompt::chat(),
+                Prompt::chat_work(),
+            ],
             notes: Vec::new(),
         }
     }
@@ -352,10 +382,11 @@ pub struct Parts {
 ///
 /// For `default` this is exactly what the launcher composed before named prompts existed: Codex's
 /// template and the web block, with the search sentence rewritten for the index, then email, code
-/// and the glossary.
+/// and the glossary. A [`Core::CodexWith`] prompt (`chat-work`) composes that full text and appends
+/// its trailing block at the end.
 pub fn compose(prompt: &Prompt, parts: &Parts) -> String {
     let mut text = match &prompt.core {
-        Core::Codex => crate::rebrand(&crate::codex_template()),
+        Core::Codex | Core::CodexWith(_) => crate::rebrand(&crate::codex_template()),
         Core::Text(core) => core.trim_end().to_string(),
     };
     if prompt.blocks.web {
@@ -375,6 +406,9 @@ pub fn compose(prompt: &Prompt, parts: &Parts) -> String {
     text.push_str(&parts.docs);
     text.push_str(&parts.glossary);
     text.push_str(&parts.masking);
+    if let Core::CodexWith(extra) = &prompt.core {
+        text.push_str(extra);
+    }
     text
 }
 
@@ -664,6 +698,24 @@ mod tests {
     }
 
     #[test]
+    fn chat_work_composes_to_the_default_prompt_followed_by_the_chat_work_block() {
+        assert_eq!(Installed::built_in().get("chat-work"), Some(&Prompt::chat_work()));
+        assert!(
+            CHAT_WORK_BLOCK.contains("Never run `git add`, `git commit` or `git push`")
+                && CHAT_WORK_BLOCK.contains("exec_command")
+                && CHAT_WORK_BLOCK.contains("timeout"),
+            "{CHAT_WORK_BLOCK}"
+        );
+        let code = "\n\n# Code navigation\n\n`ling-code def`\n";
+        let email = crate::gmail_access_instructions("a@x.com");
+        for current in [parts("", ""), parts(&email, code)] {
+            let default = compose(&Prompt::default_prompt(), &current);
+            let chat_work = compose(&Prompt::chat_work(), &current);
+            assert_eq!(chat_work, format!("{default}{CHAT_WORK_BLOCK}"));
+        }
+    }
+
+    #[test]
     fn phone_chat_takes_the_most_likely_reading_asks_only_before_costly_actions_and_never_guesses_an_attachment() {
         let chat = compose(&Prompt::chat(), &parts("", ""));
         let phone = &chat[chat.find("# On a phone").unwrap()..];
@@ -721,7 +773,7 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), "not a prompt").unwrap();
         let installed = Installed::load(&home);
         let names: Vec<&str> = installed.prompts.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["default", "offline", "high-swe", "ask", "chat", "mine", "plain"]);
+        assert_eq!(names, ["default", "offline", "high-swe", "ask", "chat", "chat-work", "mine", "plain"]);
         let mine = installed.get("mine").unwrap();
         assert_eq!(mine.blocks, Blocks { web: true, email: false, code: true });
         assert_eq!(mine.core, Core::Text("Be brief.\n".to_string()));
@@ -772,9 +824,10 @@ mod tests {
         let resolved = resolve_from(Some("high-swe"), None, &installed);
         let lines = list_lines(&resolved, &installed);
         assert_eq!(lines[0], format!("Prompt for new sessions: high-swe ({ENV_VAR})"));
-        assert!(lines[1].starts_with("  default   the general prompt") && !lines[1].contains('←'));
-        assert!(lines[2].starts_with("  offline   the general prompt without web or email") && !lines[2].contains('←'));
-        assert!(lines[3].starts_with("  high-swe  repository tasks") && lines[3].ends_with("← new sessions"));
+        assert!(lines[1].starts_with("  default    the general prompt") && !lines[1].contains('←'));
+        assert!(lines[2].starts_with("  offline    the general prompt without web or email") && !lines[2].contains('←'));
+        assert!(lines[3].starts_with("  high-swe   repository tasks") && lines[3].ends_with("← new sessions"));
+        assert!(lines[6].starts_with("  chat-work  default, for Work from a phone") && !lines[6].contains('←'));
         let updated = with_choice("# mine\nvllm_host = \"http://h:8000\"\n\n[night]\nprompt = \"x\"\n", "high-swe").unwrap();
         assert!(updated.starts_with("# mine\nvllm_host = \"http://h:8000\"\n"));
         let parsed: toml::Table = toml::from_str(&updated).unwrap();

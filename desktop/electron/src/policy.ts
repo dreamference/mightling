@@ -35,6 +35,12 @@ export interface PromptSource {
    * thread. An implementation that cannot tell answers true.
    */
   airgappedOn(threadId: string | null): boolean;
+  /** Whether `cwd` is an existing checkout recorded in `$CODEX_HOME/chat-repos/index.json` under `$CODEX_HOME/chat-repos/`: `readOnly` when recorded, `null` otherwise. */
+  repoCheckout(cwd: string): boolean | null;
+  /** The recorded checkout `cwd` when `threadId` is in `app_threads` of a checkout in `$CODEX_HOME/chat-repos/index.json`, or `null` otherwise. */
+  repoThreadCwd(threadId: string): string | null;
+  /** Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app. */
+  isBridge(): boolean;
   /**
    * Whether `cwd` is a folder a Work thread may work in: an existing directory, named by an absolute
    * path, outside the Ask folders' root. A fork of an Ask thread may move there (a project's primary
@@ -53,6 +59,10 @@ export interface Policy {
   promptOpeners: ReadonlySet<string>;
   namedPrompts: ReadonlySet<string>;
   scratchPrompts: ReadonlySet<string>;
+  repoPrompts: ReadonlySet<string>;
+  repoThreadParams: Readonly<JsonObject>;
+  repoReadOnlyThreadParams: Readonly<JsonObject>;
+  pinnedTurnFields: readonly string[];
   scratchFields: readonly string[];
   scratchSandbox: string;
   /** The request that forks a thread: an Ask thread's fork may leave its folder for a Work folder. */
@@ -112,6 +122,10 @@ export function parsePolicy(value: unknown): Policy {
     promptOpeners: new Set(strings(value, "promptOpeners")),
     namedPrompts: new Set(strings(value, "namedPrompts")),
     scratchPrompts: new Set(strings(value, "scratchPrompts")),
+    repoPrompts: new Set(strings(value, "repoPrompts")),
+    repoThreadParams: isObject(value.repoThreadParams) ? value.repoThreadParams : (() => { throw new Error("policy.json: `repoThreadParams` must be an object"); })(),
+    repoReadOnlyThreadParams: isObject(value.repoReadOnlyThreadParams) ? value.repoReadOnlyThreadParams : (() => { throw new Error("policy.json: `repoReadOnlyThreadParams` must be an object"); })(),
+    pinnedTurnFields: strings(value, "pinnedTurnFields"),
     scratchFields: strings(value, "scratchFields"),
     scratchSandbox: string(value, "scratchSandbox"),
     forkRequest: string(value, "forkRequest"),
@@ -135,6 +149,12 @@ export function parsePolicy(value: unknown): Policy {
   }
   if (![...policy.scratchPrompts].every((name) => policy.namedPrompts.has(name))) {
     throw new Error("policy.json: every scratch prompt must also be a named prompt");
+  }
+  if (![...policy.repoPrompts].every((name) => policy.namedPrompts.has(name))) {
+    throw new Error("policy.json: every repo prompt must also be a named prompt");
+  }
+  if ([...policy.repoPrompts].some((name) => policy.scratchPrompts.has(name))) {
+    throw new Error("policy.json: a repo prompt cannot also be a scratch prompt");
   }
   if (![...policy.airgappedRefusedRequests].every((method) => policy.allowedRequests.has(method))) {
     throw new Error("policy.json: every request refused at airgapped on must be allowed at off");
@@ -222,6 +242,14 @@ function vetThreadParams(policy: Policy, method: string, original: JsonObject, p
   const moved = existing !== null && method === policy.forkRequest && typeof params.cwd === "string" && prompts.workFolder?.(params.cwd) === true ? params.cwd : null;
   if (moved !== null) existing = null;
   if (moved !== null || existing !== null) confine(policy, params, moved ?? (existing as string));
+  // A resumed or forked chat-work thread stays in its recorded checkout with its sandbox and on-request approvals.
+  const existingRepoCwd = typeof params.threadId === "string" ? prompts.repoThreadCwd(params.threadId) : null;
+  if (existingRepoCwd !== null) {
+    for (const field of policy.scratchFields) delete params[field];
+    params.cwd = existingRepoCwd;
+    const readOnly = prompts.repoCheckout(existingRepoCwd) === true;
+    Object.assign(params, readOnly ? policy.repoReadOnlyThreadParams : policy.repoThreadParams);
+  }
   if (policy.windowToolsField in params) {
     const names = params[policy.windowToolsField];
     delete params[policy.windowToolsField];
@@ -238,15 +266,42 @@ function vetThreadParams(policy: Policy, method: string, original: JsonObject, p
   // A resumed thread of a prompt with a config of its own is known by its folder's name.
   const resumedAs = existing === null ? undefined : promptOfFolder(policy, existing);
   if (resumedAs !== undefined) config = { ...config, ...policy.promptThreadConfig.get(resumedAs) };
+  if (existingRepoCwd !== null) {
+    for (const prompt of policy.repoPrompts) {
+      if (policy.promptThreadConfig.has(prompt)) config = { ...config, ...policy.promptThreadConfig.get(prompt) };
+    }
+  }
   const named = policy.promptField in params;
   const name = params[policy.promptField];
   delete params[policy.promptField];
   if (named && typeof name !== "string") throw new Error(`\`${policy.promptField}\` must name a prompt`);
+  if (typeof name === "string" && !policy.namedPrompts.has(name)) {
+    throw new Error(`no prompt named "${name}" may be chosen here; named prompts: ${[...policy.namedPrompts].sort().join(", ")}`);
+  }
+  if (
+    policy.promptOpeners.has(method) &&
+    prompts.isBridge() &&
+    !(typeof name === "string" && (policy.scratchPrompts.has(name) || policy.repoPrompts.has(name)))
+  ) {
+    throw new Error("a phone bridge starts only Ask threads or chat-work threads in a forge checkout");
+  }
+  if (
+    !policy.promptOpeners.has(method) &&
+    prompts.isBridge() &&
+    existing === null &&
+    existingRepoCwd === null
+  ) {
+    throw new Error("a phone bridge resumes only Ask threads or chat-work threads");
+  }
   if (typeof name === "string" && policy.promptThreadConfig.has(name)) config = { ...config, ...policy.promptThreadConfig.get(name) };
   if (Object.keys(config).length) params.config = config;
   if (typeof name !== "string") return params;
-  if (!policy.namedPrompts.has(name)) {
-    throw new Error(`no prompt named "${name}" may be chosen here; named prompts: ${[...policy.namedPrompts].sort().join(", ")}`);
+  if (policy.repoPrompts.has(name)) {
+    const readOnly = typeof params.cwd === "string" ? prompts.repoCheckout(params.cwd) : null;
+    if (readOnly === null) {
+      throw new Error("a chat-work thread starts only in a checkout ling web made for it");
+    }
+    Object.assign(params, readOnly ? policy.repoReadOnlyThreadParams : policy.repoThreadParams);
   }
   // `default` is what the launcher's catalog already carries: setting it again would only freeze
   // today's text into the thread.
@@ -304,6 +359,14 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
     }
     if (policy.threadOpeners.has(method) && isObject(object.params)) {
       object.params = vetThreadParams(policy, method, object.params, prompts);
+    }
+    if (method === "turn/start" && isObject(object.params)) {
+      const params: JsonObject = { ...object.params };
+      const isRepo = typeof params.threadId === "string" && prompts.repoThreadCwd(params.threadId) !== null;
+      if (prompts.isBridge() || isRepo) {
+        for (const field of policy.pinnedTurnFields) delete params[field];
+      }
+      object.params = params;
     }
     if (method === policy.importRequest) {
       object.params = vetImportParams(policy, isObject(object.params) ? object.params : {}, prompts.airgappedOn(null));
