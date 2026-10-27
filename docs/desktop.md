@@ -304,6 +304,12 @@ accent, background and text colours of the theme in front; each theme keeps its 
   **Worktree** gives the thread its own checkout from the branch you pick; the thread's header says
   where its work is, and **Hand off** brings it to your local checkout. `/worktree on` in `ling`
   (or `ling worktree on`) makes Worktree the default here too.
+- **Night Shift inside a thread:** `/night add <task>` in a Work thread (or Queue in Scheduled
+  with "With what was said in …" ticked) queues the task for tonight and shows it in that thread
+  as a card: queued, running, then done with its attempts and the branch chosen. The next morning
+  the card carries the task's part of the night's report as a note, for you to read; it is never
+  sent to the model. **Apply** runs `ling night apply` in the thread's folder, bringing the branch
+  there as uncommitted changes, and **Open the result** opens the run in Scheduled.
 - **Ask one click away**, in the same window's sidebar.
 
 Not there yet: review, settings pages and choosing a model (it is shown, not chosen).

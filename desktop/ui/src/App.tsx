@@ -96,6 +96,8 @@ import { AskFiles } from "./AskFiles";
 import { toolView, type ToolView } from "./toolitems";
 import { latestFindings } from "./findings";
 import { threadContext, withThreadContext } from "./tonight";
+import { NightCards } from "./NightCards";
+import { tasksOf, tieTask } from "./nightthread";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectPage } from "./ProjectPage";
 import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollection, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
@@ -247,6 +249,8 @@ export function App() {
   const [planAvailable, setPlanAvailable] = useState(false);
   const [extensions, setExtensions] = useState<ExtensionsTab | null>(null);
   const [scheduledOpen, setScheduledOpen] = useState(false);
+  /** The finished run Scheduled opens on (a thread's Night Shift card, DESKTOP §16 B40). */
+  const [scheduledRun, setScheduledRun] = useState<string | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   // Threads from the user's other devices, on `ling web` with the node's sync hub on (SYNC Phase 1).
   const synced = useSynced(HOST === "web" && !POPOUT);
@@ -2256,6 +2260,8 @@ export function App() {
             // From a thread, the task carries what was said there (tonight.ts; the owner's decision 7).
             const task = selected ? withThreadContext(words[1], workLabel(selected.thread), threadContext(selected)) : words[1];
             const said = await bridge.night.add(folder, task, null);
+            // The task shows in the Work thread it was queued from, as a card (nightthread.ts, DESKTOP §16 B40).
+            if (selected && view === "work") updatePrefs({ nightThreads: tieTask(prefsRef.current.nightThreads, said, selected.thread.id) });
             return setInfo({ title: "Night Shift", body: <pre className="info-pre">{said}</pre> });
           }
           return setScheduledOpen(true);
@@ -2973,6 +2979,10 @@ export function App() {
               <p>A question with no project: Mightling answers in a folder of its own, searching the web when it needs to{airgap?.level === "on" ? ", except that airgapped is on, so web search is off" : ""}. Attach images or files with the paperclip, or paste a screenshot.</p>
             </div>
           ) : <p className="empty">{startingProject ? `A new thread in the project ${startingProject.name}${primaryFolder(startingProject) ? ` (${primaryFolder(startingProject)})` : ""}: write the first message below.` : newCwd.trim() ? `A new thread in ${newCwd.trim()}: write the first message below.` : "Open a thread, or name a project folder for a new one."}</p>}
+          {selected && view === "work" && bridge.host() === "electron" ? (
+            <NightCards key={selected.thread.id} ids={tasksOf(prefs.nightThreads, selected.thread.id)} cwd={workFolder} notice={notice}
+              onOpenResult={(id) => { setScheduledRun(id); setScheduledOpen(true); }} />
+          ) : null}
           {threadRequests.map((request) => (
             // Mirrored read-only while another window holds the thread's composer: that window answers.
             <div key={JSON.stringify(request.id)} className={composerHere ? "approval-host" : "approval-host mirrored"} inert={!composerHere}>
@@ -3185,9 +3195,10 @@ export function App() {
         memoryStatus={memoryStatus} resetMemories={resetMemories} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
-          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => setScheduledOpen(false)} notice={notice}
+          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => { setScheduledOpen(false); setScheduledRun(null); }} notice={notice}
           fromThread={selected && view === "work" ? { title: workLabel(selected.thread), context: threadContext(selected) } : null}
-          onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }} />
+          onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }}
+          openRun={scheduledRun} onQueued={(said) => { if (selected && view === "work") updatePrefs({ nightThreads: tieTask(prefsRef.current.nightThreads, said, selected.thread.id) }); }} />
       ) : null}
       {syncedOpen && synced.status ? <SyncedView status={synced.status} onClose={() => setSyncedOpen(false)} onChanged={synced.refresh} notice={notice} /> : null}
       {askFilesOpen ? (

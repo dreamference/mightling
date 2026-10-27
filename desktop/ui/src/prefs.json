@@ -104,6 +104,10 @@
       "default": {},
       "type": "object"
     },
+    "nightThreads": {
+      "default": {},
+      "type": "object"
+    },
     "recentsOpen": {
       "default": false,
       "type": "boolean"
