@@ -67,8 +67,9 @@ def test_the_image_is_pinned_by_digest_and_the_engine_commit_is_a_full_hash():
     # must be the full hash an ancestry check takes.
     recipe = get_model_launch_overrides(DEFAULT_MODEL_ALIAS, ENGINE_LING)
     assert recipe["engine_commit"] == QWEN38_LING_ENGINE_COMMIT
-    # 1.7.2's engine: b8e9451 plus the parse-only tool-call fix; no sparse head yet (ec9dce8).
-    assert QWEN38_LING_ENGINE_COMMIT.startswith("bdda3a2")
+    # 1.7.2's engine: b8e9451 plus the parse-only tool-call fix (bdda3a2) and the tokenizer cache's
+    # mutex (8d112d0); no sparse head yet (ec9dce8).
+    assert QWEN38_LING_ENGINE_COMMIT.startswith("8d112d0")
     assert recipe["engine_features"] == []
     assert re.fullmatch(r"[0-9a-f]{40}", QWEN38_LING_ENGINE_COMMIT)
     assert re.fullmatch(r"ghcr\.io/dreamference/ling-serve@sha256:[0-9a-f]{64}", QWEN38_LING_IMAGE)
