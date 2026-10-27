@@ -1060,3 +1060,6 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 /* An image the served model cannot see (DESKTOP §16 B13). */
 .attachment.unseen { border-color: var(--danger); }
 .attachment-warning { color: var(--danger); font-size: 11px; white-space: nowrap; }
+
+/* The menu on a file's path (DESKTOP §16 B14): at the pointer, above everything. */
+.menu.path-menu { right: auto; z-index: 40; }

@@ -146,6 +146,8 @@ export type FromView =
   /** The Scheduled view over Night Shift (night.ts). */
   /** A pasted image for a Work turn, written under $CODEX_HOME (attachments.ts, DESKTOP §16 B13). */
   | { type: "work/attach"; name: string; kind: "image" | "file"; data: string }
+  /** A file shown in the system's file manager (DESKTOP §16 B14). */
+  | { type: "open/reveal"; path: string }
   | { type: "night/list" }
   | { type: "night/report"; name: string }
   | { type: "night/add"; repo: string; task: string; test: string | null; on?: string | null; bestOf?: number | null }

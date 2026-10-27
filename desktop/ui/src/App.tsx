@@ -80,6 +80,7 @@ import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./Worktr
 import { commandChoices, type ApprovalChoice } from "./approvals";
 import { busyHere } from "./checkouts";
 import { ExportDialog } from "./ExportDialog";
+import { PathMenu, pathOf, type PathAction, type PathMenuState } from "./PathMenu";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
 import { toolView, type ToolView } from "./toolitems";
@@ -208,6 +209,8 @@ export function App() {
   const [newProject, setNewProject] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   /** The thread being exported (exportthread.ts) and the home folder its paths are redacted against. */
+  /** The menu on a file's path (DESKTOP §16 B14). */
+  const [pathMenu, setPathMenu] = useState<PathMenuState | null>(null);
   /** The first-run page (DESKTOP §16 B6), decided once the threads and preferences are read. */
   const [welcome, setWelcome] = useState(false);
   const [exporting, setExporting] = useState<{ thread: Thread; title: string; home: string | null } | null>(null);
@@ -1415,6 +1418,25 @@ export function App() {
     }
   };
 
+  const closePathMenu = useCallback(() => setPathMenu(null), []);
+  const pathAction = async (action: PathAction, file: string) => {
+    try {
+      if (action === "copy") {
+        if (await copyText(file)) dispatch({ type: "notice", message: "Copied the path." });
+      } else if (action === "attach") {
+        const mention = `@${composeRoot ? mentionPath(composeRoot, file) : file}`;
+        setDraft((text) => `${text}${text && !/\s$/.test(text) ? " " : ""}${mention} `);
+      } else if (action === "editor") {
+        const slash = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+        await bridge.openInEditor(file.slice(0, slash) || "/", file.slice(slash + 1), null, prefs.editor);
+      } else {
+        await bridge.revealFile(file);
+      }
+    } catch (error) {
+      notice(error);
+    }
+  };
+
   /** What the shortcuts and the command menu run, by keymap action. */
   const commands: Record<string, () => void> = {
     commandMenu: () => setMenuOpen((open) => (open ? false : "all")),
@@ -2535,6 +2557,13 @@ export function App() {
     <div className={`work view-${view}${POPOUT ? " popout sidebar-hidden" : ""}${drawer ? " drawer-open" : ""}${tabsShown ? (prefs.layout === "tabs" ? " review-open tabs-full" : " review-open") : ""}${prefs.sidebarHidden ? " sidebar-hidden" : ""}`} onContextMenu={(event) => {
       // In the desktop app the context menu is native, drawn by the main process
       // (desktop/electron/src/shell.ts); a browser keeps its own, which a phone needs to copy.
+      // A file's path (DESKTOP §16 B14): one menu wherever it appears, in the app and in a browser.
+      const named = pathOf(event.target);
+      if (named && !window.getSelection()?.toString()) {
+        event.preventDefault();
+        setPathMenu({ x: event.clientX, y: event.clientY, path: named });
+        return;
+      }
       if (HOST !== "electron") return;
       event.preventDefault();
       const target = event.target as HTMLElement;
@@ -2981,6 +3010,10 @@ export function App() {
       ) : null}
       {syncedOpen && synced.status ? <SyncedView status={synced.status} onClose={() => setSyncedOpen(false)} onChanged={synced.refresh} notice={notice} /> : null}
       {welcome ? <WelcomeDialog quickShortcut={keyLabel(prefs.quickEntryShortcut)} onChoose={chooseWelcome} /> : null}
+      {pathMenu ? (
+        <PathMenu menu={pathMenu} canAttach={view === "work" && canCompose} canReveal={HOST === "electron"} onClose={closePathMenu}
+          onAction={(action) => void pathAction(action, pathMenu.path)} />
+      ) : null}
       {exporting ? <ExportDialog client={client} thread={exporting.thread} title={exporting.title} home={exporting.home} notice={notice} onClose={() => setExporting(null)} /> : null}
       {projectDialog ? (
         <ProjectDialog client={client} project={projectDialog.project} folder={projectDialog.folder} notice={notice} onClose={() => setProjectDialog(null)}
@@ -3211,7 +3244,7 @@ function Item({ item, folded, progress }: { item: ThreadItem; folded: boolean; p
           {made.map((change) => <MadeFile key={change.path} path={change.path} diff={change.diff} onOpen={() => files?.open(at(change.path), null)} />)}
           {edited.map((change) => (
             <details key={change.path}>
-              <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code>{change.path}</code><DiffStat text={change.diff} />
+              <summary><Icon name="fileDiff" size={14} />{change.kind.type === "add" ? "Added" : change.kind.type === "delete" ? "Deleted" : "Edited"} <code data-path={at(change.path)}>{change.path}</code><DiffStat text={change.diff} />
                 {files && change.kind.type !== "delete" ? (
                   <button className="icon open-file" title="Open in a tab" aria-label={`Open ${change.path} in a tab`}
                     onClick={(event) => { event.preventDefault(); files.open(at(change.path), null); }}><Icon name="file" size={13} /></button>

@@ -214,6 +214,9 @@ export interface TaskEvent {
 
 export const listEditors = () => send<Editor[]>({ type: "editors/list" });
 /** Opens a file of `root` in `editor` (null: the system's choice), at `line` when given. */
+/** Shows a file in the system's file manager (DESKTOP §16 B14); the app only. */
+export const revealFile = (path: string) => send<null>({ type: "open/reveal", path });
+
 export const openInEditor = (root: string, path: string, line: number | null, editor: string | null) =>
   send<null>({ type: "editor/open", root, path, line, editor });
 
