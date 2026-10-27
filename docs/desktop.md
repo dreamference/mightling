@@ -209,6 +209,12 @@ or going to another thread, deletes it; **Keep as a thread** copies it into a sa
 The saved recap of a thread, a copy of it asked where the work stands, is **Recap in a saved copy**
 on the thread's menu.
 
+**An AGENTS.md for a repository.** `/init` in Work asks the agent to read the repository (its
+build, test and lint commands, its layout and conventions) and write a short `AGENTS.md` at its
+root. When it already has one, the agent keeps it and edits only what is wrong or missing. Either
+way the file is the turn's change, in the diff, under the thread's permissions: keep it or undo it
+there. Words after `/init` go to the agent as your note.
+
 **Earlier questions.** In **Settings › Memories**, **Let the agent search your earlier Ask
 questions** (off until you turn it on) keeps a copy of each Ask question and its answers under
 `~/.mightling/ask-history/` and gives the agent a skill to search and read them, on this machine and

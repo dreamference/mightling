@@ -106,6 +106,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "hooks", description: "The hooks: what runs when, and whether you trust each", needs: "none" },
   { name: "airgapped", description: "Show the air-gap level, or set the default for new threads", needs: "none", args: "[default off|on]" },
   { name: "cavemode", description: "How terse answers are: show the level, set it for this thread, or the default", needs: "none", args: "[off|lite|full|ultra | default <level|built-in>]" },
+  // DESKTOP §16 B38: Mightling's own prompt (init.ts).
+  { name: "init", description: "Write a short AGENTS.md for this repository, or propose changes to the one it has", needs: "work", args: "[note]" },
 ];
 
 export interface CommandContext {

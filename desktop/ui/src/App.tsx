@@ -74,6 +74,7 @@ import { boardOn, sqliteHome } from "./board";
 import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { SideChat } from "./SideChat";
 import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages } from "./sidechat";
+import { agentsPath, initPrompt } from "./init";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
 import { nearBottom } from "./follow";
@@ -1195,6 +1196,30 @@ export function App() {
     }
   };
 
+  /**
+   * `/init` (DESKTOP §16 B38, init.ts): a turn in the thread (one started first when none is open)
+   * asking for a short AGENTS.md at the repository's root, or changes proposed to the one there. It
+   * runs as any message does, under the thread's permissions, so the file is the turn's change.
+   */
+  const initRepo = async (words: string) => {
+    const target = selected?.thread ?? (await startThread());
+    if (!target) return;
+    const cwd = turnCwd(prefsRef.current.worktreeThreads[target.id]);
+    const present = await client.request("fs/readFile", { path: agentsPath(cwd ?? target.cwd) }).then(() => true, () => false);
+    await sendMessage(client, {
+      threadId: target.id,
+      activeTurnId: selected?.thread.id === target.id ? selected.activeTurnId : null,
+      input: turnInput(initPrompt(present ? "present" : "none", words), []),
+      followUp: prefs.followUp,
+      permissions: profile,
+      effort,
+      model: modelChoice,
+      cwd,
+      collaborationMode: planFor(target.id),
+    });
+    promptHistory.push(words ? `/init ${words}` : "/init");
+  };
+
   const send = async (text: string, mode: "default" | "steer" | "queue") => {
     const message = text.trim();
     if (sending) return;
@@ -2229,6 +2254,9 @@ export function App() {
         }
         case "side":
           return commands.sideChat();
+        case "init":
+          if (view !== "work") return notice("/init is Work's: open a thread in a project.");
+          return initRepo(args);
         case "pin":
           return commands.pinChat();
         case "pet":
