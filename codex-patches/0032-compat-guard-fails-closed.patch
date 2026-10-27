@@ -1,0 +1,10 @@
+diff --git a/codex-rs/hooks/src/events/pre_tool_use.rs b/codex-rs/hooks/src/events/pre_tool_use.rs
+--- a/codex-rs/hooks/src/events/pre_tool_use.rs
++++ b/codex-rs/hooks/src/events/pre_tool_use.rs
+@@ -293,2 +293,6 @@
+     }
++    // Mightling: the compat guard fails closed.
++    if status == HookRunStatus::Failed && format!("{handler:?}").contains(" compat guard") {
++        (should_block, block_reason) = (true, Some("the permission guard failed".into()));
++    }
+ 

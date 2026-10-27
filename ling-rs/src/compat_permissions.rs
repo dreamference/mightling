@@ -416,43 +416,100 @@ pub fn guard_answer(input: &Value, rules: &[Rule], root: &Path, home: Option<&Pa
     None
 }
 
-/// `ling compat guard [--allow R]... [--deny R]...`: the `PreToolUse` hook.
+/// Why the guard refuses a call it could not judge: its rules could not be read, the hook input
+/// was not Codex's, or the guard did not run at all (the fallback in [`guard_command`]). Plain
+/// words only: the fallback prints it through `cmd.exe` and `sh`, where `%`, `&`, `(` or a single
+/// quote would be read.
+pub const GUARD_FAILED_REASON: &str =
+    "Mightling refused this tool call because the permission guard for Claude Code rules could not judge it. Run it yourself, or see ling compat doctor";
+
+/// The guard's answer when it cannot judge a call: deny, never let it through.
+pub fn guard_failed_answer() -> Value {
+    json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": GUARD_FAILED_REASON}})
+}
+
+/// `ling compat guard [--allow R]... [--deny R]... [--allow-hex H]... [--deny-hex H]...`: the
+/// `PreToolUse` hook. It fails closed: a rule it cannot decode or an input it cannot read is a
+/// refusal, not a pass.
 pub fn run_guard(args: &[String]) -> i32 {
     use std::io::Read;
-    let mut extra = Vec::new();
-    let mut index = 0;
-    while index + 1 < args.len() {
-        let kind = match args[index].as_str() {
-            "--allow" => Kind::Allow,
-            "--deny" => Kind::Deny,
-            _ => {
-                index += 1;
-                continue;
-            }
-        };
-        extra.push((kind, args[index + 1].clone()));
-        index += 2;
-    }
     let mut raw = String::new();
     let _ = std::io::stdin().read_to_string(&mut raw);
-    let Ok(input) = serde_json::from_str::<Value>(&raw) else { return 0 };
-    let cwd = PathBuf::from(input["cwd"].as_str().unwrap_or("."));
-    let root = crate::compat_tui::project_root(&cwd);
-    let trusted = codex_utils_home_dir::find_codex_home().ok().is_some_and(|home| ling_skills::catalog::is_trusted(home.as_path(), &root));
-    let home = ling_node_locator::home_dir();
-    let (rules, _) = rules_for(&root, home.as_deref(), trusted, &extra);
-    if let Some(answer) = guard_answer(&input, &rules, &root, home.as_deref()) {
+    let answer = match (guard_rules_from_args(args), serde_json::from_str::<Value>(&raw)) {
+        (Some(extra), Ok(input)) if input.is_object() => {
+            let cwd = PathBuf::from(input["cwd"].as_str().unwrap_or("."));
+            let root = crate::compat_tui::project_root(&cwd);
+            let trusted =
+                codex_utils_home_dir::find_codex_home().ok().is_some_and(|home| ling_skills::catalog::is_trusted(home.as_path(), &root));
+            let home = ling_node_locator::home_dir();
+            let (rules, _) = rules_for(&root, home.as_deref(), trusted, &extra);
+            guard_answer(&input, &rules, &root, home.as_deref())
+        }
+        _ => Some(guard_failed_answer()),
+    };
+    if let Some(answer) = answer {
         println!("{answer}");
     }
     0
 }
 
+/// The guard's command-line rules: `--allow R`, `--deny R`, and their hex forms (the rule's text
+/// as a [`crate::compat_hooks::hex_word`], how Windows passes it). None when a flag has no value
+/// or a hex word does not decode, which the guard reads as "cannot judge".
+pub fn guard_rules_from_args(args: &[String]) -> Option<Vec<(Kind, String)>> {
+    let mut extra = Vec::new();
+    let mut words = args.iter();
+    while let Some(flag) = words.next() {
+        let (kind, hex) = match flag.as_str() {
+            "--allow" => (Kind::Allow, false),
+            "--deny" => (Kind::Deny, false),
+            "--allow-hex" => (Kind::Allow, true),
+            "--deny-hex" => (Kind::Deny, true),
+            _ => continue,
+        };
+        let value = words.next()?;
+        let text = if hex { crate::compat_hooks::from_hex_word(value)? } else { value.clone() };
+        extra.push((kind, text));
+    }
+    Some(extra)
+}
+
 /// The guard hook's command, with the session's command-line rules in it.
 pub fn guard_command(exe: &Path, extra: &[(Kind, String)]) -> String {
-    let mut command = format!("{} compat guard", crate::compat_hooks::shell_word(&exe.display().to_string()));
+    guard_command_for(exe, extra, cfg!(windows))
+}
+
+/// [`guard_command`] for either shell Codex runs hooks through: `$SHELL -lc` elsewhere, `cmd.exe
+/// /C` on Windows, where the program goes in double quotes and each rule as a hex word (cmd reads
+/// `%`, `&`, `|`, `(` and quotes inside rules; WINDOWS_ARM §23.4 W1).
+///
+/// The line ends in a fallback that prints a refusal when the guard itself fails: a program that
+/// cannot start (a moved install, a quoting fault, as W1 was), a crash, or any exit but 0. Codex
+/// lets a tool call through when a `PreToolUse` hook fails, so without it a guard that does not
+/// run enforces nothing. The guard exits 0 whenever it has judged, so the fallback answers only
+/// for a guard that did not.
+pub fn guard_command_for(exe: &Path, extra: &[(Kind, String)], windows: bool) -> String {
+    let exe = exe.display().to_string();
+    let mut command = if windows {
+        format!("{} compat guard", crate::compaction::quote_program(&exe, true))
+    } else {
+        format!("{} compat guard", crate::compat_hooks::shell_word(&exe))
+    };
     for (kind, text) in extra {
         let flag = if *kind == Kind::Deny { "--deny" } else { "--allow" };
-        command.push_str(&format!(" {flag} {}", crate::compat_hooks::shell_word(text)));
+        if windows {
+            command.push_str(&format!(" {flag}-hex {}", crate::compat_hooks::hex_word(text)));
+        } else {
+            command.push_str(&format!(" {flag} {}", crate::compat_hooks::shell_word(text)));
+        }
+    }
+    let refusal = guard_failed_answer().to_string();
+    if windows {
+        // `echo` prints the rest of the line as it is; the JSON's quotes are balanced, and it holds
+        // none of cmd's operators outside them.
+        command.push_str(&format!(" || echo {refusal}"));
+    } else {
+        command.push_str(&format!(" || printf '%s\\n' '{refusal}'"));
     }
     command
 }
@@ -698,6 +755,68 @@ mod tests {
         assert!(tui_mode("plan", false).unwrap().1.unwrap().contains("/plan"));
         assert!(tui_mode("auto", false).is_err());
         assert_eq!(split_tool_list("Bash(git log *) Read, Edit(src/**)"), ["Bash(git log *)", "Read", "Edit(src/**)"]);
-        assert_eq!(guard_command(Path::new("/opt/ling"), &[(Kind::Deny, "Bash(rm *)".into())]), "/opt/ling compat guard --deny 'Bash(rm *)'");
+        let refusal = guard_failed_answer().to_string();
+        assert_eq!(
+            guard_command_for(Path::new("/opt/ling"), &[(Kind::Deny, "Bash(rm *)".into())], false),
+            format!("/opt/ling compat guard --deny 'Bash(rm *)' || printf '%s\\n' '{refusal}'")
+        );
+    }
+
+    #[test]
+    fn on_windows_the_guard_takes_its_rules_as_hex_words_and_reads_them_back() {
+        let exe = Path::new(r"C:\Users\Jane Doe (x86)\AppData\Local\Programs\Mightling\bin\ling.exe");
+        let rules = [(Kind::Deny, "Bash(echo %PATH% & del *)".to_string()), (Kind::Allow, "Read(./src/**)".to_string())];
+        let line = guard_command_for(exe, &rules, true);
+        let prefix = r#""C:\Users\Jane Doe (x86)\AppData\Local\Programs\Mightling\bin\ling.exe" compat guard --deny-hex "#;
+        assert!(line.starts_with(prefix), "{line}");
+        let (guard, fallback) = line.split_once(" || ").unwrap();
+        assert_eq!(fallback, format!("echo {}", guard_failed_answer()));
+        // What the guard reads back from its command line, as Windows splits it (no quotes, no spaces
+        // in the words after the program).
+        let args: Vec<String> = guard.split(" compat guard ").nth(1).unwrap().split(' ').map(str::to_string).collect();
+        assert_eq!(guard_rules_from_args(&args), Some(rules.to_vec()));
+        assert_eq!(guard_rules_from_args(&["--deny".into(), "Bash(rm *)".into()]), Some(vec![(Kind::Deny, "Bash(rm *)".into())]));
+        assert_eq!(guard_rules_from_args(&["--deny-hex".into(), "zz".into()]), None);
+        assert_eq!(guard_rules_from_args(&["--deny".into()]), None);
+        assert_eq!(guard_rules_from_args(&[]), Some(vec![]));
+    }
+
+    #[test]
+    fn the_guards_fallback_refusal_is_plain_words_both_shells_print_as_they_are() {
+        let reason = GUARD_FAILED_REASON;
+        assert!(!reason.contains(['%', '!', '&', '|', '<', '>', '^', '(', ')', '\'', '"', '\\']), "{reason}");
+        let answer = guard_failed_answer();
+        assert_eq!(answer["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert!(!answer.to_string().contains(['%', '!', '&', '|', '<', '>', '^', '\'']));
+    }
+
+    /// The guard's line run the way Codex runs a hook (`hooks/src/engine/command_runner.rs`): with
+    /// `$SHELL -lc` (here `/bin/sh -c`) elsewhere and `cmd.exe /C "<line>"` on Windows. A guard
+    /// that cannot start still refuses: its program is missing here, in a folder whose name has a
+    /// space and parentheses.
+    fn run_like_codex(line: &str) -> String {
+        #[cfg(windows)]
+        let output = {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new(std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into()))
+                .arg("/C")
+                .raw_arg(format!("\"{line}\""))
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap()
+        };
+        #[cfg(not(windows))]
+        let output = std::process::Command::new("/bin/sh").arg("-c").arg(line).stdin(std::process::Stdio::null()).output().unwrap();
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn a_guard_that_cannot_run_refuses_the_call() {
+        let dir = std::env::temp_dir().join(format!("mightling guard (x86) {}", std::process::id()));
+        let exe = dir.join(if cfg!(windows) { "ling.exe" } else { "ling" });
+        let line = guard_command_for(&exe, &[(Kind::Deny, "Bash(rm *)".into())], cfg!(windows));
+        let stdout = run_like_codex(&line);
+        let answer: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|err| panic!("{err}: {stdout:?} from {line}"));
+        assert_eq!(answer, guard_failed_answer());
     }
 }
