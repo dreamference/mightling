@@ -1323,3 +1323,16 @@ def test_the_sampling_arm_reaches_only_the_candidates_round(tmp_path):
 def test_a_misspelt_sampling_arm_ends_the_night_before_any_round(tmp_path, arm):
     status, recorded, folder = night(tmp_path, f"default default+{arm}")
     assert status == 2 and not runs(recorded) and (folder / "failed").exists()
+
+
+def test_the_compat_arm_reaches_only_the_candidates_round(tmp_path):
+    status, recorded, _ = night(tmp_path, "default default+compat-claude")
+    assert status == 0
+    record, candidate = runs(recorded)
+    assert "--compat" not in record and "--compat claude" in candidate
+
+
+@pytest.mark.parametrize("arm", ["compat-codex", "compat", "compat_claude"])
+def test_a_misspelt_compat_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"default default+{arm}")
+    assert status == 2 and not runs(recorded) and (folder / "failed").exists()
