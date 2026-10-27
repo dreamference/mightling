@@ -34,6 +34,7 @@ import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, nightStatus, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
 import { writeWorkAttachment } from "./attachments";
+import { listMemoryFiles, writeMemoryFile } from "./memoryfiles";
 import { Nodes } from "./nodes";
 import { docsAdd, docsReindex, docsRemove, docsStatus, locate, syncKnowledge } from "./docs";
 import { Tasks } from "./tasks";
@@ -846,6 +847,13 @@ export async function main(options: MainOptions): Promise<void> {
         if (!file || !(await fs.promises.stat(file).then((entry) => entry.isFile() || entry.isDirectory(), () => false))) throw new Error("that file is not there");
         shell.showItemInFolder(file);
         return null;
+      }
+      case "memories/files":
+      case "memories/save": {
+        // Memories one by one (DESKTOP §16 B17): the consolidated summary and index, nothing else.
+        const home = codexHome();
+        if (!home) throw new Error("ling's home folder is unknown: HOME is not set");
+        return message.type === "memories/files" ? listMemoryFiles(home) : writeMemoryFile(home, message.name, message.text);
       }
       case "open/folder": {
         const failed = await shell.openPath(await folder(message.dir));
