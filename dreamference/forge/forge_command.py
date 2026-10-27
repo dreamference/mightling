@@ -583,8 +583,13 @@ class ForgeCommand:
         if last.get("stopped"):
             return f"STOPPED {cls.age(last.get('at'))}: {last['stopped']}"
         failed = [n for n, r in last.get("repositories", {}).items() if not r.get("ok")]
-        return f"last run {cls.age(last.get('at'))}" + (
-            f", problems in {', '.join(failed)}" if failed else ", all mirrored"
+        held = sum(len(r.get("held") or {}) for r in last.get("repositories", {}).values())
+        backed_off = [n for n, r in last.get("repositories", {}).items() if r.get("backoff")]
+        return (
+            f"last run {cls.age(last.get('at'))}"
+            + (f", problems in {', '.join(failed)}" if failed else ", all mirrored")
+            + (f", {held} branches held for the owner" if held else "")
+            + (f", throttled by GitHub in {', '.join(backed_off)}" if backed_off else "")
         )
 
     @classmethod

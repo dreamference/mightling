@@ -561,6 +561,122 @@ def test_the_github_credential_comes_from_gh_at_run_time():
     assert "ghp_" not in arguments and "gho_" not in arguments
 
 
+def test_one_refused_branch_holds_back_no_other_and_the_cause_names_file_and_line(tmp_path):
+    if GIT is None:
+        pytest.skip("no git")
+    remote = tmp_path / "remote.git"
+    git("init", "-q", "--bare", str(remote))
+    hook = remote / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\nwhile read old new ref; do\n"
+        '  if [ "$ref" = refs/heads/bad ]; then\n'
+        '    echo "remote: Refused by the forge\'s anonymity check: replace it" >&2\n'
+        '    echo "remote: added:7:bench/w6.steps: HUB=/home/user/.cache" >&2\n'
+        "    exit 1\n  fi\ndone\n"
+    )
+    hook.chmod(0o755)
+    work = tmp_path / "work.git"
+    git("init", "-q", "--bare", str(work))
+    tree = subprocess.run(
+        ["git", "-C", str(work), "mktree"], input="", text=True, capture_output=True, check=True
+    ).stdout.strip()
+    identity = {
+        "GIT_AUTHOR_NAME": "d",
+        "GIT_AUTHOR_EMAIL": "d@example.com",
+        "GIT_COMMITTER_NAME": "d",
+        "GIT_COMMITTER_EMAIL": "d@example.com",
+        "PATH": "/usr/bin:/bin",
+    }
+    commit = subprocess.run(
+        ["git", "-C", str(work), "commit-tree", tree, "-m", "m"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=identity,
+    ).stdout.strip()
+    refspecs = []
+    for name in ("a", "bad", "z"):
+        git("-C", str(work), "update-ref", f"refs/forge/heads/{name}", commit)
+        refspecs.append(f"refs/forge/heads/{name}:refs/heads/{name}")
+    outcome = ForgeGithubMirror.push_each(work, ["push", "--quiet", str(remote)], refspecs, None)
+    assert outcome["pushed"] == 2 and outcome["backoff"] == ""
+    assert list(outcome["failures"]) == ["refs/heads/bad"]
+    cause = outcome["failures"]["refs/heads/bad"]
+    assert "anonymity" in cause and "added:7:bench/w6.steps" in cause
+    assert "/home/user" not in cause
+    assert git("-C", str(remote), "for-each-ref", "--format=%(refname)").split() == [
+        "refs/heads/a",
+        "refs/heads/z",
+    ]
+
+
+def test_a_github_rate_limit_backs_off_to_the_next_tick(monkeypatch, tmp_path):
+    calls = []
+
+    def throttled(cls, work, arguments, environment=None, timeout=0):
+        calls.append(arguments[-1])
+        return subprocess.CompletedProcess(
+            arguments, 1, "", "remote: You have exceeded a secondary rate limit.\nfatal: x"
+        )
+
+    monkeypatch.setattr(ForgeRepositories, "git", classmethod(throttled))
+    outcome = ForgeGithubMirror.push_each(tmp_path, ["push"], ["a:b", "c:d"], None)
+    assert calls == ["a:b"]  # nothing more is tried this tick
+    assert "rate limit" in outcome["backoff"] and not outcome["failures"]
+
+
+def _one_repository_run(monkeypatch, result):
+    ForgeSettings.update_state(role="record")
+    ForgeGithubMirror.save_settings(True, "dgxcoder")
+    monkeypatch.setattr(ForgeAccounts, "admin_token", classmethod(lambda cls: "t"))
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "all",
+        classmethod(lambda cls, token=None: [{"full_name": "o/r", "name": "r", "private": False}]),
+    )
+    monkeypatch.setattr(
+        ForgeRepositories,
+        "config",
+        classmethod(lambda cls: {"repositories": {"o/r": {"github": "https://github.com/o/r"}}}),
+    )
+    monkeypatch.setattr(ForgeGithubMirror, "mirror_one", classmethod(lambda cls, *a: result))
+    return ForgeGithubMirror.run()
+
+
+def test_a_failed_branch_is_printed_with_its_cause_and_the_run_exits_1(monkeypatch, capsys):
+    code = _one_repository_run(
+        monkeypatch,
+        {"ok": False, "failures": {"refs/heads/x": "push to GitHub failed: nope"}, "held": {}},
+    )
+    assert code == 1
+    assert "o/r refs/heads/x: push to GitHub failed: nope" in capsys.readouterr().out
+
+
+def test_held_and_throttled_branches_are_printed_but_do_not_fail_the_run(monkeypatch, capsys):
+    code = _one_repository_run(
+        monkeypatch,
+        {
+            "ok": True,
+            "failures": {},
+            "held": {"refs/heads/d": "diverged both ways: never forced"},
+            "backoff": "rate limit",
+        },
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "refs/heads/d: held: diverged" in out and "retrying next tick" in out
+    from dreamference.forge.forge_command import ForgeCommand
+
+    summary = ForgeCommand.github_summary(ForgeGithubMirror.status())
+    assert "1 branches held" in summary and "throttled" in summary
+
+
+def test_a_failed_fetch_is_printed(monkeypatch, capsys):
+    code = _one_repository_run(monkeypatch, {"ok": False, "error": "fetch from GitHub failed: x"})
+    assert code == 1
+    assert "o/r: fetch from GitHub failed: x" in capsys.readouterr().out
+
+
 def test_airgapped_on_stops_the_mirror(monkeypatch):
     ForgeSettings.update_state(role="record")
     ForgeGithubMirror.save_settings(True, "dgxcoder")

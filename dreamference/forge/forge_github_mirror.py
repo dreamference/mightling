@@ -25,6 +25,7 @@ file, a URL or a log. At `/airgapped on` the job sends nothing and says so.
 import fcntl
 import json
 import os
+import re
 import subprocess
 import time
 from http import HTTPStatus
@@ -41,6 +42,17 @@ SETTINGS_NAME: Final[str] = "github-mirror.json"
 GITHUB_PREFIX: Final[str] = "https://github.com/"
 # The value of `mightling_airgapped` that stops every outbound mirror.
 AIRGAPPED_ON: Final[str] = "on"
+# What GitHub's stderr says when it is throttling the account: the run backs off to the next tick.
+RATE_LIMIT_MARKERS: Final[tuple[str, ...]] = (
+    "rate limit",
+    "abuse detection",
+    "too many requests",
+    "error: 429",
+    "returned error: 403",
+)
+# The forge's anonymity hook quotes the offending line; only `added:<line>:<file>` is kept.
+ANONYMITY_REFUSAL: Final[str] = "anonymity"
+HOOK_QUOTE: Final[re.Pattern[str]] = re.compile(r"(added:\d+:\S*?):\s.*")
 
 
 class ForgeGithubMirror:
@@ -233,23 +245,92 @@ class ForgeGithubMirror:
         if error:
             return {"ok": False, "error": error}
         plan = cls.plan(work)
+        failures: dict[str, str] = {}
+        held: dict[str, str] = {}
+        sent = received = 0
+        backoff = ""
         if plan["to_github"]:
-            failure = cls.send_to_github(
+            outcome = cls.send_to_github(
                 work, plan["to_github"], destination, settings, github_environment
             )
-            if failure:
-                return failure
+            if outcome.get("stop"):
+                return outcome
+            sent, failures = outcome["pushed"], outcome["failures"]
+            backoff = outcome["backoff"]
         if plan["to_forge"]:
-            error = cls.bring_back(work, full_name, plan["to_forge"], forge_environment)
-            if error:
-                return {"ok": False, "error": error}
+            outcome = cls.bring_back(work, full_name, plan["to_forge"], forge_environment)
+            received = outcome["pushed"]
+            for ref, cause in outcome["failures"].items():
+                # The forge's own anonymity check refusing what GitHub already has is the owner's
+                # to resolve (nothing is forced): reported, but it does not fail the run.
+                (held if ANONYMITY_REFUSAL in cause else failures)[ref] = cause
+        for ref in plan["diverged"]:
+            held[ref] = "diverged both ways: never forced"
         return {
-            "ok": not plan["diverged"],
-            "sent": len(plan["to_github"]),
-            "received": len(plan["to_forge"]),
+            "ok": not failures,
+            "sent": sent,
+            "received": received,
             "diverged": plan["diverged"][:20],
-            "error": f"{len(plan['diverged'])} refs diverged both ways" if plan["diverged"] else "",
+            "failures": failures,
+            "held": held,
+            "backoff": backoff,
+            "error": "; ".join(f"{ref}: {cause}" for ref, cause in failures.items())[:600],
         }
+
+    @classmethod
+    def push_cause(cls, stderr: str) -> str:
+        """Boil git's push output down to a one-line cause.
+
+        Args:
+            stderr: What `git push` wrote.
+
+        Returns:
+            str: The remote's own lines (the anonymity hook's quote cut to `added:<line>:<file>`),
+            else git's last `error:`/`fatal:` line, else the output's tail; never an identifier.
+        """
+        lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+        remote = [
+            HOOK_QUOTE.sub(r"\1", line[len("remote:") :].strip())
+            for line in lines
+            if line.startswith("remote:")
+        ]
+        remote = [line for line in remote if line]
+        if remote:
+            return " ".join(remote)[:300]
+        errors = [line for line in lines if line.startswith(("error:", "fatal:"))]
+        return (errors[0] if errors else (lines[-1] if lines else "git push failed"))[:300]
+
+    @classmethod
+    def push_each(
+        cls, work: Path, arguments: list[str], refspecs: list[str], environment: dict[str, str]
+    ) -> dict[str, Any]:
+        """Push the refspecs one at a time, so one refused branch holds back no other.
+
+        Args:
+            work: The work clone.
+            arguments: `git` arguments up to and including the destination.
+            refspecs: The refspecs to push.
+            environment: git's environment.
+
+        Returns:
+            dict[str, Any]: `pushed` (a count), `failures` (branch → cause) and `backoff` (the
+            cause when the destination is throttling: the rest is left for the next tick).
+        """
+        pushed = 0
+        failures: dict[str, str] = {}
+        for spec in refspecs:
+            result = ForgeRepositories.git(work, [*arguments, spec], environment)
+            if result.returncode == 0:
+                pushed += 1
+                continue
+            if any(marker in result.stderr.lower() for marker in RATE_LIMIT_MARKERS):
+                return {
+                    "pushed": pushed,
+                    "failures": failures,
+                    "backoff": cls.push_cause(result.stderr),
+                }
+            failures[spec.rsplit(":", 1)[-1]] = cls.push_cause(result.stderr)
+        return {"pushed": pushed, "failures": failures, "backoff": ""}
 
     @classmethod
     def fetch(
@@ -314,7 +395,7 @@ class ForgeGithubMirror:
         destination: str,
         settings: dict[str, Any],
         environment: dict[str, str],
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         """Re-check the commits GitHub does not have yet, then push them, never forcing.
 
         Args:
@@ -325,15 +406,19 @@ class ForgeGithubMirror:
             environment: git's environment for GitHub.
 
         Returns:
-            dict[str, Any] | None: The failed result (with `stop` on an anonymity finding), or
-            None when the push worked.
+            dict[str, Any]: `push_each`'s result, or a failed result with `stop` set when the
+            anonymity re-check found something or could not run (the whole run stops).
         """
         tips = [spec.split(":", 1)[0] for spec in refspecs]
         known = list(cls.refs(work, "refs/github/").values())
         try:
             text = ForgeAnonymity.added_text(work, tips, known, settings["exempt"])
         except RuntimeError as error:
-            return {"ok": False, "error": f"the anonymity re-check could not run: {error}"}
+            return {
+                "ok": False,
+                "stop": True,
+                "error": f"the anonymity re-check could not run: {error}",
+            }
         hits = ForgeAnonymity.findings(
             text, ForgeAnonymity.patterns(settings["scope"], ForgeAnonymity.read_denylist())
         )
@@ -344,30 +429,18 @@ class ForgeGithubMirror:
                 "error": f"the anonymity re-check found {len(hits)} identifiers in commits about to "
                 "be sent; nothing was pushed",
             }
-        pushed = ForgeRepositories.git(
+        return cls.push_each(
             work,
-            [
-                *cls.github_credential_arguments(),
-                "push",
-                "--quiet",
-                "--no-verify",
-                destination,
-                *refspecs,
-            ],
+            [*cls.github_credential_arguments(), "push", "--quiet", "--no-verify", destination],
+            refspecs,
             environment,
         )
-        if pushed.returncode != 0:
-            return {
-                "ok": False,
-                "error": f"push to GitHub failed: {pushed.stderr.strip()[-300:]}",
-            }
-        return None
 
     @classmethod
     def bring_back(
         cls, work: Path, full_name: str, refspecs: list[str], environment: dict[str, str]
-    ) -> str | None:
-        """Push into the forge what exists only on GitHub or is ahead there.
+    ) -> dict[str, Any]:
+        """Push into the forge what exists only on GitHub or is ahead there, one ref at a time.
 
         Args:
             work: The work clone.
@@ -376,22 +449,19 @@ class ForgeGithubMirror:
             environment: git's environment for the forge.
 
         Returns:
-            str | None: Why the push failed, or None when it worked.
+            dict[str, Any]: `push_each`'s result.
         """
-        pushed = ForgeRepositories.git(
+        return cls.push_each(
             work,
             [
                 *ForgeRepositories.forge_credential_arguments(),
                 "push",
                 "--quiet",
                 ForgeRepositories.forge_url(full_name),
-                *refspecs,
             ],
+            refspecs,
             environment,
         )
-        if pushed.returncode != 0:
-            return f"bringing GitHub's refs back failed: {pushed.stderr.strip()[-300:]}"
-        return None
 
     @classmethod
     def run(cls) -> int:
@@ -419,12 +489,14 @@ class ForgeGithubMirror:
         """
         if cls.airgapped():
             cls.write_status({"stopped": "/airgapped is on: no outbound mirror runs"})
+            print("⚠️  GitHub mirror: /airgapped is on: no outbound mirror runs")
             return 2
         token = ForgeAccounts.admin_token()
         try:
             repositories = {repo["full_name"]: repo for repo in ForgeRepositories.all(token)}
         except RuntimeError as error:
             cls.write_status({"stopped": f"could not read the repositories' visibility: {error}"})
+            print(f"❌ GitHub mirror stopped: could not read the repositories' visibility: {error}")
             return 2
         results: dict[str, Any] = {}
         code = 0
@@ -438,12 +510,15 @@ class ForgeGithubMirror:
                     "ok": False,
                     "error": "private, never mirrored, or not on the forge: skipped",
                 }
+                cls.report(full_name, results[full_name])
                 continue
             if not str(destination).startswith(GITHUB_PREFIX):
                 results[full_name] = {"ok": False, "error": "not a GitHub repository URL: skipped"}
+                cls.report(full_name, results[full_name])
                 continue
             result = cls.mirror_one(full_name, destination, token or "")
             results[full_name] = result
+            cls.report(full_name, result)
             if result.get("stop"):
                 cls.write_status(
                     {"stopped": f"{full_name}: {result['error']}", "repositories": results}
@@ -454,6 +529,26 @@ class ForgeGithubMirror:
                 code = 1
         cls.write_status({"repositories": results})
         return code
+
+    @classmethod
+    def report(cls, full_name: str, result: dict[str, Any]) -> None:
+        """Print one line per repository, branch and cause, so a failed run is never silent.
+
+        Args:
+            full_name: The repository.
+            result: What `mirror_one` returned.
+        """
+        if result.get("stop"):
+            print(f"❌ {full_name}: STOPPED: {result['error']}")
+        elif result.get("failures"):
+            for ref, cause in result["failures"].items():
+                print(f"❌ {full_name} {ref}: {cause}")
+        elif not result.get("ok"):
+            print(f"❌ {full_name}: {result.get('error')}")
+        for ref, cause in (result.get("held") or {}).items():
+            print(f"⚠️  {full_name} {ref}: held: {cause}")
+        if result.get("backoff"):
+            print(f"⚠️  {full_name}: GitHub is throttling, retrying next tick: {result['backoff']}")
 
     @classmethod
     def open_issue(cls, full_name: str, message: str) -> None:
