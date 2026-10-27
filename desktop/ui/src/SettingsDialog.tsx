@@ -702,7 +702,9 @@ function Project({ prefs, onChange }: SettingsProps) {
         <label className="field">Shell (empty for your login shell, $SHELL)
           <input defaultValue={prefs.terminalShell ?? ""} placeholder="/bin/bash" aria-label="Terminal shell" onBlur={(event) => onChange({ terminalShell: event.target.value.trim() || null })} />
         </label>
-        <p className="dialog-note">Terminal tabs open in the bottom panel ({shortcutLabel("terminal")}), in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
+        <label><input type="radio" name="terminal-place" checked={prefs.terminalPlace === "panel"} onChange={() => onChange({ terminalPlace: "panel" })} /> Open terminals in the bottom panel</label>
+        <label><input type="radio" name="terminal-place" checked={prefs.terminalPlace === "tabs"} onChange={() => onChange({ terminalPlace: "tabs" })} /> Open terminals as tabs beside the thread, with its files</label>
+        <p className="dialog-note">A terminal opens with {shortcutLabel("terminal")} or New tab › Terminal, in the thread's folder, under the permissions the composer shows, so airgapped holds for what you type there too.</p>
         <label><input type="checkbox" checked={prefs.agentReadsWindow} onChange={(event) => onChange({ agentReadsWindow: event.target.checked })} /> Let the agent read the thread's terminal tabs and the preview's console when it needs to (new threads)</label>
         <p className="dialog-note">It reads them on this machine, the latest lines only, with anything that looks like a password or token masked; nothing is sent anywhere else.</p>
       </fieldset>

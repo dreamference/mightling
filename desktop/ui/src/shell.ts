@@ -101,7 +101,8 @@ export type Surface = "review" | "prs" | "bottomPanel" | `file:${string}` | `pre
 export class ClosedSurfaces {
   private closed: Surface[] = [];
 
-  close(surface: Surface): void {
+  close(surface: Surface | null): void {
+    if (surface === null) return;
     this.closed = [...this.closed.filter((entry) => entry !== surface), surface];
   }
 

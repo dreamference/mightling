@@ -1118,3 +1118,7 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .table-artifact table { border-collapse: collapse; font: 13px var(--font-code); }
 .table-artifact th, .table-artifact td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; white-space: pre; max-width: 32em; overflow: hidden; text-overflow: ellipsis; }
 .table-artifact th { position: sticky; top: 0; background: var(--raised); font-weight: 600; }
+/* The tab area's New tab menu (TabArea.tsx, DESKTOP §16 B28). */
+.new-tab { position: relative; display: inline-flex; }
+.new-tab-menu { left: 0; right: auto; min-width: 140px; }
+.tab-body .terminal-host { height: 100%; }

@@ -229,6 +229,13 @@
       "type": "string",
       "nullable": true
     },
+    "terminalPlace": {
+      "default": "panel",
+      "enum": [
+        "panel",
+        "tabs"
+      ]
+    },
     "commandOutput": {
       "default": "running",
       "enum": [
