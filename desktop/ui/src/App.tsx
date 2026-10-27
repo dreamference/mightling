@@ -3069,7 +3069,7 @@ export function App() {
             }
           }} />
       ) : null}
-      {extensions ? <ExtensionsView client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => { setExtensions(null); setPluginFocus(null); }} notice={notice} focusPlugin={pluginFocus} /> : null}
+      {extensions ? <ExtensionsView airgapped={airgap?.level === "on"} client={client} listen={listen} cwd={composeRoot} tab={extensions} setTab={setExtensions} onClose={() => { setExtensions(null); setPluginFocus(null); }} notice={notice} focusPlugin={pluginFocus} /> : null}
       {fileSearch !== null && composeRoot ? (
         <FileSearch root={composeRoot} search={searchFiles} initial={fileSearch}
           front={paneActive?.kind === "file" && tabsShown ? paneActive.path : null}
