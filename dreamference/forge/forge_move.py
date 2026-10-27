@@ -31,6 +31,11 @@ from dreamference.forge.forge_settings import ROLE_MIRROR, ROLE_RECORD, UNIT, Fo
 
 # A node id is letters, digits and this separator.
 NODE_ID_SEPARATOR: Final[str] = "-"
+# What `forge move` accepts for "this node" on a mirror that pulls the role over.
+HERE_NAMES: Final[tuple[str, ...]] = ("here",)
+HAND_OVER_TIMEOUT_S: Final[int] = 7200
+# Besides letters and digits, what a node id or host name may hold.
+NAME_PUNCTUATION: Final[str] = "-."
 
 
 class ForgeMove:
@@ -175,9 +180,17 @@ class ForgeMove:
             int: 0 when the target is the record with every ref, 1 otherwise.
         """
         from dreamference.forge.forge_mirrors import ForgeMirrors
+        from dreamference.forge.forge_service import ForgeService
 
+        if ForgeSettings.role() == ROLE_MIRROR and (
+            back or name in HERE_NAMES or name == ForgeService.host_name()
+        ):
+            return cls.pull_here()
         if ForgeSettings.role() != ROLE_RECORD:
-            print("❌ This node is not the forge of record; run `forge move` there.")
+            print(
+                "❌ This node is not the forge of record: run `forge move <node>` there, or `forge move here` "
+                "(or `--back`) on the node that takes the role."
+            )
             return 1
         target = cls.move_target(name, back)
         if target is None:
@@ -279,6 +292,147 @@ class ForgeMove:
                 "ok": False,
                 "error": (result.stderr or result.stdout).strip()[-300:] or "no answer",
             }
+
+    @classmethod
+    def pull_here(cls) -> int:
+        """Pull the role from the forge of record to this mirror (`forge move here` / `--back`).
+
+        For a node the record is not paired with but which is paired with the record: the record
+        freezes and streams a fresh set back (`forge-hand-over`), this node restores it and checks
+        every ref, then the record becomes a mirror of this node (`forge-become-mirror`). Anything
+        wrong and the record is unfrozen (`forge-unfreeze`) and keeps the role.
+
+        Returns:
+            int: 0 when this node is the record with every ref, 1 otherwise.
+        """
+        from dreamference.forge.forge_mirrors import ForgeMirrors
+        from dreamference.forge.forge_service import ForgeService
+        from dreamference.node.node_pairing import NodePairing
+
+        state = ForgeSettings.state()
+        record = NodePairing.find(state.get("record_node") or "")
+        if record is None:
+            print(
+                "❌ This node is not paired with the forge of record; run `forge move <this node>` there."
+            )
+            return 1
+        record_name = record.get("name") or record["node"]
+        print(f"🧊 {record_name} freezes pushes and hands a fresh backup over…")
+        folder = cls.receive_hand_over(record)
+        if folder is None:
+            NodePairing.run(record, "forge-unfreeze")
+            return 1
+        result = cls.restore_here(folder, record["node"])
+        if not result.get("ok"):
+            print(
+                f"❌ The move stopped: {result.get('error')}. {record_name} keeps the role, unfrozen."
+            )
+            NodePairing.run(record, "forge-unfreeze")
+            cls.become_mirror(record["node"], record_name)
+            return 1
+        answer = NodePairing.run(
+            record, f"forge-become-mirror {ForgeBackup.node_id()} {ForgeService.host_name()}"
+        )
+        if answer.returncode != 0:
+            print(
+                f"⚠️  {record_name} did not confirm it is a mirror now: {(answer.stderr or '').strip()[-300:]}"
+            )
+        ForgeMirrors.sync()
+        print(f"✅ This node is the forge of record again; {record_name} is a mirror of it.")
+        return 0
+
+    @classmethod
+    def receive_hand_over(cls, record: dict[str, Any]) -> Path | None:
+        """Ask the record for a fresh set and store it with the received ones.
+
+        Args:
+            record: The record's pairing record.
+
+        Returns:
+            Path | None: The set, or None when none arrived.
+        """
+        import subprocess
+        import tarfile
+        import tempfile
+
+        from dreamference.node.node_pairing import NodePairing
+
+        try:
+            command = NodePairing.ssh_command(record, "forge-hand-over")
+        except LookupError as error:
+            print(f"❌ {error}")
+            return None
+        root = ForgeBackup.received_dir()
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryFile(dir=root) as spool:
+            result = subprocess.run(
+                command,
+                stdout=spool,
+                stderr=subprocess.PIPE,
+                timeout=HAND_OVER_TIMEOUT_S,
+                check=False,
+            )
+            if result.returncode != 0:
+                print(
+                    f"❌ The record did not hand a set over: {result.stderr.decode(errors='replace')[-300:]}"
+                )
+                return None
+            spool.seek(0)
+            try:
+                with tarfile.open(fileobj=spool, mode="r") as archive:
+                    name = archive.getnames()[0].split("/", 1)[0]
+            except (tarfile.TarError, IndexError):
+                print("❌ The record's answer was not a backup set.")
+                return None
+            spool.seek(0)
+            if ForgeBackup.receive(name, spool) != 0:
+                return None
+        return root / name
+
+    @classmethod
+    def serve_hand_over(cls) -> int:
+        """Freeze, take a set and stream it to standard output (the forced command's `forge-hand-over`).
+
+        Returns:
+            int: 0 when the set was written, 1 otherwise (and pushes unfrozen).
+        """
+        import subprocess
+
+        if ForgeSettings.role() != ROLE_RECORD:
+            sys.stderr.write("this node is not the forge of record\n")
+            return 1
+        cls.freeze(True)
+        folder = ForgeBackup.take()
+        if folder is None:
+            cls.freeze(False)
+            return 1
+        sys.stdout.flush()
+        packed = subprocess.run(
+            ["tar", "-C", str(folder.parent), "-cf", "-", folder.name],
+            stdout=sys.stdout.buffer,
+            check=False,
+        )
+        return 0 if packed.returncode == 0 else 1
+
+    @classmethod
+    def serve_become_mirror(cls, node_id: str, name: str) -> int:
+        """Become a mirror of the node that took the role (the forced command's `forge-become-mirror`).
+
+        Args:
+            node_id: The new record's node id.
+            name: Its name.
+
+        Returns:
+            int: 0, or 2 when refused.
+        """
+        if not all(c.isalnum() or c in NAME_PUNCTUATION for c in node_id + name):
+            sys.stderr.write("not a node id and name\n")
+            return 2
+        if ForgeSettings.role() != ROLE_RECORD or not cls.frozen_flag().exists():
+            sys.stderr.write("refused: this node is not a frozen forge of record\n")
+            return 2
+        cls.become_mirror(node_id, name)
+        return 0
 
     @classmethod
     def promote(cls, name: str | None) -> int:

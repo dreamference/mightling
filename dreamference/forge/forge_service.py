@@ -371,16 +371,24 @@ class ForgeService:
             return 0.0
 
     @classmethod
+    def housekeeping(cls) -> None:
+        """Keep the storage budget and remove data folders a move set aside more than 30 days ago."""
+        from dreamference.forge.forge_move import ForgeMove
+        from dreamference.forge.forge_storage import ForgeStorage
+
+        for line in ForgeStorage.prune():
+            print(line)
+        for name in ForgeMove.prune_old_data():
+            print(f"🧹 Removed {name}, set aside by a move more than 30 days ago.")
+
+    @classmethod
     def tick(cls) -> int:
         """Do the ten-minute timer's work.
 
         Returns:
             int: 0.
         """
-        from dreamference.forge.forge_storage import ForgeStorage
-
-        for line in ForgeStorage.prune():
-            print(line)
+        cls.housekeeping()
         role = ForgeSettings.role()
         if role in ROLES and ForgeContainer.running():
             from dreamference.forge.forge_repositories import ForgeRepositories
