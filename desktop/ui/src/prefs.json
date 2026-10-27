@@ -238,6 +238,10 @@
       "type": "string",
       "nullable": true
     },
+    "nightRead": {
+      "default": [],
+      "type": "strings"
+    },
     "reviewDelivery": {
       "default": "inline",
       "enum": [

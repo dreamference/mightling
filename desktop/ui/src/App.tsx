@@ -63,7 +63,8 @@ import { PreviewTab } from "./PreviewTab";
 import { PullRequestsTab } from "./PullRequestsTab";
 import { pullRequestDescription } from "./prtext";
 import { SubagentsPanel } from "./SubagentsPanel";
-import { ScheduledView, unseen } from "./ScheduledView";
+import { ScheduledView } from "./ScheduledView";
+import { markRead, prunedNight, unreadRuns } from "./nightinbox";
 import { SyncedView, useSynced } from "./SyncedView";
 import { ActivityView } from "./ActivityView";
 import { attentionList } from "./attention";
@@ -460,8 +461,6 @@ export function App() {
         setNewChoice((choice) => ({ ...choice, mode: defaultCheckout(desktop) }));
         setBoard({ on: boardOn(config), sqliteHome: sqliteHome(config) });
       }).catch(() => {});
-      // Night Shift's inbox: finished tasks since Scheduled was last opened.
-      if (bridge.host() === "electron") bridge.night.list().then((answer) => setNightUnseen(unseen(answer.tasks, stored.nightSeen))).catch(() => {});
       // Plan mode, when the server offers it (`collaborationMode/list`).
       client.request("collaborationMode/list", {}).then((answer) => setPlanAvailable(((answer as { data?: { mode: string | null }[] }).data ?? []).some((mask) => mask.mode === "plan"))).catch(() => setPlanAvailable(false));
       // The catalog the launcher wrote: one served model, with the efforts it allows.
@@ -606,6 +605,23 @@ export function App() {
       clearInterval(every);
     };
   }, [state.server, prefs.summarizeThreads, client, listen]);
+
+  // Night Shift's inbox (DESKTOP §16 B41, nightinbox.ts): the finished runs not opened since the last
+  // Mark all as read, counted on Scheduled when the marks change and every two minutes; the marks and
+  // thread ties of tasks archived (or otherwise gone) are dropped then.
+  const prefsIn = prefs !== DEFAULT_PREFS;
+  useEffect(() => {
+    if (state.server !== "ready" || !prefsIn || bridge.host() !== "electron" || POPOUT || PANE) return;
+    const look = () => bridge.night.list().then((answer) => {
+      const current = prefsRef.current;
+      setNightUnseen(unreadRuns(answer.tasks, current.nightSeen, current.nightRead ?? []));
+      const pruned = prunedNight(current, answer.tasks.map((task) => task.id), Date.now());
+      if (pruned) updatePrefsRef.current(pruned);
+    }).catch(() => {});
+    void look();
+    const every = setInterval(() => void look(), 120_000);
+    return () => clearInterval(every);
+  }, [state.server, prefsIn, prefs.nightSeen, prefs.nightRead]);
 
   // Earlier questions for the agent (DESKTOP_PARITY_CLAUDE §4.4): while Settings › Memories has it on,
   // each Ask question of the user's (never an incognito one) is kept as the Markdown the agent's
@@ -3229,7 +3245,8 @@ export function App() {
         memoryStatus={memoryStatus} resetMemories={resetMemories} /> : null}
       {scheduledOpen ? (
         <ScheduledView projects={projects(state, askRoot, (thread) => projectFolder(thread, links)).map((project) => project.cwd)} defaultProject={workFolder ?? null}
-          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at }); setNightUnseen(0); }} onClose={() => { setScheduledOpen(false); setScheduledRun(null); }} notice={notice}
+          seen={prefs.nightSeen} onSeen={(at) => { updatePrefs({ nightSeen: at, nightRead: [] }); setNightUnseen(0); }}
+          read={prefs.nightRead} onRead={(id) => { if (!prefsRef.current.nightRead.includes(id)) updatePrefs({ nightRead: markRead(prefsRef.current.nightRead, id) }); }} onClose={() => { setScheduledOpen(false); setScheduledRun(null); }} notice={notice}
           fromThread={selected && view === "work" ? { title: workLabel(selected.thread), context: threadContext(selected) } : null}
           onOpenThread={(threadId) => { showView("work"); void openThread(threadId); }}
           openRun={scheduledRun} onQueued={(said) => { if (selected && view === "work") updatePrefs({ nightThreads: tieTask(prefsRef.current.nightThreads, said, selected.thread.id) }); }} />
@@ -3289,7 +3306,7 @@ export function App() {
             label: (thread) => (isAskThread(thread, askRoot) ? askTitle(thread) : workLabel(thread)),
             onMarkAllRead: () => {
               // Every unread mark, and Night Shift's finished tasks counted as seen now.
-              updatePrefs({ unreadThreads: [], ...(nightUnseen ? { nightSeen: new Date().toISOString() } : {}) });
+              updatePrefs({ unreadThreads: [], ...(nightUnseen ? { nightSeen: new Date().toISOString(), nightRead: [] } : {}) });
               setNightUnseen(0);
             },
             onOpenScheduled: () => setScheduledOpen(true),

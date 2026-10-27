@@ -10,5 +10,9 @@ describe("the tray", () => {
     expect(trayStatus({ working: 0, waiting: 0 })).toBeNull();
     expect(trayStatus({ working: 2, waiting: 0 })).toBe("2 working");
     expect(trayStatus({ working: 1, waiting: 1 })).toBe("1 waiting for you, 1 working");
+    // Night Shift's unread results (DESKTOP §16 B41).
+    expect(trayStatus({ working: 0, waiting: 0, night: 0 })).toBeNull();
+    expect(trayStatus({ working: 1, waiting: 0, night: 1 })).toBe("1 working, 1 night result unread");
+    expect(trayStatus({ working: 0, waiting: 0, night: 3 })).toBe("3 night results unread");
   });
 });

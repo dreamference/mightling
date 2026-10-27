@@ -316,6 +316,11 @@ accent, background and text colours of the theme in front; each theme keeps its 
   the card carries the task's part of the night's report as a note, for you to read; it is never
   sent to the model. **Apply** runs `ling night apply` in the thread's folder, bringing the branch
   there as uncommitted changes, and **Open the result** opens the run in Scheduled.
+- **Night results in the inbox:** each finished run in Scheduled's inbox stays unread until you open
+  it, counted on Scheduled in the sidebar and in the tray's menu; **Mark all as read** clears them.
+  `ling-admin night archive` (runs older than four weeks, or `--weeks N`) moves old runs' records,
+  transcripts and reports to `~/.mightling/night/archive/`, keeping their branches, and Scheduled's
+  **Archive** searches them.
 - **Ask one click away**, in the same window's sidebar.
 
 Not there yet: review, settings pages and choosing a model (it is shown, not chosen).

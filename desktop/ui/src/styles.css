@@ -485,6 +485,11 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .night-status.failed, .night-status.stalled { background: var(--del); color: var(--del-text); }
 tr.unseen td:first-child { font-weight: 600; }
 .night-report { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 8px 14px; background: var(--panel); font-size: 13px; }
+/* Scheduled's unread count and Mark all as read, and its archive search (DESKTOP §16 B41). */
+.night-inbox-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.night-inbox-head .count { margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 500; }
+tr.unseen td:first-child .link-button::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.night-archive input[type="search"] { width: 100%; margin: 4px 0 8px; }
 .settings-button { margin-top: 8px; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 30; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 10vh; }
 .dialog { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; background: var(--raised); border-radius: var(--radius-lg); box-shadow: var(--shadow-focus); padding: 16px 20px 20px; }

@@ -300,6 +300,14 @@ Stop repeating a task (what it already queued stays).
 |---|---|
 | `id` | The repeating task's id (r...) |
 
+#### `ling-admin night archive`
+
+Move finished runs' records, transcripts and reports older than some weeks to night/archive/ (branches stay).
+
+| Option | Description |
+|---|---|
+| `--weeks` | How old a run must be, in weeks (default 4) |
+
 #### `ling-admin night pause`
 
 Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate).

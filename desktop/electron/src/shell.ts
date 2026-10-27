@@ -93,17 +93,21 @@ export function installTray(iconsDir: string, actions: ShellActions): void {
 
 let trayActions: ShellActions | null = null;
 
-/** What the tray says about the threads: how many work and how many wait for the user (DESKTOP §16 B20). Pure. */
-export function trayStatus(counts: { working: number; waiting: number }): string | null {
+/**
+ * What the tray says about the threads: how many work and how many wait for the user (DESKTOP §16 B20),
+ * and how many of Night Shift's results are unread (B41). Pure.
+ */
+export function trayStatus(counts: { working: number; waiting: number; night?: number }): string | null {
   const parts = [
     counts.waiting ? `${counts.waiting} waiting for you` : "",
     counts.working ? `${counts.working} working` : "",
+    counts.night ? `${counts.night} night ${counts.night === 1 ? "result" : "results"} unread` : "",
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : null;
 }
 
 /** The tray's tooltip and menu, with the threads' counts at their top. */
-export function updateTray(counts: { working: number; waiting: number }): void {
+export function updateTray(counts: { working: number; waiting: number; night?: number }): void {
   const actions = trayActions;
   if (!tray || tray.isDestroyed() || !actions) return;
   const status = trayStatus(counts);

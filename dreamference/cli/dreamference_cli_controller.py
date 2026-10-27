@@ -903,6 +903,35 @@ class DreamferenceCLIController:
         return 2
 
     @classmethod
+    def handle_night_archive(cls, weeks: int) -> int:
+        """`ling-admin night archive [--weeks N]`: old runs moved to `night/archive/` (night_shift_archive.py).
+
+        Args:
+            weeks: How old a run must be, in weeks.
+
+        Returns:
+            The exit code: 0 when the archive ran, 1 when a run held the queue or `weeks` was refused.
+        """
+        from dreamference.night_shift import NightShiftArchive, NightShiftQueue
+
+        night_dir = NightShiftQueue.night_dir()
+        try:
+            outcome = NightShiftArchive.archive(night_dir, weeks)
+        except ValueError as error:
+            print(f"❌ {error}")
+            return 1
+        if outcome is None:
+            holder = NightShiftQueue.runner_holder(night_dir) or "a run"
+            print(f"❌ {holder[0].upper()}{holder[1:]} is working through the queue: archive once it ends.")
+            return 1
+        where = NightShiftArchive.archive_dir(night_dir)
+        print(f"✅ Moved {len(outcome.tasks)} finished runs older than {weeks} weeks, {outcome.logs} log files "
+              f"and {outcome.reports} reports to {where}; the branches stay in their repositories.")
+        if outcome.skipped:
+            print(f"⚠️  {len(outcome.skipped)} files stayed: the archive already holds a file of the same name.")
+        return 0
+
+    @classmethod
     def handle_gate_pause(cls, vllm_host: str, duration: Optional[str]) -> int:
         """
         `ling-admin night pause [--for DURATION]` and `night resume`: while paused, the model gate
@@ -1387,6 +1416,14 @@ class DreamferenceCLIController:
         night_every_drop_parser = night_every_subparsers.add_parser(
             "drop", help="Stop repeating a task (what it already queued stays)")
         night_every_drop_parser.add_argument("id", help="The repeating task's id (r...)")
+        from dreamference.night_shift.night_shift_archive import DEFAULT_ARCHIVE_WEEKS
+        night_archive_parser = night_subparsers.add_parser(
+            "archive",
+            help="Move finished runs' records, transcripts and reports older than some weeks "
+                 "to night/archive/ (branches stay)")
+        night_archive_parser.add_argument(
+            "--weeks", type=int, default=DEFAULT_ARCHIVE_WEEKS,
+            help=f"How old a run must be, in weeks (default {DEFAULT_ARCHIVE_WEEKS})")
         night_pause_parser = night_subparsers.add_parser("pause", help="Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate)")
         night_pause_parser.add_argument("--for", dest="duration", default="1h", help="How long: 90m, 2h, 45s, or minutes (default 1h)")
         night_subparsers.add_parser("resume", help="End a pause: the model gate refuses everyone but the benchmark run again")
@@ -2926,7 +2963,9 @@ class DreamferenceCLIController:
                 sys.exit(cls.handle_gate_pause(config.vllm_host, args.duration if args.night_command == "pause" else None))
             if args.night_command in ("every",):
                 sys.exit(cls.handle_night_every(args))
-            print("usage: ling-admin night {enable,disable,status,run,every,pause,resume}")
+            if args.night_command in ("archive",):
+                sys.exit(cls.handle_night_archive(args.weeks))
+            print("usage: ling-admin night {enable,disable,status,run,every,archive,pause,resume}")
             sys.exit(2)
 
         elif args.command == "code":
