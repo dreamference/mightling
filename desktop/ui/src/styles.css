@@ -948,6 +948,10 @@ html.quick-page body { margin: 0; background: var(--canvas); }
   line-height: 1.45;
 }
 .quick-hint { margin: 0; color: var(--faint); font-size: 12px; }
+/* Its recent questions (DESKTOP §16 B24): one line each, the window grown by a line per question (quick.ts `quickSize`). */
+.quick-recent { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px solid var(--line); -webkit-app-region: no-drag; }
+.quick-recent button { height: 26px; padding: 0 6px; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: inherit; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quick-recent button:hover, .quick-recent button:focus-visible { background: var(--hover); color: var(--text); }
 .quick-entry .dialog-note.warning { color: var(--danger); }
 .quick-row textarea, .quick-row textarea:focus, .quick-row textarea:focus-visible { border: none; box-shadow: none; outline: none; padding: 0; border-radius: 0; }
 

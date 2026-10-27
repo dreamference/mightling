@@ -106,6 +106,7 @@ What is left of both parity studies, one branch each (`desktop/backlog-<n>-<name
 - **Subagent marks** (B21, `agentmarks.tsx`): each subagent's thread id gives one glyph of eight and one hue of eight (FNV-1a), drawn the same in the subagents panel, the stream's subagent items and, while it works, the sidebar row of the thread that started it.
 - **Enter for multiline prompts** (B22, `composer.ts` `enterSends`): `enterBehaviour` `multiline`, Enter sends a one-line prompt and, once it has several lines, starts another, Ctrl+Enter sending; the hint under the composer follows. The PR-description instruction comes with B32.
 - **A readable font** (B23, `styles.css`, `prefs.ts` `READABLE_FONT`, `SettingsDialog.tsx`): Settings › Appearance › Fonts has a box for Atkinson Hyperlegible (Braille Institute, OFL 1.1, regular and bold, Latin), bundled in `fonts/` with its licence like Inter and JetBrains Mono, which sets the interface font list to it with Inter behind; nothing is fetched.
+- **Recent questions in Quick Entry** (B24, `quick.ts` `RecentQuestions`, `QuickView.tsx`): the main process learns Ask's threads (folder under `$CODEX_HOME/ask`, never an ephemeral one) from the app-server's messages it routes, newest first; the box asks for them with `quick/recent`, lists five under the composer (the window grows a line each, `quickSize`) and opens one with `quick/open`, which the main process takes only for a thread it listed.
 
 ## Tests
 
