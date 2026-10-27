@@ -350,8 +350,10 @@ export function bundleServer(manifest: Json, dir: string, places: Places, values
   const where = { dir, ...places };
   const plan = launch(server, platform);
   let command = substitute(plan.command, where, values);
-  if (/[\\/]/.test(command) && !path.isAbsolute(command)) command = path.join(dir, command);
-  if (platform === "win32" && server.type === "binary" && !path.extname(command)) command += ".exe";
+  // The platform's own path rules, not the host's: `platform` is the one the server runs on.
+  const paths = platform === "win32" ? path.win32 : path.posix;
+  if (/[\\/]/.test(command) && !paths.isAbsolute(command)) command = paths.join(dir, command);
+  if (platform === "win32" && server.type === "binary" && !paths.extname(command)) command += ".exe";
   const args = plan.args.filter((arg): arg is string | number | boolean => ["string", "number", "boolean"].includes(typeof arg)).flatMap((arg) => {
     const whole = typeof arg === "string" ? arg.match(/^\$\{user_config\.([^}]+)\}$/) : null;
     const value = whole && values ? values[whole[1]] : undefined;
