@@ -13,15 +13,19 @@ commit SWE-bench nights 12 and 15 tested, plus the parse-only tool-call fix of b
 `fix/toolcall-text` (the owner's rule of 2026-10-20: a later commit only if the engine's checks show
 it bit-exact); its binary (sha256 598e5520…9ef41f1) is greedy-identical to night 15's on agentlong
 (16 of 16 turns, every streamed event) and passes `--spec-check`. The image's binary, sha256
-7c9098f1aa09fbcb8df8680450d2cda0180ba22f6d2fa34067567a769a889975, passed the unit suites,
-`tests/server` and a smoke (a tool call, 2 and 4 concurrent requests) on node-b on 2026-10-27. Night 17 (2026-10-26 to 27) compares b8e9451 with SGLang carrying the
+8e517c880d6139e2cc7f9de8075e7f6a2b85638334d2be947904767b7d81b2b3, is 8d112d0 rebuilt under
+neutral paths (the first build, 7c9098f1…, carried the build machine's home path, as bdda3a2's
+image did); its device code is the first build's, and on node-b on 2026-10-27 it was
+greedy-identical to the first build on agentlong (16 of 16 turns identical, the same 5,271 tokens in the same 781 verify passes) and passed `tests/server` and a
+smoke (a tool call, 2 and 4 concurrent requests), as the first build had. Night 17 (2026-10-26 to 27) compares b8e9451 with SGLang carrying the
 phase-merge fix.
 
 **Before publishing:**
-- **The image** `ghcr.io/dreamference/ling-serve:8d112d0d2539` (`scripts/build_ling_serve_image.sh`),
-  pushed on 2026-10-27 and pinned in `QWEN38_LING_IMAGE` as
-  `sha256:9428996ac21af34a816bca14ea0828ef0553576afd312e153bef4c0d3a28bc35` (an anonymous pull of
-  the digest answers 200); it replaces bdda3a2's (`sha256:87807c50…`, pushed 2026-10-26).
+- **The image** `ghcr.io/dreamference/ling-serve:8d112d0d2539` (`scripts/build_ling_serve_image.sh`,
+  whose anonymity check found nothing of the build machine in it), pushed on 2026-10-27 and pinned
+  in `QWEN38_LING_IMAGE` as `sha256:7bff4e37e731893a6248b0632897a2740e1842e0b19b28a68f0eee22d670caf8` (an anonymous pull of the digest answers 200). It
+  replaces the first 8d112d0 image (`sha256:9428996a…`) and bdda3a2's (`sha256:87807c50…`), both
+  deleted from the registry because their binaries carried a home path.
 - **Long context** (the nights ran 65,536), done on node-b on 2026-10-26 with the bdda3a2 image:
   started at 262,144 in 40 s (host memory +60 GB, 46 GB left available), both needles of a
   204,857-token prompt answered exactly, prefill ~850-900 tokens/s at that length, decode 39.6

@@ -38,6 +38,16 @@ pub fn with_bridge(page: &str) -> String {
     }
 }
 
+/// The sign-in page (`locked.html`), including `/bridge.js` only when served on the configured
+/// HTTPS front where a Telegram Mini App may launch unpaired (CHAT_REPOS §12.1 G2).
+pub fn locked_html(front: bool) -> String {
+    if front {
+        with_bridge(LOCKED_HTML)
+    } else {
+        LOCKED_HTML.to_string()
+    }
+}
+
 /// The pairing page, with a message above the form when there is one.
 pub fn pair_html(message: Option<&str>) -> String {
     pair_html_with(message, None)
@@ -93,5 +103,11 @@ mod tests {
         assert!(!pair_html(None).contains("<!--MESSAGE-->"));
         assert!(!pair_html(None).contains("<!--CODE-->"));
         assert!(pair_html_with(None, Some("01234567")).contains("value=\"01234567\""));
+    }
+
+    #[test]
+    fn locked_html_includes_the_bridge_only_on_the_front() {
+        assert!(!locked_html(false).contains(BRIDGE_TAG));
+        assert!(locked_html(true).contains(BRIDGE_TAG));
     }
 }

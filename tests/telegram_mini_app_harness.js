@@ -18,6 +18,8 @@ const record = {
   theme: null,
   openTarget: null,
   openTargetBeforeCheck: null,
+  reloads: 0,
+  finalSearch: null,
 };
 const storage = new Map();
 const documentElement = { dataset: optionsRaw.unpaired ? { unpaired: "1" } : {} };
@@ -35,6 +37,7 @@ const window = {
     search: optionsRaw.search || "",
     protocol: "https:",
     host: "node.example.ts.net",
+    ...(optionsRaw.reloadable ? { reload() { record.reloads++; } } : {}),
   },
   history: {
     replaceState(_s, _t, url) {
@@ -49,7 +52,13 @@ const window = {
       }
     },
   },
-  sessionStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) },
+  sessionStorage: {
+    getItem: (k) => storage.get(k) ?? null,
+    setItem: (k, v) => {
+      if (optionsRaw.throwOnStorage) throw new Error("QuotaExceededError");
+      storage.set(k, v);
+    },
+  },
   localStorage: { getItem: () => null },
   matchMedia: () => ({ matches: false, addEventListener() {} }),
   TelegramWebviewProxy: { postEvent(type, _data) { record.events.push(type); } },
@@ -104,6 +113,7 @@ setTimeout(() => {
   record.host = documentElement.dataset.host || null;
   record.openTarget =
     typeof context.electronBridge.openTarget === "function" ? context.electronBridge.openTarget() : null;
+  record.finalSearch = window.location.search;
   record.hasReceiver = !!(context.Telegram && context.Telegram.WebView);
   if (record.hasReceiver) context.Telegram.WebView.receiveEvent("theme_changed", { theme_params: { bg_color: "#ffffff" } });
   console.log(JSON.stringify(record));

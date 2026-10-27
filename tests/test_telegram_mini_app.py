@@ -25,10 +25,17 @@ def run(
     *,
     search: str = "",
     unpaired: bool = False,
+    reloadable: bool = False,
+    throw_on_storage: bool = False,
 ) -> dict:
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
-    options = {"search": search, "unpaired": unpaired}
+    options = {
+        "search": search,
+        "unpaired": unpaired,
+        "reloadable": reloadable,
+        "throwOnStorage": throw_on_storage,
+    }
     result = subprocess.run(
         [
             "node",
@@ -151,3 +158,32 @@ def test_deep_links_are_read_and_stripped_only_after_launch_check_and_validated(
         assert record["openTargetBeforeCheck"] is None
         assert record["openTarget"] == expected
         assert record["replaced"] == "/"
+
+
+def test_locked_page_reload_preserves_deep_link_query_for_reloaded_app_page() -> None:
+    record = run(
+        LAUNCH,
+        [
+            {"pending": "req-99", "code": "482 913"},
+            {"status": "approved", "ok": True},
+            {"ok": True},
+        ],
+        search="?open=thread:0123abcd&approval=1",
+        unpaired=True,
+        reloadable=True,
+    )
+    assert record["reloads"] == 1
+    assert record["openTarget"] is None
+    assert record["finalSearch"] == "?open=thread:0123abcd&approval=1"
+    assert record["replacedHistory"] == ["/?open=thread:0123abcd&approval=1"]
+
+
+def test_tg_web_app_data_hash_is_stripped_even_when_session_storage_throws() -> None:
+    record = run(
+        LAUNCH,
+        {"ok": True},
+        search="?open=repos",
+        throw_on_storage=True,
+    )
+    assert record["replacedHistory"] == ["/?open=repos", "/"]
+    assert record["openTarget"] == {"kind": "repos", "approval": False}
