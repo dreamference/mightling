@@ -75,6 +75,7 @@ import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { SideChat } from "./SideChat";
 import { firstMessage, keptMessage, keptName, sideChatParams, sideMessages } from "./sidechat";
 import { agentsPath, initPrompt } from "./init";
+import { editedTurn, recordVersion, stepVersion, versionsAt, type MessageVersions } from "./versions";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
 import { nearBottom } from "./follow";
@@ -2096,8 +2097,11 @@ export function App() {
   const forkFrom = async (turn: TurnView, where: "through" | "before") => {
     if (!selected || selected.thread.ephemeral) return;
     try {
-      const words = turn.items.flatMap((item) => (item.type === "userMessage" ? item.content.flatMap((input) => (input.type === "text" ? [input.text] : [])) : [])).join("\n");
+      const words = turn.items.flatMap((item) => (item.type === "userMessage" ? item.content.flatMap((input) => (input.type === "text" && !isContextText(input.text) ? [input.text] : [])) : [])).join("\n");
       const thread = await forkAt(client, selected.thread.id, turn.id, where, modelChoice ?? servedModel);
+      // An edit keeps the message as it was sent: the fork is its next version (versions.ts, DESKTOP §16 B39).
+      const index = selected.turns.findIndex((entry) => entry.id === turn.id);
+      if (where === "before" && index >= 0) updatePrefs({ messageVersions: recordVersion(prefsRef.current.messageVersions, selected.thread.id, index, thread.id) });
       dispatch({ type: "opened", thread });
       refreshQueue(thread.id);
       if (where === "before" && words.trim()) setDraftFor(draftKeyOf(view, thread.id), words);
@@ -2108,6 +2112,10 @@ export function App() {
 
   const editPrevious = async () => {
     if (!selected) return;
+    // Edit keeps what came before (DESKTOP §16 B39): a new version in a fork, as Edit in a new thread;
+    // an incognito question cannot be forked, and keeps nothing anyway: its message is taken back.
+    const lastTurn = selected.thread.ephemeral ? null : editedTurn(selected);
+    if (lastTurn) return forkFrom(lastTurn, "before");
     try {
       const text = await takeBack(client, selected);
       if (text === null) return;
@@ -2947,7 +2955,8 @@ export function App() {
             <Turn key={turn.id} turn={turn} last={index === selected.turns.length - 1} commandOutput={prefs.commandOutput}
               onFork={selected.thread.ephemeral ? null : (where) => void forkFrom(turn, where)}
               onRevert={() => void revertTurn(turn).catch(notice)}
-              onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null} />
+              onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null}
+              versions={versionsAt(prefs.messageVersions, selected.thread.id, index)} onVersion={(threadId) => void openThread(threadId)} />
           )) : view === "ask" ? (
             startingProject ? (
               <ProjectPage key={startingProject.id} project={startingProject} title={askTitle} notice={notice}
@@ -3319,11 +3328,15 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
   );
 }
 
-function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; commandOutput: Prefs["commandOutput"] }) {
+function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; commandOutput: Prefs["commandOutput"]; versions?: MessageVersions | null; onVersion?: (threadId: string) => void }) {
   const { turn } = props;
+  const firstMessage = turn.items.find((item) => item.type === "userMessage")?.id;
   return (
     <section className={`turn turn-${turn.status}`}>
-      {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} progress={turn.progress?.[item.id]} />))}
+      {turn.items.flatMap((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? [] : [
+        <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} progress={turn.progress?.[item.id]} />,
+        item.id === firstMessage && props.versions ? <VersionSwitch key={`${item.id}-versions`} versions={props.versions} onVersion={props.onVersion} /> : null,
+      ]))}
       {turn.checklist && turn.status !== "inProgress" ? <TurnChecklist checklist={turn.checklist} /> : null}
       {turn.error ? <div className="turn-error">{turn.error.message}</div> : null}
       {turn.status === "interrupted" ? <div className="turn-note">Stopped.</div> : null}
@@ -3336,12 +3349,28 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
       {turn.status !== "inProgress" && (props.last || props.onFork) ? (
         <span className={`turn-actions${props.last ? "" : " earlier"}`}>
           {props.last ? <button className="icon revert" onClick={props.onRevert} title="Undo this turn and what it changed"><Icon name="undo" size={14} />Revert</button> : null}
-          {props.last && props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Take this message back to edit it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
+          {props.last && props.onEdit ? <button className="icon edit-previous" onClick={props.onEdit} title="Edit this message in a new version; the one sent stays, a click away under it (Esc Esc)"><Icon name="pencil" size={14} />Edit</button> : null}
           {props.onFork ? <button className="icon fork-here" onClick={() => props.onFork?.("through")} title="A new thread with this conversation up to here; this one stays as it is"><Icon name="gitFork" size={14} />Fork from here</button> : null}
           {props.onFork ? <button className="icon edit-in-new" onClick={() => props.onFork?.("before")} title="A new thread with the conversation before this message, the message in its composer to change; this one stays as it is"><Icon name="squarePen" size={14} />Edit in a new thread</button> : null}
         </span>
       ) : null}
     </section>
+  );
+}
+
+/** `‹ 2 / 3 ›` under an edited message: each version is the thread it was sent in (DESKTOP §16 B39). */
+function VersionSwitch(props: { versions: MessageVersions; onVersion?: (threadId: string) => void }) {
+  const { versions } = props;
+  const go = (step: number) => {
+    const threadId = stepVersion(versions, step);
+    if (threadId) props.onVersion?.(threadId);
+  };
+  return (
+    <nav className="message-versions" aria-label="Versions of this message">
+      <button className="icon" aria-label="Previous version" title="The version before this one, in the thread it was sent in" disabled={versions.at <= 1} onClick={() => go(-1)}><Icon name="chevronLeft" size={14} /></button>
+      <span aria-label={`Version ${versions.at} of ${versions.of}`}>{versions.at} / {versions.of}</span>
+      <button className="icon" aria-label="Next version" title="The version after this one, in the thread it was sent in" disabled={versions.at >= versions.of} onClick={() => go(1)}><Icon name="chevronRight" size={14} /></button>
+    </nav>
   );
 }
 

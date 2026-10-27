@@ -460,6 +460,8 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .efforts button.selected { border-color: var(--accent); background: var(--accent-soft); }
 .picker-note { margin: 6px 8px 2px; color: var(--faint); font-size: 11.5px; }
 .turn-actions { display: inline-flex; gap: 4px; font-size: 12px; margin-left: -4px; }
+.message-versions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; font-size: 12px; color: var(--muted); margin: -12px 0 12px; font-variant-numeric: tabular-nums; }
+.message-versions button:disabled { opacity: 0.35; cursor: default; }
 .bar-action { color: var(--muted); }
 .info-panel { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 14px 12px; margin: 0 auto 16px; background: var(--panel); }
 .info-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
