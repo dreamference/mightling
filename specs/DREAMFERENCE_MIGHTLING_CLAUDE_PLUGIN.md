@@ -89,7 +89,7 @@ Runs of three or more consecutive calls of one kind: 197 search-and-read runs (1
 
 ### 2.3 What the whitelist can reach
 
-The agents' briefs, classed by keyword rules (checked by eye) over the session's 158 agents since 2026-10-15, are mostly in excluded classes: research and reports (32% of calls), exactness-critical engine work (21%), releases and history (15%), hardware and platform work (9%). **Few whole briefs are delegable.** What is delegable lives *inside* the briefs: the search-and-read runs (`ask`, `lookup`), the waiting runs (`watch`), and the small mechanical steps of larger work (`task`). The whitelist therefore covers a minority of the workload, and §6's practices, which need no delegation, cover the rest.
+The agents' briefs, classed by keyword rules (checked by eye) over the session's 158 agents since 2026-10-15, fall mostly in the excluded classes of §5.1; under a tenth of the calls (about 7%) belong to briefs that a whitelisted class could take whole. **Few whole briefs are delegable.** What is delegable lives *inside* the briefs: the search-and-read runs (`ask`, `lookup`), the waiting runs (`watch`), and the small mechanical steps of larger work (`task`). The whitelist therefore covers a minority of the workload, and §6's practices, which need no delegation, cover the rest.
 
 ### 2.4 The break-even rule (carried over, re-fitted to this night)
 
@@ -277,7 +277,7 @@ Then **the diff review**: Claude starts `mightling:diff-reviewer` with the brief
 
 - **Exploration units** for L1/L2: the 197 search-and-read runs of three or more calls (§2.2), plus a stratified sample from earlier nights to reach 150. For each, a reader writes the question the run answered and the answer it reached; that conclusion, from the run itself, is the reference.
 - **Log units** for L3: the runs that read a large output (a test log, a rollout, a report) to answer a question; the same reference method.
-- **Wait units** for W1: the 286 waiting runs, single calls included; each is replayed as one `watch` condition against the recorded timeline, checking that it would have woken the agent on the same event and no later than the polling did.
+- **Wait units** for W1: the night's 169 waiting runs, single calls included (329 calls, the classifier of §2.2); each is replayed as one `watch` condition against the recorded timeline, checking that it would have woken the agent on the same event and no later than the polling did.
 - **Change units** for T1–T5: whole briefs are mostly excluded (§2.3), so these come from the history of the owner's repositories instead: commits of each class (lint and typing fixes, test-only fixes, renames and moves, docs corrections, UI fixes with e2e tests), 30 per class where history has them. The task is the commit message, the start is its parent, the hidden check is the commit's own tests and the project's gates, and the reference outcome is the commit itself, made and merged without the plugin.
 
 **Metrics:**
@@ -305,12 +305,12 @@ These are the larger lever (§0.5). They belong in the coordinator's own instruc
 
 | Practice | Saving of price-weighted cost | Assumption |
 |---|---|---|
-| Waiting runs collapsed to one wake-up each (3) | **≈ 25%** | One call per waiting run instead of several |
+| Waiting runs collapsed to one wake-up each (3) | **≈ 25%** | One call per waiting run (169 runs, 329 calls) instead of several |
 | Retirement at 300K, fresh agent at 60K (1, 4) | ≈ 30% (lower bound) | Only cache *reads* scale with the smaller context |
 | The same, if cache *rewrites* scale too | ≈ 69% (upper bound) | A wake-up after a gap rewrites 60K–300K instead of up to 900K |
-| Both together | 35–75% | The range between the two assumptions, before the recovery cost |
+| Both together | 53–74% | The range between the two assumptions, before the recovery cost |
 
-The fresh agent's cost of recovering context (re-reading files it needs) is not modelled. It is paid once per retirement against rewrites paid on every late wake-up. A **planning figure of 35–50%** is defensible; the replay of §5.5 and a week of the practices measure it. Delegation through the plugin adds to this, on a smaller base: the search-and-read runs it can take are 11.7% of the cost, so at most about 5–7% more once the practices are in place.
+The fresh agent's cost of recovering context (re-reading files it needs) is not modelled. It is paid once per retirement against rewrites paid on every late wake-up. A **planning figure of 40–50%**, after the recovery cost and imperfect adherence, is defensible; the replay of §5.5 and a week of the practices measure it. Delegation through the plugin adds to this, on a smaller base: the search-and-read runs it can take are 11.7% of the cost, so at most about 5–7% more once the practices are in place.
 
 ---
 
