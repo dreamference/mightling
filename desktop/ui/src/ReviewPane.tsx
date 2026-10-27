@@ -9,6 +9,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import * as bridge from "./bridge";
+import { anchorLine, findingMessage, repoPath, type Finding } from "./findings";
 import { commentsMessage, editable, editPatch, zeroContext, fingerprint, hunkNewText, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
 import { Icon } from "./icons";
 import { keyLabel } from "./keymap";
@@ -45,6 +46,8 @@ export interface ReviewPaneProps {
   onOpenFile: ((path: string, line: number | null) => void) | null;
   /** Into a window of its own, or (`docks`, in that window) back into the thread's (several windows); null where there are no windows. */
   detach?: { docks: boolean; run: () => void } | null;
+  /** The thread's latest `/review` findings (findings.ts, DESKTOP §16 B12), shown on the lines they name. */
+  findings?: Finding[];
 }
 
 interface Draft {
@@ -265,6 +268,48 @@ export function ReviewPane(props: ReviewPaneProps) {
     );
   };
 
+  // Review findings (DESKTOP §16 B12): each on the first line of its range the diff shows, folded on a click.
+  const findingBase = root ?? props.cwd;
+  const findingKey = (finding: Finding) => `${finding.path}:${finding.start}:${finding.title}`;
+  const [foldedFindings, setFoldedFindings] = useState<Set<string>>(new Set());
+  const findingsAt = (file: FileDiff, line: DiffLine | null): Finding[] => {
+    if (!line || line.newNo === null || !findingBase || !props.findings?.length) return [];
+    return props.findings.filter((finding) => repoPath(finding, findingBase) === file.path && anchorLine(file, finding) === line.newNo);
+  };
+  const elsewhere = (props.findings ?? []).filter((finding) => {
+    const at = findingBase ? repoPath(finding, findingBase) : null;
+    const file = at ? files.find((entry) => entry.path === at) : undefined;
+    return !file || anchorLine(file, finding) === null;
+  });
+  const findingCard = (finding: Finding, shown: string) => {
+    const key = findingKey(finding);
+    const folded = foldedFindings.has(key);
+    const toggle = () => setFoldedFindings((set) => {
+      const next = new Set(set);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    return (
+      <div key={key} className={`review-finding${folded ? " folded" : ""}`}>
+        <div className="review-finding-head">
+          <button className="icon" aria-label={folded ? "Unfold the finding" : "Fold the finding"} aria-expanded={!folded} onClick={toggle}><Icon name={folded ? "chevronRight" : "chevronDown"} size={12} /></button>
+          <strong>{finding.title}</strong>
+          <span className="review-finding-where">{shown}:{finding.start === finding.end ? finding.start : `${finding.start}-${finding.end}`}</span>
+        </div>
+        {folded ? null : (
+          <>
+            {finding.body ? <p>{finding.body}</p> : null}
+            <div className="buttons">
+              <button onClick={() => props.onComments(findingMessage(finding, shown))}>Send to the composer</button>
+              {props.onOpenFile ? <button className="link-button" onClick={() => props.onOpenFile?.(finding.path, finding.start)}>Open the file</button> : null}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const commentsAt = (file: FileDiff, line: DiffLine | null) => {
     if (!line) return [];
     const number = line.newNo ?? line.oldNo;
@@ -274,11 +319,13 @@ export function ReviewPane(props: ReviewPaneProps) {
 
   const commentRows = (file: FileDiff, lines: (DiffLine | null)[], span: number) => {
     const here = lines.flatMap((line) => commentsAt(file, line));
+    const noted = [...new Set(lines.flatMap((line) => findingsAt(file, line)))];
     const drafting = draft && draft.path === file.path && lines.some((line) => line && (line.newNo ?? line.oldNo) === draft.line && (line.newNo === null ? "old" : "new") === draft.side);
-    if (here.length === 0 && !drafting) return null;
+    if (here.length === 0 && noted.length === 0 && !drafting) return null;
     return (
       <tr className="comment-row">
         <td colSpan={span}>
+          {noted.map((finding) => findingCard(finding, file.path))}
           {here.map((comment, index) => (
             <div key={index} className="review-comment">
               <span>{comment.text}</span>
@@ -456,6 +503,12 @@ export function ReviewPane(props: ReviewPaneProps) {
       ) : null}
       {scope === "turn" && props.onRevertTurn && files.length > 0 ? (
         <div className="review-all"><button className="link-button danger" onClick={props.onRevertTurn}>Revert the turn</button></div>
+      ) : null}
+      {elsewhere.length > 0 ? (
+        <section className="review-findings-elsewhere" aria-label="Review findings outside this diff">
+          <h4>{elsewhere.length === 1 ? "A review finding on lines this diff does not show" : `${elsewhere.length} review findings on lines this diff does not show`}</h4>
+          {elsewhere.map((finding) => findingCard(finding, (findingBase && repoPath(finding, findingBase)) || finding.path))}
+        </section>
       ) : null}
       <div className="review-files">
         {files.length === 0 ? (scope === "turn" || ready ? <p className="empty small">{scope === "turn" ? "The last turn changed no files." : "No changes."}</p> : null) : files.map(fileBlock)}
