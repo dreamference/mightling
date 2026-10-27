@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import {
-  activeTrigger, applyCompletion, effortChoices, enterSends, matchCommands, matchSkills, mentionPath, slashSkills,
+  activeTrigger, applyCompletion, effortChoices, enterSends, type EnterBehaviour, matchCommands, matchSkills, mentionPath, slashSkills,
   type CommandContext, type PromptHistory, type SlashCommand, type Trigger,
 } from "./composer";
 import { Icon } from "./icons";
@@ -51,7 +51,7 @@ export interface ComposerProps {
   prediction?: string | null;
   running: boolean;
   sending: boolean;
-  enterBehaviour: "enter" | "ctrlEnter";
+  enterBehaviour: EnterBehaviour;
   followUp: "steer" | "queue";
   /** The folder `@` searches and paths are made relative to; null hides `@`. */
   root: string | null;
@@ -208,7 +208,7 @@ export function Composer(props: ComposerProps) {
       }
     }
     // `send` is Enter in the table; the preference decides which modifiers go with it (enterSends).
-    if (event.key === keyAction("send").keys[0] && enterSends(event, props.enterBehaviour)) {
+    if (event.key === keyAction("send").keys[0] && enterSends(event, props.enterBehaviour, draft)) {
       event.preventDefault();
       props.onSend(draft, "default");
       return;
@@ -254,7 +254,7 @@ export function Composer(props: ComposerProps) {
   };
 
   const sendLabel = props.running ? (props.followUp === "queue" ? "Queue" : "Steer") : "Send";
-  const enterHint = props.enterBehaviour === "ctrlEnter" ? `${keyLabel("Ctrl+Enter", "composer")}; Enter for a new line` : `Enter; ${shortcutLabel("newLine")} for a new line`;
+  const enterHint = props.enterBehaviour === "ctrlEnter" || (props.enterBehaviour === "multiline" && draft.includes("\n")) ? `${keyLabel("Ctrl+Enter", "composer")}; Enter for a new line` : `Enter; ${shortcutLabel("newLine")} for a new line`;
   const menuOpen = trigger !== null && entries.length > 0;
 
   return (

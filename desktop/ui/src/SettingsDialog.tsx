@@ -109,6 +109,7 @@ function General({ prefs, onChange }: SettingsProps) {
         <legend>Enter in the composer</legend>
         <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "enter"} onChange={() => onChange({ enterBehaviour: "enter" })} /> Enter sends; Shift+Enter starts a new line</label>
         <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "ctrlEnter"} onChange={() => onChange({ enterBehaviour: "ctrlEnter" })} /> Enter starts a new line; {keyLabel("Ctrl+Enter", "composer")} sends</label>
+        <label><input type="radio" name="enter" checked={prefs.enterBehaviour === "multiline"} onChange={() => onChange({ enterBehaviour: "multiline" })} /> Enter sends a one-line prompt; once it has several lines, Enter starts a new one and {keyLabel("Ctrl+Enter", "composer")} sends</label>
       </fieldset>
       <fieldset>
         <legend>A message sent while the agent is working</legend>

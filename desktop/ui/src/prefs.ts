@@ -9,7 +9,7 @@ import type { Section } from "./threads";
 
 export interface Prefs {
   /** What Enter does in the composer: send (Shift+Enter for a new line), or a new line (Ctrl+Enter sends). */
-  enterBehaviour: "enter" | "ctrlEnter";
+  enterBehaviour: "enter" | "ctrlEnter" | "multiline";
   /** A message sent while a turn runs: steer the running turn, or wait in the queue for the next one. */
   followUp: "steer" | "queue";
   /** The reasoning effort last chosen in the picker; null for the model's default. */
