@@ -41,7 +41,7 @@ export function TabArea(props: TabAreaProps) {
             const label = tabLabel(tab);
             const selected = tab.key === front?.key;
             return (
-              <span key={tab.key} className={`tab${selected ? " selected" : ""}`} role="tab" aria-selected={selected} title={tab.kind === "file" ? tab.path : tab.kind === "preview" ? tab.url : label}
+              <span key={tab.key} className={`tab${selected ? " selected" : ""}`} role="tab" aria-selected={selected} title={tab.kind === "file" ? tab.path : tab.kind === "preview" ? tab.url : label} data-path={tab.kind === "file" ? tab.path : undefined}
                 onClick={() => props.onSelect(tab.key)} onAuxClick={(event) => { if (event.button === 1) props.onClose(tab.key); }}>
                 <Icon name={tab.kind === "review" ? "fileDiff" : tab.kind === "preview" ? "globe" : tab.kind === "prs" ? "gitPullRequest" : "file"} size={13} /> <span className="tab-label">{label}</span>
                 <button className="icon" aria-label={`Close the ${label} tab`} title={`Close (${shortcutLabel("closeTab")})`} onClick={(event) => { event.stopPropagation(); props.onClose(tab.key); }}><Icon name="x" size={12} /></button>

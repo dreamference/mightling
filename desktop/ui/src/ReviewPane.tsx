@@ -368,7 +368,7 @@ export function ReviewPane(props: ReviewPaneProps) {
       <section key={file.path} className={`review-file${isViewed ? " viewed" : ""}`}>
         <header onClick={(event) => event.target === event.currentTarget && toggle()}>
           <button className="icon" aria-label={isCollapsed ? "Expand" : "Collapse"} onClick={toggle}><Icon name={isCollapsed ? "chevronRight" : "chevronDown"} size={14} /></button>
-          <button className="file-name" title={windowGit ? "Open in the editor" : file.path} onClick={() => open(file, null)}>{file.path}</button>
+          <button className="file-name" title={windowGit ? "Open in the editor" : file.path} onClick={() => open(file, null)} data-path={(root ?? props.cwd) ? `${(root ?? props.cwd ?? "").replace(/\/+$/, "")}/${file.path}` : undefined}>{file.path}</button>
           {props.onOpenFile && (root ?? props.cwd) && file.status !== "deleted" ? (
             <button className="icon" title="Open in a tab" aria-label={`Open ${file.path} in a tab`} onClick={() => props.onOpenFile?.(`${(root ?? props.cwd ?? "").replace(/\/+$/, "")}/${file.path}`, null)}><Icon name="file" size={13} /></button>
           ) : null}

@@ -840,6 +840,13 @@ export async function main(options: MainOptions): Promise<void> {
         if (message.type === "docs/remove") return docsRemove(ling, message.name);
         return docsReindex(ling, message.name);
       }
+      case "open/reveal": {
+        // A file's place in the file manager (DESKTOP §16 B14): an absolute path to a file that exists.
+        const file = typeof message.path === "string" && path.isAbsolute(message.path) ? path.normalize(message.path) : null;
+        if (!file || !(await fs.promises.stat(file).then((entry) => entry.isFile() || entry.isDirectory(), () => false))) throw new Error("that file is not there");
+        shell.showItemInFolder(file);
+        return null;
+      }
       case "open/folder": {
         const failed = await shell.openPath(await folder(message.dir));
         if (failed) throw new Error(failed);

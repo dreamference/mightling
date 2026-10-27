@@ -116,7 +116,7 @@ export function FileTree(props: { root: string; client: RpcClient; listen: Liste
       }
       return (
         <div key={full} role="treeitem" aria-label={entry.fileName} aria-selected={props.selected === full}>
-          <button className={`tree-row file${props.selected === full ? " selected" : ""}`} style={{ paddingLeft: 22 + depth * 14 }} onClick={() => props.onOpen(full)} title={full}>
+          <button className={`tree-row file${props.selected === full ? " selected" : ""}`} style={{ paddingLeft: 22 + depth * 14 }} onClick={() => props.onOpen(full)} title={full} data-path={full}>
             <Icon name="file" size={14} /><span>{entry.fileName}</span>
           </button>
         </div>
