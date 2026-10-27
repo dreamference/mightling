@@ -77,6 +77,7 @@ import { TerminalHub, decode, terminalMessage, type TerminalSession } from "./te
 import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsState } from "./windows";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { ExportDialog } from "./ExportDialog";
+import { QuestionCard } from "./QuestionCard";
 import { threadContext, withThreadContext } from "./tonight";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectPage } from "./ProjectPage";
@@ -3149,7 +3150,6 @@ function Diff({ text: diff }: { text: string }) {
 function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnswer: (result: unknown) => void }) {
   const { request, onAnswer } = props;
   const params = request.params as Record<string, unknown>;
-  const [answers, setAnswers] = useState<Record<string, string>>({});
   switch (request.method) {
     case "item/commandExecution/requestApproval":
     case "item/fileChange/requestApproval": {
@@ -3196,29 +3196,8 @@ function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnsw
       );
     case "mcpServer/elicitation/request":
       return <ElicitationCard params={params} airgappedOn={props.airgappedOn} onAnswer={onAnswer} />;
-    case "item/tool/requestUserInput": {
-      const questions = (params.questions ?? []) as { id: string; header: string; question: string; options: { label: string }[] | null }[];
-      return (
-        <div className="approval">
-          {questions.map((question) => (
-            <label key={question.id} className="question">
-              <strong>{question.header}</strong> {question.question}
-              {question.options ? (
-                <select value={answers[question.id] ?? ""} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}>
-                  <option value="" disabled>Choose…</option>
-                  {question.options.map((option) => <option key={option.label}>{option.label}</option>)}
-                </select>
-              ) : (
-                <input value={answers[question.id] ?? ""} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} />
-              )}
-            </label>
-          ))}
-          <div className="buttons">
-            <button className="primary" onClick={() => onAnswer({ answers: Object.fromEntries(questions.map((q) => [q.id, { answers: answers[q.id] ? [answers[q.id]] : [] }])) })}>Answer</button>
-          </div>
-        </div>
-      );
-    }
+    case "item/tool/requestUserInput":
+      return <QuestionCard params={params} onAnswer={onAnswer} />;
     default:
       return null;
   }

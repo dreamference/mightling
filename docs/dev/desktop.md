@@ -83,6 +83,7 @@ Until 2026-10-07 it was a Tauri shell on the system's WebKitGTK, and typing into
 What is left of both parity studies, one branch each (`desktop/backlog-<n>-<name>`); new end-to-end cases go in `e2e/backlog.e2e.ts`.
 
 - **Notifications name the thread** (B1, `notices.ts`): the main process learns each thread's name from every answer and notification that carries threads (a list, a read, `thread/started`, `thread/name/updated`, and a new thread's first message until it has a name) and keeps the running turn's last answer, so a notice is titled with the thread and says what it ended with, or what waits (the command, the question, the MCP server's message). `notifyQuestions` (null: follows `notifyApprovals`) is the questions' own switch.
+- **Questions answered in full** (B2, `questions.ts`, `QuestionCard.tsx`): options with their descriptions, `None of the above` with a field for the user's words when `isOther`, a password field when `isSecret`; the answer is spelled as Codex's TUI spells it (the option's label, then `user_note: <words>`), so the agent reads both the same way.
 
 ## Tests
 

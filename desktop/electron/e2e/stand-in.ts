@@ -326,6 +326,14 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
             say({ id: "elicit-2", method: "mcpServer/elicitation/request", params: { threadId: p.threadId, turnId: id, serverName: "tickets", mode: "url", _meta: null,
               message: "Sign in to the ticket tracker.", url: "http://127.0.0.1:9/login", elicitationId: "e2" } });
           }
+          // A question from the agent (DESKTOP §16 B2): options with descriptions and a free answer, and a secret.
+          if (asked.includes("with a question")) {
+            say({ id: "input-1", method: "item/tool/requestUserInput", params: { threadId: p.threadId, turnId: id, itemId: "q" + id, isBlocking: true, autoResolutionMs: null, questions: [
+              { id: "scope", header: "Scope", question: "Which part first?", isOther: true, isSecret: false, options: [
+                { label: "The client", description: "fetcher/client.py and its retry loop" },
+                { label: "The tests", description: "tests/test_client.py" }] },
+              { id: "token", header: "Token", question: "The staging token?", isOther: false, isSecret: true, options: null }] } });
+          }
           if (asked.includes("with a report")) {
             // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
             const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
