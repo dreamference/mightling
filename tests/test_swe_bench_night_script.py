@@ -1309,3 +1309,17 @@ def test_the_image_cache_reaches_the_nights_and_the_smokes_settings(tmp_path):
         result.stdout
         == 'image_cache_lists = ["/l/a.txt", "/l/b.txt"]\nimage_cache_floor = "175G"\n'
     )
+
+
+def test_the_sampling_arm_reaches_only_the_candidates_round(tmp_path):
+    status, recorded, _ = night(tmp_path, "default default+sampling-nonthinking")
+    assert status == 0
+    record, candidate = runs(recorded)
+    assert "--sampling" not in record and "--sampling nonthinking" in candidate
+    assert "--name n4-default-sampling-nonthinking " in candidate
+
+
+@pytest.mark.parametrize("arm", ["sampling-thinking", "sampling", "sampling_nonthinking"])
+def test_a_misspelt_sampling_arm_ends_the_night_before_any_round(tmp_path, arm):
+    status, recorded, folder = night(tmp_path, f"default default+{arm}")
+    assert status == 2 and not runs(recorded) and (folder / "failed").exists()
