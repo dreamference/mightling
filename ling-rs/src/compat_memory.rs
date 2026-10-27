@@ -376,7 +376,8 @@ pub const MEMORY_HOOK: SessionHook = SessionHook {
 
 /// The `-c` settings that register the hook for this session, with its trust entry. Hooks given
 /// on the command line live in Codex's session-flags layer, whose trust key is
-/// `/<session-flags>/config.toml:<event>:<group>:<handler>`, given as an inline table because a
+/// `<source>:<event>:<group>:<handler>` ([`crate::compat_hooks::session_flags_source`]: `/<session-flags>/config.toml`,
+/// `C:\<session-flags>\config.toml` on Windows), given as an inline table because a
 /// dotted `-c` key is split at the dots of its quoted part (spec §16.3).
 pub fn hook_settings(command: &str) -> Vec<String> {
     let hook = &MEMORY_HOOK;
@@ -390,7 +391,7 @@ pub fn hook_settings(command: &str) -> Vec<String> {
         ),
         format!(
             "hooks.state={{{}={{trusted_hash={}}}}}",
-            toml_string("/<session-flags>/config.toml:session_start:0:0"),
+            toml_string(&format!("{}:session_start:0:0", crate::compat_hooks::session_flags_source(cfg!(windows)))),
             toml_string(&hash)
         ),
     ]
@@ -439,13 +440,14 @@ pub fn fallback_setting(codex_config_text: &str) -> Option<String> {
 /// The command Codex runs for the hook: this binary and `compat memory`, quoted for the shell
 /// Codex starts it through.
 pub fn hook_command(exe: &Path) -> String {
-    let path = exe.display().to_string();
-    let quoted = if path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) {
-        path
-    } else {
-        format!("'{}'", path.replace('\'', "'\\''"))
-    };
-    format!("{quoted} compat memory")
+    hook_command_for(exe, cfg!(windows))
+}
+
+/// [`hook_command`] for either shell: a POSIX shell's single quotes, or `cmd.exe`'s double quotes
+/// on Windows, which single quotes broke there (`CLAUDE.md` never reached the model; WINDOWS_ARM
+/// §23.4 W1).
+pub fn hook_command_for(exe: &Path, windows: bool) -> String {
+    format!("{} compat memory", crate::compaction::quote_program(&exe.display().to_string(), windows))
 }
 
 /// Puts `-c` settings right after the program name.
@@ -667,8 +669,12 @@ mod tests {
 
     #[test]
     fn the_hook_command_is_quoted_for_the_shell() {
-        assert_eq!(hook_command(Path::new("/opt/ling/bin/ling")), "/opt/ling/bin/ling compat memory");
-        assert_eq!(hook_command(Path::new("/home/a b/ling")), "'/home/a b/ling' compat memory");
+        assert_eq!(hook_command_for(Path::new("/opt/ling/bin/ling"), false), "/opt/ling/bin/ling compat memory");
+        assert_eq!(hook_command_for(Path::new("/home/a b/ling"), false), "'/home/a b/ling' compat memory");
+        assert_eq!(
+            hook_command_for(Path::new(r"C:\Users\Jane Doe\AppData\Local\Programs\Mightling\bin\ling.exe"), true),
+            r#""C:\Users\Jane Doe\AppData\Local\Programs\Mightling\bin\ling.exe" compat memory"#
+        );
     }
 
     #[test]
@@ -681,7 +687,7 @@ mod tests {
         assert_eq!(group["hooks"][0]["additionalContextLimit"].as_integer(), Some(0));
         let state = table["hooks"]["state"].as_table().unwrap();
         let (key, entry) = state.iter().next().unwrap();
-        assert_eq!(key, "/<session-flags>/config.toml:session_start:0:0");
+        assert_eq!(key, &format!("{}:session_start:0:0", crate::compat_hooks::session_flags_source(cfg!(windows))));
         // The hash Codex computes from its own types for that group.
         use codex_config::HookHandlerConfig;
         use codex_config::MatcherGroup;
