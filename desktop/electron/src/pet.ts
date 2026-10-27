@@ -17,7 +17,7 @@ export type PetSize = "small" | "medium" | "large";
 export const PET_SIZES: Record<PetSize, number> = { small: 72, medium: 104, large: 144 };
 
 /** The window around the pet while its bubble is open. */
-export const BUBBLE = { width: 300, height: 190 };
+export const BUBBLE = { width: 300, height: 290 };
 
 export interface PetState {
   working: number;
@@ -27,7 +27,19 @@ export interface PetState {
   size: PetSize;
   /** A picture of the user's own, as a data URL; null for Mightling's mark. */
   image: string | null;
+  /** Threads that need the user (DESKTOP §16 B18): waiting for an answer here, or blocked. */
+  needs: PetNeed[];
 }
+
+/** A thread the pet's bubble lists: waiting for an approval or a question, or blocked (it waits for one this window cannot answer, or the server reports an error). */
+export interface PetNeed {
+  id: string;
+  title: string;
+  why: "waiting" | "blocked";
+}
+
+/** The most threads the bubble lists. */
+export const NEEDS_SHOWN = 5;
 
 /** What the agent is up to, followed from the app-server's messages as the main process routes them. */
 export class PetStatus {
@@ -35,13 +47,46 @@ export class PetStatus {
   /** Open requests for the user (approvals, questions), by request id, with their thread. */
   private readonly asking = new Map<string, string | null>();
   private finished = 0;
+  /** Each thread's name or first words, learnt from the messages that carry threads. */
+  private readonly names = new Map<string, string>();
+  /** Threads the server reports as waiting on the user, or in error (`thread/status/changed`). */
+  private readonly flagged = new Map<string, "waiting" | "error">();
+
+  private learn(thread: unknown): void {
+    if (typeof thread !== "object" || thread === null) return;
+    const { id, name, preview } = thread as { id?: unknown; name?: unknown; preview?: unknown };
+    if (typeof id !== "string") return;
+    const label = typeof name === "string" && name.trim() ? name.trim() : typeof preview === "string" && preview.trim() ? preview.trim() : "";
+    if (label) this.names.set(id, label.replace(/\s+/g, " ").slice(0, 80));
+  }
 
   /** Takes one message from the server; true when the pet's state changed. */
   observe(message: unknown): boolean {
     if (typeof message !== "object" || message === null) return false;
-    const { id, method, params } = message as { id?: unknown; method?: unknown; params?: Record<string, unknown> };
+    const { id, method, params, result } = message as { id?: unknown; method?: unknown; params?: Record<string, unknown>; result?: Record<string, unknown> };
+    if (result && typeof result === "object") {
+      this.learn(result.thread);
+      if (Array.isArray(result.data)) for (const thread of result.data) this.learn(thread);
+    }
     if (typeof method !== "string") return false;
     const thread = typeof params?.threadId === "string" ? params.threadId : null;
+    if (method === "thread/started") {
+      this.learn(params?.thread);
+      return false;
+    }
+    if (method === "thread/name/updated" && thread && typeof params?.threadName === "string") {
+      this.names.set(thread, params.threadName.slice(0, 80));
+      return false;
+    }
+    if (method === "thread/status/changed" && thread) {
+      const status = (params?.status ?? {}) as { type?: unknown; activeFlags?: unknown };
+      const flags = Array.isArray(status.activeFlags) ? status.activeFlags : [];
+      const next = status.type === "systemError" ? "error" : status.type === "active" && flags.length > 0 ? "waiting" : null;
+      const before = this.flagged.get(thread) ?? null;
+      if (next) this.flagged.set(thread, next);
+      else this.flagged.delete(thread);
+      return before !== next;
+    }
     if (method === "turn/started" && thread) {
       this.running.add(thread);
       return true;
@@ -74,6 +119,25 @@ export class PetStatus {
   reset(): void {
     this.running.clear();
     this.asking.clear();
+    this.flagged.clear();
+  }
+
+  /** The threads that need the user: waiting for an answer this window holds, then blocked ones. */
+  needs(): PetNeed[] {
+    const waiting = new Set([...this.asking.values()].filter((owner): owner is string => Boolean(owner)));
+    const title = (id: string) => this.names.get(id) ?? "A thread";
+    const list: PetNeed[] = [...waiting].map((id) => ({ id, title: title(id), why: "waiting" as const }));
+    for (const id of this.flagged.keys()) {
+      if (waiting.has(id)) continue;
+      // Waiting on an answer no open request here can give, or in error: the thread cannot go on by itself.
+      list.push({ id, title: title(id), why: "blocked" });
+    }
+    return list.slice(0, NEEDS_SHOWN);
+  }
+
+  /** Whether `id` is one of the threads the bubble lists, so a click may open it. */
+  listed(id: unknown): id is string {
+    return typeof id === "string" && this.needs().some((need) => need.id === id);
   }
 
   counts(): { working: number; waiting: number; finished: number } {
@@ -100,15 +164,40 @@ export function petImage(file: unknown): string | null {
   }
 }
 
-/** The pet's window: frameless, transparent, above the others, not in the task bar; bottom right to begin with. */
-export function openPet(preload: string, size: PetSize, show: boolean, theme: Theme): BrowserWindow {
+/** Where the pet's bottom right corner is kept (`petCorner`), the corner its bubble grows from. */
+export interface PetCorner {
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Where the pet opens: its kept corner when that lies on one of the displays now attached (moved inside
+ * that display's work area), else the bottom right of the primary display. Pure, for its tests.
+ */
+export function petBounds(side: number, corner: unknown, areas: { x: number; y: number; width: number; height: number }[], primary: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
+  const kept = corner as Partial<PetCorner> | null;
+  if (kept && Number.isFinite(kept.right) && Number.isFinite(kept.bottom)) {
+    const right = kept.right as number;
+    const bottom = kept.bottom as number;
+    const area = areas.find((entry) => right > entry.x && right <= entry.x + entry.width + side && bottom > entry.y && bottom <= entry.y + entry.height + side);
+    if (area) {
+      const x = Math.min(Math.max(right - side, area.x), area.x + area.width - side);
+      const y = Math.min(Math.max(bottom - side, area.y), area.y + area.height - side);
+      return { x: Math.round(x), y: Math.round(y) };
+    }
+  }
+  return { x: primary.x + primary.width - side - 24, y: primary.y + primary.height - side - 24 };
+}
+
+/** The pet's window: frameless, transparent, above the others, not in the task bar; where it was left, else bottom right. */
+export function openPet(preload: string, size: PetSize, show: boolean, theme: Theme, corner: unknown = null): BrowserWindow {
   const side = PET_SIZES[size];
-  const area = screen.getPrimaryDisplay().workArea;
+  const at = petBounds(side, corner, screen.getAllDisplays().map((display) => display.workArea), screen.getPrimaryDisplay().workArea);
   const window = new BrowserWindow({
     width: side,
     height: side,
-    x: area.x + area.width - side - 24,
-    y: area.y + area.height - side - 24,
+    x: at.x,
+    y: at.y,
     frame: false,
     transparent: true,
     resizable: false,
