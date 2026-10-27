@@ -123,8 +123,8 @@ def test_a_recipe_can_still_veto_prefix_caching(monkeypatch):
     mgr = VLLMServerManager()
     real = model_matrix_registry.ModelMatrixRegistry.get_launch_overrides
 
-    def vetoing(cls, model_key):
-        recipe = dict(real(model_key))
+    def vetoing(cls, model_key, engine=None):
+        recipe = dict(real(model_key, engine))
         if model_key == "qwen2.5-coder-32b":
             recipe["enable_prefix_caching"] = False
         return recipe
@@ -357,8 +357,8 @@ def test_a_recipe_can_opt_out_of_the_sampling_override(monkeypatch):
 
     real = model_matrix_registry.ModelMatrixRegistry.get_launch_overrides
 
-    def opting_out(cls, model_key):
-        recipe = dict(real(model_key))
+    def opting_out(cls, model_key, engine=None):
+        recipe = dict(real(model_key, engine))
         if model_key == "qwen2.5-coder-32b":
             recipe["generation_overrides"] = None
         return recipe

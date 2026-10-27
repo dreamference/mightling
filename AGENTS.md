@@ -63,7 +63,7 @@ ruff and mypy (pinned in setup.py's `dev` extra: `.venv/bin/pip install -e .[dev
 - **Sandbox results need the AppArmor profile.** `kernel.apparmor_restrict_unprivileged_userns` is 1, so `bwrap` (and Chromium's sandbox) need a profile to create a user namespace. Shells under PyCharm run in a permissive profile and pass anyway; units, the Night Shift timer and SSH jobs do not. Check `cat /proc/self/attr/current` before trusting a sandbox result; `ling-admin host setup` installs the profile. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md#bubblewrap-needs-an-apparmor-profile-and-this-machine-now-has-one).
 - **Unattended callers of `ling`** (Night Shift, the egress audit, SWE-bench, the Codex test runner) name the model server in `DREAMFERENCE_VLLM_HOST`: a node browse is a multicast DNS query, which the egress audit counts as a failure.
 - **Launch flags belong in the model registry**, not in the launch builder ([docs/dev/models-and-engines.md](docs/dev/models-and-engines.md)). Ask the *server* which model is running (`model_key_for_served_id`), never the config.
-- **The default model is `qwen3.8-27b-nvfp4-dflash2` on SGLang** (since 2026-09-29), and the only model served. Beside it, the registry holds two candidates (`specs/DREAMFERENCE_MODELS.md`): `qwen3.8-27b-minima-nvfp4-dflash2` for night 2's A/B (§2.2) and the Flash-Next trial (§2.3).
+- **The default model is `qwen3.8-27b-nvfp4-dflash2` on SGLang** (since 2026-09-29), with ling-engine's `ling-serve` beside it, opt-in since 1.7.2 (`engine_recipes['ling']`, `server start --engine ling`, `server_engine`). It is the only model served; the registry holds two candidates (`specs/DREAMFERENCE_MODELS.md`): `qwen3.8-27b-minima-nvfp4-dflash2` for night 2's A/B (§2.2) and the Flash-Next trial (§2.3).
 - **The torch.compile cache is persistent and only partly self-invalidating**: vLLM's hash ignores `num_speculative_tokens`, so `_reset_stale_compile_cache()` keeps its own `model|method|n` signature ([docs/dev/models-and-engines.md](docs/dev/models-and-engines.md#the-torchcompile-cache-is-persistent-and-only-partly-self-invalidating)).
 - **Byte-identical copies** are compared by tests: the air-gap resolver (`ling-rs/airgapped/` and `ling-web-rs/src/airgapped.rs`) and the node locator (`ling-rs/node-locator/` and `ling-web-rs/src/node_locator.rs`). Change both or neither.
 - **Never write the user's choices into the repository** where a clone or the agent could write them: submodule indexing choices live in `$CODEX_HOME/ling-code.toml`, a node's advertisement in `~/.config/dreamference/node-advertise.json`, and for `/airgapped` the strictest of the repository's and the user's config wins.
@@ -118,7 +118,7 @@ Outside the package:
 
 **Runner dispatch is a strategy switch on `config.agent_runner`** in `cli/dreamference_cli_controller.py` (`run_cli`). Each agent has a matching `<agent>_installer.py` / `<agent>_runner.py` pair, and every runner checks vLLM health → provisions the agent CLI if missing → translates Dreamference config into the agent's own CLI flags → `subprocess.call`. Adding an agent means adding the pair, exporting both from `runner/__init__.py`, and extending the dispatch chain. Runners other than Codex wait for the server with `VLLMReadinessWaiter`; the `ling` launcher does its own waiting.
 
-**Models and the model server.** `ModelMatrixRegistry.MATRIX` (`hardware/model_matrix_registry.py`) is the source of truth for launch flags; `launch_overrides` may name the engine (SGLang for the default model) and pin a docker image. Speculation reaches vLLM only as `--speculative-config` JSON from `resolve_speculative_config()`. Details: [docs/dev/models-and-engines.md](docs/dev/models-and-engines.md). The diffusion sidecar is switched off (`DIFFUSION_ENABLED = False`) and kept for later: [docs/dev/diffusion.md](docs/dev/diffusion.md).
+**Models and the model server.** `ModelMatrixRegistry.MATRIX` (`hardware/model_matrix_registry.py`) is the source of truth for launch flags; `launch_overrides` names the engine (SGLang for the default model, ling-serve in its `engine_recipes`) and pins a docker image. Speculation reaches vLLM only as `--speculative-config` JSON from `resolve_speculative_config()`. Details: [docs/dev/models-and-engines.md](docs/dev/models-and-engines.md). The diffusion sidecar is switched off (`DIFFUSION_ENABLED = False`) and kept for later: [docs/dev/diffusion.md](docs/dev/diffusion.md).
 
 **Host safety.** `check_host_safety()` refuses an unsafe host before a load; `MemoryPressureWatchdog` kills the container on PSI pressure during one, through the fastest kill path the host can still run. `ling-admin host setup` (`HostSafetySetup`) applies the fixes. Details: [docs/dev/host-safety.md](docs/dev/host-safety.md).
 
@@ -163,14 +163,7 @@ Outside the package:
 
 ## Searching this codebase
 
-Use `rg -n "^class Foo"` to locate a definition and `ast-grep` for call sites by shape, always with constrained output (a bare match prints the whole node):
-
-```bash
-ast-grep -p '<pattern>' -l python dreamference/ --json=compact \
-  | jq -r '.[] | "\(.file):\(.range.start.line + 1)"'
-```
-
-Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.md).
+Use `rg -n "^class Foo"` for a definition and `ast-grep` for call sites by shape, always with constrained output (`--json=compact | jq`; a bare match prints the whole node). The command, measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.md).
 
 ## Detail files
 

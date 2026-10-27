@@ -155,7 +155,7 @@ def test_server_start_warns_and_carries_on(monkeypatch, capsys):
 def test_server_start_runs_it_for_every_model_after_the_warm_up():
     from dreamference.cli import dreamference_cli_controller as controller
     source = inspect.getsource(controller)
-    check_at = source.index("cls._run_tool_call_canary(vllm_mgr, args.model)")
+    check_at = source.index("cls._run_tool_call_canary(vllm_mgr, args.model, engine)")
     assert source.index("vllm_mgr.warm_up()") < source.index('if "nvfp4" in args.model.lower():') < check_at
     line = source[source.rindex("\n", 0, check_at) + 1:check_at]
     nvfp4 = source[source.rindex("\n", 0, source.index('if "nvfp4" in args.model.lower():')) + 1:]

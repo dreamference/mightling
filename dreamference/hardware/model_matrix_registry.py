@@ -255,6 +255,98 @@ QWEN38_LORA_RECIPE: Final[dict[str, Any]] = {
 }
 
 
+# The engines a recipe may name in `engine` (vLLM when it names none).
+ENGINE_VLLM: Final[str] = "vllm"
+ENGINE_SGLANG: Final[str] = "sglang"
+ENGINE_LING: Final[str] = "ling"
+
+# ling-engine (github.com/dreamference/ling-engine), the server written for this one model
+# (ling-engine specs/DREAMFERENCE_LING_ENGINE_INTEGRATION.md §12): opt-in for
+# qwen3.8-27b-nvfp4-dflash2 in 1.7.2 (`server start --engine ling`, or `server_engine = "ling"` in
+# the config), SGLang staying the default until ling-serve reads images, serves adapters and runs
+# more than two requests at once (the owner's decision of 2026-10-26). Its quality was measured on
+# SWE-bench nights 12 and 15 against SGLang and night 17 against SGLang with the phase-merge fix;
+# speculation and tree verification are exact, so the drafter moves speed alone.
+#
+# The commit the image's ling-serve was built from (the full hash, never abbreviated), recorded in
+# the image's labels (`org.opencontainers.image.revision`, `ai.dreamference.ling-engine.commit`).
+# 1.7.2: bdda3a2, the night-tested b8e9451 plus a parse-only tool-call fix (branch
+# fix/toolcall-text), greedy output token for token night 15's binary on agentlong and
+# --spec-check passing; the image carries that very binary (sha256 598e5520…9ef41f1; builds embed
+# their paths, so a rebuild differs).
+QWEN38_LING_ENGINE_COMMIT: Final[str] = "bdda3a244a9cd24742346dce806561f7441405fd"
+
+# What the engine at that commit has that an asset or a launch may depend on, so the runtime asks
+# a list rather than git: "sparse-head" (the drafter's sparse head, read from a file beside the
+# drafter) from ling-engine ec9dce8 on. A checkout-only test keeps the list true to the commit's
+# ancestry. Empty at bdda3a2.
+QWEN38_LING_ENGINE_FEATURES: Final[tuple[str, ...]] = ()
+
+# ling-serve's image (docker/ling-serve/Dockerfile, built by scripts/build_ling_serve_image.sh on an
+# aarch64 machine from QWEN38_LING_ENGINE_COMMIT), pinned by the digest GHCR gave the push
+# (ghcr.io/dreamference/ling-serve:bdda3a244a9c, pushed 2026-10-26; linux/arm64, 682 MB).
+QWEN38_LING_IMAGE: Final[str] = (
+    "ghcr.io/dreamference/ling-serve@sha256:87807c50350cdf2338b840d86c6a5ce0fc076ab88d1610eaf0459061ec1e6f8c"
+)
+
+# The DFlash2 drafters ling-serve can run, pinned by commit. Speculation is exact, so the drafter
+# moves acceptance and speed, never the output. The RTN-calibrated one is SGLang's (every node has
+# it). The ScaleSearch re-quantization of it (ling-engine BACKLOG §19 item 22) is what both arms of
+# SWE-bench nights 12, 15 and 17 ran; it is served once it is on the Hub at a pinned revision
+# (QWEN38_SCALESEARCH_DRAFTER's `revision`, None until the upload), by pointing
+# QWEN38_LING_DRAFTER at it and listing its repository in the matrix beside the RTN drafter's entry
+# (the memory gates size a drafter by its entry before the snapshot is on disk).
+QWEN38_RTN_DRAFTER: Final[dict[str, Any]] = {
+    "model": QWEN38_SGLANG_RECIPE["speculative_config"]["model"],
+    "revision": QWEN38_SGLANG_RECIPE["speculative_config"]["revision"],
+}
+QWEN38_SCALESEARCH_DRAFTER: Final[dict[str, Any]] = {
+    "model": "dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch",
+    "revision": None,
+}
+QWEN38_LING_DRAFTER: Final[dict[str, Any]] = QWEN38_RTN_DRAFTER
+
+# The launch nights 12, 15 and 17 measured (Mightling's scripts/engine_ab_remote.sh), on Mightling's
+# pinned checkpoint and drafter. What ling-serve's command line has no flag for is not here: it
+# renders the chat template itself (the patched template's behaviour, checked against it by the
+# engine's bench/template_test.py), serves only the qwen3_coder tool format and the qwen3 reasoning
+# split, idles without spinning (no --sleep-on-idle), and takes no API key and no memory fraction.
+# Its memory is what --max-context and its sessions allocate (each session's KV and state at the
+# full context, allocated at start): 60 GB at 262,144, measured. Those are device allocations, which
+# the container's cgroup cap does not count (it peaked at 0.4 GB; SGLang's container has about 8 GB
+# charged of its own ~60 GB, so this was already so), and what bounds them is
+# start_server's pre-load check against the 0.50 arena (~61 GB) and the PSI watchdog;
+# `container_headroom_gb` sizes the cap as for SGLang.
+QWEN38_LING_RECIPE: Final[dict[str, Any]] = {
+    "engine": ENGINE_LING,
+    "docker_image": QWEN38_LING_IMAGE,
+    "engine_commit": QWEN38_LING_ENGINE_COMMIT,
+    "engine_features": list(QWEN38_LING_ENGINE_FEATURES),
+    "revision": QWEN38_SGLANG_RECIPE["revision"],
+    # ling-serve's --max-context: the KV and state of each resident session are allocated at this
+    # size at start. SGLang's 262,144, by the owner's decision of 2026-10-26; the nights served
+    # 65,536, so the long-context checks of the live test (start within the container's cap, a
+    # ~205K-token needle, decode speed, ling-run --spec-check at this length) prove it before release.
+    "max_model_len": 262144,
+    "gpu_memory_utilization": 0.50,
+    "container_headroom_gb": 24.0,
+    # The formats ling-serve parses, compiled in (no flags): named for `status` and the start
+    # checks' messages, as SGLang's recipe names its parsers.
+    "tool_call_parser": "qwen3_coder",
+    "reasoning_parser": "qwen3",
+    # QWEN38_LING_DRAFTER, at the same 12 tokens a step as SGLang (--draft-block).
+    "speculative_config": {
+        "method": "DFLASH",
+        **QWEN38_LING_DRAFTER,
+        "num_speculative_tokens": QWEN38_SGLANG_RECIPE["speculative_config"]["num_speculative_tokens"],
+    },
+    # The nights' flags beyond the defaults: each speculative step as captured CUDA graphs, and
+    # programmatic dependent launch. Tree verification, the megakernel stages, two sessions and a
+    # batch of two are the engine's defaults at QWEN38_LING_ENGINE_COMMIT.
+    "extra_args": ["--graphs", "--pdl"],
+}
+
+
 class ModelMatrixRegistry:
     """
     Registry holding qualified models for NVIDIA GB10 hardware and short alias resolution logic.
@@ -270,9 +362,10 @@ class ModelMatrixRegistry:
             max_memory_gb=70.0,
             compatible_gb10=True,
             notes=(
-                "The one entry served by SGLang instead of vLLM (`engine: sglang`), because the speed "
-                "is in the drafter and only SGLang runs it: DFlash2 is a block-diffusion drafter "
-                "vLLM supports only through an unmerged pull request.\n\n"
+                "Served by SGLang (`engine: sglang`), with ling-engine's ling-serve beside it, opt-in "
+                "since 1.7.2 (`server start --engine ling`, QWEN38_LING_RECIPE). Not vLLM, because "
+                "the speed is in the drafter: DFlash2 is a block-diffusion drafter vLLM supports "
+                "only through an unmerged pull request. The measurements below are SGLang's.\n\n"
                 "Measured here (2026-09-29, single stream, temperature 0, thinking off, median of "
                 "three after a warm-up, decode net of time to first token): prose 25.5, code 50.3, "
                 "JSON 87.0 tok/s with the PyTorch sampler (24.1 / 47.5 / 82.5 before it); TTFT 0.22 s; "
@@ -301,6 +394,10 @@ class ModelMatrixRegistry:
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
             launch_overrides={**QWEN38_SGLANG_RECIPE, "lora": QWEN38_LORA_RECIPE},
+            # ling-serve, opt-in in 1.7.2 (`server start --engine ling`, `server_engine = "ling"`):
+            # the default once it reads images, serves adapters and runs more than two requests at
+            # once (the owner's decision of 2026-10-26).
+            engine_recipes={ENGINE_LING: QWEN38_LING_RECIPE},
             supports_vision=True,
         ),
         # Night 2's candidate (specs/DREAMFERENCE_MODELS.md §2.2), not a default: production
@@ -497,17 +594,24 @@ class ModelMatrixRegistry:
         return None
 
     @classmethod
-    def get_lora_recipe(cls, model_key: str) -> dict[str, Any] | None:
+    def get_lora_recipe(cls, model_key: str, engine: str | None = None) -> dict[str, Any] | None:
         """The LoRA settings a model is served with, if it serves adapters at all.
 
         Args:
             model_key (str): Model alias, HF repo ID, or display name.
+            engine (str | None): The engine whose recipe is asked; None asks every engine the
+                model has, default first (an adapter fits the checkpoint whichever engine is
+                chosen; only the one that serves adapters names how).
 
         Returns:
             dict[str, Any] | None: A copy of the recipe's `lora` key, or None.
         """
-        lora = cls.get_launch_overrides(model_key).get("lora")
-        return dict(lora) if isinstance(lora, dict) else None
+        engines = [engine] if engine else cls.engines(model_key)
+        for name in engines:
+            lora = cls.get_launch_overrides(model_key, name).get("lora")
+            if isinstance(lora, dict):
+                return dict(lora)
+        return None
 
     @classmethod
     def resolve_hf_repo(cls, model_key: str) -> str:
@@ -554,21 +658,65 @@ class ModelMatrixRegistry:
         return None
 
     @classmethod
-    def get_launch_overrides(cls, model_key: str) -> Dict[str, Any]:
+    def get_launch_overrides(cls, model_key: str, engine: str | None = None) -> dict[str, Any]:
         """
-        Retrieves the per-model vLLM launch recipe for the given alias, repo ID, or display name.
+        Retrieves the per-model launch recipe for the given alias, repo ID, or display name.
 
         Args:
             model_key (str): Model alias, HF repo ID, or display name. Unrecognized keys
                 yield an empty recipe, leaving the caller on global defaults.
+            engine (str | None): The engine to serve it with (`vllm`, `sglang`, `ling`); None,
+                or the default recipe's own engine, is the default recipe (`launch_overrides`),
+                another one the model's recipe for that engine (`engine_recipes`).
 
         Returns:
-            Dict[str, Any]: Copy of the model's launch_overrides, safe for the caller to mutate.
+            Dict[str, Any]: Copy of the recipe, safe for the caller to mutate.
+
+        Raises:
+            ValueError: When the model has no recipe for that engine.
         """
         if not model_key:
             return {}
         spec = cls.get_spec(model_key)
-        return dict(spec.launch_overrides) if spec else {}
+        if not spec:
+            return {}
+        if not engine or engine.lower() == cls.engine_of(spec.launch_overrides):
+            return dict(spec.launch_overrides)
+        recipe = spec.engine_recipes.get(engine.lower())
+        if recipe is None:
+            raise ValueError(
+                f"{model_key} has no recipe for the engine '{engine}'; its engines: "
+                f"{', '.join(cls.engines(model_key))}."
+            )
+        return dict(recipe)
+
+    @classmethod
+    def engine_of(cls, recipe: dict[str, Any]) -> str:
+        """Names the engine a recipe runs on.
+
+        Args:
+            recipe (dict[str, Any]): A launch recipe.
+
+        Returns:
+            str: `launch_overrides['engine']`, lower case; `vllm` when it names none.
+        """
+        return str(recipe.get("engine") or ENGINE_VLLM).lower()
+
+    @classmethod
+    def engines(cls, model_key: str) -> list[str]:
+        """Lists the engines a model can be served with.
+
+        Args:
+            model_key (str): Model alias, HF repo ID, or display name.
+
+        Returns:
+            list[str]: The default recipe's engine first, then the others'; empty for an unknown model.
+        """
+        spec = cls.get_spec(model_key) if model_key else None
+        if not spec:
+            return []
+        default = cls.engine_of(spec.launch_overrides)
+        return [default, *(name for name in spec.engine_recipes if name != default)]
 
     @classmethod
     def get_speculative_draft_repo(cls, model_key: str) -> Optional[str]:

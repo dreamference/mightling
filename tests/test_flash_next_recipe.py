@@ -139,7 +139,9 @@ def test_a_recipes_measured_transient_replaces_the_global_estimate_for_that_mode
 def test_a_measured_transient_is_still_floored(monkeypatch):
     recipe = {**get_model_launch_overrides(FLASH_NEXT), "load_transient_gb": 0.5}
     monkeypatch.setattr(
-        ModelMatrixRegistry, "get_launch_overrides", classmethod(lambda cls, key: dict(recipe))
+        ModelMatrixRegistry,
+        "get_launch_overrides",
+        classmethod(lambda cls, key, engine=None: dict(recipe)),
     )
     assert VLLMServerManager.load_transient_gb(FLASH_NEXT, WEIGHTS)[0] == MIN_LOAD_TRANSIENT_GB
 
@@ -226,8 +228,10 @@ def test_without_the_override_the_global_estimate_refuses_the_same_host(start, m
         ModelMatrixRegistry,
         "get_launch_overrides",
         classmethod(
-            lambda cls, key: (
-                dict(recipe) if cls.get_spec(key) is cls.MATRIX[FLASH_NEXT] else real(cls, key)
+            lambda cls, key, engine=None: (
+                dict(recipe)
+                if cls.get_spec(key) is cls.MATRIX[FLASH_NEXT]
+                else real(cls, key, engine)
             )
         ),
     )

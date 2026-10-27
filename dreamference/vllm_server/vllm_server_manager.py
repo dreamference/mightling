@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Final
 
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS as DEFAULT_MODEL
+from dreamference.hardware.model_matrix_registry import ENGINE_VLLM, ModelMatrixRegistry
 from dreamference.vllm_server.vllm_server_status import VLLMServerStatus
 from dreamference.vllm_server.vllm_log_streamer import VLLMLogStreamer
 from dreamference.vllm_server.psi_watchdog import MemoryPressureWatchdog
+from dreamference.vllm_server.ling_serve_launch_builder import LingServeLaunchBuilder
 from dreamference.vllm_server.sglang_launch_builder import SGLangLaunchBuilder
 from dreamference.config.dreamference_config import (
     DreamferenceConfig,
@@ -508,7 +510,9 @@ class VLLMServerManager:
             )
         return ["--structured-outputs-config.backend", backend]
 
-    def resolve_tool_call_parser(self, model: str, requested: Optional[str] = None) -> str:
+    def resolve_tool_call_parser(
+        self, model: str, requested: Optional[str] = None, engine: str | None = None
+    ) -> str:
         """
         Determines which vLLM tool-call parser matches the target model.
 
@@ -520,6 +524,7 @@ class VLLMServerManager:
         Args:
             model (str): Model short alias or HuggingFace repo ID.
             requested (Optional[str]): Caller-supplied parser; 'auto' is treated as unset.
+            engine (str | None): The engine whose recipe is read; None is the model's default.
 
         Returns:
             str: Parser name to pass to --tool-call-parser.
@@ -528,7 +533,7 @@ class VLLMServerManager:
             return requested
 
         from dreamference.hardware import get_model_launch_overrides
-        recipe_parser = get_model_launch_overrides(model).get("tool_call_parser")
+        recipe_parser = get_model_launch_overrides(model, engine).get("tool_call_parser")
         if recipe_parser:
             return recipe_parser
 
@@ -570,6 +575,7 @@ class VLLMServerManager:
         docker_image: Optional[str] = None,
         gate: bool = False,
         serve_adapters: bool = True,
+        engine: str | None = None,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -619,6 +625,8 @@ class VLLMServerManager:
             serve_adapters (bool): Serve the installed adapters (only behind the gate, and only
                 with no API key of the caller's: the engine's key is the gate's). False when
                 `server start` could not prepare what serving them needs.
+            engine (str | None): The engine to serve the model with (`server start --engine`,
+                `server_engine` in the config); None is the model's default recipe's.
 
         Returns:
             List[str]: Complete executable command list.
@@ -645,7 +653,7 @@ class VLLMServerManager:
         engine_host = ENGINE_BIND_ADDRESS if gate else PUBLIC_BIND_ADDRESS
         engine_port = ModelGate.engine_port(port) if gate else port
 
-        recipe = get_model_launch_overrides(model)
+        recipe = get_model_launch_overrides(model, engine)
 
         def resolved(value: Any, key: str, fallback: Any) -> Any:
             """Explicit caller argument wins; otherwise the model recipe; otherwise the module default."""
@@ -686,7 +694,29 @@ class VLLMServerManager:
             if "70b" in model.lower() or "72b" in model.lower():
                 quantization = "fp8"
 
-        tool_call_parser = self.resolve_tool_call_parser(model, tool_call_parser)
+        tool_call_parser = self.resolve_tool_call_parser(model, tool_call_parser, engine)
+
+        if LingServeLaunchBuilder.is_ling(recipe):
+            if not self.is_docker_available():
+                raise RuntimeError(
+                    "Docker is required to run the model server but is not available. "
+                    "Please ensure Docker is installed and the daemon is running (`docker ps` must succeed)."
+                )
+            # ling-serve has no API key of its own; accepting one here would serve the model open
+            # while the caller believes it is closed.
+            if api_key:
+                raise RuntimeError(
+                    "ling-serve takes no API key. Serve without --api-key, or serve this model with "
+                    "SGLang, which does: ling-admin server start --engine sglang --api-key ..."
+                )
+            # No HuggingFace token: the weights are fetched on the host before the launch, and the
+            # engine never reaches the Hub.
+            cmd = self._docker_run_prefix(port, gpu_memory_utilization, recipe, None)
+            cmd.append(docker_image)
+            cmd.extend(LingServeLaunchBuilder.server_args(
+                hf_model, recipe, engine_port, max_model_len, host=engine_host,
+            ))
+            return cmd
 
         if SGLangLaunchBuilder.is_sglang(recipe):
             if not self.is_docker_available():
@@ -1554,6 +1584,7 @@ class VLLMServerManager:
         # for the pull, the compile-cache reset and the launch alike.
         docker_image: Optional[str] = None,
         gate: bool = True,
+        engine: str | None = None,
     ) -> Optional[subprocess.Popen]:
         """
         Pre-downloads model weights, saves in tensorize format, and starts local vLLM OpenAI API server.
@@ -1584,6 +1615,8 @@ class VLLMServerManager:
             gate (bool): Put the model gate on `port` and the engine behind it on loopback
                 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18). If the gate cannot start, the
                 engine serves `port` itself, as before the gate.
+            engine (str | None): The engine to serve the model with; None is the model's
+                default recipe's (SGLang for the default model; ling-serve is opt-in since 1.7.2).
 
         Returns:
             Optional[subprocess.Popen]: Popen object if background=True, else None.
@@ -1599,7 +1632,7 @@ class VLLMServerManager:
         # same image the server will actually run.
         from dreamference.hardware import get_model_launch_overrides as _recipe_for_image
         if docker_image is None:
-            docker_image = _recipe_for_image(model).get("docker_image", DEFAULT_VLLM_IMAGE)
+            docker_image = _recipe_for_image(model, engine).get("docker_image", DEFAULT_VLLM_IMAGE)
 
         if not self.ensure_docker_image(docker_image):
             raise RuntimeError(
@@ -1628,8 +1661,8 @@ class VLLMServerManager:
         # gpu_memory_utilization sizes the KV/activation arena vLLM carves out, and scaling total
         # memory by it says nothing about whether the checkpoint itself fits. A 78 GB checkpoint
         # under a 0.3 recipe used to "require" ~38 GB and sail through this gate.
-        from dreamference.hardware import get_model_launch_overrides, get_speculative_draft_repo
-        overrides = get_model_launch_overrides(model)
+        from dreamference.hardware import get_model_launch_overrides
+        overrides = get_model_launch_overrides(model, engine)
         # Same fallback the launch builder uses, and it has to stay that way. This read used to
         # default to 0.9 against build_launch_command's 0.50, so every model without a recipe — most
         # of the registry — was gated against a 109 GB arena it would never be given, aborted on a
@@ -1648,7 +1681,8 @@ class VLLMServerManager:
         # invisible here until 2026-08-15, which under-counted the footprint by the drafter's size
         # and — worse — left it out of the pre-download below, so vLLM would fetch it from inside
         # the container during the load, the one phase where this host cannot afford surprises.
-        recipe_draft_model = get_speculative_draft_repo(model)
+        # The drafter of the engine that runs: the engines' recipes may name different ones.
+        recipe_draft_model = (overrides.get("speculative_config") or {}).get("model") or None
         draft_models = [m for m in (draft_model, recipe_draft_model) if m]
 
         weights_gb = self._estimate_model_weights_gb(model)
@@ -1757,7 +1791,7 @@ class VLLMServerManager:
         from dreamference.hardware import download_model, get_model_launch_overrides, resolve_model_hf_repo
         tensorize = use_tensorizer
         if tensorize is None:
-            tensorize = get_model_launch_overrides(model).get("use_tensorizer", False)
+            tensorize = overrides.get("use_tensorizer", False)
         # A recipe may pin the commits it was measured on; the engine is then told the same
         # revision, so what is served is what was fetched.
         download_model(model, hf_token=hf_token, auto_tensorize=tensorize, revision=overrides.get("revision"))
@@ -1781,6 +1815,7 @@ class VLLMServerManager:
         # The recipe's chat-template patches, written before the launch names the file. A missing
         # anchor means the checkpoint's template is not the one the recipe was written for, and
         # serving it unpatched would bring back the refusals the patches exist to remove.
+        # ling-serve compiles the patched template in and takes no file, so its recipe has none.
         patches = overrides.get("chat_template_patches")
         if patches and overrides.get("revision"):
             from dreamference.vllm_server.chat_template_patcher import ChatTemplatePatcher
@@ -1808,7 +1843,7 @@ class VLLMServerManager:
                     "   patch against the image's file and update runtime_patches in\n"
                     "   model_matrix_registry.py before serving it.")
 
-        if not SGLangLaunchBuilder.is_sglang(overrides):
+        if ModelMatrixRegistry.engine_of(overrides) == ENGINE_VLLM:
             self._reset_stale_compile_cache(
                 model, docker_image=docker_image, draft_model=draft_model,
                 num_speculative_tokens=num_speculative_tokens,
@@ -1836,11 +1871,12 @@ class VLLMServerManager:
             guided_decoding_backend=guided_decoding_backend,
             use_tensorizer=use_tensorizer,
             docker_image=docker_image,
+            engine=engine,
         )
         # What serving adapters needs, before the engine starts: the patched /v1/responses and the
         # gate's list. If the patch cannot be prepared, this start serves the base alone.
         from dreamference.vllm_server.adapter_serving import AdapterServing
-        serve_adapters = AdapterServing.prepare(model, docker_image, gate and not api_key)
+        serve_adapters = AdapterServing.prepare(model, docker_image, gate and not api_key, engine)
         cmd = self.build_launch_command(**launch, gate=gate, serve_adapters=serve_adapters)
 
         # Step 3: Cleanup potential container name conflicts prior to launch

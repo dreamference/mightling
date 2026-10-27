@@ -81,6 +81,8 @@
 /scripts/run_vllm_gb10.sh                       @dreamference/models
 /scripts/check_nvfp4_fused_scales.py            @dreamference/models
 /scripts/long_prompt_probe.py                    @dreamference/models
+/scripts/build_ling_serve_image.sh              @dreamference/models
+/docker/ling-serve/                             @dreamference/models
 /scripts/decode_speed.py                        @dreamference/models
 /scripts/loop_guard_corpus.py                   @dreamference/models
 /ling-rs/src/vision.rs                          @dreamference/models

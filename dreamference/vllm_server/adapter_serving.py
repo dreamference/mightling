@@ -218,7 +218,9 @@ class AdapterServing:
         return key
 
     @classmethod
-    def prepare(cls, model_key: str, docker_image: str, gated: bool) -> bool:
+    def prepare(
+        cls, model_key: str, docker_image: str, gated: bool, engine: str | None = None
+    ) -> bool:
         """Before the engine starts: writes the runtime patches and the gate's list.
 
         Args:
@@ -226,13 +228,15 @@ class AdapterServing:
             docker_image: The engine's image.
             gated: Whether the launch is behind the gate with no API key of the caller's; without
                 that, nothing is served and the gate's list is removed.
+            engine: The engine it is launched with; None is the model's default. Only a recipe
+                with a `lora` key serves adapters (SGLang's; ling-serve serves none).
 
         Returns:
             bool: False when adapters were to be served and the patch could not be prepared (the
             launch must then serve none); True otherwise.
         """
         adapters = cls.launch_adapters(model_key) if gated else []
-        recipe = ModelMatrixRegistry.get_launch_overrides(model_key)
+        recipe = ModelMatrixRegistry.get_launch_overrides(model_key, engine)
         lora = recipe.get("lora")
         if not adapters or not isinstance(lora, dict):
             cls.clear()

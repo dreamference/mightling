@@ -35,6 +35,11 @@ DEFAULT_TOOL_CALL_PARSER: Final[str] = "hermes"
 DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
 
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
+# The engine `server start` serves the model with: None is the model's own default (SGLang for the
+# default model); `ling` opts into ling-engine's ling-serve (1.7.2), `sglang` names SGLang.
+# `server start --engine` overrides it for one start.
+DEFAULT_SERVER_ENGINE: Final[str | None] = None
+SERVER_ENGINES: Final[tuple] = ("ling", "sglang", "vllm")
 DEFAULT_CAVE_MODE: Final[bool] = False
 DEFAULT_USE_TENSORIZER: Final[bool] = False
 # Whether the Mightling agent's prompt advertises `ling-admin gmail` when an account is connected.
@@ -110,6 +115,7 @@ class DreamferenceConfig:
         cave_mode: Optional[bool] = None,
         use_tensorizer: Optional[bool] = None,
         guided_decoding_backend: Optional[str] = None,
+        server_engine: str | None = None,
         mightling_gmail: Optional[bool] = None,
         mightling_compaction_ledger: Optional[bool] = None,
         mightling_cave_mode: Optional[str] = None,
@@ -276,6 +282,14 @@ class DreamferenceConfig:
             if guided_decoding_backend is not None
             else self.file_data.get("guided_decoding_backend", DEFAULT_GUIDED_DECODING_BACKEND)
         )
+
+        # The model server's engine, through the same tiers; an unknown name is skipped, so a typo
+        # falls through to the model's default instead of stopping `server start`.
+        self.server_engine: str | None = DEFAULT_SERVER_ENGINE
+        for candidate in (server_engine, os.getenv("DREAMFERENCE_SERVER_ENGINE"), self.file_data.get("server_engine")):
+            if isinstance(candidate, str) and candidate.strip().lower() in SERVER_ENGINES:
+                self.server_engine = candidate.strip().lower()
+                break
 
         env_tensorizer = os.getenv("DREAMFERENCE_USE_TENSORIZER")
         if use_tensorizer is not None:
@@ -510,6 +524,8 @@ class DreamferenceConfig:
         if self.cave_mode != DEFAULT_CAVE_MODE: data["cave_mode"] = self.cave_mode
         if self.guided_decoding_backend != DEFAULT_GUIDED_DECODING_BACKEND: data["guided_decoding_backend"] = self.guided_decoding_backend
         if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
+        if self.server_engine != DEFAULT_SERVER_ENGINE:
+            data["server_engine"] = self.server_engine
         if self.mightling_gmail != DEFAULT_MIGHTLING_GMAIL: data["mightling_gmail"] = self.mightling_gmail
         if self.mightling_compaction_ledger != DEFAULT_MIGHTLING_COMPACTION_LEDGER:
             data["mightling_compaction_ledger"] = self.mightling_compaction_ledger

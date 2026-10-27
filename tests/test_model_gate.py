@@ -800,3 +800,12 @@ def test_night_pause_and_resume_from_the_command_line(capsys):
     with pytest.raises(SystemExit) as bad:
         DreamferenceCLIController.run_cli(["night", "pause", "--for", "soon"])
     assert bad.value.code == 2
+
+
+def test_ling_serve_starts_behind_the_gate_without_sglangs_runtime_patch(monkeypatch):
+    mgr = VLLMServerManager()
+    built, events = _quiet_start(monkeypatch, mgr, gate_starts=True)
+    mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=False, engine="ling")
+    assert not any(event[0] == "patch" for event in events)
+    assert [kwargs["gate"] for kwargs in built] == [True]
+    assert events.index(("gate", 8000)) < events.index(("docker", "run"))

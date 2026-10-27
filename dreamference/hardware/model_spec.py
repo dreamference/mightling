@@ -47,6 +47,11 @@ class ModelSpec:
             The signal is the checkpoint's architecture (`...ForConditionalGeneration` with a
             `vision_config`) rather than the name, which is why it is recorded per entry here
             rather than guessed from the alias.
+        engine_recipes (Dict[str, Dict[str, Any]]): The same checkpoint's recipes for engines other
+            than the one `launch_overrides` names, by engine name (`launch_overrides['engine']`'s
+            values: `vllm`, `sglang`, `ling`). `launch_overrides` is the default; one of these is
+            served when the user asks for its engine (`server start --engine`, `server_engine` in
+            the config). Each is a complete recipe of its own, never layered over the default.
         is_diffusion (bool): Whether the checkpoint is a diffusion language model rather than an
             autoregressive one. Diffusion checkpoints cannot be served by vLLM -- they load
             through transformers with trust_remote_code and their own block-denoising generate --
@@ -66,6 +71,7 @@ class ModelSpec:
     notes: str
     hf_repo_id: str
     launch_overrides: Dict[str, Any] = field(default_factory=dict)
+    engine_recipes: dict[str, dict[str, Any]] = field(default_factory=dict)
     supports_vision: bool = False
     is_diffusion: bool = False
     swe_bench_max_parallel: int | None = None

@@ -19,6 +19,9 @@ from dreamference.hardware.model_downloader import ModelDownloader
 # mount, like vLLM's, so a compiled graph survives the container (a cold compile is minutes).
 CONTAINER_SGLANG_INDUCTOR_DIR: Final[str] = "/root/.cache/dreamference/sglang/inductor"
 
+# The module SGLang's server runs as (`python3 -m sglang.launch_server`), which marks its launch.
+SGLANG_ENTRY_POINT: Final[str] = "sglang.launch_server"
+
 # The host's HuggingFace hub as the container sees it, wherever HF_HOME puts it on the host
 # (the docker prefix mounts it here).
 CONTAINER_HF_HUB_DIR: Final[str] = ModelDownloader.CONTAINER_HF_HUB_DIR
@@ -111,7 +114,7 @@ class SGLangLaunchBuilder:
             List[str]: The command, starting with `python3 -m sglang.launch_server`.
         """
         args: List[str] = [
-            "python3", "-m", "sglang.launch_server",
+            "python3", "-m", SGLANG_ENTRY_POINT,
             "--model-path", cls.snapshot_path(hf_model, recipe.get("revision")),
             "--trust-remote-code",
             # The id clients see in /v1/models, and the one ling and the agents send back.

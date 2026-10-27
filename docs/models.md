@@ -51,6 +51,46 @@ Server settings it runs with (from the registry):
 | Tool calls / reasoning parsers | `qwen3_coder` / `qwen3` |
 | Thinking | `ling` asks for none; chat thinks at medium effort unless told otherwise |
 
+### ling-serve, opt-in
+
+Since 1.7.2 the default model can also be served by **ling-serve**, the server of
+[ling-engine](https://github.com/dreamference/ling-engine), written for this one model on the GB10.
+SGLang stays the default; ling-serve becomes the default once it reads images, serves adapters and
+runs more than two requests at once. Switch for one start:
+
+```bash
+ling-admin server stop && ling-admin server start --engine ling
+```
+
+or keep it, in `~/.config/dreamference/config.toml` (or `DREAMFERENCE_SERVER_ENGINE=ling`):
+
+```toml
+server_engine = "ling"
+```
+
+Back to SGLang: remove that line, or `ling-admin server start --engine sglang`. If ling-serve fails
+one of `server start`'s checks (it does not answer, the NVFP4 canary or the tool-call check fails),
+`server start` says so and prints the command to go back; it never switches engine by itself.
+
+It serves the same checkpoint with the same drafter and the same 262,144-token context, from its
+own small image (`ghcr.io/dreamference/ling-serve`, pinned by digest, the ling-engine commit in its
+labels), inside the same container limits and host-safety checks. Its speculation is exact (the
+drafter changes the speed, never the output) and it verifies the drafter's guesses as a tree. Its
+limits:
+
+- **No images.** An image arrives as the text `[image]`; `ling` and the phone bridges learn this
+  from the server and send text.
+- **No LoRA adapters**, and no API key (`--api-key` is refused).
+- **Two requests at once**; a third waits until one finishes.
+- **Changing the end of a long prompt reads it again**: a new prompt that shares a long beginning
+  with an earlier one but differs inside the same message is read in full (at ~850-900 tokens per
+  second near 200K tokens, nearly four minutes).
+
+Measured on a GB10 on 2026-10-26 (ling-engine bdda3a2, 262,144-token context): ready in 40 s, about
+60 GB of memory in use while serving; a 600-token code answer at 74.9 tokens per second; a
+204,857-token prompt with two facts hidden at 45% and 85% of its length answered both exactly, with
+decode at 39.6 tokens per second at that length.
+
 ## Changing models
 
 ```bash
