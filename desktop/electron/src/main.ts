@@ -42,6 +42,7 @@ import { WindowSession, cascade, follow } from "./window-state";
 import * as worktree from "./worktree";
 import { installMenu, installTray, keepAwake, notify, showContextMenu } from "./shell";
 import { Notices } from "./notices";
+import { SyncHost } from "./sync-host";
 import { transcribe } from "./voice";
 import { Previews } from "./preview";
 import { disableRecall, enableRecall, pruneRecall, recallIndex, recallOn, writeRecall } from "./recall";
@@ -146,6 +147,7 @@ export async function main(options: MainOptions): Promise<void> {
       return;
     }
     if (message.channel === "work://exit") {
+      syncHost?.stop();
       hub.reset();
       terminals.clear();
       sendTerminals();
@@ -161,6 +163,19 @@ export async function main(options: MainOptions): Promise<void> {
       keepAwake(busy && prefs.read().preventSleep !== false);
     },
   });
+  // The app as a sync host (sync-host.ts, specs/DREAMFERENCE_MIGHTLING_SYNC.md §18): while this device is
+  // paired and its agent has found the hub, another device follows the turns of this app-server and
+  // sends, approves, stops and starts through it, under the same policy. What it did is said on the
+  // owner's screen: a notification, and `sync://notice` to every window. Never in the audit's session.
+  const syncHost = options.audit === null
+    ? new SyncHost(server, {
+      told: (text, thread) => {
+        for (const target of windows()) send(target, { channel: "sync://notice", payload: { text, thread } });
+        // As any other notice: only when no window is in front (the page shows it then).
+        notify(windows(), { title: "Mightling", body: text, always: false }, () => showThread(thread));
+      },
+    })
+    : null;
 
   /** Opens a window of the app: a full one, a thread popped out, or a pane detached from `parent`. */
   function openWindow(opening: Opening): BrowserWindow {
@@ -502,8 +517,11 @@ export async function main(options: MainOptions): Promise<void> {
 
   async function handle(message: FromView, own: BrowserWindow): Promise<unknown> {
     switch (message.type) {
-      case "work/start":
-        return server.start();
+      case "work/start": {
+        const started = server.start();
+        syncHost?.start();
+        return started;
+      }
       case "work/send": {
         // Routed per window, refused when the thread's composer is in another window (windows.ts),
         // then vetted against the policy like every message (server.ts).
@@ -999,7 +1017,10 @@ export async function main(options: MainOptions): Promise<void> {
     server.stop();
     app.quit();
   });
-  app.on("before-quit", () => server.stop());
+  app.on("before-quit", () => {
+    syncHost?.stop();
+    server.stop();
+  });
   // Incognito questions open when the app quits, or left by one that crashed, are deleted
   // (DESKTOP_PARITY_CLAUDE §4.3); never in the audit's session, which touches no question.
   const sweep = () => {

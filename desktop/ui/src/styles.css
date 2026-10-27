@@ -853,6 +853,12 @@ html.pet-page body { margin: 0; }
   input, textarea, select, .composer textarea, .search input, .new-thread input { font-size: 16px; }
   .approval .buttons button { flex: 1 1 auto; }
   .startup { margin: 24px auto; }
+  .dialog-backdrop:has(.dialog.synced) { padding-top: 8px; }
+  .dialog.synced { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 12px 12px 16px; box-sizing: border-box; }
+  .dialog.synced .shortcut-table td { padding: 6px 4px; }
+  .synced-composer .buttons button { flex: 1 1 auto; min-height: 40px; }
+  .synced-composer .buttons .spacer { display: none; }
+  .synced-composer select { flex: 1 1 100%; }
 }
 
 /* A file an Ask answer made (DESKTOP_PARITY_CLAUDE §4.1): a card that opens it beside the answer. */
@@ -986,6 +992,26 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .synced-item.user p { white-space: pre-wrap; margin: 2px 0 0; }
 .synced-item.command code { font-family: var(--font-code); font-size: 12.5px; white-space: pre-wrap; }
 .synced-item.command pre { white-space: pre-wrap; font-family: var(--font-code); font-size: 12px; background: var(--code-bg); border-radius: var(--radius-sm); padding: 6px 8px; max-height: 14em; overflow: auto; margin: 4px 0 0; }
+/* Other devices, live (SYNC Phase 2, §18.4): where the thread runs, its approvals, the messages
+   still queued, the composer and "New thread on <device>". Phones are the main user: everything
+   wraps, and the buttons share the row on a narrow screen (the @media rules at the end). */
+.synced-banner { margin: 4px 0 8px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-text); font-size: 13px; }
+.synced-banner.offline { background: var(--hover); color: var(--muted); }
+.synced-live .approval { margin: 10px 0; }
+.synced-live .approval pre { white-space: pre-wrap; word-break: break-word; font-family: var(--font-code); font-size: 12.5px; margin: 8px 0 0; }
+.synced-files { margin: 8px 0 0; padding-left: 18px; font-family: var(--font-code); font-size: 12.5px; word-break: break-all; }
+.synced-queued { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.synced-queued li { display: flex; gap: 8px; align-items: baseline; }
+.synced-queued .text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.synced-error { color: var(--danger); font-size: 13px; margin: 6px 0; overflow-wrap: anywhere; }
+.synced-composer { display: grid; gap: 6px; margin-top: 10px; }
+.synced-composer textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; }
+.synced-composer .buttons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.synced-composer .buttons .spacer { flex: 1; }
+.synced-composer select { min-width: 0; max-width: 100%; font-size: 13px; }
+.synced-start { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.synced-start > summary { cursor: pointer; font-weight: 500; }
+.synced-start .field select { max-width: 100%; min-width: 0; }
 .night-context { display: block; margin: 4px 0 8px; color: var(--muted); }
 
 /* Several windows (DESKTOP_ELECTRON §13): a thread mirrored read-only while another window holds its
