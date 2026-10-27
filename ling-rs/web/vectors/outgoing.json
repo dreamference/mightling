@@ -481,6 +481,29 @@
       "message": {"id": 108, "method": "thread/start", "params": {"cwd": "/work/repo"}},
       "accept": true,
       "out": {"id": 108, "method": "thread/start", "params": {"cwd": "/work/repo"}}
+    },
+    {
+      "name": "thread/delete deletes a thread for good: allowed, unchanged (the server refuses an unknown or unsaved thread)",
+      "message": {"jsonrpc": "2.0", "id": 109, "method": "thread/delete", "params": {"threadId": "w3"}},
+      "accept": true,
+      "out": {"id": 109, "method": "thread/delete", "params": {"threadId": "w3"}}
+    },
+    {
+      "name": "thread/delete is local, so it is allowed at airgapped on too",
+      "airgapped": "on",
+      "message": {"id": 110, "method": "thread/delete", "params": {"threadId": "ask-7"}},
+      "accept": true,
+      "out": {"id": 110, "method": "thread/delete", "params": {"threadId": "ask-7"}}
+    },
+    {
+      "name": "thread/delete naming a prompt is refused: a prompt is chosen only when a thread is started",
+      "message": {"id": 111, "method": "thread/delete", "params": {"threadId": "w3", "prompt": "ask"}},
+      "accept": false
+    },
+    {
+      "name": "thread/delete naming window tools is refused",
+      "message": {"id": 112, "method": "thread/delete", "params": {"threadId": "w3", "windowTools": ["mightling_terminal_output"]}},
+      "accept": false
     }
   ]
 }

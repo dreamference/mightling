@@ -235,6 +235,14 @@ one chat at a time and only while nothing else is running. Point at the chat in 
 it under the title; Search threads shows it too and finds a chat by it. A chat that changes is
 summarized again a day later. **Settings › Suggested prompts** turns it off (it is on by default).
 
+**Several chats at once, and deleting for good.** Ctrl-click (Cmd-click on a Mac) chats in the
+sidebar to choose them, or Shift-click to choose every chat between the last one clicked and this
+one; a bar over the list then offers **Archive** (Ctrl+Z brings them back), **Move** to a project
+and **Delete…**; Escape clears the choice. **Delete for good…** is also on a chat's own menu. Deleting
+asks first, naming each chat and how many: a deleted chat cannot be restored, and the subagents'
+chats it started go with it. A worktree made for it is removed as Archive removes it; files the agent
+wrote in a question's folder stay on disk. Nothing is sent anywhere, so it works at `/airgapped on`.
+
 **Earlier versions of a message.** Editing a message, with **Edit** on the last one (or Esc Esc)
 or **Edit in a new thread** on any, keeps the message as you sent it: the new words go to a copy of
 the thread made before it, and the message then shows `‹ 2 / 3 ›`. Each version is the thread it was

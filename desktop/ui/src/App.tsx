@@ -106,6 +106,8 @@ import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollectio
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
 import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
+import { clicked, deleteQuestion, forgetThreads, NO_CHOICE, present, type Choice } from "./selection";
+import { SelectionBar } from "./SelectionBar";
 import { commitMessage, dropQueued, forkAt, forkThread, listQueue, movedQueue, reorderQueued, sendMessage, steerQueued, takeBack, updateQueued, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
@@ -288,6 +290,10 @@ export function App() {
   const [askTree, setAskTree] = useState(false);
   /** Search files (Ctrl+P) open, with what it starts with (":" for go to line). */
   const [fileSearch, setFileSearch] = useState<string | null>(null);
+  /** Threads chosen together in the sidebar (DESKTOP §16 B36, selection.ts), cleared when the view changes. */
+  const [choice, setChoice] = useState<Choice>(NO_CHOICE);
+  const [choiceBusy, setChoiceBusy] = useState(false);
+  useEffect(() => setChoice(NO_CHOICE), [view]);
   const reviewOpen = tabs.some((tab) => tab.kind === "review");
   /** Opens (to the front) or closes the Review tab, as Ctrl+Shift+G and the bar's button do. */
   const setReviewOpen = (open: boolean | ((was: boolean) => boolean)) => {
@@ -573,7 +579,7 @@ export function App() {
         if (paths.length && notification.params.threadId === selectedRef.current && prefsRef.current.openArtifacts) openFileRef.current(paths[0]);
         // Earlier questions (§4.4): the question's copy brought up to date.
         if (prefsRef.current.recallQuestions) setTimeout(() => void recallRef.current(threadId).catch(() => {}), 500);
-      } else if ((notification.method === "thread/archived" || notification.method === "thread/unarchived") && prefsRef.current.recallQuestions) {
+      } else if ((notification.method === "thread/archived" || notification.method === "thread/unarchived" || notification.method === "thread/deleted") && prefsRef.current.recallQuestions) {
         // An archived question's copy goes, an unarchived one's comes back.
         setTimeout(() => void recallRef.current().catch(() => {}), 500);
       }
@@ -1403,6 +1409,70 @@ export function App() {
     } catch (error) {
       notice(error);
     }
+  };
+
+  /**
+   * Deletes threads for good (DESKTOP §16 B36), after a confirmation naming each: `thread/delete` one
+   * at a time (the server deletes the subagents' threads with it, saying `thread/deleted` for each), a
+   * managed worktree removed as Archive removes it, and what the window kept about them forgotten
+   * (selection.ts `forgetThreads`). No undo entry. Returns the threads deleted.
+   */
+  const deleteThreads = async (ids: string[]): Promise<string[]> => {
+    const chosen = ids.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread));
+    if (chosen.length === 0) return [];
+    const labels = chosen.map((thread) => (isAskThread(thread, askRoot) ? askTitle(thread) : thread.name || thread.preview || "(new thread)"));
+    if (!window.confirm(deleteQuestion(labels, chosen.some((thread) => isAskThread(thread, askRoot))))) return [];
+    const done: string[] = [];
+    try {
+      for (const thread of chosen) {
+        await client.request("thread/delete", { threadId: thread.id });
+        done.push(thread.id);
+        const link = links[thread.id];
+        if (link && bridge.git.available() && !prefs.permanentWorktrees.includes(link.checkout)) {
+          bridge.worktrees.remove(link.sourceCwd, link.checkout, wtSettings.root, thread.id).catch(notice);
+        }
+        dispatch({ type: "notification", notification: { method: "thread/deleted", params: { threadId: thread.id } } as ServerNotification });
+        setFound((list) => list?.filter((result) => result.thread.id !== thread.id) ?? null);
+      }
+    } catch (error) {
+      notice(error);
+    }
+    if (done.length) updatePrefs(forgetThreads(prefsRef.current, done));
+    return done;
+  };
+  /** The choice's Archive: every chosen thread archived, one undo entry bringing them all back. */
+  const archiveChosen = async (ids: string[]) => {
+    const done: string[] = [];
+    try {
+      for (const id of ids) {
+        await archiveOne(id);
+        done.push(id);
+      }
+    } catch (error) {
+      notice(error);
+    }
+    if (done.length) archiveUndo(done.length === 1 ? "Archive" : `Archive ${done.length} threads`, done);
+    return done;
+  };
+  /** Runs the choice's bar action on the chosen threads still known; the choice is cleared once something was done. */
+  const actOnChoice = (action: (ids: string[]) => Promise<unknown[]>) => {
+    setChoiceBusy(true);
+    void action(choice.ids.filter((id) => state.threads[id]))
+      .then((done) => done.length && setChoice(NO_CHOICE))
+      .catch(notice)
+      .finally(() => setChoiceBusy(false));
+  };
+  /** Ctrl/Cmd- or Shift-click on a sidebar row chooses it (selection.ts): true when the click did that rather than open the thread. */
+  const chooseRow = (event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; currentTarget: Element; preventDefault: () => void }): boolean => {
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) return false;
+    const rows = [...document.querySelectorAll<HTMLElement>(".sidebar .thread-row[data-thread-id]")];
+    const row = event.currentTarget.closest<HTMLElement>(".thread-row");
+    const order = rows.map((entry) => entry.dataset.threadId ?? "");
+    const next = clicked(present(choice, (id) => Boolean(state.threads[id])), order, row ? rows.indexOf(row) : -1, event, state.selected);
+    if (!next) return false;
+    event.preventDefault();
+    setChoice(next);
+    return true;
   };
 
 
@@ -2529,6 +2599,8 @@ export function App() {
       setFindOpen(false);
       setRowMenu(null);
       setInfo(null);
+    } else if (event.key === "Escape" && choice.ids.length) {
+      setChoice(NO_CHOICE);
     } else if (!editableFocus() && threadRequests.length > 0) {
       if (matches(event, keyAction("approve")) && answerByKey("approve")) event.preventDefault();
       else if (matches(event, keyAction("decline")) && answerByKey("decline")) event.preventDefault();
@@ -2629,6 +2701,7 @@ export function App() {
   }));
 
   const unread = new Set(prefs.unreadThreads);
+  const chosen = new Set(present(choice, (id) => Boolean(state.threads[id])).ids);
   const waiting = new Set(state.requests.map((request) => request.threadId).filter((id): id is string => Boolean(id)));
   const workThreads = Object.values(state.threads).map((entry) => entry.thread).filter((thread) => !thread.ephemeral && !thread.parentThreadId && !isAskThread(thread, askRoot));
   const pinnedHere = prefs.pinnedThreads.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread) && !thread!.ephemeral && isAskThread(thread!, askRoot) === (view === "ask"));
@@ -2673,8 +2746,8 @@ export function App() {
           if (event.key === "Escape") setRenaming(null);
         }} />
     ) : (
-      <div key={thread.id} className={`thread-row${thread.id === state.selected ? " selected" : ""}${unread.has(thread.id) ? " unread" : ""}`}>
-        <button className="thread" onClick={() => openThread(thread.id)} title={summaryShown(thread) ? `${label}\n${summaryShown(thread)}` : label}>
+      <div key={thread.id} data-thread-id={thread.id} className={`thread-row${thread.id === state.selected ? " selected" : ""}${unread.has(thread.id) ? " unread" : ""}${chosen.has(thread.id) ? " chosen" : ""}`}>
+        <button className="thread" onClick={(event) => { if (chooseRow(event)) return; if (chosen.size) setChoice(NO_CHOICE); void openThread(thread.id); }} title={summaryShown(thread) ? `${label}\n${summaryShown(thread)}` : label}>
           <span className="thread-label">{prefs.pinnedThreads.includes(thread.id) ? <Icon name="pin" size={12} /> : null}{label}</span>
           {snippets.get(thread.id) ? <span className="snippet">{snippets.get(thread.id)}</span> : null}
           {found && summaryShown(thread) ? <span className="snippet thread-summary">{summaryShown(thread)}</span> : null}
@@ -2708,6 +2781,7 @@ export function App() {
                   <button key={project.id} role="menuitem" onClick={() => void moveToProject(thread.id, project.id)}>Move to project {project.name}</button>
                 ))}
                 {thread.projectId && knownProjects.has(thread.projectId) ? <button role="menuitem" onClick={() => void moveToProject(thread.id, null)}>Out of its project</button> : null}
+                <button role="menuitem" className="danger-item" onClick={() => void deleteThreads([thread.id])}>Delete for good…</button>
               </span>
             ) : null}
           </span>
@@ -2800,6 +2874,15 @@ export function App() {
           <button className={view === "work" ? "selected" : ""} onClick={() => switchView("work")}>Work</button>
           {forge ? <a className="view-link" href="/forge/" title="The node's forge: repositories and pull requests">Code</a> : null}
         </nav>
+        {chosen.size ? (
+          <SelectionBar count={chosen.size} projects={listedProjects} busy={choiceBusy}
+            inProject={[...chosen].some((id) => Boolean(state.threads[id]?.thread.projectId && knownProjects.has(state.threads[id].thread.projectId!)))}
+            onArchive={() => actOnChoice(archiveChosen)} onDelete={() => actOnChoice(deleteThreads)} onClear={() => setChoice(NO_CHOICE)}
+            onMove={(projectId) => actOnChoice(async (ids) => {
+              for (const id of ids) await moveToProject(id, projectId);
+              return ids;
+            })} />
+        ) : null}
         {view === "ask" ? (
           <>
             <button className="nav-row new-question" onClick={newQuestion}><Icon name="squarePen" />New question</button>

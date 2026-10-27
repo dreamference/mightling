@@ -27,6 +27,7 @@
     "thread/metadata/update",
     "thread/archive",
     "thread/unarchive",
+    "thread/delete",
     "thread/unsubscribe",
     "thread/compact/start",
     "thread/revert",

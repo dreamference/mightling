@@ -332,6 +332,8 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
     }
     case "thread/archived":
       return removeThread(state, notification.params.threadId);
+    case "thread/deleted":
+      return removeThread(state, notification.params.threadId);
     case "thread/closed": {
       const { threadId } = notification.params;
       return withThread(state, threadId, (view) => ({ ...view, activeTurnId: null }));

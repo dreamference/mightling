@@ -482,6 +482,8 @@ mod tests {
             assert!(policy.allowed_requests.contains(fetches) && policy.airgapped_refused_requests.contains(fetches), "{fetches}");
         }
         assert_eq!(policy.airgapped_thread_config.get("features.plugins"), Some(&Value::Bool(false)));
+        // Deleting a thread for good is local: allowed at both levels (DESKTOP §16 B36).
+        assert!(policy.allowed_requests.contains("thread/delete") && !policy.airgapped_refused_requests.contains("thread/delete"));
         let chat = &policy.prompt_thread_config["chat"];
         assert_eq!(chat.get("mcp_servers.mightling_images.enabled"), Some(&Value::Bool(false)), "a phone shows no pictures");
         // An approval on a phone holds the answer until the user replies; the sandbox has the network.
