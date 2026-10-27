@@ -88,7 +88,12 @@ pub fn is_wait_command(command: &str) -> bool {
 
 /// A command that runs a test suite: `pytest` (or `-m pytest`) as a word, `cargo test`, `npm test`,
 /// `npm run e2e`, `ctest`. A `grep` for the word "pytest.fail" is not one.
-pub fn is_test_command(command: &str) -> bool {
+pub fn follows_one_run(command: &str) -> bool {
+    let watches = command.contains("gh run watch") || (command.contains("gh run view") && !command.contains("--log"));
+    watches && !command.contains("gh run list") && !command.contains("gh api")
+}
+
+fn is_test_command(command: &str) -> bool {
     let words: Vec<&str> = command.split(|c: char| c.is_whitespace() || c == ';' || c == '&' || c == '|' || c == '(').collect();
     words.iter().any(|w| *w == "pytest" || w.ends_with("/pytest") || *w == "ctest")
         || ["-m pytest", "cargo test", "npm test", "npm run e2e"].iter().any(|p| command.contains(p))
@@ -108,7 +113,9 @@ pub struct Pending {
     pub since: i64,
     /// A shell command that runs a test suite, for C5(c).
     pub test: bool,
-    /// A `gh run` call, whose result may report a release.
+    /// A call that follows one run to its end (`gh run watch`, or `gh run view` of one run without
+    /// its log), whose result may report a release finishing. A `gh run list`, a `gh api` query or a
+    /// log is history and mentions, not an event.
     pub gh_run: bool,
     /// A `git push`, whose result may carry the pre-push hook's refusal.
     #[serde(default)]
@@ -568,7 +575,7 @@ impl Table {
                                 wait: if tool.background { WaitKind::Tool } else { WaitKind::of(tool) },
                                 since: ts,
                                 test,
-                                gh_run: command.contains("gh run"),
+                                gh_run: follows_one_run(&command),
                                 push: command.contains("git push") || command.contains("git -c") && command.contains(" push"),
                             },
                         );
@@ -705,6 +712,32 @@ mod tests {
         assert_eq!(agent.context, 4001);
         let tokens = agent.tokens_since(0);
         assert_eq!((tokens.responses, tokens.usage.cache_read, tokens.usage.cache_write, tokens.usage.output), (2, 15_000, 10_000, 390));
+    }
+
+    #[test]
+    fn a_release_counts_only_when_the_agent_follows_one_run_to_its_end() {
+        let mut table = Table::default();
+        let zone = limits::Zone::fixed("Europe/Lisbon", 0);
+        let s = source();
+        let listed = r#"[{"conclusion":"failure","databaseId":1,"workflowName":"Release"},{"conclusion":"success"}]"#;
+        let watched = "X main Release · 40000000001\nTriggered via workflow_dispatch\nrun 40000000001 completed with 'failure'";
+        let cases = [
+            ("gh run list -R o/r -w release.yml -L 3 --json databaseId,conclusion", listed),
+            ("gh api repos/o/r/actions/runs/1/jobs --jq '.jobs[]'", listed),
+            ("gh run view 40000000001 --log | grep -i release", watched),
+            ("gh run watch 40000000001 --exit-status", watched),
+        ];
+        for (i, (command, output)) in cases.iter().enumerate() {
+            table.ingest(&s, &line(&response("2026-10-27T09:00:00Z", &format!("r{i}"), 1, 1, 1, Some(command))), &zone);
+            let result = format!(
+                r#"{{"type":"user","timestamp":"2026-10-27T09:03:00Z","message":{{"content":[{{"type":"tool_result","tool_use_id":"t-r{i}","content":{}}}]}}}}"#,
+                serde_json::to_string(output).unwrap()
+            );
+            table.ingest(&s, &line(&result), &zone);
+        }
+        let releases: Vec<_> = table.events.iter().filter(|e| matches!(e.kind, EventKind::Release { .. })).collect();
+        assert_eq!(releases.len(), 1, "only the watched run");
+        assert_eq!(releases[0].kind, EventKind::Release { succeeded: false });
     }
 
     #[test]

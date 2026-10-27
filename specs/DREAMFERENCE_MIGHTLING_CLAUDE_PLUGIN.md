@@ -564,7 +564,8 @@ Two tracks. **M0 comes first or beside P0**: it needs no model, and its transcri
 **Decisions taken while building, each from the replay over 2026-10-15 to 2026-10-27:**
 
 - **Responses are counted by `message.id`, from their largest line.** A response that made several model calls around a server tool (an advisor) sums them on its last line; its context is the last call's (`usage.iterations`), not the sum. Counting the sum doubled some contexts past 300K that never reached it.
-- **C1 alerts the owner only about the coordinator's own hand-off**; a subagent's stays in the summary for the coordinator to act on. With every agent alerting, history gave 6-18 alerts a day.
+- **C1 is summary-only, never an owner alert.** A subagent's hand-off is the coordinator's to act on, and the coordinator compacts by itself, so nobody can act on an alert about it. With every agent alerting, history gave 6-18 alerts a day.
+- **A release is an event only in the result of a call that follows one run to its end**: `gh run watch`, or `gh run view` of one run without `--log`. A `gh run list`, a `gh api` query, a log or a discussion of one names old runs, and on the first live day such a listing raised a false "release workflow failed".
 - **A question put to the owner through a tool** (`AskUserQuestion`, `ExitPlanMode`) is C6 after 30 minutes, not a C2 stall.
 - **A pre-push refusal counts only in the result of a `git push`.** Every one of the 8 refusal lines in the period came from reading the hook's source; none was a refused push.
 - **A test run is a command that runs a suite** (`pytest` as a word, `-m pytest`, `cargo test`, `npm test`), so a search for the word does not arm C5(c).
@@ -572,7 +573,7 @@ Two tracks. **M0 comes first or beside P0**: it needs no model, and its transcri
 - **Urgent alerts are not held back by the hourly cap.**
 - **The first check on a machine is a baseline**: everything it finds is marked known and nothing is sent.
 
-**The M0 gate, part 1 (replay since 2026-10-15, nothing sent):** both usage limits in the period found with the right kind and reset (a monthly spend limit on 2026-10-20, 18 lines, weekly reset 10:00 UTC the next day; a session limit on 2026-10-27, 11 lines, reset 01:00 UTC), no other usage-limit alert; zero pre-push refusals, which is the true count; the 55 agents of this project that passed 300K, exactly (and 5 in another project). Alerts the replay would have sent: 1 to 8 a day, mostly a coordinator awaiting an answer, loops and the coordinator's hand-off. The replay of twelve days took 2.3 s and 207 MB; a live check reads only appended bytes (under 0.1 s and 10 MB once the baseline exists; the baseline about 1 s and 130 MB).
+**The M0 gate, part 1 (replay since 2026-10-15, nothing sent):** both usage limits in the period found with the right kind and reset (a monthly spend limit on 2026-10-20, 18 lines, weekly reset 10:00 UTC the next day; a session limit on 2026-10-27, 11 lines, reset 01:00 UTC), no other usage-limit alert; zero pre-push refusals, which is the true count; the 55 agents of this project that passed 300K, exactly (and 5 in another project). Alerts the replay would have sent: 1 to 7 a day, mostly a coordinator awaiting an answer and loops. The replay of twelve days took 2.3 s and 207 MB; a live check reads only appended bytes (under 0.1 s and 10 MB once the baseline exists; the baseline about 1 s and 130 MB).
 
 **Not yet:** parts 2 and 3 of the gate (a week live); `ling` sessions and Night Shift (M2); the digest (M1); a send entry point in the messenger bridges (M2), so `[monitor] notify_command` serves.
 
