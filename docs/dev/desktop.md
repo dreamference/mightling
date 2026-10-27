@@ -105,6 +105,7 @@ What is left of both parity studies, one branch each (`desktop/backlog-<n>-<name
 - **Menu and tray** (B20, `shell.ts`): File › New Thread, Open Folder… and Settings… go to the window in front over the `command` channel (`WINDOW_COMMANDS`, the page's `commands`), Help › Show Logs opens `$CODEX_HOME/log`; the tray's tooltip and the top of its menu say how many threads wait for the user and how many work (`trayStatus`, from the pet's `PetStatus`, whether the pet is shown or not).
 - **Subagent marks** (B21, `agentmarks.tsx`): each subagent's thread id gives one glyph of eight and one hue of eight (FNV-1a), drawn the same in the subagents panel, the stream's subagent items and, while it works, the sidebar row of the thread that started it.
 - **Enter for multiline prompts** (B22, `composer.ts` `enterSends`): `enterBehaviour` `multiline`, Enter sends a one-line prompt and, once it has several lines, starts another, Ctrl+Enter sending; the hint under the composer follows. The PR-description instruction comes with B32.
+- **A readable font** (B23, `styles.css`, `prefs.ts` `READABLE_FONT`, `SettingsDialog.tsx`): Settings › Appearance › Fonts has a box for Atkinson Hyperlegible (Braille Institute, OFL 1.1, regular and bold, Latin), bundled in `fonts/` with its licence like Inter and JetBrains Mono, which sets the interface font list to it with Inter behind; nothing is fetched.
 
 ## Tests
 

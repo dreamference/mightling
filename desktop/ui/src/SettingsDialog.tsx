@@ -11,7 +11,7 @@ import * as bridge from "./bridge";
 import { Icon } from "./icons";
 import { chordOf, conflicts, keyLabel, KEYMAP, shortcutLabel, type KeyAction } from "./keymap";
 import { boardOn } from "./board";
-import { cleanAppearance, type Appearance, type AppearanceColours, type Prefs } from "./prefs";
+import { cleanAppearance, READABLE_FONT, type Appearance, type AppearanceColours, type Prefs } from "./prefs";
 import { useShownTheme, type ThemeChoice } from "./theme";
 import type { Project } from "./protocol/v2/Project";
 import type { Thread } from "./protocol/v2/Thread";
@@ -492,7 +492,8 @@ function AppearancePage({ prefs, onChange, notice }: SettingsProps) {
       </fieldset>
       <fieldset>
         <legend>Fonts</legend>
-        <label className="field">Interface font <input defaultValue={prefs.appearance.fontUi ?? ""} placeholder="Inter, sans-serif" aria-label="Interface font" onBlur={(event) => set({ fontUi: event.target.value.trim() || undefined })} /></label>
+        <label><input type="checkbox" checked={prefs.appearance.fontUi === READABLE_FONT} onChange={(event) => set({ fontUi: event.target.checked ? READABLE_FONT : undefined })} /> A font made for reading: Atkinson Hyperlegible, its letters hard to mistake for each other</label>
+        <label className="field">Interface font <input key={prefs.appearance.fontUi ?? ""} defaultValue={prefs.appearance.fontUi ?? ""} placeholder="Inter, sans-serif" aria-label="Interface font" onBlur={(event) => set({ fontUi: event.target.value.trim() || undefined })} /></label>
         <label className="field">Code font <input defaultValue={prefs.appearance.fontCode ?? ""} placeholder='"JetBrains Mono", monospace' aria-label="Code font" onBlur={(event) => set({ fontCode: event.target.value.trim() || undefined })} /></label>
       </fieldset>
       <div className="buttons dialog-buttons">
