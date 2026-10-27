@@ -218,7 +218,9 @@ jobs:
       # `ling uninstall` (WINDOWS_ARM section 16.4) on what install.ps1 installed: the folder (the
       # running ling.exe by a detached step once it exits), the user's Path entry and the mDNS rule.
       # The runner is an administrator, so the firewall step runs without a prompt.
+      # Runs even when an earlier test step failed, so the uninstall is always checked.
       - name: ling uninstall
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           $dir = Join-Path $env:RUNNER_TEMP "mightling-install\bin"
