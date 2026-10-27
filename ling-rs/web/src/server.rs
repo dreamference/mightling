@@ -88,6 +88,8 @@ pub struct Config {
     /// `[chat]` settings and Night Shift's phone repositories; None when there is no home. Tests
     /// point it into their scratch folder, never at the real file.
     pub user_config: Option<PathBuf>,
+    /// The node's Forgejo base URL (`http://127.0.0.1:3200` when `None`), overridden by tests.
+    pub forge_url: Option<String>,
 }
 
 pub struct Server {
@@ -95,6 +97,7 @@ pub struct Server {
     pub policy: Policy,
     pub addresses: Addresses,
     pub app_server: AppServer,
+    pub chat_repos: crate::chat_repos::ChatRepos,
     owner_token: String,
     sessions: Mutex<HashSet<String>>,
     pairing_failures: AtomicU32,
@@ -116,6 +119,7 @@ impl Server {
             policy: Policy::embedded(),
             addresses,
             app_server,
+            chat_repos: crate::chat_repos::ChatRepos::new(),
             owner_token,
             sessions: Mutex::new(HashSet::new()),
             pairing_failures: AtomicU32::new(0),
@@ -306,6 +310,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/devices/revoke", post(devices_revoke))
         .route("/devices/scope", post(devices_scope))
         .merge(crate::sync_hub::routes())
+        .merge(crate::chat_repos::routes())
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(server.clone(), guard))
         .with_state(server)

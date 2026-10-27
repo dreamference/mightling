@@ -79,6 +79,7 @@ fn config(dir: &Path, port: u16, lan_names: Vec<String>) -> Config {
         speech_addr: "127.0.0.1:9".to_string(),
         // Never the real ~/.config/dreamference/config.toml: a scratch one, absent unless a test writes it.
         user_config: Some(dir.join("user/.config/dreamference/config.toml")),
+        forge_url: None,
         state_dir,
         port,
         lan_names,
@@ -146,6 +147,11 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/sync/manifest"),
     ("PUT", "/api/sync/rollouts/01a0f1ae-2da4-7942-99ae-c3151dc137cc?offset=0"),
     ("POST", "/api/sync/threads/01a0f1ae-2da4-7942-99ae-c3151dc137cc/delete"),
+    ("GET", "/api/repos"),
+    ("POST", "/api/repos/open"),
+    ("GET", "/api/repos/state?thread=01234567"),
+    ("GET", "/api/repos/diff?thread=01234567&scope=uncommitted"),
+    ("GET", "/api/repos/log?thread=01234567"),
     ("GET", "/anything-else"),
 ];
 
