@@ -79,6 +79,7 @@ import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsSta
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
 import { commandChoices, type ApprovalChoice } from "./approvals";
 import { busyHere } from "./checkouts";
+import { drawDiagrams } from "./diagrams";
 import { ExportDialog } from "./ExportDialog";
 import { PathMenu, pathOf, type PathAction, type PathMenuState } from "./PathMenu";
 import { QuestionCard } from "./QuestionCard";
@@ -641,6 +642,10 @@ export function App() {
   // The conversation follows its latest message (follow.ts): a thread opens at the end, new output
   // keeps the view there only while the reader is there, and an info panel opens at the top.
   const turnsRef = useRef<HTMLDivElement>(null);
+  // Diagrams in answers (DESKTOP §16 B15): ```mermaid blocks drawn after each render of the stream.
+  useEffect(() => {
+    void drawDiagrams(turnsRef.current).catch(() => {});
+  });
   const followRef = useRef(true);
   const onTurnsScroll = () => {
     if (turnsRef.current) followRef.current = nearBottom(turnsRef.current);
