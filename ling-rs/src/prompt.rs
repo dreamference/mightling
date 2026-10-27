@@ -652,6 +652,10 @@ mod tests {
         // `chat` is `ask` with the phone block after it.
         let chat = compose(&Prompt::chat(), &parts("", ""));
         assert!(chat.contains("research assistant") && chat.contains("# On a phone") && chat.contains("Never wait and retry"), "{chat}");
+        // The phone's web path is ling-search, and the network needs no approval (2026-10-27).
+        let phone = &chat[chat.find("# On a phone").unwrap()..];
+        assert!(phone.contains("ling-search --read") && phone.contains("never set `sandbox_permissions` to `require_escalated`"), "{phone}");
+        assert!(phone.find("ling-search --read").unwrap() < phone.find("`curl`").unwrap(), "ling-search comes before curl");
         let code = "\n\n# Code navigation\n\n`ling-code def`\n";
         let email = crate::gmail_access_instructions("a@x.com");
         let text = compose(&Prompt::ask(), &parts(&email, code));

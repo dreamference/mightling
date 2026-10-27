@@ -484,6 +484,8 @@ mod tests {
         assert_eq!(policy.airgapped_thread_config.get("features.plugins"), Some(&Value::Bool(false)));
         let chat = &policy.prompt_thread_config["chat"];
         assert_eq!(chat.get("mcp_servers.mightling_images.enabled"), Some(&Value::Bool(false)), "a phone shows no pictures");
+        // An approval on a phone holds the answer until the user replies; the sandbox has the network.
+        assert_eq!(chat.get("approval_policy"), Some(&Value::String("never".to_string())), "a phone thread asks no approvals");
         assert!(policy.prompt_thread_config.keys().all(|name| policy.named_prompts.contains(name)));
         for refused in ["feedback/upload", "account/login/start", "remoteControl/enable", "thread/realtime/start"] {
             assert!(!policy.allowed_requests.contains(refused), "{refused}");
