@@ -94,7 +94,7 @@ import { ProjectPage } from "./ProjectPage";
 import { contextItem, contextStamp, isContextText, isRemoved, knowledgeCollection, movedBefore, ordered, primaryFolder, projectContext, secondaryFolders, shownProjects, withMetadata, REMOVED_KEY, type KnowledgeFile } from "./projects";
 import { ElicitationCard } from "./ElicitationCard";
 import { elicitationAnswer, shownElicitation } from "./elicitation";
-import { carry, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
+import { ACROSS_REPOS_KEY, carry, cleanupPool, cleanupVictims, defaultCheckout, projectFolder, protectedOwners, turnCwd, worktreeSettings, type WorktreeSettings } from "./worktrees";
 import { commitMessage, dropQueued, forkAt, forkThread, listQueue, movedQueue, reorderQueued, sendMessage, steerQueued, takeBack, updateQueued, type Listen } from "./turns";
 
 const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling", version: "0.1.0" };
@@ -871,13 +871,21 @@ export function App() {
   const cleanUp = async (sourceCwd: string, spare: string | null) => {
     if (!wtSettings.autoCleanup) return;
     try {
-      const listed = await bridge.worktrees.list(sourceCwd, wtSettings.root);
+      // Counted across repositories (DESKTOP §16 B25): every repository a thread or project of this window works in.
+      const sources = wtSettings.acrossRepos
+        ? [sourceCwd, ...new Set(projects(state, askRoot, (thread) => projectFolder(thread, links)).map((group) => group.cwd).filter((folder) => folder && folder !== sourceCwd))]
+        : [sourceCwd];
+      const listed = cleanupPool(await Promise.all(sources.map((source, index) => bridge.worktrees.list(source, wtSettings.root).catch((error) => {
+        if (index === 0) throw error;
+        return [];
+      }))));
       const running = Object.values(state.threads).filter((entry) => entry.activeTurnId).map((entry) => entry.thread.id);
       const kept = protectedOwners(running, state.selected, prefsRef.current.pinnedThreads);
       const victims = cleanupVictims(listed.map((entry) => ({ root: entry.root, owner: entry.owner ?? null, modified: entry.modified ?? 0 })), wtSettings.keep, kept, prefsRef.current.permanentWorktrees, spare);
       for (const checkout of victims) {
         const owner = listed.find((entry) => entry.root === checkout)?.owner ?? null;
-        const kept = await bridge.worktrees.remove(sourceCwd, checkout, wtSettings.root, owner ?? `cleanup-${Date.now()}`);
+        const source = listed.find((entry) => entry.root === checkout)?.sourceRoot ?? sourceCwd;
+        const kept = await bridge.worktrees.remove(source, checkout, wtSettings.root, owner ?? `cleanup-${Date.now()}`);
         if (owner && prefsRef.current.worktreeThreads[owner]) setLink(owner, { ...prefsRef.current.worktreeThreads[owner], snapshot: kept });
       }
     } catch (error) {
@@ -1947,7 +1955,7 @@ export function App() {
   };
 
   /** Writes a worktree setting into `[desktop]` of config.toml, where the codex-worktree crate reads it. */
-  const writeWorktreeSetting = async (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled", value: string | number | boolean | null) => {
+  const writeWorktreeSetting = async (key: "git-worktree-root" | "worktree-keep-count" | "worktree-auto-cleanup-enabled" | typeof ACROSS_REPOS_KEY, value: string | number | boolean | null) => {
     try {
       await client.request("config/value/write", { keyPath: `desktop.${key}`, value, mergeStrategy: "upsert" });
       const answer = (await client.request("config/read", {})) as { config?: { desktop?: Record<string, unknown> | null } };
