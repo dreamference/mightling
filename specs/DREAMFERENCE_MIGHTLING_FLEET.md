@@ -19,6 +19,8 @@
 5. **Still no roles** (MIGHTLING_NODE §12.4). The managing machine is whichever one the command is typed on. Pairing goes one way: from it to each new node. There is no inventory file. The fleet is the set of paired nodes in `~/.config/dreamference/nodes/`.
 6. **Provisioning never touches the network configuration, `sshd` or the user accounts.** A step that can lock you out of a machine is not worth automating on a fleet of five.
 
+**Exception, `--role` (2026-10-27).** `node provision --role night|engine` deliberately leaves the access the last hand-provisioned node has: the main node's key authorised, a limited `NOPASSWD` sudoers drop-in for the agents (checked by `visudo -c`) and key-only SSH, turned on only after a separate key login worked. Without `--role` decisions 3 and 6 hold as written. See docs/dev/node.md, "Provisioning a node with a role".
+
 ---
 
 ## 1. Goals and non-goals

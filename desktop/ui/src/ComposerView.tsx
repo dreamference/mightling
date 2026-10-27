@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import {
-  activeTrigger, applyCompletion, effortChoices, enterSends, matchCommands, matchSkills, mentionPath, slashSkills,
+  activeTrigger, applyCompletion, effortChoices, enterSends, type EnterBehaviour, matchCommands, matchSkills, mentionPath, slashSkills,
   type CommandContext, type PromptHistory, type SlashCommand, type Trigger,
 } from "./composer";
 import { Icon } from "./icons";
@@ -31,6 +31,8 @@ export interface ComposerAttachment {
   preview: string | null;
   /** What hovering shows: the start of a long paste. */
   title?: string;
+  /** Said on the chip: an image the served model cannot see (DESKTOP §16 B13). */
+  warning?: string;
 }
 
 interface MenuEntry {
@@ -49,7 +51,7 @@ export interface ComposerProps {
   prediction?: string | null;
   running: boolean;
   sending: boolean;
-  enterBehaviour: "enter" | "ctrlEnter";
+  enterBehaviour: EnterBehaviour;
   followUp: "steer" | "queue";
   /** The folder `@` searches and paths are made relative to; null hides `@`. */
   root: string | null;
@@ -206,7 +208,7 @@ export function Composer(props: ComposerProps) {
       }
     }
     // `send` is Enter in the table; the preference decides which modifiers go with it (enterSends).
-    if (event.key === keyAction("send").keys[0] && enterSends(event, props.enterBehaviour)) {
+    if (event.key === keyAction("send").keys[0] && enterSends(event, props.enterBehaviour, draft)) {
       event.preventDefault();
       props.onSend(draft, "default");
       return;
@@ -252,7 +254,7 @@ export function Composer(props: ComposerProps) {
   };
 
   const sendLabel = props.running ? (props.followUp === "queue" ? "Queue" : "Steer") : "Send";
-  const enterHint = props.enterBehaviour === "ctrlEnter" ? `${keyLabel("Ctrl+Enter", "composer")}; Enter for a new line` : `Enter; ${shortcutLabel("newLine")} for a new line`;
+  const enterHint = props.enterBehaviour === "ctrlEnter" || (props.enterBehaviour === "multiline" && draft.includes("\n")) ? `${keyLabel("Ctrl+Enter", "composer")}; Enter for a new line` : `Enter; ${shortcutLabel("newLine")} for a new line`;
   const menuOpen = trigger !== null && entries.length > 0;
 
   return (
@@ -305,9 +307,10 @@ export function Composer(props: ComposerProps) {
         {props.attachments.length > 0 ? (
           <div className="attachments">
             {props.attachments.map((item) => (
-              <span key={item.id} className="attachment" title={item.title}>
+              <span key={item.id} className={`attachment${item.warning ? " unseen" : ""}`} title={item.warning ?? item.title}>
                 {item.preview ? <img src={item.preview} alt="" /> : null}
                 <span className="attachment-name">{item.name}</span>
+                {item.warning ? <span className="attachment-warning" role="note">Text-only model: not seen</span> : null}
                 <button className="icon" aria-label={`Remove ${item.name}`} onClick={() => props.onRemoveAttachment(item.id)}><Icon name="x" size={14} /></button>
               </span>
             ))}

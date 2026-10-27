@@ -1394,6 +1394,19 @@ class VLLMServerManager:
         return float(spec.min_memory_gb) if spec else 0.0
 
     @classmethod
+    def side_service_allowance(cls) -> list[tuple[str, float]]:
+        """List the capped services beside the model server that the pre-load check sets aside.
+
+        Specs/DREAMFERENCE_MIGHTLING_FORGEJO.md §2.6: today the node's forge.
+
+        Returns:
+            list[tuple[str, float]]: (name, GB) for each running one; empty when none runs.
+        """
+        from dreamference.forge.forge_service import ForgeService
+        forge_gb = ForgeService.memory_allowance_gb()
+        return [("the forge, mightling-forge", forge_gb)] if forge_gb > 0 else []
+
+    @classmethod
     def load_transient_gb(cls, model: str, weights_gb: float) -> tuple[float, str]:
         """The memory a load needs beyond its arena, which the start gate adds to the arena.
 
@@ -1766,7 +1779,12 @@ class VLLMServerManager:
         # page cache, the loader stages tensors before they are pinned, and the desktop keeps
         # growing throughout — all of it out of whatever is left over. Budget for the peak.
         transient_gb, transient_source = self.load_transient_gb(model, weights_gb)
-        required_gb = arena_gb + transient_gb
+        # Side services that run beside the model server and may grow up to their caps during
+        # the load (the node's forge, FORGEJO §2.6) are set aside too, and named when they are
+        # why a load does not fit.
+        side_services = self.side_service_allowance()
+        side_gb = sum(gb for _, gb in side_services)
+        required_gb = arena_gb + transient_gb + side_gb
         if actual_free_gb < required_gb:
             # The arena is a fraction of total memory, so the fix is expressed as the fraction
             # that would fit — otherwise the operator is left to work backwards from four numbers.
@@ -1777,7 +1795,8 @@ class VLLMServerManager:
                 f"({gpu_memory_utilization:.2f} x {actual_total_gb:.2f} GB total)\n"
                 f"   Load peak:   {transient_gb:.2f} GB (page cache and staging for "
                 f"{weights_gb:.2f} GB of weights; {transient_source})\n"
-                f"   Required:    {required_gb:.2f} GB\n"
+                + "".join(f"   Side service: {gb:.2f} GB ({name}, its cap)\n" for name, gb in side_services)
+                + f"   Required:    {required_gb:.2f} GB\n"
                 f"   Available:   {actual_free_gb:.2f} GB\n"
                 f"   Missing:     {required_gb - actual_free_gb:.2f} GB\n\n"
                 f"The arena alone would fit; the load peak is what does not. Either free memory on\n"
@@ -1797,14 +1816,12 @@ class VLLMServerManager:
         download_model(model, hf_token=hf_token, auto_tensorize=tensorize, revision=overrides.get("revision"))
         if draft_model:
             download_model(draft_model, hf_token=hf_token, auto_tensorize=tensorize)
-        if recipe_draft_model:
-            # Not tensorized, unlike a caller-named drafter: the format buys nothing on a 1-2 GiB
-            # checkpoint, and this one is named by HF repo ID rather than by the registry alias
-            # the tensorizer cache keys on.
-            download_model(
-                recipe_draft_model, hf_token=hf_token, auto_tensorize=False,
-                revision=(overrides.get("speculative_config") or {}).get("revision"),
-            )
+        if recipe_draft_model or ModelMatrixRegistry.get_engine_assets(model, engine):
+            # The recipe's drafter and its engine's assets, at their pins. Not tensorized, unlike a
+            # caller-named drafter: the format buys nothing on a 1-2 GiB checkpoint, and these are
+            # named by HF repo ID rather than by the registry alias the tensorizer cache keys on.
+            from dreamference.hardware import download_recipe_companions
+            download_recipe_companions(model, hf_token=hf_token, engine=engine)
 
         # The compile cache persists across container lifetimes now, which means it also outlives
         # the recipe that produced it. Reconcile the two before the graph is loaded rather than

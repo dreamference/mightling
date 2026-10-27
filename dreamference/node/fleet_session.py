@@ -1,5 +1,4 @@
-"""
-The provisioning session to one machine (specs/DREAMFERENCE_MIGHTLING_FLEET.md §8.1).
+"""The provisioning session to one machine (specs/DREAMFERENCE_MIGHTLING_FLEET.md §8.1).
 
 An ordinary SSH login, authenticated by the account's password, multiplexed so the password is
 typed (or supplied) once: every later command and copy rides the same connection, and the master
@@ -17,7 +16,7 @@ import shlex
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Final, List, Optional
+from typing import Final
 
 # Seconds to wait for the first connection, which may sit at a password prompt.
 CONNECT_TIMEOUT: Final[int] = 15
@@ -36,32 +35,36 @@ class FleetSession:
         user: str,
         run_dir: Path,
         ssh_port: int = 22,
-        log_path: Optional[Path] = None,
+        log_path: Path | None = None,
+        identity: Path | None = None,
     ) -> None:
-        """
-        Args:
-            host: The machine's name or address.
-            user: The account on it.
-            run_dir: This run's private folder (0700): the control socket and the run's own
-                known-hosts file live there.
-            ssh_port: The machine's SSH port.
-            log_path: Where each command and its output is appended; None for no log.
+        """Args:
+        host: The machine's name or address.
+        user: The account on it.
+        run_dir: This run's private folder (0700): the control socket and the run's own
+            known-hosts file live there.
+        ssh_port: The machine's SSH port.
+        log_path: Where each command and its output is appended; None for no log.
+        identity: The one key the login offers (`-i`); None for the keys `~/.ssh/config`
+            names for the host, or the default files.
         """
         self.host = host
         self.user = user
         self.ssh_port = ssh_port
         self.run_dir = run_dir
         self.log_path = log_path
+        self.identity = identity
+        # The standard error of the last `open`, for the "Permission denied" hint of pairing.
+        self.last_error = ""
         safe = "".join(ch if ch.isalnum() or ch in "-." else "_" for ch in host)
         self.control_path = run_dir / f"cm-{safe}"
         self.known_hosts = run_dir / "known_hosts"
-        self.askpass_env: Optional[dict] = None
+        self.askpass_env: dict | None = None
 
     # -- the connection ---------------------------------------------------------------------------
 
-    def options(self, first_contact: bool = False) -> List[str]:
-        """
-        Args:
+    def options(self, first_contact: bool = False) -> list[str]:
+        """Args:
             first_contact: True for the command that opens the master, the only one that may
                 store a host key (`accept-new`).
 
@@ -70,6 +73,7 @@ class FleetSession:
             file, the control socket, no agent or port forwarding.
         """
         return [
+            *(["-i", str(self.identity)] if self.identity else []),
             "-p",
             str(self.ssh_port),
             "-o",
@@ -106,15 +110,13 @@ class FleetSession:
         ]
 
     def target(self) -> str:
-        """
-        Returns:
-            str: `user@host` for ssh.
+        """Returns:
+        str: `user@host` for ssh.
         """
         return f"{self.user}@{self.host}"
 
     def open(self) -> bool:
-        """
-        Opens the master connection: the password is asked here, by ssh's own prompt, or answered
+        """Opens the master connection: the password is asked here, by ssh's own prompt, or answered
         by `FleetAskpass` when the run holds it.
 
         Returns:
@@ -142,12 +144,53 @@ class FleetSession:
             errors.seek(0)
             result = subprocess.CompletedProcess(command, code, "", errors.read())
         self._log(command, result)
+        self.last_error = result.stderr
         return code == 0
 
-    def is_open(self) -> bool:
-        """
+    def key_login_works(self) -> bool:
+        """Return whether a fresh login gets in with the session's key alone.
+
+        A separate connection, never the master: no control socket, no password, no prompt. Key-only
+        SSH is turned on only after this has worked.
+
         Returns:
-            bool: True if the master answers `ssh -O check`.
+            bool: True when `ssh … true` with the identity alone succeeded.
+        """
+        if self.identity is None:
+            return False
+        command = [
+            "ssh",
+            "-i",
+            str(self.identity),
+            "-p",
+            str(self.ssh_port),
+            "-o",
+            "ControlPath=none",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "PreferredAuthentications=publickey",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            f"UserKnownHostsFile={self.known_hosts}",
+            "-o",
+            f"HostKeyAlias={self._known_host_name()}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"ConnectTimeout={CONNECT_TIMEOUT}",
+            "-T",
+            self.target(),
+            "true",
+        ]
+        result = self._spawn(command, capture=True, timeout=CONNECT_TIMEOUT * 2)
+        self._log(command, result)
+        return result.returncode == 0
+
+    def is_open(self) -> bool:
+        """Returns:
+        bool: True if the master answers `ssh -O check`.
         """
         command = ["ssh", "-o", f"ControlPath={self.control_path}", "-O", "check", self.target()]
         return self._spawn(command, capture=True).returncode == 0
@@ -157,11 +200,10 @@ class FleetSession:
         command = ["ssh", "-o", f"ControlPath={self.control_path}", "-O", "exit", self.target()]
         self._spawn(command, capture=True)
 
-    def host_key_fingerprint(self) -> Optional[str]:
-        """
-        Returns:
-            Optional[str]: The SHA256 fingerprint of the host key the session accepted, printed so
-            it can be compared with what the machine shows locally; None if none was stored.
+    def host_key_fingerprint(self) -> str | None:
+        """Returns:
+        Optional[str]: The SHA256 fingerprint of the host key the session accepted, printed so
+        it can be compared with what the machine shows locally; None if none was stored.
         """
         if not self.known_hosts.is_file():
             return None
@@ -174,11 +216,10 @@ class FleetSession:
                 return line.split("SHA256:", 1)[1].split()[0]
         return None
 
-    def host_key_lines(self) -> List[str]:
-        """
-        Returns:
-            List[str]: The host key the session accepted, as `known_hosts` lines without the host
-            field (`<type> <key>`), for pinning the same key to the node id at pairing.
+    def host_key_lines(self) -> list[str]:
+        """Returns:
+        List[str]: The host key the session accepted, as `known_hosts` lines without the host
+        field (`<type> <key>`), for pinning the same key to the node id at pairing.
         """
         result = self._spawn(
             ["ssh-keygen", "-F", self._known_host_name(), "-f", str(self.known_hosts)], capture=True
@@ -196,13 +237,12 @@ class FleetSession:
     def run(
         self,
         script: str,
-        input_text: Optional[str] = None,
+        input_text: str | None = None,
         terminal: bool = False,
         secret_input: bool = False,
-        timeout: Optional[int] = None,
+        timeout: int | None = None,
     ) -> subprocess.CompletedProcess:
-        """
-        Runs a shell command on the machine through the open master.
+        """Runs a shell command on the machine through the open master.
 
         Args:
             script: The remote shell command line.
@@ -221,10 +261,9 @@ class FleetSession:
         return result
 
     def run_admin(
-        self, arguments: List[str], timeout: Optional[int] = None, docker: bool = False
+        self, arguments: list[str], timeout: int | None = None, docker: bool = False
     ) -> subprocess.CompletedProcess:
-        """
-        Runs the machine's own `ling-admin`.
+        """Runs the machine's own `ling-admin`.
 
         Args:
             arguments: The command line after `ling-admin`.
@@ -238,9 +277,8 @@ class FleetSession:
         line = " ".join([REMOTE_ADMIN, *(shlex.quote(part) for part in arguments)])
         return self.run(self.with_docker_group(line) if docker else line, timeout=timeout)
 
-    def sudo(self, line: str, password: Optional[str]) -> subprocess.CompletedProcess:
-        """
-        Runs one command as root there.
+    def sudo(self, line: str, password: str | None) -> subprocess.CompletedProcess:
+        """Runs one command as root there.
 
         Args:
             line: The remote command line, without `sudo`.
@@ -256,8 +294,7 @@ class FleetSession:
 
     @classmethod
     def with_docker_group(cls, line: str) -> str:
-        """
-        Args:
+        """Args:
             line: A shell command line that talks to Docker.
 
         Returns:
@@ -267,8 +304,7 @@ class FleetSession:
         return f"sg docker -c {shlex.quote(line)}"
 
     def rsync(self, source: Path, destination: str) -> subprocess.CompletedProcess:
-        """
-        Copies a folder there over the session: `rsync -aH --partial`, so the hub cache's links
+        """Copies a folder there over the session: `rsync -aH --partial`, so the hub cache's links
         survive and an interrupted copy resumes.
 
         Args:
@@ -288,16 +324,16 @@ class FleetSession:
             transport,
             f"{source}/",
             # rsync splits `host:path` at the first colon, so an IPv6 host goes in brackets.
-            f"{self.user}@[{self.host}]:{destination}/" if ":" in self.host
+            f"{self.user}@[{self.host}]:{destination}/"
+            if ":" in self.host
             else f"{self.target()}:{destination}/",
         ]
         result = self._spawn(command, capture=True)
         self._log(command, result)
         return result
 
-    def pipe_into(self, producer: List[List[str]], remote_line: str) -> int:
-        """
-        Streams the output of a local pipeline into a remote command (`docker save … | zstd`
+    def pipe_into(self, producer: list[list[str]], remote_line: str) -> int:
+        """Streams the output of a local pipeline into a remote command (`docker save … | zstd`
         into `zstd -d | docker load`).
 
         Args:
@@ -307,7 +343,7 @@ class FleetSession:
         Returns:
             int: The remote command's exit code, or the first failing local one's.
         """
-        processes: List[subprocess.Popen] = []
+        processes: list[subprocess.Popen] = []
         upstream = None
         for command in producer:
             process = subprocess.Popen(command, stdin=upstream, stdout=subprocess.PIPE)
@@ -340,11 +376,11 @@ class FleetSession:
     @classmethod
     def _spawn(
         cls,
-        command: List[str],
+        command: list[str],
         capture: bool,
-        input_text: Optional[str] = None,
-        env: Optional[dict] = None,
-        timeout: Optional[int] = None,
+        input_text: str | None = None,
+        env: dict | None = None,
+        timeout: int | None = None,
     ) -> subprocess.CompletedProcess:
         environment = None if env is None else {**os.environ, **env}
         try:
@@ -365,9 +401,9 @@ class FleetSession:
 
     def _log(
         self,
-        command: List[str],
+        command: list[str],
         result: subprocess.CompletedProcess,
-        input_note: Optional[str] = None,
+        input_note: str | None = None,
     ) -> None:
         if self.log_path is None:
             return
@@ -379,15 +415,14 @@ class FleetSession:
             if stream:
                 lines.append(stream.rstrip())
         lines.append(f"  -> exit {result.returncode}")
-        with open(self.log_path, "a") as handle:
+        with Path(self.log_path).open("a") as handle:
             handle.write("\n".join(lines) + "\n")
 
     @classmethod
     def new_run_dir(cls) -> Path:
-        """
-        Returns:
-            Path: A fresh 0700 folder for one run's sockets and known-hosts file, under
-            `$XDG_RUNTIME_DIR` when there is one.
+        """Returns:
+        Path: A fresh 0700 folder for one run's sockets and known-hosts file, under
+        `$XDG_RUNTIME_DIR` when there is one.
         """
         base = os.environ.get("XDG_RUNTIME_DIR") or None
         return Path(tempfile.mkdtemp(prefix="mightling-fleet-", dir=base))

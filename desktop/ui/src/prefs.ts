@@ -9,7 +9,7 @@ import type { Section } from "./threads";
 
 export interface Prefs {
   /** What Enter does in the composer: send (Shift+Enter for a new line), or a new line (Ctrl+Enter sends). */
-  enterBehaviour: "enter" | "ctrlEnter";
+  enterBehaviour: "enter" | "ctrlEnter" | "multiline";
   /** A message sent while a turn runs: steer the running turn, or wait in the queue for the next one. */
   followUp: "steer" | "queue";
   /** The reasoning effort last chosen in the picker; null for the model's default. */
@@ -43,6 +43,14 @@ export interface Prefs {
   sections: Section[];
   /** Threads that finished a turn while not shown, or were marked unread. */
   unreadThreads: string[];
+  /** The versions of edited messages, `<thread>:<turn index>` to the threads they were sent in (versions.ts, DESKTOP §16 B39). */
+  messageVersions: Record<string, string[]>;
+  /** Night Shift tasks queued from a Work thread: task id to the thread's id (nightthread.ts, DESKTOP §16 B40). */
+  nightThreads: Record<string, string>;
+  /** Summaries of threads idle a day, by thread id, each stamped with the thread's `updatedAt` (summaries.ts, DESKTOP §16 B43). */
+  threadSummaries: Record<string, { at: number; text: string }>;
+  /** Summarize a thread idle a day with the served model while it has nothing else to do (Settings › Suggested prompts); on by default. */
+  summarizeThreads: boolean;
   /** Whether the sidebar's Recent list is open. */
   recentsOpen: boolean;
   /** The workspace layout (§2.1): the thread beside its tabs, the tabs in full, or the thread alone with the tabs hidden. */
@@ -67,8 +75,16 @@ export interface Prefs {
   quickEntryShortcut: string;
   /** Closing the window hides it, the app staying in the tray (so Quick Entry and running turns go on); off by default. */
   keepInTray: boolean;
+  /** The first-run page was seen (DESKTOP §16 B6). */
+  welcomed: boolean;
+  /** Names, paths and symbols dictation should spell as written (Settings › Voice), sent to the speech-to-text service as its prompt. */
+  dictationWords: string[];
+  /** Work's sidebar: threads by project (the default), or every thread by date (DESKTOP §16 B10). */
+  threadOrder: "projects" | "chronological";
   petSize: "small" | "medium" | "large";
   petImage: string | null;
+  /** Where the pet was left: its bottom right corner on the screen (DESKTOP §16 B18). */
+  petCorner: { right: number; bottom: number } | null;
   /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */
   suggestPrompts: boolean;
   /** The pull-request tab through the user's GitHub CLI (Settings › Git); off by default, refused at airgapped on. */
@@ -83,13 +99,19 @@ export interface Prefs {
   /** Settings › Git: the prefix Create branch here offers, the instruction a commit message starts from, Force ticked by default. */
   branchPrefix: string;
   commitPrompt: string | null;
+  /** The instruction Create pull request's description starts from (DESKTOP §16 B32); null for Mightling's own. */
+  pullRequestPrompt: string | null;
   forcePush: boolean;
   /** When the Scheduled view was last looked at (ISO time), for its unread count. */
   nightSeen: string | null;
+  /** Night Shift's finished runs opened since the last Mark all as read (nightinbox.ts, DESKTOP §16 B41). */
+  nightRead: string[];
   /** Where /review's findings go: into the thread, or a review thread of their own. */
   reviewDelivery: "inline" | "detached";
   /** The shell terminal tabs run, as a login shell; null for the user's `$SHELL`. */
   terminalShell: string | null;
+  /** Where a new terminal opens (DESKTOP §16 B28): the bottom panel, or a tab in the tab area. */
+  terminalPlace: "panel" | "tabs";
   /** Commands in the thread: output open while running, always folded, or not shown. */
   commandOutput: "running" | "collapsed" | "hidden";
   /** Whether the bottom panel is open (Ctrl+J). */
@@ -194,6 +216,9 @@ export const APPEARANCE_TOKENS: Record<"accent" | "canvas" | "text" | "fontUi" |
   fontUi: "--font-ui",
   fontCode: "--font-code",
 };
+
+/** The readable font (DESKTOP §16 B23): bundled (fonts/, OFL 1.1) and made for legibility, Inter behind it for what it lacks. */
+export const READABLE_FONT = '"Atkinson Hyperlegible", Inter, sans-serif';
 
 const COLOUR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 

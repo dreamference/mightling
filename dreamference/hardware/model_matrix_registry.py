@@ -111,11 +111,160 @@ SGLANG_PHASE_MERGE_PATCH: Final[dict[str, Any]] = {
     ],
 }
 
+# The anchor of SGLANG_STREAM_PHASE_PATCH: the body of v0.5.21's `responses_stream_generator_non_harmony`
+# loop, which holds every event of a message, its text included, until a tool call opens or the
+# response ends, to tag the message's phase on the events it sends.
+_SGLANG_STREAM_PHASE_HOLD: Final[str] = (
+    '            payload = orjson.loads(event.split("data: ", 1)[1])\n'
+    '            event_type = payload["type"]\n'
+    '            item_type = payload.get("item", {}).get("type")\n'
+    '            opens_item = event_type == "response.output_item.added"\n'
+    '            if pending or (opens_item and item_type == "message"):\n'
+    "                pending.append(payload)\n"
+    "                tool_follows = opens_item and item_type in (\n"
+    '                    "function_call",\n'
+    '                    "custom_tool_call",\n'
+    "                )\n"
+    "                terminal = event_type in (\n"
+    '                    "response.completed",\n'
+    '                    "response.incomplete",\n'
+    '                    "response.failed",\n'
+    "                )\n"
+    "                if tool_follows or terminal:\n"
+    '                    phase = "commentary" if tool_follows else "final_answer"\n'
+    "                    for buffered in pending:\n"
+    '                        if buffered.get("item", {}).get("type") == "message":\n'
+    '                            buffered["item"]["phase"] = phase\n'
+    "                        yield f\"event: {buffered['type']}\\ndata: {orjson.dumps(buffered).decode()}\\n\\n\"\n"
+    "                    pending.clear()\n"
+    "            else:\n"
+    "                yield event\n"
+)
+
+# Its replacement: the message's added event and every text delta pass at once; only the three events
+# that close a message (output_text.done, content_part.done, output_item.done) wait, for the one event
+# after them, which the inner generator yields in the same step: a tool call's output_item.added
+# (phase commentary) or anything else (final_answer). Nothing the model wrote is held.
+_SGLANG_STREAM_PHASE_STREAM: Final[str] = (
+    "            # Mightling: hold only a message's closing events, for one event of lookahead.\n"
+    '            payload = orjson.loads(event.split("data: ", 1)[1])\n'
+    '            event_type = payload["type"]\n'
+    '            item_type = payload.get("item", {}).get("type")\n'
+    "            if event_type in (\n"
+    '                "response.output_text.done",\n'
+    '                "response.content_part.done",\n'
+    '            ) or (event_type == "response.output_item.done" and item_type == "message"):\n'
+    "                pending.append(payload)\n"
+    "                continue\n"
+    "            if pending:\n"
+    '                tool_follows = event_type == "response.output_item.added" and item_type in (\n'
+    '                    "function_call",\n'
+    '                    "custom_tool_call",\n'
+    "                )\n"
+    '                phase = "commentary" if tool_follows else "final_answer"\n'
+    "                for buffered in pending:\n"
+    '                    if buffered.get("item", {}).get("type") == "message":\n'
+    '                        buffered["item"]["phase"] = phase\n'
+    "                    yield f\"event: {buffered['type']}\\ndata: {orjson.dumps(buffered).decode()}\\n\\n\"\n"
+    "                pending.clear()\n"
+    "            yield event\n"
+    "        for buffered in pending:\n"
+    '            if buffered.get("item", {}).get("type") == "message":\n'
+    '                buffered["item"]["phase"] = "final_answer"\n'
+    "            yield f\"event: {buffered['type']}\\ndata: {orjson.dumps(buffered).decode()}\\n\\n\"\n"
+)
+
+# SGLang v0.5.21's /v1/responses sends no text of a request that offers tools until the turn ends
+# (found 2026-10-27 by the messenger live test: 188 text pieces, all at 27.4 s; reasoning streamed).
+# The stream wrapper tags each message `commentary` when a tool call follows it and `final_answer`
+# otherwise, and to put that tag on every event of the message it held them all, text deltas
+# included, until a tool call opened or the response ended. Every `ling` request offers tools, so
+# the TUI, `ling web`, the app and the phone bridges showed an answer only when it was complete.
+# The patch streams the text and holds only the message's closing events for the next event, which
+# decides the phase: Codex reads it from the completed item (output_item.done), so what it records
+# and sends back is unchanged. One difference from the image: a message followed by reasoning and
+# then a tool call is closed as `final_answer` (the image waited for the call); the history merge
+# ignores the phase (SGLANG_PHASE_MERGE_PATCH), so the history the model sees is the same.
+SGLANG_STREAM_PHASE_PATCH: Final[dict[str, Any]] = {
+    "path": SGLANG_SERVING_RESPONSES,
+    "sha256": SGLANG_SERVING_RESPONSES_SHA256,
+    "image": QWEN38_SGLANG_IMAGE,
+    "substitutions": [[_SGLANG_STREAM_PHASE_HOLD, _SGLANG_STREAM_PHASE_STREAM]],
+}
+
+# Model files Dreamference hosts itself, as assets of one release of github.com/dreamference/mightling (a
+# pre-release tagged `models-<date>`, never the latest: `releases/latest` stays the newest Mightling), each
+# pinned by SHA-256. The download (ReleaseAssetDownloader) writes them into the Hugging Face hub cache as a
+# download from the Hub would, the blob named by its SHA-256 and linked from `snapshots/<tag>/`, so the
+# launch builders, the memory gates and `node sync-model` (which checks every blob against its name) treat
+# them as any pinned checkpoint. The `models--dreamference--...` folder is a name in the cache, not a
+# Hugging Face repository.
+MODELS_RELEASE_TAG: Final[str] = "models-2026-10-27"
+MODELS_RELEASE_URL: Final[str] = (
+    f"https://github.com/dreamference/mightling/releases/download/{MODELS_RELEASE_TAG}"
+)
+
+# The drafter production speculates against since 1.7.2: the DFlash2 drafter (incoai/Qwen3.8-27B-DFlash2, Apache-2.0)
+# in the RTN-calibrated NVFP4 layout of maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal (Apache-2.0) with its 16-value
+# blocks' scales searched against the BF16 original (ling-engine BACKLOG 22, bench/quant/scalesearch.py: 27% less
+# weight error, accepted per pass x1.055 on SGLang on the replay set, paired by request, the step unchanged), hosted
+# as release assets with its model card's attribution. Its revision is the release's tag, the name of its snapshot.
+QWEN38_DRAFTER_REPO: Final[str] = "dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch"
+QWEN38_DRAFTER_REVISION: Final[str] = MODELS_RELEASE_TAG
+
+# ling-engine's sparse drafter head (BACKLOG 19): the target LM head's rank-256 factors and the 32K list, built from
+# RadixArk/Qwen3.8-27B-NVFP4's head (Apache-2.0), hosted as a release asset beside the drafter. An engine asset:
+# fetched, synced and passed (`flag`) only when the served engine is `engine` and its recipe lists `feature` in
+# `engine_features` (ling-engine 7417523 and later), so a build without it, or SGLang, never downloads it.
+# The first ling-engine commit that reads the sparse head (BACKLOG 19, merged 2026-10-26). A ling-engine recipe lists
+# the asset's feature in `engine_features` exactly when its `engine_commit` descends from it; an install has no
+# engine history to ask, so tests/test_hardware.py checks that rule against the ling-engine submodule.
+LING_ENGINE_SPARSE_HEAD_SINCE: Final[str] = "ec9dce800f986c6fff546fb728b87ebbe16eaa37"
+
+QWEN38_SPARSE_HEAD_ASSET: Final[dict[str, Any]] = {
+    "repo": "dreamference/qwen3.8-27b-sparse-head",
+    "revision": MODELS_RELEASE_TAG,
+    "engine": "ling",
+    "feature": "sparse-head",
+    "flag": "--sparse-head-dir",
+}
+
+# What each release-hosted model's snapshot holds: the file's name in the snapshot, the release asset it is
+# fetched from, and the asset's SHA-256 (the release's SHA256SUMS lists the same).
+RELEASE_HOSTED_MODELS: Final[dict[str, dict[str, Any]]] = {
+    QWEN38_DRAFTER_REPO: {
+        "revision": QWEN38_DRAFTER_REVISION,
+        "files": {
+            "model.safetensors": {
+                "url": f"{MODELS_RELEASE_URL}/qwen3.8-27b-dflash2-nvfp4-scalesearch.safetensors",
+                "sha256": "5ec78f26b5254d46bd376b2127ce87d6dfb0b6653e01d6f36983cfd3fdc35f4b",
+            },
+            "config.json": {
+                "url": f"{MODELS_RELEASE_URL}/qwen3.8-27b-dflash2-nvfp4-scalesearch.config.json",
+                "sha256": "6bf5936c68d432db3c8408d5836dc32e05dc3c4be538eb3e576439186262b186",
+            },
+            "hf_quant_config.json": {
+                "url": f"{MODELS_RELEASE_URL}/qwen3.8-27b-dflash2-nvfp4-scalesearch.hf_quant_config.json",
+                "sha256": "7aa6b31ef6cde1cf7c5489f3a4920be2f5ff1cd2a56e9c5ae1096ae7c94a58bb",
+            },
+        },
+    },
+    QWEN38_SPARSE_HEAD_ASSET["repo"]: {
+        "revision": QWEN38_SPARSE_HEAD_ASSET["revision"],
+        "files": {
+            "model.safetensors": {
+                "url": f"{MODELS_RELEASE_URL}/qwen3.8-27b-sparse-head.safetensors",
+                "sha256": "4dda4169bfbefc62082bd46ba21fa90579dd6bd763b92570a52b016b92d1e83a",
+            },
+        },
+    },
+}
+
 QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     "engine": "sglang",
     "docker_image": QWEN38_SGLANG_IMAGE,
     # Patches of the image's own Python, mounted over it on every launch (SGLangRuntimePatcher).
-    "runtime_patches": [SGLANG_PHASE_MERGE_PATCH],
+    "runtime_patches": [SGLANG_PHASE_MERGE_PATCH, SGLANG_STREAM_PHASE_PATCH],
     "revision": "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854",
     "max_model_len": 262144,
     # SGLang's --mem-fraction-static: weights plus KV pool. What lies outside it (CUDA
@@ -125,10 +274,12 @@ QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
     "container_headroom_gb": 24.0,
     "tool_call_parser": "qwen3_coder",
     "reasoning_parser": "qwen3",
+    # Files a particular engine reads beside the checkpoint and the drafter (get_engine_assets).
+    "engine_assets": [QWEN38_SPARSE_HEAD_ASSET],
     "speculative_config": {
         "method": "DFLASH",
-        "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
-        "revision": "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1",
+        "model": QWEN38_DRAFTER_REPO,
+        "revision": QWEN38_DRAFTER_REVISION,
         "num_speculative_tokens": 12,
         "quantization": "modelopt_fp4",
     },
@@ -289,22 +440,21 @@ QWEN38_LING_IMAGE: Final[str] = (
     "ghcr.io/dreamference/ling-serve@sha256:87807c50350cdf2338b840d86c6a5ce0fc076ab88d1610eaf0459061ec1e6f8c"
 )
 
-# The DFlash2 drafters ling-serve can run, pinned by commit. Speculation is exact, so the drafter
-# moves acceptance and speed, never the output. The RTN-calibrated one is SGLang's (every node has
-# it). The ScaleSearch re-quantization of it (ling-engine BACKLOG §19 item 22) is what both arms of
-# SWE-bench nights 12, 15 and 17 ran; it is served once it is on the Hub at a pinned revision
-# (QWEN38_SCALESEARCH_DRAFTER's `revision`, None until the upload), by pointing
-# QWEN38_LING_DRAFTER at it and listing its repository in the matrix beside the RTN drafter's entry
-# (the memory gates size a drafter by its entry before the snapshot is on disk).
+# The DFlash2 drafters ling-serve can run, pinned. Speculation is exact, so the drafter moves
+# acceptance and speed, never the output. The ScaleSearch re-quantization of the RTN-calibrated one
+# (ling-engine BACKLOG §19 item 22), what both arms of SWE-bench nights 12, 15 and 17 ran, is served
+# since 1.7.2, as on SGLang (QWEN38_DRAFTER_REPO, from the release assets). The RTN-calibrated one,
+# served until then, stays named here for an A/B; it has no matrix entry any more (the memory gates
+# size a drafter by its entry before the snapshot is on disk), so serving it again means adding one.
 QWEN38_RTN_DRAFTER: Final[dict[str, Any]] = {
-    "model": QWEN38_SGLANG_RECIPE["speculative_config"]["model"],
-    "revision": QWEN38_SGLANG_RECIPE["speculative_config"]["revision"],
+    "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
+    "revision": "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1",
 }
 QWEN38_SCALESEARCH_DRAFTER: Final[dict[str, Any]] = {
-    "model": "dreamference/qwen3.8-27b-dflash2-nvfp4-scalesearch",
-    "revision": None,
+    "model": QWEN38_DRAFTER_REPO,
+    "revision": QWEN38_DRAFTER_REVISION,
 }
-QWEN38_LING_DRAFTER: Final[dict[str, Any]] = QWEN38_RTN_DRAFTER
+QWEN38_LING_DRAFTER: Final[dict[str, Any]] = QWEN38_SCALESEARCH_DRAFTER
 
 # The launch nights 12, 15 and 17 measured (Mightling's scripts/engine_ab_remote.sh), on Mightling's
 # pinned checkpoint and drafter. What ling-serve's command line has no flag for is not here: it
@@ -384,7 +534,8 @@ class ModelMatrixRegistry:
                 "pinned lmsysorg/sglang image (v0.5.19 until 1.6.1; v0.5.21 since 2026-10-14, "
                 "which carries the DFlash checkpoint-crossing fix, after the wrong-answer probe of "
                 "docs/dev/sglang-probe-2026-10-14.md), RadixArk's NVFP4 conversion and the "
-                "RTN-calibrated NVFP4 DFlash2 drafter at the revisions pinned below, 12 draft "
+                "NVFP4 DFlash2 drafter at the revisions pinned below (the RTN-calibrated one until "
+                "1.7.2, the searched-scale one Dreamference hosts since), 12 draft "
                 "tokens (the recipe says 16; 12 measured +7% on the replay set, 48.3 against "
                 "45.1 tok/s single stream, speculation still exact, applied 2026-10-09), "
                 "memory fraction 0.50, flashinfer attention, mamba radix cache in "
@@ -538,9 +689,11 @@ class ModelMatrixRegistry:
             compatible_gb10=True,
             notes=(
                 "Drafter for qwen3.8-27b-nvfp4-dflash2, named by its speculative_config and listed "
-                "so the memory gates have a size before the snapshot is on disk."
+                "so the memory gates have a size before the snapshot is on disk. Since 1.7.2 the "
+                "searched-scale NVFP4 quantization of incoai/Qwen3.8-27B-DFlash2 that Dreamference "
+                "hosts (until then maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal, round to nearest)."
             ),
-            hf_repo_id="maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
+            hf_repo_id=QWEN38_DRAFTER_REPO,
         ),
         "tiny-a2d-coder-0.5b-diffusion": ModelSpec(
             name="Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion)",
@@ -788,6 +941,49 @@ class ModelMatrixRegistry:
         if not spec or spec.swe_bench_max_parallel is None:
             return None
         return max(1, int(spec.swe_bench_max_parallel))
+
+    @classmethod
+    def get_engine_assets(cls, model_key: str, engine: str | None = None) -> list[dict[str, Any]]:
+        """Lists the files the model's serving engine reads besides the checkpoint and the drafter.
+
+        An asset belongs to one engine and one feature of it: it applies only when the recipe's
+        `engine` is the asset's and the recipe's `engine_features` names the asset's feature, so
+        an engine build that does not read it (or another engine) never downloads or syncs it.
+
+        Args:
+            model_key (str): Model alias, HF repo ID, or display name.
+            engine (str | None): The engine whose recipe is asked; None for the model's default.
+
+        Returns:
+            list[dict[str, Any]]: The applicable assets (`repo`, `revision`, `flag`), possibly empty.
+        """
+        overrides = cls.get_launch_overrides(model_key, engine)
+        engine = overrides.get("engine")
+        features = set(overrides.get("engine_features") or [])
+        return [
+            dict(asset)
+            for asset in overrides.get("engine_assets") or []
+            if asset.get("engine") == engine and asset.get("feature") in features
+        ]
+
+    @classmethod
+    def get_release_source(cls, model_key: str | None) -> dict[str, Any] | None:
+        """The release assets a model is fetched from instead of the Hugging Face Hub, if it is hosted so.
+
+        Args:
+            model_key (str | None): Model alias, repository-style name (`dreamference/...`), or display name.
+
+        Returns:
+            dict[str, Any] | None: `revision` (the snapshot's name) and `files` (each snapshot file's `url` and
+            `sha256`), or None for a model the Hub serves.
+        """
+        if not model_key:
+            return None
+        repo = (cls.resolve_hf_repo(model_key) or model_key).lower()
+        for name, source in RELEASE_HOSTED_MODELS.items():
+            if name.lower() == repo:
+                return {"revision": source["revision"], "files": {k: dict(v) for k, v in source["files"].items()}}
+        return None
 
     @classmethod
     def supports_vision(cls, model_key: str) -> bool:

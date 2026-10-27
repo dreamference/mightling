@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any, Dict, Final, Optional
 
 SERVICE_TYPE: Final[str] = "_mightling-node._tcp"
+# The forge's own record beside the node's (specs/DREAMFERENCE_MIGHTLING_FORGEJO.md §2.1).
+FORGE_SERVICE_TYPE: Final[str] = "_mightling-forge._tcp"
+FORGE_ROLES: Final[tuple] = ("record", "mirror")
 
 # Version of the advertised contract. A client refuses a node whose `proto` is higher than its own.
 PROTO: Final[int] = 1
@@ -33,7 +36,8 @@ class NodeServiceFile:
     @classmethod
     def render(cls, port: int, node_id: str, version: str, state: str = "stopped",  # noqa: PLR0913 - one per TXT record
                web_port: Optional[int] = None, search_port: Optional[int] = None,
-               main: bool = False, remote: str | None = None) -> str:
+               main: bool = False, remote: str | None = None,
+               forge: tuple[str, int] | None = None) -> str:
         """
         Renders the service file.
 
@@ -47,6 +51,8 @@ class NodeServiceFile:
             main: Whether the model assigned to the node is one a coding client can use.
             remote: The node's overlay name once remote access is set up (REMOTE_ACCESS §7); a
                 name, never an address. None leaves the record out.
+            forge: The forge's role (`record` or `mirror`) and HTTP port, advertised as a second
+                service, `_mightling-forge._tcp`; None when the forge is off.
 
         Returns:
             str: The file's exact text. The instance name is the host name (`%h`).
@@ -74,7 +80,15 @@ class NodeServiceFile:
             f"    <port>{int(port)}</port>",
         ]
         lines += [f"    <txt-record>{escape(record)}</txt-record>" for record in records]
-        lines += ["  </service>", "</service-group>", ""]
+        lines.append("  </service>")
+        if forge is not None:
+            role, forge_port = forge
+            if role not in FORGE_ROLES:
+                raise ValueError(f"not a forge role: {role!r}")
+            lines += ["  <service>", f"    <type>{FORGE_SERVICE_TYPE}</type>", f"    <port>{int(forge_port)}</port>",
+                      f"    <txt-record>{escape(f'node={node_id}')}</txt-record>",
+                      f"    <txt-record>{escape(f'role={role}')}</txt-record>", "  </service>"]
+        lines += ["</service-group>", ""]
         return "\n".join(lines)
 
     @classmethod
@@ -91,6 +105,7 @@ class NodeServiceFile:
         """
         if f"<type>{SERVICE_TYPE}</type>" not in text:
             return None
+        text = cls.service_block(text, SERVICE_TYPE) or text
         port = re.search(r"<port>(\d+)</port>", text)
         if not port:
             return None
@@ -99,6 +114,39 @@ class NodeServiceFile:
             key, _, value = unescape(record).partition("=")
             records[key] = value
         return records
+
+    @classmethod
+    def service_block(cls, text: str, service_type: str) -> str | None:
+        """Find one service's block in a service file.
+
+        Args:
+            text: A service file's text.
+            service_type: The service whose block is wanted.
+
+        Returns:
+            str | None: That `<service>` block, or None when the file has none.
+        """
+        for block in re.findall(r"<service>.*?</service>", text, re.DOTALL):
+            if f"<type>{service_type}</type>" in block:
+                return block
+        return None
+
+    @classmethod
+    def parse_forge(cls, text: str) -> tuple[str, int] | None:
+        """Read the advertised forge's role and port back.
+
+        Args:
+            text: A service file's text.
+
+        Returns:
+            tuple[str, int] | None: The advertised forge's role and port, or None.
+        """
+        block = cls.service_block(text, FORGE_SERVICE_TYPE)
+        role = re.search(r"<txt-record>role=(\w+)</txt-record>", block or "")
+        port = re.search(r"<port>(\d+)</port>", block or "")
+        if not role or not port or role.group(1) not in FORGE_ROLES:
+            return None
+        return role.group(1), int(port.group(1))
 
     @classmethod
     def read(cls) -> Optional[Dict[str, str]]:
@@ -136,7 +184,8 @@ class NodeServiceFile:
     @classmethod
     def update(cls, state: Optional[str] = None, port: Optional[int] = None,
                main: Optional[bool] = None, version: Optional[str] = None,
-               web_port: Any = KEEP, search_port: Any = KEEP, remote: object = KEEP) -> Optional[bool]:
+               web_port: Any = KEEP, search_port: Any = KEEP, remote: object = KEEP,
+               forge: object = KEEP) -> Optional[bool]:
         """
         Changes records of the installed file and leaves the others as they are.
 
@@ -148,6 +197,7 @@ class NodeServiceFile:
             web_port: The web UI's port, or None to stop advertising it; `KEEP` leaves it.
             search_port: SearXNG's port, or None to stop advertising it; `KEEP` leaves it.
             remote: The node's overlay name, or None to stop advertising it; `KEEP` leaves it.
+            forge: The forge's (role, port), or None to stop advertising it; `KEEP` leaves it.
 
         Returns:
             Optional[bool]: None when the node is not advertised (nothing to do), True when the
@@ -156,6 +206,12 @@ class NodeServiceFile:
         current = cls.read()
         if current is None or "node" not in current:
             return None
+        if forge is KEEP:
+            try:
+                forge = cls.parse_forge(cls.service_path.read_text())
+            except OSError:
+                forge = None
+        advertised_forge = forge if isinstance(forge, tuple) else None
         text = cls.render(
             port=int(port if port is not None else current["port"]),
             node_id=current["node"],
@@ -165,6 +221,7 @@ class NodeServiceFile:
             search_port=(int(current["search"]) if current.get("search", "").isdigit() else None) if search_port is KEEP else search_port,
             main=("main" in current) if main is None else main,
             remote=(current.get("remote") or None) if remote is KEEP else (str(remote) if remote else None),
+            forge=advertised_forge,
         )
         try:
             if cls.service_path.read_text() == text:

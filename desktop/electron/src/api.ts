@@ -56,6 +56,8 @@ export type FromView =
   | { type: "git/status"; root: string }
   | { type: "git/diff"; root: string; scope: "unstaged" | "staged" | "commit" | "branch"; commit?: string | null }
   | { type: "git/log"; root: string }
+  /** The lines a repository's tracked files changed against HEAD, for the review pane's selector (repolines.ts, DESKTOP §16 B32). */
+  | { type: "git/changes"; root: string }
   | { type: "git/stage" | "git/unstage" | "git/discard"; root: string; paths: string[] }
   | { type: "git/apply"; root: string; patch: string; cached?: boolean; reverse?: boolean; index?: boolean; zeroContext?: boolean }
   | { type: "git/commit"; root: string; message: string; all: boolean }
@@ -72,6 +74,7 @@ export type FromView =
   | { type: "git/branches"; root: string }
   /** Local environments (environments.ts): read from .codex/ and .mightling/, written to .mightling/ only. */
   | { type: "env/list"; project: string }
+  | { type: "office/preview"; path: string }
   | { type: "env/write"; project: string; environment: unknown }
   /**
    * The bottom panel's tasks (tasks.ts): a project environment's setup or one of its actions, named
@@ -144,17 +147,39 @@ export type FromView =
   /** Quit and start again, so the agent's server resolves the node chosen (Settings › Node). */
   | { type: "app/relaunch" }
   /** The Scheduled view over Night Shift (night.ts). */
+  /** A pasted image for a Work turn, written under $CODEX_HOME (attachments.ts, DESKTOP §16 B13). */
+  | { type: "work/attach"; name: string; kind: "image" | "file"; data: string }
+  /** A file shown in the system's file manager (DESKTOP §16 B14). */
+  | { type: "open/reveal"; path: string }
+  /** The memory files, and an edit of one (memoryfiles.ts, DESKTOP §16 B17). */
+  | { type: "memories/files" }
+  | { type: "memories/save"; name: string; text: string }
+  /** MCP bundles from a file (mcpb.ts, DESKTOP §16 B45): a file dialog and the manifest read; the bundle unpacked by the token pick gave; one removed; those installed. */
+  | { type: "mcpb/pick" }
+  | { type: "mcpb/install"; token: string; values: Record<string, unknown>; replace: boolean }
+  | { type: "mcpb/remove"; name: string }
+  | { type: "mcpb/list" }
+  /** A link's folder checked, and a project's origin remote (DESKTOP §16 B19). */
+  | { type: "folder/check"; dir: string }
+  | { type: "git/origin"; dir: string }
   | { type: "night/list" }
-  | { type: "night/report"; name: string }
-  | { type: "night/add"; repo: string; task: string; test: string | null }
+  | { type: "night/report"; name: string; archived?: boolean }
+  | { type: "night/add"; repo: string; task: string; test: string | null; on?: string | null; bestOf?: number | null }
+  /** Whether the timer is on and its window (DESKTOP §16 B5), read from its unit file. */
+  | { type: "night/status" }
   | { type: "night/drop"; repo: string; id: string }
   | { type: "night/run" }
   /** Repeating tasks (night.ts): through ling-admin, which runs where Night Shift does. */
-  | { type: "night/every-add"; repo: string; task: string; test: string | null; cadence: "daily" | "weekly"; weekday: string | null }
+  | { type: "night/every-add"; repo: string; task: string; test: string | null; cadence: "daily" | "weekly" | "days" | "every" | "monthly"; weekday: string | null; days?: string[] | null; every?: number | null; day?: number | null }
   | { type: "night/every-list" }
   | { type: "night/every-drop"; id: string }
   /** A finished task's last message, diff and transcript (night.ts `taskDetails`). */
-  | { type: "night/details"; id: string }
+  | { type: "night/details"; id: string; archived?: boolean }
+  /** DESKTOP §16 B40: a thread's task applied in the thread's folder (`ling night apply`), and its block in the newest report naming it. */
+  | { type: "night/apply"; cwd: string; id: string }
+  | { type: "night/note"; id: string }
+  /** DESKTOP §16 B41: Scheduled's search of `night/archive/` (nightinbox.ts `searchArchive`); `archived` above reads a run or report there. */
+  | { type: "night/archive"; query: string }
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" }
@@ -172,6 +197,9 @@ export type FromView =
   | { type: "pr/diff"; root: string; number: number; thread: string | null }
   | { type: "pr/review"; root: string; number: number; verdict: "comment" | "approve" | "request-changes"; body: string; thread: string | null }
   | { type: "pr/status"; root: string }
+  /** DESKTOP §16 B32: a pull request's comments and reviews, and Create pull request (`gh pr create`); refused at airgapped on. */
+  | { type: "pr/activity"; root: string; number: number; thread: string | null }
+  | { type: "pr/create"; root: string; draft: { title: string; body: string; base: string | null; draft: boolean }; thread: string | null }
   /** The agent message board (board.ts): its SQLite file, read only; `sqliteHome` is config.toml's `sqlite_home`, if set. */
   | { type: "board/read"; sqliteHome: string | null }
   /** The preview tab (preview.ts): a page in a view laid over the tab's body, under the rules of preview-rules.ts. */
@@ -216,8 +244,8 @@ export type ForView =
   | { channel: "pane://docked"; payload: { pane: PaneKind; thread: string } }
   /** A pane detached from this window asks for something (windows.ts `paneAction`). */
   | { channel: "pane://action"; payload: PaneAction }
-  /** The Window menu's pane items, for the page in front: detach (or dock back) the terminal or the diff. */
-  | { channel: "command"; payload: "detachTerminal" | "detachReview" }
+  /** The Window menu's pane items, and File's New Thread, Open Folder… and Settings… (DESKTOP §16 B20), for the page in front. */
+  | { channel: "command"; payload: "detachTerminal" | "detachReview" | "newChat" | "openFolder" | "settings" }
   /** Another device acted on a thread here through the sync host (sync-host.ts): "Approved from the phone". */
   | { channel: "sync://notice"; payload: { text: string; thread: string | null } };
 

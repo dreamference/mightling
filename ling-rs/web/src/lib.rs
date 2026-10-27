@@ -6,8 +6,8 @@
 //! needs a credential, loopback included, and nothing a sandboxed command can read is one; the LAN
 //! is served only on an advertised node. It calls
 //! nothing on any network: its outbound connections are the app-server's socket, for the
-//! microphone, the speech-to-text service on loopback (sidecars.rs), and the node's own forge over
-//! HTTP on the LAN or loopback (chat_repos.rs); the only processes it starts
+//! microphone, the speech-to-text service on loopback (sidecars.rs), and the node's own forge on
+//! loopback: for `/forge/` (forge.rs) and the phone's repository work (chat_repos.rs); the only processes it starts
 //! are `ling app-server`, `ling prompt show --composed`, for a phone bridge's image, the offline
 //! text reader (ocr.rs), to open a cited document, `ling docs locate` (documents.rs), for the answers' length,
 //! `ling cavemode` (cave.rs), for a phone's Night Shift task, `ling night add` (night_phone.rs), and `git`
@@ -27,6 +27,7 @@ pub mod chat_settings;
 pub mod cli;
 pub mod devices;
 pub mod documents;
+pub mod forge;
 pub mod night_phone;
 pub mod ocr;
 pub mod policy;

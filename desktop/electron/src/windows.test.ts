@@ -33,6 +33,7 @@ function stubs(airgappedOn: () => boolean = () => false, repo: RepoContext = { r
     repoCheckout: (cwd) => repo.repoCheckouts.get(cwd) ?? null,
     repoThreadCwd: (thread) => repo.repoThreads.get(thread) ?? null,
     isBridge: () => repo.bridge,
+    workFolder: (cwd) => cwd.startsWith("WORK/"),
   };
 }
 

@@ -1,6 +1,6 @@
 # Mightling helping Claude Code: a delegation plugin and a session monitor
 
-**Status:** proposed on 2026-10-27; revised the same day into one design with the session monitor (Part B); the owner's answers to its open questions recorded the same day (§0.1). **Nothing is built**; the owner asked for this spec before any building. The cost figures in §2 were measured from one night of a Claude Code coordinator session on the owner's machine (aggregates only; no content of those logs is quoted or stored here). Every figure about Mightling doing delegated work, and every figure about the monitor's effect, is an estimate until the phases of §10 measure it.
+**Status:** proposed on 2026-10-27; revised the same day into one design with the session monitor (Part B); the owner's answers to its open questions recorded the same day (§0.1). Phase M0 (§13) and, of Phase P1, class W1 (`watch`, §14) are built (2026-10-27); the rest of Part A and M1–M2 are not. The cost figures in §2 were measured from one night of a Claude Code coordinator session on the owner's machine (aggregates only; no content of those logs is quoted or stored here). Every figure about Mightling doing delegated work, and every figure about the monitor's effect, is an estimate until the phases of §10 measure it.
 
 **Target:** the owner first, then any Mightling user who also runs Claude Code: "your local Mightling helps your Claude Code". Two parts serve one aim, fewer Claude tokens for the same results:
 
@@ -419,7 +419,7 @@ Two jobs need reading, and only these use Qwen through `ling`:
 
 ### 7.5 Outputs
 
-**The summary** (`$CODEX_HOME/monitor/summary.md`, and `summary.json` with the same content for programs), rewritten whole at every check (written to a temporary file and renamed), capped at 1,500 tokens:
+**The summary** (`~/.local/share/dreamference/monitor/summary.md`, `[monitor] state_dir`, and `summary.json` with the same content for programs), rewritten whole at every check (written to a temporary file and renamed), capped at 1,500 tokens:
 
 1. Open alerts, newest first.
 2. Waiting for an answer (C6).
@@ -446,7 +446,7 @@ The coordinator reads it at each check-in (practice 5), in place of re-reading a
 - **Two user units**, installed by `ling monitor enable` and removed by `ling monitor disable`; off until enabled. `mightling-monitor.timer` runs `ling monitor check` every 5 minutes (the deterministic checks, the summary, the alerts); `mightling-monitor-digest.timer` runs `ling monitor digest` hourly (M1).
 - **Bounded beside the model server** (host safety): both service units set `MemoryMax=512M`, `Nice=10` and idle I/O priority; a check is expected to finish in under 10 s by reading only appended bytes; the digest holds one model call at a time and sits inside the 8 requests the server serves.
 - **No model when the model is reserved** (D4): the digest's busy check skips it; `ling monitor check` never calls a model.
-- **State** under `$CODEX_HOME/monitor/`: offsets, the agent table, open alerts and their episodes, digests (kept 7 days) and hourly facts (kept 30 days), all written by the monitor alone.
+- **State** under `~/.local/share/dreamference/monitor/` (the owner's choice of 2026-10-27, over `$CODEX_HOME/monitor/`): offsets, the agent table, open alerts and their episodes, digests (kept 7 days) and hourly facts (kept 30 days), all written by the monitor alone.
 - `ling monitor status` prints the summary; `ling monitor check --once` runs one check by hand; `ling monitor doctor` reports the paths it reads, the Claude Code version seen and the share of unclassed lines.
 
 ### 7.7 Measured value
@@ -466,7 +466,7 @@ The coordinator reads it at each check-in (practice 5), in place of re-reading a
 
 ## 8. Privacy and safety (both parts)
 
-- **Transcripts never leave the node** (D6). The monitor reads them where they are and writes only under `$CODEX_HOME/monitor/`; the plugin's ledger and replay set hold no content (§6.3, §6.5). Digests stay local and are deleted after 7 days.
+- **Transcripts never leave the node** (D6). The monitor reads them where they are and writes only under its state folder (§7.6); the plugin's ledger and replay set hold no content (§6.3, §6.5). Digests stay local and are deleted after 7 days.
 - **Nothing writes into a transcript or a session.** The monitor opens every input read-only and never steers, stops or messages an agent (§1). The plugin's hook only records.
 - **What goes out goes as facts.** An owner alert is a fixed template sent by the owner's own notify command (D13). The summary reaches Anthropic through the coordinator that reads it, so its `ling` and Night Shift entries are facts only unless the owner opts in. Neither part sends content to any other service.
 - **Everything else stays on the owner's machines.** The plugin calls the local `ling` and the owner's model server; no request leaves for a third party.
@@ -552,3 +552,52 @@ Two tracks. **M0 comes first or beside P0**: it needs no model, and its transcri
 **Read from source or documents:** the `ling exec` flags; Night Shift's `--test` and `--best-of`, the refusal of `--best-of` with `--on`, its task files and timer; the model gate's 503 behaviour; the launcher's node tiers; Claude Code's plugin layout, tool naming, output limits, stdio timing, monitors and plugin-subagent limits, from its public documentation.
 
 **Not measured:** any acceptance rate of Mightling on these classes; whether `--output-schema` constrains SGLang through the local provider; latency on real delegations; whether the reviewer at a cheaper model reaches the same verdicts; the recovery cost of retiring agents; whether a subscription's limits track the price ratios; the coordinator's own share of the baseline's tokens; the monitor's effect on them; the digest's accuracy; the check's run time on a week of transcripts. The brief classes of §2.3 come from keyword rules checked by eye, and the run boundaries of §2.2 from command patterns; both are estimates.
+
+---
+
+## 13. As built: M0 (2026-10-27)
+
+**Where.** The crate `ling-rs/monitor/` (`ling-monitor`), plain code with chrono, serde and toml only (no network, no model, no async runtime), routed by the launcher as `ling monitor …` (`ling-rs/src/monitor.rs`). The crate also builds a small `ling-monitor` binary with the same commands, for a machine whose installed `ling` predates the monitor; `ling monitor enable` writes units that name whichever of the two installed them. Commands: `check` (the timer's), `status [--json]`, `doctor`, `replay --since … [--until …]`, `enable`, `disable`, `notify-test`, and `digest` (M1; does nothing yet). Settings are `[monitor]`, `[monitor.waits]` and `[monitor.rules]` in the user's config; with no rules set, C5(a) is off, and nothing of the owner's rules is in the repository.
+
+**Inputs in M0.** Claude Code's session and subagent transcripts under `~/.claude/projects/` (every project), the `.meta.json` beside each subagent, `git log` of the repositories named in `[monitor.rules] repos` (or the transcripts' `cwd`), and the entries of `~/.local/bin` and of the home for C5(c). `ling` sessions and Night Shift are M2's.
+
+**Decisions taken while building, each from the replay over 2026-10-15 to 2026-10-27:**
+
+- **Responses are counted by `message.id`, from their largest line.** A response that made several model calls around a server tool (an advisor) sums them on its last line; its context is the last call's (`usage.iterations`), not the sum. Counting the sum doubled some contexts past 300K that never reached it.
+- **C1 is summary-only, never an owner alert.** A subagent's hand-off is the coordinator's to act on, and the coordinator compacts by itself, so nobody can act on an alert about it. With every agent alerting, history gave 6-18 alerts a day.
+- **A release is an event only in the result of a call that follows one run to its end**: `gh run watch`, or `gh run view` of one run without `--log`. A `gh run list`, a `gh api` query, a log or a discussion of one names old runs, and on the first live day such a listing raised a false "release workflow failed".
+- **A question put to the owner through a tool** (`AskUserQuestion`, `ExitPlanMode`) is C6 after 30 minutes, not a C2 stall.
+- **A pre-push refusal counts only in the result of a `git push`.** Every one of the 8 refusal lines in the period came from reading the hook's source; none was a refused push.
+- **A test run is a command that runs a suite** (`pytest` as a word, `-m pytest`, `cargo test`, `npm test`), so a search for the word does not arm C5(c).
+- **A usage limit's reset is converted to UTC only in this machine's zone** (from `/etc/localtime`), with no time-zone database in the build; another zone keeps the time as written, and the key then includes the day it was seen. A monthly spend limit's message names the *weekly* limit's reset; the summary says so, and no "lifted" note is sent for it.
+- **Urgent alerts are not held back by the hourly cap.**
+- **The first check on a machine is a baseline**: everything it finds is marked known and nothing is sent.
+
+**The M0 gate, part 1 (replay since 2026-10-15, nothing sent):** both usage limits in the period found with the right kind and reset (a monthly spend limit on 2026-10-20, 18 lines, weekly reset 10:00 UTC the next day; a session limit on 2026-10-27, 11 lines, reset 01:00 UTC), no other usage-limit alert; zero pre-push refusals, which is the true count; the 55 agents of this project that passed 300K, exactly (and 5 in another project). Alerts the replay would have sent: 1 to 7 a day, mostly a coordinator awaiting an answer and loops. The replay of twelve days took 2.3 s and 207 MB; a live check reads only appended bytes (under 0.1 s and 10 MB once the baseline exists; the baseline about 1 s and 130 MB).
+
+**Not yet:** parts 2 and 3 of the gate (a week live); `ling` sessions and Night Shift (M2); the digest (M1); a send entry point in the messenger bridges (M2), so `[monitor] notify_command` serves.
+
+---
+
+## 14. As built: P1, W1 (2026-10-27)
+
+**Where.** The leaf crate `ling-rs/delegate/` (`ling-delegate`), with `chrono`, `regex-lite`, `serde`, `serde_json` and `toml` only (no model, no async runtime), routed by the launcher as `ling delegate …` (`ling-rs/src/delegate.rs`) and also built as a standalone `ling-delegate` binary (on Linux, in the same Cargo run as `ling` and installed beside it in `~/.local/share/dreamference/mightling/bin/`, never linked onto `PATH`; a release asset `ling-delegate-<target>.gz`, optional for `install.sh`; `docs/dev/claude-plugin.md`). Commands: `ling delegate mcp` (the JSON-RPC 2.0 stdio MCP server), `ling delegate watch …` (the CLI equivalent), and `ling delegate classes [--json]` (the class status table). The Claude Code plugin lives in `claude-plugin/` (`.claude-plugin/plugin.json`, `.mcp.json`, `agents/delegate.md`, `skills/delegate/SKILL.md`), with `.claude-plugin/marketplace.json` at the repository root. The skills planner (`ling-rs/skills/src/catalog.rs`) excludes foreign `delegate` skills (`BUILTIN_EXCLUDED_FOREIGN_SKILLS`) so `ling` never links the Claude Code skill into its own sessions (§4.3).
+
+**Scope (W1 only).** Class `W1` (`watch`) is the one class the owner turned on (2026-10-27); it is the only one built. Calls to `ask`, `lookup`, `task`, or `night` over MCP or CLI are refused with a message stating that only class W1 (`watch`, no model) is enabled in P1.
+
+**Closed condition list and bounds:**
+
+- `file_line` (aliases `file`, `log_line`): polls a local file (bounded to 64 MiB per read) for a substring or `regex-lite` match and returns `<path>:<line_number>: <matching line verbatim>`.
+- `pid_exit` (aliases `pid`, `process_exit`): waits for a positive PID to exit (`pid <pid> exited`).
+- `http_status` (alias `http`): polls an `http://` URL on loopback (`127.0.0.1`, `localhost`, `::1`, connected to without a name lookup) until the target HTTP status code (default `200`) is returned; every other host is refused, a node by name included (§4.2 allows one; it waits for the node locator, since a lookup by name could leave the machine).
+- `gh_run`: polls `gh run view <run_id> [--repo <owner/name>] --json status,conclusion` at `>= 15s` until `status == "completed"`, returning `run <id> completed: <conclusion>`.
+- `systemd_unit` (alias `unit`): polls `systemctl --user is-active <unit>` at `>= 15s` until the unit reaches the target state (default `"active"`).
+- `command`: polls an allowlisted read-only command (`git status|rev-parse|log|diff|show-ref|ls-files` without `--output`, `--ext-diff` or `--textconv`, `gh run view`, `ling night show|status`, `ling-admin night status|show`, `systemctl --user is-active`, or `curl` to loopback with only `-s -S -f -I -i` and their long forms; shell metacharacters are refused) at `>= 15s` until the target exit code and/or line pattern matches.
+- `night_task` (aliases `night`, `task`): polls `$CODEX_HOME/night/tasks/<id>.json` until `status` is one of `done`, `no-change`, `stalled`, `failed`, `interrupted`, or `cancelled`.
+- `git_ref`: polls `git rev-parse --verify <ref>` at `>= 15s` until the resolved commit hash differs from `from` (or from the initial poll's hash).
+- `timeout`: waits a bounded duration (`timeout elapsed (<n>s)`), and any condition that reaches `timeout_s` (default 1,800 s / 30 min, hard max 14,400 s / 4 h) returns `{met: false, observed: "timeout after <n>s (last: ...)", at: "<RFC3339 UTC>"}`.
+- `observed` is capped at 6,000 characters (~1,500 tokens). `watch` uses no model, so it has no busy check and runs during a benchmark (D4, §5.3).
+
+**Not built in P1:** `ask` and `lookup` (refused over MCP and the CLI), the ledger (§6.3), the busy check (§5.3), the egress-audit run `--claude-plugin` (§8), `agents/diff-reviewer.md` and the hooks (§4.1, §4.5), a `watch` URL on a node by name, and the version stamp: `plugin.json` carries `dreamference.__version__` by hand, and `tests/test_claude_plugin.py` fails when they differ. Nothing enables the plugin: it is installed only by the commands of §4.1.
+
+

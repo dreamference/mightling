@@ -27,6 +27,7 @@
     "thread/metadata/update",
     "thread/archive",
     "thread/unarchive",
+    "thread/delete",
     "thread/unsubscribe",
     "thread/compact/start",
     "thread/revert",
@@ -136,6 +137,7 @@
     "runtimeWorkspaceRoots"
   ],
   "scratchSandbox": "workspace-write",
+  "forkRequest": "thread/fork",
   "importRequest": "externalAgentConfig/import",
   "refusedImportItems": [],
   "airgappedRefusedRequests": [

@@ -128,6 +128,15 @@ SIGNAL_PACKAGE: Final[str] = "ling-signal"
 SIGNAL_BIN_NAME: Final[str] = "ling-signal"
 BUILDS_SIGNAL: Final[bool] = sys.platform.startswith("linux")
 
+# The delegation plugin's server (`ling-rs/delegate/`, specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md
+# §14): the launcher links the crate for `ling delegate …`, and the crate's own small binary runs
+# the same commands for a machine whose installed `ling` predates it. Built in the same Cargo run as
+# `ling` (a workspace member through the launcher's dependency), installed beside it and never
+# linked onto PATH: the plugin's `.mcp.json` starts `ling delegate mcp`. Linux only, like the bridge.
+DELEGATE_PACKAGE: Final[str] = "ling-delegate"
+DELEGATE_BIN_NAME: Final[str] = "ling-delegate"
+BUILDS_DELEGATE: Final[bool] = sys.platform.startswith("linux")
+
 # Upstream's release profile keeps line tables (`debug = "line-tables-only"`, `strip = false`) so
 # its CI can archive symbols, and strips only when it packages. Built as-is, mightling-codex is 1.4 GB
 # rather than ~315 MB -- and the runner reads the whole file on every launch to recover its system
@@ -379,6 +388,8 @@ class CodexBrandedBuilder:
         required = [cls.executable_path(), host]
         if BUILDS_SIGNAL:
             required.append(os.path.join(INSTALL_DIR, "bin", SIGNAL_BIN_NAME))
+        if BUILDS_DELEGATE:
+            required.append(str(Path(INSTALL_DIR) / "bin" / DELEGATE_BIN_NAME))
         return all(os.path.isfile(path) and os.access(path, os.X_OK) for path in required)
 
     @classmethod
@@ -780,6 +791,9 @@ class CodexBrandedBuilder:
         if BUILDS_SIGNAL:
             command += ["-p", SIGNAL_PACKAGE, "--bin", SIGNAL_BIN_NAME]
             installed_names.append((SIGNAL_BIN_NAME, SIGNAL_BIN_NAME))
+        if BUILDS_DELEGATE:
+            command += ["-p", DELEGATE_PACKAGE, "--bin", DELEGATE_BIN_NAME]
+            installed_names.append((DELEGATE_BIN_NAME, DELEGATE_BIN_NAME))
         if IS_WINDOWS:
             command += ["-p", WINDOWS_SANDBOX_PACKAGE]
             for helper in WINDOWS_SANDBOX_HELPERS:

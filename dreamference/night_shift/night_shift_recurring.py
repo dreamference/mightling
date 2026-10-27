@@ -1,15 +1,17 @@
 """Night Shift's repeating tasks (DESKTOP_PARITY §9.5, the owner's decision 7 of 2026-10-21).
 
-A repeating task is a template under ``$CODEX_HOME/night/recurring/<id>.json``: a repository, the
-task's words, an optional test command and a cadence, every night or every week on one day. At the
-start of each run, before the queue is read, the runner queues every template that is due tonight
-through the launcher's own ``ling night add`` in its repository, so a repeating task becomes an
-ordinary queued task (best-of-N, the window, the report all as for any other) and the queue keeps
+A repeating task is a template under ``$CODEX_HOME/night/recurring/<id>.json``: a repository,
+the task's words, an optional test command and a cadence (every night, every week on one day,
+on chosen weekdays, every N nights, or on a day of the month). At the start of each run,
+before the queue is read, the runner queues every template that is due tonight through the
+launcher's own ``ling night add`` in its repository, so a repeating task becomes an ordinary
+queued task (best-of-N, the window, the report all as for any other) and the queue keeps
 one writer. A template is queued at most once a day; templates are written whole and atomically.
 """
 
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import re
@@ -26,7 +28,16 @@ WEEKDAYS: Final[list[str]] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 #: The cadences a template can have.
 DAILY: Final[str] = "daily"
 WEEKLY: Final[str] = "weekly"
-CADENCES: Final[list[str]] = [DAILY, WEEKLY]
+DAYS: Final[str] = "days"
+EVERY: Final[str] = "every"
+MONTHLY: Final[str] = "monthly"
+CADENCES: Final[list[str]] = [DAILY, WEEKLY, DAYS, EVERY, MONTHLY]
+
+#: The nights an ``every`` template may have between runs, and the days of the month.
+MIN_EVERY: Final[int] = 1
+MAX_EVERY: Final[int] = 365
+MIN_MONTHLY: Final[int] = 1
+MAX_MONTHLY: Final[int] = 31
 
 #: A template's id: what ``add`` makes, and all ``drop`` accepts.
 TEMPLATE_ID: Final[re.Pattern[str]] = re.compile(r"^r[0-9a-f]{12}$")
@@ -63,13 +74,58 @@ class NightShiftRecurring:
         return night_dir / "recurring"
 
     @classmethod
+    def _parse_days(cls, value: object) -> list[str]:
+        """The weekdays a ``days`` template names, in the order given, each once.
+
+        Args:
+            value: ``"mon,wed,fri"`` or ``["mon", "wed", "fri"]``.
+
+        Returns:
+            The days.
+
+        Raises:
+            ValueError: When no day is named, or one is not ``mon`` … ``sun``.
+        """
+        if isinstance(value, str):
+            raw = [day.strip().lower() for day in value.split(",") if day.strip()]
+        elif isinstance(value, list):
+            raw = [str(day).strip().lower() for day in value if str(day).strip()]
+        else:
+            raw = []
+        if not raw or any(day not in WEEKDAYS for day in raw):
+            raise ValueError(f"name the days from {', '.join(WEEKDAYS)}, comma-separated")
+        return list(dict.fromkeys(raw))
+
+    @classmethod
+    def _parse_count(cls, value: object, low: int, high: int, what: str) -> int:
+        """A whole number from ``low`` to ``high``: the nights of ``every``, the day of ``monthly``.
+
+        Args:
+            value: The number, or its digits.
+            low: The smallest allowed.
+            high: The largest allowed.
+            what: What the number counts, for the refusal.
+
+        Returns:
+            The number.
+
+        Raises:
+            ValueError: When ``value`` is not a whole number in the range.
+        """
+        if isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+            value = int(value.strip())
+        if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+            raise ValueError(f"{what} is a whole number from {low} to {high}")
+        return value
+
+    @classmethod
     def add(
         cls,
         night_dir: Path,
         repo: Path,
         task: str,
         cadence: str,
-        weekday: str | None = None,
+        on: str | int | list[str] | None = None,
         test: str | None = None,
     ) -> dict[str, Any]:
         """Writes a new template.
@@ -78,8 +134,11 @@ class NightShiftRecurring:
             night_dir: Night Shift's folder.
             repo: The repository the task runs in (an absolute path to a folder).
             task: What to do, in words.
-            cadence: ``daily`` or ``weekly``.
-            weekday: For ``weekly``, the day (``mon`` … ``sun``).
+            cadence: ``daily``, ``weekly``, ``days``, ``every`` or ``monthly``.
+            on: The cadence's parameter: for ``weekly`` the day (``mon`` … ``sun``), for ``days``
+                the days (``"mon,wed,fri"`` or a list), for ``every`` the nights between runs
+                (1 … 365, the first run the night it is set), for ``monthly`` the day of the month
+                (1 … 31, the month's last day where it is shorter).
             test: The test command the run uses, if any.
 
         Returns:
@@ -94,16 +153,31 @@ class NightShiftRecurring:
         if not repo.is_absolute() or not repo.is_dir():
             raise ValueError(f"{repo} is not a folder")
         if cadence not in CADENCES:
-            raise ValueError(f"the cadence is daily or weekly, not {cadence}")
-        if cadence == WEEKLY and weekday not in WEEKDAYS:
+            raise ValueError(f"the cadence is {', '.join(CADENCES)}, not {cadence}")
+        if cadence == WEEKLY and on not in WEEKDAYS:
             raise ValueError(f"a weekly task names its day: {', '.join(WEEKDAYS)}")
+        days = cls._parse_days(on) if cadence == DAYS else None
+        every = (
+            cls._parse_count(on, MIN_EVERY, MAX_EVERY, "the nights between runs")
+            if cadence == EVERY
+            else None
+        )
+        day = (
+            cls._parse_count(on, MIN_MONTHLY, MAX_MONTHLY, "the day of the month")
+            if cadence == MONTHLY
+            else None
+        )
+
         template: dict[str, Any] = {
             "id": f"r{secrets.token_hex(6)}",
             "repo": str(repo),
             "task": words,
             "test": test.strip() if test and test.strip() else None,
             "cadence": cadence,
-            "weekday": weekday if cadence == WEEKLY else None,
+            "weekday": on if cadence == WEEKLY else None,
+            "days": days,
+            "every": every,
+            "day": day,
             "created": datetime.now().astimezone().isoformat(timespec="microseconds"),
             "last_queued": None,
             "last_error": None,
@@ -166,11 +240,98 @@ class NightShiftRecurring:
         """
         if template.get("last_queued") == today.isoformat():
             return False
-        if template.get("cadence") == DAILY:
+        weekday = WEEKDAYS[today.weekday()]
+        match template.get("cadence"):
+            case "daily":
+                on_its_night = True
+            case "weekly":
+                on_its_night = template.get("weekday") == weekday
+            case "days":
+                days = template.get("days")
+                on_its_night = isinstance(days, list) and weekday in days
+            case "every":
+                on_its_night = cls._due_every(template, today)
+            case "monthly":
+                on_its_night = cls._due_monthly(template, today)
+            case _:
+                on_its_night = False
+        return on_its_night
+
+    @classmethod
+    def _due_monthly(cls, template: dict[str, Any], today: date) -> bool:
+        """Whether ``today`` is a ``monthly`` template's day of the month.
+
+        A day the month does not have (the 31st in a 30-day month, the 29th to 31st in February)
+        is the month's last day.
+
+        Args:
+            template: A ``monthly`` template.
+            today: The night's date.
+
+        Returns:
+            Whether it is its day.
+        """
+        day = template.get("day")
+        if (
+            not isinstance(day, int)
+            or isinstance(day, bool)
+            or not MIN_MONTHLY <= day <= MAX_MONTHLY
+        ):
+            return False
+        return today.day == min(day, calendar.monthrange(today.year, today.month)[1])
+
+    @classmethod
+    def _due_every(cls, template: dict[str, Any], today: date) -> bool:
+        """Whether an ``every`` template is due: its first night, then N nights after it was last queued.
+
+        Counted from the night it was set, which is the first night it is due: a night the run
+        did not happen, or that ``ling night add`` refused, moves the count to the night it
+        was queued in the end, so a refused task is tried again the next night.
+
+        Args:
+            template: An ``every`` template.
+            today: The night's date.
+
+        Returns:
+            Whether to queue it.
+        """
+        every = template.get("every")
+        if (
+            not isinstance(every, int)
+            or isinstance(every, bool)
+            or not MIN_EVERY <= every <= MAX_EVERY
+        ):
+            return False
+        try:
+            last = date.fromisoformat(str(template.get("last_queued")))
+        except ValueError:
             return True
-        if template.get("cadence") == WEEKLY:
-            return template.get("weekday") == WEEKDAYS[today.weekday()]
-        return False
+        return (today - last).days >= every
+
+    @classmethod
+    def describe(cls, template: dict[str, Any]) -> str:
+        """A template's cadence in words, as ``night every add`` prints it.
+
+        Args:
+            template: A template.
+
+        Returns:
+            For example ``every night``, ``every fri``, ``on mon,wed,fri``, ``every 3 nights``.
+        """
+        match template.get("cadence"):
+            case "weekly":
+                return f"every {template.get('weekday')}"
+            case "days":
+                return f"on {','.join(template.get('days') or [])}"
+            case "every":
+                return (
+                    "every night"
+                    if template.get("every") == 1
+                    else f"every {template.get('every')} nights"
+                )
+            case "monthly":
+                return f"on day {template.get('day')} of each month"
+        return "every night"
 
     @classmethod
     def queue_due(

@@ -28,6 +28,7 @@ from dreamference.runner import (
 from dreamference.hardware import detect_gb10_hardware, download_model, download_model_with_drafter, download_all_models, clear_model_cache, clear_tensorizer_cache, model_key_for_served_id
 from dreamference.vllm_server import VLLMServerManager, DiffusionServerManager, DEFAULT_VLLM_IMAGE, DEFAULT_DIFFUSION_PORT
 from dreamference.vllm_server.model_loading_monitor import create_model_loading_monitor
+from dreamference.forge.forge_command import ForgeCommand
 from dreamference.mcp_server import main as run_mcp_server
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
@@ -878,14 +879,17 @@ class DreamferenceCLIController:
         night_dir = NightShiftQueue.night_dir()
         match args.night_every_command:
             case "add":
-                cadence = "weekly" if args.weekly else "daily"
+                cadence, value = next(
+                    ((name, getattr(args, name)) for name in ("weekly", "days", "every", "monthly")
+                     if getattr(args, name) is not None),
+                    ("daily", None))
                 try:
                     template = NightShiftRecurring.add(
-                        night_dir, Path.cwd(), " ".join(args.task), cadence, args.weekly, args.test)
+                        night_dir, Path.cwd(), " ".join(args.task), cadence, value, args.test)
                 except ValueError as error:
                     print(f"❌ {error}")
                     return 1
-                when = f"every {template['weekday']}" if args.weekly else "every night"
+                when = NightShiftRecurring.describe(template)
                 print(f"✅ Repeating task {template['id']}, {when}, in {Path.cwd()}: queued each night when due.")
                 return 0
             case "list":
@@ -900,6 +904,35 @@ class DreamferenceCLIController:
                 return 1
         print("usage: ling-admin night every {add,list,drop}")
         return 2
+
+    @classmethod
+    def handle_night_archive(cls, weeks: int) -> int:
+        """`ling-admin night archive [--weeks N]`: old runs moved to `night/archive/` (night_shift_archive.py).
+
+        Args:
+            weeks: How old a run must be, in weeks.
+
+        Returns:
+            The exit code: 0 when the archive ran, 1 when a run held the queue or `weeks` was refused.
+        """
+        from dreamference.night_shift import NightShiftArchive, NightShiftQueue
+
+        night_dir = NightShiftQueue.night_dir()
+        try:
+            outcome = NightShiftArchive.archive(night_dir, weeks)
+        except ValueError as error:
+            print(f"❌ {error}")
+            return 1
+        if outcome is None:
+            holder = NightShiftQueue.runner_holder(night_dir) or "a run"
+            print(f"❌ {holder[0].upper()}{holder[1:]} is working through the queue: archive once it ends.")
+            return 1
+        where = NightShiftArchive.archive_dir(night_dir)
+        print(f"✅ Moved {len(outcome.tasks)} finished runs older than {weeks} weeks, {outcome.logs} log files "
+              f"and {outcome.reports} reports to {where}; the branches stay in their repositories.")
+        if outcome.skipped:
+            print(f"⚠️  {len(outcome.skipped)} files stayed: the archive already holds a file of the same name.")
+        return 0
 
     @classmethod
     def handle_gate_pause(cls, vllm_host: str, duration: Optional[str]) -> int:
@@ -1375,17 +1408,31 @@ class DreamferenceCLIController:
             "every", help="Repeating tasks, queued by each night's run when due")
         night_every_subparsers = night_every_parser.add_subparsers(dest="night_every_command")
         night_every_add_parser = night_every_subparsers.add_parser(
-            "add", help="Repeat a task in this repository every night or every week")
+            "add", help="Repeat a task in this repository every night, every week, on chosen weekdays, "
+                        "every N nights or on a day of the month (`night every --<cadence>` is short for it)")
         night_every_add_cadence = night_every_add_parser.add_mutually_exclusive_group(required=True)
         night_every_add_cadence.add_argument("--daily", action="store_true", help="Every night")
         night_every_add_cadence.add_argument(
             "--weekly", choices=["mon", "tue", "wed", "thu", "fri", "sat", "sun"], help="Every week, that day's night")
+        night_every_add_cadence.add_argument("--days", help="Those weekdays' nights, comma-separated: mon,wed,fri")
+        night_every_add_cadence.add_argument(
+            "--every", type=int, metavar="N", help="Every N nights (1 to 365), counted from the night it is set")
+        night_every_add_cadence.add_argument(
+            "--monthly", type=int, metavar="D", help="That day of each month, 1 to 31; in a shorter month, the last")
         night_every_add_parser.add_argument("--test", default=None, help="The test command each run uses")
         night_every_add_parser.add_argument("task", nargs="+", help="What to do, in words")
         night_every_subparsers.add_parser("list", help="The repeating tasks, as JSON lines")
         night_every_drop_parser = night_every_subparsers.add_parser(
             "drop", help="Stop repeating a task (what it already queued stays)")
         night_every_drop_parser.add_argument("id", help="The repeating task's id (r...)")
+        from dreamference.night_shift.night_shift_archive import DEFAULT_ARCHIVE_WEEKS
+        night_archive_parser = night_subparsers.add_parser(
+            "archive",
+            help="Move finished runs' records, transcripts and reports older than some weeks "
+                 "to night/archive/ (branches stay)")
+        night_archive_parser.add_argument(
+            "--weeks", type=int, default=DEFAULT_ARCHIVE_WEEKS,
+            help=f"How old a run must be, in weeks (default {DEFAULT_ARCHIVE_WEEKS})")
         night_pause_parser = night_subparsers.add_parser("pause", help="Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate)")
         night_pause_parser.add_argument("--for", dest="duration", default="1h", help="How long: 90m, 2h, 45s, or minutes (default 1h)")
         night_subparsers.add_parser("resume", help="End a pause: the model gate refuses everyone but the benchmark run again")
@@ -1427,6 +1474,8 @@ class DreamferenceCLIController:
         node_enable_parser = node_subparsers.add_parser("enable", help="Advertise the node and publish the web UI and web search to the local network")
         node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get ling and web search only")
         node_enable_parser.add_argument("--yes", action="store_true", help="Never wait for input: root through `sudo -n` only, with no terminal needed (what install.sh runs)")
+        node_enable_parser.add_argument("--no-forge", action="store_true",
+                                        help="Do not set up the node's forge (Forgejo); `forge on` does it later")
         node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
         node_status_parser = node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status")
         node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `ling-admin status` instead")
@@ -1478,12 +1527,18 @@ class DreamferenceCLIController:
         node_provision_parser.add_argument("--mesh", action="store_true", help="Also pair every node with every other (not built yet)")
         node_provision_parser.add_argument("--web", action="store_true", help="Also share the web UI (`ling web`) on the LAN there: `node enable` without `--no-web`")
         node_provision_parser.add_argument("--no-start", action="store_true", help="Leave the model server stopped")
+        node_provision_parser.add_argument("--no-forge", action="store_true",
+                                           help="Set the nodes up without their forge (Forgejo)")
         node_provision_parser.add_argument("--restart", action="store_true", help="Restart a running model server")
         node_provision_parser.add_argument("--os-update", action="store_true", help="NVIDIA's OS and firmware update first, with a reboot")
         node_provision_parser.add_argument("--dry-run", action="store_true", help="Connect and read only, then print what each machine would change")
         node_provision_parser.add_argument("--via", default=None, help="With one host: copy and install over this address instead (a QSFP link's)")
         node_provision_parser.add_argument("--match", default=None, help="With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-")
         node_provision_parser.add_argument("--start-timeout", type=int, default=None, help="Seconds to wait for a started model server (default 1200)")
+        node_provision_parser.add_argument(
+            "--role", choices=["night", "engine"], default=None,
+            help="Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, "
+                 "the role's setup and a readiness report (docs/dev/node.md)")
         node_subparsers.add_parser("prepare", help="(Run with sudo) the root steps of a node install, for the user who ran sudo, and nothing else")
         node_subparsers.add_parser("askpass", help=argparse.SUPPRESS)
         node_job_exec_parser = node_subparsers.add_parser("job-exec", help="(Run inside a job's systemd unit) carry out one job")
@@ -1491,6 +1546,9 @@ class DreamferenceCLIController:
         node_subparsers.add_parser("authorize", help="(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only")
         node_serve_parser = node_subparsers.add_parser("serve-job", help="(Run by sshd as a paired key's forced command) carry out one node operation")
         node_serve_parser.add_argument("--key", default=None, help="The connecting key's tag")
+
+        # Command: ling-admin forge (the node's Forgejo; specs/DREAMFERENCE_MIGHTLING_FORGEJO.md §7)
+        ForgeCommand.add_parser(subparsers)
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
@@ -1695,6 +1753,28 @@ class DreamferenceCLIController:
         return parser
 
     @classmethod
+    def night_every_shorthand(cls, argv: list[str]) -> list[str]:
+        """`night every --<cadence> …` read as `night every add --<cadence> …` (DESKTOP §16 B42).
+
+        Only when `night every` are the first two words after the global options and a cadence
+        flag follows them; anything else (`list`, `drop`, `add`, `--help`, task words) is left as it is.
+
+        Args:
+            argv: The arguments.
+
+        Returns:
+            The arguments, with `add` inserted where the shorthand is used.
+        """
+        at = 0
+        while at < len(argv) and argv[at] in ("--config", "--agent", "--hf-token"):
+            at += 2
+        cadences = ("--daily", "--weekly", "--days", "--every", "--monthly")
+        flag = argv[at + 2:at + 3]
+        if argv[at:at + 2] == ["night", "every"] and flag and flag[0].split("=")[0] in cadences:
+            return [*argv[:at + 2], "add", *argv[at + 2:]]
+        return argv
+
+    @classmethod
     def run_cli(cls, argv: Optional[List[str]] = None) -> None:
         """
         Main execution entrypoint for CLI command parsing and subcommand dispatching.
@@ -1703,7 +1783,7 @@ class DreamferenceCLIController:
             argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.
         """
         parser = cls.build_parser()
-        args = parser.parse_args(argv)
+        args = parser.parse_args(cls.night_every_shorthand(list(sys.argv[1:] if argv is None else argv)))
 
         # Loopback and the model server never go through a proxy a shell left set, for every request
         # made here and every process started from here (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §11).
@@ -2807,7 +2887,13 @@ class DreamferenceCLIController:
         elif args.command == "node":
             from dreamference.node import NodeAdvertiser
             if args.node_command == "enable":
-                sys.exit(0 if NodeAdvertiser.enable(no_web=args.no_web, yes=args.yes) else 1)
+                enabled = NodeAdvertiser.enable(no_web=args.no_web, yes=args.yes)
+                if enabled and not args.no_forge:
+                    # The forge is part of the node (FORGEJO O1); a node works without it, so its
+                    # failure is reported and does not fail the enable.
+                    from dreamference.forge.forge_service import ForgeService
+                    ForgeService.setup()
+                sys.exit(0 if enabled else 1)
             if args.node_command == "disable":
                 sys.exit(0 if NodeAdvertiser.disable() else 1)
             if args.node_command == "status" and not args.name:
@@ -2865,8 +2951,8 @@ class DreamferenceCLIController:
             if args.node_command == "provision":
                 from dreamference.node.node_provisioner import NodeProvisioner
                 options = {name: getattr(args, name) for name in (
-                    "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start",
-                    "restart", "os_update", "dry_run", "via", "match", "start_timeout")}
+                    "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start", "no_forge",
+                    "restart", "os_update", "dry_run", "via", "match", "start_timeout", "role")}
                 sys.exit(NodeProvisioner(args.hosts, options).run())
             if args.node_command == "prepare":
                 from dreamference.node.node_prepare import NodePrepare
@@ -2880,6 +2966,9 @@ class DreamferenceCLIController:
                 sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
             print("usage: ling-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
             sys.exit(2)
+
+        elif args.command in ForgeCommand.COMMANDS:
+            sys.exit(ForgeCommand.dispatch(args))
 
         elif args.command == "host":
             from dreamference.vllm_server import HostSafetySetup
@@ -2909,7 +2998,9 @@ class DreamferenceCLIController:
                 sys.exit(cls.handle_gate_pause(config.vllm_host, args.duration if args.night_command == "pause" else None))
             if args.night_command in ("every",):
                 sys.exit(cls.handle_night_every(args))
-            print("usage: ling-admin night {enable,disable,status,run,every,pause,resume}")
+            if args.night_command in ("archive",):
+                sys.exit(cls.handle_night_archive(args.weeks))
+            print("usage: ling-admin night {enable,disable,status,run,every,archive,pause,resume}")
             sys.exit(2)
 
         elif args.command == "code":

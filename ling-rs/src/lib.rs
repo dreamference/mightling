@@ -53,6 +53,7 @@ pub mod compat_keys;
 pub mod compat_print;
 pub mod compat_tui;
 pub mod compaction;
+pub mod delegate;
 pub mod docs_index;
 pub mod exec_tool;
 pub mod guard;
@@ -62,6 +63,7 @@ pub mod images;
 pub mod ledger;
 pub mod loop_guard;
 pub mod mask;
+pub mod monitor;
 pub mod night;
 pub mod node;
 pub mod node_command;
@@ -120,13 +122,13 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal", "sync", "monitor", "delegate",
 ];
 
 /// The launcher's own subcommands, handled before Codex parses the command line.
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
-    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync",
+    "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync", "monitor", "delegate",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -474,6 +476,20 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "loop-guard"
     {
         std::process::exit(loop_guard::run_cli(&user_args[index + 1..]));
+    }
+    // `monitor` is the session monitor: one check, its summary, its timer (monitor.rs;
+    // specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md Part B).
+    if let Some(index) = subcommand
+        && user_args[index] == "monitor"
+    {
+        std::process::exit(monitor::run_cli(&user_args[index + 1..]));
+    }
+    // `delegate` is the Claude Code delegation plugin server and CLI (delegate.rs;
+    // specs/DREAMFERENCE_MIGHTLING_CLAUDE_PLUGIN.md Part A).
+    if let Some(index) = subcommand
+        && user_args[index] == "delegate"
+    {
+        std::process::exit(delegate::run_cli(&user_args[index + 1..]));
     }
     // `refine` shows refine mode's setting, and `refine hook` is its hook in the TUI (refine.rs).
     if let Some(index) = subcommand
@@ -1363,6 +1379,11 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     set_if_absent(features, "guardian_approval", false);
     // Plugins are allowed; the vendor's remote catalogue and plugin sharing are not (plugins.rs).
     plugins::close_vendor_features(features);
+    // Codex's `non_prefixed_mcp_tool_names` names an MCP server's namespace after the server alone,
+    // without `mcp__`, and ling-tools flattens only `mcp__` namespaces into function tools (patch
+    // 0020). The model servers drop a namespace entry, so that server's tools would never reach
+    // the model. Forced off, whatever the file says (the table form included).
+    features["non_prefixed_mcp_tool_names"] = value(false);
 
     // Sandboxed commands have the network whenever /airgapped is off (owner decision, 2026-10-22):
     // without it the workspace-write sandbox also blocks DNS, and `pip install`, `git fetch` and the
@@ -1895,6 +1916,21 @@ mod tests {
         };
         assert_eq!(guardian(""), Some(false));
         assert_eq!(guardian("[features]\nguardian_approval = true\n"), Some(true));
+    }
+
+    #[test]
+    fn mcp_namespaces_keep_their_prefix_so_they_are_flattened() {
+        let feature = |existing: &str| {
+            let text = updated_config(existing, Path::new("/h/c.json"), "http://x:8000").unwrap_or_default();
+            let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+            parsed.get("features").and_then(|features| features.get("non_prefixed_mcp_tool_names")).cloned()
+        };
+        assert_eq!(feature(""), Some(toml::Value::Boolean(false)));
+        assert_eq!(feature("[features]\nnon_prefixed_mcp_tool_names = true\n"), Some(toml::Value::Boolean(false)));
+        assert_eq!(
+            feature("[features.non_prefixed_mcp_tool_names]\nenabled = true\nserver_names = [\"notes\"]\n"),
+            Some(toml::Value::Boolean(false))
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 import { parentOf } from "./files";
 
-export type ArtifactKind = "markdown" | "image" | "pdf" | "html" | "latex";
+export type ArtifactKind = "markdown" | "image" | "pdf" | "html" | "latex" | "table" | "office";
 
 const KINDS: Record<string, ArtifactKind> = {
   md: "markdown", markdown: "markdown", mdx: "markdown",
@@ -14,6 +14,8 @@ const KINDS: Record<string, ArtifactKind> = {
   pdf: "pdf",
   html: "html", htm: "html", xhtml: "html",
   tex: "latex",
+  csv: "table", tsv: "table",
+  docx: "office", doc: "office", xlsx: "office", xls: "office", pptx: "office", ppt: "office", odt: "office", ods: "office", odp: "office", rtf: "office",
 };
 
 export const IMAGE_TYPES: Record<string, string> = {
@@ -40,7 +42,7 @@ export function imageType(path: string): string {
 /** Whether a kind has a text source worth a Source view (an SVG does; a PNG does not). */
 export function hasSource(path: string): boolean {
   const kind = artifactKind(path);
-  return kind === "markdown" || kind === "html" || kind === "latex" || extension(path) === "svg";
+  return kind === "markdown" || kind === "html" || kind === "latex" || kind === "table" || extension(path) === "svg";
 }
 
 /** A reference that would leave the machine, or a scheme that is not a file: never loaded. */
@@ -124,4 +126,62 @@ export function createdArtifacts(item: { type: string; status?: string; changes?
   return item.changes
     .filter((change) => change.kind.type === "add" && AUTO_OPENED.has(artifactKind(change.path) as ArtifactKind))
     .map((change) => (change.path.startsWith("/") || !cwd ? change.path : `${cwd.replace(/\/+$/, "")}/${change.path}`));
+}
+
+/** The most rows and columns a CSV tab shows (DESKTOP §16 B27); the rest is counted, not drawn. */
+export const TABLE_ROWS = 1000;
+export const TABLE_COLUMNS = 50;
+
+/** A CSV or TSV file read as a table, capped, with how much was left out. */
+export interface ParsedTable {
+  rows: string[][];
+  /** All the rows in the file, the header included. */
+  totalRows: number;
+  /** The widest row's cells. */
+  totalColumns: number;
+}
+
+/** The separator a table file uses: a tab for `.tsv`; for `.csv` a comma, or a semicolon when its first line has more of those. */
+export function tableSeparator(path: string, text: string): string {
+  if (extension(path) === "tsv") return "\t";
+  const first = text.slice(0, text.search(/\r?\n/) >= 0 ? text.search(/\r?\n/) : text.length);
+  return (first.match(/;/g)?.length ?? 0) > (first.match(/,/g)?.length ?? 0) ? ";" : ",";
+}
+
+/** Splits delimited text into rows of cells, RFC 4180 quoting included (a quoted cell may hold the separator, a doubled quote and line breaks). */
+export function parseTable(text: string, separator: string, maxRows = TABLE_ROWS, maxColumns = TABLE_COLUMNS): ParsedTable {
+  const rows: string[][] = [];
+  let totalRows = 0;
+  let totalColumns = 0;
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  const endRow = () => {
+    row.push(cell);
+    cell = "";
+    totalRows++;
+    totalColumns = Math.max(totalColumns, row.length);
+    if (rows.length < maxRows) rows.push(row.slice(0, maxColumns));
+    row = [];
+  };
+  const body = text.replace(/^\uFEFF/, "");
+  for (let index = 0; index < body.length; index++) {
+    const char = body[index];
+    if (quoted) {
+      if (char === '"' && body[index + 1] === '"') {
+        cell += '"';
+        index++;
+      } else if (char === '"') quoted = false;
+      else cell += char;
+    } else if (char === '"' && cell === "") quoted = true;
+    else if (char === separator) {
+      row.push(cell);
+      cell = "";
+    } else if (char === "\n" || char === "\r") {
+      if (char === "\r" && body[index + 1] === "\n") index++;
+      endRow();
+    } else cell += char;
+  }
+  if (cell !== "" || row.length > 0) endRow();
+  return { rows, totalRows, totalColumns };
 }

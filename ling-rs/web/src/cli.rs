@@ -71,6 +71,21 @@ pub fn advertised_web(home: &Path) -> bool {
     value.get("advertise") == Some(&Value::Bool(true)) && value.get("web") != Some(&Value::Bool(false))
 }
 
+/// This node's name in the remote-access overlay (`~/.config/dreamference/remote/remote.json`,
+/// written by `ling-admin remote setup`), once the node is a peer: an enrolled client off the LAN
+/// opens `http://<that name>:3100/` (REMOTE_ACCESS §4.3). Only a name of the node's own shape
+/// (`mightling-<id>.<domain>`, letters, digits, dots and hyphens) is taken.
+pub fn overlay_name(home: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(home.join(".config/dreamference/remote/remote.json")).ok()?;
+    let value = serde_json::from_str::<Value>(&text).ok()?;
+    if value.get("node_peer") != Some(&Value::Bool(true)) {
+        return None;
+    }
+    let name = value.get("overlay_name")?.as_str()?.trim().to_ascii_lowercase();
+    let plain = name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    (plain && name.starts_with("mightling-") && name.contains('.')).then_some(name)
+}
+
 /// This machine's addresses and names on the network: what a device on the LAN may put in `Host`.
 pub fn lan_names() -> Vec<String> {
     let mut names = Vec::new();
@@ -269,7 +284,7 @@ async fn serve_command(args: &[String], environment: &Environment) -> i32 {
         codex_home: environment.codex_home.clone(),
         state_dir: state.clone(),
         port,
-        lan_names: if lan { lan_names() } else { Vec::new() },
+        lan_names: if lan { lan_names().into_iter().chain(overlay_name(&environment.home)).collect() } else { Vec::new() },
         public_names: ling_airgapped::user_config_file()
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|text| crate::telegram_app::mini_app_url(&text))
@@ -587,6 +602,25 @@ mod tests {
         assert!(!advertised_web(&home));
         std::fs::write(&file, "not json").unwrap();
         assert!(!advertised_web(&home));
+    }
+
+    #[test]
+    fn a_node_in_the_overlay_answers_to_its_overlay_name() {
+        let home = scratch("overlay");
+        assert_eq!(overlay_name(&home), None);
+        let file = home.join(".config/dreamference/remote/remote.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let name = "mightling-00000000-0000-4000-8000-000000000000.netbird.selfhosted";
+        std::fs::write(&file, format!(r#"{{"overlay_name": "{name}"}}"#)).unwrap();
+        assert_eq!(overlay_name(&home), None, "not yet a peer");
+        std::fs::write(&file, format!(r#"{{"overlay_name": "{name}", "node_peer": true}}"#)).unwrap();
+        assert_eq!(overlay_name(&home).as_deref(), Some(name));
+        std::fs::write(&file, r#"{"overlay_name": "evil.example.org", "node_peer": true}"#).unwrap();
+        assert_eq!(overlay_name(&home), None, "only the node's own shape");
+        std::fs::write(&file, r#"{"overlay_name": "mightling-x.y/z", "node_peer": true}"#).unwrap();
+        assert_eq!(overlay_name(&home), None);
+        std::fs::write(&file, "not json").unwrap();
+        assert_eq!(overlay_name(&home), None);
     }
 
     #[test]

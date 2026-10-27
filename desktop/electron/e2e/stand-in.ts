@@ -68,6 +68,18 @@ export function threads(home: string, askRoot: string) {
   ];
 }
 
+/** MIGHTLING_STAND_IN_IDLE=1 (DESKTOP §16 B43): nothing running, the question and a Work thread left two days ago. */
+export function idleThreads(home: string, askRoot: string) {
+  const { fetcher } = projectFolders(home);
+  const question = threads(home, askRoot).find((entry) => entry.id === "q1");
+  return [question, thread("w5", fetcher, "Speed up the CSV import", "Speed up the CSV import", Math.floor(Date.now() / 1000) - 2 * 24 * 3600, [{
+    id: "t5", status: "completed", error: null, items: [
+      { type: "userMessage", id: "u5", content: text("The CSV import takes a minute for 100k rows. Make it faster.") },
+      { type: "agentMessage", id: "a5", text: "Rows are now read in batches of 1000; the import takes 6 seconds." },
+    ],
+  }])];
+}
+
 const FILES = ["fetcher/client.py", "fetcher/__init__.py", "fetcher/backoff.py", "tests/test_fetch.py", "README.md", "pyproject.toml"];
 
 /** Writes the stand-in `ling` into `home` and returns its path. */
@@ -117,16 +129,23 @@ if (process.argv[2] === "night" && process.argv[3] === "every") {
   if (process.argv[4] === "drop") { fs.writeFileSync(kept, JSON.stringify(list.filter((entry) => entry.id !== process.argv[5]))); console.log("Repeating task " + process.argv[5] + " dropped."); process.exit(0); }
   const args = process.argv.slice(5);
   const weekly = args[0] === "--weekly" ? args[1] : null;
+  // DESKTOP §16 B42: on chosen weekdays, every N nights, on a day of the month, kept as the real template keeps them.
+  const flag = ["--days", "--every", "--monthly"].find((name) => args[0] === name);
+  const more = flag === "--days" ? { cadence: "days", days: args[1].split(",") } : flag === "--every" ? { cadence: "every", every: Number(args[1]) } : flag === "--monthly" ? { cadence: "monthly", day: Number(args[1]) } : {};
   const test = args.includes("--test") ? args[args.indexOf("--test") + 1] : null;
   const task = args.slice(args.indexOf("--") + 1).join(" ");
   const id = "r" + String(list.length + 1).padStart(12, "0");
-  list.push({ id, repo: process.cwd(), task, test, cadence: weekly ? "weekly" : "daily", weekday: weekly, created: "2026-10-21T12:00:00+01:00", last_queued: null, last_error: null });
+  list.push({ id, repo: process.cwd(), task, test, cadence: weekly ? "weekly" : "daily", weekday: weekly, ...more, created: "2026-10-21T12:00:00+01:00", last_queued: null, last_error: null });
   fs.writeFileSync(kept, JSON.stringify(list));
-  console.log("Repeating task " + id + ", " + (weekly ? "every " + weekly : "every night") + ".");
+  console.log("Repeating task " + id + ", " + (weekly ? "every " + weekly : flag ? flag.slice(2) + " " + args[1] : "every night") + ".");
   process.exit(0);
 }
+// ling night apply <id> (DESKTOP §16 B40): says where it ran, as the real one names the checkout.
+if (process.argv[2] === "night" && process.argv[3] === "apply") { console.log("Applied night/" + process.argv[4] + " to " + process.cwd() + " as uncommitted changes."); process.exit(0); }
 if (process.argv[2] === "night") { console.log(process.argv[3] === "add" ? "Queued 20261017-0930 on branch night/20261017-0930, from 1a2b3c4d5e." : "Dropped " + process.argv[4] + "."); process.exit(0); }
-const threads = ${JSON.stringify(threads(home, askRoot))};
+// MIGHTLING_STAND_IN_EMPTY=1: someone with no threads yet, as at the first start (DESKTOP §16 B6).
+const threads = process.env.MIGHTLING_STAND_IN_EMPTY === "1" ? [] : ${JSON.stringify(threads(home, askRoot))};
+if (process.env.MIGHTLING_STAND_IN_IDLE === "1") threads.splice(0, threads.length, ...${JSON.stringify(idleThreads(home, askRoot))});
 const files = ${JSON.stringify(FILES)};
 const fetcher = ${JSON.stringify(fetcher)};
 const log = ${JSON.stringify(path.join(home, "received.jsonl"))};
@@ -192,6 +211,11 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     }
     case "thread/list":
       if (p.archived) return answer({ data: [{ ...threads[0], id: "old1", name: "Try a smaller hero image", turns: [] }], nextCursor: null });
+      // MIGHTLING_STAND_IN_PAGES=1 (DESKTOP §16 B10): a second page holds a thread of a project seen nowhere else.
+      if (process.env.MIGHTLING_STAND_IN_PAGES === "1") {
+        if (p.cursor === "page-2") return answer({ data: [{ ...threads[0], id: "old-quiet", cwd: require("node:path").join(${JSON.stringify(home)}, "quiet"), name: "Rename the old config keys", preview: "Rename the old config keys", updatedAt: 1000, createdAt: 1000, turns: [] }], nextCursor: null });
+        return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: "page-2" });
+      }
       return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null });
     case "permissionProfile/list": return answer({ data: [":read-only", ":workspace", ":danger-full-access"].map((id) => ({ id, allowed: true })) });
     case "model/list": return answer({ data: [model], nextCursor: null });
@@ -241,6 +265,14 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       answer({ cleared: true });
       return say({ method: "thread/goal/cleared", params: { threadId: p.threadId } });
     case "thread/archive": return answer({});
+    case "thread/delete": {
+      // Deleted for good (DESKTOP §16 B36): the thread and the subagents' threads it started, each said as deleted.
+      const gone = threads.filter((t) => t.id === p.threadId || t.parentThreadId === p.threadId).map((t) => t.id);
+      if (!gone.length) return say({ id: m.id, error: { code: -32600, message: "thread not found: " + p.threadId } });
+      for (const id of gone) threads.splice(threads.findIndex((t) => t.id === id), 1);
+      answer({});
+      return gone.forEach((id) => say({ method: "thread/deleted", params: { threadId: id } }));
+    }
     case "thread/unarchive": return answer({ thread: { ...(threads.find((t) => t.id === p.threadId) || { ...threads[0], id: p.threadId, name: "Try a smaller hero image" }), turns: [] } });
     case "thread/name/set": {
       const found = threads.find((t) => t.id === p.threadId);
@@ -277,6 +309,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       const at = turns.findIndex((t) => t.id === (p.lastTurnId || p.beforeTurnId));
       const cut = at < 0 ? turns : p.lastTurnId ? turns.slice(0, at + 1) : turns.slice(0, at);
       const copy = { ...source, turns: cut, id: source.id + "-fork" + (p.lastTurnId || p.beforeTurnId ? "-" + next++ : ""), name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
+      // A fork into another folder (DESKTOP §16 B33: an Ask question continued in a project) works there.
+      if (p.cwd) copy.cwd = p.cwd;
       threads.push(copy);
       return answer({ thread: copy, model: "qwen3.8-27b", modelProvider: "local", cwd: copy.cwd });
     }
@@ -340,6 +374,18 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
                 { label: "The tests", description: "tests/test_client.py" }] },
               { id: "token", header: "Token", question: "The staging token?", isOther: false, isSecret: true, options: null }] } });
           }
+          // A command to approve with a rule proposed for later (DESKTOP §16 B8).
+          if (asked.includes("with a rule")) {
+            say({ id: "approve-rule", method: "item/commandExecution/requestApproval", params: { threadId: p.threadId, turnId: id, itemId: "c" + id, command: "cargo test -p fetcher",
+              proposedExecpolicyAmendment: ["cargo", "test"], proposedNetworkPolicyAmendments: [{ host: "crates.io", action: "allow" }] } });
+          }
+          // An MCP tool call with its arguments, progress and result (DESKTOP §16 B11).
+          if (asked.includes("with a tool")) {
+            const call = { type: "mcpToolCall", id: "t" + id, server: "tickets", tool: "create_ticket", status: "inProgress", arguments: { title: "Retry swallows errors", team: "web" }, appContext: null, mcpAppUi: null, pluginId: null, readOnlyHint: null, result: null, error: null, durationMs: null };
+            say({ method: "item/started", params: { threadId: p.threadId, turnId: id, item: call } });
+            say({ method: "item/mcpToolCall/progress", params: { threadId: p.threadId, turnId: id, itemId: call.id, message: "Filing under web" } });
+            say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { ...call, status: "completed", durationMs: 1200, result: { content: [{ type: "text", text: "Created OPS-12" }], structuredContent: null, _meta: null } } } });
+          }
           if (asked.includes("with a report")) {
             // An answer that makes a file in its folder (DESKTOP_PARITY_CLAUDE §4.1): written, then reported as added.
             const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
@@ -347,6 +393,15 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
             require("node:fs").writeFileSync(report, "# Memory on the GB10\\n\\nOne pool of LPDDR5X, shared by the CPU and the GPU.\\n");
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
               changes: [{ path: report, kind: { type: "add" }, diff: "+# Memory on the GB10\\n" }] } } });
+          }
+          // /init (DESKTOP §16 B38): AGENTS.md at the folder's root, added, or edited when one is there.
+          if (asked.includes("AGENTS.md for this repository") || asked.startsWith("This repository already has an AGENTS.md")) {
+            const own = threads.find((t) => t.id === p.threadId) || unlisted[p.threadId];
+            const agents = require("node:path").join((own && own.cwd) || "/tmp", "AGENTS.md");
+            const had = require("node:fs").existsSync(agents);
+            require("node:fs").appendFileSync(agents, "# fetcher\\n\\nTests: pytest -q\\n");
+            say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "fileChange", id: "f" + id, status: "completed",
+              changes: [{ path: agents, kind: had ? { type: "update", move_path: null } : { type: "add" }, diff: "+# fetcher\\n+\\n+Tests: pytest -q\\n" }] } } });
           }
           // The window's own tools (the owner's decision 5): the agent reads the terminal and the preview's console.
           if (asked.includes("with the terminal")) {
@@ -356,7 +411,9 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }
-          const answerItem = { type: "agentMessage", id: "m" + id, text: asked.includes("with a source")
+          const answerItem = { type: "agentMessage", id: "m" + id, text: asked.includes("with a diagram")
+            ? "The retry, drawn:\\n\\n\u0060\u0060\u0060mermaid\\nflowchart LR\\n  A[Request] --> B{Failed?}\\n  B -- yes --> C[Wait, then retry]\\n  B -- no --> D[Answer]\\n\u0060\u0060\u0060\\n"
+            : asked.includes("with a source")
             ? "NVFP4 is described on [NVIDIA's developer blog](https://developer.nvidia.com/blog/nvfp4/) [1].\\n\\n[1] https://developer.nvidia.com/blog/nvfp4/"
             : "Done: the retry counter is in fetcher/client.py." };
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: answerItem } });
@@ -366,6 +423,26 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           // As ling sends it: the completed turn lists the answer alone, not what the turn streamed.
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
         }, planned ? 4000 : 300);
+      }
+      // A side chat (DESKTOP §16 B37): unkept and read-only, known by the recap its first message carries; its turns stream.
+      const sideWords = String(((p.input || [])[0] || {}).text || "");
+      if (String(p.threadId).startsWith("e") && unlisted[p.threadId] && (unlisted[p.threadId].side || sideWords.includes("Context: this was asked in the conversation"))) {
+        unlisted[p.threadId].side = true;
+        answer({ turn: { id, items: [], status: "inProgress", error: null } });
+        say({ method: "turn/started", params: { threadId: p.threadId, turn: { id, items: [], status: "inProgress", error: null } } });
+        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "userMessage", id: "u" + id, content: p.input || [] } } });
+        return setTimeout(() => {
+          const sideAnswer = { type: "agentMessage", id: "m" + id, text: sideWords.includes("Context:") ? "Left: the docs. The retry fix is in." : "Yes, only the docs." };
+          say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: sideAnswer } });
+          say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [sideAnswer], status: "completed", error: null } } });
+        }, 300);
+      }
+      // A finished chat's summary (DESKTOP §16 B43): two lines, in a read-only, unkept thread.
+      if (String(p.threadId).startsWith("e") && sideWords.startsWith("Below is a conversation between")) {
+        answer({ turn: { id, items: [], status: "inProgress", error: null } });
+        const summary = { type: "agentMessage", id: "m" + id, text: "- Wanted the CSV import made faster\\n- Done: rows read in batches of 1000" };
+        say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: summary } });
+        return say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [summary], status: "completed", error: null } } });
       }
       if (String(p.threadId).startsWith("e")) {
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
@@ -387,12 +464,21 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     case "config/read": return answer({ config, origins: {}, layers: null });
     case "plugin/list": return answer({ marketplaces: [{ name: "Team tools", path: "/srv/team/marketplace.json", interface: null, plugins: [
       { id: "lint@team", remotePluginId: null, version: "1.2.0", localVersion: null, name: "lint", shareContext: null, source: { type: "local", path: "/srv/team/lint" }, installed: false, installedAt: null, enabled: false,
-        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: [] }] }],
+        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: [] },
+      { id: "format@team", remotePluginId: null, version: "0.3.0", localVersion: null, name: "format", shareContext: null, source: { type: "local", path: "/srv/team/format" }, installed: true, installedAt: null, enabled: true,
+        installPolicy: "AVAILABLE", installPolicySource: null, mustShowInstallationInterstitial: null, authPolicy: "ON_INSTALL", availability: "AVAILABLE", disabledReason: null, eligiblePlanTypes: null, interface: null, keywords: ["style"] }] }],
       marketplaceLoadErrors: [], featuredPluginIds: [] });
+    case "plugin/read": return answer({ plugin: { marketplaceName: "Team tools", marketplacePath: p.marketplacePath, shareUrl: null, description: "Runs the team's checks before a commit.", onboardingSkill: null, appTemplates: [], scheduledTasks: null,
+      summary: { id: p.pluginName + "@team", name: p.pluginName, version: "1.2.0", localVersion: null, keywords: [] }, skills: [{ name: "lint-check", description: "Lints the changed files", shortDescription: null, interface: null, path: null, enabled: true }],
+      hooks: [{ key: "lint:postToolUse:0", eventName: "postToolUse" }], apps: [], mcpServers: ["lint-server"] } });
+    case "marketplace/remove": return answer({ marketplaceName: p.marketplaceName, installedRoot: null });
     case "plugin/install": return answer({ authPolicy: "ON_INSTALL", appsNeedingAuth: [] });
     case "plugin/uninstall": return answer({});
     case "skills/config/write": return answer({ effectiveEnabled: p.enabled });
-    case "config/mcpServer/reload": return answer({});
+    case "config/mcpServer/reload":
+      // A reload restarts the servers: one reports how its start went (DESKTOP §16 B34).
+      say({ method: "mcpServer/startupStatus/updated", params: { threadId: null, name: "ling-code", status: "failed", error: "exited with status 1", failureReason: null } });
+      return answer({});
     case "hooks/list": return answer({ data: [{ cwd: (p.cwds || ["/"])[0], warnings: [], errors: [], hooks: [
       { key: "ledger", eventName: "Stop", matcher: null, timeoutSec: 30, statusMessage: null, additionalContextLimit: null, sourcePath: "/home/u/.mightling/hooks.json", source: "user",
         pluginId: null, displayOrder: 0, isManaged: true, currentHash: "x", handlerType: "command", command: "ling ledger", async: false },
@@ -402,6 +488,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     ].map((hook) => hookOf(hook.key, hook)) }] });
     case "config/batchWrite": {
       for (const edit of p.edits || []) {
+        if (String(edit.keyPath).startsWith("mcp_servers.") && edit.value === null && config.mcp_servers) delete config.mcp_servers[edit.keyPath.slice(12)];
         if (edit.keyPath !== "hooks.state") continue;
         for (const [key, value] of Object.entries(edit.value || {})) hookState[key] = { ...(hookState[key] || {}), ...value };
       }
@@ -421,7 +508,13 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       answer({ turn: { id, items: [], status: "inProgress", error: null }, reviewThreadId: where });
       say({ method: "turn/started", params: { threadId: where, turn: { id, items: [], status: "inProgress", error: null } } });
       say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "enteredReviewMode", id: "rv1", review: "uncommitted changes" } } });
-      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "exitedReviewMode", id: "rv2", review: "**One finding.** fetcher/client.py:15 re-raises without the attempt count in the message." } } });
+      // Asked for findings (DESKTOP §16 B12): the block as ling formats it, one on a line of the turn's diff and one elsewhere.
+      const withFindings = p.target && p.target.type === "custom" && /findings/.test(String(p.target.instructions || ""));
+      const at = require("node:path").join(${JSON.stringify(projectFolders(home).fetcher)}, "fetcher");
+      const review = withFindings
+        ? "Two things to fix.\\n\\nFull review comments:\\n\\n- Timeout is hard-coded — " + at + "/client.py:14-14\\n  Pass the timeout in from the caller.\\n\\n- Backoff has no cap — " + at + "/backoff.py:3-5\\n  The delay doubles without a ceiling."
+        : "**One finding.** fetcher/client.py:15 re-raises without the attempt count in the message.";
+      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "exitedReviewMode", id: "rv2", review } } });
       return say({ method: "turn/completed", params: { threadId: where, turn: { id, items: [], status: "completed", error: null } } });
     }
     // A stand-in PTY: a fake shell that echoes what is typed and runs echo, enough to show the
@@ -508,7 +601,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       if (watches[p.watchId]) watches[p.watchId].close();
       delete watches[p.watchId];
       return answer({});
-    case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null }], nextCursor: null });
+    case "mcpServerStatus/list": return answer({ data: [{ name: "ling-code", tools: { def: {}, refs: {}, callers: {} }, toolsError: null },
+      ...Object.keys(config.mcp_servers || {}).map((name) => ({ name, tools: {}, toolsError: null, runtimeStatus: null, pluginId: null }))], nextCursor: null });
     default: return answer({ data: [] });
   }
 });

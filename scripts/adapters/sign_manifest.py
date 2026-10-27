@@ -35,7 +35,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -368,8 +368,10 @@ class ManifestSigner:
         repo, revision, digest = (section.get(key) for key in ("repo", "revision", "digest"))
         if not isinstance(repo, str) or not repo:
             raise ValueError("drafter_base.repo is not a repository")
-        if not isinstance(revision, str) or not REVISION.fullmatch(revision):
-            raise ValueError("drafter_base.revision is not a commit")
+        source = ModelMatrixRegistry.get_release_source(repo)
+        released = source is not None and revision == source["revision"]
+        if not isinstance(revision, str) or not (REVISION.fullmatch(revision) or released):
+            raise ValueError("drafter_base.revision is not a commit (nor a release-hosted drafter's tag)")
         if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
             raise ValueError("drafter_base.digest is not a sha256 digest")
         return repo, revision, digest
@@ -479,6 +481,9 @@ class ManifestSigner:
         Returns:
             str: `sha256:<hex>`.
         """
+        source = ModelMatrixRegistry.get_release_source(repo)
+        if source is not None and source["revision"] == revision:
+            return cls.release_base_digest(source)
         remote = hub.files(repo, revision)
         with tempfile.TemporaryDirectory(prefix="adapter-base-") as work:
             staged, downloads = Path(work) / "snapshot", Path(work) / "downloads"
@@ -493,6 +498,26 @@ class ManifestSigner:
                 else:
                     sha = cls.remote_sha256(found, repo, revision, hub, downloads)
                     target.write_bytes(cls._downloaded(downloads / path, sha))
+            return AdapterBaseDigest.compute(staged)
+
+    @classmethod
+    def release_base_digest(cls, source: dict[str, Any]) -> str:
+        """`AdapterBaseDigest.compute` over a release-hosted model's snapshot, staged from its pins.
+
+        Every file of such a model is pinned by SHA-256 in the registry, and its snapshot links each
+        to a blob of that name, which is what `AdapterBaseDigest.file_hash` reads: no download.
+
+        Args:
+            source: The model's release source (ModelMatrixRegistry.get_release_source).
+
+        Returns:
+            str: `sha256:<hex>`.
+        """
+        with tempfile.TemporaryDirectory(prefix="adapter-base-") as work:
+            staged = Path(work) / "snapshot"
+            staged.mkdir()
+            for name, pin in source["files"].items():
+                (staged / name).symlink_to(Path("blobs") / pin["sha256"])
             return AdapterBaseDigest.compute(staged)
 
     @classmethod

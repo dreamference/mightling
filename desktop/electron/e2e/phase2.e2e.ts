@@ -705,6 +705,8 @@ test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task 
     await expect.poll(() => runs(home).filter((args) => args[0] === "night" && args[1] !== "every").map((args) => args.join(" "))).toEqual([
       "night add Update the changelog for 1.7", "night drop 20261016-2215",
     ]);
+    // A finished run is unread until it is opened (DESKTOP §16 B41).
+    await view.getByRole("button", { name: "Add type hints to fetcher/client.py" }).click();
     await page.keyboard.press("Escape");
     await expect(page.locator(".scheduled-button .count")).toHaveCount(0);
   } finally {
@@ -825,6 +827,7 @@ test("11 plugins and hooks: a skill turned off, a plugin installed from a local 
     await expect.poll(() => received(home).find((m) => m.method === "skills/config/write")?.params).toEqual({ path: "/skills/pdf-search/SKILL.md", enabled: false });
     await view.getByRole("button", { name: "Plugins" }).click();
     await view.getByRole("button", { name: "Install" }).click();
+    await view.getByRole("region", { name: "Plugin details" }).getByRole("button", { name: "Install" }).click();
     await expect.poll(() => received(home).find((m) => m.method === "plugin/install")?.params).toEqual({ marketplacePath: "/srv/team/marketplace.json", pluginName: "lint" });
     await shoot("11-plugins.png");
     await view.getByRole("button", { name: "MCP servers" }).click();

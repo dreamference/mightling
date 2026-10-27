@@ -5,7 +5,8 @@
       "default": "enter",
       "enum": [
         "enter",
-        "ctrlEnter"
+        "ctrlEnter",
+        "multiline"
       ]
     },
     "followUp": {
@@ -43,6 +44,17 @@
     "projectContextSent": {
       "default": {},
       "type": "object"
+    },
+    "dictationWords": {
+      "default": [],
+      "type": "strings"
+    },
+    "threadOrder": {
+      "default": "projects",
+      "enum": [
+        "projects",
+        "chronological"
+      ]
     },
     "projectOrder": {
       "default": [],
@@ -87,6 +99,22 @@
     "unreadThreads": {
       "default": [],
       "type": "strings"
+    },
+    "messageVersions": {
+      "default": {},
+      "type": "object"
+    },
+    "nightThreads": {
+      "default": {},
+      "type": "object"
+    },
+    "threadSummaries": {
+      "default": {},
+      "type": "object"
+    },
+    "summarizeThreads": {
+      "default": true,
+      "type": "boolean"
     },
     "recentsOpen": {
       "default": false,
@@ -140,6 +168,10 @@
       "default": false,
       "type": "boolean"
     },
+    "welcomed": {
+      "default": false,
+      "type": "boolean"
+    },
     "petSize": {
       "default": "medium",
       "enum": ["small", "medium", "large"]
@@ -148,6 +180,11 @@
       "default": null,
       "nullable": true,
       "type": "string"
+    },
+    "petCorner": {
+      "default": null,
+      "nullable": true,
+      "type": "object"
     },
     "suggestPrompts": {
       "default": false,
@@ -187,6 +224,11 @@
       "type": "string",
       "nullable": true
     },
+    "pullRequestPrompt": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
     "forcePush": {
       "default": false,
       "type": "boolean"
@@ -195,6 +237,10 @@
       "default": null,
       "type": "string",
       "nullable": true
+    },
+    "nightRead": {
+      "default": [],
+      "type": "strings"
     },
     "reviewDelivery": {
       "default": "inline",
@@ -207,6 +253,13 @@
       "default": null,
       "type": "string",
       "nullable": true
+    },
+    "terminalPlace": {
+      "default": "panel",
+      "enum": [
+        "panel",
+        "tabs"
+      ]
     },
     "commandOutput": {
       "default": "running",

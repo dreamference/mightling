@@ -54,7 +54,12 @@ export interface WorktreeSettings {
   root: string | null;
   autoCleanup: boolean;
   keep: number;
+  /** The keep-count counted across every repository rather than per repository (DESKTOP §16 B25); Mightling's own key. */
+  acrossRepos: boolean;
 }
+
+/** The key Settings › Worktrees writes for counting across repositories (DESKTOP §16 B25). */
+export const ACROSS_REPOS_KEY = "mightling-worktree-keep-across-repos";
 
 export const DEFAULT_KEEP = 15;
 
@@ -71,5 +76,15 @@ export function worktreeSettings(desktop: Record<string, unknown> | null | undef
   const root = typeof desktop?.["git-worktree-root"] === "string" && (desktop["git-worktree-root"] as string).trim() ? (desktop["git-worktree-root"] as string).trim() : null;
   const autoCleanup = typeof desktop?.["worktree-auto-cleanup-enabled"] === "boolean" ? (desktop["worktree-auto-cleanup-enabled"] as boolean) : true;
   const keep = typeof desktop?.["worktree-keep-count"] === "number" && (desktop["worktree-keep-count"] as number) > 0 ? Math.floor(desktop["worktree-keep-count"] as number) : DEFAULT_KEEP;
-  return { root, autoCleanup, keep };
+  const acrossRepos = desktop?.[ACROSS_REPOS_KEY] === true;
+  return { root, autoCleanup, keep, acrossRepos };
+}
+
+/**
+ * The managed worktrees one cleanup weighs: the new thread's repository's alone (the default), or,
+ * counted across repositories, every known repository's, each worktree once (DESKTOP §16 B25).
+ */
+export function cleanupPool<T extends { root: string }>(listed: T[][]): T[] {
+  const seen = new Set<string>();
+  return listed.flat().filter((entry) => (seen.has(entry.root) ? false : (seen.add(entry.root), true)));
 }

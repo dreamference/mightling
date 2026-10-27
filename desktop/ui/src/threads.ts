@@ -75,3 +75,34 @@ export function renameStart(thread: Pick<Thread, "name" | "preview">): string {
 export function threadLink(id: string): string {
   return `ling://threads/${encodeURIComponent(id)}`;
 }
+
+/** How many pages of 200 the sidebar reads at most (10,000 threads); one more page waits for a search. */
+export const THREAD_PAGES = 50;
+
+/**
+ * Reads `thread/list` page by page (its cursor; DESKTOP_PARITY §4.5 item 25, DESKTOP §16 B10), handing
+ * each page over as it comes, so a project whose threads are all older than the first 200 is still
+ * listed. Stops at `maxPages` or when `stopped()` says the window moved on.
+ */
+export async function readThreadPages(
+  list: (cursor: string | null) => Promise<{ data: Thread[]; nextCursor: string | null }>,
+  onPage: (threads: Thread[], page: number) => void,
+  maxPages = THREAD_PAGES,
+  stopped: () => boolean = () => false,
+): Promise<{ pages: number; complete: boolean }> {
+  let cursor: string | null = null;
+  for (let page = 0; page < maxPages; page++) {
+    const answer = await list(cursor);
+    if (stopped()) return { pages: page, complete: false };
+    onPage(answer.data, page);
+    cursor = answer.nextCursor;
+    if (!cursor) return { pages: page + 1, complete: true };
+  }
+  return { pages: maxPages, complete: false };
+}
+
+/** Every top-level thread by date, newest first, across projects: the sidebar's Chronological list. */
+export function chronological(threads: Thread[]): Thread[] {
+  return [...threads].sort((a, b) => recency(b) - recency(a));
+}
+

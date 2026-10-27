@@ -106,6 +106,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "hooks", description: "The hooks: what runs when, and whether you trust each", needs: "none" },
   { name: "airgapped", description: "Show the air-gap level, or set the default for new threads", needs: "none", args: "[default off|on]" },
   { name: "cavemode", description: "How terse answers are: show the level, set it for this thread, or the default", needs: "none", args: "[off|lite|full|ultra | default <level|built-in>]" },
+  // DESKTOP §16 B38: Mightling's own prompt (init.ts).
+  { name: "init", description: "Write a short AGENTS.md for this repository, or propose changes to the one it has", needs: "work", args: "[note]" },
 ];
 
 export interface CommandContext {
@@ -258,11 +260,17 @@ export function lastUserTurn(view: ThreadView | null): { turnId: string; text: s
 }
 
 /** What Enter does in the composer under the window's preference: send, or a new line. */
-export function enterSends(event: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }, behaviour: "enter" | "ctrlEnter"): boolean {
+export function enterSends(event: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }, behaviour: EnterBehaviour, draft = ""): boolean {
   if (event.key !== "Enter" || event.altKey) return false;
-  if (behaviour === "ctrlEnter") return event.ctrlKey || event.metaKey;
+  // "multiline" (DESKTOP §16 B22): Enter sends a one-line prompt; once it has several lines, Enter
+  // adds another and Ctrl+Enter sends, as the Codex app's choice for multiline prompts.
+  const chord = behaviour === "ctrlEnter" || (behaviour === "multiline" && draft.includes("\n"));
+  if (chord) return event.ctrlKey || event.metaKey;
   return !event.shiftKey;
 }
+
+/** What Enter does in the composer (Settings › General). */
+export type EnterBehaviour = "enter" | "ctrlEnter" | "multiline";
 
 /** The reasoning efforts the model's catalog entry allows, and the one it uses by default. */
 export function effortChoices(model: Model | null): { efforts: string[]; preferred: string | null } {

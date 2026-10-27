@@ -183,6 +183,13 @@ def test_the_server_config_serves_tls_and_names_the_box_for_relay_and_stun():
         assert digit_run not in config, "no address literal"
 
 
+def _geolocation_files():
+    data = RemoteSettings.path("server", "data")
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "GeoLite2-City_20260911.mmdb").write_bytes(b"mmdb")
+    (data / "geonames_20260911.db").write_bytes(b"db")
+
+
 def test_the_container_is_on_loopback_pinned_and_bounded(monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -190,7 +197,11 @@ def test_the_container_is_on_loopback_pinned_and_bounded(monkeypatch):
         "_run",
         classmethod(lambda cls, argv, timeout=300: calls.append(argv) or _done(argv)),
     )
+    _geolocation_files()
     assert RemoteControlPlane.start()
+    assert sum(argv[:2] == ["docker", "run"] for argv in calls) == 1, (
+        "no fetch when the files are there"
+    )
     run = next(argv for argv in calls if argv[:2] == ["docker", "run"])
     assert run[:3] == ["docker", "run", "-d"] and remote_settings.SERVER_IMAGE in run
     # On an internal network, published nowhere: the loopback proxy is the only way in.
@@ -1273,3 +1284,90 @@ def test_the_cli_has_the_remote_group():
     assert staged.ssh_to == "my-box" and staged.box_only
     assert parser.parse_args(["remote", "remove", "--purge"]).purge
     assert "remote" in parser.command_groups
+
+
+def test_the_first_start_fetches_the_geolocation_databases_once_then_has_no_route_out(monkeypatch):
+    # Found on the node (2026-10-27): with no route out and no databases, the server stops at
+    # "could not initialize geolocation service" and restarts forever.
+    calls = []
+
+    def run(cls, argv, timeout=300):
+        calls.append(argv)
+        if argv[:2] == ["docker", "run"] and "bridge" in argv:
+            _geolocation_files()
+        return _done(argv)
+
+    monkeypatch.setattr(RemoteControlPlane, "_run", classmethod(run))
+    assert not RemoteControlPlane.geolocation_ready()
+    assert RemoteControlPlane.start(setup_pat=True)
+    runs = [argv for argv in calls if argv[:2] == ["docker", "run"]]
+    fetch, real = runs
+    assert fetch[fetch.index("--network") + 1] == "bridge" and "--ip" not in fetch
+    assert fetch[fetch.index("--restart") + 1] == "no"
+    assert "-p" not in fetch and "NB_SETUP_PAT_ENABLED=true" not in fetch
+    assert calls[calls.index(fetch) + 1] == ["docker", "rm", "-f", "dreamference-remote"]
+    assert (
+        real[real.index("--network") + 1] == "dreamference-remote"
+        and "NB_SETUP_PAT_ENABLED=true" in real
+    )
+    assert RemoteControlPlane.geolocation_ready()
+
+
+def test_no_databases_after_the_wait_is_a_failed_start(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        RemoteControlPlane,
+        "_run",
+        classmethod(lambda cls, argv, timeout=300: calls.append(argv) or _done(argv)),
+    )
+    monkeypatch.setattr("dreamference.remote.remote_control_plane.GEO_WAIT_S", 0.0)
+    assert not RemoteControlPlane.start()
+    assert sum(argv[:2] == ["docker", "run"] for argv in calls) == 1, "the real start never happens"
+    assert calls[-1] == ["docker", "rm", "-f", "dreamference-remote"]
+
+
+def _run_node_peer_script(tmp_path, monkeypatch, store_text: str) -> list[str]:
+    """Runs the node's root script against stand-ins for every command; returns their calls."""
+    import subprocess
+
+    from dreamference.remote import remote_node_peer
+
+    bin_dir, calls = tmp_path / "bin", tmp_path / "calls"
+    bin_dir.mkdir()
+    for name in ("netbird", "update-ca-certificates"):
+        stub = bin_dir / name
+        stub.write_text(f'#!/bin/sh\necho "{name} $*" >> {calls}\n')
+        stub.chmod(0o755)
+    install = bin_dir / "install"
+    install.write_text(f'#!/bin/sh\necho "install $*" >> {calls}\ncp "$3" "$4"\n')
+    install.chmod(0o755)
+    ca, store = tmp_path / "ca.crt", tmp_path / "store.crt"
+    ca.write_text("new CA\n")
+    store.write_text(store_text)
+    monkeypatch.setattr(remote_node_peer, "TRUST_STORE_FILE", str(store))
+    script = RemoteNodePeer.script(
+        None, ca, "https://remote.example.org:443", tmp_path / "key", f"mightling-{NODE_ID}"
+    )
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
+    subprocess.run(["bash", "-c", script], env=env, check=True)
+    return calls.read_text().splitlines()
+
+
+def test_a_changed_ca_restarts_the_running_client_before_it_logs_in(tmp_path, monkeypatch):
+    # A daemon started before the CA changed keeps the old roots (Go loads them once per
+    # process): without the restart its login to the new management fails (2026-10-27).
+    calls = _run_node_peer_script(tmp_path, monkeypatch, "old CA\n")
+    assert any(call.startswith("install -m 0644") for call in calls)
+    stop, start = calls.index("netbird service stop"), calls.index("netbird service start")
+    down = calls.index("netbird down")
+    up = next(i for i, call in enumerate(calls) if call.startswith("netbird up"))
+    assert stop < start < down < up
+
+
+def test_an_unchanged_ca_keeps_the_client_running_but_resets_a_stale_profile(tmp_path, monkeypatch):
+    # A profile from an earlier control plane made `netbird up` answer "Already connected".
+    calls = _run_node_peer_script(tmp_path, monkeypatch, "new CA\n")
+    assert not any(call.startswith("install") for call in calls)
+    assert "netbird service stop" not in calls
+    down = calls.index("netbird down")
+    assert any(call.startswith("netbird up") for call in calls[down:])

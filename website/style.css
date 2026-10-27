@@ -96,6 +96,7 @@ h3 { font-size: 20px; margin: 0 0 8px; }
 .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
 .pillar { background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
 .pillar p { margin: 0 0 10px; }
+.pillar p:last-child { margin-bottom: 0; }
 .pillar ul { margin: 0; padding-left: 18px; }
 .pillar li { margin: 6px 0; }
 .pillar ol { margin: 0 0 10px; padding-left: 20px; }

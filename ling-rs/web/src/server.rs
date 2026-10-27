@@ -29,6 +29,7 @@ use axum::http::header;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use axum::response::Response;
+use axum::routing::any;
 use axum::routing::get;
 use axum::routing::post;
 use futures::StreamExt;
@@ -108,6 +109,8 @@ pub struct Server {
     sync: Mutex<Option<Arc<crate::sync_store::Store>>>,
     /// The hub's live half: following and answering turns (sync_live.rs).
     live: Mutex<Option<Arc<crate::sync_live::Live>>>,
+    /// The forge's signed-in cookies, for `/forge/` (forge.rs).
+    pub forge: crate::forge::ForgeProxy,
 }
 
 impl Server {
@@ -129,6 +132,7 @@ impl Server {
             next_tab: AtomicU64::new(1),
             sync: Mutex::new(None),
             live: Mutex::new(None),
+            forge: crate::forge::ForgeProxy::new(),
             config,
         }))
     }
@@ -236,6 +240,14 @@ impl Server {
             || self.paired_device_name(headers).as_deref().is_some_and(ask::is_bridge_device)
     }
 
+    /// Whether a `Host` header is one of the overlay front's names (`public_names`), not the LAN's.
+    pub fn public_host(&self, host: Option<&str>) -> bool {
+        host.is_some_and(|host| {
+            let host = host.trim().to_ascii_lowercase();
+            self.config.public_names.iter().any(|name| name.trim().to_ascii_lowercase() == host)
+        })
+    }
+
     fn new_session_with(&self, bridge: bool) -> String {
         let token = auth::random_hex(32);
         let hash = auth::sha256_hex(&token);
@@ -332,6 +344,10 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/ask/file", get(ask_file))
         .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/api/telegram/check", post(telegram_check))
+        .route("/api/forge", get(forge_status))
+        .route("/forge", any(forge_proxy))
+        .route("/forge/", any(forge_proxy))
+        .route("/forge/{*path}", any(forge_proxy).layer(DefaultBodyLimit::disable()))
         .route("/login", get(login))
         .route("/pair", get(pair_page).post(pair))
         .route("/pair.css", get(pair_css))
@@ -352,6 +368,11 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
     let headers = request.headers();
     if !server.addresses.host_ok(header_str(headers, header::HOST)) {
         return secured(text(StatusCode::MISDIRECTED_REQUEST, "This server does not answer to that name.\n"));
+    }
+    // Git over HTTP to the forge carries the forge's own credentials, as on the forge's own port,
+    // and is passed on only on the LAN and loopback names (forge.rs).
+    if crate::forge::is_git(request.uri().path()) && !server.public_host(header_str(headers, header::HOST)) {
+        return secured(next.run(request).await);
     }
     let upgrade = header_str(headers, header::UPGRADE).is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
     let changes = !matches!(*request.method(), Method::GET | Method::HEAD);
@@ -378,7 +399,8 @@ fn secured(mut response: Response) -> Response {
     headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(HeaderValue::from_static(CSP));
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
-    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    // The forge's pages may be framed by this server's own (forge.rs); nothing else may be.
+    headers.entry(header::X_FRAME_OPTIONS).or_insert(HeaderValue::from_static("DENY"));
     headers.entry(header::CACHE_CONTROL).or_insert(HeaderValue::from_static("no-store"));
     response
 }
@@ -417,6 +439,22 @@ async fn bridge_js() -> Response {
 
 async fn pair_css() -> Response {
     (StatusCode::OK, [(header::CONTENT_TYPE, "text/css; charset=utf-8")], assets::PAIR_CSS).into_response()
+}
+
+/// Whether the page offers its Code view: the node has a forge, and this device may see it.
+async fn forge_status(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    let available = crate::forge::password_file(server.config.user_config.as_deref()).is_some_and(|file| file.is_file());
+    let control = crate::forge::may_sign_in(&server.config.state_dir, server.owner_session(&headers), &headers);
+    json_response(StatusCode::OK, json!({ "available": available, "control": control, "path": "/forge/" }))
+}
+
+/// `/forge/`: the node's forge, signed in for this machine's session and `control` devices.
+async fn forge_proxy(State(server): State<Arc<Server>>, request: Request) -> Response {
+    let git = crate::forge::is_git(request.uri().path());
+    if !git && !crate::forge::may_sign_in(&server.config.state_dir, server.owner_session(request.headers()), request.headers()) {
+        return crate::forge::watch_only();
+    }
+    server.forge.handle(server.config.forge_url.as_deref(), server.config.user_config.as_deref(), request).await
 }
 
 async fn not_found() -> Response {
