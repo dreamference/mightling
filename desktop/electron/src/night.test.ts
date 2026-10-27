@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { addTask, dropTask, nightStatus, nodeName, readReport, readReports, readTasks } from "./night";
 import { taskDetails, transcriptOf } from "./night";
+import { applyTask, reportBlock, taskNote } from "./night";
 
 describe("Night Shift for the Scheduled view", () => {
   it("reads the tasks newest first and the reports, and refuses a report name that leaves the folder", () => {
@@ -99,5 +100,45 @@ console.log("Queued.");
     expect(await nightStatus(home, "linux")).toEqual({ timer: "on", window: "01:00-07:00" });
     fs.writeFileSync(path.join(units, "mightling-night.timer"), "[Timer]\nOnCalendar=daily\n");
     expect(await nightStatus(home, "linux")).toEqual({ timer: "on", window: null });
+  });
+});
+
+describe("Night Shift inside a thread (DESKTOP §16 B40)", () => {
+  it("reads a task's attempts and when it was applied", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-b40-"));
+    fs.mkdirSync(path.join(dir, "tasks"));
+    fs.writeFileSync(path.join(dir, "tasks", "a.json"), JSON.stringify({ id: "a", repo: "/w/app", task: "t", status: "done", attempts: 3, applied: { at: "2026-10-28T09:00:00+01:00", into: "/w/app" }, history: [] }));
+    fs.writeFileSync(path.join(dir, "tasks", "b.json"), JSON.stringify({ id: "b", repo: "/w/app", task: "t", status: "queued", history: [] }));
+    const tasks = readTasks(dir);
+    expect(tasks.find((task) => task.id === "a")).toMatchObject({ attempts: 3, applied: "2026-10-28T09:00:00+01:00" });
+    expect(tasks.find((task) => task.id === "b")).toMatchObject({ attempts: null, applied: null });
+  });
+
+  it("finds a task's block in the newest report that names it, and only that block", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-note-"));
+    fs.mkdirSync(path.join(dir, "reports"));
+    const report = "# Night Shift — 2026-10-28\n\n## /w/app\n\n### 20261027-2200-abc — done\n\n- Task: Make the retry test deterministic\n- Branch: `night/20261027-2200-abc`, not merged\n- Attempts: 1, nudges: 0, wall time: 4 min 2 s\n- Best of 3: 3 of 3 attempts ran; chose attempt 2 by judge\n  - Attempt 1: done\n\n### 20261027-2300-def — stalled\n\n- Task: other\n\n## Review\n\n- No branch to review.\n";
+    expect(reportBlock(report, "20261027-2200-abc")).toBe(report.split("\n").slice(4, 12).join("\n").trim());
+    expect(reportBlock(report, "20261027-2300-def")).toBe("### 20261027-2300-def — stalled\n\n- Task: other");
+    expect(reportBlock(report, "20261027-2200")).toBeNull();
+    fs.writeFileSync(path.join(dir, "reports", "2026-10-27.md"), "## /w/app\n\n### 20261027-2200-abc — interrupted\n\n- cut off\n");
+    fs.utimesSync(path.join(dir, "reports", "2026-10-27.md"), new Date("2026-10-27T07:00:00Z"), new Date("2026-10-27T07:00:00Z"));
+    fs.writeFileSync(path.join(dir, "reports", "2026-10-28.md"), report);
+    expect(taskNote(dir, "20261027-2200-abc")).toEqual({ report: "2026-10-28.md", text: expect.stringContaining("chose attempt 2") });
+    expect(taskNote(dir, "nothing-here")).toBeNull();
+    expect(() => taskNote(dir, "../x")).toThrow("not a task");
+  });
+
+  it("applies through ling night apply in the thread's folder, refusing a bad id or folder", async () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ling-night-apply-")));
+    const log = path.join(home, "calls.txt");
+    const ling = nodeScript(home, "ling", `require("fs").appendFileSync(${JSON.stringify(log)}, process.cwd() + "|" + process.argv.slice(2).join(" ") + "\\n");
+console.log("Applied night/20261027-2200-abc here as uncommitted changes.");
+`);
+    await expect(applyTask(ling, home, "20261027-2200-abc")).resolves.toContain("Applied");
+    expect(fs.readFileSync(log, "utf8").trim()).toBe(`${home}|night apply 20261027-2200-abc`);
+    await expect(applyTask(ling, home, "a b")).rejects.toThrow("not a task");
+    await expect(applyTask(ling, "relative", "x")).rejects.toThrow("folder");
+    await expect(applyTask(ling, path.join(home, "missing"), "x")).rejects.toThrow("folder");
   });
 });

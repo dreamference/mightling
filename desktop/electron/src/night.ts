@@ -22,6 +22,9 @@ export interface NightTask {
   /** When the status last changed (the history's last entry). */
   at: string | null;
   result: unknown;
+  /** How many times the runner started it (DESKTOP §16 B40), and when `ling night apply` brought it into a checkout. */
+  attempts: number | null;
+  applied: string | null;
 }
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
@@ -53,6 +56,8 @@ export function readTasks(nightDir: string): NightTask[] {
         on: text(value.on),
         at: text(history[history.length - 1]?.at) ?? null,
         result: value.result ?? null,
+        attempts: typeof value.attempts === "number" ? value.attempts : null,
+        applied: text((value.applied as { at?: unknown } | null)?.at),
       });
     } catch {
       // A task being replaced, or not a task: skipped.
@@ -152,6 +157,47 @@ export function dropTask(ling: string, repo: unknown, id: unknown): Promise<stri
   if (typeof id !== "string" || !ID.test(id)) return Promise.reject(new Error("not a task"));
   if (typeof repo !== "string" || !path.isAbsolute(repo)) return Promise.reject(new Error("not a repository"));
   return run(ling, ["night", "drop", id], repo);
+}
+
+/**
+ * Apply (DESKTOP §16 B40): `ling night apply <id>` in the checkout `cwd`, the thread's own folder,
+ * which brings the task's branch there as uncommitted changes, all or nothing (ling-rs/src/night.rs).
+ * Only git on this machine: nothing reaches the network.
+ */
+export async function applyTask(ling: string, cwd: unknown, id: unknown): Promise<string> {
+  if (typeof id !== "string" || !ID.test(id)) throw new Error("not a task");
+  if (typeof cwd !== "string" || !path.isAbsolute(cwd) || !(await userFs.isDirectory(cwd))) throw new Error("name the thread's folder");
+  return run(ling, ["night", "apply", id], cwd);
+}
+
+/**
+ * A task's block in a morning report (night_shift_report.py `_task_block`): from its `### <id> — `
+ * heading up to the next heading, or null when the report does not name it. Pure.
+ */
+export function reportBlock(report: string, id: string): string | null {
+  const lines = report.split("\n");
+  const start = lines.findIndex((line) => line.startsWith(`### ${id} `));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^#{1,3} /.test(line));
+  return lines.slice(start, end < 0 ? lines.length : end).join("\n").trim();
+}
+
+/** The reports `taskNote` looks through, newest first: a task finishes within a few nights of being queued. */
+const NOTE_REPORTS = 30;
+
+/** A task's note from the newest morning report that names it (DESKTOP §16 B40): the report's name and the block. */
+export function taskNote(nightDir: string, id: unknown): { report: string; text: string } | null {
+  if (typeof id !== "string" || !ID.test(id)) throw new Error("not a task");
+  for (const { name } of readReports(nightDir).slice(0, NOTE_REPORTS)) {
+    let block: string | null = null;
+    try {
+      block = reportBlock(readReport(nightDir, name), id);
+    } catch {
+      // A report being written: the next one, or the next look.
+    }
+    if (block) return { report: name, text: block };
+  }
+  return null;
 }
 
 /** Run now: the runner (`ling-admin night run`), detached; it refuses on its own when the machine is busy. */

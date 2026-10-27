@@ -125,6 +125,8 @@ if (process.argv[2] === "night" && process.argv[3] === "every") {
   console.log("Repeating task " + id + ", " + (weekly ? "every " + weekly : "every night") + ".");
   process.exit(0);
 }
+// ling night apply <id> (DESKTOP §16 B40): says where it ran, as the real one names the checkout.
+if (process.argv[2] === "night" && process.argv[3] === "apply") { console.log("Applied night/" + process.argv[4] + " to " + process.cwd() + " as uncommitted changes."); process.exit(0); }
 if (process.argv[2] === "night") { console.log(process.argv[3] === "add" ? "Queued 20261017-0930 on branch night/20261017-0930, from 1a2b3c4d5e." : "Dropped " + process.argv[4] + "."); process.exit(0); }
 // MIGHTLING_STAND_IN_EMPTY=1: someone with no threads yet, as at the first start (DESKTOP §16 B6).
 const threads = process.env.MIGHTLING_STAND_IN_EMPTY === "1" ? [] : ${JSON.stringify(threads(home, askRoot))};

@@ -40,6 +40,10 @@ export function ScheduledView(props: {
   fromThread?: { title: string; context: string[] } | null;
   /** Opens a finished run's session as a thread in Work. */
   onOpenThread?: (threadId: string) => void;
+  /** DESKTOP §16 B40: the finished run to open on (a thread's card, Open the result). */
+  openRun?: string | null;
+  /** DESKTOP §16 B40: a task queued for tonight with the thread's context, and what `ling night add` said: the thread keeps it as a card. */
+  onQueued?: (said: string) => void;
 }) {
   const { notice } = props;
   const [data, setData] = useState<{ tasks: bridge.NightTask[]; reports: { name: string; modified: number }[] } | null>(null);
@@ -52,7 +56,7 @@ export function ScheduledView(props: {
   const [weekday, setWeekday] = useState<string>("mon");
   const [withContext, setWithContext] = useState(Boolean(props.fromThread?.context.length));
   const [repeating, setRepeating] = useState<bridge.RepeatingTask[] | null>(null);
-  const [opened, setOpened] = useState<{ id: string; tab: "result" | "diff" | "transcript"; details: Details | null } | null>(null);
+  const [opened, setOpened] = useState<{ id: string; tab: "result" | "diff" | "transcript"; details: Details | null } | null>(props.openRun ? { id: props.openRun, tab: "result", details: null } : null);
   const [node, setNode] = useState("");
   const [bestOf, setBestOf] = useState<number | null>(null);
   const [status, setStatus] = useState<Awaited<ReturnType<typeof bridge.night.status>> | null>(null);
@@ -66,6 +70,10 @@ export function ScheduledView(props: {
     }).catch((error) => { setData({ tasks: [], reports: [] }); notice(error); });
   }, [notice]);
   useEffect(load, [load]);
+  useEffect(() => {
+    const run = props.openRun;
+    if (run) bridge.night.details(run).then((details) => setOpened((current) => (current?.id === run ? { ...current, details } : current))).catch(notice);
+  }, [props.openRun]);
   // Opening the view marks what it shows as seen.
   useEffect(() => {
     if (data) props.onSeen(new Date().toISOString());
@@ -111,7 +119,7 @@ export function ScheduledView(props: {
             const queued = repeat === "once"
               ? bridge.night.add(repo, words, test || null, node.trim() ? { on: node.trim() } : { bestOf })
               : bridge.night.every(repo, words, test || null, repeat, repeat === "weekly" ? weekday : null);
-            queued.then((text) => { setSaid(text); setTask(""); setTest(""); setNode(""); setBestOf(null); load(); }).catch(notice);
+            queued.then((text) => { if (repeat === "once" && withContext && props.fromThread?.context.length) props.onQueued?.(text); setSaid(text); setTask(""); setTest(""); setNode(""); setBestOf(null); load(); }).catch(notice);
           }}>{repeat === "once" ? "Queue" : "Repeat"}</button>
           <button onClick={() => bridge.night.runNow().then(() => setSaid("Night Shift started; it gives way if the machine is busy.")).catch(notice)}>Run now</button>
         </div>

@@ -170,6 +170,9 @@ export type FromView =
   | { type: "night/every-drop"; id: string }
   /** A finished task's last message, diff and transcript (night.ts `taskDetails`). */
   | { type: "night/details"; id: string }
+  /** DESKTOP §16 B40: a thread's task applied in the thread's folder (`ling night apply`), and its block in the newest report naming it. */
+  | { type: "night/apply"; cwd: string; id: string }
+  | { type: "night/note"; id: string }
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" }

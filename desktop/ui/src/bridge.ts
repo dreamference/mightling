@@ -341,6 +341,9 @@ export interface NightTask {
   on: string | null;
   at: string | null;
   result: unknown;
+  /** DESKTOP §16 B40: how many times the runner started it, and when `ling night apply` brought it into a checkout. */
+  attempts?: number | null;
+  applied?: string | null;
 }
 
 /** A node as Settings › Node lists it (desktop/electron/src/nodes.ts): names, never an address. */
@@ -398,6 +401,9 @@ export const night = {
   dropRepeating: (id: string) => send<string>({ type: "night/every-drop", id }),
   /** A finished task's last message, diff and transcript, and the session it ran as. */
   details: (id: string) => send<{ result: string | null; diff: string | null; transcript: string | null; session: string | null }>({ type: "night/details", id }),
+  /** DESKTOP §16 B40: `ling night apply <id>` in a thread's folder, and the task's block in the newest report naming it. */
+  apply: (cwd: string, id: string) => send<string>({ type: "night/apply", cwd, id }),
+  note: (id: string) => send<{ report: string; text: string } | null>({ type: "night/note", id }),
 };
 /** Ctrl+O: the system's folder chooser; resolves with the folder, or null. */
 export const chooseFolder = () => send<string | null>({ type: "dialog/open-folder" });

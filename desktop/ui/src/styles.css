@@ -1021,6 +1021,15 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .project-add-files { display: inline-flex; align-items: center; gap: 6px; justify-self: start; }
 /* Scheduled (item 18, the owner's decision 7): a finished run opened on its result, changes and transcript. */
 .night-details pre { max-height: 40vh; overflow: auto; }
+/* A Work thread's Night Shift tasks (NightCards.tsx, DESKTOP §16 B40): a card, never a message. */
+.night-card { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 14px 12px; margin: 12px auto; background: var(--panel); }
+.night-card > header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.night-card-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.night-card-state { margin: 6px 0 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.night-note { margin-top: 10px; padding: 8px 12px; border-left: 3px solid var(--line-strong); background: var(--canvas); border-radius: var(--radius-sm); font-size: 13px; }
+.night-note-head { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.night-card-said { margin: 8px 0 0; }
+.night-card .buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .night-transcript { white-space: pre-wrap; font-family: var(--font-code); font-size: 12.5px; background: var(--code-bg); border-radius: var(--radius-sm); padding: 8px 10px; }
 /* Other devices (SYNC Phase 1): a thread from another device, read only. */
 .synced-transcript td { padding-bottom: 12px; }

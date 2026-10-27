@@ -35,6 +35,7 @@ import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, nightStatus, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
+import { applyTask, taskNote } from "./night";
 import { writeWorkAttachment } from "./attachments";
 import { listMemoryFiles, writeMemoryFile } from "./memoryfiles";
 import { Nodes } from "./nodes";
@@ -698,6 +699,16 @@ export async function main(options: MainOptions): Promise<void> {
         const home = codexHome();
         if (!home) throw new Error("there is no CODEX_HOME");
         return taskDetails(path.join(home, "night"), message.id);
+      }
+      case "night/apply": {
+        // A thread's task brought into the thread's checkout (DESKTOP §16 B40): git here, no network.
+        const ling = findLing(resourcesPath());
+        if (!ling) throw new Error("ling is not installed");
+        return applyTask(ling, message.cwd, message.id);
+      }
+      case "night/note": {
+        const home = codexHome();
+        return home ? taskNote(path.join(home, "night"), message.id) : null;
       }
       case "night/run": {
         const admin = whichOnPath("ling-admin");
