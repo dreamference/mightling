@@ -1028,3 +1028,10 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 /* Scheduled: whether Night Shift runs by itself (DESKTOP §16 B5). */
 .night-timer { margin: 0 0 8px; font-size: 13px; }
 .night-timer.off { color: var(--danger); }
+/* First run (DESKTOP §16 B6). */
+.dialog.welcome { max-width: 560px; }
+.welcome-head { display: flex; align-items: center; gap: 12px; }
+.welcome-choices { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.welcome-choice { display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--raised); }
+.welcome-choice:hover, .welcome-choice:focus-visible { border-color: var(--accent); }
+.welcome-body { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }

@@ -67,6 +67,8 @@ export interface Prefs {
   quickEntryShortcut: string;
   /** Closing the window hides it, the app staying in the tray (so Quick Entry and running turns go on); off by default. */
   keepInTray: boolean;
+  /** The first-run page was seen (DESKTOP §16 B6). */
+  welcomed: boolean;
   petSize: "small" | "medium" | "large";
   petImage: string | null;
   /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */

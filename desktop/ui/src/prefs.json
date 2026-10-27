@@ -140,6 +140,10 @@
       "default": false,
       "type": "boolean"
     },
+    "welcomed": {
+      "default": false,
+      "type": "boolean"
+    },
     "petSize": {
       "default": "medium",
       "enum": ["small", "medium", "large"]
