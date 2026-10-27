@@ -281,6 +281,15 @@ pub fn trust_hash(event: &str, matcher: Option<&str>, handler: &Handler, context
     format!("sha256:{hex}")
 }
 
+/// The source Codex names in the trust key of a hook given with `-c`: its session-flags layer's
+/// synthetic path (`hooks/src/engine/discovery.rs`, `synthetic_layer_path`), resolved against `/`,
+/// or against `C:\` on Windows, where it reads `C:\<session-flags>\config.toml`. Keys in the Unix
+/// form left every hook of the mode untrusted on Windows, so Codex ran none of them, `CLAUDE.md`'s
+/// and the permission guard included (WINDOWS_ARM §23.4 W1).
+pub fn session_flags_source(windows: bool) -> &'static str {
+    if windows { r"C:\<session-flags>\config.toml" } else { "/<session-flags>/config.toml" }
+}
+
 /// `PreToolUse` → `pre_tool_use`, as Codex names events in trust keys and hashes.
 pub fn event_label(event: &str) -> String {
     let mut label = String::new();
@@ -336,7 +345,7 @@ pub fn setting(plan: &Plan) -> Option<String> {
             groups.push(format!("{{{matcher}hooks=[{}]}}", handlers.join(", ")));
             if group.trusted {
                 for (handler_index, handler) in group.handlers.iter().enumerate() {
-                    let key = format!("/<session-flags>/config.toml:{}:{index}:{handler_index}", event_label(event));
+                    let key = format!("{}:{}:{index}:{handler_index}", session_flags_source(cfg!(windows)), event_label(event));
                     let hash = trust_hash(event, group.matcher.as_deref(), handler, group.context_limit);
                     state.push(format!("{}={{trusted_hash={}}}", toml_string(&key), toml_string(&hash)));
                 }
@@ -709,10 +718,12 @@ mod tests {
         assert_eq!(hooks["PreToolUse"][0]["hooks"][0]["statusMessage"].as_str(), Some("checking"));
         let state = hooks["state"].as_table().unwrap();
         let keys: Vec<&String> = state.keys().collect();
-        assert_eq!(keys, ["/<session-flags>/config.toml:session_start:0:0", "/<session-flags>/config.toml:session_start:1:0"]);
+        let source = session_flags_source(cfg!(windows));
+        let (first, second) = (format!("{source}:session_start:0:0"), format!("{source}:session_start:1:0"));
+        assert_eq!(keys, [&first, &second]);
         // The memory group's entry is the hash compat_memory computes for it.
         assert_eq!(
-            state["/<session-flags>/config.toml:session_start:0:0"]["trusted_hash"].as_str(),
+            state[&format!("{source}:session_start:0:0")]["trusted_hash"].as_str(),
             Some(crate::compaction::hook_hash_for("/opt/ling compat memory", &crate::compat_memory::MEMORY_HOOK).as_str())
         );
         assert_eq!(setting(&Plan::default()), None);
@@ -772,6 +783,16 @@ mod tests {
         let (out, _) = translate_output(r#"{"continue":false,"stopReason":"x","hookSpecificOutput":{"permissionDecision":"ask"}}"#, "PreToolUse");
         assert!(out.contains("\"continue\":false") && !out.contains("ask"));
         assert_eq!(translate_output("plain text", "Stop").0, "plain text");
+    }
+
+    #[test]
+    fn the_session_flags_source_is_the_path_codex_resolves() {
+        // Codex builds it as AbsolutePathBuf::resolve_path_against_base("<session-flags>/config.toml",
+        // "/" or "C:\\"); on this machine that must give this platform's form.
+        let base = if cfg!(windows) { r"C:\" } else { "/" };
+        let codex = codex_utils_absolute_path::AbsolutePathBuf::resolve_path_against_base("<session-flags>/config.toml", base);
+        assert_eq!(codex.as_path().display().to_string(), session_flags_source(cfg!(windows)));
+        assert_eq!(session_flags_source(true), r"C:\<session-flags>\config.toml");
     }
 
     #[test]

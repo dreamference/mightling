@@ -376,7 +376,8 @@ pub const MEMORY_HOOK: SessionHook = SessionHook {
 
 /// The `-c` settings that register the hook for this session, with its trust entry. Hooks given
 /// on the command line live in Codex's session-flags layer, whose trust key is
-/// `/<session-flags>/config.toml:<event>:<group>:<handler>`, given as an inline table because a
+/// `<source>:<event>:<group>:<handler>` ([`crate::compat_hooks::session_flags_source`]: `/<session-flags>/config.toml`,
+/// `C:\<session-flags>\config.toml` on Windows), given as an inline table because a
 /// dotted `-c` key is split at the dots of its quoted part (spec §16.3).
 pub fn hook_settings(command: &str) -> Vec<String> {
     let hook = &MEMORY_HOOK;
@@ -390,7 +391,7 @@ pub fn hook_settings(command: &str) -> Vec<String> {
         ),
         format!(
             "hooks.state={{{}={{trusted_hash={}}}}}",
-            toml_string("/<session-flags>/config.toml:session_start:0:0"),
+            toml_string(&format!("{}:session_start:0:0", crate::compat_hooks::session_flags_source(cfg!(windows)))),
             toml_string(&hash)
         ),
     ]
@@ -685,7 +686,7 @@ mod tests {
         assert_eq!(group["hooks"][0]["additionalContextLimit"].as_integer(), Some(0));
         let state = table["hooks"]["state"].as_table().unwrap();
         let (key, entry) = state.iter().next().unwrap();
-        assert_eq!(key, "/<session-flags>/config.toml:session_start:0:0");
+        assert_eq!(key, &format!("{}:session_start:0:0", crate::compat_hooks::session_flags_source(cfg!(windows))));
         // The hash Codex computes from its own types for that group.
         use codex_config::HookHandlerConfig;
         use codex_config::MatcherGroup;

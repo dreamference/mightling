@@ -96,6 +96,8 @@ clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true, features = ["executor"] }
 # Codex's own hook types, to check the trust hashes the launcher computes (refine.rs's tests).
 codex-config = { workspace = true }
+# How Codex resolves its session-flags layer's path, the source of a `-c` hook's trust key.
+codex-utils-absolute-path = { workspace = true }
 # Codex's own parser of agent role files, to check the ones compat_agents.rs writes.
 codex-agent-roles = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
