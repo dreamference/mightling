@@ -291,6 +291,31 @@ jobs:
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+      # A second user's elevated setup (WINDOWS_ARM §23.4 W11): the sandbox accounts get new passwords,
+      # and every user set up before must get them too. A stand-in second profile holds a passwords
+      # file from before; after this user's setup it must hold the new one, and this user's sandbox runs.
+      - name: Sandbox setup on a PC with two users
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $mine = Join-Path $env:USERPROFILE ".mightling\.sandbox-secrets\sandbox_users.json"
+          $other = Join-Path (Split-Path $env:USERPROFILE) "mightling-ci-other\.mightling\.sandbox-secrets"
+          New-Item -ItemType Directory -Force $other | Out-Null
+          $otherFile = Join-Path $other "sandbox_users.json"
+          Copy-Item $mine $otherFile
+          $before = Get-Content -Raw $otherFile
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          $ErrorActionPreference = "Continue"
+          $out = & $ling sandbox setup --elevated --user $user --codex-home (Join-Path $env:USERPROFILE ".mightling") 2>&1 | Out-String
+          Write-Host "setup: exit $LASTEXITCODE, $out"
+          $ErrorActionPreference = "Stop"
+          $after = Get-Content -Raw $otherFile
+          if ($after -eq $before) { throw "the other user's passwords file was not updated" }
+          if ($after -ne (Get-Content -Raw $mine)) { throw "the other user's passwords file differs from this user's" }
+          $echo = & $ling sandbox -- cmd.exe /c echo shared 2>&1 | Out-String
+          if ($echo -notmatch "shared") { throw "this user's sandbox did not run after the setup: $echo" }
+          Remove-Item -Recurse -Force (Split-Path (Split-Path $other))
       # `ling doctor` on Windows (WINDOWS_ARM §23.4 W9): no vendor app in its endpoint check, and no
       # warning for the rg.exe the release does not ship.
       - name: ling doctor

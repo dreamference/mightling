@@ -65,7 +65,7 @@ On the GB10, under `flock ~/.ling-build.lock nice -n 10` and `-j 12`, keep the d
 
 ### The patches are one-line hooks and nothing else
 
-32 patches, ~59.5 KB in all (59,496 bytes); `test_the_patches_stay_small` caps them at 60 KB. The cap's history:
+32 patches, ~59.5 KB in all (59,496 bytes); `test_the_patches_stay_small` caps them at 64 KB. The cap's history:
 
 - raised from 20 KB on 2026-09-30 for the last on-screen Codex names;
 - to 25 KB on 2026-10-01 for `0017-cave-mode`;
@@ -92,6 +92,7 @@ On the GB10, under `flock ~/.ling-build.lock nice -n 10` and `-j 12`, keep the d
 - not raised on 2026-10-26 for `0032-compat-guard-fails-closed` (467 bytes: a failed `PreToolUse` run of the compatibility mode's guard blocks the call instead of letting it through, for the one case the guard's own `||` fallback cannot answer, a guard killed at its timeout; [launcher.md](launcher.md), WINDOWS_ARM §23.4 W1); 57,280 in all;
 - to 60 KB on 2026-10-26 by the owner, for the Windows fixes W1/W2/W9 (WINDOWS_ARM §23.4), with `0033-sandbox-window-station` (1,269 bytes: the Windows sandbox names its private desktop in the caller's real window station, read with `GetProcessWindowStation`, instead of `Winsta0\<desktop>`, which does not exist over SSH; a desktop named without a station would land a sandbox account's child in its own logon's station; the launcher's `src/winsta.rs` lets the sandbox into a service window station); 58,549 in all, the rest kept for later Windows fixes;
 - not raised again on 2026-10-26 for `0034-doctor-windows` (947 bytes: on Windows `ling doctor` neither names Codex in its endpoint-protection check, which it skips there since the preview is unsigned, nor warns about a missing `rg.exe`, which the release does not ship and thread search does without; both only outside Codex's tests, through 0016's `MIGHTLING_DOCTOR_OFFLINE`); 59,496 in all;
+- to 64 KB on 2026-10-27 by the owner: headroom for Windows and compat fixes (59,496 in all then);
 - and to be raised again, explicitly, for each hook that needs it.
 
 Not raised on 2026-10-22, when plugins were allowed at `/airgapped off`: the launcher and the bridge policy do it (`ling-rs/src/plugins.rs`), and the only patch change is 0030's empty Curated tab, which now says the vendor's catalogue is closed in Mightling (33 bytes; overlay `0004-tests-neutral-vendor-names`).
