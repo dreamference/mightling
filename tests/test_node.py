@@ -1218,7 +1218,7 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
 SYNC_KEY = "qwen3.8-27b-nvfp4-dflash2"
 
 
-def model_cache(hub, repo, files):
+def model_cache(hub, repo, files, revision="rev1"):
     """A hub cache folder as huggingface_hub writes one: blobs by checksum, a snapshot of links."""
     import hashlib
     folder = hub / ("models--" + repo.replace("/", "--"))
@@ -1226,11 +1226,11 @@ def model_cache(hub, repo, files):
         digest = hashlib.sha256(data).hexdigest()
         (folder / "blobs").mkdir(parents=True, exist_ok=True)
         (folder / "blobs" / digest).write_bytes(data)
-        link = folder / "snapshots" / "rev1" / name
+        link = folder / "snapshots" / revision / name
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(os.path.relpath(folder / "blobs" / digest, link.parent))
     (folder / "refs").mkdir(exist_ok=True)
-    (folder / "refs" / "main").write_text("rev1")
+    (folder / "refs" / "main").write_text(revision)
     return folder
 
 
@@ -1241,10 +1241,15 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     here, there = tmp_path / "here", tmp_path / "there"
     monkeypatch.setenv("HF_HUB_CACHE", str(here))
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
     repos = NodeModelSync.repos(SYNC_KEY)
     assert len(repos) == 2                                                    # the checkpoint and its drafter
-    for index, repo in enumerate(repos):
-        model_cache(here, repo, {"model.safetensors": b"w" * (1000 + index), "config.json": b"{}"})
+    pins = {repo: ModelMatrixRegistry.pinned_revision(repo) for repo in repos}
+    assert all(pins.values())
+    # Only another revision of the checkpoint here (the Hub's default branch): not the one served.
+    model_cache(here, repos[0], {"model.safetensors": b"main" * 300, "config.json": b"{}"}, revision="319f741")
+    for index, repo in enumerate(repos[1:], 1):
+        model_cache(here, repo, {"model.safetensors": b"w" * (1000 + index), "config.json": b"{}"}, revision=pins[repo])
     paired_record()
     checkout = Path(__file__).resolve().parent.parent
     receiver = [sys.executable, "-c", "import sys; from dreamference.node.node_model_sync import NodeModelSync; "
@@ -1254,12 +1259,19 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
     environment = dict(os.environ, HF_HUB_CACHE=str(there), PYTHONPATH=str(checkout))
     monkeypatch.setattr(NodePairing, "ssh_command", classmethod(
         lambda cls, record, request: ["env", *[f"{k}={v}" for k, v in environment.items()], *receiver]))
+    assert NodeModelSync.sync("spark-2", SYNC_KEY) == 1
+    assert f"at {pins[repos[0]][:12]}" in capsys.readouterr().out and not there.exists()
+    model_cache(here, repos[0], {"model.safetensors": b"w" * 1000, "config.json": b"{}"}, revision=pins[repos[0]])
     assert NodeModelSync.sync("spark-2", SYNC_KEY) == 0
     for repo in repos:
         folder = there / ("models--" + repo.replace("/", "--"))
-        assert (folder / "snapshots" / "rev1" / "config.json").read_bytes() == b"{}"
-        assert (folder / "snapshots" / "rev1" / "model.safetensors").is_symlink()
-        assert (folder / "refs" / "main").read_text() == "rev1"
+        assert (folder / "snapshots" / pins[repo] / "config.json").read_bytes() == b"{}"
+        assert (folder / "snapshots" / pins[repo] / "model.safetensors").is_symlink()
+        assert (folder / "snapshots" / pins[repo] / "model.safetensors").read_bytes().startswith(b"w")
+    # The pinned commit and its blobs only: the other revision and its weights stay here.
+    checkpoint = there / ("models--" + repos[0].replace("/", "--"))
+    assert sorted(p.name for p in (checkpoint / "snapshots").iterdir()) == [pins[repos[0]]]
+    assert len(list((checkpoint / "blobs").iterdir())) == 2
     assert not list(there.glob(".mightling-sync-*"))
     assert "Serve it there with: ling-admin node set spark-2" in capsys.readouterr().out
     # A model this machine does not have is not sent.

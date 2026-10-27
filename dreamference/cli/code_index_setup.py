@@ -4,8 +4,11 @@ Code index setup for Dreamference.
 This module provides the CodeIndexSetup class, behind `ling-admin code setup`: it installs the
 pinned tools `ling-code` runs to build its index (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §5) --
 codebase-memory-mcp and the scip CLI from their release archives, each checked against the SHA-256
-committed in `ling-code-rs/code-index.sha256`, and scip-python and scip-typescript from npm,
-pinned by the committed lockfile's integrity hashes. Everything goes under Mightling's own install
+committed in `code_index_pins/code-index.sha256` beside this module, and scip-python and
+scip-typescript from npm, pinned by the integrity hashes of the lockfile in the same folder. The
+pins are package data (setup.py), so a release install has them as a checkout does; until 1.7.2
+they lived in `ling-code-rs/`, which no wheel carries, and `code setup` failed on a release
+install. Everything goes under Mightling's own install
 directory; `ling-code` resolves its tools from there only, never from PATH, because its schema
 fingerprints belong to exactly these versions.
 
@@ -27,12 +30,15 @@ import subprocess
 import tarfile
 import urllib.request
 import zipfile
+from pathlib import Path
 from typing import Dict, Final, List, NamedTuple, Optional
 
-from dreamference.runner.codex_branded_builder import CODE_CRATE_DIR, INSTALL_DIR
+from dreamference.runner.codex_branded_builder import INSTALL_DIR
 
-PINS_FILE: Final[str] = os.path.join(CODE_CRATE_DIR, "code-index.sha256")
-INDEXERS_SOURCE_DIR: Final[str] = os.path.join(CODE_CRATE_DIR, "indexers")
+# The pinned tools and the npm lockfile: package data, shipped in the wheel (setup.py).
+PINS_DIR: Final[str] = str(Path(__file__).resolve().parent / "code_index_pins")
+PINS_FILE: Final[str] = os.path.join(PINS_DIR, "code-index.sha256")
+INDEXERS_SOURCE_DIR: Final[str] = PINS_DIR
 INDEXERS_DIR: Final[str] = os.path.join(INSTALL_DIR, "indexers")
 DOWNLOAD_TIMEOUT_S: Final[int] = 300
 # The toolchain each indexer runs on: a link of this name under the indexers directory.

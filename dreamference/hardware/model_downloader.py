@@ -96,6 +96,10 @@ class ModelDownloader:
         """
         Gets the local HuggingFace snapshot directory for the given model key.
 
+        The registry's pinned revision when it is on disk: a cache that also holds another
+        revision (the Hub's default branch, fetched before every fetch honoured the pin) must not
+        have that one sized or tensorized in its place. Otherwise the newest snapshot.
+
         Args:
             model_key (str): Model key or repo ID.
 
@@ -109,6 +113,9 @@ class ModelDownloader:
             return None
         folder_name = "models--" + repo_id.replace("/", "--")
         cache_dir = cls.get_hf_cache_dir() / folder_name / "snapshots"
+        pin = ModelMatrixRegistry.pinned_revision(model_key)
+        if pin and (cache_dir / pin).is_dir():
+            return cache_dir / pin
         if cache_dir.exists():
             snapshots = [d for d in cache_dir.iterdir() if d.is_dir()]
             if snapshots:
@@ -366,9 +373,10 @@ class ModelDownloader:
 
         Args:
             model_key (str): Short alias or HuggingFace repo ID.
-            revision (Optional[str]): A pinned commit. When given, only that snapshot counts:
-                a cache holding some other revision is not the checkpoint the recipe was
-                measured on.
+            revision (Optional[str]): A pinned commit; None means the registry's pin for the
+                model (ModelMatrixRegistry.pinned_revision), if it has one. Under a pin only
+                that snapshot counts: a cache holding some other revision is not the checkpoint
+                the recipe was measured on.
 
         Returns:
             bool: True if snapshot directory exists and is non-empty.
@@ -380,6 +388,7 @@ class ModelDownloader:
             return False
         folder_name = "models--" + repo_id.replace("/", "--")
         cache_dir = cls.get_hf_cache_dir() / folder_name / "snapshots"
+        revision = revision or ModelMatrixRegistry.pinned_revision(model_key)
         if revision:
             pinned = cache_dir / revision
             return pinned.is_dir() and any(pinned.iterdir())
@@ -402,7 +411,9 @@ class ModelDownloader:
             model_key (str): Short alias or HuggingFace repo ID.
             hf_token (Optional[str]): Optional HuggingFace access token.
             auto_tensorize (bool): If True, convert to tensorize format after download.
-            revision (Optional[str]): Commit to fetch; None fetches the default branch.
+            revision (Optional[str]): Commit to fetch; None fetches the registry's pin for the
+                model or drafter (ModelMatrixRegistry.pinned_revision), and the Hub's default
+                branch only for a model no recipe pins.
 
         Returns:
             bool: True if weights are present or successfully downloaded.
@@ -412,7 +423,8 @@ class ModelDownloader:
         repo_id = ModelMatrixRegistry.resolve_hf_repo(model_key)
         if not repo_id:
             raise ValueError(f"Unable to resolve model '{model_key}' to a valid HuggingFace repository ID.")
-        
+        revision = revision or ModelMatrixRegistry.pinned_revision(model_key)
+
         success = False
 
         # Check cache FIRST before any downloads
@@ -421,7 +433,8 @@ class ModelDownloader:
             print(f"✅ Model '{model_key}' ({repo_id}) found in local cache ({cache_size}).")
             success = True
         else:
-            print(f"📥 Pre-downloading HuggingFace weights for '{model_key}' ({repo_id})...")
+            at = f" at {revision[:12]}" if revision else ""
+            print(f"📥 Pre-downloading HuggingFace weights for '{model_key}' ({repo_id}){at}...")
             token_val = hf_token or os.getenv("HF_TOKEN") or os.getenv("DREAMFERENCE_HF_TOKEN")
 
             # 1. Attempt python huggingface_hub snapshot_download
@@ -455,6 +468,30 @@ class ModelDownloader:
         if not success:
             print(f"💡 vLLM will attempt to fetch '{repo_id}' during initialization (cache-first mode).")
         return success
+
+    @classmethod
+    def download_with_drafter(
+        cls, model_key: str, hf_token: str | None = None, auto_tensorize: bool = False
+    ) -> bool:
+        """Fetches a model and the drafter its recipe speculates against, each at its pinned commit.
+
+        What `server start` would fetch before a load, so a model fetched ahead of time
+        (`model download`, `init`) is the one served and nothing is fetched at start.
+
+        Args:
+            model_key (str): Short alias or HuggingFace repo ID.
+            hf_token (str | None): Optional HuggingFace access token.
+            auto_tensorize (bool): Convert the model (never the drafter, 1-2 GiB, named by
+                repository) to tensorize format after the download.
+
+        Returns:
+            bool: True if both are present afterwards.
+        """
+        ok = cls.download_model(model_key, hf_token=hf_token, auto_tensorize=auto_tensorize)
+        drafter = ModelMatrixRegistry.get_speculative_draft_repo(model_key)
+        if drafter:
+            ok = cls.download_model(drafter, hf_token=hf_token, auto_tensorize=False) and ok
+        return ok
 
     @classmethod
     def _get_cache_size(cls, model_key: str) -> str:

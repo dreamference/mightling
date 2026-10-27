@@ -258,7 +258,7 @@ A submodule is indexed only when it belongs to the same organisation as the repo
 
 - **Pinned binaries, verified:**
   - The Mightling release workflow downloads the pinned codebase-memory-mcp and scip CLI releases for `linux-arm64` and checks each against its published checksum.
-  - The expected SHA-256s are committed in `ling-code-rs/code-index.sha256`, the same trust model as the rusty_v8 archive.
+  - The expected SHA-256s are committed in `dreamference/cli/code_index_pins/code-index.sha256` (package data, so a release install has them; in `ling-code-rs/` until 1.7.2), the same trust model as the rusty_v8 archive.
   - They are shipped beside `ling` and `ling-code` in `~/.local/share/dreamference/mightling/bin/` and attached to Mightling releases, so `ling update` refreshes them together with the `ling-code` that knows their schema fingerprints (§7.5).
   - `ling-admin codex build` fetches the same pinned archives for local builds, and builds and links `ling-code` (§4.2).
 - **Fork only when a patch is needed.** No change to codebase-memory is required. If one becomes necessary, for example §11's SCIP import or a fix for its submodule ignore handling, fork it to `dgxcoder/codebase-memory-mcp` as a submodule and build from source, following the Codex pattern: pinned tag, patches in a directory, submodule never edited. The MIT notice must stay in the shipped files.

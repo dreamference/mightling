@@ -11,6 +11,8 @@ There are two ways Mightling gets onto a machine, and the package must work in b
 
 `CodexBrandedBuilder.has_source()` and `DesktopRunner.has_source()` tell them apart: without source, installed binaries count as current and `codex build`/`desktop build` say what to do instead. Before 2026-10-02 nothing had ever been installed from a release, and `ling-admin run` on one installed rustup and then died on the missing `ling-web-rs/`. Anything new that reaches for a path under `REPO_ROOT` needs the same guard.
 
+A file a command needs on both kinds of install lives inside the package and is named in `setup.py`'s `package_data`; a wheel carries nothing else that is not Python. The code index's pins (`dreamference/cli/code_index_pins/`: `code-index.sha256` and the npm lockfile) were in `ling-code-rs/` until 1.7.2, and `ling-admin code setup` failed on every release install; `test_a_release_wheel_carries_the_pins_and_code_setup_reads_them_from_it` builds the wheel as the release does and reads them from it.
+
 ## `install.sh`
 
 `install.sh` downloads exactly what `ling update` does (`ling-rs/src/update.rs`: same asset names, same checksum file), so the two stay one mechanism. On a GB10 it also installs `ling-admin` and, unattended (one sudo password at most, at the start; SETUP §3.2.1), applies `host setup --yes`, the docker group, lingering, `node enable --yes`, the model download and `server start`, offering system updates as its one question.

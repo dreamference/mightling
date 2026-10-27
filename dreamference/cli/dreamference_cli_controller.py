@@ -25,7 +25,7 @@ from dreamference.runner import (
     OpenHandsRunner, OpenHandsInstaller,
     CodexRunner, CodexInstaller
 )
-from dreamference.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache, model_key_for_served_id
+from dreamference.hardware import detect_gb10_hardware, download_model, download_model_with_drafter, download_all_models, clear_model_cache, clear_tensorizer_cache, model_key_for_served_id
 from dreamference.vllm_server import VLLMServerManager, DiffusionServerManager, DEFAULT_VLLM_IMAGE, DEFAULT_DIFFUSION_PORT
 from dreamference.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dreamference.mcp_server import main as run_mcp_server
@@ -1826,7 +1826,9 @@ class DreamferenceCLIController:
                         print(f"❌ '{target_model}' is not a model Mightling offers.")
                         sys.exit(1)
                     if target_model:
-                        download_model(target_model, hf_token=config.hf_token, auto_tensorize=auto_t)
+                        # At the registry's pinned commits, the recipe's drafter included: what
+                        # `server start` serves, so it fetches nothing more.
+                        download_model_with_drafter(target_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                         if config.draft_model:
                             download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                     else:
@@ -2455,7 +2457,7 @@ class DreamferenceCLIController:
             cls.display_header()
             auto_t = config.use_tensorizer
             if config.model:
-                download_model(config.model, hf_token=config.hf_token, auto_tensorize=auto_t)
+                download_model_with_drafter(config.model, hf_token=config.hf_token, auto_tensorize=auto_t)
                 if config.draft_model:
                     download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
             from dreamference.config.config_generator import generate_default_init_config
