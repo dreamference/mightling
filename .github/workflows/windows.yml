@@ -431,6 +431,49 @@ jobs:
           if (Test-Path $app) { throw "the uninstaller left Mightling.exe" }
           if (Test-Path $shortcut) { throw "the uninstaller left the Start menu entry" }
           if (Test-Path $key) { throw "the uninstaller left its Apps entry" }
+      # The installer and the uninstaller while the app runs, as a user's update or removal meets it:
+      # the app and the ling.exe serving it hold their files, and the installer must close them and
+      # replace the folder whole, or stop with exit code 2; never mix two versions (installer.nsi,
+      # FreeAppFolder). The app runs normally here (no audit), so it waits until it is closed.
+      - name: Install over the running app, uninstall it running
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist-desktop\Mightling-Setup-*.exe | Select-Object -First 1).FullName
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\Mightling\App"
+          $app = Join-Path $installed "Mightling.exe"
+          $scratch = Join-Path $env:RUNNER_TEMP "mightling-app-running"
+          New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          $env:CODEX_HOME = Join-Path $scratch ".mightling"
+          $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:9"
+          function Start-App {
+            $started = Start-Process -FilePath $app -PassThru
+            $null = $started.Handle
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+              Start-Sleep -Seconds 2
+              $running = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith("$installed\", [StringComparison]::OrdinalIgnoreCase) })
+            } while (-not ($running | Where-Object { $_.Name -eq "ling.exe" }) -and (Get-Date) -lt $deadline)
+            Write-Host "running from the app's folder: $(($running | ForEach-Object { $_.Name }) -join ', ')"
+            if ($started.HasExited) { throw "the app exited at once ($($started.ExitCode))" }
+            return $started
+          }
+          $process = Start-Process -FilePath $setup -ArgumentList "/S" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "the installer exited with $($process.ExitCode)" }
+          $started = Start-App
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          $process = Start-Process -FilePath $setup -ArgumentList "/S" -PassThru -Wait
+          Write-Host "installed over the running app in $([int]$clock.Elapsed.TotalSeconds) s (over 10 s: it was ended, not closed)"
+          if ($process.ExitCode -ne 0) { throw "the installer over the running app exited with $($process.ExitCode)" }
+          if (-not $started.HasExited) { throw "the installer left the old app running" }
+          if (-not (Test-Path (Join-Path $installed "resources\ling.exe"))) { throw "the new app has no ling.exe" }
+          if (Test-Path "$installed.old") { throw "the old app's folder was left beside the new one" }
+          $started = Start-App
+          Start-Process -FilePath (Join-Path $installed "Uninstall Mightling.exe") -ArgumentList "/S" -Wait
+          $deadline = (Get-Date).AddSeconds(120)
+          while (((Test-Path $installed) -or (Test-Path "$installed.old")) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Test-Path $installed) { throw "the uninstaller left the running app's folder" }
+          if (Test-Path "$installed.old") { throw "the uninstaller left the folder it moved aside" }
+          if (-not $started.HasExited) { throw "the uninstaller left the app running" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
         with:
