@@ -741,8 +741,15 @@ class SweBenchRunner:
                     print(f"⚠️  Not run: the model server at {vllm_host} is not answering.")
                     return 1
                 metrics = cls.host.metrics(vllm_host) or {}
+                max_parallel = cls.max_parallel(settings, served)
+                if max_parallel < settings.max_parallel:
+                    print(  # noqa: T201 — CLI output
+                        f"💡 At most {max_parallel} instance(s) at once: the cap of {served[0]}'s registry entry "
+                        f"(max_parallel is {settings.max_parallel}).",
+                        flush=True,
+                    )
                 parallel = cls.host.parallelism(
-                    settings.max_parallel, metrics.get("kv_pool", 0.0), settings.task_context
+                    max_parallel, metrics.get("kv_pool", 0.0), settings.task_context
                 )
                 runtime_hash = SweBenchRuntime.ensure(
                     mightling_bin, SweBenchHarness.tool("patchelf")
@@ -1005,6 +1012,27 @@ class SweBenchRunner:
         raise KeyboardInterrupt
 
     @classmethod
+    def max_parallel(
+        cls, settings: "swe_bench_settings.SweBenchSettings", served: tuple | None
+    ) -> int:
+        """The configured `max_parallel`, lowered to the served model's own cap.
+
+        A registry entry may carry `swe_bench_max_parallel`, for a model that leaves the host too
+        little memory for the task containers.
+
+        Args:
+            settings: The benchmark's settings.
+            served: What the model server serves, `(model id, context length)`.
+
+        Returns:
+            int: At least 1.
+        """
+        from dreamference.hardware import ModelMatrixRegistry
+
+        cap = ModelMatrixRegistry.swe_bench_max_parallel(served[0] if served else None)
+        return max(1, min(settings.max_parallel, cap) if cap else settings.max_parallel)
+
+    @classmethod
     def lanes(
         cls,
         vllm_host: str,
@@ -1038,8 +1066,9 @@ class SweBenchRunner:
         }
         if NodeLanes.wanted(settings.nodes) == [] or not NodePairing.paired():
             return [local], []
+        max_parallel = cls.max_parallel(settings, served)
         budget = lambda pool: (
-            cls.host.parallelism(settings.max_parallel, pool, settings.task_context),
+            cls.host.parallelism(max_parallel, pool, settings.task_context),
             None,
         )
         lanes, skipped = NodeLanes.lanes(vllm_host, served, settings.nodes, cls.host, budget)

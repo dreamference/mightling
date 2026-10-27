@@ -346,6 +346,92 @@ class ModelMatrixRegistry:
             },
             supports_vision=False,
         ),
+        # A trial candidate (approved 2026-10-19; docs/dev/flash-next-feasibility-2026-10-19.md),
+        # not a default: smoke-booted by day first (docs/dev/flash-next-smoke-boot.md), then a
+        # SWE-bench A/B night against production.
+        "qwen3.8-flash-next-nvfp4-mtp": ModelSpec(
+            name="Qwen 3.8 Flash-Next (QAD NVFP4 + MTP, vLLM)",
+            # 125B (6B active) plus the 51B n-gram table and the 4B MTP head.
+            params_b=180.0,
+            # ModelOpt MIXED_PRECISION, declared in its own config.json: no --quantization.
+            supported_precisions=["NVFP4"],
+            # The snapshot's size (106.4 GB = 99.1 GiB): before the download this is the
+            # weights figure the start gate uses, so it must not exceed the arena below.
+            min_memory_gb=100.0,
+            max_memory_gb=115.0,
+            compatible_gb10=True,
+            notes=(
+                "Trial candidate, not yet booted here. Qwen3.8-Flash-Next is about 125B parameters "
+                "with 6B active (48 layers, 12 x (3 Gated DeltaNet + 1 Qwen Sparse Attention), 512 "
+                "experts of which 10 routed and 1 shared are active), plus a 51B n-gram (PLE) "
+                "embedding table, a 4B MTP head and a vision tower. This is local-inference-lab's "
+                "quantization-aware-distilled export: experts and the n-gram table in NVFP4 (the "
+                "table 26.8 GiB instead of 47.7 in FP8), attention and shared experts in MXFP8. It "
+                "loads at about 97.5 GiB (vLLM #56273) and is the only export that both fits "
+                "resident on one GB10 and loads on upstream vLLM.\n\n"
+                "vLLM, not SGLang: no SGLang release loads a packed NVFP4 n-gram table (#41624 "
+                "open), and the vLLM nightly pinned below is the first image with #56273 (not in "
+                "v0.32.0). MTP at 3 draft tokens: MiaAI-Lab measured about 2.8-3.0 accepted per "
+                "step and 48.7 tok/s on prose on a patched vLLM; upstream with this checkpoint and "
+                "MTP on GB10 is unmeasured. Expected 45-55 tok/s on prose against production's "
+                "25.5.\n\n"
+                "Memory is tight: about 15 GiB stays free while serving, so the global load-transient "
+                "estimate (0.15 x weights) refuses the load and SWE-bench runs one instance at a "
+                "time (see load_transient_gb and swe_bench_max_parallel). Known risks on SM121: "
+                "vLLM #54521 (greedy output nondeterministic and corrupted past the 2,048-token "
+                "indexer budget) and silent long-context corruption seen in a community build; the "
+                "smoke boot checks both. Licence: Qwen Community License 1.0, to check before "
+                "shipping."
+            ),
+            hf_repo_id="local-inference-lab/Qwen3.8-Flash-Next-NVFP4",
+            supports_vision=True,
+            # Each SWE-bench task container may take up to task_memory (8G) beside a model that
+            # leaves about 15 GiB free, with the 8 GiB reserve: one at a time until the smoke
+            # boot measures more room (two would need task_memory lowered as well).
+            swe_bench_max_parallel=1,
+            launch_overrides={
+                "engine": "vllm",
+                # vLLM nightly e68efc685ab1 (2026-10-19), the multi-arch index digest; the first
+                # image with #56273 (packed NVFP4 n-gram tables).
+                "docker_image": (
+                    "vllm/vllm-openai@sha256:"
+                    "1ff6716fe240a922d0d518b8884261e25b0c02eda8e2ce90888e364978249cad"
+                ),
+                "revision": "6c01ac378d22f6652c9f392c87700496eca8e5dc",
+                # Covers SWE-bench's 49,152-token tasks and the smoke boot's 120K needle. The KV
+                # pool is whatever the arena leaves, not sized by this; 262,144 (native) once the
+                # smoke boot's log shows a pool that holds it.
+                "max_model_len": 131072,
+                # Not the 0.90 of the feasibility sketch: the container's cgroup cap is the arena
+                # plus container_headroom_gb, clamped to total - HOST_MEMORY_RESERVE_GB (109.6 GiB
+                # here), so a 109.4 GiB arena would have left the process 0.2 GiB outside it. At
+                # 0.86 the arena is 104.6 GiB (weights 97.5, about 7 for KV, mamba state and
+                # graphs) and the process keeps 5 GiB under the cap.
+                "gpu_memory_utilization": 0.86,
+                # Measured-figure override of the start gate's load transient (owner's approval,
+                # 2026-10-19). 0.15 x 99.1 GiB = 14.9 GiB would need 119.5 GiB free, which no GB10
+                # has. PROVISIONAL until the smoke boot measures the real peak: the 0.15
+                # calibration came from fastsafetensors staging a checkpoint twice, and this load
+                # mmaps (vLLM's default loader) after its page cache is dropped. Replace with the
+                # measured transient plus 2 GiB (docs/dev/flash-next-smoke-boot.md §3).
+                "load_transient_gb": 8.0,
+                # The vLLM recipe's choice; NVIDIA's FP4-Local card uses qwen3_xml.
+                "tool_call_parser": "qwen3_coder",
+                "reasoning_parser": "qwen3",
+                # Self-speculation: the MTP head ships in the checkpoint, so no drafter to fetch.
+                "speculative_config": {"method": "mtp", "num_speculative_tokens": 3},
+                # Qwen's template, byte-identical to the base model's: both anchors occur in it
+                # exactly once, so production's patches carry over unchanged.
+                "chat_template_patches": QWEN38_SGLANG_RECIPE["chat_template_patches"],
+                "kv_cache_dtype": "fp8",
+                "max_num_batched_tokens": 4096,
+                "extra_args": [
+                    # Prefix caching on a hybrid GDN model needs the mamba states aligned to it.
+                    "--mamba-cache-mode", "align",
+                    "--max-num-seqs", "4",
+                ],
+            },
+        ),
         "qwen3.8-27b-dflash2-draft": ModelSpec(
             name="Qwen 3.8 27B DFlash2 Drafter (NVFP4, Draft Model)",
             params_b=1.0,
@@ -506,6 +592,21 @@ class ModelMatrixRegistry:
         """
         spec_config = cls.get_launch_overrides(model_key).get("speculative_config") or {}
         return spec_config.get("model") or None
+
+    @classmethod
+    def swe_bench_max_parallel(cls, model_key: str | None) -> int | None:
+        """The most SWE-bench instances that may run at once beside a model, by the model's own entry.
+
+        Args:
+            model_key (str | None): Model alias, HF repo ID (what a server reports), or display name.
+
+        Returns:
+            int | None: The cap (at least 1), or None when the model is unknown or has none.
+        """
+        spec = cls.get_spec(model_key) if model_key else None
+        if not spec or spec.swe_bench_max_parallel is None:
+            return None
+        return max(1, int(spec.swe_bench_max_parallel))
 
     @classmethod
     def supports_vision(cls, model_key: str) -> bool:

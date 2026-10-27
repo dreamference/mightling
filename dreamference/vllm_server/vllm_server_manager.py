@@ -42,6 +42,8 @@ HOST_MEMORY_RESERVE_GB: Final[float] = 12.0
 # a 78 GB checkpoint into a 97.3 GB arena with 105.8 GB available, i.e. 8.5 GB of slack, took the
 # machine down. 0.15 x 78 = 11.7 GB required, so that launch is refused. Raise it if a load ever
 # freezes with this gate satisfied; do not lower it without a load that failed for room to spare.
+# A model whose own load was measured may carry `load_transient_gb` in its recipe instead, which
+# replaces this estimate for that model only (load_transient_gb()).
 LOAD_TRANSIENT_FRACTION: Final[float] = 0.15
 # Floor for the above, so a small checkpoint still leaves the host something to breathe with.
 MIN_LOAD_TRANSIENT_GB: Final[float] = 4.0
@@ -800,6 +802,19 @@ class VLLMServerManager:
         if load_format and load_format != "auto":
             base_args.extend(["--load-format", load_format])
 
+        # A pinned recipe serves the commit it was measured on and downloaded at; without these the
+        # engine resolves the repository's default branch, which the cache may not hold.
+        revision = recipe.get("revision")
+        if revision:
+            base_args.extend(["--revision", revision, "--tokenizer-revision", revision])
+            # The recipe's patched chat template, written by start_server (ChatTemplatePatcher),
+            # as the SGLang launch passes it.
+            patches = recipe.get("chat_template_patches")
+            if patches:
+                from dreamference.vllm_server.chat_template_patcher import ChatTemplatePatcher
+
+                base_args.extend(["--chat-template", ChatTemplatePatcher.container_path(hf_model, revision, patches)])
+
         if docker_available:
             cmd = self._docker_run_prefix(port, gpu_memory_utilization, recipe, token_env)
             # Persist torch.compile output across container lifetimes. This lands inside the
@@ -1349,6 +1364,31 @@ class VLLMServerManager:
         return float(spec.min_memory_gb) if spec else 0.0
 
     @classmethod
+    def load_transient_gb(cls, model: str, weights_gb: float) -> tuple[float, str]:
+        """The memory a load needs beyond its arena, which the start gate adds to the arena.
+
+        A recipe's `load_transient_gb` replaces the global estimate for that model alone: a figure
+        measured on a guarded load of that checkpoint, for a model the global fraction would refuse
+        on any GB10 (owner's approval of 2026-10-19 for Qwen3.8-Flash-Next). It is still floored at
+        MIN_LOAD_TRANSIENT_GB, and the gate still refuses a host that cannot meet it. Only this
+        pre-load figure changes; the PSI watchdog that guards the load itself does not read it.
+
+        Args:
+            model (str): Model alias, HF repo ID, or display name.
+            weights_gb (float): The weights the load streams, drafters included.
+
+        Returns:
+            tuple[float, str]: The transient in GB, and where it came from, for the refusal message.
+        """
+        from dreamference.hardware import get_model_launch_overrides
+
+        measured = get_model_launch_overrides(model).get("load_transient_gb")
+        if measured is not None:
+            return max(MIN_LOAD_TRANSIENT_GB, float(measured)), "this model's own figure, load_transient_gb"
+        return (max(MIN_LOAD_TRANSIENT_GB, weights_gb * LOAD_TRANSIENT_FRACTION),
+                f"{LOAD_TRANSIENT_FRACTION:.2f} x weights")
+
+    @classmethod
     def resolve_speculative_config(
         cls, model: str, draft_model: Optional[str] = None, num_speculative_tokens: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
@@ -1691,7 +1731,7 @@ class VLLMServerManager:
         # steady state, not the peak. Streaming a 78 GB checkpoint through fastsafetensors churns
         # page cache, the loader stages tensors before they are pinned, and the desktop keeps
         # growing throughout — all of it out of whatever is left over. Budget for the peak.
-        transient_gb = max(MIN_LOAD_TRANSIENT_GB, weights_gb * LOAD_TRANSIENT_FRACTION)
+        transient_gb, transient_source = self.load_transient_gb(model, weights_gb)
         required_gb = arena_gb + transient_gb
         if actual_free_gb < required_gb:
             # The arena is a fraction of total memory, so the fix is expressed as the fraction
@@ -1702,7 +1742,7 @@ class VLLMServerManager:
                 f"   Arena:       {arena_gb:.2f} GB "
                 f"({gpu_memory_utilization:.2f} x {actual_total_gb:.2f} GB total)\n"
                 f"   Load peak:   {transient_gb:.2f} GB (page cache and staging for "
-                f"{weights_gb:.2f} GB of weights)\n"
+                f"{weights_gb:.2f} GB of weights; {transient_source})\n"
                 f"   Required:    {required_gb:.2f} GB\n"
                 f"   Available:   {actual_free_gb:.2f} GB\n"
                 f"   Missing:     {required_gb - actual_free_gb:.2f} GB\n\n"

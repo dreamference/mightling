@@ -39,6 +39,24 @@ It is the only model served, and was the only model in the registry from 2026-10
 - **No image input.** The candidate is a text-only extraction (`supports_vision=False`).
 - **Speed** is measured by `scripts/decode_speed.py` (stdlib only), which checks every answer it times. The prompts behind production's 25.5 / 50.3 / 87.0 were not recorded, so a comparison measures both arms on the same night.
 
+## A trial candidate on vLLM: Qwen3.8-Flash-Next (2026-10-19)
+
+`qwen3.8-flash-next-nvfp4-mtp` serves `local-inference-lab/Qwen3.8-Flash-Next-NVFP4`, the QAD NVFP4 export of Qwen3.8-Flash-Next (125B, 6B active, plus a 51B n-gram table and an MTP head). It runs on a pinned vLLM nightly with MTP at 3 draft tokens.
+
+**Status:** the trial is approved. The registry entry is ready on branch `models/flash-next` (not merged). The model has not been booted. It is never the default.
+
+- **Feasibility:** [flash-next-feasibility-2026-10-19.md](flash-next-feasibility-2026-10-19.md).
+- **Smoke-boot plan:** [flash-next-smoke-boot.md](flash-next-smoke-boot.md).
+- **Spec:** `specs/DREAMFERENCE_MODELS.md` §2.3.
+
+Notes:
+
+- **The first vLLM recipe since 2026-10-07**, and the first with a pinned `revision` on vLLM. The vLLM launch now passes `--revision`/`--tokenizer-revision` for a pinned recipe. Without them vLLM resolves the default branch, which a by-commit download does not record. It also passes the patched `--chat-template` when the recipe has `chat_template_patches`, as the SGLang launch did.
+- **`load_transient_gb`** in a recipe replaces the start gate's `0.15 × weights` load-transient estimate for that model only ([host-safety.md](host-safety.md)). Flash-Next's 8.0 is provisional until the smoke boot measures it.
+- **`swe_bench_max_parallel`** on a `ModelSpec` caps the SWE-bench instances that run at once beside that model, whatever `[swe_bench] max_parallel` says. Flash-Next's is 1, because about 15 GiB stays free while serving.
+- **`gpu_memory_utilization` is 0.86, not the sketch's 0.90.** The cgroup cap is clamped at total − 12 GiB, so a larger arena leaves the process almost nothing outside it.
+- **Two engines in one A/B.** Production is SGLang, the candidate vLLM, so a result compares checkpoint and engine together.
+
 ## A model may pin its own vLLM image
 
 `launch_overrides['docker_image']` overrides `DEFAULT_VLLM_IMAGE` for that model alone, because the engine is part of a recipe just as much as the flags are (the removed 122B DFlash recipe ran on a third-party vLLM build because the project image's vLLM tripped a KV page-size assert on its drafter). Two consequences worth knowing before touching this:

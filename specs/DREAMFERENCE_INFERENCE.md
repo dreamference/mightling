@@ -206,6 +206,8 @@ These are always emitted on vLLM:
 --enable-auto-tool-choice            (unless disabled)
 ```
 
+A recipe that pins a `revision` also gets `--revision <commit> --tokenizer-revision <commit>`. If it has `chat_template_patches`, it also gets `--chat-template` with the patched copy that `start_server()` writes. Both were added 2026-10-19 for the Flash-Next trial (`DREAMFERENCE_MODELS.md` §2.3), the first pinned vLLM recipe.
+
 **Module defaults**, used only when neither the caller nor the recipe sets a value:
 - `DEFAULT_MAX_MODEL_LEN = 16384`;
 - `DEFAULT_GPU_MEMORY_UTILIZATION = 0.50`;
@@ -228,7 +230,7 @@ The main model's recipe sets its own context length and utilisation.
 
 On GB10, host RAM and GPU memory are the same memory. A load that exhausts it can freeze the whole machine rather than OOM the container. There are two layers, both of which must be kept when touching `start_server()`:
 
-- **Before the load:** `check_host_safety()` inspects swap (at least 64 GB, `MIN_SWAP_GB`), `sysctl` values (`vm.min_free_kbytes` ≥ 1,048,576 and `vm.watermark_scale_factor` ≥ 200) and whether `earlyoom` or `systemd-oomd` is present and configured (earlyoom's memory threshold at most 6%, `MAX_EARLYOOM_MEM_PCT`; the suggested setting is `-m 5,2 -s 100 -r 60`). `ling-admin server start` also refuses while a Night Shift run holds its lock, and stops running `mightling-index-*` scopes first. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. Either one aborts with an explanation rather than risking a lockup.
+- **Before the load:** `check_host_safety()` inspects swap (at least 64 GB, `MIN_SWAP_GB`), `sysctl` values (`vm.min_free_kbytes` ≥ 1,048,576 and `vm.watermark_scale_factor` ≥ 200) and whether `earlyoom` or `systemd-oomd` is present and configured (earlyoom's memory threshold at most 6%, `MAX_EARLYOOM_MEM_PCT`; the suggested setting is `-m 5,2 -s 100 -r 60`). `ling-admin server start` also refuses while a Night Shift run holds its lock, and stops running `mightling-index-*` scopes first. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. The transient is `max(4 GB, 0.15 × weights)`, or the model's own measured `load_transient_gb` when its recipe carries one (still floored at 4 GB; `DREAMFERENCE_MODELS.md` §2.3). Either one aborts with an explanation rather than risking a lockup.
 - **During the load, `MemoryPressureWatchdog` (`psi_watchdog.py`):** it samples `/proc/pressure/memory` once a second and resolves the container's cgroup. It trips when `full avg10` ≥ 60% holds for 5 s (`PSI_FULL_LIMIT_PCT`, `PSI_TRIP_DURATION_S`), or at once when `full avg60` ≥ 25% (`PSI_SUSTAINED_AVG60_PCT`). The kill paths, in order:
   1. direct `SIGKILL` to the cgroup's PIDs, if permitted;
   2. a kill request over dockerd's unix socket;
