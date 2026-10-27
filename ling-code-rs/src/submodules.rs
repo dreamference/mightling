@@ -598,7 +598,11 @@ pub fn change(repo: &Repo, settings: &Settings, verb: &str, wanted: &str) -> Res
     let now = find(&after, &submodule.path)?;
     let mut lines = vec![format!("{}  {} ({})", now.path, if now.indexed { "indexed" } else { "not indexed" }, now.reason.label())];
     if now.indexed != submodule.indexed {
-        lines.push("re-index: `ling-code index` (a running ling session does it by itself)".to_string());
+        lines.push(if crate::paths::indexing_here() {
+            "re-index: `ling-code index` (a running ling session does it by itself)".to_string()
+        } else {
+            format!("re-index: {}", crate::paths::BUILT_ON_LINUX)
+        });
     }
     Ok(lines)
 }
