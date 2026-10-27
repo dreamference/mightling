@@ -1,7 +1,7 @@
 // Quick Entry (DESKTOP_PARITY_CLAUDE §4.2): which shortcuts may be system-wide, where they work, what the box sends.
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SHORTCUT, QUICK_MAX, accelerator, quickPrompt, shortcutsWork } from "./quick";
+import { DEFAULT_SHORTCUT, QUICK_MAX, QUICK_SIZE, RecentQuestions, accelerator, quickPrompt, quickSize, shortcutsWork } from "./quick";
 
 describe("Quick Entry's shortcut", () => {
   it("turns the keymap's spelling into Electron's, Ctrl standing for Cmd on a Mac as in the keymap", () => {
@@ -36,5 +36,43 @@ describe("Quick Entry's question", () => {
     expect(quickPrompt("   ")).toBeNull();
     expect(quickPrompt(null)).toBeNull();
     expect(quickPrompt("x".repeat(QUICK_MAX + 10))).toHaveLength(QUICK_MAX);
+  });
+});
+
+describe("Quick Entry's recent questions (DESKTOP §16 B24)", () => {
+  const thread = (id: string, cwd: string, preview: string, updatedAt: number, extra: Record<string, unknown> = {}) => ({ id, cwd, preview, name: null, updatedAt, ...extra });
+
+  it("lists Ask's questions only, newest first, at most five, never an incognito one", () => {
+    const recent = new RecentQuestions(() => "/home/u/.mightling/ask");
+    recent.observe({ id: 1, result: { data: [
+      thread("a1", "/home/u/.mightling/ask/q-1", "What is NVFP4?", 10),
+      thread("w1", "/home/u/src/fetcher", "Fix the retry", 50),
+      thread("a2", "/home/u/.mightling/ask/q-2", "How much  memory\nhas the GB10?", 20),
+      thread("a3", "/home/u/.mightling/ask/q-3", "A secret", 30, { ephemeral: true }),
+      thread("a4", "/home/u/.mightling/asking/q-4", "Not under the root", 40),
+    ] } });
+    expect(recent.list()).toEqual([{ id: "a2", title: "How much memory has the GB10?" }, { id: "a1", title: "What is NVFP4?" }]);
+    for (let n = 0; n < 7; n++) recent.observe({ method: "thread/started", params: { thread: thread(`n${n}`, `/home/u/.mightling/ask/n${n}`, `Question ${n}`, 100 + n) } });
+    expect(recent.list().map((q) => q.id)).toEqual(["n6", "n5", "n4", "n3", "n2"]);
+  });
+
+  it("follows renames, a new turn and an archive, and opens only what it listed", () => {
+    const recent = new RecentQuestions(() => "/r/ask");
+    recent.observe({ id: 2, result: { data: [thread("a", "/r/ask/a", "First", 1), thread("b", "/r/ask/b", "Second", 2)] } });
+    recent.observe({ method: "thread/name/updated", params: { threadId: "a", threadName: "Renamed" } });
+    recent.observe({ method: "turn/started", params: { threadId: "a", turn: { id: "t" } } });
+    expect(recent.list()).toEqual([{ id: "a", title: "Renamed" }, { id: "b", title: "Second" }]);
+    recent.observe({ method: "thread/archived", params: { threadId: "a" } });
+    expect(recent.listed("a")).toBe(false);
+    expect(recent.listed("b")).toBe(true);
+    expect(recent.listed({ id: "b" })).toBe(false);
+    recent.reset();
+    expect(recent.list()).toEqual([]);
+  });
+
+  it("grows the box by a line a question, up to five", () => {
+    expect(quickSize(0)).toEqual(QUICK_SIZE);
+    expect(quickSize(2).height).toBe(QUICK_SIZE.height + 8 + 56);
+    expect(quickSize(9)).toEqual(quickSize(5));
   });
 });

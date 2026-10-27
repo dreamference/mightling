@@ -1,7 +1,8 @@
 // Quick Entry's box (specs/DREAMFERENCE_MIGHTLING_DESKTOP_PARITY_CLAUDE.md §4.2;
 // desktop/electron/src/quick.ts): a question from anywhere. Enter sends it as a new Ask question in
-// the app window, Shift+Enter starts a new line, Esc puts the box away. It may ask the main process
-// for two things only: `quick/ask` and `quick/hide`.
+// the app window, Shift+Enter starts a new line, Esc puts the box away. Below it, the five most recent
+// Ask questions, each a click away (DESKTOP §16 B24). It may ask the main process for four things
+// only: `quick/ask`, `quick/hide`, `quick/recent` and `quick/open` (a question it listed).
 
 import { useEffect, useRef, useState } from "react";
 
@@ -21,17 +22,28 @@ export function quickKey(event: { key: string; shiftKey: boolean; isComposing?: 
   return null;
 }
 
+/** A recent question as the main process lists it; anything else is dropped. */
+export function recentQuestions(value: unknown): { id: string; title: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is { id: string; title: string } =>
+    typeof entry === "object" && entry !== null && typeof (entry as { id?: unknown }).id === "string" && typeof (entry as { title?: unknown }).title === "string").slice(0, 5);
+}
+
 export function QuickView() {
   const [text, setText] = useState("");
+  const [recent, setRecent] = useState<{ id: string; title: string }[]>([]);
   const field = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     document.documentElement.classList.add("quick-page");
     field.current?.focus();
+    const refresh = () => void send({ type: "quick/recent" }).then((list) => setRecent(recentQuestions(list))).catch(() => {});
+    refresh();
     const onMessage = (event: MessageEvent) => {
       const data = event.data as { channel?: string } | null;
       if (data?.channel === "quick://open") {
         setText("");
+        refresh();
         field.current?.focus();
       }
     };
@@ -61,6 +73,13 @@ export function QuickView() {
           }} />
       </div>
       <p className="quick-hint">Enter asks it as a new question in Ask · Shift+Enter for a new line · Esc to close</p>
+      {recent.length ? (
+        <nav className="quick-recent" aria-label="Recent questions">
+          {recent.map((question) => (
+            <button key={question.id} title={question.title} onClick={() => void send({ type: "quick/open", thread: question.id }).catch(() => {})}>{question.title}</button>
+          ))}
+        </nav>
+      ) : null}
     </div>
   );
 }

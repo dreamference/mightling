@@ -49,7 +49,7 @@ import { transcribe } from "./voice";
 import { Previews } from "./preview";
 import { disableRecall, enableRecall, pruneRecall, recallIndex, recallOn, writeRecall } from "./recall";
 import { PetStatus, fitPet, openPet, petImage, type PetSize, type PetState } from "./pet";
-import { DEFAULT_SHORTCUT, accelerator, openQuick, placeQuick, quickPrompt, shortcutsWork, type QuickStatus } from "./quick";
+import { DEFAULT_SHORTCUT, RecentQuestions, accelerator, openQuick, placeQuick, quickPrompt, quickSize, shortcutsWork, type QuickStatus } from "./quick";
 import type { SiteChoice } from "./preview-rules";
 import { openWork } from "./work";
 import { themeChoice, windowColours, type Theme } from "./theme";
@@ -141,6 +141,7 @@ export async function main(options: MainOptions): Promise<void> {
       const notice = notices.take(message.payload, () => prefs.read());
       if (notice) notify(windows(), notice, () => showThread(notice.threadId ?? null));
       if (petStatus.observe(message.payload)) sendPet();
+      recentQuestions.observe(message.payload);
       terminals.observe(message.payload);
       const routed = hub.incoming(message.payload);
       for (const target of windows()) {
@@ -154,6 +155,7 @@ export async function main(options: MainOptions): Promise<void> {
       terminals.clear();
       sendTerminals();
       petStatus.reset();
+      recentQuestions.reset();
       sendPet();
     }
     for (const target of windows()) send(target, message);
@@ -333,6 +335,11 @@ export async function main(options: MainOptions): Promise<void> {
 
   // The pet (pet.ts, Phase 3 item 6): a window of its own, shown while Settings › Pets says so.
   const petStatus = new PetStatus();
+  /** Ask's recent questions for Quick Entry's box (quick.ts, DESKTOP §16 B24). */
+  const recentQuestions = new RecentQuestions(() => {
+    const home = codexHome();
+    return home ? path.join(home, "ask") : null;
+  });
   let pet: BrowserWindow | null = null;
   let petPicture: { file: unknown; data: string | null } = { file: null, data: null };
   const petSize = (): PetSize => {
@@ -426,6 +433,10 @@ export async function main(options: MainOptions): Promise<void> {
       quick.on("blur", hideQuick);
       quick.on("closed", () => (quick = null));
     }
+    const size = quickSize(recentQuestions.list().length);
+    quick.setResizable(true);
+    quick.setContentSize(size.width, size.height);
+    quick.setResizable(false);
     placeQuick(quick);
     if (show) {
       quick.show();
@@ -454,8 +465,17 @@ export async function main(options: MainOptions): Promise<void> {
     }
   };
   /** What the box may ask for; nothing else of the app's channel answers it. */
-  const handleQuick = (message: { type?: string; prompt?: unknown }): unknown => {
+  const handleQuick = (message: { type?: string; prompt?: unknown; thread?: unknown }): unknown => {
     switch (message.type) {
+      // The most recent Ask questions, and one of them opened (DESKTOP §16 B24): only a thread the box listed.
+      case "quick/recent":
+        return recentQuestions.list();
+      case "quick/open": {
+        if (!recentQuestions.listed(message.thread)) return null;
+        hideQuick();
+        showThread(message.thread as string);
+        return null;
+      }
       case "quick/ask": {
         const prompt = quickPrompt(message.prompt);
         hideQuick();
@@ -494,7 +514,7 @@ export async function main(options: MainOptions): Promise<void> {
   const fromView = new Reassembler();
   ipcMain.handle(CHANNEL_FROM_VIEW, async (event: IpcMainInvokeEvent, data: unknown) => {
     if (pet && !pet.isDestroyed() && event.sender.id === pet.webContents.id) return handlePet(data as { type?: string });
-    if (quick && !quick.isDestroyed() && event.sender.id === quick.webContents.id) return handleQuick(data as { type?: string });
+    if (quick && !quick.isDestroyed() && event.sender.id === quick.webContents.id) return handleQuick(data as { type?: string; prompt?: unknown; thread?: unknown });
     const own = windowFor(event.sender.id);
     if (!own) throw new Error("only the app's windows talk to the agent");
     let message = data;
