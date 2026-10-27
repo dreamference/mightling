@@ -326,6 +326,14 @@ accent, background and text colours of the theme in front; each theme keeps its 
   on a day you name (on the month's last day when it is shorter, so the 31st runs on 30 April).
   Repeating tasks still run in the night window. From a terminal: `ling-admin night every --days
   mon,wed,fri -- <task>`, `--every 3` or `--monthly 15`.
+- **MCP servers and plugins:** Skills and tools › MCP servers › **Add an MCP server** takes a command
+  with its arguments, environment (`NAME=value` lines) and working folder, or a URL with its headers
+  and the name of the environment variable that holds its bearer token: the token itself is never
+  written to config.toml, and an `Authorization` header is refused. Each server shows how its start
+  went (starts, running, failed to start and why, off), and one you added has **Remove**, which asks
+  first. **Plugins** has a search, an **Installed** list where each plugin is turned off or on, and
+  **Remove marketplace**; **Install** first shows what the plugin adds (skills, MCP servers, hooks,
+  apps), and only the Install there installs it.
 - **MCP bundles from a file:** Skills and tools › MCP servers › **Install from a file…** takes an
   MCP bundle (`.mcpb`). Its manifest is shown before anything is unpacked: the name, the author, the
   command it runs, the settings it asks for, and whether a signature is attached (the app does not

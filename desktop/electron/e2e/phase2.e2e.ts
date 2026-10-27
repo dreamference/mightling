@@ -827,6 +827,7 @@ test("11 plugins and hooks: a skill turned off, a plugin installed from a local 
     await expect.poll(() => received(home).find((m) => m.method === "skills/config/write")?.params).toEqual({ path: "/skills/pdf-search/SKILL.md", enabled: false });
     await view.getByRole("button", { name: "Plugins" }).click();
     await view.getByRole("button", { name: "Install" }).click();
+    await view.getByRole("region", { name: "Plugin details" }).getByRole("button", { name: "Install" }).click();
     await expect.poll(() => received(home).find((m) => m.method === "plugin/install")?.params).toEqual({ marketplacePath: "/srv/team/marketplace.json", pluginName: "lint" });
     await shoot("11-plugins.png");
     await view.getByRole("button", { name: "MCP servers" }).click();
