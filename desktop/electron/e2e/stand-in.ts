@@ -439,7 +439,13 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       answer({ turn: { id, items: [], status: "inProgress", error: null }, reviewThreadId: where });
       say({ method: "turn/started", params: { threadId: where, turn: { id, items: [], status: "inProgress", error: null } } });
       say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "enteredReviewMode", id: "rv1", review: "uncommitted changes" } } });
-      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "exitedReviewMode", id: "rv2", review: "**One finding.** fetcher/client.py:15 re-raises without the attempt count in the message." } } });
+      // Asked for findings (DESKTOP §16 B12): the block as ling formats it, one on a line of the turn's diff and one elsewhere.
+      const withFindings = p.target && p.target.type === "custom" && /findings/.test(String(p.target.instructions || ""));
+      const at = require("node:path").join(${JSON.stringify(projectFolders(home).fetcher)}, "fetcher");
+      const review = withFindings
+        ? "Two things to fix.\\n\\nFull review comments:\\n\\n- Timeout is hard-coded — " + at + "/client.py:14-14\\n  Pass the timeout in from the caller.\\n\\n- Backoff has no cap — " + at + "/backoff.py:3-5\\n  The delay doubles without a ceiling."
+        : "**One finding.** fetcher/client.py:15 re-raises without the attempt count in the message.";
+      say({ method: "item/completed", params: { threadId: where, turnId: id, item: { type: "exitedReviewMode", id: "rv2", review } } });
       return say({ method: "turn/completed", params: { threadId: where, turn: { id, items: [], status: "completed", error: null } } });
     }
     // A stand-in PTY: a fake shell that echoes what is typed and runs echo, enough to show the

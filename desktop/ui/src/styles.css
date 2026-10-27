@@ -1049,3 +1049,11 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 /* Work's sidebar by date (DESKTOP §16 B10). */
 .search .order-toggle { flex: none; color: var(--muted); }
 .search .order-toggle.on { color: var(--accent); }
+/* Review findings on their lines (DESKTOP §16 B12). */
+.review-finding { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-sm); padding: 6px 10px; margin: 4px 0; font-size: 13px; }
+.review-finding-head { display: flex; align-items: center; gap: 6px; }
+.review-finding-where { color: var(--muted); font-family: var(--font-code); font-size: 12px; margin-left: auto; }
+.review-finding p { margin: 6px 0 0 20px; white-space: pre-wrap; }
+.review-finding .buttons { margin: 6px 0 0 20px; display: flex; gap: 6px; }
+.review-findings-elsewhere { margin: 8px 0; }
+.review-findings-elsewhere h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); font-weight: 500; }

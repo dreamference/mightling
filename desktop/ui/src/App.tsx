@@ -83,6 +83,7 @@ import { ExportDialog } from "./ExportDialog";
 import { QuestionCard } from "./QuestionCard";
 import { showsWelcome, WelcomeDialog, type WelcomeChoice } from "./WelcomeDialog";
 import { toolView, type ToolView } from "./toolitems";
+import { latestFindings } from "./findings";
 import { threadContext, withThreadContext } from "./tonight";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectPage } from "./ProjectPage";
@@ -2321,6 +2322,8 @@ export function App() {
     return <StartupScreen state={state.server} stderr={state.stderr} protocolErrors={state.protocolErrors} notices={state.notices} onRetry={connect} />;
   }
 
+  // The latest /review's findings, shown on their lines in the review pane (DESKTOP §16 B12).
+  const reviewFindings = latestFindings(selected?.turns ?? []);
   const usage = contextUse(selected?.usage ?? null);
   const otherRequests = state.requests.length - threadRequests.length;
   const allThreads = Object.values(state.threads).map((entry) => entry.thread);
@@ -2483,7 +2486,7 @@ export function App() {
             <div className="review-pane">
               <ReviewPane
                 cwd={composeRoot} threadId={PANE.thread}
-                turnDiff={lastTurnDiff(selected)}
+                turnDiff={lastTurnDiff(selected)} findings={reviewFindings}
                 airgapOn={airgap?.level === "on"}
                 layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
                 editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
@@ -2904,7 +2907,7 @@ export function App() {
           ) : tab.kind === "review" ? (
             <ReviewPane
               cwd={composeRoot} threadId={selected?.thread.id ?? null}
-              turnDiff={lastTurnDiff(selected)}
+              turnDiff={lastTurnDiff(selected)} findings={reviewFindings}
               airgapOn={airgap?.level === "on"}
               layout={prefs.diffLayout} setLayout={(diffLayout) => updatePrefs({ diffLayout })}
               editor={prefs.editor} setEditor={(editor) => updatePrefs({ editor })}
