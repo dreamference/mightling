@@ -1,47 +1,64 @@
-# Mightling Forge: a Forgejo instance on each GB10 node
+# Mightling Forge: a Forgejo forge on every node
 
-**Status:** proposed 2026-10-27; nothing built. The owner asked for "a spec for running Forgejo on each puffin node" (the GB10 machines of the development fleet). The open choices are in §0.1.
+**Status:** proposed 2026-10-27. **Decided by the owner the same day (§0.1):**
+- Forgejo is a **product feature of the node install, on by default**.
+- The main node is the forge of record, and every other node is a read-only mirror.
+- For this project's own fleet, every branch is push-mirrored to GitHub through the anonymity check.
+- CPU gates move to the forge's runners.
+- LAN only.
+- The pre-rewrite history goes into a private repository that a server-side rule and a test keep off GitHub.
 
-**Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`). Machines are written with the repository's placeholders: `gx10-1a2b` (the primary development node), `node-b` (the engine development box), `node-c` and `node-d` (the two newer GB10s). The real names and addresses are never written here; nodes are resolved by name at use time, as everywhere else ([NODE](./DREAMFERENCE_MIGHTLING_NODE.md)).
+**Building waits:** this is the spec only.
+
+**Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`). Machines are written with the repository's placeholders: `gx10-1a2b` (this project's main node), `node-b`, `node-c`, `node-d` (the other GB10s). Real names and addresses are never written here; nodes are resolved by name at use time ([NODE](./DREAMFERENCE_MIGHTLING_NODE.md)).
 
 **Builds on:**
-- [FLEET](./DREAMFERENCE_MIGHTLING_FLEET.md): provisioning a GB10 from an existing node, over SSH, one forced command;
-- [NODE](./DREAMFERENCE_MIGHTLING_NODE.md): name resolution, the trusted-LAN decision, jobs in capped user units;
+- [NODE](./DREAMFERENCE_MIGHTLING_NODE.md): the node install, the advertisement on the LAN (§3), pairing (§13.2, §18.6), jobs in capped user units, the trusted-LAN decision;
+- [FLEET](./DREAMFERENCE_MIGHTLING_FLEET.md): provisioning further GB10s from an existing node;
+- [ASK](./DREAMFERENCE_MIGHTLING_ASK.md): `ling web` and its device pairing; [DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the app;
+- [EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md): the audit and its declared node services;
 - [SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md) §30 and the night scheduler: nights own a machine's GPU and disk;
-- [ORGANISATION](./DREAMFERENCE_ORGANISATION.md): the 15 team roles and their bots;
-- `docs/dev/host-safety.md`: anything running beside a resident model server bounds its memory;
+- [ORGANISATION](./DREAMFERENCE_ORGANISATION.md): the 15 team roles;
+- `docs/dev/host-safety.md`: anything beside a resident model server bounds its memory;
 - the anonymity rules (`tests/test_anonymity.py`, the local denylist, the pre-push guard).
 
-**Why now.** Three things happened in one week:
-- **An identifier leaked.** An agent's working branch put a real host name into a spec on public `main`; the history rewrite of 2026-10-26 had just removed such names.
-- **Agents' branches clutter GitHub.** After that rewrite, about 200 local branches still pointed at the old history and had to be moved by hand.
-- **A release download was refused.** GitHub's download limit stopped a release download on a test box, and the release runs found Windows failures one run at a time, because no CI machine has a GB10 or a GPU.
+**Why.** Three things happened in one week:
+- **An identifier leaked:** an agent's working branch put a real host name into a spec on public `main`.
+- **Branches went stale:** after the history rewrite of 2026-10-26, about 200 local branches still pointed at the old history.
+- **CI ran out of room:** GitHub's download limit refused a release download on a test box, and every CI gate ran on one machine (`gx10-1a2b`), competing with the model server.
 
-A forge at home, on the machines that already run day and night, addresses all three: work in progress stays private, only reviewed merges reach GitHub, clones and fetches stay on the LAN, and GB10s can run CI jobs no hosted runner can.
+A forge on the nodes that already run day and night fixes all three for this project, and gives every Mightling owner the same thing: their code on their own node, Night Shift's branches as pull requests in a web UI, and their GB10 as a CI machine.
 
 ---
 
-## 0. Decisions, stated first
+## 0. Decisions
 
-1. **Forgejo, pinned.** Forgejo (the community fork of Gitea: one Go binary, a web UI, git over SSH and HTTP, issues, pull requests, mirrors, its own Actions runner) runs in Docker from `codeberg.org/forgejo/forgejo`, pinned by digest like every image the project runs ([DOCKER](./DREAMFERENCE_DOCKER.md)). The release line is the current long-term-support one at build time, checked on forgejo.org. On 2026-10-27 the latest stable is v15 (released 2026-04-16); stable lines get three months of fixes and the yearly first-quarter line gets long-term support.
-2. **One forge of record, an instance on every node.** A single instance, on `node-c`, holds the repositories agents push to, the issues and the pull requests: the forge of record. Every other GB10 runs its own instance as a **read replica**: pull mirrors of the forge of record (and of GitHub), so clones, fetches and CI checkouts are local to the machine, and a replica can be promoted if the forge of record is lost (§6). Two writable instances never accept pushes to the same repository; Forgejo has no multi-writer replication, and this spec does not invent one.
-3. **GitHub stays the public face and gets only reviewed merges.** Agents push working branches to the forge of record. A merge to `main` is pushed to GitHub by the merging step, through the existing pre-push anonymity guard, exactly as today. No push mirror sends branches to GitHub. The forge pulls GitHub's `main`, tags and releases every 10 minutes, so it never falls behind changes made on GitHub (release merges, the dry-run workflow's issues).
-4. **Private repositories stay private.** The forge holds what must never reach GitHub: the pre-rewrite history (today only in bundle files under `~/backups/`), the memos folder, and scratch repositories. These have no push mirror at all, and the forge refuses to create one for them (§5.3).
-5. **LAN only, no new exposure.** The web UI listens on the LAN (port 3000) and git over SSH on port 2222. Nothing is published through the remote-access relay unless the owner turns that on (§0.1, O5). The trusted-LAN decision of 2026-09-30 applies, so there is no TLS on the LAN. Every account has a password and SSH keys, and anonymous access is off.
-6. **Bounded beside the model server.** Each instance runs in a container capped at 1 GiB of memory and 1 CPU share. It uses SQLite rather than a database server, since the forge has a handful of users, and keeps its data under `~/forge/` on the node. A runner job never starts a model server and never takes the GPU without the GPU lock (§4.3).
-7. **Runners on every GB10, registered with the forge of record.** Each node runs a Forgejo Runner with labels for what it has (`gb10`, `arm64`, `gpu`, `cuda-13`, `docker`). CPU jobs come first (§4.2): the pytest gate, cargo tests in an export and the desktop npm tests, which today all run on `gx10-1a2b` and load it. GPU jobs come in a later phase and obey the GPU lock and the nights (§4.3).
-8. **Team accounts, not GitHub Apps.** The forge has one user per team role (ORGANISATION's 15 roles) plus an admin. Agents commit and push as the team that owns the change, with no GitHub App registration needed. On the forge the bots exist the moment they are created. What reaches GitHub is still committed as GitHub sees fit today (dgxcoder, or a team's GitHub App once registered).
+1. **Forgejo, part of the node install, on by default.**
+   - `ling-admin node` install and enable start a Forgejo instance on every node, in Docker from `codeberg.org/forgejo/forgejo`, pinned by digest in the release like every image Mightling runs ([DOCKER](./DREAMFERENCE_DOCKER.md)).
+   - The release line is the current long-term-support one when a Mightling release is cut. On 2026-10-27 the latest stable is v15 (2026-04-16). Stable lines get three months of fixes; the first-quarter line each year gets long-term support.
+   - The off switch is in §2.5.
+2. **The main node is the forge of record; every other node is a read-only mirror.**
+   - The main node is the one a client paired with first, or the one the owner marks `main` (`ling-admin node main <node>`). It holds the writable repositories, issues, pull requests and the Actions queue.
+   - Every other node's instance pull-mirrors it, set up automatically when that node is installed or enabled, so clones, fetches and CI checkouts are local everywhere.
+   - `ling-admin forge promote <node>` turns a mirror into the forge of record if the main node is lost (§6).
+   - Two writable instances never serve the same repository: Forgejo has no multi-writer replication, and this spec doesn't invent one.
+3. **LAN only.** The forge listens only where the node already advertises itself, on the interfaces `node-advertise` publishes (`~/.config/dreamference/node-advertise.json`), never on Docker bridges or the remote-access overlay. There's no TLS on the LAN, per the trusted-LAN decision. Anonymous access is off, and every account has a password and SSH keys.
+4. **Bounded beside the model server.** One container per node, capped at 1 GiB of memory and one CPU share, using SQLite. Data lives under `~/.local/share/dreamference/forge/`. A runner job never starts a model server, and never touches a GPU without that node's GPU lock (§4.3).
+5. **Runners on every node, CPU first.** Each node runs a Forgejo Runner registered with the forge of record, with labels for what the node has. CPU gates (pytest, cargo tests in an export, npm) move there and spread across the nodes. GPU jobs follow under the GPU lock and outside nights (§4.3).
+6. **GitHub mirroring is a per-repository choice in the product, off by default.** For this project's own fleet, it's on for every branch (§3.2). Private repositories can never be mirrored out, by a server-side rule with a test (§5.3).
+7. **Upgrades follow Mightling releases.** Each release pins the Forgejo and runner digests. `ling update` (or `ling-admin node update`) pulls the new image, takes a `forgejo dump` first, then restarts. It never skips a Forgejo major version without running that version's migration path, and it refuses a downgrade.
 
-### 0.1 For the owner to decide
+### 0.1 Decided by the owner (2026-10-27)
 
-| # | Decision | Proposed |
+| # | Decision | Answer |
 |---|---|---|
-| O1 | Instances on **every** GB10 (replicas, §2), or the forge of record alone with runners on the others | Every node, as asked: a replica is cheap (~300 MB RAM, a few GB of disk) and gives local checkouts and a standby |
-| O2 | Which node holds the forge of record | `node-c`: 800 GB free, no production model server, already the night machine; git barely touches CPU or GPU |
-| O3 | What agents push to the forge instead of GitHub | All working branches from now on. GitHub receives `main`, release branches and tags only |
-| O4 | Whether CI moves from GitHub to forge runners | CPU gates for agent branches move to the forge, so gx10's CPU is freed. GitHub Actions keep the release pipeline and the nightly dry run, for the Mac, Windows and x86 platforms the GB10s don't have |
-| O5 | Reachable outside the house through remote access | Not now; revisit with remote access |
-| O6 | Pre-rewrite history imported into a private repository | Yes, as a private repository with no mirror, readable by the admin only |
+| O1 | Instances on every node | **Yes, as a product feature on by default:** the main node holds the forge of record, and every other node runs a read-only mirror, set up automatically by `ling-admin node` install and enable; `promote` for failover |
+| O2 | Which node is the forge of record | **The main ling node:** the one a client pairs with first, or the one marked `main` |
+| O3 | What reaches GitHub | **Everything, for this project's fleet:** every working branch, abandoned ones included, push-mirrored to GitHub to maximise the public commit count. Every push to the forge goes through the anonymity check first. Private repositories are never mirrored |
+| O4 | CI | **CPU gates move to the forge's runners across the nodes;** the release pipeline stays on GitHub |
+| O5 | Reach | **LAN only for now** |
+| O6 | Pre-rewrite history | **A private repository on the forge of record,** excluded from any GitHub mirror by a server-side rule, with a test proving it can't be pushed out |
+| — | When | **Spec now; building later** |
 
 ---
 
@@ -49,168 +66,194 @@ A forge at home, on the machines that already run day and night, addresses all t
 
 | Node | Forgejo | Runner labels | Notes |
 |---|---|---|---|
-| `node-c` | **forge of record** | `gb10 arm64 docker gpu cuda-13` | Night machine by night; engine test windows by day; the forge itself runs around the clock |
-| `node-d` | replica | `gb10 arm64 docker gpu cuda-13` | From its provisioning (next week) |
-| `node-b` | replica | `gb10 arm64 docker gpu cuda-13` | Engine development box: GPU jobs here only through the GPU lock |
-| `gx10-1a2b` | replica | `gb10 arm64 docker` (CPU only by default) | Serves the owner's production model; GPU jobs off here unless the owner says otherwise |
+| Main node (`gx10-1a2b` in this project's fleet) | **forge of record** | `gb10 arm64 docker` (CPU jobs) | Serves the owner's model; GPU jobs here only if the owner allows (§4.3) |
+| Every other node (`node-b`, `node-c`, `node-d`) | read-only mirror | `gb10 arm64 docker gpu cuda-13` | Nights by night, engine windows by day; GPU jobs under the lock |
 
-The AMD box and the Mac mini can be added as runners later (`windows`, `x86_64`, `macos`), which would bring the platforms GitHub provides today in-house. That is out of scope here.
+The forge of record is wherever the main node is. In this project that is `gx10-1a2b`, whose disk floor (175 GB during nights) the forge respects (§5.2). If the owner later marks another node `main`, `promote` moves it (§6).
 
-## 2. The instance on each node
+Clients (laptops, the AMD box, the Mac) run no forge; they use the main node's.
 
-### 2.1 Container
+## 2. The product: what a Mightling owner gets
 
-- **Image and identity:** `codeberg.org/forgejo/forgejo@sha256:<pinned>`, running as the node's user via `USER_UID`/`USER_GID`, so files under `~/forge/` belong to that user.
-- **Mounts:** `~/forge/data:/data` and nothing else: no Docker socket, no home directory.
-- **Ports:** `3000/tcp` (web) and `2222/tcp` (SSH), bound on the LAN interface only. The interface is resolved at start from the node's route, as `node-advertise` already does, never a stored address.
-- **Limits:** `--memory 1g --cpus 1 --pids-limit 512`, plus `--restart unless-stopped`.
-- **Discovery:** advertised on mDNS as `_forge._tcp` with the node id in its TXT record, like `ling web`. A client finds the forge of record by browsing for the record whose TXT says `role=record`.
+### 2.1 On install
 
-### 2.2 Configuration (`app.ini`, generated)
+`ling-admin node install` (and `enable` on an existing node):
+- pulls the pinned image and writes `app.ini` (§2.3);
+- starts the container as a user unit, `mightling-forge.service`;
+- advertises the forge on mDNS as `_mightling-forge._tcp`, with the node id and `role=record` or `role=mirror` in its TXT record.
 
-- `[database] DB_TYPE = sqlite3`;
-- `[server] ROOT_URL = http://<node>.local:3000/`, `SSH_PORT = 2222`, `START_SSH_SERVER = true` (Forgejo's built-in SSH; the host's sshd is untouched);
-- `[service] DISABLE_REGISTRATION = true`, `REQUIRE_SIGNIN_VIEW = true`;
-- `[repository] DEFAULT_PRIVATE = private`;
-- `[mirror] DEFAULT_INTERVAL = 10m`;
-- `[actions] ENABLED = true` on the forge of record only;
-- outgoing mail off, no telemetry: Forgejo sends none, and the update checker is disabled (`[cron.update_checker] ENABLED = false`);
-- `[security] INSTALL_LOCK = true`, secrets generated at setup into `~/forge/data/` (mode 0600). They are never written into this repository or into memory notes.
+On a mirror node, it finds the forge of record by that record, creates a `mirror` account there with a read token, and sets up pull mirrors of every non-private repository (every 10 minutes, plus on a webhook from the record).
 
-### 2.3 Accounts and keys
+### 2.2 The first account, with no default password
 
-- **Admin:** `forge-admin`, with a random password written to `~/.config/dreamference/forge-admin` (0600) on the forge of record only.
-- **Team users:** the 15 role names from ORGANISATION (`engine`, `models`, `agent`, `desktop`, …) plus `owner`. Each agent's SSH key is added to the team user it commits as.
-- **Machine users:** `mirror` on each replica, with a read token for the forge of record, and the runners' registration tokens. All live in `~/.config/dreamference/forge/` (0600).
+- **The owner's account is created at install** as `owner`, with a generated 24-character password. It's shown **once**, in the terminal at the end of `node install`, and stored on the node at `~/.config/dreamference/forge/owner-password` (0600) so `ling web` can show it again to a paired device. It's never shown on the LAN without a paired session.
+- **Paired devices sign in without the password.** A device paired with the node through `ling web` (a one-time code) gets a forge session through `ling web`: the forge sits behind `ling web`'s reverse proxy at `/forge/`, using Forgejo's reverse-proxy authentication header, which only `ling web` can set. So the desktop app and the phone page open the forge already signed in as `owner`.
+- **Direct access:** the port is reachable on the LAN for git over HTTP and SSH. A browser reaching it directly still sees Forgejo's sign-in page, and needs the password or an SSH key.
+- **SSH keys:** `ling-admin forge key add <file>` adds a key to `owner`. A paired client's `ling` adds its own key at pairing time, so `git push forge` works from a laptop without setup.
+- **Admin account:** a separate `forge-admin` with its own generated password, stored like the owner's. It's used only by `ling-admin` for maintenance, never shown in the UI.
+- **Team accounts:** this project's fleet adds the 15 ORGANISATION team users, so agents commit and push as the team that owns the change. The product adds none by default.
+
+### 2.3 Configuration (generated, not edited by hand)
+
+- **Database and server:** `DB_TYPE = sqlite3`; `ROOT_URL` is the node's `.local` name plus `/forge/` through `ling web`, with the direct port as a second clone URL; `HTTP_PORT = 3200`; `START_SSH_SERVER = true` on port 2222 (Forgejo's built-in SSH; the host's sshd is untouched).
+- **Bind address:** `HTTP_ADDR` and `SSH_LISTEN_HOST` are each advertised interface's address, resolved at start, never stored. They're regenerated when the advertisement changes, the same moment `ling web` re-binds.
+- **Access:** `DISABLE_REGISTRATION = true`, `REQUIRE_SIGNIN_VIEW = true`, `DEFAULT_PRIVATE = private`.
+- **Reverse-proxy sign-in:** `[service] ENABLE_REVERSE_PROXY_AUTHENTICATION = true`, trusting only loopback, which is where `ling web`'s proxy connects from.
+- **Updates and mail off:** `[cron.update_checker] ENABLED = false`; mail off; no telemetry (Forgejo has none).
+- **Mirrors:** `[mirror] DEFAULT_INTERVAL = 10m`. Push mirrors are allowed only for repositories that aren't private (§5.3).
+- **Actions:** `[actions] ENABLED = true` on the forge of record.
+- **Secrets:** generated at install into the data folder (0600). They never enter a repository, a log or a memory note.
+
+### 2.4 What the owner sees
+
+- **`ling web` and the desktop app:**
+  - **A "Code" entry:** the forge's web UI inside the app's window, through the `/forge/` proxy, signed in. Navigation is locked to the forge's paths, the same lock-down as the app's other views.
+  - **The node's status page** lists the forge: on or off, role (record or mirror), mirror freshness, runner health, last backup.
+  - **Night Shift results** arrive as pull requests on the forge, alongside the existing branch and `ling night apply`. The morning report links to them.
+- **`ling node list`** shows each node's forge role.
+- **`ling-admin forge status`** gives the same information on the command line (§7).
+
+### 2.5 The off switch
+
+- **`ling-admin forge off`** stops the unit, removes the mDNS record and keeps the data. **`on`** brings it back.
+- **The setting** is `[forge] enabled = false` in the node's config (`~/.config/dreamference/config.toml`, never the repository), with `DREAMFERENCE_FORGE=0` as an environment override. `node install --no-forge` installs without it.
+- **Off on the main node** means the mirrors stop syncing and show "forge of record is off". Nothing is deleted.
+- **At `/airgapped on`:** the forge keeps running on the LAN, but its outbound mirrors to GitHub stop (§5.4).
+
+### 2.6 Memory beside the model server
+
+- The forge's container (1 GiB cap) and the runner's container (256 MiB, plus per-job caps, §4.1) are added to the side-service allowance `check_host_safety()` uses before a model load. The pre-load refusal names them when they're why a load doesn't fit.
+- The PSI watchdog's kill path is unchanged: the forge and runner are ordinary capped containers, and the model server keeps priority.
+- The forge idles at about 150–300 MB on SQLite; the cap is headroom for large pushes and repository indexing.
 
 ## 3. Repositories
 
-| Repository | On the forge of record | Mirrors |
+### 3.1 On the forge of record
+
+| Repository | Visibility | Mirrors |
 |---|---|---|
-| `mightling` | Writable; agents push branches here | Pull mirror of GitHub `dreamference/mightling` (`main`, release branches, tags) every 10 min; each replica pull-mirrors the forge of record |
-| `ling-engine` | Writable | Pull mirror of GitHub `dreamference/ling-engine`; replicas as above |
-| `codex` | Read-only mirror | Pull mirror of GitHub `dreamference/codex` |
-| `archive-pre-rewrite` (private, admin only) | Imported once from the bundles in `~/backups/rewrite-2026-10-26/` and `-10-08` | **None, ever** |
-| `memos` (private) | The owner's memos folder | **None** |
+| `mightling` | Writable; agents push every branch here | **Push mirror to GitHub, every branch and tag** (§3.2) |
+| `ling-engine` | Writable | Push mirror to GitHub, every branch and tag |
+| `codex` | Writable (the fork's branch) | Push mirror to GitHub |
+| `archive-pre-rewrite` | **Private, admin and owner only** | **None, ever** (§5.3) |
+| `memos` | **Private** | **None, ever** |
 
-### 3.1 Two sources of `main`
+Every mirror node pull-mirrors every non-private repository from the forge of record. Private repositories reach mirror nodes only through the nightly backup (§6), never as browsable mirrors.
 
-A writable `mightling` on the forge and a pull mirror of GitHub's `main` must not fight. The forge keeps GitHub's `main` as the branch `github/main`, refreshed by a pull of that ref every 10 minutes, a fetch-only remote inside the repository. The forge's own `main` is updated only by the merge step:
-1. a merge is made on a fresh `github/main`;
-2. it is pushed to GitHub `main`, through the pre-push guard;
-3. on success, the same commit is pushed to the forge's `main`.
+### 3.2 Everything to GitHub (this project's fleet, O3)
 
-If GitHub refuses, the forge's `main` is not moved, so it never contains anything GitHub doesn't. A server-side `pre-receive` hook on the forge refuses any push to `main` whose commit is not already an ancestor-or-equal of `github/main` once refreshed. That makes the rule mechanical: `main` follows GitHub, and only branches are the forge's own.
+- **The forge is the origin; GitHub is its public copy.** Agents push only to the forge, and the forge's push mirror sends every branch and tag to GitHub within a minute (push-on-commit plus a 10-minute sweep). Abandoned branches go too, to maximise the public commit count.
+- **Nothing is deleted on GitHub.** The mirror pushes without pruning: forge-side branch deletions don't reach GitHub. That keeps abandoned branches and their commits public, and keeps GitHub-only refs alive. Forgejo's push mirror uses `--mirror`, which prunes, so this project's mirror is a small forge Actions job (`.forgejo/workflows/github-mirror.yml`) that runs `git push github 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'` without `--prune` on every push, triggered by the forge's push event.
+- **Refs GitHub creates itself:** release tags made by `release.yml`, and the merge of a release branch back into `main`. Releases are tagged on the forge first, and `release.yml` takes an existing tag instead of creating one. A ref that still appears only on GitHub (for example a hand-made tag) is fetched back into the forge by a 10-minute pull of GitHub's tags, so the two never diverge silently.
+- **Every push is checked before it exists on the forge.** A server-side `pre-receive` hook on the forge of record runs the anonymity check (`tests/test_anonymity.py`'s checks against the denylist kept on the main node, never in a repository) on every ref of every push to a non-private repository. A failing push is refused, with the matching file and line, so a leak never enters the forge, and therefore never reaches GitHub.
+- **The mirror re-checks every ref before sending,** as a second layer, and stops the whole mirror run on any failure, with an issue on the forge. The existing client-side pre-push guard stays on the developer machines.
+- **Rewrite rule:** the forge's history is never rewritten. If GitHub's is (as on 2026-10-26), the mirror is paused, the forge is rewritten with the same tool and the same id map, and the mirror resumes with one forced push per ref, after the owner's OK.
 
-### 3.2 Branch hygiene
+In the product, push mirroring is per repository, off by default, and never on for a private repository. The every-branch, no-prune policy above is this project's configuration, set by `ling-admin forge github-mirror --all-branches` on this fleet only.
 
-- Agents' branches live on the forge as `<team>/<topic>`.
-- A branch merged into `main` is deleted after 7 days. An unmerged branch idle for 30 days is listed in a weekly issue, never deleted automatically.
-- The forge's history is never rewritten. GitHub's might be again, and a rewrite then only touches GitHub, while the forge keeps the old ids for reference in its archive.
+### 3.3 Branch hygiene
+
+- Agents push `<team>/<topic>` branches.
+- Nothing is deleted automatically, since branches are wanted on GitHub.
+- A weekly forge issue lists branches idle for 30 days, for the owner's information only.
 
 ## 4. Runners
 
 ### 4.1 Install
 
-- Forgejo Runner in its own container, pinned by digest, registered with the forge of record with the node's labels (§1).
-- It runs jobs in Docker (the `docker` executor) with the node's NVIDIA runtime available but not attached by default.
-- Each job container is capped by the runner's config (memory, CPUs) per label.
-- The runner's own container gets the Docker socket, which is what Forgejo Runner needs. This is the one privileged piece, and it is why the runner is configured to accept jobs **only from repositories on the forge of record** and **only from team users**, never from forks or other users.
+- Forgejo Runner in its own container on every node, pinned by digest, registered with the forge of record at node install, with the labels in §1.
+- Jobs run in Docker with per-label caps (CPU jobs: 8 GiB, 8 CPUs by default), with the NVIDIA runtime available only to `gpu` jobs.
+- The runner needs the Docker socket. That is its one privileged part, so it accepts jobs **only from repositories on the forge of record pushed by the owner's or the team accounts**, never from forks or other users.
 
-### 4.2 CPU jobs (Phase 2)
+### 4.2 CPU gates (O4)
 
-A workflow in `.forgejo/workflows/gate.yml` runs on every push of an agent branch:
-- `pytest` (the full suite);
-- the ruff and mypy ratchet;
-- the launcher, web and chat cargo tests in an export (never in `codex/`, as AGENTS.md says), through sccache;
-- the desktop `npm test`, with e2e under Xvfb in the job image.
+- **The gate workflow:** `.forgejo/workflows/gate.yml` runs on every push of an agent branch, split into parallel jobs that land on different nodes:
+  - pytest (the full suite);
+  - the ruff and mypy ratchet;
+  - the launcher, web and chat cargo tests in an export (never in `codex/`), with sccache;
+  - the desktop `npm test`, plus e2e under Xvfb.
+- **Merges:** the result is a commit status, and the merge step requires it green.
+- **The effect:** gates that agents now run one after another on `gx10-1a2b` spread over four nodes, and the main node's CPU stays free for builds and the model server.
+- **What stays on GitHub:** the release pipeline (`release.yml`) and the nightly release dry run, which need Mac, Windows and x86 runners and the release key in GitHub's `release` environment. The forge's gate comes in addition to them.
 
-It runs on any node with the label `gb10` whose load allows it. The result is a commit status on the forge, and the merge step requires it green.
-
-This moves the gates that agents now run one after another on `gx10-1a2b`, where they compete with builds and the model server, onto the four GB10s in parallel.
-
-### 4.3 GPU jobs (Phase 3)
+### 4.3 GPU jobs (later phase)
 
 A job with `runs-on: [gb10, gpu]`:
-- takes `flock ~/.ling-gpu.lock` on its node before touching the GPU, logs a line in `~/.ling-gpu-holds.log`, and stops and restarts the node's production model server around itself where one exists, as the engine agents' windows do;
-- is limited to 45 minutes;
-- is refused while a night holds the node: the runner reads the night scheduler's state (`ling-swe-*` active, or a claimed night after its `not_before`) and puts the job back in the queue.
+- takes `flock ~/.ling-gpu.lock` on its node, logs a line in `~/.ling-gpu-holds.log`, and stops and restarts that node's production model server where one exists, as the engine windows do;
+- runs at most 45 minutes;
+- is put back in the queue while a night holds the node (`ling-swe-*` active, or a night claimed by the scheduler past its `not_before`).
 
-This turns the engine's ad-hoc "windows" into ordinary CI jobs: exactness checks, agentlong identity and the vision gates, with logs and artefacts kept on the forge.
-
-### 4.4 What stays on GitHub
-
-- The release pipeline (`release.yml`) and the nightly dry run need the Mac, Windows and x86 runners GitHub provides, and the release key lives in GitHub's `release` environment. They stay on GitHub.
-- The forge's gate is in addition to them, not a replacement.
+On the main node, GPU jobs are off unless the owner turns them on, since its model serves the owner.
 
 ## 5. Safety
 
 ### 5.1 Host safety
 
-- A Forgejo instance and its runner idle at a few hundred MB.
-- The caps in §2.1 and §4.1 bound them below what `check_host_safety()` assumes for side services.
-- Runner job containers are capped per label and placed in the runner's own cgroup, so the PSI watchdog's kill path is unchanged.
-- On `gx10-1a2b`, whose model serves the owner, the runner takes CPU jobs only, at a lower CPU weight than the model server's container.
+See §2.6. Runner jobs inherit their label's caps and the runner's cgroup, and the main node's runner takes CPU jobs only, at a lower CPU weight than the model server.
 
 ### 5.2 Disk
 
-- The forge of record keeps the repositories (a few GB), job logs and artefacts (expiring after 14 days) and the backups (§6).
-- Each replica keeps mirrors only.
+- The forge of record keeps repositories (a few GB), job logs and artefacts (14 days) and its dumps. Mirrors keep mirrors.
+- The runner refuses jobs while its node is below its floor: 150 GB, or 175 GB on a node running a SWE-bench night.
 - Job workspaces are deleted after each job.
-- The runner refuses jobs while the node is below its night disk floor: 175 GB on `gx10-1a2b`, 150 GB elsewhere.
 
-### 5.3 Anonymity
+### 5.3 Private repositories can't leave (O6)
 
-- The forge is private, but what leaves it goes through the same guard as today: the merge step pushes to GitHub with the pre-push hook that runs `tests/test_anonymity.py` against the local denylist.
-- A second, server-side check on the forge (a `pre-receive` hook running the same test) flags a branch that would fail the guard the moment it is pushed, days before its merge, so a leak is fixed while it is still private.
-- Push mirrors are disabled forge-wide by configuration (`[mirror] DISABLE_NEW_PUSH = true`), so no repository can be set to copy itself out.
-- The archive and memos repositories are private, admin-only, and listed in the forge's config as never-mirror.
+- **Server-side rule:** a private repository can't get a push mirror. The forge's config lists the never-mirror repositories (`archive-pre-rewrite`, `memos`, and any repository marked private), and a `pre-receive` hook on them refuses any push whose target remote isn't the forge itself. The GitHub mirror job (§3.2) skips them by name and by visibility, and fails closed if it can't read a repository's visibility.
+- **The archive:** `archive-pre-rewrite` is imported once from the bundles in `~/backups/rewrite-2026-10-26/` and `-10-08/`, readable by `owner` and `forge-admin` only. It's never cloned by agents, and no runner can check it out: jobs for private repositories are refused.
+- **The test:** `tests/test_forge_private.py`, part of the suite, runs against a throwaway Forgejo in Docker (marked like other container tests, never the real forge). It:
+  - creates a private repository;
+  - tries to add a push mirror through the API, and asserts refusal;
+  - runs the GitHub mirror job against a local bare "GitHub" stand-in, and asserts the private repository's refs never arrive;
+  - flips the visibility check to fail, and asserts the job stops instead of pushing.
+
+  A second check runs nightly on the real forge: it lists every repository's mirrors and fails loudly if a private repository has one.
 
 ### 5.4 Egress
 
-- The forge's only outbound connections are its pull mirrors to GitHub (HTTPS, `github.com` and `codeload.github.com`) and the runners' image pulls from the registries the project already uses.
-- It is not part of a `ling` session, so the egress audit's verdict is unaffected. The audit lists the forge as a declared node service, like the Signal bridge, so a reader of the audit knows it is there.
+- **Outbound connections:** the forge's only ones are the GitHub mirror (this project) or the push mirrors the owner configured (product), and image pulls at upgrade. With no mirror configured, the forge makes no outbound connection.
+- **The audit:** `ling-admin audit egress` lists the forge as a declared node service, like the Signal bridge. It names each configured mirror's destination, so a reader of the audit sees exactly where code can go.
+- **At `/airgapped on`:** outbound mirrors stop, and the audit says so.
 
 ## 6. Backups and failover
 
-- **Nightly backup:** `forgejo dump` on the forge of record at 06:30 UTC (after the nights' grading, before the engine's day windows), written to `~/forge/backups/` and copied to `gx10-1a2b` and `node-b` by name over SSH. Each repository is also kept as a `git bundle --all`. Seven daily and four weekly copies are kept.
-- **Restore test:** monthly, a replica restores the latest dump into a scratch instance and compares the repository refs.
-- **Failover:** if the forge of record is lost, a replica is promoted with `ling-admin forge promote <node>`:
-  - it restores the latest dump;
+- **Nightly backup:** `forgejo dump` on the forge of record (06:30 local by default), copied by name over SSH to two other nodes. Each repository is also kept as a `git bundle --all`. Seven daily and four weekly copies are kept. Private repositories are in the dump; that's the only way they leave the main node, and only to the owner's own nodes.
+- **Restore test:** monthly, a mirror node restores the latest dump into a scratch instance and compares every ref.
+- **`ling-admin forge promote <node>`:**
+  - restores the latest dump on that node;
   - turns its mirrors into writable repositories;
-  - takes the mDNS `role=record`;
-  - re-registers the runners.
+  - takes `role=record` on mDNS;
+  - re-registers the runners;
+  - re-points `ling web`'s proxy and the other nodes' mirrors.
 
-  Work pushed after the last dump is lost from the forge, but not from the agents' worktrees, which push it again.
+  Pushes after the last dump are lost from the forge, but not from agents' worktrees, which push again.
 
 ## 7. Commands
 
-`ling-admin forge`, beside `node` and `night`, all over the existing SSH forced command for nodes other than the one running it:
-- `setup <node> [--record]`: pull the pinned image, generate `app.ini` and the secrets, create the admin and team users, the mirrors and the runner;
-- `status`: instances, roles, mirror freshness, runner health, last backup;
-- `promote <node>`: failover (§6);
-- `backup` and `restore --check`;
-- `remove <node>`: stop and delete the instance, keeping its data folder unless `--purge`.
+`ling-admin forge`, beside `node`; other nodes are reached over the existing SSH forced command:
+- `status`: role, mirror freshness, runner health, last backup, GitHub mirror state;
+- `on` / `off` (§2.5);
+- `promote <node>` (§6);
+- `backup`, and `restore --check`;
+- `key add <file>`;
+- `github-mirror --all-branches | --off` (this project's fleet: §3.2);
+- `password --show`, which prints the owner's password again, on the node's own terminal only.
 
-Agents use the forge through plain git (`git push forge <team>/<topic>`) and the Forgejo API with a team token for statuses and pull requests. A short section in AGENTS.md (at most two lines) points to `docs/dev/forge.md`.
+`ling-admin node install|enable` sets the forge up; `node install --no-forge` skips it. Agents use plain git (`git push forge <team>/<topic>`) and the Forgejo API with a team token for statuses and pull requests. AGENTS.md gets at most two lines pointing to `docs/dev/forge.md`.
 
-## 8. For Mightling users later
-
-The same commands could give a Mightling user a forge on their own node: private repositories on the GB10, Night Shift branches arriving as pull requests in a web UI, and the GPU as a CI runner. That would be a product decision with its own spec, covering the egress-audit wording, the default off state and the setup UX. This spec covers only the project's own fleet.
-
-## 9. Phases
+## 8. Phases (building waits for the owner's go)
 
 | Phase | Delivers | Gate |
 |---|---|---|
-| **P0** | The forge of record on `node-c`: pinned image, `app.ini`, admin and team users, pull mirrors of the three GitHub repositories, the nightly backup with a restore test | The mirrors are fresh within 10 min; a restore reproduces every ref; the memory cap holds under a clone storm (20 parallel clones) |
-| **P1** | Agents' working branches on the forge; the `main` rule (§3.1) and the server-side anonymity check (§5.3); the private archive imported | One week of agent work with no branch pushed to GitHub except merges; the pre-receive hook catches a seeded denylist entry |
-| **P2** | Runners on every GB10 with CPU gates (§4.2); replicas on the other nodes; `ling-admin forge status` | The gate's results match a local run on three sample branches; gx10's CPU load during the day measurably drops |
-| **P3** | GPU jobs with the lock and night awareness (§4.3); the engine's windows as jobs | A GPU job never overlaps a night or another lock holder in a week of use; job logs replace the ad-hoc holds log as the record |
-| **P4** | `promote` tested end to end; optional Windows, Mac and x86 runners | A drill: the forge of record is stopped, a replica is promoted, and agents continue within 15 min |
+| **P0** | Forge of record on the main node through `node install`: pinned image, generated accounts (password shown once), `ling web` proxy sign-in, LAN-only binding, off switch, the side-service memory allowance | Fresh install on a scratch node: the password is shown once, and the paired desktop opens the forge signed in; nothing listens on non-advertised interfaces; host-safety tests pass |
+| **P1** | Mirror nodes set up automatically; `promote`; nightly dumps and the restore test | A promote drill finishes in 15 min; a restore reproduces every ref |
+| **P2** | This project's GitHub mirror of every branch (§3.2); the server-side anonymity hook; `archive-pre-rewrite` and `memos` imported; `tests/test_forge_private.py` | A seeded denylist entry is refused at push; the private test passes; a week of agent work reaches GitHub with no leak and no deletion |
+| **P3** | Runners on every node; CPU gates moved (§4.2) | Gate results match a local run on three sample branches; the main node's daytime CPU load drops measurably |
+| **P4** | GPU jobs under the lock (§4.3); the Night Shift results-as-pull-requests view; the egress audit naming mirrors | No GPU job overlaps a night or another lock holder in a week |
 
-## 10. Not done here
+## 9. Not done here
 
-- Multi-writer replication between instances. Forgejo has none, and none is needed with one forge of record.
+- Multi-writer replication.
 - Moving releases off GitHub.
-- Exposing the forge outside the LAN (O5).
-- Forgejo's package registry. Images stay on GHCR, models wherever the hosting decision puts them.
+- Reaching the forge outside the LAN (O5): a later decision with remote access.
+- Forgejo's package registry: images stay on GHCR.
