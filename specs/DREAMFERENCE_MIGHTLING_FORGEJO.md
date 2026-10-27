@@ -1,8 +1,8 @@
 # Mightling Forge: a Forgejo forge on every node
 
-**Status:** proposed 2026-10-27. **Decided by the owner the same day (§0.1):**
+**Status:** proposed 2026-10-27. **Decided by the owner the same day (§0.1, O1–O7):**
 - Forgejo is a **product feature of the node install, on by default**.
-- The main node is the forge of record, and every other node is a read-only mirror.
+- The first node set up is the forge of record, with a `move` command to hand the role over, and every other node is a read-only mirror.
 - For this project's own fleet, every branch is push-mirrored to GitHub through the anonymity check.
 - CPU gates move to the forge's runners.
 - LAN only.
@@ -38,7 +38,8 @@ A forge on the nodes that already run day and night fixes all three for this pro
    - The release line is the current long-term-support one when a Mightling release is cut. On 2026-10-27 the latest stable is v15 (2026-04-16). Stable lines get three months of fixes; the first-quarter line each year gets long-term support.
    - The off switch is in §2.5.
 2. **The main node is the forge of record; every other node is a read-only mirror.**
-   - The main node is the one a client paired with first, or the one the owner marks `main` (`ling-admin node main <node>`). It holds the writable repositories, issues, pull requests and the Actions queue.
+   - The main node is **the first node set up** (in this project's fleet, `gx10-1a2b`). It holds the writable repositories, issues, pull requests and the Actions queue.
+   - **The role moves by command:** `ling-admin forge move <node>` hands it to another node in a planned way (§6.1): it copies the repositories, flips the mirrors and keeps a backup. `promote` is the unplanned case.
    - Every other node's instance pull-mirrors it, set up automatically when that node is installed or enabled, so clones, fetches and CI checkouts are local everywhere.
    - `ling-admin forge promote <node>` turns a mirror into the forge of record if the main node is lost (§6).
    - Two writable instances never serve the same repository: Forgejo has no multi-writer replication, and this spec doesn't invent one.
@@ -53,7 +54,8 @@ A forge on the nodes that already run day and night fixes all three for this pro
 | # | Decision | Answer |
 |---|---|---|
 | O1 | Instances on every node | **Yes, as a product feature on by default:** the main node holds the forge of record, and every other node runs a read-only mirror, set up automatically by `ling-admin node` install and enable; `promote` for failover |
-| O2 | Which node is the forge of record | **The main ling node:** the one a client pairs with first, or the one marked `main` |
+| O2 | Which node is the forge of record | **The first node set up** (here `gx10-1a2b`), with `ling-admin forge move <node>` to hand the role to another node: it copies the repositories, flips the mirrors and keeps a backup (§6.1) |
+| O7 | Storage on the forge of record | **Sized for a tight disk:** `gx10-1a2b` runs near its 150–175 GB floor, so the forge keeps a 10 GB budget there, with logs, artefacts and dumps capped and dumps stored off-node (§5.2) |
 | O3 | What reaches GitHub | **Everything, for this project's fleet:** every working branch, abandoned ones included, push-mirrored to GitHub to maximise the public commit count. Every push to the forge goes through the anonymity check first. Private repositories are never mirrored |
 | O4 | CI | **CPU gates move to the forge's runners across the nodes;** the release pipeline stays on GitHub |
 | O5 | Reach | **LAN only for now** |
@@ -66,10 +68,10 @@ A forge on the nodes that already run day and night fixes all three for this pro
 
 | Node | Forgejo | Runner labels | Notes |
 |---|---|---|---|
-| Main node (`gx10-1a2b` in this project's fleet) | **forge of record** | `gb10 arm64 docker` (CPU jobs) | Serves the owner's model; GPU jobs here only if the owner allows (§4.3) |
+| Main node: the first node set up (`gx10-1a2b` in this project's fleet) | **forge of record** | `gb10 arm64 docker` (CPU jobs) | Serves the owner's model; GPU jobs here only if the owner allows (§4.3) |
 | Every other node (`node-b`, `node-c`, `node-d`) | read-only mirror | `gb10 arm64 docker gpu cuda-13` | Nights by night, engine windows by day; GPU jobs under the lock |
 
-The forge of record is wherever the main node is. In this project that is `gx10-1a2b`, whose disk floor (175 GB during nights) the forge respects (§5.2). If the owner later marks another node `main`, `promote` moves it (§6).
+The forge of record is the first node set up. In this project that is `gx10-1a2b`, which has the tightest disk in the fleet (§5.2). `ling-admin forge move <node>` hands the role to another node at any time (§6.1).
 
 Clients (laptops, the AMD box, the Mac) run no forge; they use the main node's.
 
@@ -193,7 +195,26 @@ See §2.6. Runner jobs inherit their label's caps and the runner's cgroup, and t
 
 ### 5.2 Disk
 
-- The forge of record keeps repositories (a few GB), job logs and artefacts (14 days) and its dumps. Mirrors keep mirrors.
+**Measured, 2026-10-27:** the repositories are small.
+- `mightling` packs to 24 MiB and `ling-engine` to 5 MiB.
+- The `codex` fork is a few hundred MiB with upstream's full history.
+- The pre-rewrite bundles are 44 MiB.
+- `mightling` grew by about 1,500 commits in the last 30 days, a few MiB of pack.
+
+What grows is everything around the repositories: job logs, artefacts, dumps, and Forgejo's own indexes.
+
+**Budget on the forge of record: 10 GB in all**, because `gx10-1a2b` runs near its floor (150 GB, and 175 GB during a SWE-bench night):
+
+| Item | Cap |
+|---|---|
+| Repositories and indexes | 2 GB (alarm at 1 GB, about 10× today) |
+| Job logs and artefacts | 3 GB, expiring after 7 days on the forge of record, 14 elsewhere; logs only, no build outputs as artefacts |
+| Local dumps | Only the latest, about 1 GB; the 7 daily and 4 weekly copies live on two other nodes, never on the forge of record |
+| Headroom | The rest |
+
+- **Enforcement:** `ling-admin forge status` reports the forge's own use. When the forge of record's node drops below its floor plus 10 GB, the forge prunes artefacts first and then logs, and refuses new artefacts until it's back above.
+- **Mirror nodes:** they keep mirrors only.
+- **If the budget stops fitting:** `forge move` is the remedy, to a node with room (§6.1).
 - The runner refuses jobs while its node is below its floor: 150 GB, or 175 GB on a node running a SWE-bench night.
 - Job workspaces are deleted after each job.
 
@@ -215,10 +236,24 @@ See §2.6. Runner jobs inherit their label's caps and the runner's cgroup, and t
 - **The audit:** `ling-admin audit egress` lists the forge as a declared node service, like the Signal bridge. It names each configured mirror's destination, so a reader of the audit sees exactly where code can go.
 - **At `/airgapped on`:** outbound mirrors stop, and the audit says so.
 
-## 6. Backups and failover
+## 6. Backups, moving the role, and failover
 
 - **Nightly backup:** `forgejo dump` on the forge of record (06:30 local by default), copied by name over SSH to two other nodes. Each repository is also kept as a `git bundle --all`. Seven daily and four weekly copies are kept. Private repositories are in the dump; that's the only way they leave the main node, and only to the owner's own nodes.
 - **Restore test:** monthly, a mirror node restores the latest dump into a scratch instance and compares every ref.
+### 6.1 Moving the role (planned)
+
+`ling-admin forge move <node>` hands the forge of record to another node while both are up:
+1. Back up: a `forgejo dump` on the current record, copied to the target and to one more node.
+2. Freeze writes: the current record goes read-only for pushes, with a banner in the UI, and in-flight Actions jobs are drained.
+3. Copy: the target restores the dump into its instance, which until now was a mirror, and its pull mirrors become writable repositories. Private repositories arrive from the dump, never through a mirror.
+4. Check: every ref on the target is compared with the frozen record. The move stops and unfreezes the old record if anything differs.
+5. Flip: the target takes `role=record` on mDNS. The old record becomes a mirror of the new one; its data is kept, not deleted. The other nodes' mirrors, `ling web`'s `/forge/` proxy on every node, the runners' registration, the GitHub mirror job and the paired clients' `forge` remotes are re-pointed.
+6. Keep: the pre-move dump stays on two nodes for 30 days, and `forge move --back` within that time reverses the move the same way.
+
+The move never deletes data on either node. It takes minutes for repositories this size; pushes during the freeze are refused with a message to retry.
+
+### 6.2 Failover (unplanned)
+
 - **`ling-admin forge promote <node>`:**
   - restores the latest dump on that node;
   - turns its mirrors into writable repositories;
@@ -233,7 +268,7 @@ See §2.6. Runner jobs inherit their label's caps and the runner's cgroup, and t
 `ling-admin forge`, beside `node`; other nodes are reached over the existing SSH forced command:
 - `status`: role, mirror freshness, runner health, last backup, GitHub mirror state;
 - `on` / `off` (§2.5);
-- `promote <node>` (§6);
+- `move <node>` / `move --back` (§6.1), and `promote <node>` (§6.2);
 - `backup`, and `restore --check`;
 - `key add <file>`;
 - `github-mirror --all-branches | --off` (this project's fleet: §3.2);
@@ -246,7 +281,7 @@ See §2.6. Runner jobs inherit their label's caps and the runner's cgroup, and t
 | Phase | Delivers | Gate |
 |---|---|---|
 | **P0** | Forge of record on the main node through `node install`: pinned image, generated accounts (password shown once), `ling web` proxy sign-in, LAN-only binding, off switch, the side-service memory allowance | Fresh install on a scratch node: the password is shown once, and the paired desktop opens the forge signed in; nothing listens on non-advertised interfaces; host-safety tests pass |
-| **P1** | Mirror nodes set up automatically; `promote`; nightly dumps and the restore test | A promote drill finishes in 15 min; a restore reproduces every ref |
+| **P1** | Mirror nodes set up automatically; `move` and `promote`; nightly dumps off-node and the restore test; the storage budget | A `move` there and `--back` keeps every ref; a promote drill finishes in 15 min; the budget prunes before the node's floor in a filled-disk test |
 | **P2** | This project's GitHub mirror of every branch (§3.2); the server-side anonymity hook; `archive-pre-rewrite` and `memos` imported; `tests/test_forge_private.py` | A seeded denylist entry is refused at push; the private test passes; a week of agent work reaches GitHub with no leak and no deletion |
 | **P3** | Runners on every node; CPU gates moved (§4.2) | Gate results match a local run on three sample branches; the main node's daytime CPU load drops measurably |
 | **P4** | GPU jobs under the lock (§4.3); the Night Shift results-as-pull-requests view; the egress audit naming mirrors | No GPU job overlaps a night or another lock holder in a week |
