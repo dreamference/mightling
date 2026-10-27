@@ -468,7 +468,10 @@ impl Hub {
                     None => break,
                 },
                 _ = tick.tick() => self.on_tick(),
-                _ = reports.tick() => self.push_reports().await,
+                _ = reports.tick() => {
+                    self.push_reports().await;
+                    self.push_sync_notices().await;
+                }
             }
         }
     }
@@ -1108,6 +1111,43 @@ impl Hub {
                 self.send(Outbound::Message { chat: chat.clone(), markdown: format!("**Night Shift's report** ({})\n\n{text}", name.trim_end_matches(".md")) });
             }
             let _ = crate::store::write_private(&seen_file, name);
+        }
+    }
+
+    /// Sync's notices since the last one passed on (specs/DREAMFERENCE_MIGHTLING_SYNC.md §18.3): a
+    /// turn on another device finished, or an approval waits there, to every chat of each
+    /// messenger `[chat] sync_notices_to` names. Nothing while the hub is off (its route answers
+    /// 404), never to Telegram at `/airgapped on`, and the first look only notes the newest.
+    pub async fn push_sync_notices(&mut self) {
+        let seen_file = self.config.dir.join("sync-notice-seen");
+        let seen = std::fs::read_to_string(&seen_file).ok().and_then(|s| s.trim().parse::<u64>().ok());
+        let Ok(value) = self.agent.web(&format!("/api/sync/notices?after={}", seen.unwrap_or(0)), None).await else { return };
+        let latest = value.get("latest").and_then(Value::as_u64).unwrap_or(0);
+        if seen.is_none() {
+            let _ = crate::store::write_private(&seen_file, &latest.to_string());
+            return;
+        }
+        let targets: Vec<String> = {
+            let mut keys: Vec<String> = self
+                .threads
+                .chats
+                .keys()
+                .map(|key| base_of(key).to_string())
+                .filter(|key| self.config.settings.sync_notices_to.iter().any(|m| m == adapter_of(key)))
+                .collect();
+            keys.sort();
+            keys.dedup();
+            keys
+        };
+        for notice in value.get("notices").and_then(Value::as_array).cloned().unwrap_or_default() {
+            let (Some(seq), Some(text)) = (notice.get("seq").and_then(Value::as_u64), notice.get("text").and_then(Value::as_str)) else { continue };
+            for chat in &targets {
+                if adapter_of(chat) == "telegram" && self.airgapped {
+                    continue;
+                }
+                self.send(Outbound::Notice { chat: chat.clone(), text: format!("{text} (open Other devices in Mightling)") });
+            }
+            let _ = crate::store::write_private(&seen_file, &seq.to_string());
         }
     }
 

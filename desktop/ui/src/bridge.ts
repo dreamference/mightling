@@ -556,6 +556,8 @@ export interface BridgeEvents {
   paneAction?: (action: PaneAction) => void;
   /** The Window menu's pane items, for this window. */
   command?: (command: "detachTerminal" | "detachReview") => void;
+  /** Another device acted on a thread here (sync, specs/DREAMFERENCE_MIGHTLING_SYNC.md §18.2): "Approved from the phone". */
+  syncNotice?: (notice: { text: string; thread: string | null }) => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -589,6 +591,8 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
       }
       case "pane://action":
         return events.paneAction?.(data.payload as PaneAction);
+      case "sync://notice":
+        return events.syncNotice?.(data.payload as { text: string; thread: string | null });
       case "command":
         if (data.payload === "detachTerminal" || data.payload === "detachReview") events.command?.(data.payload);
         return;

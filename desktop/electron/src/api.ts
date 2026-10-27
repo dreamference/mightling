@@ -217,7 +217,9 @@ export type ForView =
   /** A pane detached from this window asks for something (windows.ts `paneAction`). */
   | { channel: "pane://action"; payload: PaneAction }
   /** The Window menu's pane items, for the page in front: detach (or dock back) the terminal or the diff. */
-  | { channel: "command"; payload: "detachTerminal" | "detachReview" };
+  | { channel: "command"; payload: "detachTerminal" | "detachReview" }
+  /** Another device acted on a thread here through the sync host (sync-host.ts): "Approved from the phone". */
+  | { channel: "sync://notice"; payload: { text: string; thread: string | null } };
 
 export interface Started {
   served_model: string | null;

@@ -374,6 +374,8 @@ pub struct ChatSettings {
     pub command_ms: Option<u64>,
     /// Whether Night Shift's morning report comes here (`[chat] night_report_to`; §19.7).
     pub night_reports: bool,
+    /// Whether sync's notices come here (`[chat] sync_notices_to`; MIGHTLING_SYNC §18.3).
+    pub sync_notices: bool,
 }
 
 impl Default for ChatSettings {
@@ -401,6 +403,7 @@ impl ChatSettings {
                 None => Some(25),
             },
             night_reports: value.get("nightReportTo").and_then(Value::as_array).map_or(true, |to| to.iter().any(|m| m.as_str() == Some("signal"))),
+            sync_notices: value.get("syncNoticesTo").and_then(Value::as_array).map_or(true, |to| to.iter().any(|m| m.as_str() == Some("signal"))),
         }
     }
 }
@@ -555,6 +558,14 @@ mod tests {
 
     fn events(t: &mut Translator, message: Value) -> Vec<AgentEvent> {
         t.read(&message).into_iter().filter_map(|x| if let Translated::Event(e) = x { Some(e) } else { None }).collect()
+    }
+
+    #[test]
+    fn sync_notices_come_here_unless_the_settings_leave_signal_out() {
+        assert!(ChatSettings::default().sync_notices);
+        assert!(ChatSettings::from_json(&json!({ "syncNoticesTo": ["signal", "matrix"] })).sync_notices);
+        assert!(!ChatSettings::from_json(&json!({ "syncNoticesTo": ["matrix"] })).sync_notices);
+        assert!(!ChatSettings::from_json(&json!({ "syncNoticesTo": [] })).sync_notices);
     }
 
     #[test]

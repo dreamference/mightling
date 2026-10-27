@@ -96,6 +96,10 @@ struct Daemon {
     /// The last Night Shift report sent (§19.7), and whether reports come here at all.
     night_seen: Option<String>,
     night_reports: bool,
+    /// The last sync notice passed on (MIGHTLING_SYNC §18.3), and whether they come here at all;
+    /// the first look after a start only notes the newest.
+    sync_seen: Option<u64>,
+    sync_notices: bool,
     status: Option<OpenStatus>,
     /// The question in hand's timing, for the journal (§19.8).
     timing: Option<Timing>,
@@ -162,6 +166,8 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
         held_attachments: HashSet::new(),
         night_seen: conversation.night_seen.clone(),
         night_reports: true,
+        sync_seen: None,
+        sync_notices: true,
         status: None,
         timing: None,
     };
@@ -217,6 +223,9 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
                 if now / 1000 % 300 == 150 {
                     daemon.push_reports().await;
                 }
+                if now / 1000 % 30 == 20 {
+                    daemon.push_sync_notices().await;
+                }
             }
             _ = airgap.tick() => daemon.poll_airgap().await,
             _ = stop.recv() => {
@@ -253,6 +262,7 @@ impl Daemon {
             self.bridge.new_thread_after_ms = settings.new_thread_after_ms;
             self.bridge.limits = crate::limits::Limits::from_settings(&settings);
             self.night_reports = settings.night_reports;
+            self.sync_notices = settings.sync_notices;
         }
     }
 
@@ -276,6 +286,27 @@ impl Daemon {
             self.carry_out(vec![Action::Reply(reply)]).await;
             self.night_seen = Some(name.to_string());
             self.save_conversation();
+        }
+    }
+
+    /// Sync's notices since the last one sent (a turn on another device finished, an approval
+    /// waits there), into the conversation. Nothing while the hub is off (its route answers 404),
+    /// not at `/airgapped on`, and not when `[chat] sync_notices_to` leaves Signal out.
+    async fn push_sync_notices(&mut self) {
+        if !self.sync_notices || self.bridge.airgapped() || self.config.owner.is_none() {
+            return;
+        }
+        let after = self.sync_seen.unwrap_or(0);
+        let Ok(value) = agent::web_json(self.config.port, &self.cookie, &format!("/api/sync/notices?after={after}"), None).await else { return };
+        if self.sync_seen.is_none() {
+            self.sync_seen = Some(value.get("latest").and_then(Value::as_u64).unwrap_or(0));
+            return;
+        }
+        for notice in value.get("notices").and_then(Value::as_array).cloned().unwrap_or_default() {
+            let (Some(seq), Some(text)) = (notice.get("seq").and_then(Value::as_u64), notice.get("text").and_then(Value::as_str)) else { continue };
+            let reply = crate::format::reply(&format!("{text} (open Other devices in Mightling)"));
+            self.carry_out(vec![Action::Reply(reply)]).await;
+            self.sync_seen = Some(seq);
         }
     }
 

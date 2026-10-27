@@ -29,6 +29,13 @@ export interface ServerEvents {
   busyChanged(busy: boolean): void;
 }
 
+/**
+ * Something beside the windows that follows the server (the sync host, sync-host.ts): it sees every
+ * protocol message after this process has taken note of it, and answers true only for an answer to
+ * one of its own requests, which then reaches no window.
+ */
+export type ServerObserver = (message: unknown, kind: "serverRequest" | "notification" | "response") => boolean;
+
 export class AppServer {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly pending = new Set<string>();
@@ -40,6 +47,9 @@ export class AppServer {
   private launch: { ling: string; env: NodeJS.ProcessEnv } | null = null;
   private busy = new BusyTracker();
   private marker: string | null = null;
+  private observer: ServerObserver | null = null;
+  /** Whether a window has finished the protocol's handshake (`initialized` sent) with this server. */
+  private initialized = false;
 
   constructor(private readonly resourcesPath: string | null, private readonly events: ServerEvents) {}
 
@@ -58,6 +68,7 @@ export class AppServer {
     this.pending.clear();
     this.openers.clear();
     this.places.clear();
+    this.initialized = false;
     this.busy = new BusyTracker();
     this.marker = home && child.pid ? busyMarker(home, child.pid) : null;
     readline.createInterface({ input: child.stdout }).on("line", (line) => this.incoming(line));
@@ -128,11 +139,19 @@ export class AppServer {
         break;
       }
     }
+    // The observer's own answers stop here; everything else goes on to the windows as before.
+    if (this.observer && this.observer(value, kind.kind) && kind.kind === "response") return;
     this.events.deliver({ channel: "work://message", payload: value });
+  }
+
+  /** Follows every message from the server beside the windows (one observer: the sync host); null stops. */
+  observe(observer: ServerObserver | null): void {
+    this.observer = observer;
   }
 
   private exited(code: number | null): void {
     this.child = null;
+    this.initialized = false;
     this.pending.clear();
     this.openers.clear();
     this.places.clear();
@@ -184,6 +203,7 @@ export class AppServer {
       this.openers.set(JSON.stringify(vetted.id), cwd);
     }
     child.stdin.write(`${JSON.stringify(vetted)}\n`);
+    if (method === "initialized" && !("id" in vetted)) this.initialized = true;
   }
 
   /** Writes an attachment into an Ask thread's folder; answers where it landed. */
@@ -219,5 +239,10 @@ export class AppServer {
 
   get running(): boolean {
     return this.child !== null;
+  }
+
+  /** Running and past the handshake a window makes: requests of this process's own (the sync host's) may go now. */
+  get ready(): boolean {
+    return this.child !== null && this.initialized;
   }
 }

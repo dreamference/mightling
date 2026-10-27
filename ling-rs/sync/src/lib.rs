@@ -9,6 +9,10 @@
 //! own commands. Without `[sync] replicate` (Phase 4) it writes nothing of another device's into
 //! `~/.mightling`: other devices' threads are read from the hub.
 //!
+//! It is also a host (Phase 2, §18): attached to an app-server that listens on a socket here (the
+//! TUI's control socket, `ling web`'s), it passes turns to the hub as they run and carries out what
+//! other devices ask, through this machine's policy (`live.rs`).
+//!
 //! Off until `ling sync enable`, per device: before that no unit exists, no file is written and the
 //! hub's routes answer 404. It talks to the node's `ling web` port and nothing else, on a private
 //! or overlay address only, so `/airgapped on` changes nothing about it (§9).
@@ -17,6 +21,7 @@ pub mod agent;
 pub mod cli;
 pub mod client;
 pub mod config;
+pub mod live;
 pub mod scan;
 
 pub use cli::Environment;

@@ -476,6 +476,9 @@ async fn run_agent(environment: &Environment, once: bool) -> i32 {
         return 3;
     };
     let mut hub: Option<HubClient> = None;
+    // The agent as a host (live.rs), one per hub address: started when the hub is found, and
+    // started again when the hub is found somewhere else.
+    let mut host: Option<(String, tokio::task::JoinHandle<()>)> = None;
     let mut failures = 0u32;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
     loop {
@@ -491,6 +494,18 @@ async fn run_agent(environment: &Environment, once: bool) -> i32 {
                         return 1;
                     }
                 }
+            }
+        }
+        if let Some(client) = &hub
+            && !once
+            && host.as_ref().is_none_or(|(base, _)| base != client.base())
+        {
+            if let Some((_, task)) = host.take() {
+                task.abort();
+            }
+            if let Ok(live_hub) = HubClient::new(client.base(), &agent.device.secret) {
+                let task = tokio::spawn(crate::live::run(environment.codex_home.clone(), Arc::new(live_hub)));
+                host = Some((client.base().to_string(), task));
             }
         }
         if let Some(client) = &hub {

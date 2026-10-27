@@ -10,6 +10,7 @@
 //! command_seconds = 60         # one command's time in a chat session, the same; 0: no limit
 //! night_repos = ["~/code/app"]  # where /night add may queue, besides every repository already queued in
 //! night_report_to = ["signal", "matrix"]  # which messengers get the morning report; [] for none
+//! sync_notices_to = ["signal", "matrix"]  # which get sync's notices (a turn finished, an approval waits); [] for none
 //! telegram_mini_app_url = "https://…"  # ling web over HTTPS on your own network, as Telegram's app (telegram_app.rs)
 //! ```
 //!
@@ -48,6 +49,10 @@ pub struct ChatSettings {
     /// Telegram only when named, because the report's repository and task names would then be on
     /// Telegram's servers (MOONSHOT §3.5).
     pub night_report_to: Vec<String>,
+    /// Which messengers pass on sync's notices (specs/DREAMFERENCE_MIGHTLING_SYNC.md §18.3): a turn
+    /// on another device finished, or an approval waits there. The same default as the report, for
+    /// the same reason: a notice names the thread's title.
+    pub sync_notices_to: Vec<String>,
 }
 
 impl Default for ChatSettings {
@@ -59,6 +64,7 @@ impl Default for ChatSettings {
             command_timeout: Some(DEFAULT_COMMAND_TIMEOUT),
             night_repos: Vec::new(),
             night_report_to: vec!["signal".to_string(), "matrix".to_string()],
+            sync_notices_to: vec!["signal".to_string(), "matrix".to_string()],
         }
     }
 }
@@ -99,6 +105,9 @@ impl ChatSettings {
         if let Some(to) = strings("night_report_to") {
             settings.night_report_to = to.into_iter().map(|m| m.to_ascii_lowercase()).collect();
         }
+        if let Some(to) = strings("sync_notices_to") {
+            settings.sync_notices_to = to.into_iter().map(|m| m.to_ascii_lowercase()).collect();
+        }
         settings
     }
 
@@ -120,6 +129,7 @@ impl ChatSettings {
             "toolCalls": self.tool_calls.unwrap_or(0),
             "commandSeconds": self.command_timeout.map_or(0, |timeout| timeout.as_secs()),
             "nightReportTo": self.night_report_to,
+            "syncNoticesTo": self.sync_notices_to,
         })
     }
 
@@ -141,6 +151,9 @@ impl ChatSettings {
         }
         if let Some(to) = value.get("nightReportTo").and_then(Value::as_array) {
             settings.night_report_to = to.iter().filter_map(Value::as_str).map(str::to_string).collect();
+        }
+        if let Some(to) = value.get("syncNoticesTo").and_then(Value::as_array) {
+            settings.sync_notices_to = to.iter().filter_map(Value::as_str).map(str::to_string).collect();
         }
         settings
     }
@@ -169,6 +182,10 @@ mod tests {
         assert_eq!(night.night_repos, ["~/code/app"]);
         assert_eq!(night.night_report_to, ["telegram", "signal"]);
         assert_eq!(ChatSettings::default().night_report_to, ["signal", "matrix"], "Telegram only when named");
+        assert_eq!(ChatSettings::default().sync_notices_to, ["signal", "matrix"], "Telegram only when named");
+        assert_eq!(ChatSettings::from_toml("[chat]\nsync_notices_to = [\"Telegram\"]\n").sync_notices_to, ["telegram"]);
+        let settings = ChatSettings::from_toml("[chat]\nsync_notices_to = []\n");
+        assert!(ChatSettings::from_json(&settings.to_json()).sync_notices_to.is_empty());
     }
 
     #[test]

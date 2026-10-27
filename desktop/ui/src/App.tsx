@@ -480,6 +480,7 @@ export function App() {
       docked: (pane, thread) => windowEvents.current.docked(pane, thread),
       paneAction: (action) => windowEvents.current.paneAction(action),
       command: (command) => windowEvents.current.command(command),
+      syncNotice: (sync) => notice(sync.text),
       task: (event) => setTasks((list) => {
         if (event.kind === "started") {
           setFront({ id: event.id, tick: Date.now() });

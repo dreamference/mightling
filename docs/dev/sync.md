@@ -1,6 +1,6 @@
 # Sync: threads from every device on the node
 
-Developer notes behind `ling sync`. Spec: `specs/DREAMFERENCE_MIGHTLING_SYNC.md`; what Phase 0 measured is its §16, Phase 1 as built its §17. Built 2026-10-22, **off by default and not released** until the owner has tried it.
+Developer notes behind `ling sync`. Spec: `specs/DREAMFERENCE_MIGHTLING_SYNC.md`; what Phase 0 measured is its §16, Phase 1 as built its §17. Phases 0 and 1 built 2026-10-22, Phase 2 (live turns) 2026-10-26 (spec §18), all **off by default** until `ling sync enable`.
 
 ## The pieces
 
@@ -13,6 +13,9 @@ Developer notes behind `ling sync`. Spec: `specs/DREAMFERENCE_MIGHTLING_SYNC.md`
 | `ling-rs/src/sync.rs` | The launcher's routing, and the node found by the node tiers without asking its model server |
 | `desktop/ui/src/sync.ts`, `SyncedView.tsx` | Other devices in `ling web`'s sidebar: the list, the transcript, Archive and Delete |
 | `dreamference/audit/sync_egress_audit.py` | `ling-admin audit egress --sync` |
+| `ling-rs/web/src/sync_live.rs` | Phase 2's hub half: each thread's last 2,000 live events, whether a turn runs, the approvals waiting, commands to the owner's host and their answers, the offline queue (`queue.json`), the bridges' notices |
+| `ling-rs/sync/src/live.rs` | The agent as a host: attached to the app-servers listening on the control socket and `ling web`'s socket |
+| `desktop/electron/src/sync-host.ts` | The desktop app's main process as a host: its own app-server, followed and answered |
 
 `ling-sync` depends on `ling-web-server` (the store's hash, clock and ids, `auth::write_private`), as `ling-chat` does, so its tests run a real hub on loopback.
 
@@ -23,7 +26,9 @@ Developer notes behind `ling sync`. Spec: `specs/DREAMFERENCE_MIGHTLING_SYNC.md`
 - **Codex's files are changed only by Codex.** A deletion or an archive state decided elsewhere is applied with `ling delete --force`, `ling archive` and `ling unarchive`. Moving a rollout by hand breaks Codex's reads of it (Phase 0); a downloaded rollout's turns are never projected, so nothing of another device's is written into `~/.mightling` (`[sync] replicate` is not built, for that reason).
 - **The node is found, never stored**, and only an address on the user's own network is a hub (`cli::hub_base`). The resolver must not ask the model server (`node::resolve`, not `node::resolve_host`): the audit allows the hub's port alone.
 - **A rollout, not a thread, is the unit.** A revert writes a new rollout that starts from a byte offset of the one before; the hub keeps both and the transcript follows `history_base`.
-- **The bridge policy is untouched.** Nothing here is an app-server method; Phase 2's forwarded commands will be, with their conformance cases in both enforcers.
+- **A command from another device is the owner's act, through the owner's policy.** Both hosts pass every command through their own `policy.json` enforcer (`Policy::vet_outgoing` in Rust, `vetOutgoing` in the app) with the server requests still waiting, so an approval can answer only what waits, and only the two approvals in `sync_live::ANSWERABLE` are answered from elsewhere. The hub checks the scope (`control`) and that the approval waits, the turn runs, the folder was offered; the host checks the rest.
+- **Following needs the store.** `/api/sync/live/<thread>` answers only for a thread the store holds, so a thread kept on its device (`[sync] exclude`, `ling exec`) is followed by nobody, whatever a host posts; its events make no notice.
+- **The bridge policy is untouched.** No method was added: the hosts use requests the policy already allows.
 
 ## Tests
 
