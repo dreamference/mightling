@@ -229,6 +229,12 @@ thread with the conversation up to there) and **Edit in a new thread** (the conv
 that message, the message in the composer to change), leaving the thread as it is. A queued
 message can be edited and moved up or down.
 
+**Summaries of finished chats.** A chat left alone for a day gets a two-line summary, what you
+wanted and what came of it, written by this machine's model in a read-only thread that is not kept,
+one chat at a time and only while nothing else is running. Point at the chat in the sidebar to see
+it under the title; Search threads shows it too and finds a chat by it. A chat that changes is
+summarized again a day later. **Settings › Suggested prompts** turns it off (it is on by default).
+
 **Earlier versions of a message.** Editing a message, with **Edit** on the last one (or Esc Esc)
 or **Edit in a new thread** on any, keeps the message as you sent it: the new words go to a copy of
 the thread made before it, and the message then shows `‹ 2 / 3 ›`. Each version is the thread it was

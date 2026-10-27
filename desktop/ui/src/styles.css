@@ -282,6 +282,7 @@ html[data-host="electron"] .sidebar { padding-top: 8px; }
 .project .thread { padding-left: 32px; }
 .thread-label, .snippet { display: block; width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .snippet { color: var(--muted); font-size: 12px; }
+.snippet.thread-summary { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .age { flex: none; color: var(--faint); font-size: 12px; padding-right: 10px; font-variant-numeric: tabular-nums; }
 .row-actions { display: none; flex: none; padding-right: 4px; }
 .thread-row:hover .row-actions, .thread-row:focus-within .row-actions { display: flex; }

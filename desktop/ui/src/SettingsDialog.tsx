@@ -924,6 +924,11 @@ function Suggestions({ prefs, onChange }: SettingsProps) {
         <legend>Next message</legend>
         <label><input type="checkbox" checked={prefs.suggestPrompts} onChange={(event) => onChange({ suggestPrompts: event.target.checked })} /> Predict my next message when a turn ends</label>
       </fieldset>
+      <fieldset>
+        <legend>Summaries of finished chats</legend>
+        <label><input type="checkbox" checked={prefs.summarizeThreads} onChange={(event) => onChange({ summarizeThreads: event.target.checked })} /> Summarize a chat left alone for a day</label>
+        <p className="dialog-note">Two lines from this machine's model, shown under the chat's title when you point at it and in Search threads, and found by a search. Made one at a time, only when nothing else is running, in a read-only thread that is not kept; a chat that changes is summarized again a day later.</p>
+      </fieldset>
     </>
   );
 }
