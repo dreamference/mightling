@@ -46,6 +46,7 @@ Rust and TypeScript tests, each in its own place:
 - `ling-code-rs/`, `ling-docs-rs/`: `cargo test --locked` (own lockfiles).
 - The messenger bridges: `cargo test --release -p ling-signal -p ling-chat` in the same export as the launcher.
 - The launcher: `cargo test --release -p ling-launcher` in the build's *export* directory under `~/.cache/dreamference/puffin-codex/`, **never in `codex/`**. `ling-rs/skills/`: `cargo test` in a copy of the folder.
+- Compile cache: `codex build` uses sccache when installed; by hand, see [codex-build.md](docs/dev/codex-build.md#the-compile-cache).
 - `desktop/electron` and `desktop/ui`: `npm test`; `npm run e2e` in `desktop/electron` needs a display and `npm run package` first.
 - Codex's own tests on the patched tree: `ling-admin codex test`.
 
@@ -173,28 +174,28 @@ Measurements and verified patterns: [docs/dev/searching.md](docs/dev/searching.m
 
 ## Detail files
 
-- [docs/dev/testing.md](docs/dev/testing.md): how the tests are kept off the real machine, and why
-- [docs/dev/models-and-engines.md](docs/dev/models-and-engines.md): config precedence, SGLang and its traps, pinned images, the model matrix, speculation, the compile cache
-- [docs/dev/diffusion.md](docs/dev/diffusion.md): the diffusion sidecar (switched off)
-- [docs/dev/host-safety.md](docs/dev/host-safety.md): pre-flight checks, the PSI watchdog, the AppArmor profile for `bwrap`
-- [docs/dev/install-modes.md](docs/dev/install-modes.md): checkout vs release install, `install.sh`, `HostSafetySetup`
-- [docs/dev/codex-build.md](docs/dev/codex-build.md): building `ling`, the patches and their size cap, V8, the submodules
-- [docs/dev/launcher.md](docs/dev/launcher.md): the launcher, `~/.mightling`, the vendor channels closed
-- [docs/dev/prompt.md](docs/dev/prompt.md): named system prompts
-- [docs/dev/egress-audit.md](docs/dev/egress-audit.md): `ling-admin audit egress`
-- [docs/dev/airgapped.md](docs/dev/airgapped.md): `/airgapped`
-- [docs/dev/skills.md](docs/dev/skills.md): skills from other agents
-- [docs/dev/night-shift.md](docs/dev/night-shift.md): Night Shift
-- [docs/dev/swe-bench.md](docs/dev/swe-bench.md): the SWE-bench harness
-- [docs/dev/node.md](docs/dev/node.md): clients, nodes, pairing and jobs
-- [docs/dev/desktop.md](docs/dev/desktop.md): the Electron desktop app
-- [docs/dev/code-index.md](docs/dev/code-index.md): `ling-code`
-- [docs/dev/local-file-index.md](docs/dev/local-file-index.md): `ling-docs`
-- [docs/dev/context-engine.md](docs/dev/context-engine.md): the Python context engine
-- [docs/dev/remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay, its DNS and its migration
-- [docs/dev/adapters.md](docs/dev/adapters.md): LoRA adapters: `ling-admin adapter`, the signature, serving them
-- [docs/dev/messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
-- [docs/dev/sync.md](docs/dev/sync.md): `ling sync`
-- [docs/dev/searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
-- [docs/dev/cli.md](docs/dev/cli.md): every `ling-admin` subcommand, the sidecars behind `ling web` and the app
-- [docs/dev/sessions.md](docs/dev/sessions.md): the work streams of 2026-10-10 (retired)
+- [testing.md](docs/dev/testing.md): how the tests are kept off the real machine, and why
+- [models-and-engines.md](docs/dev/models-and-engines.md): config precedence, SGLang and its traps, pinned images, the model matrix, speculation, the compile cache
+- [diffusion.md](docs/dev/diffusion.md): the diffusion sidecar (switched off)
+- [host-safety.md](docs/dev/host-safety.md): pre-flight checks, the PSI watchdog, the AppArmor profile for `bwrap`
+- [install-modes.md](docs/dev/install-modes.md): checkout vs release install, `install.sh`, `HostSafetySetup`
+- [codex-build.md](docs/dev/codex-build.md): building `ling`, the patches and their size cap, V8, the submodules
+- [launcher.md](docs/dev/launcher.md): the launcher, `~/.mightling`, the vendor channels closed
+- [prompt.md](docs/dev/prompt.md): named system prompts
+- [egress-audit.md](docs/dev/egress-audit.md): `ling-admin audit egress`
+- [airgapped.md](docs/dev/airgapped.md): `/airgapped`
+- [skills.md](docs/dev/skills.md): skills from other agents
+- [night-shift.md](docs/dev/night-shift.md): Night Shift
+- [swe-bench.md](docs/dev/swe-bench.md): the SWE-bench harness
+- [node.md](docs/dev/node.md): clients, nodes, pairing and jobs
+- [desktop.md](docs/dev/desktop.md): the Electron desktop app
+- [code-index.md](docs/dev/code-index.md): `ling-code`
+- [local-file-index.md](docs/dev/local-file-index.md): `ling-docs`
+- [context-engine.md](docs/dev/context-engine.md): the Python context engine
+- [remote-access.md](docs/dev/remote-access.md): remote access over a NetBird overlay, its DNS and its migration
+- [adapters.md](docs/dev/adapters.md): LoRA adapters: `ling-admin adapter`, the signature, serving them
+- [messengers.md](docs/dev/messengers.md): `ling signal`, `ling chat` and `ling-admin matrix`
+- [sync.md](docs/dev/sync.md): `ling sync`
+- [searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
+- [cli.md](docs/dev/cli.md): every `ling-admin` subcommand, the sidecars behind `ling web` and the app
+- [sessions.md](docs/dev/sessions.md): the work streams of 2026-10-10 (retired)
