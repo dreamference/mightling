@@ -48,7 +48,7 @@ pub const RELEASE_REPO: &str = "dreamference/mightling";
 pub const MIGHTLING_VERSION: Option<&str> = option_env!("MIGHTLING_VERSION");
 
 /// Code Mode's host process, which Codex looks for next to its own executable under this name.
-const CODE_MODE_HOST: &str = "codex-code-mode-host";
+pub const CODE_MODE_HOST: &str = "codex-code-mode-host";
 
 /// The agent's web commands (`ling-web-rs/`), installed beside `ling` and linked into
 /// `~/.local/bin`, because the prompt names them and the model's shell must find them.

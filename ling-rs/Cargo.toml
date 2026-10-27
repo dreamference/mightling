@@ -85,12 +85,16 @@ ling-signal = { path = "signal" }
 # the sandbox let into a service window station over SSH (src/winsta.rs); the same windows-sys
 # release the Codex workspace already builds.
 [target.'cfg(windows)'.dependencies]
+# `ling uninstall` (src/uninstall.rs) takes its folder out of the user's Path in the registry and
+# tells running programs.
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_System_Registry",
     "Win32_System_StationsAndDesktops",
     "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # Whether the elevated sandbox is set up, asked exactly as Codex asks it (src/airgapped.rs).
 codex-windows-sandbox = { workspace = true }
