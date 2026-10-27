@@ -18,6 +18,7 @@ import type { RpcClient } from "./rpc";
 import type { AppInfo } from "./protocol/v2/AppInfo";
 import type { ConfigBatchWriteParams } from "./protocol/v2/ConfigBatchWriteParams";
 import type { HookMetadata } from "./protocol/v2/HookMetadata";
+import { RULE_LABELS, ruleEdits, toolRules, type ToolRule } from "./mcptools";
 import type { HooksListEntry } from "./protocol/v2/HooksListEntry";
 import type { PluginMarketplaceEntry } from "./protocol/v2/PluginMarketplaceEntry";
 import type { SkillMetadata } from "./protocol/v2/SkillMetadata";
@@ -93,12 +94,16 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
   const [adding, setAdding] = useState<{ name: string; kind: "command" | "url"; target: string; args: string } | null>(null);
   const [changed, setChanged] = useState(false);
   const [source, setSource] = useState("");
+  /** The user's config as the server read it, for the rules per MCP tool (DESKTOP §16 B16). */
+  const [config, setConfig] = useState<unknown>(null);
+  const [toolsOf, setToolsOf] = useState<string | null>(null);
 
   const load = useCallback(() => {
     client.request("skills/list", cwd ? { cwds: [cwd] } : {})
       .then((answer) => setSkills((answer as { data?: { skills: SkillMetadata[] }[] }).data?.flatMap((entry) => entry.skills) ?? []))
       .catch(() => setSkills([]));
     client.request("mcpServerStatus/list", {}).then((answer) => setServers((answer as { data?: McpServer[] }).data ?? [])).catch(() => setServers([]));
+    client.request("config/read", {}).then((answer) => setConfig((answer as { config?: unknown }).config ?? null)).catch(() => setConfig(null));
     client.request("app/list", {}).then((answer) => setApps((answer as { data?: AppInfo[] }).data ?? [])).catch(() => setApps([]));
     client.request("plugin/list", cwd ? { cwds: [cwd] } : {}).then((answer) => setMarketplaces((answer as { marketplaces?: PluginMarketplaceEntry[] }).marketplaces ?? [])).catch(() => setMarketplaces([]));
     client.request("hooks/list", cwd ? { cwds: [cwd] } : {}).then((answer) => setHooks((answer as { data?: HooksListEntry[] }).data ?? [])).catch(() => setHooks([]));
@@ -244,7 +249,9 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
                   {servers.map((server) => (
                     <tr key={server.name}>
                       <td><strong>{server.name}</strong>{server.httpOrigin ? <span className="planned-note"> {server.httpOrigin}</span> : null}</td>
-                      <td>{server.toolsError ? `tools unavailable: ${server.toolsError}` : `${Object.keys(server.tools).length} tools`}</td>
+                      <td>{server.toolsError ? `tools unavailable: ${server.toolsError}` : (
+                        <button className="link-button" aria-expanded={toolsOf === server.name} onClick={() => setToolsOf(toolsOf === server.name ? null : server.name)}>{Object.keys(server.tools).length} tools</button>
+                      )}</td>
                       <td className="planned-note">{server.runtimeStatus ?? "not started"}</td>
                       <td className="shortcut-actions">
                         {server.runtimeStatus === "disabled"
@@ -252,7 +259,35 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
                           : <button className="link-button" onClick={() => void write(`mcp_servers.${server.name}.enabled`, false)}>Turn off</button>}
                       </td>
                     </tr>
-                  ))}
+                  )).flatMap((row, index) => {
+                    const server = servers[index];
+                    if (toolsOf !== server.name) return [row];
+                    const rules = toolRules(config, server.name, Object.keys(server.tools));
+                    return [row, (
+                      <tr key={`${server.name}-tools`} className="mcp-tools-row">
+                        <td colSpan={4}>
+                          {rules.length === 0 ? <p className="empty small">This server offers no tools.</p> : (
+                            <table className="mcp-tools" aria-label={`${server.name}'s tools`}>
+                              <tbody>
+                                {rules.map((entry) => (
+                                  <tr key={entry.tool}>
+                                    <td><code>{entry.tool}</code></td>
+                                    <td>
+                                      <select aria-label={`When ${entry.tool} runs`} value={entry.rule} disabled={!entry.editable} title={entry.editable ? undefined : "This name cannot be written as a setting"}
+                                        onChange={(event) => void writeHooks({ edits: ruleEdits(config, server.name, entry.tool, event.target.value as ToolRule), reloadUserConfig: true })}>
+                                        {(Object.keys(RULE_LABELS) as ToolRule[]).map((rule) => <option key={rule} value={rule}>{RULE_LABELS[rule]}</option>)}
+                                      </select>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                          <p className="planned-note">Always allow runs the tool without asking; Ask each time asks before every call; Off takes it away from the agent. Kept in ~/.mightling/config.toml.</p>
+                        </td>
+                      </tr>
+                    )];
+                  })}
                 </tbody>
               </table>
             )}
