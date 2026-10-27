@@ -10,6 +10,7 @@ import { command } from "./platform";
 import fs from "node:fs";
 import path from "node:path";
 import * as userFs from "./userfs";
+import { CADENCES, type Cadence, cadenceArgs } from "./cadence";
 
 export interface NightTask {
   id: string;
@@ -287,26 +288,27 @@ export interface RepeatingTask {
   repo: string;
   task: string;
   test: string | null;
-  cadence: "daily" | "weekly";
+  cadence: Cadence;
   weekday: string | null;
+  days: string[] | null;
+  every: number | null;
+  day: number | null;
   lastQueued: string | null;
   lastError: string | null;
 }
 
-const WEEKDAY = /^(mon|tue|wed|thu|fri|sat|sun)$/;
 const TEMPLATE = /^r[0-9a-f]{12}$/;
 
-/** Repeats a task in `repo` every night or every week on one day (`ling-admin night every add`). */
-export async function addRepeating(admin: string, repo: unknown, task: unknown, test: unknown, cadence: unknown, weekday: unknown): Promise<string> {
+/** Repeats a task in `repo` every night, every week on one day, on chosen weekdays, every N nights or on a day of the month (`ling-admin night every add`); `cadence` and `options` are checked by cadence.ts. */
+export async function addRepeating(admin: string, repo: unknown, task: unknown, test: unknown, cadence: unknown, options: unknown): Promise<string> {
   if (typeof repo !== "string" || !path.isAbsolute(repo) || !(await userFs.isDirectory(repo))) throw new Error("name the project folder");
   if (typeof task !== "string" || !task.trim() || task.length > 8000) throw new Error("describe the task");
-  const when = cadence === "weekly" && typeof weekday === "string" && WEEKDAY.test(weekday) ? ["--weekly", weekday] : cadence === "daily" ? ["--daily"] : null;
-  if (!when) throw new Error("repeat every night, or every week on one day");
+  const when = cadenceArgs(cadence, options);
   const testArgs = typeof test === "string" && test.trim() ? ["--test", test.trim()] : [];
   return run(admin, ["night", "every", "add", ...when, ...testArgs, "--", task.trim()], repo);
 }
 
-/** The repeating tasks (`ling-admin night every list`, one JSON object a line). */
+/** The repeating tasks (`ling-admin night every list`, one JSON object a line); a cadence this window does not know is left out. */
 export async function listRepeating(admin: string): Promise<RepeatingTask[]> {
   const output = await run(admin, ["night", "every", "list"], process.env.HOME ?? "/");
   const found: RepeatingTask[] = [];
@@ -314,9 +316,14 @@ export async function listRepeating(admin: string): Promise<RepeatingTask[]> {
     try {
       const value = JSON.parse(line) as Record<string, unknown>;
       if (typeof value.id !== "string" || !TEMPLATE.test(value.id)) continue;
+      const cadence = CADENCES.find((known) => known === value.cadence);
+      if (!cadence) continue;
+      const whole = (number: unknown) => (Number.isInteger(number) ? (number as number) : null);
       found.push({
         id: value.id, repo: text(value.repo) ?? "", task: text(value.task) ?? "", test: text(value.test),
-        cadence: value.cadence === "weekly" ? "weekly" : "daily", weekday: text(value.weekday),
+        cadence, weekday: text(value.weekday),
+        days: Array.isArray(value.days) ? value.days.filter((day): day is string => typeof day === "string") : null,
+        every: whole(value.every), day: whole(value.day),
         lastQueued: text(value.last_queued), lastError: text(value.last_error),
       });
     } catch {

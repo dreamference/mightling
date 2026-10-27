@@ -279,12 +279,15 @@ Repeating tasks, queued by each night's run when due.
 
 #### `ling-admin night every add`
 
-Repeat a task in this repository every night or every week.
+Repeat a task in this repository every night, every week, on chosen weekdays, every N nights or on a day of the month (`night every --<cadence>` is short for it).
 
 | Option | Description |
 |---|---|
 | `--daily` | Every night. |
 | `--weekly` | Every week, that day's night. One of: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`. |
+| `--days` | Those weekdays' nights, comma-separated: mon,wed,fri. |
+| `--every` | Every N nights (1 to 365), counted from the night it is set. |
+| `--monthly` | That day of each month, 1 to 31; in a shorter month, the last. |
 | `--test` | The test command each run uses. |
 | `task` | What to do, in words. |
 

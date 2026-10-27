@@ -879,14 +879,17 @@ class DreamferenceCLIController:
         night_dir = NightShiftQueue.night_dir()
         match args.night_every_command:
             case "add":
-                cadence = "weekly" if args.weekly else "daily"
+                cadence, value = next(
+                    ((name, getattr(args, name)) for name in ("weekly", "days", "every", "monthly")
+                     if getattr(args, name) is not None),
+                    ("daily", None))
                 try:
                     template = NightShiftRecurring.add(
-                        night_dir, Path.cwd(), " ".join(args.task), cadence, args.weekly, args.test)
+                        night_dir, Path.cwd(), " ".join(args.task), cadence, value, args.test)
                 except ValueError as error:
                     print(f"❌ {error}")
                     return 1
-                when = f"every {template['weekday']}" if args.weekly else "every night"
+                when = NightShiftRecurring.describe(template)
                 print(f"✅ Repeating task {template['id']}, {when}, in {Path.cwd()}: queued each night when due.")
                 return 0
             case "list":
@@ -1405,11 +1408,17 @@ class DreamferenceCLIController:
             "every", help="Repeating tasks, queued by each night's run when due")
         night_every_subparsers = night_every_parser.add_subparsers(dest="night_every_command")
         night_every_add_parser = night_every_subparsers.add_parser(
-            "add", help="Repeat a task in this repository every night or every week")
+            "add", help="Repeat a task in this repository every night, every week, on chosen weekdays, "
+                        "every N nights or on a day of the month (`night every --<cadence>` is short for it)")
         night_every_add_cadence = night_every_add_parser.add_mutually_exclusive_group(required=True)
         night_every_add_cadence.add_argument("--daily", action="store_true", help="Every night")
         night_every_add_cadence.add_argument(
             "--weekly", choices=["mon", "tue", "wed", "thu", "fri", "sat", "sun"], help="Every week, that day's night")
+        night_every_add_cadence.add_argument("--days", help="Those weekdays' nights, comma-separated: mon,wed,fri")
+        night_every_add_cadence.add_argument(
+            "--every", type=int, metavar="N", help="Every N nights (1 to 365), counted from the night it is set")
+        night_every_add_cadence.add_argument(
+            "--monthly", type=int, metavar="D", help="That day of each month, 1 to 31; in a shorter month, the last")
         night_every_add_parser.add_argument("--test", default=None, help="The test command each run uses")
         night_every_add_parser.add_argument("task", nargs="+", help="What to do, in words")
         night_every_subparsers.add_parser("list", help="The repeating tasks, as JSON lines")
@@ -1744,6 +1753,28 @@ class DreamferenceCLIController:
         return parser
 
     @classmethod
+    def night_every_shorthand(cls, argv: list[str]) -> list[str]:
+        """`night every --<cadence> …` read as `night every add --<cadence> …` (DESKTOP §16 B42).
+
+        Only when `night every` are the first two words after the global options and a cadence
+        flag follows them; anything else (`list`, `drop`, `add`, `--help`, task words) is left as it is.
+
+        Args:
+            argv: The arguments.
+
+        Returns:
+            The arguments, with `add` inserted where the shorthand is used.
+        """
+        at = 0
+        while at < len(argv) and argv[at] in ("--config", "--agent", "--hf-token"):
+            at += 2
+        cadences = ("--daily", "--weekly", "--days", "--every", "--monthly")
+        flag = argv[at + 2:at + 3]
+        if argv[at:at + 2] == ["night", "every"] and flag and flag[0].split("=")[0] in cadences:
+            return [*argv[:at + 2], "add", *argv[at + 2:]]
+        return argv
+
+    @classmethod
     def run_cli(cls, argv: Optional[List[str]] = None) -> None:
         """
         Main execution entrypoint for CLI command parsing and subcommand dispatching.
@@ -1752,7 +1783,7 @@ class DreamferenceCLIController:
             argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.
         """
         parser = cls.build_parser()
-        args = parser.parse_args(argv)
+        args = parser.parse_args(cls.night_every_shorthand(list(sys.argv[1:] if argv is None else argv)))
 
         # Loopback and the model server never go through a proxy a shell left set, for every request
         # made here and every process started from here (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §11).

@@ -170,7 +170,7 @@ export type FromView =
   | { type: "night/drop"; repo: string; id: string }
   | { type: "night/run" }
   /** Repeating tasks (night.ts): through ling-admin, which runs where Night Shift does. */
-  | { type: "night/every-add"; repo: string; task: string; test: string | null; cadence: "daily" | "weekly"; weekday: string | null }
+  | { type: "night/every-add"; repo: string; task: string; test: string | null; cadence: "daily" | "weekly" | "days" | "every" | "monthly"; weekday: string | null; days?: string[] | null; every?: number | null; day?: number | null }
   | { type: "night/every-list" }
   | { type: "night/every-drop"; id: string }
   /** A finished task's last message, diff and transcript (night.ts `taskDetails`). */

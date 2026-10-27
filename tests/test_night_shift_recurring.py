@@ -4,9 +4,11 @@ Templates, when they are due, and queueing through `ling night add` in the repos
 file written here.
 """
 
+import calendar
 import json
 import subprocess
-from datetime import date
+from datetime import date, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -177,3 +179,189 @@ def test_a_refusal_printed_by_ling_night_add_is_not_taken_for_queued(tmp_path: P
     said = NightShiftRecurring.queue_due(night, "/opt/ling", date(2026, 10, 23), run=printed)
     assert "not queued" in said[0]
     assert NightShiftRecurring.templates(night)[0]["last_queued"] is None
+
+
+def test_the_new_cadences_are_checked_and_kept_with_their_parameter(tmp_path: Path) -> None:
+    night = tmp_path / "night"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    days = NightShiftRecurring.add(night, repo, "Audit", "days", " Mon,wed,fri,mon ")
+    every = NightShiftRecurring.add(night, repo, "Sync", "every", "3")
+    monthly = NightShiftRecurring.add(night, repo, "Rotate", "monthly", 31)
+    assert (days["days"], days["every"], days["day"]) == (["mon", "wed", "fri"], None, None)
+    assert (every["every"], every["days"], every["weekday"]) == (3, None, None)
+    assert (monthly["day"], monthly["every"]) == (31, None)
+    assert NightShiftRecurring.add(night, repo, "Listed", "days", ["sat", "sun"])["days"] == [
+        "sat",
+        "sun",
+    ]
+    for cadence, bad in [
+        ("days", None),
+        ("days", ""),
+        ("days", []),
+        ("days", "mon,holiday"),
+        ("days", 3),
+        ("every", 0),
+        ("every", 366),
+        ("every", -1),
+        ("every", "3.5"),
+        ("every", True),
+        ("every", None),
+        ("every", [3]),
+        ("monthly", 0),
+        ("monthly", 32),
+        ("monthly", "x"),
+        ("monthly", None),
+        ("weekly", ["fri"]),
+    ]:
+        with pytest.raises(ValueError):
+            NightShiftRecurring.add(night, repo, "Bad", cadence, bad)
+    assert len(NightShiftRecurring.templates(night)) == 4
+
+
+def nights(first: date, last: date) -> list[date]:
+    """Every date from ``first`` to ``last``, both included."""
+    return [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
+
+
+def run_nightly(template: dict[str, Any], first: date, last: date) -> list[date]:
+    """The nights a template is queued, as the runner marks it each night it is due."""
+    queued = []
+    for night in nights(first, last):
+        if NightShiftRecurring.due(template, night):
+            template["last_queued"] = night.isoformat()
+            queued.append(night)
+    return queued
+
+
+def test_a_monthly_template_runs_once_a_month_on_its_day_or_the_months_last() -> None:
+    # Two years and more of nights, over year ends and February 2028, a leap year.
+    for day in range(1, 32):
+        template = {"cadence": "monthly", "day": day, "last_queued": None}
+        queued = run_nightly(template, date(2026, 1, 1), date(2028, 3, 31))
+        expected = [
+            date(year, month, min(day, calendar.monthrange(year, month)[1]))
+            for year in (2026, 2027, 2028)
+            for month in range(1, 13)
+            if (year, month) <= (2028, 3)
+        ]
+        assert queued == expected, day
+    template = {"cadence": "monthly", "day": 31, "last_queued": None}
+    assert run_nightly(template, date(2027, 12, 1), date(2028, 3, 31)) == [
+        date(2027, 12, 31),
+        date(2028, 1, 31),
+        date(2028, 2, 29),
+        date(2028, 3, 31),
+    ]
+    assert run_nightly(
+        {"cadence": "monthly", "day": 30, "last_queued": None}, date(2027, 2, 1), date(2027, 3, 31)
+    ) == [
+        date(2027, 2, 28),
+        date(2027, 3, 30),
+    ]
+
+
+def test_an_every_n_template_runs_the_night_it_is_set_then_every_nth_night() -> None:
+    for every in (1, 2, 3, 7, 30, 365):
+        template = {"cadence": "every", "every": every, "last_queued": None}
+        queued = run_nightly(template, date(2026, 12, 20), date(2028, 1, 15))
+        assert queued[0] == date(2026, 12, 20), every
+        assert all((later - earlier).days == every for earlier, later in pairwise(queued)), every
+        assert queued[-1] + timedelta(days=every) > date(2028, 1, 15)
+    # Over the year's end, three nights apart.
+    template = {"cadence": "every", "every": 3, "last_queued": None}
+    assert run_nightly(template, date(2026, 12, 28), date(2027, 1, 6)) == [
+        date(2026, 12, 28),
+        date(2026, 12, 31),
+        date(2027, 1, 3),
+        date(2027, 1, 6),
+    ]
+    # A night it was not queued (refused, or no run) counts on from the night it was.
+    late = {"cadence": "every", "every": 3, "last_queued": "2026-12-28"}
+    assert not NightShiftRecurring.due(late, date(2026, 12, 30))
+    assert NightShiftRecurring.due(late, date(2026, 12, 31))
+    assert NightShiftRecurring.due(late, date(2027, 1, 2))
+    for broken in [0, 366, "3", None, True]:
+        assert not NightShiftRecurring.due(
+            {"cadence": "every", "every": broken, "last_queued": None}, date(2026, 12, 28)
+        )
+
+
+def test_a_days_template_runs_on_its_weekdays_only() -> None:
+    template = {"cadence": "days", "days": ["mon", "wed", "fri"], "last_queued": None}
+    queued = run_nightly(template, date(2026, 12, 1), date(2027, 2, 28))
+    assert queued and {night.weekday() for night in queued} == {0, 2, 4}
+    assert len(queued) == sum(
+        1 for night in nights(date(2026, 12, 1), date(2027, 2, 28)) if night.weekday() in (0, 2, 4)
+    )
+    assert not NightShiftRecurring.due(
+        {"cadence": "days", "days": "mon", "last_queued": None}, date(2026, 10, 19)
+    )
+    assert not NightShiftRecurring.due(
+        {"cadence": "hourly", "last_queued": None}, date(2026, 10, 19)
+    )
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["night", "every", "--days", "mon"], ["night", "every", "add", "--days", "mon"]),
+        (["night", "every", "--every=3", "x"], ["night", "every", "add", "--every=3", "x"]),
+        (
+            ["--agent", "codex", "night", "every", "--daily", "x"],
+            ["--agent", "codex", "night", "every", "add", "--daily", "x"],
+        ),
+        (["night", "every", "add", "--daily", "x"], None),
+        (["night", "every", "list"], None),
+        (["night", "every", "drop", "r000000000001"], None),
+        (["night", "every", "--help"], None),
+        (["night", "every"], None),
+        (["night", "add", "night", "every", "--daily"], None),
+        (["run", "night every --daily"], None),
+    ],
+)
+def test_the_shorthand_adds_add_only_right_after_night_every(
+    argv: list[str], expected: list[str] | None
+) -> None:
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    assert DreamferenceCLIController.night_every_shorthand(list(argv)) == (expected or argv)
+
+
+def test_ling_admin_night_every_takes_the_new_cadences_one_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(repo)
+
+    def run(*argv: str) -> int:
+        with pytest.raises(SystemExit) as code:
+            DreamferenceCLIController.run_cli(list(argv))
+        return int(code.value.code or 0)
+
+    assert run("night", "every", "--days", "mon,wed,fri", "--", "Days", "task") == 0
+    assert "on mon,wed,fri" in capsys.readouterr().out
+    assert run("night", "every", "add", "--every", "3", "--", "Every", "task") == 0
+    assert "every 3 nights" in capsys.readouterr().out
+    assert run("night", "every", "--monthly", "31", "Monthly") == 0
+    assert "on day 31 of each month" in capsys.readouterr().out
+    assert run("night", "every", "--every", "0", "Never") == 1
+    assert "❌" in capsys.readouterr().out
+    for twice in (
+        ["--days", "mon", "--every", "3"],
+        ["--daily", "--monthly", "15"],
+        ["--weekly", "fri", "--days", "sat"],
+    ):
+        assert run("night", "every", "add", *twice, "--", "Bad") == 2
+    assert run("night", "every", "add", "--every", "three", "Bad") == 2
+    assert run("night", "every", "--every", "3", "--bogus", "Bad") == 2
+    assert run("night", "every", "list") == 0
+    listed = [
+        json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")
+    ]
+    assert [entry["cadence"] for entry in listed] == ["days", "every", "monthly"]
+    assert run("night", "every", "drop", listed[0]["id"]) == 0

@@ -380,8 +380,11 @@ export interface RepeatingTask {
   repo: string;
   task: string;
   test: string | null;
-  cadence: "daily" | "weekly";
+  cadence: "daily" | "weekly" | "days" | "every" | "monthly";
   weekday: string | null;
+  days: string[] | null;
+  every: number | null;
+  day: number | null;
   lastQueued: string | null;
   lastError: string | null;
 }
@@ -394,9 +397,9 @@ export const night = {
   status: () => send<{ timer: "on" | "off" | "unsupported"; window: string | null }>({ type: "night/status" }),
   drop: (repo: string, id: string) => send<string>({ type: "night/drop", repo, id }),
   runNow: () => send<null>({ type: "night/run" }),
-  /** Repeating tasks: every night, or every week on one day (ling-admin night every). */
-  every: (repo: string, task: string, test: string | null, cadence: "daily" | "weekly", weekday: string | null) =>
-    send<string>({ type: "night/every-add", repo, task, test, cadence, weekday }),
+  /** Repeating tasks: every night, every week on one day, on chosen weekdays, every N nights or on a day of the month (ling-admin night every); the main process checks each (cadence.ts). */
+  every: (repo: string, task: string, test: string | null, cadence: RepeatingTask["cadence"], on: { weekday?: string; days?: string[]; every?: number; day?: number }) =>
+    send<string>({ type: "night/every-add", repo, task, test, cadence, weekday: on.weekday ?? null, days: on.days ?? null, every: on.every ?? null, day: on.day ?? null }),
   repeating: () => send<RepeatingTask[]>({ type: "night/every-list" }),
   dropRepeating: (id: string) => send<string>({ type: "night/every-drop", id }),
   /** A finished task's last message, diff and transcript, and the session it ran as. */

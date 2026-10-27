@@ -480,6 +480,11 @@ button.steer { border-radius: var(--radius-pill); padding: 5px 14px; }
 .nav-row .count { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); font-size: 11px; text-align: center; }
 .night-add { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
 .night-add input { flex: 1; min-width: 160px; }
+/* Repeat's chosen days and its numbers (DESKTOP §16 B42). */
+.night-add .night-days { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; font-size: 13px; }
+.night-add .night-days label { display: inline-flex; align-items: center; gap: 3px; }
+.night-add .night-days input, .night-add input.night-number { flex: none; min-width: 0; }
+.night-add input.night-number { width: 72px; }
 .night-status { font-size: 12px; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--muted); }
 .night-status.done { background: var(--add); color: var(--add-text); }
 .night-status.failed, .night-status.stalled { background: var(--del); color: var(--del-text); }

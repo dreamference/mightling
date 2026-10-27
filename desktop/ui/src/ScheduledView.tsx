@@ -3,13 +3,15 @@
 // a task added to tonight's queue for a project, a queued task dropped, and Run now. Everything goes
 // through the launcher's `ling night` and the runner (desktop/electron/src/night.ts). Since the owner's
 // decision 7 (2026-10-21): a finished task opens on its result, its changes and its transcript; a task
-// repeats every night or every week (`ling-admin night every`); one queued from a thread carries that
+// repeats every night or every week (`ling-admin night every`; since DESKTOP §16 B42 also on chosen
+// weekdays, every N nights or on a day of the month, cadence.ts); one queued from a thread carries that
 // thread's latest messages (tonight.ts). Since DESKTOP §16 B41: each finished run is unread until it is
 // opened, with Mark all as read (nightinbox.ts), and the archive is searched (NightArchive.tsx).
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 
 import * as bridge from "./bridge";
+import { type Cadence, cadenceWords, toggleDay, WEEKDAYS } from "./cadence";
 import { Icon } from "./icons";
 import { renderMarkdown } from "./markdown";
 import { NightArchive } from "./NightArchive";
@@ -17,7 +19,6 @@ import { INBOX_STATUSES, isUnread, unreadRuns } from "./nightinbox";
 import { NightRunDetails } from "./NightRunDetails";
 import { withThreadContext } from "./tonight";
 
-const WEEKDAYS = [["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]] as const;
 /** Statuses of a task that has run (the runner's words, ling-rs/src/night.rs), as the inbox lists them (nightinbox.ts). */
 export const FINISHED = INBOX_STATUSES;
 
@@ -58,8 +59,11 @@ export function ScheduledView(props: {
   const [task, setTask] = useState("");
   const [test, setTest] = useState("");
   const [said, setSaid] = useState<string | null>(null);
-  const [repeat, setRepeat] = useState<"once" | "daily" | "weekly">("once");
+  const [repeat, setRepeat] = useState<"once" | Cadence>("once");
   const [weekday, setWeekday] = useState<string>("mon");
+  const [days, setDays] = useState<string[]>(["mon", "wed", "fri"]);
+  const [every, setEvery] = useState("2");
+  const [monthly, setMonthly] = useState("1");
   const [withContext, setWithContext] = useState(Boolean(props.fromThread?.context.length));
   const [repeating, setRepeating] = useState<bridge.RepeatingTask[] | null>(null);
   const [opened, setOpened] = useState<string | null>(props.openRun ?? null);
@@ -103,6 +107,9 @@ export function ScheduledView(props: {
             <option value="once">Tonight</option>
             <option value="daily">Every night</option>
             <option value="weekly">Every week</option>
+            <option value="days">On chosen days</option>
+            <option value="every">Every N nights</option>
+            <option value="monthly">Every month</option>
           </select>
           {repeat === "once" ? (
             <>
@@ -118,11 +125,22 @@ export function ScheduledView(props: {
               {WEEKDAYS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           ) : null}
-          <button className="primary" disabled={!repo || !task.trim()} onClick={() => {
+          {repeat === "days" ? (
+            <span className="night-days" role="group" aria-label="Days">
+              {WEEKDAYS.map(([value, label]) => <label key={value} title={label}><input type="checkbox" checked={days.includes(value)} onChange={() => setDays(toggleDay(days, value))} />{label.slice(0, 3)}</label>)}
+            </span>
+          ) : null}
+          {repeat === "every" ? (
+            <input className="night-number" type="number" min={1} max={365} value={every} aria-label="Nights between runs" title="Every this many nights, the first tonight (1 to 365)" onChange={(event) => setEvery(event.target.value)} />
+          ) : null}
+          {repeat === "monthly" ? (
+            <input className="night-number" type="number" min={1} max={31} value={monthly} aria-label="Day of the month" title="This day of each month (1 to 31); in a shorter month, its last day" onChange={(event) => setMonthly(event.target.value)} />
+          ) : null}
+          <button className="primary" disabled={!repo || !task.trim() || (repeat === "days" && !days.length)} onClick={() => {
             const words = withContext && props.fromThread ? withThreadContext(task, props.fromThread.title, props.fromThread.context) : task;
             const queued = repeat === "once"
               ? bridge.night.add(repo, words, test || null, node.trim() ? { on: node.trim() } : { bestOf })
-              : bridge.night.every(repo, words, test || null, repeat, repeat === "weekly" ? weekday : null);
+              : bridge.night.every(repo, words, test || null, repeat, repeat === "weekly" ? { weekday } : repeat === "days" ? { days } : repeat === "every" ? { every: Number(every) } : repeat === "monthly" ? { day: Number(monthly) } : {});
             queued.then((text) => { if (repeat === "once" && withContext && props.fromThread?.context.length) props.onQueued?.(text); setSaid(text); setTask(""); setTest(""); setNode(""); setBestOf(null); load(); }).catch(notice);
           }}>{repeat === "once" ? "Queue" : "Repeat"}</button>
           <button onClick={() => bridge.night.runNow().then(() => setSaid("Night Shift started; it gives way if the machine is busy.")).catch(notice)}>Run now</button>
@@ -158,13 +176,13 @@ export function ScheduledView(props: {
           </table>
         )}
         <h3>Repeating</h3>
-        {repeating === null ? null : repeating.length === 0 ? <p className="empty small">Nothing repeats. Choose Every night or Every week above.</p> : (
+        {repeating === null ? null : repeating.length === 0 ? <p className="empty small">Nothing repeats. Choose how often in Repeat above.</p> : (
           <table className="shortcut-table">
             <tbody>
               {repeating.map((entry) => (
                 <tr key={entry.id}>
                   <td>{entry.task.split("\n")[0]}{entry.test ? <span className="planned-note"> · test: {entry.test}</span> : null}</td>
-                  <td className="planned-note">{name(entry.repo)} · {entry.cadence === "weekly" ? `every ${WEEKDAYS.find(([value]) => value === entry.weekday)?.[1] ?? entry.weekday}` : "every night"}{entry.lastQueued ? ` · last queued ${entry.lastQueued}` : ""}{entry.lastError ? ` · not queued: ${entry.lastError}` : ""}</td>
+                  <td className="planned-note">{name(entry.repo)} · {cadenceWords(entry)}{entry.lastQueued ? ` · last queued ${entry.lastQueued}` : ""}{entry.lastError ? ` · not queued: ${entry.lastError}` : ""}</td>
                   <td className="shortcut-actions"><button className="link-button" onClick={() => bridge.night.dropRepeating(entry.id).then(load).catch(notice)}>Stop</button></td>
                 </tr>
               ))}
