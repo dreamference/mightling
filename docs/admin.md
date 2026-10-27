@@ -608,6 +608,7 @@ Set up new GB10s from this one: install Mightling, the root half, the model, pai
 | `--via` | With one host: copy and install over this address instead (a QSFP link's) |
 | `--match` | With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-. |
 | `--start-timeout` | Seconds to wait for a started model server (default 1200) |
+| `--role` | Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, the role's setup and a readiness report (docs/dev/node.md) One of: `night`, `engine`. |
 
 #### `ling-admin node prepare`
 

@@ -1,5 +1,4 @@
-"""
-`ling-admin node provision`: bringing more GB10s to a working node from this one
+"""`ling-admin node provision`: bringing more GB10s to a working node from this one
 (specs/DREAMFERENCE_MIGHTLING_FLEET.md §5, §7, §9, §11).
 
 After NVIDIA's first-boot wizard, one command run here installs Mightling on each new machine from a
@@ -11,7 +10,8 @@ already satisfied.
 Two channels, kept apart (§8): the **provisioning session**, a password-authenticated SSH login
 that lasts only while the command runs and is the only channel that installs anything or runs
 anything as root; and the **pairing key**, used afterwards to start, read and check, never to
-install. No persistent access is added: no NOPASSWD sudoers entry, no full-access key.
+install. No persistent access is added: no NOPASSWD sudoers entry, no full-access key. `--role`
+is the deliberate exception: it adds both, and key-only SSH (node_role_provisioner.py).
 
 With several machines every question comes first (one password for all by default, the host-key
 fingerprints), then the slow part runs unattended. A failure stops that machine at that step and
@@ -28,8 +28,9 @@ import socket
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Final, List, Optional
+from typing import Any, Final
 
 from dreamference.node.fleet_askpass import FleetAskpass
 from dreamference.node.fleet_bundle import FleetBundle
@@ -37,6 +38,7 @@ from dreamference.node.fleet_model_plan import GIB, FleetModelPlan
 from dreamference.node.fleet_probe import FleetProbe
 from dreamference.node.fleet_session import REMOTE_ADMIN, FleetSession
 from dreamference.node.node_pairing import NodePairing
+from dreamference.node.node_role_provisioner import NodeRoleProvisioner
 
 LOG_DIR: Final[str] = os.path.expanduser("~/.local/state/dreamference/fleet")
 
@@ -59,13 +61,14 @@ BARE_NAME: Final[re.Pattern] = re.compile(r"[A-Za-z0-9-]+")
 class NodeProvisioner:
     """One provisioning run over one or more machines."""
 
-    def __init__(self, hosts: List[str], options: Dict[str, Any]) -> None:
-        """
+    def __init__(self, hosts: list[str], options: dict[str, Any]) -> None:
+        """Set up one run.
+
         Args:
             hosts: The machines named on the command line (names, addresses or paired nodes).
             options: The parsed flags: `all`, `user`, `model`, `source`, `per_host_password`,
                 `mesh`, `web`, `no_start`, `restart`, `os_update`, `dry_run`, `via`, `match`,
-                `start_timeout`.
+                `start_timeout`, `role`.
         """
         self.hosts = hosts
         self.options = options
@@ -76,18 +79,22 @@ class NodeProvisioner:
         self.users: dict[str, str] = {}
         self.model: str = options.get("model") or self.configured_model()
         self.run_dir = FleetSession.new_run_dir()
-        self.passwords: Dict[str, str] = {}
-        self.askpass: Optional[FleetAskpass] = None
-        self.sessions: Dict[str, FleetSession] = {}
-        self.results: Dict[str, Dict[str, Any]] = {}
-        self.bundle: Optional[Path] = None
-        self.plan: Dict[str, Any] = {}
+        self.passwords: dict[str, str] = {}
+        self.askpass: FleetAskpass | None = None
+        self.sessions: dict[str, FleetSession] = {}
+        self.results: dict[str, dict[str, Any]] = {}
+        self.bundle: Path | None = None
+        self.plan: dict[str, Any] = {}
+        # `--role`: the steps that leave a node as the last one was set up by hand (persistent
+        # access FLEET decisions 3 and 6 rule out otherwise; node_role_provisioner.py).
+        self.role: NodeRoleProvisioner | None = None
+        if options.get("role"):
+            self.role = NodeRoleProvisioner(self, options["role"])
 
     # -- the run ----------------------------------------------------------------------------------
 
     def run(self) -> int:
-        """
-        Runs the whole provisioning.
+        """Runs the whole provisioning.
 
         Returns:
             int: 0 when every machine is complete, 1 otherwise.
@@ -103,10 +110,12 @@ class NodeProvisioner:
             self._questions_first()
             for host in list(self.sessions):
                 self._provision(host)
+                if self.role is not None:
+                    self.role.finish(host, self.sessions[host])
         finally:
             self._close_all()
         for host in self.hosts:
-            if host in self.results and self.results[host].get("paired_record"):
+            if self.role is None and self.results.get(host, {}).get("paired_record"):
                 self._start_and_verify(host)
         if self.options.get("mesh"):
             print(
@@ -218,8 +227,12 @@ class NodeProvisioner:
     # -- questions first (§9.2) -------------------------------------------------------------------
 
     def _questions_first(self) -> None:
-        """Asks every password, opens every session, prints each host key, before any slow step."""
-        if len(self.hosts) > 1:
+        """Asks every password, opens every session, prints each host key, before any slow step.
+
+        With `--role` the password is asked even for one machine: its root steps run unattended,
+        through `sudo -S`, which has no terminal to prompt on.
+        """
+        if len(self.hosts) > 1 or self.role is not None:
             self._ask_passwords()
             self.askpass = FleetAskpass(self.run_dir, self.passwords)
             self.askpass.start(self._admin_executable())
@@ -250,7 +263,8 @@ class NodeProvisioner:
                     f"Password for {self._user(host)} on {host}: "
                 )
             return
-        shared = getpass.getpass(f"Password for {self.user} on all {len(self.hosts)} machines: ")
+        where = self.hosts[0] if len(self.hosts) == 1 else f"all {len(self.hosts)} machines"
+        shared = getpass.getpass(f"Password for {self.user} on {where}: ")
         self.passwords = {self._address(host): shared for host in self.hosts}
 
     def _address(self, host: str) -> str:
@@ -266,6 +280,10 @@ class NodeProvisioner:
         safe = "".join(ch if ch.isalnum() or ch in "-." else "_" for ch in host)
         log = Path(LOG_DIR) / f"{datetime.date.today().isoformat()}-{safe}.log"
         session = FleetSession(address, self._user(host), self.run_dir, log_path=log)
+        if self.role is not None:
+            # The main node's key (`ssh -G`'s, or the default), the one the role authorises, so a
+            # re-run still logs in once password SSH is off.
+            session.identity = NodePairing.ssh_config(address)[1]
         if self.askpass is not None:
             session.askpass_env = self.askpass.environment(address)
         return session
@@ -286,7 +304,7 @@ class NodeProvisioner:
     def _provision(self, host: str) -> None:
         session = self.sessions[host]
         self.results.setdefault(host, {"host": host, "done": []})
-        steps: List[Callable[[str, FleetSession], bool]] = [
+        steps: list[Callable[[str, FleetSession], bool]] = [
             self._step_probe,
             self._step_os_update,
             self._step_install,
@@ -296,11 +314,15 @@ class NodeProvisioner:
             self._step_assign,
             self._step_pair,
         ]
+        if self.role is not None:
+            steps = self.role.steps(steps)
         for step in steps:
             if not step(host, session):
                 return
             if self.options.get("dry_run") and step == self._step_probe:
                 self._describe_dry_run(host)
+                if self.role is not None:
+                    self.role.describe(host, session)
                 return
 
     def _step_probe(self, host: str, session: FleetSession) -> bool:
@@ -584,14 +606,14 @@ class NodeProvisioner:
         if not self.results[host]["complete"]:
             self.results[host]["left"] = f"ling-admin node status {host}"
 
-    def _info(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def _info(self, record: dict[str, Any]) -> dict[str, Any]:
         answer = NodePairing.run(record, "info")
         try:
             return json.loads(answer.stdout) if answer.returncode == 0 else {}
         except ValueError:
             return {}
 
-    def _served_model(self, host: str, port: int) -> Optional[str]:
+    def _served_model(self, host: str, port: int) -> str | None:
         try:
             with urllib.request.urlopen(f"http://{host}:{port}/v1/models", timeout=5) as response:
                 data = json.load(response).get("data") or []
@@ -599,7 +621,7 @@ class NodeProvisioner:
             return None
         return data[0].get("id") if data else None
 
-    def _wait_for_model(self, host: str, port: int) -> Optional[str]:
+    def _wait_for_model(self, host: str, port: int) -> str | None:
         deadline = time.monotonic() + int(
             self.options.get("start_timeout") or DEFAULT_START_TIMEOUT_S
         )
@@ -637,7 +659,7 @@ class NodeProvisioner:
 
     # -- bookkeeping ------------------------------------------------------------------------------
 
-    def _state(self, host: str) -> Dict[str, str]:
+    def _state(self, host: str) -> dict[str, str]:
         return self.results.get(host, {}).get("probe", {})
 
     def _reprobe(self, host: str, session: FleetSession) -> bool:
@@ -669,6 +691,8 @@ class NodeProvisioner:
 
     def _close_all(self) -> None:
         for session in self.sessions.values():
+            if self.role is not None:
+                session.run("sudo -k")  # the root steps ran unattended: drop sudo's timestamp
             session.close()
         if self.askpass is not None:
             self.askpass.stop()
@@ -734,9 +758,8 @@ class NodeProvisioner:
 
     @classmethod
     def configured_model(cls) -> str:
-        """
-        Returns:
-            str: This machine's configured main model, which new nodes get by default.
+        """Returns:
+        str: This machine's configured main model, which new nodes get by default.
         """
         from dreamference.config import DreamferenceConfig
 

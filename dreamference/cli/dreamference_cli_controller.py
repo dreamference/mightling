@@ -1489,6 +1489,10 @@ class DreamferenceCLIController:
         node_provision_parser.add_argument("--via", default=None, help="With one host: copy and install over this address instead (a QSFP link's)")
         node_provision_parser.add_argument("--match", default=None, help="With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-")
         node_provision_parser.add_argument("--start-timeout", type=int, default=None, help="Seconds to wait for a started model server (default 1200)")
+        node_provision_parser.add_argument(
+            "--role", choices=["night", "engine"], default=None,
+            help="Also leave it as a night or engine node: main key, docker, agents' sudoers, key-only SSH, "
+                 "the role's setup and a readiness report (docs/dev/node.md)")
         node_subparsers.add_parser("prepare", help="(Run with sudo) the root steps of a node install, for the user who ran sudo, and nothing else")
         node_subparsers.add_parser("askpass", help=argparse.SUPPRESS)
         node_job_exec_parser = node_subparsers.add_parser("job-exec", help="(Run inside a job's systemd unit) carry out one job")
@@ -2880,7 +2884,7 @@ class DreamferenceCLIController:
                 from dreamference.node.node_provisioner import NodeProvisioner
                 options = {name: getattr(args, name) for name in (
                     "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start", "no_forge",
-                    "restart", "os_update", "dry_run", "via", "match", "start_timeout")}
+                    "restart", "os_update", "dry_run", "via", "match", "start_timeout", "role")}
                 sys.exit(NodeProvisioner(args.hosts, options).run())
             if args.node_command == "prepare":
                 from dreamference.node.node_prepare import NodePrepare
