@@ -1371,6 +1371,11 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     set_if_absent(features, "guardian_approval", false);
     // Plugins are allowed; the vendor's remote catalogue and plugin sharing are not (plugins.rs).
     plugins::close_vendor_features(features);
+    // Codex's `non_prefixed_mcp_tool_names` names an MCP server's namespace after the server alone,
+    // without `mcp__`, and ling-tools flattens only `mcp__` namespaces into function tools (patch
+    // 0020). The model servers drop a namespace entry, so that server's tools would never reach
+    // the model. Forced off, whatever the file says (the table form included).
+    features["non_prefixed_mcp_tool_names"] = value(false);
 
     // Sandboxed commands have the network whenever /airgapped is off (owner decision, 2026-10-22):
     // without it the workspace-write sandbox also blocks DNS, and `pip install`, `git fetch` and the
@@ -1903,6 +1908,21 @@ mod tests {
         };
         assert_eq!(guardian(""), Some(false));
         assert_eq!(guardian("[features]\nguardian_approval = true\n"), Some(true));
+    }
+
+    #[test]
+    fn mcp_namespaces_keep_their_prefix_so_they_are_flattened() {
+        let feature = |existing: &str| {
+            let text = updated_config(existing, Path::new("/h/c.json"), "http://x:8000").unwrap_or_default();
+            let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+            parsed.get("features").and_then(|features| features.get("non_prefixed_mcp_tool_names")).cloned()
+        };
+        assert_eq!(feature(""), Some(toml::Value::Boolean(false)));
+        assert_eq!(feature("[features]\nnon_prefixed_mcp_tool_names = true\n"), Some(toml::Value::Boolean(false)));
+        assert_eq!(
+            feature("[features.non_prefixed_mcp_tool_names]\nenabled = true\nserver_names = [\"notes\"]\n"),
+            Some(toml::Value::Boolean(false))
+        );
     }
 
     #[test]
