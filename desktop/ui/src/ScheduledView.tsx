@@ -4,24 +4,26 @@
 // through the launcher's `ling night` and the runner (desktop/electron/src/night.ts). Since the owner's
 // decision 7 (2026-10-21): a finished task opens on its result, its changes and its transcript; a task
 // repeats every night or every week (`ling-admin night every`); one queued from a thread carries that
-// thread's latest messages (tonight.ts).
+// thread's latest messages (tonight.ts). Since DESKTOP §16 B41: each finished run is unread until it is
+// opened, with Mark all as read (nightinbox.ts), and the archive is searched (NightArchive.tsx).
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 
 import * as bridge from "./bridge";
 import { Icon } from "./icons";
 import { renderMarkdown } from "./markdown";
+import { NightArchive } from "./NightArchive";
+import { INBOX_STATUSES, isUnread, unreadRuns } from "./nightinbox";
+import { NightRunDetails } from "./NightRunDetails";
 import { withThreadContext } from "./tonight";
 
 const WEEKDAYS = [["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]] as const;
-type Details = Awaited<ReturnType<typeof bridge.night.details>>;
+/** Statuses of a task that has run (the runner's words, ling-rs/src/night.rs), as the inbox lists them (nightinbox.ts). */
+export const FINISHED = INBOX_STATUSES;
 
-/** Statuses of a task that has run (the runner's words, ling-rs/src/night.rs). */
-export const FINISHED = ["done", "stalled", "failed", "cancelled", "blocked"];
-
-/** Finished tasks newer than `seen` (an ISO time), for the unread mark. */
-export function unseen(tasks: bridge.NightTask[], seen: string | null): number {
-  return tasks.filter((task) => FINISHED.includes(task.status) && (!seen || (task.at ?? "") > seen)).length;
+/** Finished tasks newer than `seen` (an ISO time) and not opened since (`read`), for the unread mark. */
+export function unseen(tasks: bridge.NightTask[], seen: string | null, read: readonly string[] = []): number {
+  return unreadRuns(tasks, seen, read);
 }
 
 /** The attempt counts the Queue form offers (`--best-of`); the launcher takes any count of 1 or more. */
@@ -35,7 +37,11 @@ export function timerWords(status: { timer: "on" | "off" | "unsupported"; window
 }
 
 export function ScheduledView(props: {
+  /** `seen`: when everything was last marked read; `onSeen` is Mark all as read (DESKTOP §16 B41). */
   projects: string[]; defaultProject: string | null; seen: string | null; onSeen: (at: string) => void; onClose: () => void; notice: (error: unknown) => void;
+  /** DESKTOP §16 B41: the runs opened since (`nightRead`), and one more opened. */
+  read?: readonly string[];
+  onRead?: (id: string) => void;
   /** The thread shown when Scheduled opened: its title and latest messages, offered as the task's context. */
   fromThread?: { title: string; context: string[] } | null;
   /** Opens a finished run's session as a thread in Work. */
@@ -56,7 +62,7 @@ export function ScheduledView(props: {
   const [weekday, setWeekday] = useState<string>("mon");
   const [withContext, setWithContext] = useState(Boolean(props.fromThread?.context.length));
   const [repeating, setRepeating] = useState<bridge.RepeatingTask[] | null>(null);
-  const [opened, setOpened] = useState<{ id: string; tab: "result" | "diff" | "transcript"; details: Details | null } | null>(props.openRun ? { id: props.openRun, tab: "result", details: null } : null);
+  const [opened, setOpened] = useState<string | null>(props.openRun ?? null);
   const [node, setNode] = useState("");
   const [bestOf, setBestOf] = useState<number | null>(null);
   const [status, setStatus] = useState<Awaited<ReturnType<typeof bridge.night.status>> | null>(null);
@@ -70,18 +76,16 @@ export function ScheduledView(props: {
     }).catch((error) => { setData({ tasks: [], reports: [] }); notice(error); });
   }, [notice]);
   useEffect(load, [load]);
+  // A run opened from a thread's card (B40) counts as opened here (B41).
   useEffect(() => {
-    const run = props.openRun;
-    if (run) bridge.night.details(run).then((details) => setOpened((current) => (current?.id === run ? { ...current, details } : current))).catch(notice);
+    if (props.openRun) props.onRead?.(props.openRun);
   }, [props.openRun]);
-  // Opening the view marks what it shows as seen.
-  useEffect(() => {
-    if (data) props.onSeen(new Date().toISOString());
-  }, [data]);
 
   const finished = data?.tasks.filter((entry) => FINISHED.includes(entry.status)) ?? [];
   const waiting = data?.tasks.filter((entry) => !FINISHED.includes(entry.status)) ?? [];
   const name = (folder: string) => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder;
+  const unread = finished.filter((entry) => isUnread(entry, props.seen, props.read ?? [])).length;
+  const openThread = props.onOpenThread ? (threadId: string) => { props.onClose(); props.onOpenThread?.(threadId); } : undefined;
 
   return (
     <div className="dialog-backdrop" onClick={props.onClose}>
@@ -127,40 +131,26 @@ export function ScheduledView(props: {
           <label className="night-context"><input type="checkbox" checked={withContext} onChange={(event) => setWithContext(event.target.checked)} /> With what was said in <strong>{props.fromThread.title}</strong> (its latest {props.fromThread.context.length} messages)</label>
         ) : null}
         {said ? <div className="notice">{said}</div> : null}
-        <h3>Inbox</h3>
+        <div className="night-inbox-head">
+          <h3>Inbox{unread ? <span className="count" aria-label={`${unread} unread`}>{unread}</span> : null}</h3>
+          {unread ? <button className="link-button" onClick={() => props.onSeen(new Date().toISOString())}>Mark all as read</button> : null}
+        </div>
         {data === null ? <p className="empty small">…</p> : finished.length === 0 ? <p className="empty small">Nothing has run yet.</p> : (
           <table className="shortcut-table">
             <tbody>
               {finished.map((entry) => (
                 <Fragment key={entry.id}>
-                  <tr className={`night-run${!props.seen || (entry.at ?? "") > props.seen ? " unseen" : ""}${opened?.id === entry.id ? " open" : ""}`}>
-                    <td><button className="link-button" aria-expanded={opened?.id === entry.id} onClick={() => {
-                      if (opened?.id === entry.id) return setOpened(null);
-                      setOpened({ id: entry.id, tab: "result", details: null });
-                      bridge.night.details(entry.id).then((details) => setOpened((current) => (current?.id === entry.id ? { ...current, details } : current))).catch(notice);
+                  <tr className={`night-run${isUnread(entry, props.seen, props.read ?? []) ? " unseen" : ""}${opened === entry.id ? " open" : ""}`}>
+                    <td><button className="link-button" aria-expanded={opened === entry.id} onClick={() => {
+                      if (opened === entry.id) return setOpened(null);
+                      setOpened(entry.id);
+                      props.onRead?.(entry.id);
                     }}>{entry.task.split("\n")[0]}</button></td>
                     <td className="planned-note">{name(entry.repo)} · <code>{entry.branch}</code></td>
                     <td><span className={`night-status ${entry.status}`}>{entry.status}</span></td>
                   </tr>
-                  {opened?.id === entry.id ? (
-                    <tr className="night-details"><td colSpan={3}>
-                      <nav className="review-scopes" aria-label="What the run left">
-                        {(["result", "diff", "transcript"] as const).map((tab) => (
-                          <button key={tab} className={opened.tab === tab ? "selected" : ""} aria-pressed={opened.tab === tab} onClick={() => setOpened({ ...opened, tab })}>
-                            {{ result: "Result", diff: "Changes", transcript: "Transcript" }[tab]}
-                          </button>
-                        ))}
-                        {opened.details?.session && props.onOpenThread ? <button className="link-button" onClick={() => { props.onClose(); props.onOpenThread?.(opened.details!.session!); }}>Open as a thread</button> : null}
-                      </nav>
-                      {entry.status === "done" ? <p className="planned-note">Not merged: the changes are on <code>{entry.branch}</code>. <code>ling night apply {entry.id}</code> in {name(entry.repo)} brings them into your checkout as uncommitted changes.</p> : null}
-                      {opened.details === null ? <p className="empty small">Reading the run…</p> : opened.tab === "result" ? (
-                        opened.details.result ? <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(opened.details.result) }} /> : <p className="empty small">The run left no message.</p>
-                      ) : opened.tab === "diff" ? (
-                        opened.details.diff ? <pre className="diff night-diff">{opened.details.diff.split("\n").map((line, index) => <span key={index} className={line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : ""}>{line}{"\n"}</span>)}</pre> : <p className="empty small">No changes.</p>
-                      ) : (
-                        opened.details.transcript ? <pre className="night-transcript">{opened.details.transcript}</pre> : <p className="empty small">No transcript was kept.</p>
-                      )}
-                    </td></tr>
+                  {opened === entry.id ? (
+                    <tr className="night-details"><td colSpan={3}><NightRunDetails entry={entry} notice={notice} onOpenThread={openThread} /></td></tr>
                   ) : null}
                 </Fragment>
               ))}
@@ -202,6 +192,7 @@ export function ScheduledView(props: {
             <div className="markdown night-report" dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }} />
           </>
         ) : null}
+        <NightArchive notice={notice} onOpenThread={openThread} />
       </section>
     </div>
   );

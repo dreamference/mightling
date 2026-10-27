@@ -158,7 +158,7 @@ export type FromView =
   | { type: "folder/check"; dir: string }
   | { type: "git/origin"; dir: string }
   | { type: "night/list" }
-  | { type: "night/report"; name: string }
+  | { type: "night/report"; name: string; archived?: boolean }
   | { type: "night/add"; repo: string; task: string; test: string | null; on?: string | null; bestOf?: number | null }
   /** Whether the timer is on and its window (DESKTOP §16 B5), read from its unit file. */
   | { type: "night/status" }
@@ -169,10 +169,12 @@ export type FromView =
   | { type: "night/every-list" }
   | { type: "night/every-drop"; id: string }
   /** A finished task's last message, diff and transcript (night.ts `taskDetails`). */
-  | { type: "night/details"; id: string }
+  | { type: "night/details"; id: string; archived?: boolean }
   /** DESKTOP §16 B40: a thread's task applied in the thread's folder (`ling night apply`), and its block in the newest report naming it. */
   | { type: "night/apply"; cwd: string; id: string }
   | { type: "night/note"; id: string }
+  /** DESKTOP §16 B41: Scheduled's search of `night/archive/` (nightinbox.ts `searchArchive`); `archived` above reads a run or report there. */
+  | { type: "night/archive"; query: string }
   | { type: "personal/read" }
   | { type: "personal/write"; text: string }
   | { type: "dialog/open-folder" }

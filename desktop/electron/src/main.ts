@@ -36,6 +36,7 @@ import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
 import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, nightStatus, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
 import { applyTask, taskNote } from "./night";
+import { ARCHIVE, nightUnread, searchArchive } from "./nightinbox";
 import { writeWorkAttachment } from "./attachments";
 import { listMemoryFiles, writeMemoryFile } from "./memoryfiles";
 import { Nodes } from "./nodes";
@@ -338,6 +339,8 @@ export async function main(options: MainOptions): Promise<void> {
 
   // The pet (pet.ts, Phase 3 item 6): a window of its own, shown while Settings › Pets says so.
   const petStatus = new PetStatus();
+  /** Night Shift's unread results, for the tray (DESKTOP §16 B41, `syncNight`). */
+  let nightCount = 0;
   /** Ask's recent questions for Quick Entry's box (quick.ts, DESKTOP §16 B24). */
   const recentQuestions = new RecentQuestions(() => {
     const home = codexHome();
@@ -357,8 +360,19 @@ export async function main(options: MainOptions): Promise<void> {
   function sendPet(): void {
     if (pet && !pet.isDestroyed()) send(pet, { channel: "pet://state", payload: petState() });
     // The tray says how many threads work and wait, from the same state (DESKTOP §16 B20).
-    updateTray(petStatus.counts());
+    updateTray({ ...petStatus.counts(), night: nightCount });
   }
+  // Night Shift's unread results in the tray (DESKTOP §16 B41, nightinbox.ts): counted from the files
+  // and the window's marks, every two minutes and whenever a window changes the marks.
+  const syncNight = () => {
+    const home = codexHome();
+    try {
+      nightCount = home ? nightUnread(path.join(home, "night"), prefs.read()) : 0;
+    } catch {
+      nightCount = 0;
+    }
+    updateTray({ ...petStatus.counts(), night: nightCount });
+  };
   const syncPet = () => {
     const wanted = prefs.read().petShown === true;
     if (wanted && (!pet || pet.isDestroyed())) {
@@ -512,6 +526,8 @@ export async function main(options: MainOptions): Promise<void> {
   app.on("will-quit", () => session.flush());
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
   installTray(path.join(__dirname, "..", "..", "icons"), { ...actions, quickQuestion: toggleQuick });
+  syncNight();
+  setInterval(syncNight, 120_000).unref();
 
   // The one channel from the page.
   const fromView = new Reassembler();
@@ -671,7 +687,7 @@ export async function main(options: MainOptions): Promise<void> {
       case "night/report": {
         const home = codexHome();
         if (!home) throw new Error("there is no CODEX_HOME");
-        return readReport(path.join(home, "night"), message.name);
+        return readReport(path.join(home, "night", message.archived === true ? ARCHIVE : ""), message.name);
       }
       case "night/add": {
         const ling = findLing(resourcesPath());
@@ -698,7 +714,7 @@ export async function main(options: MainOptions): Promise<void> {
       case "night/details": {
         const home = codexHome();
         if (!home) throw new Error("there is no CODEX_HOME");
-        return taskDetails(path.join(home, "night"), message.id);
+        return taskDetails(path.join(home, "night", message.archived === true ? ARCHIVE : ""), message.id);
       }
       case "night/apply": {
         // A thread's task brought into the thread's checkout (DESKTOP §16 B40): git here, no network.
@@ -709,6 +725,11 @@ export async function main(options: MainOptions): Promise<void> {
       case "night/note": {
         const home = codexHome();
         return home ? taskNote(path.join(home, "night"), message.id) : null;
+      }
+      case "night/archive": {
+        // Scheduled's search of the archive (DESKTOP §16 B41): files here, read only.
+        const home = codexHome();
+        return home ? searchArchive(path.join(home, "night"), message.query) : { tasks: [], reports: [] };
       }
       case "night/run": {
         const admin = whichOnPath("ling-admin");
@@ -998,6 +1019,7 @@ export async function main(options: MainOptions): Promise<void> {
         const written = prefs.write(message.values);
         if (["petShown", "petSize", "petImage"].some((key) => key in (message.values ?? {}))) syncPet();
         if ("recallQuestions" in (message.values ?? {})) syncRecall();
+        if (["nightSeen", "nightRead"].some((key) => key in (message.values ?? {}))) syncNight();
         if (["quickEntry", "quickEntryShortcut"].some((key) => key in (message.values ?? {}))) syncQuick();
         if ("theme" in (message.values ?? {})) {
           nativeTheme.themeSource = themeChoice(prefs.read().theme);

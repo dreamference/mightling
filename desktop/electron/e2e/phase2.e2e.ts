@@ -705,6 +705,8 @@ test("12 scheduled: Night Shift's inbox with an unread count, the queue, a task 
     await expect.poll(() => runs(home).filter((args) => args[0] === "night" && args[1] !== "every").map((args) => args.join(" "))).toEqual([
       "night add Update the changelog for 1.7", "night drop 20261016-2215",
     ]);
+    // A finished run is unread until it is opened (DESKTOP §16 B41).
+    await view.getByRole("button", { name: "Add type hints to fetcher/client.py" }).click();
     await page.keyboard.press("Escape");
     await expect(page.locator(".scheduled-button .count")).toHaveCount(0);
   } finally {
