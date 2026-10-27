@@ -82,6 +82,7 @@ pub mod summary_cap;
 #[cfg(unix)]
 pub mod sync;
 
+pub mod uninstall;
 pub mod update;
 pub mod usage;
 pub mod userns;
@@ -131,6 +132,7 @@ const COMMANDS_WITHOUT_MODEL: &[&str] = &[
 pub const LAUNCHER_SUBCOMMANDS: &[&str] = &[
     "app", "night", "airgapped", "node", "apps", "ledger", "notice", "skill", "audit", "docs", "prompt", "web", "chat",
     "signal", "refine", "compat", "cavemode", "loop-guard", "guard", "worktree", "sync", "monitor",
+    "uninstall",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -337,6 +339,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "app"
     {
         std::process::exit(app::open(&user_args[index + 1..]).await);
+    }
+    // `uninstall` removes this release install of the client (uninstall.rs; WINDOWS_ARM §16.4).
+    if let Some(index) = subcommand
+        && user_args[index] == "uninstall"
+    {
+        std::process::exit(uninstall::run_cli(&user_args[index + 1..]));
     }
     // `night` is Night Shift's queue (night.rs): `/night` from a shell, for scripts and cron.
     if let Some(index) = subcommand

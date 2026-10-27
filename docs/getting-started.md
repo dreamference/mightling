@@ -144,6 +144,15 @@ A Mac is never installed as a node. `ling` finds the GB10 on the network by itse
 it uses a node it has not used before; `ling node list` shows what it found. To name one yourself:
 `MIGHTLING_NODE=<host> ling`.
 
+On Windows, `install.ps1` installs the client into `%LOCALAPPDATA%\Programs\Mightling\bin` and
+the desktop app (`-NoApp` leaves it out), puts that folder on your `Path`, and asks once for
+Administrator rights: for the sandbox the agent's commands run in, the firewall rules that let
+`ling` and the app hear nodes announce themselves, and an egress audit. Over SSH there is no
+desktop for that prompt; the script says so and prints the command an administrator runs instead.
+
+To remove the client, on any of them: `ling uninstall` (it asks first; `--purge` also removes
+`~/.mightling`, your sessions and settings). The desktop app stays: remove it as any other app.
+
 !!! note "`/airgapped` on a Mac"
     macOS's own sandbox enforces `/airgapped on`, but it is set once, when `ling` starts: use
     `ling airgapped default on` (or `DREAMFERENCE_MIGHTLING_AIRGAPPED=on ling`) and restart. Typed
