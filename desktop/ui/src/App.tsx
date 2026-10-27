@@ -245,6 +245,10 @@ export function App() {
   const [activityOpen, setActivityOpen] = useState(false);
   // Threads from the user's other devices, on `ling web` with the node's sync hub on (SYNC Phase 1).
   const synced = useSynced(HOST === "web" && !POPOUT);
+  const [forge, setForge] = useState(false);
+  useEffect(() => {
+    if (HOST === "web" && !POPOUT) void bridge.forgeAvailable().then(setForge).catch(() => {});
+  }, []);
   const [syncedOpen, setSyncedOpen] = useState(false);
   /** The agent message board (Phase 3 item 10): whether config.toml has it on, and its view. */
   const [board, setBoard] = useState<{ on: boolean; sqliteHome: string | null }>({ on: false, sqliteHome: null });
@@ -2634,6 +2638,7 @@ export function App() {
         <nav className="views" aria-label="View">
           <button className={view === "ask" ? "selected" : ""} onClick={() => switchView("ask")}>Ask</button>
           <button className={view === "work" ? "selected" : ""} onClick={() => switchView("work")}>Work</button>
+          {forge ? <a className="view-link" href="/forge/" title="The node's forge: repositories and pull requests">Code</a> : null}
         </nav>
         {view === "ask" ? (
           <>

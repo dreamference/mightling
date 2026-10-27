@@ -432,6 +432,18 @@ export interface DocsStatus {
   runtime_missing: string | null;
 }
 
+/**
+ * Whether the page offers the forge's Code view (FORGEJO §2.4): in a browser on `ling web`, when the
+ * node has a forge and this device may see it signed in (`control`). The app's window has none yet.
+ */
+export async function forgeAvailable(): Promise<boolean> {
+  if (host() === "electron") return false;
+  const response = await fetch("/api/forge", { credentials: "same-origin" });
+  if (!response.ok) return false;
+  const answer = (await response.json().catch(() => ({}))) as { available?: boolean; control?: boolean };
+  return answer.available === true && answer.control === true;
+}
+
 async function docsCall<T>(electron: object, method: "GET" | "POST", url: string, body?: object): Promise<T> {
   if (host() === "electron") return send<T>(electron);
   const response = await fetch(url, { method, credentials: "same-origin", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });

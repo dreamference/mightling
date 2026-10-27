@@ -312,6 +312,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/ask/file", get(ask_file))
         .route("/api/cavemode", get(cavemode_status).post(cavemode_change))
         .route("/api/telegram/check", post(telegram_check))
+        .route("/api/forge", get(forge_status))
         .route("/forge", any(forge_proxy))
         .route("/forge/", any(forge_proxy))
         .route("/forge/{*path}", any(forge_proxy).layer(DefaultBodyLimit::disable()))
@@ -405,6 +406,13 @@ async fn bridge_js() -> Response {
 
 async fn pair_css() -> Response {
     (StatusCode::OK, [(header::CONTENT_TYPE, "text/css; charset=utf-8")], assets::PAIR_CSS).into_response()
+}
+
+/// Whether the page offers its Code view: the node has a forge, and this device may see it.
+async fn forge_status(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    let available = crate::forge::password_file(server.config.user_config.as_deref()).is_some_and(|file| file.is_file());
+    let control = crate::forge::may_sign_in(&server.config.state_dir, server.owner_session(&headers), &headers);
+    json_response(StatusCode::OK, json!({ "available": available, "control": control, "path": "/forge/" }))
 }
 
 /// `/forge/`: the node's forge, signed in for this machine's session and `control` devices.
