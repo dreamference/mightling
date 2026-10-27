@@ -74,6 +74,7 @@ pub mod refine;
 pub mod release_signature;
 pub mod remote_join;
 pub mod rename;
+pub mod sandbox_share;
 #[cfg(target_os = "linux")]
 pub mod signal;
 pub mod skills;
@@ -497,6 +498,16 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "worktree"
     {
         std::process::exit(worktree::run_cli(&user_args[index + 1..]));
+    }
+    // An elevated sandbox setup on Windows gives the machine-wide sandbox accounts new passwords:
+    // the launcher runs it as a child, then hands them to every user set up before, whose sandbox
+    // would otherwise stop logging on (sandbox_share.rs; WINDOWS_ARM §23.4 W11).
+    if cfg!(windows)
+        && let Some(index) = subcommand
+        && sandbox_share::is_elevated_setup(&user_args, index)
+        && std::env::var_os(sandbox_share::CHILD_ENV).is_none()
+    {
+        std::process::exit(sandbox_share::run(&user_args));
     }
     // `ling plugin add` and `marketplace add|upgrade` fetch with git outside the sandbox: refused
     // at a configured `on` (plugins.rs).
