@@ -47,6 +47,7 @@ import { BottomPanel, EnvironmentEditor, appendOutput, type TaskView } from "./B
 import { CommandMenu } from "./CommandMenu";
 import { ExtensionsView, type ExtensionsTab } from "./ExtensionsView";
 import { GoalRow } from "./GoalRow";
+import { LiveChecklist, TurnChecklist } from "./PlanChecklist";
 import { ReviewPane } from "./ReviewPane";
 import { FileTree } from "./FileTree";
 import { FileView } from "./FileView";
@@ -2684,6 +2685,10 @@ export function App() {
               else notice("Open the subagent to stop it: this window has not seen its turn start.");
             }} onClose={() => setAgentsHidden(true)} />
         ) : null}
+        {(() => {
+          const live = selected?.activeTurnId ? selected.turns.find((turn) => turn.id === selected.activeTurnId)?.checklist : null;
+          return live ? <LiveChecklist checklist={live} /> : null;
+        })()}
         {selected ? (
           <GoalRow key={selected.thread.id} goal={state.goals[selected.thread.id] ?? null} editing={goalEditing} setEditing={setGoalEditing}
             onSet={(objective) => setGoal({ objective, status: "active" })} onStatus={(status) => setGoal({ status })} onClear={clearGoal} />
@@ -2979,6 +2984,7 @@ function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEd
   return (
     <section className={`turn turn-${turn.status}`}>
       {turn.items.map((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? null : <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} />))}
+      {turn.checklist && turn.status !== "inProgress" ? <TurnChecklist checklist={turn.checklist} /> : null}
       {turn.error ? <div className="turn-error">{turn.error.message}</div> : null}
       {turn.status === "interrupted" ? <div className="turn-note">Stopped.</div> : null}
       {turn.diff ? (

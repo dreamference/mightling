@@ -313,6 +313,12 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
         // The user's message as an item, as the server reports it.
         say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "userMessage", id: "u" + id, content: p.input || [] } } });
         const asked = String(((p.input || [])[0] || {}).text || "");
+        // The agent's plan as a checklist (DESKTOP §16 B3): one update at once, the next a moment later, then the answer.
+        const planned = asked.includes("with a plan");
+        if (planned) {
+          say({ method: "turn/plan/updated", params: { threadId: p.threadId, turnId: id, explanation: null, plan: [{ step: "Read the retry loop", status: "inProgress" }, { step: "Re-raise the last error", status: "pending" }, { step: "Run the tests", status: "pending" }] } });
+          setTimeout(() => say({ method: "turn/plan/updated", params: { threadId: p.threadId, turnId: id, explanation: "The loop was simpler than it looked.", plan: [{ step: "Read the retry loop", status: "completed" }, { step: "Re-raise the last error", status: "completed" }, { step: "Run the tests", status: "inProgress" }] } }), 1500);
+        }
         return setTimeout(() => {
           // An MCP server asking (item 14): a form, or a link to open.
           if (asked.includes("with a form")) {
@@ -359,7 +365,7 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           if (kept) kept.turns = [...(kept.turns || []), { id, status: "completed", error: null, items: [{ type: "userMessage", id: "u" + id, content: p.input || [] }, answerItem] }];
           // As ling sends it: the completed turn lists the answer alone, not what the turn streamed.
           say({ method: "turn/completed", params: { threadId: p.threadId, turn: { id, items: [answerItem], status: "completed", error: null } } });
-        }, 300);
+        }, planned ? 4000 : 300);
       }
       if (String(p.threadId).startsWith("e")) {
         answer({ turn: { id, items: [], status: "inProgress", error: null } });
