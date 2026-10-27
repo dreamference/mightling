@@ -51,6 +51,10 @@ LOG: Final[logging.Logger] = logging.getLogger(__name__)
 
 MEMORY_LIMIT: Final[str] = "512m"
 TOKEN_DAYS: Final[int] = 365
+# NetBird's geolocation databases, as the server names them in its data folder.
+GEO_PATTERNS: Final[tuple[str, str]] = ("GeoLite2-City_*.mmdb", "geonames_*.db")
+GEO_WAIT_S: Final[float] = 300.0
+GEO_POLL_S: Final[float] = 2.0
 
 HTTP_OK: Final[int] = 200
 RUNNING: Final[str] = "true"
@@ -258,12 +262,66 @@ class RemoteControlPlane:
                 )
                 return False
         cls._run(["docker", "rm", "-f", SERVER_CONTAINER], timeout=60)
+        if not cls.geolocation_ready() and not cls.prime_geolocation():
+            return False
         result = cls._run(cls.run_command(setup_pat))
         if result.returncode != 0:
             LOG.error(f"❌ Could not start {SERVER_CONTAINER}: {result.stderr.strip()[:400]}")
             return False
         if not cls.install_proxy():
             LOG.error(f"❌ Could not start the loopback proxy ({PROXY_SOCKET_UNIT}).")
+            return False
+        return True
+
+    @classmethod
+    def geolocation_ready(cls) -> bool:
+        """Whether the data folder holds NetBird's two geolocation databases.
+
+        The server cannot start without them: with `disableGeoliteUpdate` it uses the files it
+        finds, and with none it fetches them, which a container with no route out cannot (found on
+        the node, 2026-10-27: `could not initialize geolocation service`, a restart loop).
+
+        Returns:
+            bool: True when both are there.
+        """
+        data = RemoteSettings.path("server", "data")
+        return all(any(data.glob(pattern)) for pattern in GEO_PATTERNS)
+
+    @classmethod
+    def prime_geolocation(cls, seconds: float | None = None) -> bool:
+        """Lets the server fetch its geolocation databases once, then takes it away.
+
+        The pinned image is started on Docker's default bridge, with no port published (nothing
+        can reach it) and the setup token never allowed; NetBird downloads the two databases from
+        its own package server and checks them against the SHA-256 published beside them. As soon
+        as both are in the data folder the container is removed, and every start after this one
+        runs on the internal network with no route out.
+
+        Args:
+            seconds: How long to wait for the files; `GEO_WAIT_S` by default.
+
+        Returns:
+            bool: True when both databases arrived.
+        """
+        LOG.warning(
+            "⚠️  Fetching NetBird's geolocation databases once (the only start with a route out)…"
+        )
+        argv = cls.run_command(setup_pat=False)
+        start = argv.index("--network")
+        argv[start : start + 4] = ["--network", "bridge"]
+        argv[argv.index("--restart") + 1] = "no"
+        cls._run(["docker", "rm", "-f", SERVER_CONTAINER], timeout=60)
+        if cls._run(argv).returncode != 0:
+            LOG.error("❌ Could not start the control plane to fetch its geolocation databases.")
+            return False
+        deadline = time.monotonic() + (GEO_WAIT_S if seconds is None else seconds)
+        while not cls.geolocation_ready() and time.monotonic() < deadline:
+            time.sleep(GEO_POLL_S)
+        cls._run(["docker", "rm", "-f", SERVER_CONTAINER], timeout=60)
+        if not cls.geolocation_ready():
+            LOG.error(
+                "❌ NetBird's geolocation databases did not arrive; `docker logs` of a manual run says why."
+            )
             return False
         return True
 
