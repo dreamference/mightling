@@ -51,6 +51,7 @@ describe("the policy", () => {
       newScratchFolder: () => `SCRATCH/${++made}`,
       scratchFolderOf: (thread) => (thread.startsWith("ask-") || thread.startsWith("chat-") ? `ASK/${thread}` : null),
       airgappedOn: () => on,
+      workFolder: (cwd) => cwd.startsWith("WORK/"),
     };
     for (const testCase of vectors.cases) {
       expect(["off", "on"], testCase.name).toContain(testCase.airgapped ?? "off");
@@ -65,6 +66,30 @@ describe("the policy", () => {
       }
       if (testCase.pendingAfter) expect([...pending].sort(), testCase.name).toEqual([...testCase.pendingAfter].sort());
     }
+  });
+
+  it("lets only an Ask thread's fork leave its folder, only for a Work folder (DESKTOP §16 B33)", () => {
+    expect(POLICY.forkRequest).toBe("thread/fork");
+    const source = (workFolder?: (cwd: string) => boolean): PromptSource => ({
+      composed: (name) => name,
+      newScratchFolder: () => "SCRATCH/1",
+      scratchFolderOf: (thread) => (thread.startsWith("ask-") || thread.startsWith("chat-") ? `ASK/${thread}` : null),
+      airgappedOn: () => false,
+      ...(workFolder ? { workFolder } : {}),
+    });
+    const vet = (method: string, thread: string, cwd: string, prompts = source((folder) => folder.startsWith("WORK/"))) =>
+      (vetOutgoing({ id: 1, method, params: { threadId: thread, cwd, sandbox: "danger-full-access", permissions: ":danger-full-access", runtimeWorkspaceRoots: ["/"] } }, new Set(), prompts).params as Record<string, unknown>);
+    expect(vet("thread/fork", "ask-7", "WORK/repo")).toEqual({ threadId: "ask-7", cwd: "WORK/repo", sandbox: "workspace-write" });
+    expect(vet("thread/fork", "ask-7", "/home/user").cwd).toBe("ASK/ask-7");
+    expect(vet("thread/resume", "ask-7", "WORK/repo").cwd).toBe("ASK/ask-7");
+    // A phone's thread continued in a project leaves its prompt's config behind.
+    expect(vet("thread/fork", "chat-3", "WORK/repo").config).toBeUndefined();
+    expect((vet("thread/fork", "chat-3", "/home/user").config as Record<string, unknown>).approval_policy).toBe("never");
+    // A Work thread's fork is not the policy's to place: as asked, as before.
+    expect(vet("thread/fork", "w1", "WORK/repo").sandbox).toBe("danger-full-access");
+    // A source that cannot tell a Work folder keeps every Ask fork in its folder.
+    expect(vet("thread/fork", "ask-7", "WORK/repo", source()).cwd).toBe("ASK/ask-7");
+    expect(vet("thread/fork", "ask-7", "WORK/repo", source(() => false)).cwd).toBe("ASK/ask-7");
   });
 
   it("names the prompt to compose before vetting, and only an allowed one other than default", () => {

@@ -64,6 +64,18 @@ pub fn is_folder(root: &Path, path: &Path) -> bool {
     path.is_dir() && path.parent() == Some(root.as_path())
 }
 
+/// Whether a path is a folder a Work thread may work in: an existing directory named by an absolute
+/// path, neither the Ask root nor inside it, links resolved. An Ask thread's fork may move there (a
+/// project's primary folder, DESKTOP §16 B33).
+pub fn is_work_folder(root: &Path, path: &Path) -> bool {
+    if !path.is_absolute() {
+        return false;
+    }
+    let Ok(path) = path.canonicalize() else { return false };
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    path.is_dir() && !path.starts_with(&root)
+}
+
 /// Names a folder after the thread that works in it: `ask/<thread-id>` → the folder.
 pub fn link_thread(root: &Path, thread_id: &str, folder: &Path) -> std::io::Result<()> {
     if !valid_thread_id(thread_id) {
@@ -119,6 +131,10 @@ impl PromptSource for MessagePrompts<'_> {
             Some(thread) => crate::server::thread_airgapped_on(Some(thread), self.thread_folder.as_deref()),
         }
     }
+
+    fn work_folder(&self, cwd: &str) -> bool {
+        is_work_folder(self.root, Path::new(cwd))
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +173,28 @@ mod tests {
         let name = |p: &Path| p.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name(&chat).starts_with("chat-") && name(&chat).len() == 5 + 16, "{chat:?}");
         assert!(name(&ask).starts_with("q-") && is_folder(&root, &chat) && is_folder(&root, &ask));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_work_folder_is_an_existing_folder_outside_the_ask_root() {
+        let home = scratch("work");
+        let root = root(&home);
+        let question = new_folder(&root).unwrap();
+        let repo = home.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        assert!(is_work_folder(&root, &repo));
+        assert!(!is_work_folder(&root, &question), "another question's folder");
+        assert!(!is_work_folder(&root, &root), "the Ask root itself");
+        assert!(!is_work_folder(&root, &home.join("missing")), "a folder that does not exist");
+        assert!(!is_work_folder(&root, Path::new("repo")), "a relative path");
+        std::fs::write(home.join("file"), "x").unwrap();
+        assert!(!is_work_folder(&root, &home.join("file")), "a file");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&question, home.join("into-ask")).unwrap();
+            assert!(!is_work_folder(&root, &home.join("into-ask")), "a link into the Ask root");
+        }
         let _ = std::fs::remove_dir_all(&home);
     }
 

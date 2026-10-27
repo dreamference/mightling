@@ -309,6 +309,8 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
       const at = turns.findIndex((t) => t.id === (p.lastTurnId || p.beforeTurnId));
       const cut = at < 0 ? turns : p.lastTurnId ? turns.slice(0, at + 1) : turns.slice(0, at);
       const copy = { ...source, turns: cut, id: source.id + "-fork" + (p.lastTurnId || p.beforeTurnId ? "-" + next++ : ""), name: (source.name || "") + " (fork)", updatedAt: Math.floor(Date.now() / 1000) };
+      // A fork into another folder (DESKTOP §16 B33: an Ask question continued in a project) works there.
+      if (p.cwd) copy.cwd = p.cwd;
       threads.push(copy);
       return answer({ thread: copy, model: "qwen3.8-27b", modelProvider: "local", cwd: copy.cwd });
     }

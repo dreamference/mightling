@@ -78,6 +78,21 @@ export function folderOf(root: string, threadId: string): string | null {
   return folder !== null && realRoot !== null && path.dirname(folder) === realRoot ? folder : null;
 }
 
+/**
+ * Whether a path is a folder a Work thread may work in: an existing directory named by an absolute
+ * path, neither the Ask root nor inside it, links resolved (`ling web`'s `is_work_folder`). An Ask
+ * thread's fork may move there (a project's primary folder, DESKTOP §16 B33).
+ */
+export function isWorkFolder(root: string, folder: string): boolean {
+  if (!path.isAbsolute(folder)) return false;
+  const real = realDir(folder);
+  if (real === null) return false;
+  // Without a home folder there is no Ask root to stay out of.
+  if (!root) return true;
+  const relative = path.relative(realDir(root) ?? path.resolve(root), real);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
 /** Names a folder after the thread that works in it: `ask/<thread-id>` → the folder. */
 export function linkThread(root: string, threadId: string, folder: string): void {
   if (!validThreadId(threadId)) throw new Error(`not a thread id: ${threadId}`);
@@ -121,6 +136,10 @@ export class MessagePrompts implements PromptSource {
 
   scratchFolderOf(threadId: string): string | null {
     return folderOf(this.root, threadId);
+  }
+
+  workFolder(cwd: string): boolean {
+    return isWorkFolder(this.root, cwd);
   }
 
   /** The level the host resolved before vetting: the named thread's for a `!` command, else the configured one. */

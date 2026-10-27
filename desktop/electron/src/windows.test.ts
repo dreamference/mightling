@@ -27,6 +27,7 @@ function stubs(airgappedOn: () => boolean = () => false): PromptSource {
     newScratchFolder: () => `SCRATCH/${++made}`,
     scratchFolderOf: (thread) => (thread.startsWith("ask-") || thread.startsWith("chat-") ? `ASK/${thread}` : null),
     airgappedOn,
+    workFolder: (cwd) => cwd.startsWith("WORK/"),
   };
 }
 

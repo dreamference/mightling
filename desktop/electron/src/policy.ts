@@ -35,6 +35,12 @@ export interface PromptSource {
    * thread. An implementation that cannot tell answers true.
    */
   airgappedOn(threadId: string | null): boolean;
+  /**
+   * Whether `cwd` is a folder a Work thread may work in: an existing directory, named by an absolute
+   * path, outside the Ask folders' root. A fork of an Ask thread may move there (a project's primary
+   * folder, DESKTOP §16 B33). Without it, or when it cannot tell, the answer is no.
+   */
+  workFolder?(cwd: string): boolean;
 }
 
 /** The rules of `policy.json`. */
@@ -49,6 +55,8 @@ export interface Policy {
   scratchPrompts: ReadonlySet<string>;
   scratchFields: readonly string[];
   scratchSandbox: string;
+  /** The request that forks a thread: an Ask thread's fork may leave its folder for a Work folder. */
+  forkRequest: string;
   importRequest: string;
   refusedImportItems: ReadonlySet<string>;
   /** Requests refused at `on`: they fetch a plugin or a marketplace outside the sandbox, or run a `!` command with no sandbox. */
@@ -106,6 +114,7 @@ export function parsePolicy(value: unknown): Policy {
     scratchPrompts: new Set(strings(value, "scratchPrompts")),
     scratchFields: strings(value, "scratchFields"),
     scratchSandbox: string(value, "scratchSandbox"),
+    forkRequest: string(value, "forkRequest"),
     importRequest: string(value, "importRequest"),
     refusedImportItems: new Set(strings(value, "refusedImportItems")),
     airgappedRefusedRequests: new Set(strings(value, "airgappedRefusedRequests")),
@@ -203,12 +212,16 @@ function confine(policy: Policy, params: JsonObject, folder: string): void {
   params.sandbox = policy.scratchSandbox;
 }
 
-function vetThreadParams(policy: Policy, original: JsonObject, prompts: PromptSource): JsonObject {
+function vetThreadParams(policy: Policy, method: string, original: JsonObject, prompts: PromptSource): JsonObject {
   const params: JsonObject = { ...original };
   for (const field of policy.droppedThreadFields) delete params[field];
-  // A resumed or forked Ask thread stays where it was started.
-  const existing = typeof params.threadId === "string" ? prompts.scratchFolderOf(params.threadId) : null;
-  if (existing !== null) confine(policy, params, existing);
+  // A resumed or forked Ask thread stays where it was started, unless a fork continues it in a Work
+  // folder (a project's, DESKTOP §16 B33): a Work thread there, with the sandbox an Ask folder gets
+  // and nothing broader, and without its prompt's config.
+  let existing = typeof params.threadId === "string" ? prompts.scratchFolderOf(params.threadId) : null;
+  const moved = existing !== null && method === policy.forkRequest && typeof params.cwd === "string" && prompts.workFolder?.(params.cwd) === true ? params.cwd : null;
+  if (moved !== null) existing = null;
+  if (moved !== null || existing !== null) confine(policy, params, moved ?? (existing as string));
   if (policy.windowToolsField in params) {
     const names = params[policy.windowToolsField];
     delete params[policy.windowToolsField];
@@ -290,7 +303,7 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
       throw new Error(`window tools can only be named when a thread is started, not by ${method}`);
     }
     if (policy.threadOpeners.has(method) && isObject(object.params)) {
-      object.params = vetThreadParams(policy, object.params, prompts);
+      object.params = vetThreadParams(policy, method, object.params, prompts);
     }
     if (method === policy.importRequest) {
       object.params = vetImportParams(policy, isObject(object.params) ? object.params : {}, prompts.airgappedOn(null));

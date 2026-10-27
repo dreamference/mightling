@@ -1,5 +1,5 @@
 {
-  "comment": "Conformance cases for policy.json (specs/DREAMFERENCE_MIGHTLING_ASK.md §2.3, §13). Every implementation of the policy runs every case with the same stubs, at the air-gap level the case names in `airgapped` (\"off\" when absent): a named prompt's composed text is the string \"PROMPT:<name>\"; the scratch folders it creates are \"SCRATCH/1\", \"SCRATCH/2\", ... in order of creation, counted across the whole file; and a thread whose id starts with \"ask-\" or \"chat-\" is an existing Ask thread whose folder is \"ASK/<id>\" (no other thread has one). `pending` lists the ids (as JSON text) of server requests waiting for an answer before the case. `out` is the exact message forwarded to the app-server, compared as JSON values; `pendingAfter` the ids still waiting after it.",
+  "comment": "Conformance cases for policy.json (specs/DREAMFERENCE_MIGHTLING_ASK.md §2.3, §13). Every implementation of the policy runs every case with the same stubs, at the air-gap level the case names in `airgapped` (\"off\" when absent): a named prompt's composed text is the string \"PROMPT:<name>\"; the scratch folders it creates are \"SCRATCH/1\", \"SCRATCH/2\", ... in order of creation, counted across the whole file; and a thread whose id starts with \"ask-\" or \"chat-\" is an existing Ask thread whose folder is \"ASK/<id>\" (no other thread has one). A folder whose path starts with \"WORK/\" is a Work folder (an existing directory outside the Ask root), and no other is. `pending` lists the ids (as JSON text) of server requests waiting for an answer before the case. `out` is the exact message forwarded to the app-server, compared as JSON values; `pendingAfter` the ids still waiting after it.",
   "cases": [
     {
       "name": "an allowed request passes unchanged, its jsonrpc field removed",
@@ -504,6 +504,43 @@
       "name": "thread/delete naming window tools is refused",
       "message": {"id": 112, "method": "thread/delete", "params": {"threadId": "w3", "windowTools": ["mightling_terminal_output"]}},
       "accept": false
+    },
+    {
+      "name": "an Ask thread's fork into a Work folder (a project's primary folder, DESKTOP §16 B33) goes there as a Work thread, with the Ask folder's sandbox",
+      "message": {"id": 330, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "WORK/repo", "model": "m"}},
+      "accept": true,
+      "out": {"id": 330, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "WORK/repo", "model": "m", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "an Ask thread's fork into any other folder (another question's) does not go there: it stays in its own folder",
+      "message": {"id": 331, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "ASK/ask-8"}},
+      "accept": true,
+      "out": {"id": 331, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "ASK/ask-7", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "an Ask thread's fork into a Work folder gets no broader sandbox or permissions than its own, and no other folders, whatever the UI asks",
+      "message": {"id": 332, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "WORK/repo", "sandbox": "danger-full-access", "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"]}},
+      "accept": true,
+      "out": {"id": 332, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "WORK/repo", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "a resumed Ask thread stays in its folder even when the UI names a Work folder: only a fork moves",
+      "message": {"id": 333, "method": "thread/resume", "params": {"threadId": "ask-7", "cwd": "WORK/repo"}},
+      "accept": true,
+      "out": {"id": 333, "method": "thread/resume", "params": {"threadId": "ask-7", "cwd": "ASK/ask-7", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "a phone's thread continued in a Work folder leaves its prompt's config (no approvals asked) behind",
+      "message": {"id": 334, "method": "thread/fork", "params": {"threadId": "chat-3", "cwd": "WORK/repo"}},
+      "accept": true,
+      "out": {"id": 334, "method": "thread/fork", "params": {"threadId": "chat-3", "cwd": "WORK/repo", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "an Ask thread's fork into a Work folder at airgapped on has no plugins",
+      "airgapped": "on",
+      "message": {"id": 335, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "WORK/repo"}},
+      "accept": true,
+      "out": {"id": 335, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "WORK/repo", "sandbox": "workspace-write", "config": {"features.plugins": false}}}
     }
   ]
 }
