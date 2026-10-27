@@ -32,7 +32,7 @@ import { boardFile, readBoards } from "./board";
 import { Prefs } from "./prefs";
 import { AppServer } from "./server";
 import { insights, readPersonal, writePersonal } from "./insights";
-import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
+import { addRepeating, addTask, dropRepeating, dropTask, listRepeating, nightStatus, readReport, readReports, readTasks, runNow, taskDetails } from "./night";
 import { Nodes } from "./nodes";
 import { docsAdd, docsReindex, docsRemove, docsStatus, locate, syncKnowledge } from "./docs";
 import { Tasks } from "./tasks";
@@ -620,8 +620,10 @@ export async function main(options: MainOptions): Promise<void> {
       case "night/add": {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");
-        return addTask(ling, message.repo, message.task, message.test);
+        return addTask(ling, message.repo, message.task, message.test, message.on ?? null, message.bestOf ?? null);
       }
+      case "night/status":
+        return nightStatus(app.getPath("home"));
       case "night/drop": {
         const ling = findLing(resourcesPath());
         if (!ling) throw new Error("ling is not installed");

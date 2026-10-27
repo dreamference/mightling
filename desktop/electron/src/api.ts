@@ -146,7 +146,9 @@ export type FromView =
   /** The Scheduled view over Night Shift (night.ts). */
   | { type: "night/list" }
   | { type: "night/report"; name: string }
-  | { type: "night/add"; repo: string; task: string; test: string | null }
+  | { type: "night/add"; repo: string; task: string; test: string | null; on?: string | null; bestOf?: number | null }
+  /** Whether the timer is on and its window (DESKTOP §16 B5), read from its unit file. */
+  | { type: "night/status" }
   | { type: "night/drop"; repo: string; id: string }
   | { type: "night/run" }
   /** Repeating tasks (night.ts): through ling-admin, which runs where Night Shift does. */

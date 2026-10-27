@@ -90,13 +90,61 @@ function run(ling: string, args: string[], cwd: string): Promise<string> {
   });
 }
 
-/** Queues a task for tonight in `repo` (`ling night add [--test <cmd>] <task>`); resolves with what it printed. */
-export async function addTask(ling: string, repo: unknown, task: unknown, test: unknown): Promise<string> {
+/**
+ * A node's name as `ling node list` shows it (the launcher's own rule, ling-rs/src/night.rs
+ * `node_name`), and never an address: a node is found by its name when the task is handed over.
+ */
+export function nodeName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(name)) return null;
+  if (/^\d+(\.\d+){3}$/.test(name)) return null;
+  return name;
+}
+
+/** The most attempts the Queue form offers; the launcher takes any count of 1 or more. */
+export const MAX_BEST_OF = 9;
+
+/**
+ * Queues a task for tonight in `repo` (`ling night add [--test <cmd>] [--on <node>] [--best-of N] <task>`);
+ * resolves with what it printed. A node works a task sent to it once, so `on` and `bestOf` exclude
+ * each other, as the launcher says.
+ */
+export async function addTask(ling: string, repo: unknown, task: unknown, test: unknown, on: unknown = null, bestOf: unknown = null): Promise<string> {
   // Asynchronous (userfs.ts): the project may be a folder macOS guards behind a prompt.
   if (typeof repo !== "string" || !path.isAbsolute(repo) || !(await userFs.isDirectory(repo))) throw new Error("name the project folder");
   if (typeof task !== "string" || !task.trim() || task.length > 8000) throw new Error("describe the task");
   const testArgs = typeof test === "string" && test.trim() ? ["--test", test.trim()] : [];
-  return run(ling, ["night", "add", ...testArgs, task.trim()], repo);
+  const node = on === null || on === undefined || on === "" ? null : nodeName(on);
+  if (on !== null && on !== undefined && on !== "" && !node) throw new Error("name a node as ling node list shows it, not an address");
+  if (bestOf !== null && bestOf !== undefined && !(Number.isInteger(bestOf) && (bestOf as number) >= 1 && (bestOf as number) <= MAX_BEST_OF)) throw new Error(`best-of takes 1 to ${MAX_BEST_OF} attempts`);
+  if (node && bestOf !== null && bestOf !== undefined) throw new Error("a node works a task sent to it once: choose a node or a number of attempts, not both");
+  const nodeArgs = node ? ["--on", node] : [];
+  const bestArgs = typeof bestOf === "number" ? ["--best-of", String(bestOf)] : [];
+  // `--` is not needed: the launcher stops at the first word that is not one of its options, and the task is one argument.
+  return run(ling, ["night", "add", ...testArgs, ...nodeArgs, ...bestArgs, task.trim()], repo);
+}
+
+/** The timer's unit file `ling-admin night enable` writes, and the comment in it that names the window. */
+const TIMER = path.join(".config", "systemd", "user", "mightling-night.timer");
+const WINDOW_MARKER = "# Night Shift window: ";
+
+/**
+ * Whether Night Shift runs by itself, and in which window: the timer `ling-admin night enable`
+ * installs (dreamference/night_shift/night_shift_scheduler.py), read from its unit file as the
+ * launcher's `/night list` reads it. Nothing is run. Elsewhere than Linux there is no timer.
+ */
+export async function nightStatus(home: string, platform: NodeJS.Platform = process.platform): Promise<{ timer: "on" | "off" | "unsupported"; window: string | null }> {
+  if (platform !== "linux") return { timer: "unsupported", window: null };
+  let unit: string;
+  try {
+    unit = await fs.promises.readFile(path.join(home, TIMER), "utf8");
+  } catch {
+    return { timer: "off", window: null };
+  }
+  const line = unit.split("\n").find((entry) => entry.startsWith(WINDOW_MARKER));
+  const window = line ? line.slice(WINDOW_MARKER.length).trim() : "";
+  return { timer: "on", window: /^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(window) ? window : null };
 }
 
 /** Cancels a queued task (`ling night drop <id>`, run in its repository). */

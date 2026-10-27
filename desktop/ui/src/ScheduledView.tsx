@@ -24,6 +24,16 @@ export function unseen(tasks: bridge.NightTask[], seen: string | null): number {
   return tasks.filter((task) => FINISHED.includes(task.status) && (!seen || (task.at ?? "") > seen)).length;
 }
 
+/** The attempt counts the Queue form offers (`--best-of`); the launcher takes any count of 1 or more. */
+export const BEST_OF = [1, 2, 3, 4, 5];
+
+/** Whether Night Shift runs by itself, in words, for the top of Scheduled. */
+export function timerWords(status: { timer: "on" | "off" | "unsupported"; window: string | null }): string {
+  if (status.timer === "on") return status.window ? `Night Shift is on: it works through the queue every night, ${status.window}.` : "Night Shift is on: it works through the queue every night.";
+  if (status.timer === "off") return "Night Shift is off: queued tasks wait until Run now, or until it is turned on with ling-admin night enable.";
+  return "Night Shift has no timer on this computer: queued tasks run on Run now, or on the node that takes them.";
+}
+
 export function ScheduledView(props: {
   projects: string[]; defaultProject: string | null; seen: string | null; onSeen: (at: string) => void; onClose: () => void; notice: (error: unknown) => void;
   /** The thread shown when Scheduled opened: its title and latest messages, offered as the task's context. */
@@ -43,8 +53,12 @@ export function ScheduledView(props: {
   const [withContext, setWithContext] = useState(Boolean(props.fromThread?.context.length));
   const [repeating, setRepeating] = useState<bridge.RepeatingTask[] | null>(null);
   const [opened, setOpened] = useState<{ id: string; tab: "result" | "diff" | "transcript"; details: Details | null } | null>(null);
+  const [node, setNode] = useState("");
+  const [bestOf, setBestOf] = useState<number | null>(null);
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof bridge.night.status>> | null>(null);
 
   const load = useCallback(() => {
+    bridge.night.status().then(setStatus).catch(() => setStatus(null));
     bridge.night.repeating().then(setRepeating).catch(() => setRepeating([]));
     bridge.night.list().then((answer) => {
       setData(answer);
@@ -66,6 +80,7 @@ export function ScheduledView(props: {
       <section className="dialog scheduled" role="dialog" aria-label="Scheduled" onClick={(event) => event.stopPropagation()}>
         <header><h2>Scheduled</h2><button className="icon" aria-label="Close" onClick={props.onClose}><Icon name="x" size={16} /></button></header>
         <p className="dialog-note">Night Shift works through these at night, each in its own worktree and branch; nothing is merged or pushed. Run now starts it at once, if the machine is free.</p>
+        {status ? <p className={`night-timer ${status.timer}`} role="status">{timerWords(status)}</p> : null}
         <div className="night-add">
           <select value={repo} aria-label="Project" onChange={(event) => setRepo(event.target.value)}>
             {props.projects.map((folder) => <option key={folder} value={folder}>{name(folder)}</option>)}
@@ -77,6 +92,15 @@ export function ScheduledView(props: {
             <option value="daily">Every night</option>
             <option value="weekly">Every week</option>
           </select>
+          {repeat === "once" ? (
+            <>
+              <input value={node} placeholder="on a node (optional)" aria-label="Node" title="Hand the task to another node, by the name ling node list shows; it works it once" onChange={(event) => setNode(event.target.value)} />
+              <select value={bestOf ?? ""} aria-label="Attempts" disabled={!!node.trim()} title={node.trim() ? "A node works a task sent to it once" : "How many attempts Night Shift makes; it keeps the best"} onChange={(event) => setBestOf(event.target.value ? Number(event.target.value) : null)}>
+                <option value="">Attempts: as set</option>
+                {BEST_OF.map((count) => <option key={count} value={count}>{count === 1 ? "1 attempt" : `Best of ${count}`}</option>)}
+              </select>
+            </>
+          ) : null}
           {repeat === "weekly" ? (
             <select value={weekday} aria-label="Day" onChange={(event) => setWeekday(event.target.value)}>
               {WEEKDAYS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -84,8 +108,10 @@ export function ScheduledView(props: {
           ) : null}
           <button className="primary" disabled={!repo || !task.trim()} onClick={() => {
             const words = withContext && props.fromThread ? withThreadContext(task, props.fromThread.title, props.fromThread.context) : task;
-            const queued = repeat === "once" ? bridge.night.add(repo, words, test || null) : bridge.night.every(repo, words, test || null, repeat, repeat === "weekly" ? weekday : null);
-            queued.then((text) => { setSaid(text); setTask(""); setTest(""); load(); }).catch(notice);
+            const queued = repeat === "once"
+              ? bridge.night.add(repo, words, test || null, node.trim() ? { on: node.trim() } : { bestOf })
+              : bridge.night.every(repo, words, test || null, repeat, repeat === "weekly" ? weekday : null);
+            queued.then((text) => { setSaid(text); setTask(""); setTest(""); setNode(""); setBestOf(null); load(); }).catch(notice);
           }}>{repeat === "once" ? "Queue" : "Repeat"}</button>
           <button onClick={() => bridge.night.runNow().then(() => setSaid("Night Shift started; it gives way if the machine is busy.")).catch(notice)}>Run now</button>
         </div>
