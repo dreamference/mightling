@@ -445,6 +445,10 @@ mod platform {
     /// `CREATE_BREAKAWAY_FROM_JOB`: an SSH session's job may end its processes when the session
     /// ends, which can come right after this one exits.
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    /// `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`: the removal's PowerShell gets a console of its
+    /// own, hidden. Not `DETACHED_PROCESS`: powershell.exe started with no console at all exits
+    /// before it runs its script (CI and the test PC, 2026-10-27), which left ling.exe behind.
+    const HIDDEN_CONSOLE: u32 = 0x0800_0000 | 0x0000_0200;
 
     /// The desktop app's folder: where its installer says it is, else its one place.
     fn app_dir() -> Option<PathBuf> {
@@ -533,7 +537,7 @@ mod platform {
                 .creation_flags(flags)
                 .spawn()
         };
-        let spawned = spawn(crate::DETACHED_PROCESS_FLAGS | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| spawn(crate::DETACHED_PROCESS_FLAGS));
+        let spawned = spawn(HIDDEN_CONSOLE | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| spawn(HIDDEN_CONSOLE));
         match spawned {
             Ok(_) => println!(
                 "The rest of {}{} is removed as soon as this command exits; anything that could not be is listed in {}.",
