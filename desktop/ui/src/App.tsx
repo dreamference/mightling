@@ -80,6 +80,7 @@ import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./Worktr
 import { commandChoices, type ApprovalChoice } from "./approvals";
 import { busyHere } from "./checkouts";
 import { drawDiagrams } from "./diagrams";
+import { AgentMark } from "./agentmarks";
 import { ExportDialog } from "./ExportDialog";
 import { LINKED_SETTINGS, sameRemote } from "./links2";
 import { PathMenu, pathOf, type PathAction, type PathMenuState } from "./PathMenu";
@@ -2489,6 +2490,7 @@ export function App() {
         </button>
         {waiting.has(thread.id) ? <span className="attention" aria-label="waiting for you" title="An approval or a question is waiting">!</span> : null}
         {unread.has(thread.id) && !waiting.has(thread.id) ? <span className="unread-dot" aria-label="unread" /> : null}
+        {subagents(state, thread.id).filter((agent) => isWorking(state, agent.id)).slice(0, 3).map((agent) => <AgentMark key={agent.id} id={agent.id} label={`Subagent ${agent.agentNickname || agent.name || ""} working`.replace("  ", " ")} />)}
         {state.threads[thread.id]?.activeTurnId ? <span className="running" aria-label="running" /> : null}
         <span className="age" title={new Date(thread.updatedAt * 1000).toLocaleString()}>{age(thread.updatedAt)}</span>
         <span className="row-actions">
@@ -3304,9 +3306,9 @@ function Item({ item, folded, progress }: { item: ThreadItem; folded: boolean; p
     case "exitedReviewMode":
       return <div className="item agent review-result"><div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.review) }} /></div>;
     case "collabAgentToolCall":
-      return <div className="item note">Subagents: {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
+      return <div className="item note">Subagents: {item.receiverThreadIds.map((id) => <AgentMark key={id} id={id} />)} {item.tool} {item.receiverThreadIds.length ? `(${item.receiverThreadIds.length})` : ""}{item.prompt ? ` — ${item.prompt.slice(0, 160)}` : ""}</div>;
     case "subAgentActivity":
-      return <div className="item note">Subagent {item.agentPath}: {item.kind}</div>;
+      return <div className="item note"><AgentMark id={item.agentThreadId} /> Subagent {item.agentPath}: {item.kind}</div>;
     default:
       // A kind of item a later server adds: its name, until the window knows it.
       return <div className="item note">{(item as { type: string }).type}</div>;

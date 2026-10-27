@@ -1082,3 +1082,7 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 
 /* The plugin a link named (DESKTOP §16 B19). */
 .plugin-market tr.focused { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Subagent marks (DESKTOP §16 B21): the hue from the id, a lightness that reads on both themes. */
+.agent-mark { display: inline-block; font-size: 11px; line-height: 1; margin: 0 2px; vertical-align: middle; }
+
