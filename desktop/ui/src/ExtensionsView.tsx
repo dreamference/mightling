@@ -13,6 +13,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Icon } from "./icons";
 import { ImportPanel } from "./ImportPanel";
+import { McpBundles } from "./McpBundles";
+import { mcpBundles } from "./bridge";
 import type { Listen } from "./turns";
 import type { RpcClient } from "./rpc";
 import type { AppInfo } from "./protocol/v2/AppInfo";
@@ -327,6 +329,7 @@ export function ExtensionsView(props: { client: RpcClient; listen: Listen; cwd: 
                 <button className="link-button" onClick={() => void act("config/mcpServer/reload", {})}>Read the servers again</button>
               </div>
             )}
+            {mcpBundles.available() ? <McpBundles client={client} config={config} airgapped={props.airgapped} notice={notice} onChanged={() => { setChanged(true); load(); }} /> : null}
           </>
         ) : null}
         {props.tab === "apps" ? (

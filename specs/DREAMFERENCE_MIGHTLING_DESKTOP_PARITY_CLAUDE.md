@@ -263,7 +263,7 @@ Answered on 2026-10-21:
 2. **Links in answers:** yes, after a confirmation showing the full address, never at `/airgapped on`: built, §4.5.
 3. **Incognito questions:** yes, the thread and its folder deleted when left, the irreversibility made clear: built, §4.3.
 4. **Recall of earlier questions:** yes, local and read only, off by default, a setting: built, §4.4.
-5. **One-file MCP extensions (`.mcpb`):** not now. **Approved 2026-10-27 (the owner):** installs from a file, nothing fetched (DESKTOP §16 B45).
+5. **One-file MCP extensions (`.mcpb`):** not now. **Approved 2026-10-27 (the owner):** installs from a file, nothing fetched (DESKTOP §16 B45). **Built 2026-10-27** (B45): Skills and tools › MCP servers › Install from a file.
 6. **Projects for Ask:** the Codex-parity work owns Projects (instructions and knowledge files for Ask and Work); Ask builds on them, with no Ask-only projects.
 7. **This document on `main`:** yes, merged.
 
