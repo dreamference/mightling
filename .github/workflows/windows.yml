@@ -524,7 +524,10 @@ jobs:
           $scratch = Join-Path $env:RUNNER_TEMP "mightling-app-home"
           New-Item -ItemType Directory -Force -Path $scratch | Out-Null
           $ownProfile = $env:USERPROFILE
+          $ownLocal = $env:LOCALAPPDATA
           $env:USERPROFILE = $scratch
+          # The app's data folder is %LOCALAPPDATA%\dev.dreamference.mightling (data-folder.ts, W4).
+          $env:LOCALAPPDATA = Join-Path $scratch "AppData\Local"
           $env:CODEX_HOME = Join-Path $scratch ".mightling"
           $env:MIGHTLING_APP_AUDIT = "8"
           $env:ELECTRON_ENABLE_LOGGING = "1"
@@ -532,8 +535,12 @@ jobs:
           $null = $started.Handle  # kept, so ExitCode is there after the app has gone
           if (-not $started.WaitForExit(90000)) { Stop-Process -Id $started.Id -Force; throw "the app did not quit by itself" }
           if ($started.ExitCode -ne 0) { throw "the app exited with $($started.ExitCode)" }
+          $data = Join-Path $env:LOCALAPPDATA "dev.dreamference.mightling"
+          if (-not (Test-Path $data)) { throw "the app wrote no data folder at $data" }
+          if (Test-Path (Join-Path $scratch ".local\share\dev.dreamference.mightling")) { throw "the app wrote its data under .local\share" }
           # The uninstaller with the runner's own profile: Windows finds the Start menu from USERPROFILE.
           $env:USERPROFILE = $ownProfile
+          $env:LOCALAPPDATA = $ownLocal
           # An NSIS uninstaller copies itself to the temporary folder and runs from there, so -Wait
           # returns at once: wait for the folder to go.
           Start-Process -FilePath (Join-Path $installed "Uninstall Mightling.exe") -ArgumentList "/S" -Wait
