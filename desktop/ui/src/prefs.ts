@@ -71,6 +71,8 @@ export interface Prefs {
   welcomed: boolean;
   /** Names, paths and symbols dictation should spell as written (Settings › Voice), sent to the speech-to-text service as its prompt. */
   dictationWords: string[];
+  /** Work's sidebar: threads by project (the default), or every thread by date (DESKTOP §16 B10). */
+  threadOrder: "projects" | "chronological";
   petSize: "small" | "medium" | "large";
   petImage: string | null;
   /** Suggested follow-ups when a turn ends (Settings › Suggested prompts); off: each is one more turn on the model server. */

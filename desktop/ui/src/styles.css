@@ -1037,3 +1037,6 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 .welcome-body { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
 /* Another thread working in this checkout (DESKTOP §16 B9). */
 .checkout-clash { display: flex; align-items: center; gap: 8px; max-width: calc(var(--column) + 32px); width: calc(100% - 32px); margin: 0 auto 6px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--notice); font-size: 13px; flex-wrap: wrap; }
+/* Work's sidebar by date (DESKTOP §16 B10). */
+.search .order-toggle { flex: none; color: var(--muted); }
+.search .order-toggle.on { color: var(--accent); }

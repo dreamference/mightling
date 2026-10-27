@@ -193,6 +193,11 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
     }
     case "thread/list":
       if (p.archived) return answer({ data: [{ ...threads[0], id: "old1", name: "Try a smaller hero image", turns: [] }], nextCursor: null });
+      // MIGHTLING_STAND_IN_PAGES=1 (DESKTOP §16 B10): a second page holds a thread of a project seen nowhere else.
+      if (process.env.MIGHTLING_STAND_IN_PAGES === "1") {
+        if (p.cursor === "page-2") return answer({ data: [{ ...threads[0], id: "old-quiet", cwd: require("node:path").join(${JSON.stringify(home)}, "quiet"), name: "Rename the old config keys", preview: "Rename the old config keys", updatedAt: 1000, createdAt: 1000, turns: [] }], nextCursor: null });
+        return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: "page-2" });
+      }
       return answer({ data: threads.map((t) => ({ ...t, turns: [] })), nextCursor: null });
     case "permissionProfile/list": return answer({ data: [":read-only", ":workspace", ":danger-full-access"].map((id) => ({ id, allowed: true })) });
     case "model/list": return answer({ data: [model], nextCursor: null });

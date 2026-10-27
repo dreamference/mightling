@@ -73,7 +73,7 @@ import { SettingsDialog, type SettingsPage } from "./SettingsDialog";
 import { ClosedSurfaces, History, UndoStack, nextScale, type MenuEntry, type Place } from "./shell";
 import { findRanges, mark } from "./find";
 import { nearBottom } from "./follow";
-import { moveToSection, nextAttention, pinnedFirst, recentThreads, renameStart, stepThread, threadLink, toggled, type Section } from "./threads";
+import { chronological, moveToSection, nextAttention, pinnedFirst, readThreadPages, recentThreads, renameStart, stepThread, THREAD_PAGES, threadLink, toggled, type Section } from "./threads";
 import { TerminalHub, decode, terminalMessage, type TerminalSession } from "./terminal";
 import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsState } from "./windows";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
@@ -410,6 +410,15 @@ export function App() {
       ]);
       dispatch({ type: "threads", list: list.data });
       if (showsWelcome(stored.welcomed, list.data.length, !POPOUT && !PANE)) setWelcome(true);
+      // The rest of the list, page by page (DESKTOP §16 B10): an older project no longer vanishes.
+      if (list.nextCursor) {
+        const first = list.nextCursor;
+        void readThreadPages(
+          async (cursor) => (await client.request("thread/list", { limit: 200, cursor: cursor ?? first })) as { data: Thread[]; nextCursor: string | null },
+          (more) => dispatch({ type: "threads", list: more }),
+          THREAD_PAGES - 1,
+        ).catch(notice);
+      }
       void loadProjects();
       setProfiles(permissions.data);
       setAirgap(level);
@@ -1609,6 +1618,10 @@ export function App() {
     pinChat: () => { if (selected) pin(selected.thread.id); },
     renameChat: () => { if (selected) setRenaming({ id: selected.thread.id, name: renameStart(selected.thread) }); },
     sideChat: () => void sideChat(),
+    searchChats: () => {
+      setDrawer(true);
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".sidebar .search input")?.focus());
+    },
     findInChat: () => { setFindOpen(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".find-bar input")?.select()); },
     findNext: () => setFindAt((at) => (findCount ? (at + 1) % findCount : 0)),
     findPrevious: () => setFindAt((at) => (findCount ? (at - 1 + findCount) % findCount : 0)),
@@ -2158,6 +2171,7 @@ export function App() {
       [keyAction("pinChat"), "pinChat"],
       [keyAction("renameChat"), "renameChat"],
       [keyAction("sideChat"), "sideChat"],
+      [keyAction("searchChats"), "searchChats"],
       [keyAction("findInChat"), "findInChat"],
       [keyAction("findNext"), "findNext"],
       [keyAction("findPrevious"), "findPrevious"],
@@ -2348,6 +2362,7 @@ export function App() {
   const pinnedHere = prefs.pinnedThreads.map((id) => state.threads[id]?.thread).filter((thread): thread is Thread => Boolean(thread) && !thread!.ephemeral && isAskThread(thread!, askRoot) === (view === "ask"));
   const sectioned = new Set(prefs.sections.flatMap((section) => section.threads));
   const workLabel = (thread: Thread) => thread.name || thread.preview || "(new thread)";
+  const folderName = (folder: string) => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder;
 
   /** A project in the sidebar: its name (a click makes it where the next thread or question starts), its menu, its threads. */
   const projectSection = (project: Project, threads: Thread[], where: "ask" | "work") => (
@@ -2532,6 +2547,9 @@ export function App() {
             <label className="search">
               <Icon name="search" size={14} />
               <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search threads" aria-label="Search threads" />
+              <button className={`icon order-toggle${prefs.threadOrder === "chronological" ? " on" : ""}`} aria-pressed={prefs.threadOrder === "chronological"}
+                title={prefs.threadOrder === "chronological" ? "List threads by project" : "List every thread by date, across projects"} aria-label="Chronological"
+                onClick={(event) => { event.preventDefault(); updatePrefs({ threadOrder: prefs.threadOrder === "chronological" ? "projects" : "chronological" }); }}><Icon name="clock" size={14} /></button>
             </label>
             {found ? (
               <section className="project">
@@ -2578,8 +2596,14 @@ export function App() {
                 ))}
               </>
             )}
-            {found ? null : listedProjects.map((project) => projectSection(project, workThreads.filter((thread) => thread.projectId === project.id && !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)), "work"))}
-            {found ? null : pinnedFirst(folderGroups.map((group) => ({ ...group, threads: group.threads.filter((thread) => !inProject(thread)) })), prefs.pinnedProjects, (project) => project.cwd)
+            {!found && prefs.threadOrder === "chronological" ? (
+              <section className="project chronological">
+                <h2>By date</h2>
+                {chronological(workThreads.filter((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id))).map((thread) => threadRow(thread, `${workLabel(thread)} · ${folderName(projectFolder(thread, links))}`))}
+              </section>
+            ) : null}
+            {found || prefs.threadOrder === "chronological" ? null : listedProjects.map((project) => projectSection(project, workThreads.filter((thread) => thread.projectId === project.id && !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)), "work"))}
+            {found || prefs.threadOrder === "chronological" ? null : pinnedFirst(folderGroups.map((group) => ({ ...group, threads: group.threads.filter((thread) => !inProject(thread)) })), prefs.pinnedProjects, (project) => project.cwd)
               .filter((project) => project.threads.some((thread) => !prefs.pinnedThreads.includes(thread.id) && !sectioned.has(thread.id)) || prefs.pinnedProjects.includes(project.cwd)).map((project) => (
               <section key={project.cwd} className="project">
                 <h2 title={project.cwd} {...dragHeader(`folder:${project.cwd}`)} onClick={() => { setNewProject(null); setNewCwd(project.cwd); }}>
