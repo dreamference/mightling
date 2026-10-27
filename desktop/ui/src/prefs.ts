@@ -91,6 +91,8 @@ export interface Prefs {
   /** Settings › Git: the prefix Create branch here offers, the instruction a commit message starts from, Force ticked by default. */
   branchPrefix: string;
   commitPrompt: string | null;
+  /** The instruction Create pull request's description starts from (DESKTOP §16 B32); null for Mightling's own. */
+  pullRequestPrompt: string | null;
   forcePush: boolean;
   /** When the Scheduled view was last looked at (ISO time), for its unread count. */
   nightSeen: string | null;

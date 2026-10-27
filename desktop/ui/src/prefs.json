@@ -208,6 +208,11 @@
       "type": "string",
       "nullable": true
     },
+    "pullRequestPrompt": {
+      "default": null,
+      "type": "string",
+      "nullable": true
+    },
     "forcePush": {
       "default": false,
       "type": "boolean"

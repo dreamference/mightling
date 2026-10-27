@@ -13,6 +13,7 @@ import { anchorLine, findingMessage, repoPath, type Finding } from "./findings";
 import { commentsMessage, editable, editPatch, zeroContext, fingerprint, hunkNewText, hunkPatch, parseDiff, splitRows, type DiffLine, type FileDiff, type ReviewComment } from "./diff";
 import { Icon } from "./icons";
 import { keyLabel } from "./keymap";
+import { filesIn, repoName, repoOption, turnBase, turnLines, type Lines } from "./repos";
 
 export type ReviewScope = bridge.GitScope | "turn";
 
@@ -83,6 +84,10 @@ export function ReviewPane(props: ReviewPaneProps) {
   const [gitMissing, setGitMissing] = useState<string | null>(null);
   /** The folder whose repositories `repos` and `root` are. */
   const [resolvedCwd, setResolvedCwd] = useState<string | null>(null);
+  /** DESKTOP §16 B32: Last turn over one repository of several, null for All repos; each repository's lines changed. */
+  const [turnRepo, setTurnRepo] = useState<string | null>(null);
+  const [repoLines, setRepoLines] = useState<Record<string, Lines>>({});
+  const [linesTick, setLinesTick] = useState(0);
   /** The folder and repository the diff and status on screen were read for. */
   const [shown, setShown] = useState<{ cwd: string | null; root: string | null } | null>(null);
   const { notice } = props;
@@ -125,6 +130,7 @@ export function ReviewPane(props: ReviewPaneProps) {
     setRepos([]);
     setRoot(null);
     setResolvedCwd(null);
+    setTurnRepo(null);
     setDiff("");
     setStatus(null);
     setAgainst(null);
@@ -142,6 +148,21 @@ export function ReviewPane(props: ReviewPaneProps) {
       current = false;
     };
   }, [props.cwd, windowGit, notice]);
+
+  // Each repository's lines changed against HEAD, for the selector (several repositories only).
+  useEffect(() => {
+    if (!windowGit || repos.length < 2) {
+      setRepoLines({});
+      return;
+    }
+    let live = true;
+    void Promise.all(repos.map((repo) => bridge.git.changes(repo).then((lines) => [repo, lines] as const).catch(() => null))).then((answers) => {
+      if (live) setRepoLines(Object.fromEntries(answers.filter((answer) => answer !== null)));
+    });
+    return () => {
+      live = false;
+    };
+  }, [repos, windowGit, props.refreshKey, linesTick]);
 
   const rootRef = useRef(root);
   rootRef.current = root;
@@ -185,7 +206,12 @@ export function ReviewPane(props: ReviewPaneProps) {
   // shown: no diff, no Stage or Revert, no commit box (decided during the render, so not even one
   // frame of the last thread's repository with live buttons). Last turn is the thread's own diff.
   const ready = !windowGit || (resolvedCwd === props.cwd && shown !== null && shown.cwd === props.cwd && shown.root === root);
-  const files = useMemo(() => (scope === "turn" ? parseDiff(props.turnDiff ?? "") : ready ? parseDiff(diff) : []), [scope, props.turnDiff, ready, diff]);
+  const turnFiles = useMemo(() => parseDiff(props.turnDiff ?? ""), [props.turnDiff]);
+  const turnCounts = useMemo(() => turnLines(turnFiles, props.cwd, repos), [turnFiles, props.cwd, repos]);
+  const files = useMemo(() => (scope === "turn" ? filesIn(turnFiles, props.cwd, repos, repos.length > 1 && turnRepo && repos.includes(turnRepo) ? turnRepo : null) : ready ? parseDiff(diff) : []),
+    [scope, turnFiles, props.cwd, repos, turnRepo, ready, diff]);
+  /** Where the shown diff's paths start: Last turn's from the server's display root (turnBase), the others from the repository. */
+  const pathBase = scope === "turn" ? turnBase(props.cwd, repos, root) : root ?? props.cwd;
 
   /** Runs a git step, then reads the repository again. */
   const step = async (label: string, action: () => Promise<unknown>) => {
@@ -196,6 +222,7 @@ export function ReviewPane(props: ReviewPaneProps) {
       notice(failure);
     } finally {
       setBusy(null);
+      setLinesTick((tick) => tick + 1);
       await load();
     }
   };
@@ -238,7 +265,7 @@ export function ReviewPane(props: ReviewPaneProps) {
   };
 
   const open = (file: FileDiff, line: number | null) => {
-    const base = root ?? props.cwd;
+    const base = pathBase;
     if (!base || !windowGit) return;
     bridge.openInEditor(base, file.path, line, props.editor).catch(notice);
   };
@@ -368,9 +395,9 @@ export function ReviewPane(props: ReviewPaneProps) {
       <section key={file.path} className={`review-file${isViewed ? " viewed" : ""}`}>
         <header onClick={(event) => event.target === event.currentTarget && toggle()}>
           <button className="icon" aria-label={isCollapsed ? "Expand" : "Collapse"} onClick={toggle}><Icon name={isCollapsed ? "chevronRight" : "chevronDown"} size={14} /></button>
-          <button className="file-name" title={windowGit ? "Open in the editor" : file.path} onClick={() => open(file, null)} data-path={(root ?? props.cwd) ? `${(root ?? props.cwd ?? "").replace(/\/+$/, "")}/${file.path}` : undefined}>{file.path}</button>
-          {props.onOpenFile && (root ?? props.cwd) && file.status !== "deleted" ? (
-            <button className="icon" title="Open in a tab" aria-label={`Open ${file.path} in a tab`} onClick={() => props.onOpenFile?.(`${(root ?? props.cwd ?? "").replace(/\/+$/, "")}/${file.path}`, null)}><Icon name="file" size={13} /></button>
+          <button className="file-name" title={windowGit ? "Open in the editor" : file.path} onClick={() => open(file, null)} data-path={pathBase ? `${pathBase.replace(/\/+$/, "")}/${file.path}` : undefined}>{file.path}</button>
+          {props.onOpenFile && pathBase && file.status !== "deleted" ? (
+            <button className="icon" title="Open in a tab" aria-label={`Open ${file.path} in a tab`} onClick={() => props.onOpenFile?.(`${pathBase.replace(/\/+$/, "")}/${file.path}`, null)}><Icon name="file" size={13} /></button>
           ) : null}
           {file.status !== "modified" ? <span className={`file-status ${file.status}`}>{file.status}</span> : null}
           <span className="diffstat"><span className="plus">+{file.added}</span> <span className="minus">−{file.removed}</span></span>
@@ -456,14 +483,27 @@ export function ReviewPane(props: ReviewPaneProps) {
   return (
     <div className="review-body">
       <header className="review-tools">
-        {repos.length > 1 ? (
-          <select aria-label="Repository" value={root ?? ""} onChange={(event) => setRoot(event.target.value)}>
-            {repos.map((repo) => <option key={repo} value={repo}>{repo.split(/[\\/]/).pop()}</option>)}
+        {repos.length > 1 && scope === "turn" ? (
+          <select aria-label="Repository" value={turnRepo && repos.includes(turnRepo) ? turnRepo : ""} title="What the last turn changed, in every repository or one"
+            onChange={(event) => {
+              const chosen = event.target.value || null;
+              setTurnRepo(chosen);
+              if (chosen) setRoot(chosen);
+            }}>
+            <option value="">{repoOption("All repos", turnCounts.total)}</option>
+            {repos.map((repo) => <option key={repo} value={repo}>{repoOption(repoName(repo), turnCounts.byRepo.get(repo))}</option>)}
+          </select>
+        ) : repos.length > 1 ? (
+          <select aria-label="Repository" value={root ?? ""} title="Lines changed against HEAD in each repository" onChange={(event) => setRoot(event.target.value)}>
+            {repos.map((repo) => <option key={repo} value={repo}>{repoOption(repoName(repo), repoLines[repo])}</option>)}
           </select>
         ) : null}
         <span className="spacer" />
         <button className="icon" title={props.layout === "split" ? "Show the diff in one column" : "Show the old and the new side by side"} aria-label="Switch the view" onClick={() => props.setLayout(props.layout === "split" ? "unified" : "split")}>{props.layout === "split" ? "One column" : "Side by side"}</button>
-        <button className="icon" title="Read the repository again" aria-label="Refresh" onClick={() => void load()}><Icon name="undo" size={14} /></button>
+        <button className="icon" title="Read the repository again" aria-label="Refresh" onClick={() => {
+          setLinesTick((tick) => tick + 1);
+          void load();
+        }}><Icon name="undo" size={14} /></button>
         {props.detach ? (
           <button className="icon" aria-label={props.detach.docks ? "Dock the diff" : "Diff in its own window"} title={props.detach.docks ? "Back into the thread's window" : "Open the diff in a window of its own"} onClick={props.detach.run}>
             <Icon name={props.detach.docks ? "dock" : "externalLink"} size={14} />
@@ -511,7 +551,7 @@ export function ReviewPane(props: ReviewPaneProps) {
         </section>
       ) : null}
       <div className="review-files">
-        {files.length === 0 ? (scope === "turn" || ready ? <p className="empty small">{scope === "turn" ? "The last turn changed no files." : "No changes."}</p> : null) : files.map(fileBlock)}
+        {files.length === 0 ? (scope === "turn" || ready ? <p className="empty small">{scope === "turn" ? (turnFiles.length > 0 && turnRepo ? `The last turn changed nothing in ${repoName(turnRepo)}.` : "The last turn changed no files.") : "No changes."}</p> : null) : files.map(fileBlock)}
       </div>
       {comments.length > 0 ? (
         <div className="review-send">
