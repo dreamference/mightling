@@ -329,6 +329,11 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
             command.find_subcommand(word).is_some() || LAUNCHER_SUBCOMMANDS.contains(&word)
         })
     {
+        // Refused before any child or model server where the mode's rules cannot be enforced.
+        if let Err(err) = compat::refuse_where_unenforced(compat::Mode::Claude, cfg!(windows)) {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
         std::process::exit(compat_print::run(&user_args).await);
     }
     let subcommand = first_positional(command, &user_args);
