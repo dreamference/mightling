@@ -26,7 +26,6 @@ import {
   repoOf,
   repoOption,
   resetChatRepos,
-  setActiveChatRepoCwd,
   setChatReposFetcher,
   sortAndFilterRepos,
   turnBase,
@@ -650,6 +649,25 @@ describe("G9: Git bar, single-use confirm nonces, and refusals", () => {
     expect(formatAnonymityRefusal([{ file: "README.md", line: 7, entry: 1 }])).toBe(
       "Push refused by the anonymity check: README.md:7 (entry 1)",
     );
+  });
+
+  it("says the anonymity check could not run, and nothing from the answer, when it names no findings", async () => {
+    const api = chatRepos(async (url) => {
+      if (url.startsWith("/api/repos/state?")) return jsonResponse(sampleState({ confirm: "nonce-push-98" }));
+      return jsonResponse({ refused: "anonymity", error: "raw-server-text" }, 422);
+    });
+    const step = await beginGitAction(api, "01234567", "push");
+    const outcome = await executeGitAction(api, "01234567", step.pending);
+    expect(outcome.text).toBe("Push refused: the anonymity check could not run");
+  });
+
+  it("shows a file whose diff could not be read by its header only, never invented lines", async () => {
+    const api = chatRepos(async (url) => {
+      if (url.includes("path=")) return jsonResponse({ error: "boom" }, 500);
+      return jsonResponse([{ path: "a.txt", added: 2, removed: 1 }]);
+    });
+    const text = await api.diff("01234567", "uncommitted");
+    expect(text).toBe("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n");
   });
 });
 

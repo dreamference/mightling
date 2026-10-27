@@ -329,11 +329,10 @@ export function formatBudgetLeft(budget: ChatRepoBudget): string {
   return `${left.toLocaleString("en-US")} tokens left`;
 }
 
+/** A file whose diff could not be read: its header only, never invented lines. */
 function minimalFileDiff(entry: ChatRepoFileStat): string {
   if (typeof entry.diff === "string" && entry.diff.trim()) return entry.diff.endsWith("\n") ? entry.diff : `${entry.diff}\n`;
-  const removed = Math.max(0, entry.removed);
-  const added = Math.max(0, entry.added);
-  return `diff --git a/${entry.path} b/${entry.path}\n--- a/${entry.path}\n+++ b/${entry.path}\n@@ -1,${removed} +1,${added} @@\n${"-changed\n".repeat(removed)}${"+changed\n".repeat(added)}`;
+  return `diff --git a/${entry.path} b/${entry.path}\n--- a/${entry.path}\n+++ b/${entry.path}\n`;
 }
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
@@ -356,7 +355,9 @@ async function throwRefusal(response: Response, fallback: string): Promise<never
           return { file: String(rec.file ?? ""), line: Number(rec.line ?? 0), entry: Number(rec.entry ?? 0) };
         })
       : [];
-    throw new RepoRefusal(response.status, formatAnonymityRefusal(findings), { refused: "anonymity", findings });
+    // Without findings the check could not run. Nothing else from the answer is shown.
+    const message = findings.length === 0 ? "Push refused: the anonymity check could not run" : formatAnonymityRefusal(findings);
+    throw new RepoRefusal(response.status, message, { refused: "anonymity", findings });
   }
   const conflicts = Array.isArray(body.conflicts) ? body.conflicts.map(String) : undefined;
   if (conflicts && conflicts.length > 0) {
@@ -600,7 +601,7 @@ export async function executeGitAction(
   } catch (error) {
     if (error instanceof RepoRefusal) {
       if (error.refused === "anonymity" || error.findings) {
-        return { text: formatAnonymityRefusal(error.findings) };
+        return { text: error.findings && error.findings.length > 0 ? formatAnonymityRefusal(error.findings) : error.message };
       }
       if (error.conflicts && error.conflicts.length > 0) {
         return {

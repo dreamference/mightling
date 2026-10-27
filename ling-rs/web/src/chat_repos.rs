@@ -2498,8 +2498,8 @@ fn find_checked_out_thread(server: &Server, thread: &str) -> Result<(CheckoutRec
 }
 
 /// `GET /api/repos/state?thread=&intent=`: branch, ahead/behind against `base.git`'s default branch
-/// tip, uncommitted file stat list, `read_only`, `private`, `budget`, `warnings`, and (when `intent`
-/// is given) a single-use 32-hex confirmation nonce `confirm`.
+/// tip, uncommitted file stat list, `read_only`, `private`, `budget`, `warnings`, `allow_main`,
+/// `merge_in_progress`, and (when `intent` is given) a single-use 32-hex confirmation nonce `confirm`.
 async fn repo_state(
     State(server): State<Arc<Server>>,
     headers: HeaderMap,
@@ -2543,6 +2543,10 @@ async fn repo_state(
 
     let (used, limit, resets_at) = server.chat_repos.budget_snapshot(&record, settings.tokens_per_day);
     let warnings = server.chat_repos.warnings_for(&server.config.codex_home, &record);
+    let allow_main = settings.allow_main.iter().any(|r| r == &record.repo);
+    let merge_in_progress = run_git(&server, Some(&worktree_dir), &["rev-parse", "-q", "--verify", "MERGE_HEAD"], false)
+        .await
+        .is_ok_and(|output| output.status.success());
 
     let mut payload = json!({
         "repo": record.repo,
@@ -2559,6 +2563,8 @@ async fn repo_state(
             "resets_at": resets_at,
         },
         "warnings": warnings,
+        "allow_main": allow_main,
+        "merge_in_progress": merge_in_progress,
     });
     if let Some(intent) = intent_opt {
         let nonce = server.chat_repos.issue_nonce(&caller_nonce_id, &record.thread, intent);
@@ -5686,6 +5692,9 @@ mod tests {
         assert_eq!(u_res["conflicts"], json!(["README.md"]));
         let readme_conflict = std::fs::read_to_string(wt.join("README.md")).unwrap();
         assert!(readme_conflict.contains("<<<<<<<"), "{readme_conflict}");
+        let (_, mid_state, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(mid_state["merge_in_progress"], json!(true), "{mid_state}");
+        assert_eq!(mid_state["allow_main"], json!(false), "{mid_state}");
 
         // 2. POST /api/repos/update with abort: true restores a clean working tree.
         let a_nonce = get_nonce(&server, &cookie, &thread, "update").await;
@@ -5702,6 +5711,8 @@ mod tests {
         assert_eq!(readme_restored, "# Demo\nphone branch change\n");
         let status_porcelain = git_stdout(&wt, &["status", "--porcelain"]);
         assert!(status_porcelain.trim().is_empty(), "expected clean tree after abort: {status_porcelain}");
+        let (_, after_state, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread}")).await;
+        assert_eq!(after_state["merge_in_progress"], json!(false), "{after_state}");
     }
 
     #[tokio::test]
@@ -7025,6 +7036,9 @@ mod tests {
         )
         .await;
         let thread2 = open2["thread"].as_str().unwrap().to_string();
+        let (_, allowed_state, _) = get_json(&server, &cookie, &format!("/api/repos/state?thread={thread1}")).await;
+        assert_eq!(allowed_state["allow_main"], json!(true), "{allowed_state}");
+        assert_eq!(allowed_state["merge_in_progress"], json!(false), "{allowed_state}");
 
         // 1. Switching thread1 with `/api/repos/main` switches to `trunk` (record.base), not `main`.
         let m_nonce1 = get_nonce(&server, &cookie, &thread1, "main").await;
