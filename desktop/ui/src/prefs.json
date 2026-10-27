@@ -169,6 +169,11 @@
       "default": true,
       "type": "boolean"
     },
+    "notifyQuestions": {
+      "default": null,
+      "type": "boolean",
+      "nullable": true
+    },
     "appearance": {
       "default": {},
       "type": "object"

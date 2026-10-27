@@ -426,10 +426,11 @@ function Notifications({ prefs, onChange }: SettingsProps) {
         <label><input type="radio" name="turns" checked={prefs.notifyTurns === "never"} onChange={() => onChange({ notifyTurns: "never" })} /> Never</label>
       </fieldset>
       <fieldset>
-        <legend>Approvals and questions</legend>
-        <label><input type="checkbox" checked={prefs.notifyApprovals} onChange={(event) => onChange({ notifyApprovals: event.target.checked })} /> Notify when the agent waits for an answer and the window is not in front</label>
+        <legend>When the agent waits for you</legend>
+        <label><input type="checkbox" checked={prefs.notifyApprovals} onChange={(event) => onChange({ notifyApprovals: event.target.checked })} /> Notify when it waits for an approval and the window is not in front</label>
+        <label><input type="checkbox" checked={prefs.notifyQuestions ?? prefs.notifyApprovals} onChange={(event) => onChange({ notifyQuestions: event.target.checked })} /> Notify when it asks a question and the window is not in front</label>
       </fieldset>
-      <p className="dialog-note">Notifications are silent: Mightling has no sounds of its own. A click on one shows its thread.</p>
+      <p className="dialog-note">A notification is titled with its thread's name and says how the turn ended, or what waits. Notifications are silent: Mightling has no sounds of its own. A click on one shows its thread.</p>
       <div className="buttons dialog-buttons"><button onClick={() => void bridge.testNotification()}>Send a test notification</button></div>
     </>
   );
