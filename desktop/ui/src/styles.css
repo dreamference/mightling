@@ -298,8 +298,11 @@ html[data-host="electron"] .sidebar { padding-top: 8px; }
 .bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 16px; user-select: none; }
 /* The window is frameless (desktop/electron/src/work.ts): there this bar is the title bar the
    page draws, draggable, with room on the right for the native minimise/maximise/close controls
-   the overlay paints (36px high). Its own controls opt out of dragging. */
-html[data-host="electron"] .bar { padding-right: 150px; -webkit-app-region: drag; }
+   the overlay paints (36px high). Its own controls opt out of dragging. How wide those controls are
+   the window says (the Window Controls Overlay's titlebar-area-*: 96 CSS pixels on Linux, about 138
+   on Windows, what the system draws elsewhere); 138 where it says nothing (full screen). */
+html[data-host="electron"] { --window-controls: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px))); }
+html[data-host="electron"] .bar { padding-right: max(16px, calc(var(--window-controls) + 12px)); -webkit-app-region: drag; }
 html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, html[data-host="electron"] .bar select, html[data-host="electron"] .bar .link-button { -webkit-app-region: no-drag; }
 .bar .menu-toggle { display: none; }
 .bar .title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
@@ -517,7 +520,7 @@ tr.unseen td:first-child .link-button::before { content: ""; display: inline-blo
 .layout-switch button { font-size: 12px; padding: 2px 9px; }
 .review-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; border-left: 1px solid var(--line); background: var(--canvas); overflow: hidden; }
 .review-bar { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px 6px 14px; user-select: none; }
-html[data-host="electron"] .review-bar { padding-right: 150px; -webkit-app-region: drag; }
+html[data-host="electron"] .review-bar { padding-right: max(10px, calc(var(--window-controls) + 12px)); -webkit-app-region: drag; }
 html[data-host="electron"] .review-bar button, html[data-host="electron"] .review-bar select { -webkit-app-region: no-drag; }
 .review-bar select, .commit-choice { font-size: 12.5px; padding: 3px 6px; border-radius: var(--radius-sm); }
 .commit-choice { margin: 0 14px 6px; }
