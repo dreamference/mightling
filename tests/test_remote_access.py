@@ -183,6 +183,13 @@ def test_the_server_config_serves_tls_and_names_the_box_for_relay_and_stun():
         assert digit_run not in config, "no address literal"
 
 
+def _geolocation_files():
+    data = RemoteSettings.path("server", "data")
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "GeoLite2-City_20260911.mmdb").write_bytes(b"mmdb")
+    (data / "geonames_20260911.db").write_bytes(b"db")
+
+
 def test_the_container_is_on_loopback_pinned_and_bounded(monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -190,7 +197,11 @@ def test_the_container_is_on_loopback_pinned_and_bounded(monkeypatch):
         "_run",
         classmethod(lambda cls, argv, timeout=300: calls.append(argv) or _done(argv)),
     )
+    _geolocation_files()
     assert RemoteControlPlane.start()
+    assert sum(argv[:2] == ["docker", "run"] for argv in calls) == 1, (
+        "no fetch when the files are there"
+    )
     run = next(argv for argv in calls if argv[:2] == ["docker", "run"])
     assert run[:3] == ["docker", "run", "-d"] and remote_settings.SERVER_IMAGE in run
     # On an internal network, published nowhere: the loopback proxy is the only way in.
@@ -1273,3 +1284,43 @@ def test_the_cli_has_the_remote_group():
     assert staged.ssh_to == "my-box" and staged.box_only
     assert parser.parse_args(["remote", "remove", "--purge"]).purge
     assert "remote" in parser.command_groups
+
+
+def test_the_first_start_fetches_the_geolocation_databases_once_then_has_no_route_out(monkeypatch):
+    # Found on the node (2026-10-27): with no route out and no databases, the server stops at
+    # "could not initialize geolocation service" and restarts forever.
+    calls = []
+
+    def run(cls, argv, timeout=300):
+        calls.append(argv)
+        if argv[:2] == ["docker", "run"] and "bridge" in argv:
+            _geolocation_files()
+        return _done(argv)
+
+    monkeypatch.setattr(RemoteControlPlane, "_run", classmethod(run))
+    assert not RemoteControlPlane.geolocation_ready()
+    assert RemoteControlPlane.start(setup_pat=True)
+    runs = [argv for argv in calls if argv[:2] == ["docker", "run"]]
+    fetch, real = runs
+    assert fetch[fetch.index("--network") + 1] == "bridge" and "--ip" not in fetch
+    assert fetch[fetch.index("--restart") + 1] == "no"
+    assert "-p" not in fetch and "NB_SETUP_PAT_ENABLED=true" not in fetch
+    assert calls[calls.index(fetch) + 1] == ["docker", "rm", "-f", "dreamference-remote"]
+    assert (
+        real[real.index("--network") + 1] == "dreamference-remote"
+        and "NB_SETUP_PAT_ENABLED=true" in real
+    )
+    assert RemoteControlPlane.geolocation_ready()
+
+
+def test_no_databases_after_the_wait_is_a_failed_start(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        RemoteControlPlane,
+        "_run",
+        classmethod(lambda cls, argv, timeout=300: calls.append(argv) or _done(argv)),
+    )
+    monkeypatch.setattr("dreamference.remote.remote_control_plane.GEO_WAIT_S", 0.0)
+    assert not RemoteControlPlane.start()
+    assert sum(argv[:2] == ["docker", "run"] for argv in calls) == 1, "the real start never happens"
+    assert calls[-1] == ["docker", "rm", "-f", "dreamference-remote"]
