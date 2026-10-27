@@ -666,6 +666,8 @@ export interface PickedElement {
   tag: string;
   text: string;
   url: string;
+  /** A dragged area instead of one element (DESKTOP §16 B29), in the page's CSS pixels. */
+  area?: { x: number; y: number; width: number; height: number };
 }
 
 /** The preview tab (DESKTOP_PARITY §2.9): the desktop app's only; a browser on `ling web` has none. */
