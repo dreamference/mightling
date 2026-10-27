@@ -87,7 +87,10 @@ import { chronological, moveToSection, nextAttention, pinnedFirst, readThreadPag
 import { TerminalHub, decode, terminalMessage, type TerminalSession } from "./terminal";
 import { answersFor, composerOf, paneKey, paneOf, type PaneKind, type WindowsState } from "./windows";
 import { NewThreadOptions, WorktreeHeader, type NewThreadChoice } from "./WorktreeControls";
-import { commandChoices, type ApprovalChoice } from "./approvals";
+import { ApprovalStrip } from "./ApprovalStrip";
+import { commandChoices, FILE_CHOICES, phoneChoices } from "./approvals";
+import { OutputView } from "./OutputView";
+import { attachVisibilityResume } from "./resume";
 import { busyHere } from "./checkouts";
 import { drawDiagrams } from "./diagrams";
 import { AgentMark } from "./agentmarks";
@@ -407,6 +410,8 @@ export function App() {
   const [reposOpen, setReposOpen] = useState(false);
   /** Flag set by `&approval=1` on a deep link, read by the G7 approval step. */
   const [approvalRequested, setApprovalRequested] = useState(false);
+  /** Full-screen read-only command output view target (CHAT_REPOS §10 G8). */
+  const [outputTarget, setOutputTarget] = useState<{ threadId: string; itemId: string } | null>(null);
   /** Opens the Repos view (CHAT_REPOS §10 G4) in Work with `repo` preselected. */
   const openRepos = useCallback((repo: string | null = null) => {
     setSelectedRepo(repo);
@@ -548,6 +553,7 @@ export function App() {
       if (notification.method === "thread/started") loader.markLoaded(notification.params.thread.id);
       if (notification.method === "thread/queue/changed") refreshQueue(notification.params.threadId);
       if (notification.method === "project/changed") void loadProjectsRef.current();
+      if (notification.method === "serverRequest/resolved") setApprovalRequested(false);
       // A turn that ends while its thread is not in front leaves the thread unread.
       if (notification.method === "turn/completed") {
         const threadId = notification.params.threadId;
@@ -630,6 +636,29 @@ export function App() {
       }
     });
   }, [listen]);
+
+  // Resuming the selected thread when the webview returns from the background (CHAT_REPOS §10 G10).
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    return attachVisibilityResume({
+      host: bridge.host(),
+      request: (method, params) => client.request(method as never, params as never),
+      document,
+      window: typeof window !== "undefined" ? window : null,
+      getState: () => {
+        const current = stateRef.current;
+        const selectedId = current.selected;
+        return {
+          server: current.server,
+          selectedThreadId: selectedId,
+          servedModel: servedModelRef.current,
+          thread: selectedId ? current.threads[selectedId]?.thread ?? null : null,
+        };
+      },
+      onThreadOpened: (thread) => dispatch({ type: "opened", thread }),
+      markLoaded: (threadId) => loader.markLoaded(threadId),
+    });
+  }, [client, loader]);
 
   // Summaries of finished chats (DESKTOP §16 B43, summaries.ts): a thread idle a day, one at a time, by
   // the served model, only while no turn runs; at most one a minute, the first a few seconds after start.
@@ -2276,6 +2305,7 @@ export function App() {
   };
 
   const answer = (request: PendingRequest, result: unknown) => {
+    setApprovalRequested(false);
     client.respond(request.id, result).then(() => dispatch({ type: "answered", id: request.id })).catch(notice);
   };
 
@@ -2887,7 +2917,7 @@ export function App() {
   );
 
   /** A dialog over the whole window: a preview's view (drawn above the page) hides under it. */
-  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null || continuing !== null;
+  const overlayOpen = settingsOpen || menuOpen !== false || fileSearch !== null || scheduledOpen || extensions !== null || editingEnv || activityOpen || boardOpen || linkAsked !== null || continuing !== null || outputTarget !== null;
   const title = incognitoShown ? "Incognito question" : selected ? selected.thread.name || selected.thread.preview || (view === "ask" ? "New question" : "New thread") : view === "ask" ? (incognitoNext ? "New incognito question" : "New question") : "Mightling";
   const canCompose = view === "ask" || selected !== null || newCwd.trim() !== "";
   const placeholder = selected?.activeTurnId
@@ -3160,6 +3190,16 @@ export function App() {
           <GitBar key={selectedChatRepoThread} thread={selectedChatRepoThread} cwd={workFolder} state={chatRepoState}
             onStateChange={(next) => { setChatRepoState(next); setGitTick((tick) => tick + 1); }} />
         ) : null}
+        {view === "work" ? (
+          <ApprovalStrip
+            host={HOST}
+            approvalRequested={approvalRequested}
+            requests={state.requests}
+            threads={state.threads}
+            selectedThreadId={selected?.thread.id ?? null}
+            openThread={(threadId) => openThread(threadId)}
+          />
+        ) : null}
 
         {state.notices.map((message, index) => (
           <div key={index} className="notice" onClick={() => dispatch({ type: "dismissNotice", index })}>{message}</div>
@@ -3224,6 +3264,7 @@ export function App() {
               onFork={selected.thread.ephemeral ? null : (where) => void forkFrom(turn, where)}
               onRevert={() => void revertTurn(turn).catch(notice)}
               onEdit={!selected.activeTurnId && index === selected.turns.length - 1 ? () => void editPrevious() : null}
+              onOpenOutput={(itemId) => setOutputTarget({ threadId: selected.thread.id, itemId })}
               versions={versionsAt(prefs.messageVersions, selected.thread.id, index)} onVersion={(threadId) => void openThread(threadId)} />
           )) : view === "ask" ? (
             startingProject ? (
@@ -3243,7 +3284,12 @@ export function App() {
           {threadRequests.map((request) => (
             // Mirrored read-only while another window holds the thread's composer: that window answers.
             <div key={JSON.stringify(request.id)} className={composerHere ? "approval-host" : "approval-host mirrored"} inert={!composerHere}>
-              <Approval request={request} airgappedOn={airgap?.level === "on"} onAnswer={(result) => answer(request, result)} />
+              <Approval
+                request={request}
+                airgappedOn={airgap?.level === "on"}
+                phoneRepo={HOST === "web" && isChatRepoCwd(state.threads[request.threadId ?? ""]?.thread.cwd ?? selected?.thread.cwd ?? null)}
+                onAnswer={(result) => answer(request, result)}
+              />
             </div>
           ))}
           {otherRequests > 0 ? <div className="notice">{otherRequests} other thread(s) are waiting for an answer.</div> : null}
@@ -3528,6 +3574,14 @@ export function App() {
           }} onClose={() => setActivityOpen(false)} />
       ) : null}
       {menuOpen ? <CommandMenu entries={menuOpen === "projects" ? menuEntries().filter((entry) => entry.kind === "project") : menuEntries()} onRun={runEntry} onClose={() => setMenuOpen(false)} /> : null}
+      {outputTarget ? (
+        <OutputView
+          threads={state.threads}
+          threadId={outputTarget.threadId}
+          itemId={outputTarget.itemId}
+          onClose={() => setOutputTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -3605,13 +3659,13 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
   );
 }
 
-function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; commandOutput: Prefs["commandOutput"]; versions?: MessageVersions | null; onVersion?: (threadId: string) => void }) {
+function Turn(props: { turn: TurnView; last: boolean; onRevert: () => void; onEdit: (() => void) | null; onFork: ((where: "through" | "before") => void) | null; onOpenOutput?: (itemId: string) => void; commandOutput: Prefs["commandOutput"]; versions?: MessageVersions | null; onVersion?: (threadId: string) => void }) {
   const { turn } = props;
   const firstMessage = turn.items.find((item) => item.type === "userMessage")?.id;
   return (
     <section className={`turn turn-${turn.status}`}>
       {turn.items.flatMap((item) => (props.commandOutput === "hidden" && item.type === "commandExecution" && item.source !== "userShell" ? [] : [
-        <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} progress={turn.progress?.[item.id]} />,
+        <Item key={item.id} item={item} folded={props.commandOutput === "collapsed"} progress={turn.progress?.[item.id]} onOpenOutput={props.onOpenOutput} />,
         item.id === firstMessage && props.versions ? <VersionSwitch key={`${item.id}-versions`} versions={props.versions} onVersion={props.onVersion} /> : null,
       ]))}
       {turn.checklist && turn.status !== "inProgress" ? <TurnChecklist checklist={turn.checklist} /> : null}
@@ -3690,7 +3744,7 @@ function ToolItem({ view, status }: { view: ToolView; status: string }) {
   );
 }
 
-function Item({ item, folded, progress }: { item: ThreadItem; folded: boolean; progress?: string[] }) {
+function Item({ item, folded, progress, onOpenOutput }: { item: ThreadItem; folded: boolean; progress?: string[]; onOpenOutput?: (itemId: string) => void }) {
   const files = useContext(OpenFileContext);
   switch (item.type) {
     case "userMessage":
@@ -3712,7 +3766,12 @@ function Item({ item, folded, progress }: { item: ThreadItem; folded: boolean; p
       return (
         // A `!` command is the user's own: its output stays open, as the Codex app shows it.
         <details className={`item command status-${item.status}${item.source === "userShell" ? " user-shell" : ""}`} open={item.source === "userShell" || (!folded && item.status === "inProgress")}>
-          <summary><Icon name="terminal" size={14} />{item.source === "userShell" ? <span className="shell-mark" title="Your command, run in your shell">!</span> : null}<code>{item.command}</code>{item.exitCode !== null && item.exitCode !== 0 ? <span className="exit"> exit {item.exitCode}</span> : null}</summary>
+          <summary><Icon name="terminal" size={14} />{item.source === "userShell" ? <span className="shell-mark" title="Your command, run in your shell">!</span> : null}<code>{item.command}</code>{item.exitCode !== null && item.exitCode !== 0 ? <span className="exit"> exit {item.exitCode}</span> : null}
+            {onOpenOutput ? (
+              <button type="button" className="ghost open-output" title="Open full-screen read-only output"
+                onClick={(event) => { event.preventDefault(); event.stopPropagation(); onOpenOutput(item.id); }}>Open output</button>
+            ) : null}
+          </summary>
           {item.aggregatedOutput ? <pre>{item.aggregatedOutput}</pre> : null}
         </details>
       );
@@ -3813,21 +3872,15 @@ function Diff({ text: diff }: { text: string }) {
   );
 }
 
-/** A file change's approval: the four plain choices (a rule for later is offered for commands only). */
-const FILE_CHOICES: ApprovalChoice[] = [
-  { label: "Allow", title: "Apply these changes", decision: "accept", primary: true },
-  { label: "Allow for this session", title: "Apply these, and later changes, without asking until this session ends", decision: "acceptForSession" },
-  { label: "Decline", title: "Do not apply them; the agent goes on", decision: "decline" },
-  { label: "Stop the turn", title: "Do not apply them, and stop the turn", decision: "cancel" },
-];
-
-function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnswer: (result: unknown) => void }) {
+function Approval(props: { request: PendingRequest; airgappedOn: boolean; phoneRepo?: boolean; onAnswer: (result: unknown) => void }) {
   const { request, onAnswer } = props;
   const params = request.params as Record<string, unknown>;
   switch (request.method) {
     case "item/commandExecution/requestApproval":
     case "item/fileChange/requestApproval": {
       const network = params.networkApprovalContext as { host?: string } | null | undefined;
+      const baseChoices = request.method === "item/commandExecution/requestApproval" ? commandChoices(params, props.airgappedOn) : FILE_CHOICES;
+      const shownChoices = props.phoneRepo ? phoneChoices(baseChoices) : baseChoices;
       return (
         <div className="approval">
           <strong>{request.method === "item/fileChange/requestApproval" ? "Apply these changes?" : "Run this command?"}</strong>
@@ -3835,7 +3888,7 @@ function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnsw
           {typeof params.reason === "string" ? <p>{params.reason}</p> : null}
           {network?.host ? <p className="warn">It asks for the network ({network.host}).{props.airgappedOn ? " Airgapped is on: approving lets it reach the network." : ""}</p> : null}
           <div className="buttons">
-            {(request.method === "item/commandExecution/requestApproval" ? commandChoices(params, props.airgappedOn) : FILE_CHOICES).map((choice) => (
+            {shownChoices.map((choice) => (
               <button key={choice.label} className={choice.primary ? "primary" : undefined} title={choice.title} onClick={() => onAnswer({ decision: choice.decision })}>{choice.label}</button>
             ))}
           </div>
@@ -3862,7 +3915,7 @@ function Approval(props: { request: PendingRequest; airgappedOn: boolean; onAnsw
           {Array.isArray(params.command) ? <pre>{(params.command as string[]).join(" ")}</pre> : null}
           <div className="buttons">
             <button className="primary" onClick={() => onAnswer({ decision: "approved" })}>Allow</button>
-            <button onClick={() => onAnswer({ decision: "approved_for_session" })}>Allow for this session</button>
+            {!props.phoneRepo ? <button onClick={() => onAnswer({ decision: "approved_for_session" })}>Allow for this session</button> : null}
             <button onClick={() => onAnswer({ decision: "abort" })}>Stop the turn</button>
           </div>
         </div>

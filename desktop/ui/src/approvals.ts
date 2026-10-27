@@ -1,9 +1,10 @@
-// What a command's approval card offers (DESKTOP_PARITY §9.5.9, DESKTOP §16 B8): beside Allow, Allow
-// for this session and Decline, **Always allow commands starting with …** when the server proposes a
-// rule for them (`proposedExecpolicyAmendment`, answered `acceptWithExecpolicyAmendment`; `ling` keeps
-// it in its rules, so it holds in later sessions), and a host to allow or block from now on when it
-// proposes one (`proposedNetworkPolicyAmendments`, answered `applyNetworkPolicyAmendment`), never a
-// host to allow at `/airgapped on`. When the server lists `availableDecisions`, only those are offered.
+// What a command's approval card offers (DESKTOP_PARITY §9.5.9, DESKTOP §16 B8, specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §6.1, §10 G7):
+// beside Allow, Allow for this session and Decline, **Always allow commands starting with …** when the
+// server proposes a rule for them (`proposedExecpolicyAmendment`, answered `acceptWithExecpolicyAmendment`;
+// `ling` keeps it in its rules, so it holds in later sessions), and a host to allow or block from now on
+// when it proposes one (`proposedNetworkPolicyAmendments`, answered `applyNetworkPolicyAmendment`), never a
+// host to allow at `/airgapped on`. For a `chat-repos` thread in the web host, `phoneChoices` drops
+// session-wide and policy-amendment choices. When the server lists `availableDecisions`, only those are offered.
 // Pure: no DOM.
 
 export type CommandDecision =
@@ -87,4 +88,20 @@ export function commandChoices(params: unknown, airgappedOn: boolean): ApprovalC
   if (plain.has("decline")) choices.push({ label: "Decline", title: "Do not run it; the agent goes on", decision: "decline" });
   if (plain.has("cancel")) choices.push({ label: "Stop the turn", title: "Do not run it, and stop the turn", decision: "cancel" });
   return choices;
+}
+
+/** The choices a file-change approval offers, in order. */
+export const FILE_CHOICES: ApprovalChoice[] = [
+  { label: "Allow", title: "Apply these changes", decision: "accept", primary: true },
+  { label: "Allow for this session", title: "Apply these, and later changes, without asking until this session ends", decision: "acceptForSession" },
+  { label: "Decline", title: "Do not apply them; the agent goes on", decision: "decline" },
+  { label: "Stop the turn", title: "Do not apply them, and stop the turn", decision: "cancel" },
+];
+
+/**
+ * Keep only once-only choices for a chat-repos checkout in the web host (specs/DREAMFERENCE_MIGHTLING_CHAT_REPOS.md §6.1, §10 G7):
+ * drops session-wide approval (`acceptForSession`) and every policy-amendment choice.
+ */
+export function phoneChoices(choices: readonly ApprovalChoice[]): ApprovalChoice[] {
+  return choices.filter((choice) => typeof choice.decision === "string" && choice.decision !== "acceptForSession");
 }
