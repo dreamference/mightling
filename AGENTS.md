@@ -192,5 +192,4 @@ Use `rg -n "^class Foo"` for a definition and `ast-grep` for call sites by shape
 - [sync.md](docs/dev/sync.md): `ling sync`
 - [searching.md](docs/dev/searching.md): `ast-grep` and `rg` on this tree
 - [cli.md](docs/dev/cli.md): every `ling-admin` subcommand, the sidecars behind `ling web` and the app
-- [claude-plugin.md](docs/dev/claude-plugin.md): the Claude Code delegation plugin (`ling delegate`, `watch`) and session monitor (`ling monitor`)
 - [sessions.md](docs/dev/sessions.md): the work streams of 2026-10-10 (retired)
