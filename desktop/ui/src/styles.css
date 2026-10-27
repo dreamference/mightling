@@ -1063,3 +1063,8 @@ html.quick-page body { margin: 0; background: var(--canvas); }
 
 /* The menu on a file's path (DESKTOP §16 B14): at the pointer, above everything. */
 .menu.path-menu { right: auto; z-index: 40; }
+
+/* Diagrams in answers (DESKTOP §16 B15). */
+.diagram { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--raised); overflow-x: auto; }
+.diagram-picture svg { max-width: 100%; height: auto; }
+.diagram-source summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }

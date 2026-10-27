@@ -374,7 +374,9 @@ require("readline").createInterface({ input: process.stdin }).on("line", (line) 
           if (asked.includes("with a command")) {
             say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: { type: "commandExecution", id: "c" + id, command: "pytest -q", cwd: fetcher, processId: null, status: "completed", commandActions: [], exitCode: 0, durationMs: 900, aggregatedOutput: "3 passed in 0.9s" } } });
           }
-          const answerItem = { type: "agentMessage", id: "m" + id, text: asked.includes("with a source")
+          const answerItem = { type: "agentMessage", id: "m" + id, text: asked.includes("with a diagram")
+            ? "The retry, drawn:\\n\\n\u0060\u0060\u0060mermaid\\nflowchart LR\\n  A[Request] --> B{Failed?}\\n  B -- yes --> C[Wait, then retry]\\n  B -- no --> D[Answer]\\n\u0060\u0060\u0060\\n"
+            : asked.includes("with a source")
             ? "NVFP4 is described on [NVIDIA's developer blog](https://developer.nvidia.com/blog/nvfp4/) [1].\\n\\n[1] https://developer.nvidia.com/blog/nvfp4/"
             : "Done: the retry counter is in fetcher/client.py." };
           say({ method: "item/completed", params: { threadId: p.threadId, turnId: id, item: answerItem } });
