@@ -468,6 +468,15 @@ export interface Uploaded {
 }
 
 /** A file's bytes as base64, built in pieces so a large file does not overflow the argument list. */
+/**
+ * A pasted image for a Work turn (DESKTOP §16 B13): the app's main process writes it under
+ * `$CODEX_HOME/attachments/` and answers its path; `ling web` has no such route, so in a browser it fails.
+ */
+export async function workAttach(file: Blob & { name?: string }, kind: "image" | "file", name: string): Promise<string> {
+  if (host() !== "electron") throw new Error("Pasted images reach Work in the desktop app; in a browser, drop the image's file or ask in Ask.");
+  return (await send<{ path: string }>({ type: "work/attach", name, kind, data: await base64(file) })).path;
+}
+
 export async function base64(file: Blob): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
