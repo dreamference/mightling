@@ -68,7 +68,9 @@ pub const KNOWN_BRIDGES: &[&str] = &["signal", "matrix", "telegram", "discord", 
 /// Lifetime of a single-use confirmation nonce issued by `GET /api/repos/state?intent=…` (10 minutes).
 pub const CONFIRM_TTL: Duration = Duration::from_secs(10 * 60);
 /// Valid `intent` values for confirmation nonces.
-pub const VALID_INTENTS: &[&str] = &["commit", "push", "update", "merge", "pr", "main", "budget"];
+pub const VALID_INTENTS: &[&str] = &[
+    "commit", "push", "update", "merge", "pr", "main", "budget", "access",
+];
 /// Maximum length (in Unicode scalar values) of a commit message in `POST /api/repos/commit`.
 pub const MAX_COMMIT_MESSAGE_CHARS: usize = 5_000;
 /// Maximum size in bytes of an untracked regular file for line counting or diffing (8 MiB).
@@ -433,6 +435,7 @@ pub struct ChatRepos {
     running_threads: Mutex<HashMap<String, bool>>,
     thread_places: Mutex<HashMap<String, PathBuf>>,
     turn_warnings: Mutex<HashMap<String, Vec<String>>>,
+    full_access_grants: Mutex<std::collections::HashSet<String>>,
 }
 
 impl Default for ChatRepos {
@@ -459,6 +462,7 @@ impl ChatRepos {
             running_threads: Mutex::new(HashMap::new()),
             thread_places: Mutex::new(HashMap::new()),
             turn_warnings: Mutex::new(HashMap::new()),
+            full_access_grants: Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -570,6 +574,40 @@ impl ChatRepos {
             (r.has_app_thread(app_thread) || r.thread == app_thread)
                 && is_repo_checkout(codex_home, Path::new(&r.dir))
         })
+    }
+
+    /// Grants in-memory Full Access to the checkout identified by its 8-hex `thread` id.
+    pub fn grant_full_access(&self, thread: &str) {
+        if !thread.is_empty() {
+            self.full_access_grants
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(thread.to_string());
+        }
+    }
+
+    /// Removes the in-memory Full Access grant for the checkout identified by its 8-hex `thread` id.
+    pub fn revoke_full_access(&self, thread: &str) {
+        self.full_access_grants
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(thread);
+    }
+
+    /// Returns whether the checkout identified by its 8-hex `thread` id currently holds an
+    /// in-memory Full Access grant.
+    pub fn is_full_access_granted(&self, thread: &str) -> bool {
+        self.full_access_grants
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(thread)
+    }
+
+    /// Maps an app-server thread id to its checkout record (`find_by_app_thread`) and answers
+    /// whether that checkout is granted Full Access in memory.
+    pub fn full_access_for_app_thread(&self, codex_home: &Path, app_thread: &str) -> bool {
+        self.find_by_app_thread(codex_home, app_thread)
+            .is_some_and(|record| !record.read_only && self.is_full_access_granted(&record.thread))
     }
 
     /// Queues a pending bot notice (`{chat, repo, kind}`).
@@ -1036,6 +1074,7 @@ pub fn routes() -> Router<Arc<Server>> {
         .route("/api/repos/pr", post(repo_pr))
         .route("/api/repos/main", post(repo_main))
         .route("/api/repos/budget", post(repo_budget))
+        .route("/api/repos/access", post(repo_access))
 }
 
 fn json_response(status: StatusCode, value: Value) -> Response {
@@ -2525,7 +2564,7 @@ async fn repo_state(
     {
         return json_response(
             StatusCode::BAD_REQUEST,
-            json!({ "error": "intent must be commit, push, update, merge, pr, main, or budget" }),
+            json!({ "error": "intent must be commit, push, update, merge, pr, main, budget, or access" }),
         );
     }
 
@@ -2544,6 +2583,7 @@ async fn repo_state(
     let (used, limit, resets_at) = server.chat_repos.budget_snapshot(&record, settings.tokens_per_day);
     let warnings = server.chat_repos.warnings_for(&server.config.codex_home, &record);
     let allow_main = settings.allow_main.iter().any(|r| r == &record.repo);
+    let full_access = server.chat_repos.is_full_access_granted(&record.thread);
     let merge_in_progress = run_git(&server, Some(&worktree_dir), &["rev-parse", "-q", "--verify", "MERGE_HEAD"], false)
         .await
         .is_ok_and(|output| output.status.success());
@@ -2564,6 +2604,8 @@ async fn repo_state(
         },
         "warnings": warnings,
         "allow_main": allow_main,
+        "full_access_allowed": settings.full_access,
+        "full_access": full_access,
         "merge_in_progress": merge_in_progress,
     });
     if let Some(intent) = intent_opt {
@@ -3932,6 +3974,74 @@ async fn repo_budget(State(server): State<Arc<Server>>, headers: HeaderMap, body
             "resets_at": resets_at,
         }),
     )
+}
+
+fn record_airgapped_on(record: &CheckoutRecord, worktree_dir: &Path) -> bool {
+    if crate::server::thread_airgapped_on(Some(&record.thread), Some(worktree_dir)) {
+        return true;
+    }
+    record
+        .app_threads
+        .iter()
+        .any(|tid| crate::server::thread_airgapped_on(Some(tid), Some(worktree_dir)))
+}
+
+/// `POST /api/repos/access {thread, level, typed?, confirm}` (§6.2, §6.3, §4.7): grants or revokes
+/// in-memory Full Access for a phone repository checkout after a single-use nonce and typed
+/// `FULL ACCESS <org>/<repo>` confirmation.
+async fn repo_access(State(server): State<Arc<Server>>, headers: HeaderMap, body: Bytes) -> Response {
+    let mreq = match prepare_mutation_request(&server, &headers, &body, "access").await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let level = mreq.request.get("level").and_then(Value::as_str).unwrap_or("");
+    match level {
+        "workspace" => {
+            if let Err(resp) = consume_mutation_nonce(&server, &mreq, "access") {
+                return resp;
+            }
+            server.chat_repos.revoke_full_access(&mreq.record.thread);
+            json_response(StatusCode::OK, json!({ "level": "workspace" }))
+        }
+        "full" => {
+            if !mreq.settings.full_access {
+                return json_response(
+                    StatusCode::FORBIDDEN,
+                    json!({
+                        "error": "Full Access is off for phone threads; turn it on at the node with `ling chat repos full-access on`"
+                    }),
+                );
+            }
+            if mreq.record.read_only {
+                return read_only_response();
+            }
+            if record_airgapped_on(&mreq.record, &mreq.worktree_dir) {
+                return json_response(
+                    StatusCode::FORBIDDEN,
+                    json!({
+                        "error": "Full Access runs commands with no sandbox, and the sandbox is what takes their network away, so the two are incompatible"
+                    }),
+                );
+            }
+            let expected = format!("FULL ACCESS {}", mreq.record.repo);
+            let typed = mreq.request.get("typed").and_then(Value::as_str).unwrap_or("");
+            if typed != expected {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    json!({ "error": format!("type {expected} exactly") }),
+                );
+            }
+            if let Err(resp) = consume_mutation_nonce(&server, &mreq, "access") {
+                return resp;
+            }
+            server.chat_repos.grant_full_access(&mreq.record.thread);
+            json_response(StatusCode::OK, json!({ "level": "full" }))
+        }
+        _ => json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "level must be workspace or full" }),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -7432,5 +7542,252 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK, "{body}");
+    }
+
+    #[tokio::test]
+    async fn full_access_typed_confirmation_grant_refusals_and_workspace_reset() {
+        let s = scratch("full-access-route");
+        let bare = make_bare_repo(&s.dir, "org/widget");
+        let bare_ro = make_bare_repo(&s.dir, "org/readonly");
+        let (forge_url, _forge_handle) = start_fake_forge(json!([
+            {
+                "full_name": "org/widget",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": true, "admin": true },
+                "clone_url": format!("file://{}", bare.display()),
+            },
+            {
+                "full_name": "org/readonly",
+                "default_branch": "main",
+                "updated_at": "2026-10-20T10:00:00Z",
+                "private": true,
+                "archived": false,
+                "mirror": false,
+                "permissions": { "pull": true, "push": false, "admin": false },
+                "clone_url": format!("file://{}", bare_ro.display()),
+            }
+        ]))
+        .await;
+        let (server, _probe) = test_server(&s.dir, Some(forge_url), true);
+        let cookie = owner_cookie(&server).await;
+
+        let (_, open, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/widget", "bridge": "signal", "chat": "c1" }),
+        )
+        .await;
+        let thread = open["thread"].as_str().unwrap().to_string();
+        let wt = PathBuf::from(open["cwd"].as_str().unwrap());
+        server
+            .chat_repos
+            .record_app_thread_async(&server.config.codex_home, &wt, "app-t1")
+            .await
+            .unwrap();
+
+        let (_, open_ro, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/open",
+            json!({ "repo": "org/readonly", "bridge": "signal", "chat": "c2" }),
+        )
+        .await;
+        let thread_ro = open_ro["thread"].as_str().unwrap().to_string();
+
+        // Initial state shows full_access_allowed = false and full_access = false.
+        let (st, state_initial, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/state?thread={thread}"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(state_initial["full_access_allowed"], false);
+        assert_eq!(state_initial["full_access"], false);
+        assert!(!server.chat_repos.full_access_for_app_thread(&server.config.codex_home, "app-t1"));
+
+        // 1. Refused while full_access is off in settings (and nonce is unconsumed).
+        let nonce = get_nonce(&server, &cookie, &thread, "access").await;
+        let (st, res, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "full",
+                "typed": "FULL ACCESS org/widget",
+                "confirm": nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        assert_eq!(
+            res["error"],
+            "Full Access is off for phone threads; turn it on at the node with `ling chat repos full-access on`"
+        );
+
+        // Enable full_access in settings.
+        std::fs::write(
+            server.config.user_config.as_ref().unwrap(),
+            "[chat_repos]\nfull_access = true\n",
+        )
+        .unwrap();
+
+        // 2. Refused on a read-only checkout.
+        let ro_nonce = get_nonce(&server, &cookie, &thread_ro, "access").await;
+        let (st, res, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread_ro,
+                "level": "full",
+                "typed": "FULL ACCESS org/readonly",
+                "confirm": ro_nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        assert_eq!(res["error"], "this repository is read-only on the forge");
+
+        // 3. Refused when the air gap is on for this thread (via dreamference.toml in checkout folder).
+        let wt_cfg = wt.join("dreamference.toml");
+        std::fs::write(&wt_cfg, "airgapped = \"on\"\n").unwrap();
+        let (st, res, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "full",
+                "typed": "FULL ACCESS org/widget",
+                "confirm": nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        assert_eq!(
+            res["error"],
+            "Full Access runs commands with no sandbox, and the sandbox is what takes their network away, so the two are incompatible"
+        );
+        std::fs::remove_file(&wt_cfg).unwrap();
+
+        // 4. Refused with missing or wrong `typed`, and `nonce` is still unconsumed afterwards.
+        let (st, res, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "full",
+                "confirm": nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert_eq!(res["error"], "type FULL ACCESS org/widget exactly");
+
+        let (st, res, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "full",
+                "typed": "full access org/widget",
+                "confirm": nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert_eq!(res["error"], "type FULL ACCESS org/widget exactly");
+
+        // Invalid level is refused with 400 and preserves the nonce.
+        let (st, _, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "other",
+                "confirm": nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        // 5. Granted with the exact text using the SAME unconsumed nonce, and shown in /state.
+        let (st, res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "full",
+                "typed": "FULL ACCESS org/widget",
+                "confirm": nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(res["level"], "full");
+        assert!(server.chat_repos.full_access_for_app_thread(&server.config.codex_home, "app-t1"));
+
+        let (st, state_granted, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/state?thread={thread}"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(state_granted["full_access_allowed"], true);
+        assert_eq!(state_granted["full_access"], true);
+
+        // 6. A used nonce is refused on replay with 409.
+        let (st, res, _) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "full",
+                "typed": "FULL ACCESS org/widget",
+                "confirm": nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(res["error"], "confirmation missing or expired");
+
+        // 7. `workspace` removes the grant.
+        let ws_nonce = get_nonce(&server, &cookie, &thread, "access").await;
+        let (st, res, body) = post_json(
+            &server,
+            &cookie,
+            "/api/repos/access",
+            json!({
+                "thread": thread,
+                "level": "workspace",
+                "confirm": ws_nonce,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(res["level"], "workspace");
+        assert!(!server.chat_repos.full_access_for_app_thread(&server.config.codex_home, "app-t1"));
+
+        let (st, state_after, body) = get_json(
+            &server,
+            &cookie,
+            &format!("/api/repos/state?thread={thread}"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(state_after["full_access"], false);
     }
 }

@@ -56,6 +56,10 @@ pub trait PromptSource: Send + Sync {
     fn repo_thread_cwd(&self, _thread_id: &str) -> Option<String> {
         None
     }
+    /// Whether `thread_id` is a repository thread whose checkout is currently granted Full Access.
+    fn repo_thread_full_access(&self, _thread_id: &str) -> bool {
+        false
+    }
     /// Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app.
     fn is_bridge(&self) -> bool {
         false
@@ -280,14 +284,31 @@ impl Policy {
                 if method == "turn/start"
                     && let Some(Value::Object(params)) = object.get_mut("params")
                 {
-                    let is_repo = params
+                    let repo_thread = params
                         .get("threadId")
                         .and_then(Value::as_str)
-                        .is_some_and(|id| prompts.repo_thread_cwd(id).is_some());
+                        .and_then(|id| prompts.repo_thread_cwd(id).map(|cwd| (id.to_string(), cwd)));
+                    let is_repo = repo_thread.is_some();
                     if prompts.is_bridge() || is_repo {
                         for field in &self.pinned_turn_fields {
                             params.remove(field);
                         }
+                    }
+                    if let Some((thread_id, repo_cwd)) = repo_thread {
+                        let sandbox_policy = if prompts.repo_thread_full_access(&thread_id) {
+                            serde_json::json!({"type": "dangerFullAccess"})
+                        } else if prompts.repo_checkout(&repo_cwd) == Some(true) {
+                            serde_json::json!({"type": "readOnly", "networkAccess": false})
+                        } else {
+                            serde_json::json!({
+                                "type": "workspaceWrite",
+                                "writableRoots": [],
+                                "networkAccess": false,
+                                "excludeTmpdirEnvVar": false,
+                                "excludeSlashTmp": false
+                            })
+                        };
+                        params.insert("sandboxPolicy".to_string(), sandbox_policy);
                     }
                 }
                 if method == self.import_request {
@@ -574,6 +595,7 @@ mod tests {
         airgapped: std::sync::atomic::AtomicBool,
         repo_checkouts: Mutex<BTreeMap<String, bool>>,
         repo_threads: Mutex<BTreeMap<String, String>>,
+        repo_full_access: Mutex<BTreeSet<String>>,
         bridge: std::sync::atomic::AtomicBool,
     }
 
@@ -597,6 +619,9 @@ mod tests {
         }
         fn repo_thread_cwd(&self, thread_id: &str) -> Option<String> {
             self.repo_threads.lock().unwrap().get(thread_id).cloned()
+        }
+        fn repo_thread_full_access(&self, thread_id: &str) -> bool {
+            self.repo_full_access.lock().unwrap().contains(thread_id)
         }
         fn is_bridge(&self) -> bool {
             self.bridge.load(std::sync::atomic::Ordering::Relaxed)
@@ -654,6 +679,7 @@ mod tests {
             airgapped: Default::default(),
             repo_checkouts: Mutex::new(BTreeMap::new()),
             repo_threads: Mutex::new(BTreeMap::new()),
+            repo_full_access: Mutex::new(BTreeSet::new()),
             bridge: Default::default(),
         };
         let cases = vectors["cases"].as_array().unwrap();
@@ -677,6 +703,11 @@ mod tests {
                 .get("repoThreads")
                 .and_then(Value::as_object)
                 .map(|items| items.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string())).collect())
+                .unwrap_or_default();
+            *stub.repo_full_access.lock().unwrap() = case
+                .get("repoFullAccess")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().map(|id| id.as_str().unwrap().to_string()).collect())
                 .unwrap_or_default();
             stub.bridge.store(case.get("bridge").and_then(Value::as_bool).unwrap_or(false), std::sync::atomic::Ordering::Relaxed);
             let result = policy.vet_outgoing(&case["message"], &mut pending, &stub);
@@ -747,6 +778,7 @@ mod tests {
             airgapped: Default::default(),
             repo_checkouts: Mutex::new(BTreeMap::new()),
             repo_threads: Mutex::new(BTreeMap::new()),
+            repo_full_access: Mutex::new(BTreeSet::new()),
             bridge: Default::default(),
         };
         let vet = |method: &str, thread: &str, cwd: &str| {

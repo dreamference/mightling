@@ -157,6 +157,11 @@ export class MessagePrompts implements PromptSource {
     return null;
   }
 
+  /** The desktop app has no phone repository Full Access grants. */
+  repoThreadFullAccess(_threadId: string): boolean {
+    return false;
+  }
+
   /** The desktop app is never a phone bridge. */
   isBridge(): boolean {
     return false;

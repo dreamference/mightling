@@ -21,6 +21,7 @@ interface Case {
   airgapped?: "off" | "on";
   repoCheckouts?: Record<string, boolean>;
   repoThreads?: Record<string, string>;
+  repoFullAccess?: string[];
   bridge?: boolean;
 }
 
@@ -51,6 +52,7 @@ describe("the policy", () => {
     let on = false;
     let repoCheckouts = new Map<string, boolean>();
     let repoThreads = new Map<string, string>();
+    let repoFullAccess = new Set<string>();
     let bridge = false;
     const stub: PromptSource = {
       composed: (name) => `PROMPT:${name}`,
@@ -59,6 +61,7 @@ describe("the policy", () => {
       airgappedOn: () => on,
       repoCheckout: (cwd) => repoCheckouts.get(cwd) ?? null,
       repoThreadCwd: (threadId) => repoThreads.get(threadId) ?? null,
+      repoThreadFullAccess: (threadId) => repoFullAccess.has(threadId),
       isBridge: () => bridge,
       workFolder: (cwd) => cwd.startsWith("WORK/"),
     };
@@ -67,6 +70,7 @@ describe("the policy", () => {
       on = testCase.airgapped === "on";
       repoCheckouts = new Map(Object.entries(testCase.repoCheckouts ?? {}));
       repoThreads = new Map(Object.entries(testCase.repoThreads ?? {}));
+      repoFullAccess = new Set(testCase.repoFullAccess ?? []);
       bridge = Boolean(testCase.bridge);
       const pending = new Set(testCase.pending ?? []);
       if (testCase.accept) {
@@ -89,6 +93,7 @@ describe("the policy", () => {
       airgappedOn: () => false,
       repoCheckout: () => null,
       repoThreadCwd: () => null,
+      repoThreadFullAccess: () => false,
       isBridge: () => false,
       ...(workFolder ? { workFolder } : {}),
     });
@@ -127,6 +132,7 @@ describe("the policy", () => {
       airgappedOn: (thread) => (asked.push(thread), thread === "sealed"),
       repoCheckout: () => null,
       repoThreadCwd: () => null,
+      repoThreadFullAccess: () => false,
       isBridge: () => false,
     };
     const shell = (thread: string) => ({ id: 1, method: "thread/shellCommand", params: { threadId: thread, command: "ls" } });

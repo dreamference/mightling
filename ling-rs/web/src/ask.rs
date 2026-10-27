@@ -128,9 +128,36 @@ impl<'a> MessagePrompts<'a> {
         self.root.parent().unwrap_or(self.root)
     }
 
+    fn repo_thread_full_access_with(&self, server: &crate::server::Server, thread_id: &str) -> bool {
+        let codex_home = self.codex_home();
+        if !server.chat_repos.full_access_for_app_thread(codex_home, thread_id) {
+            return false;
+        }
+        let settings = crate::chat_repos::ChatReposSettings::load_from(server.config.user_config.as_deref());
+        if !settings.full_access {
+            return false;
+        }
+        if self.airgapped_on(Some(thread_id)) {
+            return false;
+        }
+        if let Some(record) = server.chat_repos.find_by_app_thread(codex_home, thread_id) {
+            let dir = Path::new(&record.dir);
+            if crate::server::thread_airgapped_on(Some(thread_id), Some(dir))
+                || crate::server::thread_airgapped_on(Some(&record.thread), Some(dir))
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Marks whether this message came from a paired phone bridge tab.
     pub fn with_bridge(self, bridge: bool) -> TabPrompts<'a> {
-        TabPrompts { inner: self, bridge }
+        TabPrompts {
+            inner: self,
+            bridge,
+            server: None,
+        }
     }
 }
 
@@ -138,6 +165,16 @@ impl<'a> MessagePrompts<'a> {
 pub struct TabPrompts<'a> {
     pub inner: MessagePrompts<'a>,
     pub bridge: bool,
+    pub server: Option<&'a crate::server::Server>,
+}
+
+impl<'a> TabPrompts<'a> {
+    /// Attaches the running [`crate::server::Server`] so repository Full Access grants are checked
+    /// directly against its [`crate::chat_repos::ChatRepos`] and configuration.
+    pub fn with_server(mut self, server: &'a crate::server::Server) -> Self {
+        self.server = Some(server);
+        self
+    }
 }
 
 impl PromptSource for MessagePrompts<'_> {
@@ -177,6 +214,13 @@ impl PromptSource for MessagePrompts<'_> {
         crate::chat_repos::repo_thread_cwd(self.codex_home(), thread_id)
     }
 
+    fn repo_thread_full_access(&self, thread_id: &str) -> bool {
+        let Some(server) = crate::server::server_for_home(self.codex_home()) else {
+            return false;
+        };
+        self.repo_thread_full_access_with(&server, thread_id)
+    }
+
     fn is_bridge(&self) -> bool {
         false
     }
@@ -205,6 +249,13 @@ impl PromptSource for TabPrompts<'_> {
 
     fn repo_thread_cwd(&self, thread_id: &str) -> Option<String> {
         self.inner.repo_thread_cwd(thread_id)
+    }
+
+    fn repo_thread_full_access(&self, thread_id: &str) -> bool {
+        match self.server {
+            Some(server) => self.inner.repo_thread_full_access_with(server, thread_id),
+            None => self.inner.repo_thread_full_access(thread_id),
+        }
     }
 
     fn is_bridge(&self) -> bool {
@@ -343,6 +394,48 @@ mod tests {
         assert!(crate::chat_repos::record_app_thread(&home, &checkout, "app-t2").unwrap());
         assert_eq!(prompts.repo_thread_cwd("app-t1"), Some(canonical_checkout.clone()));
         assert_eq!(prompts.repo_thread_cwd("app-t2"), Some(canonical_checkout));
+        assert!(!prompts.repo_thread_full_access("app-t1"));
+
+        let state_dir = crate::auth::state_dir(&home);
+        let user_config = home.join("config.toml");
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
+        let server = crate::server::Server::new(crate::server::Config {
+            codex_home: home.clone(),
+            state_dir: state_dir.clone(),
+            port: 3100,
+            lan_names: Vec::new(),
+            public_names: Vec::new(),
+            socket: home.join("s.sock"),
+            launch: crate::app_server::Launch {
+                ling: home.join("ling"),
+                env: Vec::new(),
+                log: state_dir.join("app-server.log"),
+            },
+            images_dir: home.join("images"),
+            speech_addr: "127.0.0.1:9".to_string(),
+            user_config: Some(user_config.clone()),
+            forge_url: None,
+        })
+        .unwrap();
+
+        server.chat_repos.grant_full_access("deadbeef");
+        assert!(prompts.repo_thread_full_access("app-t1"));
+
+        // Turning off [chat_repos] full_access revokes effective Full Access immediately.
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = false\n").unwrap();
+        assert!(!prompts.repo_thread_full_access("app-t1"));
+        std::fs::write(&user_config, "[chat_repos]\nfull_access = true\n").unwrap();
+        assert!(prompts.repo_thread_full_access("app-t1"));
+
+        // Turning on airgapped in the checkout's dreamference.toml revokes effective Full Access.
+        let wt_cfg = checkout.join("dreamference.toml");
+        std::fs::write(&wt_cfg, "airgapped = \"on\"\n").unwrap();
+        assert!(!prompts.repo_thread_full_access("app-t1"));
+        std::fs::remove_file(&wt_cfg).unwrap();
+        assert!(prompts.repo_thread_full_access("app-t1"));
+
+        server.chat_repos.revoke_full_access("deadbeef");
+        assert!(!prompts.repo_thread_full_access("app-t1"));
 
         let _ = std::fs::remove_dir_all(&home);
     }

@@ -113,13 +113,31 @@ pub struct Server {
     pub forge: crate::forge::ForgeProxy,
 }
 
+static SERVERS_BY_HOME: std::sync::OnceLock<Mutex<HashMap<PathBuf, std::sync::Weak<Server>>>> =
+    std::sync::OnceLock::new();
+
+/// Looks up the active [`Server`] registered for `codex_home`.
+pub fn server_for_home(codex_home: &Path) -> Option<Arc<Server>> {
+    let map = SERVERS_BY_HOME.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = map.lock().unwrap_or_else(|p| p.into_inner());
+    guard.retain(|_, w| w.strong_count() > 0);
+    if let Some(srv) = guard.get(codex_home).and_then(std::sync::Weak::upgrade) {
+        return Some(srv);
+    }
+    let canon = codex_home.canonicalize().ok()?;
+    guard.iter().find_map(|(k, w)| {
+        (k == &canon || k.canonicalize().ok().as_ref() == Some(&canon)).then(|| w.upgrade())?
+    })
+}
+
 impl Server {
     pub fn new(config: Config) -> std::io::Result<Arc<Server>> {
         auth::private_dir(&config.state_dir)?;
         let owner_token = auth::owner_token(&config.state_dir)?;
         let addresses = Addresses::new(config.port, &config.lan_names).with_public(&config.public_names);
         let app_server = AppServer::new(config.socket.clone(), config.launch.clone());
-        Ok(Arc::new(Server {
+        let codex_home = config.codex_home.clone();
+        let server = Arc::new(Server {
             policy: Policy::embedded(),
             addresses,
             app_server,
@@ -134,7 +152,13 @@ impl Server {
             live: Mutex::new(None),
             forge: crate::forge::ForgeProxy::new(),
             config,
-        }))
+        });
+        SERVERS_BY_HOME
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(codex_home, Arc::downgrade(&server));
+        Ok(server)
     }
 
     pub fn ask_root(&self) -> PathBuf {

@@ -630,7 +630,7 @@
       "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
       "message": {"id": 121, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "hi"}], "approvalPolicy": "never", "sandboxPolicy": {"type": "dangerFullAccess"}, "cwd": "/tmp"}},
       "accept": true,
-      "out": {"id": 121, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "hi"}]}}
+      "out": {"id": 121, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "hi"}], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": false, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}}
     },
     {
       "name": "a page turn/start on an ordinary thread keeps its overrides",
@@ -703,7 +703,7 @@
       "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
       "message": {"id": 336, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"]}},
       "accept": true,
-      "out": {"id": 336, "method": "turn/start", "params": {"threadId": "repo-t1", "input": []}}
+      "out": {"id": 336, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": false, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}}
     },
     {
       "name": "a bridge turn/start cannot pick a permissions profile",
@@ -718,6 +718,40 @@
       "message": {"id": 338, "method": "thread/start", "params": {"prompt": "chat-work", "cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "danger-full-access", "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/"]}},
       "accept": true,
       "out": {"id": 338, "method": "thread/start", "params": {"cwd": "/codex/chat-repos/org_widget/deadbeef", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user", "baseInstructions": "PROMPT:chat-work", "config": {"approval_policy": "on-request"}}}
+    },
+    {
+      "name": "a granted repo thread turn/start gets an explicit dangerFullAccess sandboxPolicy",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "repoFullAccess": ["repo-t1"],
+      "message": {"id": 339, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "run"}]}},
+      "accept": true,
+      "out": {"id": 339, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "run"}], "sandboxPolicy": {"type": "dangerFullAccess"}}}
+    },
+    {
+      "name": "an ungranted repo thread turn/start gets an explicit workspaceWrite sandboxPolicy",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 340, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "run"}]}},
+      "accept": true,
+      "out": {"id": 340, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "run"}], "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [], "networkAccess": false, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}}
+    },
+    {
+      "name": "a repo thread in a read-only checkout gets an explicit readOnly sandboxPolicy on turn/start",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": true},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "message": {"id": 341, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "read"}], "sandboxPolicy": {"type": "dangerFullAccess"}}},
+      "accept": true,
+      "out": {"id": 341, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [{"type": "text", "text": "read"}], "sandboxPolicy": {"type": "readOnly", "networkAccess": false}}}
+    },
+    {
+      "name": "a granted repo thread asking for a permissions profile still gets only dangerFullAccess",
+      "repoCheckouts": {"/codex/chat-repos/org_widget/deadbeef": false},
+      "repoThreads": {"repo-t1": "/codex/chat-repos/org_widget/deadbeef"},
+      "repoFullAccess": ["repo-t1"],
+      "message": {"id": 342, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "permissions": ":custom", "runtimeWorkspaceRoots": ["/etc"], "approvalPolicy": "never", "cwd": "/etc"}},
+      "accept": true,
+      "out": {"id": 342, "method": "turn/start", "params": {"threadId": "repo-t1", "input": [], "sandboxPolicy": {"type": "dangerFullAccess"}}}
     }
   ]
 }

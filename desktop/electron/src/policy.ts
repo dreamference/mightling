@@ -39,6 +39,8 @@ export interface PromptSource {
   repoCheckout(cwd: string): boolean | null;
   /** The recorded checkout `cwd` when `threadId` is in `app_threads` of a checkout in `$CODEX_HOME/chat-repos/index.json`, or `null` otherwise. */
   repoThreadCwd(threadId: string): string | null;
+  /** Whether `threadId` is a repository thread whose checkout is currently granted Full Access. */
+  repoThreadFullAccess(threadId: string): boolean;
   /** Whether the caller is a paired phone bridge device or bridge session rather than the owner's browser session or desktop app. */
   isBridge(): boolean;
   /**
@@ -365,9 +367,24 @@ export function vetOutgoing(message: unknown, pending: Set<string>, prompts: Pro
     }
     if (method === "turn/start" && isObject(object.params)) {
       const params: JsonObject = { ...object.params };
-      const isRepo = typeof params.threadId === "string" && prompts.repoThreadCwd(params.threadId) !== null;
+      const threadId = typeof params.threadId === "string" ? params.threadId : null;
+      const repoCwd = threadId !== null ? prompts.repoThreadCwd(threadId) : null;
+      const isRepo = repoCwd !== null;
       if (prompts.isBridge() || isRepo) {
         for (const field of policy.pinnedTurnFields) delete params[field];
+      }
+      if (threadId !== null && repoCwd !== null) {
+        params.sandboxPolicy = prompts.repoThreadFullAccess(threadId)
+          ? { type: "dangerFullAccess" }
+          : prompts.repoCheckout(repoCwd) === true
+            ? { type: "readOnly", networkAccess: false }
+            : {
+                type: "workspaceWrite",
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: false,
+                excludeSlashTmp: false,
+              };
       }
       object.params = params;
     }

@@ -27,7 +27,7 @@ use crate::telegram;
 
 pub const UNIT_NAME: &str = "mightling-chat.service";
 
-const USAGE: &str = "Usage: ling chat start | stop | status | serve | telegram setup | telegram pair | telegram users | telegram remove <id> | telegram off";
+const USAGE: &str = "Usage: ling chat start | stop | status | serve | telegram setup | telegram pair | telegram users | telegram remove <id> | telegram off | repos full-access on | repos full-access off";
 
 pub const TELEGRAM_WARNING: &str = "Telegram is the less private way to reach Mightling:\n\
 - everything you send the bot, and every answer, passes through Telegram's servers, unencrypted;\n\
