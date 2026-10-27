@@ -1324,3 +1324,50 @@ def test_no_databases_after_the_wait_is_a_failed_start(monkeypatch):
     assert not RemoteControlPlane.start()
     assert sum(argv[:2] == ["docker", "run"] for argv in calls) == 1, "the real start never happens"
     assert calls[-1] == ["docker", "rm", "-f", "dreamference-remote"]
+
+
+def _run_node_peer_script(tmp_path, monkeypatch, store_text: str) -> list[str]:
+    """Runs the node's root script against stand-ins for every command; returns their calls."""
+    import subprocess
+
+    from dreamference.remote import remote_node_peer
+
+    bin_dir, calls = tmp_path / "bin", tmp_path / "calls"
+    bin_dir.mkdir()
+    for name in ("netbird", "update-ca-certificates"):
+        stub = bin_dir / name
+        stub.write_text(f'#!/bin/sh\necho "{name} $*" >> {calls}\n')
+        stub.chmod(0o755)
+    install = bin_dir / "install"
+    install.write_text(f'#!/bin/sh\necho "install $*" >> {calls}\ncp "$3" "$4"\n')
+    install.chmod(0o755)
+    ca, store = tmp_path / "ca.crt", tmp_path / "store.crt"
+    ca.write_text("new CA\n")
+    store.write_text(store_text)
+    monkeypatch.setattr(remote_node_peer, "TRUST_STORE_FILE", str(store))
+    script = RemoteNodePeer.script(
+        None, ca, "https://remote.example.org:443", tmp_path / "key", f"mightling-{NODE_ID}"
+    )
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
+    subprocess.run(["bash", "-c", script], env=env, check=True)
+    return calls.read_text().splitlines()
+
+
+def test_a_changed_ca_restarts_the_running_client_before_it_logs_in(tmp_path, monkeypatch):
+    # A daemon started before the CA changed keeps the old roots (Go loads them once per
+    # process): without the restart its login to the new management fails (2026-10-27).
+    calls = _run_node_peer_script(tmp_path, monkeypatch, "old CA\n")
+    assert any(call.startswith("install -m 0644") for call in calls)
+    stop, start = calls.index("netbird service stop"), calls.index("netbird service start")
+    down = calls.index("netbird down")
+    up = next(i for i, call in enumerate(calls) if call.startswith("netbird up"))
+    assert stop < start < down < up
+
+
+def test_an_unchanged_ca_keeps_the_client_running_but_resets_a_stale_profile(tmp_path, monkeypatch):
+    # A profile from an earlier control plane made `netbird up` answer "Already connected".
+    calls = _run_node_peer_script(tmp_path, monkeypatch, "new CA\n")
+    assert not any(call.startswith("install") for call in calls)
+    assert "netbird service stop" not in calls
+    down = calls.index("netbird down")
+    assert any(call.startswith("netbird up") for call in calls[down:])
