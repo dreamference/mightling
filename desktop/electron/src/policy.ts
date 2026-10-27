@@ -301,6 +301,9 @@ function vetThreadParams(policy: Policy, method: string, original: JsonObject, p
     if (readOnly === null) {
       throw new Error("a chat-work thread starts only in a checkout ling web made for it");
     }
+    // Its checkout is its only place and the pinned sandbox its only one: no permissions profile or
+    // extra workspace roots asked beside them.
+    for (const field of policy.scratchFields) if (field !== "cwd") delete params[field];
     Object.assign(params, readOnly ? policy.repoReadOnlyThreadParams : policy.repoThreadParams);
   }
   // `default` is what the launcher's catalog already carries: setting it again would only freeze
