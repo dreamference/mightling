@@ -134,6 +134,20 @@ def snapshot_digest(tmp_path: Path, files: dict[str, tuple[bytes, bool]]) -> str
     return AdapterBaseDigest.compute(snapshot)
 
 
+def drafter_digest(tmp_path: Path) -> str:
+    """The drafter base's digest: from its release pins when Mightling hosts it, from its Hub files otherwise."""
+    source = ModelMatrixRegistry.get_release_source(DRAFTER_REPO)
+    if source is None:
+        return snapshot_digest(tmp_path, DRAFTER_FILES)
+    # As ReleaseAssetDownloader lays the snapshot out: each file a link to the blob its pin names.
+    snapshot = tmp_path / "release-snapshot"
+    shutil.rmtree(snapshot, ignore_errors=True)
+    snapshot.mkdir()
+    for name, pin in source["files"].items():
+        (snapshot / name).symlink_to(Path("../..") / "blobs" / pin["sha256"])
+    return AdapterBaseDigest.compute(snapshot)
+
+
 @pytest.fixture(scope="module")
 def keys(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     """Two session keys: one standing in for the release key, one for a stranger's."""
@@ -185,7 +199,7 @@ def write_manifest(tmp_path: Path, **changes: object) -> Path:
         "drafter_base": {
             "repo": DRAFTER_REPO,
             "revision": DRAFTER_REVISION,
-            "digest": snapshot_digest(tmp_path, DRAFTER_FILES),
+            "digest": drafter_digest(tmp_path),
         },
         "lora": {"rank": 16, "alpha": 32, "target_modules": ["q_proj", "v_proj"]},
         "drafter_adapter": {

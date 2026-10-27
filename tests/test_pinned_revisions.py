@@ -13,7 +13,7 @@ import types
 import pytest
 
 from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
-from dreamference.hardware import ModelDownloader
+from dreamference.hardware import ModelDownloader, ReleaseAssetDownloader
 from dreamference.hardware.model_matrix_registry import (
     DEFAULT_MODEL_ALIAS,
     QWEN38_SGLANG_RECIPE,
@@ -49,6 +49,14 @@ def hub(tmp_path, monkeypatch):
     monkeypatch.setitem(
         sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=snapshot_download)
     )
+
+    # A release-hosted drafter never reaches the Hub: its fetch is recorded at the release's tag.
+    def release_ensure(cls, model_key):
+        source = ModelMatrixRegistry.get_release_source(model_key)
+        fetched.append((ModelMatrixRegistry.resolve_hf_repo(model_key), source["revision"]))
+        return True
+
+    monkeypatch.setattr(ReleaseAssetDownloader, "ensure", classmethod(release_ensure))
     return types.SimpleNamespace(cache=cache, fetched=fetched)
 
 

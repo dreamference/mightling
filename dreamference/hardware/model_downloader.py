@@ -383,6 +383,9 @@ class ModelDownloader:
         """
         if not model_key:
             return False
+        if ModelMatrixRegistry.get_release_source(model_key) is not None:
+            from dreamference.hardware.release_asset_downloader import ReleaseAssetDownloader
+            return ReleaseAssetDownloader.is_present(model_key)
         repo_id = ModelMatrixRegistry.resolve_hf_repo(model_key)
         if not repo_id or "/" not in repo_id:
             return False
@@ -418,11 +421,17 @@ class ModelDownloader:
         Returns:
             bool: True if weights are present or successfully downloaded.
         """
-        if not model_key:
-            raise ValueError("model_key cannot be None or empty. Please specify a model to download.")
-        repo_id = ModelMatrixRegistry.resolve_hf_repo(model_key)
+        repo_id = ModelMatrixRegistry.resolve_hf_repo(model_key) if model_key else ""
         if not repo_id:
-            raise ValueError(f"Unable to resolve model '{model_key}' to a valid HuggingFace repository ID.")
+            raise ValueError(
+                f"Unable to resolve model '{model_key}' to a valid HuggingFace repository ID."
+                if model_key
+                else "model_key cannot be None or empty. Please specify a model to download."
+            )
+        if ModelMatrixRegistry.get_release_source(model_key) is not None:
+            # Hosted as release assets, not on the Hub: fetched by URL, checked against SHA-256 pins.
+            from dreamference.hardware.release_asset_downloader import ReleaseAssetDownloader
+            return ReleaseAssetDownloader.ensure(model_key)
         revision = revision or ModelMatrixRegistry.pinned_revision(model_key)
 
         success = False
@@ -473,10 +482,11 @@ class ModelDownloader:
     def download_with_drafter(
         cls, model_key: str, hf_token: str | None = None, auto_tensorize: bool = False
     ) -> bool:
-        """Fetches a model and the drafter its recipe speculates against, each at its pinned commit.
+        """Fetches a model and the drafter its recipe speculates against, each at its pin.
 
         What `server start` would fetch before a load, so a model fetched ahead of time
-        (`model download`, `init`) is the one served and nothing is fetched at start.
+        (`model download`, `init`) is the one served and nothing is fetched at start. The
+        engine assets of the model's default engine come along (download_companions).
 
         Args:
             model_key (str): Short alias or HuggingFace repo ID.
@@ -485,12 +495,37 @@ class ModelDownloader:
                 repository) to tensorize format after the download.
 
         Returns:
-            bool: True if both are present afterwards.
+            bool: True if all of them are present afterwards.
         """
         ok = cls.download_model(model_key, hf_token=hf_token, auto_tensorize=auto_tensorize)
-        drafter = ModelMatrixRegistry.get_speculative_draft_repo(model_key)
-        if drafter:
-            ok = cls.download_model(drafter, hf_token=hf_token, auto_tensorize=False) and ok
+        return cls.download_companions(model_key, hf_token=hf_token) and ok
+
+    @classmethod
+    def download_companions(cls, model_key: str, hf_token: str | None = None, engine: str | None = None) -> bool:
+        """Fetches what the model's recipe serves beside the checkpoint, each at its pin.
+
+        The drafter its speculative_config names and the engine assets its engine reads
+        (ModelMatrixRegistry.get_engine_assets), never tensorized. A release-hosted one comes from
+        its release assets, checked against its SHA-256 pins (ReleaseAssetDownloader).
+
+        Args:
+            model_key (str): Short alias or HuggingFace repo ID.
+            hf_token (str | None): Optional HuggingFace access token.
+            engine (str | None): The engine whose recipe is served; None for the model's default.
+
+        Returns:
+            bool: True when every companion is present afterwards (or there are none).
+        """
+        overrides = ModelMatrixRegistry.get_launch_overrides(model_key, engine)
+        speculative = overrides.get("speculative_config") or {}
+        wanted: list[tuple[str, str | None]] = []
+        if speculative.get("model"):
+            wanted.append((str(speculative["model"]), speculative.get("revision") or None))
+        for asset in ModelMatrixRegistry.get_engine_assets(model_key, engine):
+            wanted.append((asset["repo"], asset.get("revision") or None))
+        ok = True
+        for repo, revision in wanted:
+            ok = cls.download_model(repo, hf_token=hf_token, auto_tensorize=False, revision=revision) and ok
         return ok
 
     @classmethod

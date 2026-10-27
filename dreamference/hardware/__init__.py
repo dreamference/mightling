@@ -6,6 +6,7 @@ from dreamference.hardware.memory_metrics import MemoryMetrics
 from dreamference.hardware.hardware_telemetry import HardwareTelemetry
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 from dreamference.hardware.model_downloader import ModelDownloader
+from dreamference.hardware.release_asset_downloader import ReleaseAssetDownloader
 from dreamference.hardware.hardware_manager import HardwareManager
 from dreamference.hardware.adapter_base_digest import AdapterBaseDigest
 from dreamference.hardware.adapter_catalog import AdapterCatalog
@@ -60,6 +61,10 @@ def download_model_with_drafter(model_key: str, hf_token: str | None = None, aut
     """Fetches a model and its recipe's drafter, each at its pinned commit (ModelDownloader.download_with_drafter)."""
     return ModelDownloader.download_with_drafter(model_key, hf_token=hf_token, auto_tensorize=auto_tensorize)
 
+def download_recipe_companions(model_key: str, hf_token: str | None = None, engine: str | None = None) -> bool:
+    """Fetches the recipe's drafter and engine assets for the served engine (ModelDownloader.download_companions)."""
+    return ModelDownloader.download_companions(model_key, hf_token=hf_token, engine=engine)
+
 def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = False) -> Dict[str, bool]:
     return ModelDownloader.download_all_models(hf_token=hf_token, auto_tensorize=auto_tensorize)
 
@@ -100,6 +105,7 @@ __all__ = [
     "HardwareTelemetry",
     "ModelMatrixRegistry",
     "ModelDownloader",
+    "ReleaseAssetDownloader",
     "HardwareManager",
     "AdapterBaseDigest",
     "AdapterCatalog",
@@ -122,6 +128,7 @@ __all__ = [
     "get_tensorized_path",
     "download_model",
     "download_model_with_drafter",
+    "download_recipe_companions",
     "download_all_models",
     "get_system_memory",
     "detect_gb10_hardware",
