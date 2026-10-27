@@ -132,7 +132,6 @@ pub fn run(table: &Table, config: &Config, now: i64, env: &Env) -> Vec<Finding> 
         let name = label(&agent.key);
         let idle_min = (now - agent.last_ts) / 60;
         let recent = now - agent.last_ts <= 6 * 3600;
-        let active = now - agent.last_ts <= 900;
         // C1: context size.
         if agent.context >= config.warn_context && now - agent.last_ts <= 2 * 3600 && !finished(agent) {
             let due = agent.over_handoff_since.filter(|_| agent.context >= config.handoff_context);
@@ -145,9 +144,9 @@ pub fn run(table: &Table, config: &Config, now: i64, env: &Env) -> Vec<Finding> 
                 kind: "handoff",
                 subject: agent.key.clone(),
                 section: Section::Context,
-                // The owner is told only of the coordinator's own hand-off; a subagent's is the
-                // coordinator's to act on, from the summary (a week of history gave 6-18 a day).
-                alert: !agent.subagent && due.is_some_and(|since| now - since >= 3600) && active,
+                // Summary only: a subagent's hand-off is the coordinator's to act on, and the
+                // coordinator compacts by itself, so no owner can act on an alert about it.
+                alert: false,
                 urgent: false,
                 consecutive: 1,
                 text,
